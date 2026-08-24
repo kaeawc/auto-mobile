@@ -290,9 +290,9 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         XCTAssertTrue(diagnostics.lines.isEmpty)
     }
 
-    // MARK: - Reconfigure dedup (storm / data-race fix)
+    // MARK: - Reconfigure dedup + coalesce-to-latest (storm / data-race fix)
 
-    func testBeginReconfigureCommitsSizeSynchronouslyAndDedupsWhileInFlight() {
+    func testBeginReconfigureCommitsSizeSynchronouslyAndDedupsIdenticalTargets() {
         let session = makeSession(diagnostics: DiagnosticRecorder())
         let fake = FakeCaptureStream()
         session.stream = fake
@@ -304,18 +304,45 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         XCTAssertEqual(session.configuredPixelWidth, 900)
         XCTAssertEqual(session.configuredPixelHeight, 1900)
 
-        // A second frame while the update is in flight commits the size but does NOT
-        // spawn a second update — this is the storm dedup.
+        // A same-size frame while the update is in flight does NOT spawn a second
+        // update — this is the storm dedup.
         let second = session.beginReconfigure(width: 900, height: 1900)
         XCTAssertNil(second, "a reconfigure already in flight is deduped")
-        XCTAssertEqual(session.configuredPixelWidth, 900)
 
-        // Once the in-flight update completes, a genuinely new size reconfigures again.
-        session.endReconfigure()
+        // Applying the same size we committed releases the slot: nothing left to do.
+        let next = session.nextReconfigureTarget(applied: 900, 1900)
+        XCTAssertNil(next, "same target applied: the in-flight slot is released")
+
+        // With the slot released a genuinely new size reconfigures again.
         let third = session.beginReconfigure(width: 910, height: 1910)
         XCTAssertTrue(third === fake, "after the slot is released a new size reconfigures again")
-        XCTAssertEqual(session.configuredPixelWidth, 910)
+    }
+
+    func testReconfigureCoalescesToLatestTargetRequestedWhileInFlight() {
+        let session = makeSession(diagnostics: DiagnosticRecorder())
+        let fake = FakeCaptureStream()
+        session.stream = fake
+
+        // Update A (900x1900) claims the slot.
+        let streamForA = session.beginReconfigure(width: 900, height: 1900)
+        XCTAssertTrue(streamForA === fake)
+
+        // While A is applying, a newer rotation requests B (910x1910). It is deduped
+        // (no second concurrent update) but the newer target is committed.
+        let deduped = session.beginReconfigure(width: 910, height: 1910)
+        XCTAssertNil(deduped, "no overlapping update while one is in flight")
+        XCTAssertEqual(session.configuredPixelWidth, 910, "the newer target is committed")
         XCTAssertEqual(session.configuredPixelHeight, 1910)
+
+        // When A completes, the loop must NOT stop — the committed target drifted to B,
+        // so B is returned to be applied next (coalesce-to-latest; B is never dropped).
+        let afterA = session.nextReconfigureTarget(applied: 900, 1900)
+        XCTAssertEqual(afterA?.width, 910, "the latest requested target B is applied after A")
+        XCTAssertEqual(afterA?.height, 1910)
+
+        // After B is applied and nothing newer arrived, the slot is released.
+        let afterB = session.nextReconfigureTarget(applied: 910, 1910)
+        XCTAssertNil(afterB, "target B applied, no newer target: slot released")
     }
 
     func testBeginReconfigureWithoutStreamReturnsNilAndLeavesSizeUnset() {

@@ -364,24 +364,34 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
     }
 
     /// Kicks off a size change from the frame queue. `beginReconfigure` commits the
-    /// new size synchronously and dedups, so a burst of same-size frames neither
-    /// races the dimension writes nor spawns overlapping `updateConfiguration` calls
-    /// (the reconfigure storm). The retry inside `applyStreamConfiguration` bounds
-    /// recovery so a single transient failure does not strand the stream at a stale
-    /// size (issue #4768); `endReconfigure` then releases the in-flight slot.
+    /// new size synchronously and claims the single in-flight slot, so a burst of
+    /// frames neither races the dimension writes nor spawns overlapping
+    /// `updateConfiguration` calls (the reconfigure storm). The loop then
+    /// **coalesces to the latest** target: if a newer size is requested while an
+    /// update is applying, it is applied once the current one completes, so the last
+    /// requested geometry is never dropped (only same-size requests are truly
+    /// deduped). The retry inside `applyStreamConfiguration` bounds recovery so a
+    /// single transient failure does not strand the stream at a stale size (#4768).
     private func reconfigure(width: Int, height: Int) {
         guard let stream = beginReconfigure(width: width, height: height) else { return }
         Task { [weak self] in
-            await self?.applyStreamConfiguration(stream: stream, width: width, height: height)
-            self?.endReconfigure()
+            var width = width
+            var height = height
+            while true {
+                await self?.applyStreamConfiguration(stream: stream, width: width, height: height)
+                guard let next = self?.nextReconfigureTarget(applied: width, height) else { return }
+                width = next.width
+                height = next.height
+            }
         }
     }
 
     /// Commits the new size under `stateLock` and claims the reconfigure slot,
     /// returning the stream to update — or `nil` when there is no stream, or an
-    /// update is already in flight (dedup). Synchronous, so once a frame commits a
-    /// size, a same-size burst no longer re-triggers. Internal so tests can drive the
-    /// dedup deterministically.
+    /// update is already in flight. In the in-flight case the newer size is still
+    /// committed, so the running loop picks it up via `nextReconfigureTarget`
+    /// (coalesce-to-latest). Synchronous, so once a frame commits a size a same-size
+    /// burst no longer re-triggers. Internal so tests can drive it deterministically.
     func beginReconfigure(width: Int, height: Int) -> CaptureStream? {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -395,11 +405,19 @@ final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate 
         return stream
     }
 
-    /// Releases the reconfigure slot claimed by `beginReconfigure`. Internal for tests.
-    func endReconfigure() {
+    /// Called after applying `(width, height)`. If the committed target still matches
+    /// what was applied, releases the in-flight slot and returns `nil`. If a newer
+    /// target was committed while the update was applying, keeps the slot and returns
+    /// that target so the loop applies it too — so the latest requested geometry is
+    /// never left unsent. Internal so tests can drive the coalescing deterministically.
+    func nextReconfigureTarget(applied width: Int, _ height: Int) -> (width: Int, height: Int)? {
         stateLock.lock()
-        _reconfiguring = false
-        stateLock.unlock()
+        defer { stateLock.unlock() }
+        if _configuredPixelWidth == width, _configuredPixelHeight == height {
+            _reconfiguring = false
+            return nil
+        }
+        return (_configuredPixelWidth, _configuredPixelHeight)
     }
 
     /// Applies a new capture size to the given stream. Split out so tests can `await`

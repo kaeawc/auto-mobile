@@ -47,6 +47,7 @@
 		671E243A2BD5CAF78FF48E1D /* GesturePerformerSymbolsUnavailableWiringTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCAAB1439B71724CA0BF2401 /* GesturePerformerSymbolsUnavailableWiringTests.swift */; };
 		6733CA6A1FABC8D7C34F9327 /* ObjCExceptionBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 649A3185201F07E4D152CED6 /* ObjCExceptionBridgeTests.swift */; };
 		6798190F766D01F963F6DFD0 /* SdkDatabaseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EDA90BC9E26458BCE47381F /* SdkDatabaseClient.swift */; };
+		6B55D827D015776972629D1F /* SemanticLinkActivation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86E304C3C42FE1AECFDB293B /* SemanticLinkActivation.swift */; };
 		714A3E41ACE47ACF314E0FC2 /* ClipboardResolutionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E30D131E590A0CF8F9674B0E /* ClipboardResolutionTests.swift */; };
 		74B1E8F78E9FF807417ABC2D /* PinchGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EE070E3D058AF5F67D2E1F3 /* PinchGeometryTests.swift */; };
 		74CA22BFA1779993CDCF59AE /* CtrlProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EE277596991C059142C485B /* CtrlProxy.swift */; };
@@ -63,6 +64,7 @@
 		9EFF1197D83979B0FC0E0BCE /* CommandPayloadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A702D259D2A37D9AA088EF8 /* CommandPayloadTests.swift */; };
 		9FE4564D1819768FEFD62606 /* ElementLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95565999DC108319DEED894A /* ElementLocator.swift */; };
 		9FED7BF37AFE34ADDF4E730A /* PinchFallback.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FEB521226F4C469CBFE7296 /* PinchFallback.swift */; };
+		A10EB8CB7F9F91B1B86CBAAF /* SemanticLinkActivationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E1D0E93B99CBC6F7ED64B7B /* SemanticLinkActivationTests.swift */; };
 		A603343B94D35DDF48F7AA4D /* Fakes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1B2931E58B158EE51C5F4F /* Fakes.swift */; };
 		A9D79278D7A9C7ED3E7E4F8C /* CtrlProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 056D5DCA8003C7DFA37244C4 /* CtrlProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		A9E8300EE35B13DED1A0E579 /* MainThreadRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B8E0FBA4D04484920DA1D03 /* MainThreadRunner.swift */; };
@@ -84,6 +86,7 @@
 		CDEF0C911EA979C4E9C54B0B /* DefaultStorageInspecting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CFB4EDEE20CB1CE002E68A5 /* DefaultStorageInspecting.swift */; };
 		CFCA362E1EF1F3251B19BC1B /* HierarchyMergerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F6E995191B4AF437EDB71CA /* HierarchyMergerTests.swift */; };
 		D0C171171348407EBFF5BAB7 /* PerfProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A284B6FFBE969931BB03A2FF /* PerfProvider.swift */; };
+		D2E88D247B7DA9F929D0CB6B /* SemanticLinkActivation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86E304C3C42FE1AECFDB293B /* SemanticLinkActivation.swift */; };
 		D9EF3A486E53F97C1CCB7A3B /* GesturePerformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2144B84CD70DB35A1030624 /* GesturePerformer.swift */; };
 		DFEE186C8B4CD32EF76D995A /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 878A53A7F0EDDABDF2435E7F /* AppDelegate.swift */; };
 		E48A38EAE6AD5408BB7007CE /* OSLogReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB4D52EC87CA484C4BC98756 /* OSLogReaderTests.swift */; };
@@ -217,9 +220,11 @@
 		77305F40F85694E983987E68 /* CommandHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandHandler.swift; sourceTree = "<group>"; };
 		802717F6B1F37809C4806C23 /* CtrlProxyUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CtrlProxyUITests.swift; sourceTree = "<group>"; };
 		83E0B84D4CA225ECB1E09064 /* SdkHierarchyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyModels.swift; sourceTree = "<group>"; };
+		86E304C3C42FE1AECFDB293B /* SemanticLinkActivation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticLinkActivation.swift; sourceTree = "<group>"; };
 		878A53A7F0EDDABDF2435E7F /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		8A702D259D2A37D9AA088EF8 /* CommandPayloadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPayloadTests.swift; sourceTree = "<group>"; };
 		8CB532F74A3F3A670BD526CC /* MultiFingerSwipeDiagnostics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiFingerSwipeDiagnostics.swift; sourceTree = "<group>"; };
+		8E1D0E93B99CBC6F7ED64B7B /* SemanticLinkActivationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SemanticLinkActivationTests.swift; sourceTree = "<group>"; };
 		95565999DC108319DEED894A /* ElementLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementLocator.swift; sourceTree = "<group>"; };
 		9A1B2931E58B158EE51C5F4F /* Fakes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Fakes.swift; sourceTree = "<group>"; };
 		9BD704E3A2708D91D4FABE3E /* CtrlProxyApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CtrlProxyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -316,6 +321,7 @@
 				A158ADBA8E3301E9FF181598 /* RequestSnapshotWireParityTests.swift */,
 				0033E307147A024BE2F74149 /* RotationChangeGenerationTests.swift */,
 				5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */,
+				8E1D0E93B99CBC6F7ED64B7B /* SemanticLinkActivationTests.swift */,
 				EA84FDE08DAFEAD66F399887 /* TypedRequestDecodeTests.swift */,
 				AC68B1D8C55DA187332B555E /* WebSocketServerTests.swift */,
 			);
@@ -402,6 +408,7 @@
 				043D2CA5107B76077BA6301C /* SdkHierarchyCache.swift */,
 				E7C65BE687554E71E587B731 /* SdkHierarchyClient.swift */,
 				83E0B84D4CA225ECB1E09064 /* SdkHierarchyModels.swift */,
+				86E304C3C42FE1AECFDB293B /* SemanticLinkActivation.swift */,
 				10362B68AB9153544B411CCA /* VoiceOverStateProvider.swift */,
 				B4CB9272A186932D89EB1072 /* WebSocketServer.swift */,
 			);
@@ -625,6 +632,7 @@
 				0DCD8748EF0E74AD806385A5 /* SdkHierarchyCache.swift in Sources */,
 				0A4F48C4211E43B829855704 /* SdkHierarchyClient.swift in Sources */,
 				2CFEE57D3D518C352BAB2937 /* SdkHierarchyModels.swift in Sources */,
+				6B55D827D015776972629D1F /* SemanticLinkActivation.swift in Sources */,
 				E75D4EFAF582079165A67B66 /* VoiceOverStateProvider.swift in Sources */,
 				C2DCB71857A14ED314300AAC /* WebSocketServer.swift in Sources */,
 			);
@@ -663,6 +671,7 @@
 				1E92C9DDBA24968595494BA3 /* RequestSnapshotWireParityTests.swift in Sources */,
 				BD4056F11836FEAB9B99D1AC /* RotationChangeGenerationTests.swift in Sources */,
 				2ABF683DE1AD6578F8EAF168 /* SdkHierarchyCacheTests.swift in Sources */,
+				A10EB8CB7F9F91B1B86CBAAF /* SemanticLinkActivationTests.swift in Sources */,
 				0F29D59ABFB52692F62B434F /* TypedRequestDecodeTests.swift in Sources */,
 				B33435D31AF41A6C03499842 /* WebSocketServerTests.swift in Sources */,
 			);
@@ -697,6 +706,7 @@
 				EE7765F6DA0807474D52C3DD /* SdkHierarchyCache.swift in Sources */,
 				261F76AE6277D92BD87CFB1C /* SdkHierarchyClient.swift in Sources */,
 				CB577FE46E063BB09F5D4010 /* SdkHierarchyModels.swift in Sources */,
+				D2E88D247B7DA9F929D0CB6B /* SemanticLinkActivation.swift in Sources */,
 				7EBA4E6991444E3154C6BC84 /* VoiceOverStateProvider.swift in Sources */,
 				53A41EE5F98E771345D6EA90 /* WebSocketServer.swift in Sources */,
 			);

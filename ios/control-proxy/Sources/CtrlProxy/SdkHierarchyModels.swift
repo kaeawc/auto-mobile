@@ -1,6 +1,7 @@
 import Foundation
 
 // MARK: - SDK View Hierarchy Models
+
 // Duplicated from AutoMobileSDK since the two packages have no shared dependency.
 
 /// Complete snapshot of the in-process UIView hierarchy from the SDK.
@@ -87,6 +88,11 @@ public struct SdkViewNode: Codable, Sendable {
     public let isUserInteractionEnabled: Bool
     public let hasTapTarget: Bool
     public let isOccluded: Bool
+    /// Inline semantic links the in-app SDK discovered on this text element
+    /// (issue #5560). The runner projects these onto the merged element's
+    /// `semantic-links` and uses the optional per-link center point to activate a
+    /// specific inline link by coordinate.
+    public let semanticLinks: [SdkSemanticLink]?
     public let children: [SdkViewNode]?
 
     public init(
@@ -110,6 +116,7 @@ public struct SdkViewNode: Codable, Sendable {
         isUserInteractionEnabled: Bool = true,
         hasTapTarget: Bool = false,
         isOccluded: Bool = false,
+        semanticLinks: [SdkSemanticLink]? = nil,
         children: [SdkViewNode]? = nil
     ) {
         self.className = className
@@ -132,6 +139,7 @@ public struct SdkViewNode: Codable, Sendable {
         self.isUserInteractionEnabled = isUserInteractionEnabled
         self.hasTapTarget = hasTapTarget
         self.isOccluded = isOccluded
+        self.semanticLinks = semanticLinks
         self.children = children
     }
 
@@ -141,32 +149,62 @@ public struct SdkViewNode: Codable, Sendable {
              accessibilityTraits, accessibilityCustomActions, gestureRecognizers,
              alpha, backgroundColor, cornerRadius,
              borderColor, borderWidth, isLayerNode,
-             isHidden, isUserInteractionEnabled, hasTapTarget, isOccluded, children
+             isHidden, isUserInteractionEnabled, hasTapTarget, isOccluded, semanticLinks, children
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.className = try c.decode(String.self, forKey: .className)
-        self.bounds = try c.decode(SdkBounds.self, forKey: .bounds)
-        self.accessibilityLabel = try c.decodeIfPresent(String.self, forKey: .accessibilityLabel)
-        self.accessibilityIdentifier = try c.decodeIfPresent(String.self, forKey: .accessibilityIdentifier)
-        self.isAccessibilityElement = try c.decodeIfPresent(Bool.self, forKey: .isAccessibilityElement) ?? false
-        self.isAccessibilityFocused = try c.decodeIfPresent(Bool.self, forKey: .isAccessibilityFocused) ?? false
-        self.accessibilityElementsHidden = try c.decodeIfPresent(Bool.self, forKey: .accessibilityElementsHidden) ?? false
-        self.accessibilityTraits = try c.decodeIfPresent([String].self, forKey: .accessibilityTraits) ?? []
-        self.accessibilityCustomActions = try c.decodeIfPresent([String].self, forKey: .accessibilityCustomActions) ?? []
-        self.gestureRecognizers = try c.decodeIfPresent([SdkGestureInfo].self, forKey: .gestureRecognizers) ?? []
-        self.alpha = try c.decodeIfPresent(Float.self, forKey: .alpha) ?? 1.0
-        self.backgroundColor = try c.decodeIfPresent(String.self, forKey: .backgroundColor)
-        self.cornerRadius = try c.decodeIfPresent(Float.self, forKey: .cornerRadius) ?? 0
-        self.borderColor = try c.decodeIfPresent(String.self, forKey: .borderColor)
-        self.borderWidth = try c.decodeIfPresent(Float.self, forKey: .borderWidth) ?? 0
-        self.isLayerNode = try c.decodeIfPresent(Bool.self, forKey: .isLayerNode) ?? false
-        self.isHidden = try c.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
-        self.isUserInteractionEnabled = try c.decodeIfPresent(Bool.self, forKey: .isUserInteractionEnabled) ?? true
-        self.hasTapTarget = try c.decodeIfPresent(Bool.self, forKey: .hasTapTarget) ?? false
-        self.isOccluded = try c.decodeIfPresent(Bool.self, forKey: .isOccluded) ?? false
-        self.children = try c.decodeIfPresent([SdkViewNode].self, forKey: .children)
+        className = try c.decode(String.self, forKey: .className)
+        bounds = try c.decode(SdkBounds.self, forKey: .bounds)
+        accessibilityLabel = try c.decodeIfPresent(String.self, forKey: .accessibilityLabel)
+        accessibilityIdentifier = try c.decodeIfPresent(String.self, forKey: .accessibilityIdentifier)
+        isAccessibilityElement = try c.decodeIfPresent(Bool.self, forKey: .isAccessibilityElement) ?? false
+        isAccessibilityFocused = try c.decodeIfPresent(Bool.self, forKey: .isAccessibilityFocused) ?? false
+        accessibilityElementsHidden = try c.decodeIfPresent(Bool.self, forKey: .accessibilityElementsHidden) ?? false
+        accessibilityTraits = try c.decodeIfPresent([String].self, forKey: .accessibilityTraits) ?? []
+        accessibilityCustomActions = try c.decodeIfPresent([String].self, forKey: .accessibilityCustomActions) ?? []
+        gestureRecognizers = try c.decodeIfPresent([SdkGestureInfo].self, forKey: .gestureRecognizers) ?? []
+        alpha = try c.decodeIfPresent(Float.self, forKey: .alpha) ?? 1.0
+        backgroundColor = try c.decodeIfPresent(String.self, forKey: .backgroundColor)
+        cornerRadius = try c.decodeIfPresent(Float.self, forKey: .cornerRadius) ?? 0
+        borderColor = try c.decodeIfPresent(String.self, forKey: .borderColor)
+        borderWidth = try c.decodeIfPresent(Float.self, forKey: .borderWidth) ?? 0
+        isLayerNode = try c.decodeIfPresent(Bool.self, forKey: .isLayerNode) ?? false
+        isHidden = try c.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
+        isUserInteractionEnabled = try c.decodeIfPresent(Bool.self, forKey: .isUserInteractionEnabled) ?? true
+        hasTapTarget = try c.decodeIfPresent(Bool.self, forKey: .hasTapTarget) ?? false
+        isOccluded = try c.decodeIfPresent(Bool.self, forKey: .isOccluded) ?? false
+        semanticLinks = try c.decodeIfPresent([SdkSemanticLink].self, forKey: .semanticLinks)
+        children = try c.decodeIfPresent([SdkViewNode].self, forKey: .children)
+    }
+}
+
+/// A single inline semantic link the in-app SDK discovered on a text element,
+/// as decoded from the SDK's hierarchy payload (issue #5560). Mirrors the SDK's
+/// `SdkSemanticLink` wire shape: the Android-parity `text`/`occurrence`/range plus
+/// the iOS-only optional on-screen center point used for coordinate activation.
+public struct SdkSemanticLink: Codable, Sendable, Equatable {
+    public let text: String
+    public let occurrence: Int
+    public let start: Int?
+    public let end: Int?
+    public let centerX: Double?
+    public let centerY: Double?
+
+    public init(
+        text: String,
+        occurrence: Int,
+        start: Int? = nil,
+        end: Int? = nil,
+        centerX: Double? = nil,
+        centerY: Double? = nil
+    ) {
+        self.text = text
+        self.occurrence = occurrence
+        self.start = start
+        self.end = end
+        self.centerX = centerX
+        self.centerY = centerY
     }
 }
 

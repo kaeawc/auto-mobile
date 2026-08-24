@@ -488,8 +488,18 @@ public enum HierarchyMerger {
         // from the matched in-app SDK node; fall back to the existing value when there is
         // no SDK match. Follows the "true"-or-nil convention (#3924).
         let enrichedFocused = node.fullMatch?.isAccessibilityFocused == true ? "true" : element.accessibilityFocused
+        // Inline semantic links only the in-app SDK can see (attributed text /
+        // SwiftUI link accessibility elements) are projected onto the owning
+        // element as the Android-parity `semanticLinks` (issue #5560). Prefer the
+        // SDK's richer links (real occurrence + range) when present; otherwise keep
+        // whatever XCUITest already surfaced (e.g. a standalone `.link` element).
+        let enrichedSemanticLinks = semanticLinks(from: node.fullMatch) ?? element.semanticLinks
         let enrichmentChanged = node.fullMatch != nil &&
-            (enrichedExtras != element.extras || enrichedFocused != element.accessibilityFocused)
+            (
+                enrichedExtras != element.extras ||
+                    enrichedFocused != element.accessibilityFocused ||
+                    enrichedSemanticLinks != element.semanticLinks
+            )
 
         // Nothing touched this node or its subtree — return the original by value, skipping
         // the field-by-field copy.
@@ -525,7 +535,7 @@ public enum HierarchyMerger {
             checked: element.checked,
             selected: element.selected,
             longClickable: element.longClickable,
-            semanticLinks: element.semanticLinks,
+            semanticLinks: enrichedSemanticLinks,
             testTag: element.testTag,
             role: element.role,
             stateDescription: element.stateDescription,
@@ -537,6 +547,15 @@ public enum HierarchyMerger {
             node: finalChildren
         )
         return (rebuilt, true)
+    }
+
+    /// Project a matched SDK node's inline links onto the Android-parity wire
+    /// shape (`text`/`occurrence`/range), dropping the iOS-only activation center.
+    /// Returns `nil` when the node has no links, so callers can fall back to any
+    /// links XCUITest already surfaced.
+    private static func semanticLinks(from sdkNode: SdkViewNode?) -> [SemanticLink]? {
+        guard let links = sdkNode?.semanticLinks, !links.isEmpty else { return nil }
+        return links.map { SemanticLink(text: $0.text, occurrence: $0.occurrence, start: $0.start, end: $0.end) }
     }
 
     /// Populate `sdk.*` extras from a matched SDK node. Only non-default SDK fields are

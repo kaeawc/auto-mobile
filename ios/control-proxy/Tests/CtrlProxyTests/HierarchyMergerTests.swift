@@ -351,6 +351,64 @@ final class HierarchyMergerTests: XCTestCase {
         XCTAssertEqual(childExtras?["sdk.backgroundColor"], "#00FF00FF")
     }
 
+    func testEnrichesOwnerElementWithSdkSemanticLinks() {
+        // The XCUITest snapshot of an inline-link text owner carries no links;
+        // the in-app SDK supplies them and the merge must project them onto the
+        // owning element as `semantic-links` (issue #5560).
+        let owner = UIElementInfo(
+            text: "Read the Terms of Service, contact Support, or review the Terms of Service again.",
+            resourceId: "uikit_semantic_links_inline",
+            className: "UITextView",
+            bounds: ElementBounds(left: 0, top: 0, right: 375, bottom: 72)
+        )
+        let sdkOwner = SdkViewNode(
+            className: "UITextView",
+            bounds: SdkBounds(left: 0, top: 0, right: 375, bottom: 72),
+            accessibilityIdentifier: "uikit_semantic_links_inline",
+            semanticLinks: [
+                SdkSemanticLink(text: "Terms of Service", occurrence: 0, start: 9, end: 25, centerX: 40, centerY: 20),
+                SdkSemanticLink(text: "Support", occurrence: 0, start: 35, end: 42),
+                SdkSemanticLink(text: "Terms of Service", occurrence: 1, start: 58, end: 74),
+            ]
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: owner),
+            sdk: makeSdkHierarchy(root: sdkOwner)
+        )
+
+        let links = result.hierarchy?.semanticLinks
+        XCTAssertEqual(links?.count, 3)
+        XCTAssertEqual(links?.map(\.text), ["Terms of Service", "Support", "Terms of Service"])
+        XCTAssertEqual(links?.map(\.occurrence), [0, 0, 1])
+        XCTAssertEqual(links?[0].start, 9)
+        XCTAssertEqual(links?[2].start, 58)
+    }
+
+    func testDoesNotOverrideExistingXcuitestSemanticLinksWhenSdkHasNone() {
+        // A standalone XCUITest link already carries a single-entry semanticLinks;
+        // an SDK match without links must leave it intact.
+        let standalone = UIElementInfo(
+            resourceId: "uikit_semantic_links_standalone",
+            className: "UITextView",
+            bounds: ElementBounds(left: 0, top: 0, right: 200, bottom: 28),
+            semanticLinks: [SemanticLink(text: "Privacy Policy", occurrence: 0)]
+        )
+        let sdkStandalone = SdkViewNode(
+            className: "UITextView",
+            bounds: SdkBounds(left: 0, top: 0, right: 200, bottom: 28),
+            accessibilityIdentifier: "uikit_semantic_links_standalone",
+            backgroundColor: "#00000000"
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: standalone),
+            sdk: makeSdkHierarchy(root: sdkStandalone)
+        )
+
+        XCTAssertEqual(result.hierarchy?.semanticLinks?.map(\.text), ["Privacy Policy"])
+    }
+
     func testIdentifierFallbackMatchesDifferentBounds() {
         // XCUITest and SDK have different bounds but same accessibilityIdentifier
         let xcuiWithId = UIElementInfo(

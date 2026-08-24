@@ -176,13 +176,14 @@ final class CommandHandlerTests: XCTestCase {
             sdkHierarchyClient: fetcher
         )
 
-        let response = commandHandler.handle(WebSocketRequest.setNetworkErrorSimulation(RequestSetNetworkErrorSimulation(
-            requestId: "sim-sync-1",
-            enabled: true,
-            errorType: "timeout",
-            limit: 2,
-            expiresAtEpochMs: 1_720_000_000_000
-        )))
+        let response = commandHandler
+            .handle(WebSocketRequest.setNetworkErrorSimulation(RequestSetNetworkErrorSimulation(
+                requestId: "sim-sync-1",
+                enabled: true,
+                errorType: "timeout",
+                limit: 2,
+                expiresAtEpochMs: 1_720_000_000_000
+            )))
 
         guard let typed = response as? SetNetworkErrorSimulationResponse else {
             XCTFail("Expected SetNetworkErrorSimulationResponse, got \(Swift.type(of: response))")
@@ -622,8 +623,10 @@ final class CommandHandlerTests: XCTestCase {
 
         XCTAssertFalse(response.success ?? true)
         XCTAssertEqual(response.type, "multi_finger_swipe_result")
-        XCTAssertTrue(response.error?
-            .contains("XCTest private multi-touch event synthesis classes are unavailable") ?? false)
+        XCTAssertTrue(
+            response.error?
+                .contains("XCTest private multi-touch event synthesis classes are unavailable") ?? false
+        )
     }
 
     func testPinchSuccessForwardsRequestPayload() {
@@ -2286,5 +2289,97 @@ final class DatabaseCommandHandlerTests: XCTestCase {
         XCTAssertEqual(CommandHandler.sanitizedTableOffset(.infinity), 0)
         XCTAssertEqual(CommandHandler.sanitizedTableOffset(-.infinity), 0)
         XCTAssertEqual(CommandHandler.sanitizedTableOffset(.nan), 0)
+    }
+}
+
+/// Routing coverage for `request_activate_accessibility_link` (issue #5560): an
+/// SDK-resolved inline link is tapped by coordinate; anything the SDK cannot
+/// resolve falls back to the XCUITest `.link` activation path.
+final class ActivateAccessibilityLinkCommandHandlerTests: XCTestCase {
+    private var fakeGesturePerformer: FakeGesturePerformer!
+    private var fakeSdkHierarchy: FakeSdkHierarchyFetcher!
+    private var perfProvider: PerfProvider!
+    private var commandHandler: CommandHandler!
+
+    override func setUp() {
+        super.setUp()
+        perfProvider = PerfProvider.createForTesting(timeProvider: FakeTimeProvider(initialTime: 1000))
+        fakeGesturePerformer = FakeGesturePerformer()
+        fakeSdkHierarchy = FakeSdkHierarchyFetcher()
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: FakeElementLocator(),
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fakeSdkHierarchy
+        )
+    }
+
+    override func tearDown() {
+        perfProvider.clear()
+        PerfProvider.resetInstance()
+        super.tearDown()
+    }
+
+    private func ownerHierarchy(links: [SdkSemanticLink]) -> SdkViewHierarchy {
+        SdkViewHierarchy(
+            timestamp: 1,
+            bundleId: "com.example.app",
+            screenScale: 3,
+            screenWidth: 375,
+            screenHeight: 812,
+            root: SdkViewNode(
+                className: "UITextView",
+                bounds: SdkBounds(left: 0, top: 0, right: 375, bottom: 72),
+                accessibilityIdentifier: "inline_owner",
+                semanticLinks: links
+            )
+        )
+    }
+
+    private func activate(text: String, occurrence: Int, owner: String?) {
+        _ = commandHandler.handle(.activateAccessibilityLink(RequestActivateAccessibilityLink(
+            requestId: "link-1",
+            text: text,
+            occurrence: occurrence,
+            ownerResourceId: owner
+        )))
+    }
+
+    func testResolvedInlineLinkIsActivatedByCoordinateTap() {
+        fakeSdkHierarchy.setFreshHierarchy(ownerHierarchy(links: [
+            SdkSemanticLink(text: "Terms of Service", occurrence: 0, start: 9, end: 25, centerX: 40, centerY: 20),
+            SdkSemanticLink(text: "Terms of Service", occurrence: 1, start: 58, end: 74, centerX: 300, centerY: 20),
+        ]))
+
+        activate(text: "Terms of Service", occurrence: 1, owner: "inline_owner")
+
+        let taps = fakeGesturePerformer.getTapHistory()
+        XCTAssertEqual(taps.count, 1)
+        XCTAssertEqual(taps.first?.x, 300)
+        XCTAssertEqual(taps.first?.y, 20)
+        // The XCUITest fallback path must not also run.
+        XCTAssertTrue(fakeGesturePerformer.getActionHistory().isEmpty)
+    }
+
+    func testUnresolvedLinkFallsBackToXcuitestActivation() {
+        // No SDK geometry (link lacks a center) → fall through to the XCUITest path.
+        fakeSdkHierarchy.setFreshHierarchy(ownerHierarchy(links: [
+            SdkSemanticLink(text: "Support", occurrence: 0),
+        ]))
+
+        activate(text: "Support", occurrence: 0, owner: "inline_owner")
+
+        XCTAssertTrue(fakeGesturePerformer.getTapHistory().isEmpty)
+        let actions = fakeGesturePerformer.getActionHistory()
+        XCTAssertEqual(actions.count, 1)
+        XCTAssertEqual(actions.first?.action, "activate_accessibility_link")
+        XCTAssertEqual(actions.first?.label, "Support#0")
+    }
+
+    func testNoSdkHierarchyFallsBackToXcuitestActivation() {
+        activate(text: "Privacy Policy", occurrence: 0, owner: nil)
+
+        XCTAssertTrue(fakeGesturePerformer.getTapHistory().isEmpty)
+        XCTAssertEqual(fakeGesturePerformer.getActionHistory().first?.action, "activate_accessibility_link")
     }
 }

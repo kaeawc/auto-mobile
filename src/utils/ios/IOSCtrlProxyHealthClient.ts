@@ -46,8 +46,8 @@ export class IOSCtrlProxyHealthClient {
    * body. Does not require device identity — used to gate spawn/restart on any
    * responding runner on the port.
    */
-  public async checkHealthEndpointOnPort(port: number): Promise<boolean> {
-    const body = await this.readHealthEndpointBodyOnPort(port);
+  public async checkHealthEndpointOnPort(port: number, timeoutMs?: number): Promise<boolean> {
+    const body = await this.readHealthEndpointBodyOnPort(port, timeoutMs);
     return body !== null && (body.includes("ok") || body.includes("healthy"));
   }
 
@@ -56,8 +56,12 @@ export class IOSCtrlProxyHealthClient {
    * AND identifies as `deviceId`. Rejects a sibling simulator's runner or the
    * Android runner answering the same/default port.
    */
-  public async checkHealthEndpointOnPortForDevice(port: number, deviceId: string): Promise<boolean> {
-    const body = await this.readHealthEndpointBodyOnPort(port);
+  public async checkHealthEndpointOnPortForDevice(
+    port: number,
+    deviceId: string,
+    timeoutMs?: number
+  ): Promise<boolean> {
+    const body = await this.readHealthEndpointBodyOnPort(port, timeoutMs);
     if (body === null) {
       return false;
     }
@@ -103,14 +107,18 @@ export class IOSCtrlProxyHealthClient {
    * `curl` (bounded by `--max-time`); remote probes use `fetch` bounded by a
    * timer-driven `AbortController`.
    */
-  public async readHealthEndpointBodyOnPort(port: number): Promise<string | null> {
+  public async readHealthEndpointBodyOnPort(port: number, timeoutMs?: number): Promise<string | null> {
     try {
+      const requestTimeoutMs = Math.min(
+        IOSCtrlProxyHealthClient.FETCH_TIMEOUT_MS,
+        Math.max(1, timeoutMs ?? IOSCtrlProxyHealthClient.FETCH_TIMEOUT_MS)
+      );
       const host = this.context.useRemoteRunner() ? this.context.getHost() : "localhost";
       if (this.context.useRemoteRunner()) {
         const controller = new AbortController();
         const timeoutId = this.timer.setTimeout(
           () => controller.abort(),
-          IOSCtrlProxyHealthClient.FETCH_TIMEOUT_MS
+          requestTimeoutMs
         );
         try {
           const response = await fetch(`http://${host}:${port}/health`, {
@@ -125,8 +133,8 @@ export class IOSCtrlProxyHealthClient {
       // Use curl to check the health endpoint locally
       const { stdout } = await this.processExecutor.executeCommand(
         "curl",
-        ["-s", "--max-time", "2", `http://${host}:${port}/health`],
-        { timeoutMs: IOSCtrlProxyHealthClient.FETCH_TIMEOUT_MS }
+        ["-s", "--max-time", String(requestTimeoutMs / 1000), `http://${host}:${port}/health`],
+        { timeoutMs: requestTimeoutMs }
       );
       return stdout;
     } catch (error) {

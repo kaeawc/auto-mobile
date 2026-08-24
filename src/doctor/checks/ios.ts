@@ -948,8 +948,7 @@ function classifyObserveRoundTrip(
   // completed (connected, non-degenerate, error-free, non-empty) passes despite
   // the divergence, and a genuine wrong-port bind (issue #2731) still fails here
   // because it cannot connect (connected=false) and surfaces a hierarchyError.
-  const failed =
-    !inspection.connected || hasDegenerateScreen || hasHierarchyError || hasNoElements;
+  const failed = !inspection.connected || hasDegenerateScreen || hasHierarchyError || hasNoElements;
 
   const parts = [
     "platform=ios",

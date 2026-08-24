@@ -1022,7 +1022,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Android-specific state
   private portForwardingSetup: boolean = false;
-  private inFlightEnsureConnected: Promise<boolean> | null = null;
+  private inFlightConnection: Promise<boolean> | null = null;
   private cleanupHeldPort: number | null = null;
   private lastWebSocketTimeout: number = 0;
   // Terminal-close latch (#5493): set once by close() so the best-effort ADB
@@ -1611,17 +1611,23 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   public override async ensureConnected(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
-    const connection = super.ensureConnected(perf);
-    this.inFlightEnsureConnected = connection;
+    const connected = await super.ensureConnected(perf);
+    if (connected) {
+      this.syncAccessibilityFlagsToDevice();
+    }
+    return connected;
+  }
+
+  protected override async connectWebSocket(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+  ): Promise<boolean> {
+    const connection = super.connectWebSocket(perf);
+    this.inFlightConnection = connection;
     try {
-      const connected = await connection;
-      if (connected) {
-        this.syncAccessibilityFlagsToDevice();
-      }
-      return connected;
+      return await connection;
     } finally {
-      if (this.inFlightEnsureConnected === connection) {
-        this.inFlightEnsureConnected = null;
+      if (this.inFlightConnection === connection) {
+        this.inFlightConnection = null;
       }
       if (this.closed) {
         await this.finishInvalidatedConnectionCleanup();
@@ -3103,7 +3109,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   private async finishInvalidatedConnectionCleanup(): Promise<void> {
-    if (this.inFlightEnsureConnected !== null || this.cleanupHeldPort === null) {
+    if (this.inFlightConnection !== null || this.cleanupHeldPort === null) {
       return;
     }
     const heldPort = this.cleanupHeldPort;

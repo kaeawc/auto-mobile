@@ -889,6 +889,22 @@ function hasLiveAndroidObserverSessionBinding(
   );
 }
 
+function bindLiveAndroidObserverSession(
+  observer: AndroidCtrlProxyClient,
+  device: BootedDevice,
+  observerState: AndroidObserverShutdownState,
+): void {
+  if (
+    hasLiveAndroidObserverSessionBinding(
+      device,
+      observerState.boundSessionId,
+      observerState.deviceIdentity,
+    )
+  ) {
+    observer.bindSession(observerState.boundSessionId);
+  }
+}
+
 function invalidateAndroidObserver(observer: AndroidCtrlProxyClient, deviceId: string): void {
   // Removal is deliberately synchronous and precedes cleanup. `close()` can
   // wait on an ADB forward removal that does not honour the shutdown deadline;
@@ -1010,6 +1026,10 @@ async function restoreAndroidObserverAfterCommandFailure(
       isSameBootedDeviceIdentity(observerState.deviceIdentity, survivingDevice)
     ) {
       const observer = AndroidCtrlProxyClient.getInstance(survivingDevice);
+      // Bind before connecting so a frame arriving immediately after the socket
+      // opens is attributed to the surviving session. A post-connect identity
+      // mismatch still invalidates this client before it is retained.
+      bindLiveAndroidObserverSession(observer, device, observerState);
       const connected = await reconnectAndroidObserverWithinShutdownDeadline(
         observer,
         device,
@@ -1037,15 +1057,6 @@ async function restoreAndroidObserverAfterCommandFailure(
       if (!sameIncarnation) {
         invalidateAndroidObserver(observer, device.deviceId);
         return;
-      }
-      if (
-        hasLiveAndroidObserverSessionBinding(
-          device,
-          observerState.boundSessionId,
-          observerState.deviceIdentity,
-        )
-      ) {
-        observer.bindSession(observerState.boundSessionId);
       }
     }
   } catch (restoreError) {

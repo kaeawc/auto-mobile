@@ -1832,3 +1832,39 @@ describe("Daemon manager available-devices", () => {
     );
   });
 });
+
+describe("Daemon manager heartbeat", () => {
+  test("records a session heartbeat through the daemon socket", async () => {
+    const fakeClient = new FakeDaemonClient({});
+    const output: string[] = [];
+    const logSpy = spyOn(console, "log").mockImplementation((...args) => {
+      output.push(args.join(" "));
+    });
+
+    try {
+      await runDaemonCommand("heartbeat", ["session-1"], {
+        clientFactory: () => fakeClient,
+        stateProvider: () =>
+          ({
+            isInitialized: () => false,
+            getDevicePool: () => {
+              throw new Error("Device pool unavailable");
+            },
+            getSessionManager: () => {
+              throw new Error("Session manager unavailable");
+            },
+            getDeviceSessionRegistry: () => {
+              throw new Error("Device session registry unavailable");
+            },
+          }) satisfies DaemonStateLike,
+      });
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    expect(fakeClient.callDaemonMethodCalls).toEqual([
+      { method: "daemon/heartbeat", params: { sessionId: "session-1" } },
+    ]);
+    expect(output).toContain("Session session-1 heartbeat recorded");
+  });
+});

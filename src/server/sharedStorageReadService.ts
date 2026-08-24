@@ -68,14 +68,6 @@ export function getSharedStorageReadService(): SharedStorageReadService {
   return sharedStorageReadService;
 }
 
-export function setSharedStorageReadServiceForTesting(service: SharedStorageReadService): void {
-  sharedStorageReadService = service;
-}
-
-export function resetSharedStorageReadServiceForTesting(): void {
-  sharedStorageReadService = null;
-}
-
 export function createSharedStorageReadServiceForTesting(
   dependencies: SharedStorageReadServiceDependencies = {},
 ): SharedStorageReadService {
@@ -133,6 +125,10 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
         signal: request.signal,
       });
     } catch (error) {
+      logger.warn(
+        `[SharedStorageRead] resolve user failed for list: ${errorMessage(error)}`,
+        error,
+      );
       return { ...base, observation: "unavailable", reason: errorMessage(error) };
     }
 
@@ -156,6 +152,10 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
         files: parseListing(statOutput, shaOutput, directory, request.deviceId, namespace),
       };
     } catch (error) {
+      // A permission-denied read of a non-primary profile's storage also lands
+      // here as "unavailable"; note that a missing/inaccessible directory can
+      // instead surface as "missing" via the shell existence probe above.
+      logger.warn(`[SharedStorageRead] list ${directory} failed: ${errorMessage(error)}`, error);
       return { ...resolved, observation: "unavailable", reason: errorMessage(error) };
     }
   }
@@ -193,6 +193,10 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
         signal: request.signal,
       });
     } catch (error) {
+      logger.warn(
+        `[SharedStorageRead] resolve user failed for read: ${errorMessage(error)}`,
+        error,
+      );
       return { ...base, observation: "unavailable", reason: errorMessage(error) };
     }
     base.userId = target.userId;
@@ -224,6 +228,7 @@ class DefaultSharedStorageReadService implements SharedStorageReadService {
           : { mimeType: mimeTypeForPath(path) ?? "text/plain; charset=utf-8", text }),
       };
     } catch (error) {
+      logger.warn(`[SharedStorageRead] read ${file} failed: ${errorMessage(error)}`, error);
       return { ...base, observation: "unavailable", reason: errorMessage(error) };
     }
   }

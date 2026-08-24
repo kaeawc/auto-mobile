@@ -308,6 +308,67 @@ describe("session screenshot resources", () => {
     });
   });
 
+  test("does not return a PNG when cancellation occurs while reading the fresh screenshot", async () => {
+    const controller = new AbortController();
+    let resolveRead: (image: Buffer) => void = () => {};
+    const pendingRead = new Promise<Buffer>(resolve => {
+      resolveRead = resolve;
+    });
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () => createTrackedScreenshot({
+        success: true,
+        path: "/tmp/fresh.png",
+      }),
+    });
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: () => pendingRead,
+    });
+
+    const readPromise = readTemplate(
+      "automobile:device-session/session-123/screenshot",
+      { sessionUuid, signal: controller.signal },
+    );
+    controller.abort();
+    resolveRead(Buffer.from("fresh"));
+
+    expect(JSON.parse((await readPromise).text!)).toMatchObject({
+      code: "SCREENSHOT_CAPTURE_CANCELLED",
+      retryable: false,
+    });
+  });
+
+  test("does not return a PNG when ownership is lost while reading the fresh screenshot", async () => {
+    let owned = true;
+    let resolveRead: (image: Buffer) => void = () => {};
+    const pendingRead = new Promise<Buffer>(resolve => {
+      resolveRead = resolve;
+    });
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => owned ? activeSession() : undefined,
+      createScreenshotService: () => createTrackedScreenshot({
+        success: true,
+        path: "/tmp/fresh.png",
+      }),
+    });
+    setScreenshotFileSystem({
+      stat: async () => ({ isFile: () => true }),
+      readFile: () => pendingRead,
+    });
+
+    const readPromise = readTemplate(
+      "automobile:device-session/session-123/screenshot",
+    );
+    owned = false;
+    resolveRead(Buffer.from("fresh"));
+
+    expect(JSON.parse((await readPromise).text!)).toMatchObject({
+      code: "SESSION_OWNERSHIP_LOST",
+      retryable: false,
+    });
+  });
+
   test("waits for a pending capture before taking a distinct fresh capture", async () => {
     let resolvePendingCapture: (result: ScreenshotResult) => void = () => {};
     const pendingCapture = new Promise<ScreenshotResult>((resolve) => {

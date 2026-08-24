@@ -30,15 +30,18 @@ import XCTest
             window.makeKeyAndVisible()
             host.view.setNeedsLayout()
             host.view.layoutIfNeeded()
-            // SwiftUI wires up accessibility (and the link rotor) asynchronously; spin
-            // the runloop until the walker can see the inline links, up to a ceiling.
-            var hierarchy = ViewHierarchyWalker.walk()
+            // Walk THIS window explicitly, not the resolved key window: other tests in
+            // the suite leave overlay windows up, and on a slow CI runner the global
+            // key-window heuristic can pick one of those instead of the demo. SwiftUI
+            // also wires the link rotor asynchronously, so spin the runloop until the
+            // links appear, up to a generous ceiling.
+            var hierarchy = ViewHierarchyWalker.walk(window: window)
             var waited: TimeInterval = 0
-            while ownerNode(in: hierarchy)?.semanticLinks?.isEmpty ?? true, waited < 2.0 {
-                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            while ownerNode(in: hierarchy)?.semanticLinks?.isEmpty ?? true, waited < 8.0 {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.25))
                 host.view.layoutIfNeeded()
-                hierarchy = ViewHierarchyWalker.walk()
-                waited += 0.2
+                hierarchy = ViewHierarchyWalker.walk(window: window)
+                waited += 0.25
             }
             return hierarchy
         }
@@ -63,11 +66,30 @@ import XCTest
             return nil
         }
 
+        /// (total nodes, nodes carrying any semanticLinks) — surfaced on failure so a
+        /// CI-only miss is diagnosable without a rerun.
+        private func nodeStats(in hierarchy: SdkViewHierarchy) -> (total: Int, withLinks: Int) {
+            guard let root = hierarchy.root else { return (0, 0) }
+            var total = 0
+            var withLinks = 0
+            var stack = [root]
+            while let node = stack.popLast() {
+                total += 1
+                if node.semanticLinks?.isEmpty == false { withLinks += 1 }
+                stack.append(contentsOf: node.children ?? [])
+            }
+            return (total, withLinks)
+        }
+
         @MainActor
         func testDiscoversSwiftUIInlineLinksOnOwnerWithOccurrenceAndGeometry() {
             let hierarchy = renderDemoAndWalk()
             guard let owner = ownerNode(in: hierarchy) else {
-                return XCTFail("No node carrying accessibilityIdentifier swiftui_semantic_links_inline")
+                let (total, withLinks) = nodeStats(in: hierarchy)
+                return XCTFail(
+                    "No node carrying accessibilityIdentifier swiftui_semantic_links_inline "
+                        + "(walked \(total) nodes, \(withLinks) with semanticLinks)"
+                )
             }
             guard let links = owner.semanticLinks else {
                 return XCTFail("Owner element carries no semanticLinks (SwiftUI inline links undiscovered)")

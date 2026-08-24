@@ -16,12 +16,23 @@
         /// Walk the entire view hierarchy and return a snapshot.
         /// Must be called on the main thread.
         public static func walk(bundleId: String? = nil) -> SdkViewHierarchy {
+            walk(in: visibleKeyWindow(), bundleId: bundleId)
+        }
+
+        /// Testability seam: snapshot an explicit window rather than resolving the
+        /// visible key window. Production always goes through `walk(bundleId:)`;
+        /// tests use this so a snapshot doesn't depend on which of several windows
+        /// (app, overlays) the global key-window heuristic happens to pick.
+        static func walk(window: UIWindow, bundleId: String? = nil) -> SdkViewHierarchy {
+            walk(in: window, bundleId: bundleId)
+        }
+
+        private static func walk(in keyWindow: UIWindow?, bundleId: String?) -> SdkViewHierarchy {
             let scale = Float(UIScreen.main.scale)
             let screenBounds = UIScreen.main.bounds
             let screenWidth = Int(screenBounds.width)
             let screenHeight = Int(screenBounds.height)
 
-            let keyWindow = visibleKeyWindow()
             let rootNode = keyWindow.flatMap(walkWindow)
             let safeAreaInsets = keyWindow.map {
                 SdkEdgeInsets(
@@ -423,10 +434,13 @@
             if let array = view.accessibilityElements as? [NSObject], !array.isEmpty {
                 return array
             }
-            let count = view.accessibilityElementCount()
-            guard count != NSNotFound, count > 0 else { return [] }
+            // `accessibilityElementCount()` returns `NSNotFound` for a non-container;
+            // a positive value is the number of vended elements (an Int API, not a
+            // collection count).
+            let elementCount = view.accessibilityElementCount()
+            guard elementCount != NSNotFound, elementCount > 0 else { return [] }
             var out: [NSObject] = []
-            for index in 0 ..< count {
+            for index in 0 ..< elementCount {
                 if let element = view.accessibilityElement(at: index) as? NSObject {
                     out.append(element)
                 }

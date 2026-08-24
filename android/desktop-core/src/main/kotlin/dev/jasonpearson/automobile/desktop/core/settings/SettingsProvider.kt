@@ -15,4 +15,8 @@ interface SettingsProvider {
   var themeMode: String
   /** Whether the first-run onboarding has been dismissed. */
   var hasSeenOnboarding: Boolean
+  /** Live-mirror quality preset: "low", "medium", or "high". */
+  var streamQualityPreset: String
+  /** Whether the live mirror lowers/raises its quality preset automatically on frame drops. */
+  var streamQualityAutoAdjust: Boolean
 }

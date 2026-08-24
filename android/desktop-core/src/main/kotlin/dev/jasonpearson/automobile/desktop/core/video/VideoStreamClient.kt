@@ -73,7 +73,20 @@ enum class VideoStreamPermission {
 enum class VideoStreamQuality(internal val wire: String) {
   Low("low"),
   Medium("medium"),
-  High("high"),
+  High("high");
+
+  /** The next preset down (cheaper), clamped at [Low]. */
+  fun lower(): VideoStreamQuality = entries[(ordinal - 1).coerceAtLeast(0)]
+
+  /** The next preset up (sharper), clamped at [High]. */
+  fun higher(): VideoStreamQuality = entries[(ordinal + 1).coerceAtMost(entries.lastIndex)]
+
+  companion object {
+    /** Parses a persisted/wire string case-insensitively, or null when it names no preset. */
+    fun fromWire(value: String?): VideoStreamQuality? = entries.firstOrNull {
+      it.wire.equals(value, ignoreCase = true)
+    }
+  }
 }
 
 /** A live view of a device's screen. */

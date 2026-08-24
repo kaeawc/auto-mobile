@@ -46,6 +46,25 @@ class FileSettingsProviderTest {
   }
 
   @Test
+  fun `defaults the live-mirror quality settings`() {
+    val settings = FileSettingsProvider(tempSettingsFile())
+    assertEquals("medium", settings.streamQualityPreset)
+    assertTrue(settings.streamQualityAutoAdjust)
+  }
+
+  @Test
+  fun `persists the live-mirror quality settings across instances`() {
+    val file = tempSettingsFile()
+    FileSettingsProvider(file).apply {
+      streamQualityPreset = "high"
+      streamQualityAutoAdjust = false
+    }
+    val reloaded = FileSettingsProvider(file)
+    assertEquals("high", reloaded.streamQualityPreset)
+    assertFalse(reloaded.streamQualityAutoAdjust)
+  }
+
+  @Test
   fun `writes the backing file on the first set`() {
     val file = tempSettingsFile()
     assertFalse(file.exists())

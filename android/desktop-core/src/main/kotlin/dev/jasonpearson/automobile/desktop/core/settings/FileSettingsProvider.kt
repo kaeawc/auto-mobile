@@ -132,6 +132,14 @@ class FileSettingsProvider(private val file: File = defaultSettingsFile()) : Set
     get() = boolean(KEY_HAS_SEEN_ONBOARDING, false)
     set(value) = put(KEY_HAS_SEEN_ONBOARDING, value)
 
+  override var streamQualityPreset: String
+    get() = string(KEY_STREAM_QUALITY_PRESET, "medium")
+    set(value) = put(KEY_STREAM_QUALITY_PRESET, value)
+
+  override var streamQualityAutoAdjust: Boolean
+    get() = boolean(KEY_STREAM_QUALITY_AUTO_ADJUST, true)
+    set(value) = put(KEY_STREAM_QUALITY_AUTO_ADJUST, value)
+
   companion object {
     private const val SETTINGS_DIR = ".auto-mobile"
     private const val SETTINGS_FILE = "desktop-settings.properties"
@@ -145,6 +153,8 @@ class FileSettingsProvider(private val file: File = defaultSettingsFile()) : Set
     private const val KEY_IOS_IDE = "iosIde"
     private const val KEY_THEME_MODE = "themeMode"
     private const val KEY_HAS_SEEN_ONBOARDING = "hasSeenOnboarding"
+    private const val KEY_STREAM_QUALITY_PRESET = "streamQualityPreset"
+    private const val KEY_STREAM_QUALITY_AUTO_ADJUST = "streamQualityAutoAdjust"
 
     /** Resolves `~/.auto-mobile/desktop-settings.properties`, matching `AutoMobileSocketPaths`. */
     fun defaultSettingsFile(): File {

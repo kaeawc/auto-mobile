@@ -496,6 +496,9 @@ fun AutoMobileDesktopApp(
                   sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
                   enableDeviceControl = controlActive,
                   control = control,
+                  // Wires the per-pane quality overlay (manual Low/Medium/High + live FPS +
+                  // auto-adjust) and persists the choice across sessions.
+                  settings = settings,
                 )
               },
             )

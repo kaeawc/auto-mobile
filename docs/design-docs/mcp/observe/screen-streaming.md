@@ -150,11 +150,17 @@ when the last subscriber for a device disconnects.
 
 ## Quality Presets
 
-| Quality | Android Bitrate | Resolution | Target FPS |
+| Quality | Android Bitrate | Resolution | Preset FPS |
 |---------|-----------------|------------|------------|
 | Low | 2 Mbps | 540p | 30 |
-| Medium | 4 Mbps | 720p | 60 |
-| High | 8 Mbps | 1080p | 60 |
+| Medium | 4 Mbps | 720p | 30 |
+| High | 8 Mbps | 1080p | 30 |
+
+The preset FPS is the on-device encoder default (`QualityPreset` — 30fps for every preset, since UI
+automation is mostly static frames and 30fps roughly halves encode load versus 60 for no observable
+benefit). The host may still override it per subscribe with `fps` in the 5–60 range; the desktop
+mirror requests 30fps for the focused/controlled pane and 10fps for display-only farm mirrors,
+independent of preset.
 
 iOS streams raw frames, so quality is controlled by resolution scaling only.
 
@@ -172,7 +178,7 @@ When video streaming is unavailable:
 |----------|----------|
 | Audio streaming | Include audio for complete mirroring |
 | Touch input | Plan for it, implement later |
-| Quality auto-adjustment | Automatically lower quality on frame drops |
+| Quality auto-adjustment | Client-side on the desktop mirror: a per-pane controller measures the decoded frame rate and steps the preset down on a sustained drop / back up once healthy, applied by re-subscribing. Because a shared per-device capture's encode is fixed by the first subscriber (see Stream Control), this takes effect for a sole subscriber / the next subscribe; reconfiguring a live shared capture is a server-side follow-up. |
 | Multiple devices | Concurrent per-device streams — one shared capture per device, fanned out to its subscribers, so the desktop workspace mirrors many device panes at once |
 | Android decoder | `org.bytedeco:ffmpeg` (in-process JNI), host-platform classifier only. Klarity was the original choice but cannot consume a live stream — its API takes file paths only. No FFmpeg *subprocess* fallback. |
 | iOS Swift integration | Swift-to-Node bridge |

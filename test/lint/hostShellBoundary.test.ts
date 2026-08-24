@@ -102,6 +102,45 @@ describe("host shell execution boundary (issue #4068)", () => {
     ).toEqual([]);
   });
 
+  test("rejects aliases of directly imported shell APIs", () => {
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import { exec } from "node:child_process"; const run = exec; run("curl $HOST");',
+      ),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import { execSync } from "node:child_process"; class Runner { constructor(private readonly run = execSync) {} execute() { this.run("curl $HOST"); } }',
+      ),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import { exec } from "node:child_process"; function acceptRunner(_run: unknown) {} acceptRunner(exec);',
+      ),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import { exec } from "node:child_process"; const runner = { run: exec }; runner.run("curl $HOST");',
+      ),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import * as childProcess from "node:child_process"; function acceptRunner(_run: unknown) {} acceptRunner(childProcess.exec);',
+      ),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import { execFile } from "node:child_process"; function acceptRunner(_run: unknown) {} acceptRunner(execFile);',
+      ),
+    ).toEqual([]);
+  });
+
   test("fails closed outside a Git worktree", () => {
     expect(() => changedSourceFiles("origin/main", false, false)).toThrow(
       "not a Git or Jujutsu worktree",

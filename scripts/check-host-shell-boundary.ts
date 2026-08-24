@@ -179,6 +179,18 @@ export function findViolationsInSource(file: string, source: string): Violation[
     });
   };
 
+  const isDeclarationName = (node: ts.Identifier): boolean => {
+    const { parent } = node;
+    return (
+      ts.isImportSpecifier(parent) ||
+      ((ts.isBindingElement(parent) ||
+        ts.isVariableDeclaration(parent) ||
+        ts.isParameter(parent) ||
+        ts.isPropertyDeclaration(parent)) &&
+        parent.name === node)
+    );
+  };
+
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) && isChildProcessModule(node.moduleSpecifier)) {
       const bindings = node.importClause?.namedBindings;
@@ -229,7 +241,28 @@ export function findViolationsInSource(file: string, source: string): Violation[
       node.initializer &&
       childProcessApiFromMember(node.initializer)
     ) {
-      recordImportedApi(childProcessApiFromMember(node.initializer)!, node.name.text);
+      const memberApi = childProcessApiFromMember(node.initializer)!;
+      if (SHELL_APIS.has(memberApi)) {
+        record(node);
+      } else {
+        recordImportedApi(memberApi, node.name.text);
+      }
+    }
+    if (
+      ts.isIdentifier(node) &&
+      importedShellApis.has(node.text) &&
+      !isDeclarationName(node) &&
+      !(ts.isCallExpression(node.parent) && node.parent.expression === node)
+    ) {
+      record(node);
+    }
+    if (
+      (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+      SHELL_APIS.has(childProcessApiFromMember(node) ?? "") &&
+      !(ts.isCallExpression(node.parent) && node.parent.expression === node) &&
+      !(ts.isVariableDeclaration(node.parent) && node.parent.initializer === node)
+    ) {
+      record(node);
     }
     if (ts.isCallExpression(node)) {
       const localApi = ts.isIdentifier(node.expression) ? node.expression.text : undefined;

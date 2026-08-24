@@ -50,15 +50,10 @@ export class SessionToolBinding {
     return explicitSessionUuid ?? boundSessionUuid;
   }
 
-  /**
-   * Preserve a released transport's session identity only for resources/read so
-   * a previously advertised session resource can report a typed inactive-session
-   * result. Tool routing deliberately remains unbound after release.
-   */
-  effectiveResourceSessionUuid(mcpSessionId: string | undefined): string | undefined {
-    const activeSessionUuid = this.boundSessionUuid(mcpSessionId);
-    if (activeSessionUuid) {
-      return activeSessionUuid;
+  /** A released identity is not an authorization grant for a replacement session. */
+  releasedResourceSessionUuid(mcpSessionId: string | undefined): string | undefined {
+    if (this.boundSessionUuid(mcpSessionId)) {
+      return undefined;
     }
     if (mcpSessionId) {
       return this.releasedDeviceSessions.get(mcpSessionId) ?? this.releasedInitialSessionUuid;

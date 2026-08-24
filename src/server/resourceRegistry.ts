@@ -13,6 +13,8 @@ import { ListChangedBroadcaster } from "./listChangedBroadcast";
 
 export interface ResourceReadContext {
   sessionUuid?: string;
+  /** A released session identity, available only to handlers that safely report inactivity. */
+  releasedSessionUuid?: string;
   signal?: AbortSignal;
 }
 

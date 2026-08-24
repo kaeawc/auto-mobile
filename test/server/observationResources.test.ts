@@ -219,6 +219,25 @@ describe("session screenshot resources", () => {
     });
   });
 
+  test("does not authorize a replacement session from a released session identity", async () => {
+    let screenshotServiceCalls = 0;
+    setSessionScreenshotResourceDependencies({
+      resolveActiveSession: () => activeSession(),
+      createScreenshotService: () => {
+        screenshotServiceCalls++;
+        return createTrackedScreenshot({ success: true, path: "/tmp/fresh.png" });
+      },
+    });
+
+    const content = await readTemplate(
+      "automobile:device-session/session-123/screenshot",
+      { releasedSessionUuid: sessionUuid },
+    );
+
+    expect(JSON.parse(content.text!).error).toContain("bound device session");
+    expect(screenshotServiceCalls).toBe(0);
+  });
+
   test("returns a typed retryable failure when fresh screenshot capture fails", async () => {
     setSessionScreenshotResourceDependencies({
       resolveActiveSession: () => activeSession(),

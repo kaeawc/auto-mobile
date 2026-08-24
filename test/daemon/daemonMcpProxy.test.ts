@@ -2301,6 +2301,43 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("forwards only the released session's fresh screenshot read", async () => {
+      const expectedResult = {
+        contents: [{
+          uri: "automobile:device-session/session-a/screenshot",
+          mimeType: "application/json",
+          text: JSON.stringify({ code: "SESSION_NOT_ACTIVE" }),
+        }],
+      };
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        resourceResult: expectedResult,
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.listTools();
+        fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
+
+        await expect(
+          proxy.readResource("automobile:device-session/session-a/screenshot"),
+        ).resolves.toEqual(expectedResult);
+        await expect(proxy.readResource("automobile:devices/booted")).rejects.toThrow(
+          /session-a.*(?:expired|released)/i,
+        );
+        expect(fakeClient.readResourceParams).toEqual([{ sessionUuid: "session-a" }]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("preserves the daemon heartbeat snapshot on a terminal binding error", async () => {
       const timer = new FakeTimer();
       const fakeClient = new FakeDaemonClient({

@@ -276,6 +276,25 @@ function isAuthorizedSessionResource(context: ResourceReadContext, sessionUuid: 
   return context.sessionUuid === sessionUuid;
 }
 
+function releasedSessionNotActiveError(
+  uri: string,
+  context: ResourceReadContext,
+  sessionUuid: string,
+): ResourceContent | undefined {
+  if (
+    context.releasedSessionUuid === sessionUuid
+    && !sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid)
+  ) {
+    return freshSessionScreenshotError(
+      uri,
+      "SESSION_NOT_ACTIVE",
+      false,
+      `No active device session found for sessionUuid ${sessionUuid}.`,
+    );
+  }
+  return undefined;
+}
+
 // Session-scoped handler for a cached observation.
 async function getSessionObservation(
   params: Record<string, string>,
@@ -409,7 +428,7 @@ async function getFreshSessionScreenshot(
   const { sessionUuid } = params;
   const uri = `automobile:device-session/${sessionUuid}/screenshot`;
   if (!isAuthorizedSessionResource(context, sessionUuid)) {
-    return unauthorizedSessionResourceError(uri);
+    return releasedSessionNotActiveError(uri, context, sessionUuid) ?? unauthorizedSessionResourceError(uri);
   }
   const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
   if (!activeSession) {

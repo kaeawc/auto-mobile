@@ -100,12 +100,12 @@ describe("session-scoped tool discovery", () => {
     expect(binding.unbindSession("session-1")).toBe(true);
 
     expect(binding.effectiveSessionUuid("transport-a")).toBeUndefined();
-    expect(binding.effectiveResourceSessionUuid("transport-a")).toBe("session-1");
-    expect(binding.effectiveResourceSessionUuid("transport-b")).toBe("session-2");
+    expect(binding.releasedResourceSessionUuid("transport-a")).toBe("session-1");
+    expect(binding.releasedResourceSessionUuid("transport-b")).toBeUndefined();
 
     binding.bind("transport-a", "session-3");
 
-    expect(binding.effectiveResourceSessionUuid("transport-a")).toBe("session-3");
+    expect(binding.releasedResourceSessionUuid("transport-a")).toBeUndefined();
   });
 
   test("unbindSession reports no change when nothing matches the released session", () => {

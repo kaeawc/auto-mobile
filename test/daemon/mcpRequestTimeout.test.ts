@@ -11,6 +11,7 @@ import {
   MIN_START_DEVICE_MCP_TIMEOUT_MS,
   MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS,
   MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
+  MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS,
   OBSERVE_MCP_TIMEOUT_ENV_VAR,
   OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
   START_DEVICE_MCP_TIMEOUT_OVERHEAD_MS,
@@ -99,6 +100,11 @@ describe("resolveMcpRequestTimeoutMs", () => {
       expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
     },
     {
+      name: "videoRecording floor when timeoutMs omitted",
+      tool: "videoRecording",
+      expected: MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS,
+    },
+    {
       name: "uninstallApp floor when timeoutMs omitted",
       tool: "uninstallApp",
       expected: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
@@ -144,6 +150,12 @@ describe("resolveMcpRequestTimeoutMs", () => {
       tool: "launchApp",
       timeoutMs: 10_000,
       expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "raises short videoRecording to floor",
+      tool: "videoRecording",
+      timeoutMs: 30_000,
+      expected: MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS,
     },
     {
       name: "raises short uninstallApp to floor",

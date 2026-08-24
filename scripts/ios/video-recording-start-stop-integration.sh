@@ -89,7 +89,10 @@ rm -rf "${DISPLAY_WARMUP_DIR}"
 # in-memory guard unless AUTOMOBILE_ALLOW_IN_MEMORY_DB is set.
 INTEGRATION_DB_DIR="$(mktemp -d)"
 export AUTOMOBILE_DB_DIR="${INTEGRATION_DB_DIR}"
-trap 'rm -rf "${INTEGRATION_DB_DIR}"' EXIT
+# `auto-mobile --cli` may start or restart the shared daemon with this database.
+# The following navigation integration step reuses that daemon, so deleting its
+# live database here causes SQLite disk-I/O failures. The directory is under the
+# runner's temporary storage and is discarded with the CI runner.
 
 cd "${PROJECT_ROOT}"
 bun test test/integration/iosVideoRecordingStartStop.integration.test.ts

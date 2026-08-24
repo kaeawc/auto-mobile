@@ -49,6 +49,14 @@ export const MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS =
 export const MIN_LAUNCH_APP_MCP_TIMEOUT_MS = 90_000;
 
 /**
+ * Floor for `videoRecording` — an iOS recording can be the first operation
+ * that starts CtrlProxy on a cold simulator. Aborting at the generic 30s
+ * deadline leaves the recording active while the client reports a failure,
+ * making a retry collide with that still-live recording.
+ */
+export const MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS = 90_000;
+
+/**
  * Floor for `uninstallApp` — the Android command has a 20s local deadline,
  * followed by bounded package-state reconciliation (and, if still installed,
  * one retry). The default 30s MCP deadline can otherwise abort recovery after
@@ -111,6 +119,8 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
       return MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS;
     case "launchApp":
       return MIN_LAUNCH_APP_MCP_TIMEOUT_MS;
+    case "videoRecording":
+      return MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS;
     case "uninstallApp":
       return MIN_UNINSTALL_APP_MCP_TIMEOUT_MS;
     case "openLink":

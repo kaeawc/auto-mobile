@@ -1100,8 +1100,9 @@ export async function checkIosObserveRoundTrip(
         status: "fail",
         message,
         recommendation:
-          "Restart the AutoMobile daemon and iOS CtrlProxy runner, then verify the runner WebSocket port " +
-          "matches the client port and re-run: auto-mobile --doctor --ios.",
+          "Restart the AutoMobile daemon and iOS CtrlProxy runner, then confirm each simulator's runner is " +
+          "reachable through its assigned client endpoint and returns a non-empty hierarchy, and re-run: " +
+          "auto-mobile --doctor --ios.",
       };
     }
 

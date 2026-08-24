@@ -243,6 +243,26 @@ jobs:
         run: |
           INSTALL_KTFMT_WHEN_MISSING=true ONLY_TOUCHED_FILES=false scripts/ktfmt/validate_ktfmt.sh
 
+  oxfmt:
+    name: "oxfmt"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: "Install Bun dependencies"
+        run: bun install --frozen-lockfile
+
+      - name: "Run oxfmt"
+        run: bun run format:check
+
   # The full-tree backstop. PRs run detekt scoped to the modules they changed
   # (pull_request.yml), which cannot see a violation introduced in a *consumer*
   # of a changed module -- this unscoped post-merge run is what catches that.

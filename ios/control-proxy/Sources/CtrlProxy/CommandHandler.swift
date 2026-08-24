@@ -157,6 +157,7 @@ public class CommandHandler: CommandHandling {
             // Action commands
             case let .action(payload):
                 return try handleAction(payload, startTime: startTime)
+
             case let .activateAccessibilityLink(payload):
                 return try handleActivateAccessibilityLink(payload, startTime: startTime)
 
@@ -960,12 +961,28 @@ public class CommandHandler: CommandHandling {
     private func handleActivateAccessibilityLink(
         _ request: RequestActivateAccessibilityLink,
         startTime: Date
-    ) throws -> WebSocketResponse {
-        try gesturePerformer.activateAccessibilityLink(
+    )
+        throws -> WebSocketResponse
+    {
+        // Prefer the in-app SDK's per-link geometry: it is the only source that
+        // can disambiguate duplicate inline links and see SwiftUI inline links,
+        // which XCUITest's `.link` query cannot (issue #5560). A resolved center
+        // is tapped directly; otherwise fall back to the XCUITest `.link` path,
+        // which still throws cleanly (never a false success) when nothing matches.
+        if let coordinate = SemanticLinkActivation.coordinate(
+            in: sdkHierarchyClient?.fetchFreshHierarchy(),
+            ownerResourceId: request.ownerResourceId,
             text: request.text,
-            occurrence: request.occurrence,
-            ownerResourceId: request.ownerResourceId
-        )
+            occurrence: request.occurrence
+        ) {
+            try gesturePerformer.tap(x: coordinate.x, y: coordinate.y, duration: 0)
+        } else {
+            try gesturePerformer.activateAccessibilityLink(
+                text: request.text,
+                occurrence: request.occurrence,
+                ownerResourceId: request.ownerResourceId
+            )
+        }
         return WebSocketResponse.success(
             type: ResponseType.actionResult.rawValue,
             requestId: request.requestId,
@@ -1520,11 +1537,11 @@ public class CommandHandler: CommandHandling {
                 success: true,
                 queryType: result.queryType,
                 columns: result.columns,
-                    rows: result.rows,
-                    rowsAffected: result.rowsAffected,
-                    diagnostic: result.diagnostic,
-                    truncated: result.truncated,
-                    totalTimeMs: totalTimeMs(from: startTime)
+                rows: result.rows,
+                rowsAffected: result.rowsAffected,
+                diagnostic: result.diagnostic,
+                truncated: result.truncated,
+                totalTimeMs: totalTimeMs(from: startTime)
             )
         } catch {
             return ExecuteSqlResponse(
@@ -1567,7 +1584,9 @@ public class CommandHandler: CommandHandling {
     private func handleStorageCapabilities(
         _ request: RequestStorageCapabilities,
         startTime: Date
-    ) -> StorageCapabilitiesResponse {
+    )
+        -> StorageCapabilitiesResponse
+    {
         guard let client = sdkDatabaseClient else {
             return StorageCapabilitiesResponse(
                 requestId: request.requestId,

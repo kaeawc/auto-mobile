@@ -101,6 +101,12 @@ public struct SdkViewNode: Codable, Sendable {
     public let isUserInteractionEnabled: Bool
     public let hasTapTarget: Bool
     public let isOccluded: Bool
+    /// Inline accessibility links discovered on this text element (issue #5560).
+    /// Non-nil only for text-bearing views (`UITextView`/`UILabel` attributed
+    /// text, or SwiftUI text whose inline links surface as `.link`-trait
+    /// accessibility children). The runner projects these onto the owning
+    /// element's `semantic-links` for Android parity.
+    public let semanticLinks: [SdkSemanticLink]?
     public let children: [SdkViewNode]?
 
     public init(
@@ -124,6 +130,7 @@ public struct SdkViewNode: Codable, Sendable {
         isUserInteractionEnabled: Bool = true,
         hasTapTarget: Bool = false,
         isOccluded: Bool = false,
+        semanticLinks: [SdkSemanticLink]? = nil,
         children: [SdkViewNode]? = nil
     ) {
         self.className = className
@@ -146,6 +153,7 @@ public struct SdkViewNode: Codable, Sendable {
         self.isUserInteractionEnabled = isUserInteractionEnabled
         self.hasTapTarget = hasTapTarget
         self.isOccluded = isOccluded
+        self.semanticLinks = semanticLinks
         self.children = children
     }
 
@@ -155,32 +163,33 @@ public struct SdkViewNode: Codable, Sendable {
              accessibilityTraits, accessibilityCustomActions, gestureRecognizers,
              alpha, backgroundColor, cornerRadius,
              borderColor, borderWidth, isLayerNode,
-             isHidden, isUserInteractionEnabled, hasTapTarget, isOccluded, children
+             isHidden, isUserInteractionEnabled, hasTapTarget, isOccluded, semanticLinks, children
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        self.className = try c.decode(String.self, forKey: .className)
-        self.bounds = try c.decode(SdkBounds.self, forKey: .bounds)
-        self.accessibilityLabel = try c.decodeIfPresent(String.self, forKey: .accessibilityLabel)
-        self.accessibilityIdentifier = try c.decodeIfPresent(String.self, forKey: .accessibilityIdentifier)
-        self.isAccessibilityElement = try c.decodeIfPresent(Bool.self, forKey: .isAccessibilityElement) ?? false
-        self.isAccessibilityFocused = try c.decodeIfPresent(Bool.self, forKey: .isAccessibilityFocused) ?? false
-        self.accessibilityElementsHidden = try c.decodeIfPresent(Bool.self, forKey: .accessibilityElementsHidden) ?? false
-        self.accessibilityTraits = try c.decodeIfPresent([String].self, forKey: .accessibilityTraits) ?? []
-        self.accessibilityCustomActions = try c.decodeIfPresent([String].self, forKey: .accessibilityCustomActions) ?? []
-        self.gestureRecognizers = try c.decodeIfPresent([SdkGestureInfo].self, forKey: .gestureRecognizers) ?? []
-        self.alpha = try c.decodeIfPresent(Float.self, forKey: .alpha) ?? 1.0
-        self.backgroundColor = try c.decodeIfPresent(String.self, forKey: .backgroundColor)
-        self.cornerRadius = try c.decodeIfPresent(Float.self, forKey: .cornerRadius) ?? 0
-        self.borderColor = try c.decodeIfPresent(String.self, forKey: .borderColor)
-        self.borderWidth = try c.decodeIfPresent(Float.self, forKey: .borderWidth) ?? 0
-        self.isLayerNode = try c.decodeIfPresent(Bool.self, forKey: .isLayerNode) ?? false
-        self.isHidden = try c.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
-        self.isUserInteractionEnabled = try c.decodeIfPresent(Bool.self, forKey: .isUserInteractionEnabled) ?? true
-        self.hasTapTarget = try c.decodeIfPresent(Bool.self, forKey: .hasTapTarget) ?? false
-        self.isOccluded = try c.decodeIfPresent(Bool.self, forKey: .isOccluded) ?? false
-        self.children = try c.decodeIfPresent([SdkViewNode].self, forKey: .children)
+        className = try c.decode(String.self, forKey: .className)
+        bounds = try c.decode(SdkBounds.self, forKey: .bounds)
+        accessibilityLabel = try c.decodeIfPresent(String.self, forKey: .accessibilityLabel)
+        accessibilityIdentifier = try c.decodeIfPresent(String.self, forKey: .accessibilityIdentifier)
+        isAccessibilityElement = try c.decodeIfPresent(Bool.self, forKey: .isAccessibilityElement) ?? false
+        isAccessibilityFocused = try c.decodeIfPresent(Bool.self, forKey: .isAccessibilityFocused) ?? false
+        accessibilityElementsHidden = try c.decodeIfPresent(Bool.self, forKey: .accessibilityElementsHidden) ?? false
+        accessibilityTraits = try c.decodeIfPresent([String].self, forKey: .accessibilityTraits) ?? []
+        accessibilityCustomActions = try c.decodeIfPresent([String].self, forKey: .accessibilityCustomActions) ?? []
+        gestureRecognizers = try c.decodeIfPresent([SdkGestureInfo].self, forKey: .gestureRecognizers) ?? []
+        alpha = try c.decodeIfPresent(Float.self, forKey: .alpha) ?? 1.0
+        backgroundColor = try c.decodeIfPresent(String.self, forKey: .backgroundColor)
+        cornerRadius = try c.decodeIfPresent(Float.self, forKey: .cornerRadius) ?? 0
+        borderColor = try c.decodeIfPresent(String.self, forKey: .borderColor)
+        borderWidth = try c.decodeIfPresent(Float.self, forKey: .borderWidth) ?? 0
+        isLayerNode = try c.decodeIfPresent(Bool.self, forKey: .isLayerNode) ?? false
+        isHidden = try c.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
+        isUserInteractionEnabled = try c.decodeIfPresent(Bool.self, forKey: .isUserInteractionEnabled) ?? true
+        hasTapTarget = try c.decodeIfPresent(Bool.self, forKey: .hasTapTarget) ?? false
+        isOccluded = try c.decodeIfPresent(Bool.self, forKey: .isOccluded) ?? false
+        semanticLinks = try c.decodeIfPresent([SdkSemanticLink].self, forKey: .semanticLinks)
+        children = try c.decodeIfPresent([SdkViewNode].self, forKey: .children)
     }
 }
 

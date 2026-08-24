@@ -247,10 +247,56 @@ describe("IOSCtrlProxyClient auto-setup", function () {
       // the replacement is live. Its stale, unconditional close/error handlers
       // must not run: otherwise the close handler nulls out this.ws, stops the
       // replacement's health check, and schedules a spurious reconnect. The
-      // generation guard detaches the invalidated socket's listeners (both close
-      // and error), so this delayed close is a no-op and the replacement stays up.
+      // generation guard detaches the invalidated socket's listeners, so this
+      // delayed close is a no-op and the replacement stays up. A delayed "error"
+      // must not throw either: the guard keeps a lone swallowing error listener,
+      // so the discarded socket cannot crash the daemon or disturb the replacement.
       sockets[0].socket.emit("close");
+      sockets[0].socket.emit("error", new Error("stale old-port socket reset"));
       await flushPromises(8);
+      expect(client.isConnected()).toBe(true);
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("a port change resets the per-endpoint attempt budget so the new port is not cooldown-blocked (#5645)", async function () {
+    // Frozen manual timer: the cooldown window never elapses on its own, so only a
+    // budget reset (not the passage of time) can let the new-port connect through.
+    const manualTimer = new FakeTimer();
+    const wsFactory = (url: string): WebSocket => {
+      // The old port fails instantly (exhausting the budget); the new port connects.
+      const mode: "none" | "instant" = url.includes(":8767") ? "none" : "instant";
+      return new FakeWebSocket(url, mode, 0, manualTimer) as unknown as WebSocket;
+    };
+    const client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      wsFactory,
+      manualTimer,
+      createManagerFactory(),
+    );
+    const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
+      .connectWebSocket;
+    const updatePort = (
+      client as unknown as { updatePort: (port: number) => void }
+    ).updatePort.bind(client);
+    try {
+      // Exhaust the attempt budget against the old port (default max is 3).
+      for (let i = 0; i < 3; i += 1) {
+        expect(await connect.call(client)).toBe(false);
+      }
+      // Now cooled down: another old-port connect is refused without dialing.
+      expect(await connect.call(client)).toBe(false);
+      expect(client.getReconnectStatus()).not.toBeNull();
+
+      // A real port change resets the per-endpoint budget...
+      updatePort(8767);
+      expect(client.getReconnectStatus()).toBeNull();
+
+      // ...so a fresh connect to the new port succeeds immediately — no waiting out
+      // the old port's cooldown.
+      expect(await connect.call(client)).toBe(true);
       expect(client.isConnected()).toBe(true);
     } finally {
       await client.close();

@@ -955,6 +955,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       // makes the base connectWebSocket() open-guard drop that socket and clear
       // isConnecting, leaving a fresh connect free to dial the new port.
       this.connectionGeneration++;
+      // The connection-attempt budget is per-endpoint: failures against the old
+      // port must not cool down the new one. Without this reset, a port change on
+      // the max-th in-flight attempt leaves connectionAttempts at the ceiling, so
+      // connectWebSocket()'s cooldown check refuses to dial the new port for the
+      // reset interval — the wedged state AC2 forbids.
+      this.connectionAttempts = 0;
       if (this.ws) {
         logger.info(
           "[IOSCtrlProxyClient] Closing stale WebSocket after CtrlProxy service port change",

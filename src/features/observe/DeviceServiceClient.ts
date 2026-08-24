@@ -384,6 +384,16 @@ export abstract class DeviceServiceClient {
                 logger.info(`[${this.logTag}] Discarding WebSocket opened after close`);
                 try {
                   ws.removeAllListeners();
+                  // Keep a lone error listener: a discarded socket (e.g. dialing a
+                  // dead old port) can still emit "error" during its close
+                  // handshake, and an EventEmitter with no "error" listener THROWS,
+                  // which would crash the daemon. The socket is being torn down, so
+                  // the error is expected and needs no state mutation.
+                  ws.on("error", (error) => {
+                    logger.debug(
+                      `[${this.logTag}] Ignoring error on discarded WebSocket: ${error}`,
+                    );
+                  });
                   ws.close();
                 } catch (error) {
                   // The socket may already be closing; nothing else to clean up.

@@ -290,6 +290,44 @@ final class SimulatorCaptureSessionTests: XCTestCase {
         XCTAssertTrue(diagnostics.lines.isEmpty)
     }
 
+    // MARK: - Reconfigure dedup (storm / data-race fix)
+
+    func testBeginReconfigureCommitsSizeSynchronouslyAndDedupsWhileInFlight() {
+        let session = makeSession(diagnostics: DiagnosticRecorder())
+        let fake = FakeCaptureStream()
+        session.stream = fake
+
+        // First frame at a new size claims the reconfigure slot and commits the size
+        // synchronously (before any async hop), so subsequent frames see the new size.
+        let first = session.beginReconfigure(width: 900, height: 1900)
+        XCTAssertTrue(first === fake, "first reconfigure returns the stream to update")
+        XCTAssertEqual(session.configuredPixelWidth, 900)
+        XCTAssertEqual(session.configuredPixelHeight, 1900)
+
+        // A second frame while the update is in flight commits the size but does NOT
+        // spawn a second update — this is the storm dedup.
+        let second = session.beginReconfigure(width: 900, height: 1900)
+        XCTAssertNil(second, "a reconfigure already in flight is deduped")
+        XCTAssertEqual(session.configuredPixelWidth, 900)
+
+        // Once the in-flight update completes, a genuinely new size reconfigures again.
+        session.endReconfigure()
+        let third = session.beginReconfigure(width: 910, height: 1910)
+        XCTAssertTrue(third === fake, "after the slot is released a new size reconfigures again")
+        XCTAssertEqual(session.configuredPixelWidth, 910)
+        XCTAssertEqual(session.configuredPixelHeight, 1910)
+    }
+
+    func testBeginReconfigureWithoutStreamReturnsNilAndLeavesSizeUnset() {
+        let session = makeSession(diagnostics: DiagnosticRecorder())
+
+        let result = session.beginReconfigure(width: 640, height: 480)
+
+        XCTAssertNil(result)
+        XCTAssertEqual(session.configuredPixelWidth, 0, "no stream: nothing to reconfigure")
+        XCTAssertEqual(session.configuredPixelHeight, 0)
+    }
+
     // MARK: - Bounded startCapture() deadline (issue #4350 / #4764)
 
     /// A `startCapture()` that hangs inside ScreenCaptureKit start must be

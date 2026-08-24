@@ -324,6 +324,12 @@ class VideoStreamClient(
     // the current SPS/PPS attested. Stays null until the first attested config packet, so an
     // unattested stream (screenrecord/iOS relay) leaves the control gate to fail closed.
     var currentRotation: Int? = null
+    // The decoder reuses its BGRA buffer, so fingerprint it before converting to the immutable
+    // raster. A full-array hash uses no extra frame-sized copy and catches Android's repeated idle
+    // output as unchanged; it is intentionally source-neutral for iOS too (#5582).
+    var previousContentHash: Int? = null
+    var previousWidth = 0
+    var previousHeight = 0
 
     while (true) {
       val read = input.read(buffer)
@@ -353,6 +359,15 @@ class VideoStreamClient(
               // device rotation.
               _state.value = VideoStreamState.Streaming(frame.width, frame.height)
             }
+            val contentHash = frame.bgra.contentHashCode()
+            val contentChanged =
+              previousContentHash != null &&
+                (previousContentHash != contentHash ||
+                  previousWidth != frame.width ||
+                  previousHeight != frame.height)
+            previousContentHash = contentHash
+            previousWidth = frame.width
+            previousHeight = frame.height
             // Present here, on the reader thread, while the decoder's reused buffer is valid:
             // the immutable raster produced by toImageBitmap is the only per-frame copy, and
             // consumers receive a ready-to-draw frame with no conversion (or allocation) of
@@ -362,6 +377,7 @@ class VideoStreamClient(
                 bitmap = frame.toImageBitmap(),
                 sequence = frameSequence.incrementAndGet(),
                 receivedAtMs = nowMs(),
+                contentChanged = contentChanged,
                 // The stream's config packets attest the display rotation; carrying it here
                 // lets DeviceControlSession re-prove orientation from the live frame alone
                 // (issue #4786).
@@ -511,12 +527,18 @@ class FakeVideoStreamSource(
   }
 
   /** Publishes a ready-to-draw frame to collectors, as the real client would. */
-  fun emitFrame(width: Int = 1080, height: Int = 2400, rotation: Int? = null) {
+  fun emitFrame(
+    width: Int = 1080,
+    height: Int = 2400,
+    rotation: Int? = null,
+    contentChanged: Boolean = false,
+  ) {
     _frames.tryEmit(
       LiveVideoFrame(
         bitmap = ImageBitmap(width, height),
         sequence = fakeSequence.incrementAndGet(),
         receivedAtMs = nowMs(),
+        contentChanged = contentChanged,
         rotation = rotation,
       )
     )

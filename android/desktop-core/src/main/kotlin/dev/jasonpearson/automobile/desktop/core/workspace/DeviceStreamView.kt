@@ -172,7 +172,7 @@ fun DeviceStreamView(
   LaunchedEffect(liveFrame?.sequence) {
     if (liveFrame != null) {
       control?.tracer?.videoFrameRendered(column.deviceId)
-      qualityController?.onFrame(liveFrame.receivedAtMs)
+      qualityController?.onFrame(liveFrame.receivedAtMs, liveFrame.contentChanged)
     }
   }
   Box(Modifier.fillMaxSize()) {

@@ -31,13 +31,9 @@ import kotlinx.coroutines.flow.StateFlow
  *   [samplesToDowngrade]/[samplesToUpgrade] (hysteresis) plus [minDwellMs] then keep a brief dip or
  *   a flapping rate from thrashing the encode.
  *
- * **Known limit:** a *severe* sustained drop (roughly ≤ the idle cadence, ~11fps or below) is
- * indistinguishable from a static screen by inter-frame timing alone, so it lands in the idle band
- * and is not auto-downgraded — the deliberate safe choice (never degrade a still screen) over
- * downgrading every idle screen. Auto-adjust therefore covers the common moderate-degradation band
- * (~12fps up to target); catching severe drops needs a signal timing cannot supply — the on-device
- * `VideoStatsAccumulator` dropped-frame count plumbed to the client, or content-change detection —
- * tracked as a follow-up.
+ * A severe interval can be classified safely when its decoded pixels changed: that proves active
+ * content, rather than Android's repeated idle frame. This source-neutral signal works for both
+ * Android repeat-frame and iOS idle-suppression behavior; absent frames are never samples.
  *
  * The displayed [actualFps] is computed as frames-over-elapsed across a trailing [rateWindowMs]
  * window — an unbiased rate. (Averaging instantaneous `1000/dt` values would overstate throughput
@@ -127,8 +123,15 @@ class QualityController(
   private val droppingMinDtMs: Double
     get() = 1000.0 / (downgradeRatio * targetFps)
 
-  /** Records a decoded frame's arrival time, updates the live rate, and maybe adjusts quality. */
-  fun onFrame(receivedAtMs: Long) {
+  /**
+   * Records a decoded frame's arrival time, updates the live rate, and maybe adjusts quality.
+   *
+   * [contentChanged] is supplied by the decoded-frame source. It is needed only for intervals at
+   * the idle cadence or slower: an unchanged frame is idle, while a changed frame proves a severe
+   * active drop. The conservative default preserves static-safe behavior for sources that do not
+   * yet provide the signal.
+   */
+  fun onFrame(receivedAtMs: Long, contentChanged: Boolean = false) {
     window.addLast(receivedAtMs)
     while (window.size > 1 && receivedAtMs - window.first() > rateWindowMs) window.removeFirst()
     _actualFps.value = windowFps()
@@ -141,7 +144,7 @@ class QualityController(
     if (dt <= 0L) return // out-of-order / duplicate timestamp: ignore rather than divide by zero.
     if (!autoAdjustEnabled) return
 
-    classify(dt)
+    classify(dt, contentChanged)
     if (samples < minSamplesForDecision) return
     maybeAdjust(receivedAtMs)
   }
@@ -171,10 +174,16 @@ class QualityController(
   }
 
   /** Buckets one inter-frame interval into healthy / dropping / idle and advances the streaks. */
-  private fun classify(dt: Long) {
+  private fun classify(dt: Long, contentChanged: Boolean) {
     when {
-      // Idle: consistent with a static screen's repeat cadence or a suppression/reconnect gap.
-      // Not degradation — clear the streaks and do not count it as a decision sample.
+      // A changed frame at a static-compatible cadence proves this is not an Android repeat. iOS
+      // emits no idle frames at all, so it reaches here only when content resumed and changed.
+      dt >= idleIntervalMs && contentChanged -> {
+        lowStreak++
+        highStreak = 0
+        samples++
+      }
+      // Idle: unchanged Android repeat frame, or iOS suppression/reconnect gap. Not degradation.
       dt >= idleIntervalMs -> {
         lowStreak = 0
         highStreak = 0

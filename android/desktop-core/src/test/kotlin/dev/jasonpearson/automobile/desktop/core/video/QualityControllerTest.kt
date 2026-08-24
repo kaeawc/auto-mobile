@@ -81,7 +81,43 @@ class QualityControllerTest {
         samplesToDowngrade = 3,
         minDwellMs = 0,
       )
-    controller.feed(count = 60, intervalMs = 100)
+    repeat(60) { index -> controller.onFrame(index * 100L, contentChanged = false) }
+    assertEquals(VideoStreamQuality.High, controller.quality.value)
+  }
+
+  @Test
+  fun `a severe active drop downgrades when decoded content changes`() {
+    val controller =
+      QualityController(
+        initialQuality = VideoStreamQuality.High,
+        targetFps = 30,
+        samplesToDowngrade = 3,
+        minDwellMs = 0,
+      )
+
+    // At 5fps timing alone is indistinguishable from Android's static repeat cadence. Pixels that
+    // change on every delivered frame prove this is active content, so it must shed quality.
+    repeat(60) { index -> controller.onFrame(index * 200L, contentChanged = true) }
+
+    assertEquals(VideoStreamQuality.Low, controller.quality.value)
+  }
+
+  @Test
+  fun `iOS idle suppression never downgrades without a delivered changed frame`() {
+    val controller =
+      QualityController(
+        initialQuality = VideoStreamQuality.High,
+        targetFps = 30,
+        samplesToDowngrade = 1,
+        minSamplesForDecision = 1,
+        minDwellMs = 0,
+      )
+
+    controller.onFrame(0, contentChanged = true)
+    // ScreenCaptureKit emits nothing while static. Its eventual unchanged resume frame must not
+    // reinterpret the idle gap as encoder overload.
+    controller.onFrame(5_000, contentChanged = false)
+
     assertEquals(VideoStreamQuality.High, controller.quality.value)
   }
 

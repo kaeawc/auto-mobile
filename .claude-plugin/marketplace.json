@@ -14,7 +14,7 @@
       "name": "auto-mobile",
       "source": "./.claude-plugin",
       "description": "Mobile device automation for Android and iOS - control devices with natural language",
-      "version": "0.0.62",
+      "version": "0.0.63",
       "author": {
         "name": "AutoMobile Contributors",
         "email": "jason.d.pearson@gmail.com"
@@ -22,9 +22,25 @@
       "homepage": "https://kaeawc.github.io/auto-mobile/",
       "repository": "https://github.com/kaeawc/auto-mobile",
       "license": "Apache-2.0",
-      "keywords": ["mobile", "android", "ios", "automation", "testing", "mcp", "adb", "simctl"],
+      "keywords": [
+        "mobile",
+        "android",
+        "ios",
+        "automation",
+        "testing",
+        "mcp",
+        "adb",
+        "simctl"
+      ],
       "category": "development",
-      "tags": ["mobile-testing", "android", "ios", "automation", "ui-testing", "device-control"],
+      "tags": [
+        "mobile-testing",
+        "android",
+        "ios",
+        "automation",
+        "ui-testing",
+        "device-control"
+      ],
       "strict": true
     }
   ]

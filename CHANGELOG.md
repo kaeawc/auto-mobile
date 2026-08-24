@@ -1,5 +1,35 @@
 # Changelog
 
+## [v0.0.63] - 2026-08-24
+### Added
+- feat(android): add session-bound shared-storage fixture transfer and media indexing ([#5587](https://github.com/kaeawc/auto-mobile/issues/5587)) (android)
+- Bound getDaemonStatus on HTTP/STDIO transports + before the McpDaemonClient lifecycle preflight (follow-up to #4858) ([#5585](https://github.com/kaeawc/auto-mobile/issues/5585)) (desktop)
+- feat(ios): discover SwiftUI AttributedString inline semantic links via AXBridge (follow-up to #5560) ([#5578](https://github.com/kaeawc/auto-mobile/issues/5578)) (ios, a11y)
+- feat(android): expose DataStore adapter through the end-to-end MCP storage surface ([#5573](https://github.com/kaeawc/auto-mobile/issues/5573)) (android, database)
+- Desktop compare: match multi-window frames by stable window identity, not position ([#5533](https://github.com/kaeawc/auto-mobile/issues/5533)) (desktop)
+- refactor(utils): route AdbClient + SimCtlClient through the shared ExecSeam ([#5459](https://github.com/kaeawc/auto-mobile/issues/5459)) (maintenance)
+- feat(desktop): inspector export ergonomics — copy field, Copy as cURL, Copy as Markdown, copy selector, Open in IDE ([#5205](https://github.com/kaeawc/auto-mobile/issues/5205)) (desktop)
+- feat(android): add an application-provided DataStore storage adapter ([#5192](https://github.com/kaeawc/auto-mobile/issues/5192)) (android, database)
+- Desktop: make the daemon status probe injectable + timeout-bounded + FakeTimer-tested ([#4858](https://github.com/kaeawc/auto-mobile/issues/4858)) (desktop)
+- feat(ios): accessibility — VoiceOver enable/disable on physical iOS devices ([#2501](https://github.com/kaeawc/auto-mobile/issues/2501)) (ios, a11y)
+- Screen Streaming: Quality controls and auto-adjustment ([#1098](https://github.com/kaeawc/auto-mobile/issues/1098)) (intellij plugin)
+### Changed
+- oxfmt is unenforced in CI and the tree isn't oxfmt-clean: align local formatting with CI and normalize the codebase ([#5531](https://github.com/kaeawc/auto-mobile/issues/5531)) (devxp)
+- chore(android): re-cut and re-pin control-proxy runner APK after CtrlProxy perf batch (#5462–#5471) ([#5490](https://github.com/kaeawc/auto-mobile/issues/5490)) (android, release engineering)
+### Fixed
+- fix(android): preserve CtrlProxy JPEG screenshots and report correct resource MIME types ([#5605](https://github.com/kaeawc/auto-mobile/issues/5605)) (android)
+- iOS semantic accessibility-link discovery & activation are incomplete (SwiftUI links undiscovered; inline links don't activate) ([#5560](https://github.com/kaeawc/auto-mobile/issues/5560)) (ios, a11y)
+- iOS CtrlProxy runner wedges (port-health up, observation stream dead) with no self-heal — readiness times out until process is externally killed ([#5532](https://github.com/kaeawc/auto-mobile/issues/5532))
+- killDevice: restore Android observer when the shutdown command fails on a still-alive device ([#5503](https://github.com/kaeawc/auto-mobile/issues/5503)) (android)
+- killDevice: reject session admissions for a device under an active shutdown reservation ([#5494](https://github.com/kaeawc/auto-mobile/issues/5494)) (android)
+### Other
+- Re-cut Android control-proxy artifact to deliver DataStore MCP commands (#5573) ([#5596](https://github.com/kaeawc/auto-mobile/issues/5596)) (android)
+- fix(android): make inspector driver registration/removal safe against same-name replacement ([#5581](https://github.com/kaeawc/auto-mobile/issues/5581)) (android, database)
+- iOS runner re-cut to deliver #2501 physical-device VoiceOver toggle ([#5572](https://github.com/kaeawc/auto-mobile/issues/5572)) (ios, a11y)
+- bug: make fresh session screenshot failures machine-readable ([#5571](https://github.com/kaeawc/auto-mobile/issues/5571))
+- iOS daemon relaunches instead of reusing a healthy CtrlProxy runner listening on a non-allocated port ([#5568](https://github.com/kaeawc/auto-mobile/issues/5568))
+- Locally built iOS CtrlProxy runner cannot be verified against the daemon (SHA256 guard + SKIP-download interaction; override is undocumented) ([#5561](https://github.com/kaeawc/auto-mobile/issues/5561)) (ios, devxp, testing)
+
 ## [v0.0.62] - 2026-08-23
 
 ### Added

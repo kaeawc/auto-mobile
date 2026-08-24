@@ -3,9 +3,11 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { BugReport } from "../../../src/features/debug/BugReport";
+import { IosDeviceLogCollector } from "../../../src/features/debug/IosDeviceLogCollector";
 import type { BootedDevice, Element, ElementBounds } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeElementParser } from "../../fakes/FakeElementParser";
+import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
@@ -271,6 +273,74 @@ describe("BugReport", () => {
       // Assert the exact commands, not a per-element predicate over a possibly
       // empty list — an empty array would satisfy a `for...of` loop vacuously.
       expect(logcatCommands).toEqual(["shell logcat -d -t 0 *:E", "shell logcat -d -t 0 *:W"]);
+    });
+  });
+
+  describe("iOS device log", () => {
+    const iosDevice: BootedDevice = {
+      deviceId: "sim-udid-1",
+      platform: "ios",
+      isEmulator: true,
+      name: "iPhone 15 Simulator",
+    };
+
+    const setupIos = (simctl: FakeSimCtlClient) => {
+      const adbFactory = new FakeAdbClientFactory();
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const elementParser = new FakeElementParser();
+      const viewHierarchy = new FakeViewHierarchy();
+      viewHierarchy.configureHierarchy({ hierarchy: {} });
+      elementParser.nextRootNodes = [];
+      elementParser.nextFlattenedElements = [];
+      const collector = new IosDeviceLogCollector(simctl, iosDevice);
+      // Stub the screenshot capturer: the real iOS path connects to a CtrlProxy
+      // host port and would block the test (CI timeout, issue #5641 follow-up).
+      const takeScreenshot = { execute: async () => ({ success: false as boolean }) };
+      const bugReport = new BugReport(
+        iosDevice,
+        adbFactory,
+        timer,
+        elementParser,
+        viewHierarchy,
+        collector,
+        takeScreenshot,
+      );
+      return { bugReport };
+    };
+
+    test("attaches an ordered iOS device-log tail and no android logcat", async () => {
+      const simctl = new FakeSimCtlClient();
+      const lines = [
+        "2026-08-24 10:00:01.000000-0700  localhost App[123]: entry-1",
+        "2026-08-24 10:00:02.000000-0700  localhost App[123]: entry-2",
+      ];
+      simctl.setCommandArgsResult(
+        ["spawn", iosDevice.deviceId, "log", "show", "--style", "syslog", "--last", "5m"],
+        lines.join("\n"),
+      );
+      const { bugReport } = setupIos(simctl);
+
+      const result = await bugReport.execute();
+
+      expect(result.iosDeviceLog?.status).toBe("collected");
+      expect(result.iosDeviceLog?.entries).toEqual(lines);
+      expect(result.logcat).toBeUndefined();
+    });
+
+    test("does not fail the report when iOS log collection is unavailable", async () => {
+      const simctl = new FakeSimCtlClient();
+      simctl.setCommandArgsError(
+        ["spawn", iosDevice.deviceId, "log", "show", "--style", "syslog", "--last", "5m"],
+        new Error("device not booted"),
+      );
+      const { bugReport } = setupIos(simctl);
+
+      const result = await bugReport.execute();
+
+      expect(result.iosDeviceLog?.status).toBe("unavailable");
+      expect(result.iosDeviceLog?.diagnostic).toContain("device not booted");
+      expect(result.reportId).toBeDefined();
     });
   });
 

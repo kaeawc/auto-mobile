@@ -17,6 +17,17 @@ import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../utility/ElementParser";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
+import { IosDeviceLogCollector } from "./IosDeviceLogCollector";
+import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+
+/**
+ * Narrow screenshot seam the bug report needs. Satisfied by the real
+ * {@link TakeScreenshot}; injectable so tests can avoid the platform-native
+ * capture path (the iOS path connects to a CtrlProxy host port and would block).
+ */
+export interface BugReportScreenshotCapturer {
+  execute(): Promise<{ success?: boolean; path?: string }>;
+}
 
 interface BugReportOptions {
   /**
@@ -42,9 +53,10 @@ export class BugReport {
   private device: BootedDevice;
   private readonly adb: AdbExecutor;
   private viewHierarchy: ViewHierarchyContract;
-  private takeScreenshot: TakeScreenshot;
+  private takeScreenshot: BugReportScreenshotCapturer;
   private elementParser: ElementParser;
   private timer: Timer;
+  private iosLogCollector?: IosDeviceLogCollector;
 
   constructor(
     device: BootedDevice,
@@ -52,13 +64,16 @@ export class BugReport {
     timer: Timer = defaultTimer,
     elementParser: ElementParser = new DefaultElementParser(),
     viewHierarchy?: ViewHierarchyContract,
+    iosLogCollector?: IosDeviceLogCollector,
+    takeScreenshot?: BugReportScreenshotCapturer,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
     this.viewHierarchy = viewHierarchy ?? new ViewHierarchy(device, adbFactory);
-    this.takeScreenshot = new TakeScreenshot(device, adbFactory);
+    this.takeScreenshot = takeScreenshot ?? new TakeScreenshot(device, adbFactory);
     this.elementParser = elementParser;
     this.timer = timer;
+    this.iosLogCollector = iosLogCollector;
   }
 
   /**
@@ -88,12 +103,17 @@ export class BugReport {
       errors: [],
     };
 
+    const captureDeviceLog =
+      this.device.platform === "ios"
+        ? this.getIosDeviceLog(result, logcatLines, options.appId)
+        : this.getLogcat(result, logcatLines, options.appId);
+
     await Promise.all([
       this.getDeviceInfo(result),
       this.getScreenState(result),
       this.getWindowState(result),
       this.getHierarchy(result),
-      this.getLogcat(result, logcatLines, options.appId),
+      captureDeviceLog,
       this.getScreenshot(result),
     ]);
 
@@ -345,6 +365,35 @@ export class BugReport {
     } catch (error) {
       result.errors?.push(`Failed to get logcat: ${error}`);
     }
+  }
+
+  /**
+   * Get a bounded, timestamped iOS device-log tail. The collector never throws,
+   * so a failed capture attaches structured diagnostic status instead of failing
+   * the surrounding bug-report request (issue #5641).
+   */
+  private async getIosDeviceLog(
+    result: BugReportResult,
+    maxEntries: number,
+    appId?: string,
+  ): Promise<void> {
+    try {
+      const collector = this.getIosLogCollector();
+      result.iosDeviceLog = await collector.collect({ appId, maxEntries });
+    } catch (error) {
+      // Defensive: the collector is contracted not to throw, but a construction
+      // failure must still not fail the caller's operation.
+      result.errors?.push(`Failed to get iOS device log: ${error}`);
+    }
+  }
+
+  private getIosLogCollector(): IosDeviceLogCollector {
+    if (this.iosLogCollector) {
+      return this.iosLogCollector;
+    }
+    const simctl = new SimCtlClient(this.device);
+    this.iosLogCollector = new IosDeviceLogCollector(simctl, this.device);
+    return this.iosLogCollector;
   }
 
   /**

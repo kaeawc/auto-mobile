@@ -662,6 +662,22 @@ function artifactBugReportPayload(
     changed = true;
   }
 
+  if (isRecord(payload.iosDeviceLog)) {
+    const iosDeviceLog = payload.iosDeviceLog;
+    next.iosDeviceLogSummary = {
+      status: iosDeviceLog.status,
+      entryCount: arrayLength(iosDeviceLog.entries),
+      byteSize: iosDeviceLog.byteSize,
+      truncated: iosDeviceLog.truncated,
+      filterStatus: isRecord(iosDeviceLog.appFilter) ? iosDeviceLog.appFilter.status : undefined,
+    };
+    next.iosDeviceLog = {
+      ...iosDeviceLog,
+      entries: writeJsonArtifact(ctx, "BugReportIosDeviceLog", iosDeviceLog.entries),
+    };
+    changed = true;
+  }
+
   if (isRecord(payload.windowState) && Array.isArray(payload.windowState.windows)) {
     next.windowState = {
       ...payload.windowState,

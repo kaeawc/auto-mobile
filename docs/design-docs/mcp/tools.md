@@ -186,7 +186,7 @@ cat "$APP_CONTAINER/Documents/fixtures/hello.txt"
 - 🧪 `executePlan` (daemon mode only) executes a series of tool calls from a YAML plan content, stopping if any step fails.
 - 🔒 `criticalSection` (daemon mode only) coordinates multiple devices at a synchronization barrier for serialized steps.
 - 🩺 `doctor` runs diagnostic checks to verify AutoMobile setup and environment configuration.
-- 🐛 `bugReport` generates a comprehensive bug report including screen state, view hierarchy, logcat, screenshot, and optional highlight metadata.
+- 🐛 `bugReport` generates a comprehensive bug report including screen state, view hierarchy, a bounded device-log tail (Android logcat, or a bounded/timestamped iOS device log — default 1000 entries, 256 KiB), screenshot, and optional highlight metadata.
 - 🔍 `debugSearch` debugs element search operations to understand why elements aren't found or wrong elements are selected.
 - 📸 `rawViewHierarchy` gets raw view hierarchy data (XML/JSON) without parsing for debugging.
 - 🖍️ `highlight` draws visual overlays to highlight areas of the screen during debugging. <kbd>🤖 Android</kbd> <kbd>🍎 iOS</kbd>

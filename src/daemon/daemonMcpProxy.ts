@@ -1505,11 +1505,18 @@ export class DaemonMcpProxy {
         this.boundSessionUuidAt = this.timer.now();
       }
     } catch (error) {
-      // Safe to swallow: the establishment heartbeat is best-effort. The keeper
-      // started immediately after retries within the pre-first-heartbeat grace,
-      // and a genuinely released session is fenced by the keeper's reconnect path
-      // or a session-released notification — so a transient failure here must not
-      // fail connection establishment.
+      if (this.isDaemonSessionNotFoundError(error) && this.boundSessionUuid === sessionUuid) {
+        // The bound session was already reaped before our first heartbeat reached
+        // the daemon (the #5637 race lost). Surface it as terminal now instead of
+        // proceeding to a keeper that can only re-confirm the loss — this keeps
+        // terminal fencing intact and gives the caller an ownership-lost error on
+        // its next operation. Synchronous fence: no reconnect, no reentrancy.
+        this.fenceBoundSessionUuid(sessionUuid, "session-not-found");
+        return;
+      }
+      // Safe to swallow the rest: the establishment heartbeat is best-effort. The
+      // keeper started immediately after retries within the pre-first-heartbeat
+      // grace — so a transient failure here must not fail connection establishment.
       logger.debug(
         `[DaemonMcpProxy] Initial bound-session heartbeat failed: ${errorMessage(error)}`,
       );

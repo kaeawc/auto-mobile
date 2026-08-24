@@ -400,6 +400,42 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     }
   });
 
+  // AC3 (terminal fencing intact): if the first heartbeat comes back
+  // "Session not found" — the bound session was reaped before it arrived — the
+  // binding is terminally fenced rather than silently proceeding, and no keeper
+  // interval is left running.
+  test("fences the binding when the first heartbeat reports the session is gone", async () => {
+    // Deliberately do NOT create the session, so the daemon reports it missing.
+    const fakeClient = new FakeDaemonClient({
+      onCallDaemonMethod: (method) => {
+        if (method === "daemon/heartbeat") {
+          throw new Error("Session not found: " + BOUND_SESSION);
+        }
+      },
+    });
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    const pendingBefore = timer.getPendingIntervalCount();
+    try {
+      // Establishment resolves (it does not throw), but the binding is now terminal.
+      await proxy.ensureConnected();
+
+      expect(timer.getPendingIntervalCount()).toBe(pendingBefore);
+      // The next operation surfaces the terminal ownership loss.
+      await expect(proxy.callTool("observe", { deviceId: "device-a" })).rejects.toThrow();
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
   // AC4: a bound session whose proxy never connects still expires under the
   // existing pre-first-heartbeat reclaim policy from #2443.
   test("still expires a bound session whose proxy never connects", async () => {

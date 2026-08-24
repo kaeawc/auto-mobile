@@ -15,6 +15,12 @@ export interface InstalledApp {
   userId: number;
 
   /**
+   * Android's parsed profile classification. It is optional for cached rows
+   * created before profile metadata was persisted.
+   */
+  profileType?: "primary" | "managed" | "secondary" | "unknown";
+
+  /**
    * Whether this app instance is currently in the foreground
    */
   foreground: boolean;

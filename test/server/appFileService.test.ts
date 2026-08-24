@@ -76,6 +76,31 @@ describe("AppFileService", () => {
     expect(iosProvider.putRequests).toHaveLength(0);
   });
 
+  test("rejects malformed base64 for direct service callers", async () => {
+    const provider = new RecordingAppFileProvider("android");
+    const service = createAppFileServiceForTesting({
+      providers: [provider],
+      deviceResolver: async () => {
+        throw new Error("putFile already has a device");
+      },
+    });
+
+    await expect(
+      service.putFile({
+        device: {
+          deviceId: "emulator-5554",
+          name: "Pixel",
+          platform: "android",
+        },
+        appId: "com.example.app",
+        container: "documents",
+        contentBase64: "%%%not-base64%%%",
+        destinationPath: "fixture.bin",
+      }),
+    ).rejects.toThrow("contentBase64 must be valid, non-empty base64.");
+    expect(provider.putRequests).toEqual([]);
+  });
+
   test("rejects unsafe service input before provider selection", async () => {
     const provider = new RecordingAppFileProvider("android");
     const service = createAppFileServiceForTesting({

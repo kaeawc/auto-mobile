@@ -1,10 +1,7 @@
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
+import { classifyAndroidUser } from "../../models/AndroidUser";
 
-export type UserTargetSource =
-  | "explicit"
-  | "foregroundPackage"
-  | "managedProfile"
-  | "primaryFallback";
+export type UserTargetSource = "explicit" | "foregroundPackage" | "managedProfile" | "primary";
 
 export interface ResolvedUserTarget {
   userId: number;
@@ -20,8 +17,10 @@ export interface UserTargetRequest {
 /**
  * Resolves the user for one public operation. Explicit IDs (including zero)
  * win; otherwise a foreground instance of the requested package wins, followed
- * by a running managed profile and finally the primary user. A secondary user
- * is never treated as managed solely because its ID is nonzero.
+ * by the sole running managed profile and finally the running primary user. A
+ * secondary user is never treated as managed solely because its ID is nonzero.
+ * Missing or ambiguous device state is rejected instead of silently targeting
+ * user 0.
  */
 export class AndroidUserTargetResolver {
   constructor(private readonly adb: AdbExecutor) {}
@@ -39,11 +38,29 @@ export class AndroidUserTargetResolver {
     }
 
     const users = await this.adb.listUsers(request.signal);
-    const managedProfile = users.find((user) => user.running && (user.flags & 0x20) !== 0);
-    if (managedProfile) {
+    const managedProfiles = users.filter(
+      (user) => user.running && (user.profileType ?? classifyAndroidUser(user.flags)) === "managed",
+    );
+    if (managedProfiles.length === 1) {
+      const managedProfile = managedProfiles[0];
       return { userId: managedProfile.userId, source: "managedProfile" };
     }
 
-    return { userId: 0, source: "primaryFallback" };
+    if (managedProfiles.length > 1) {
+      throw new Error(
+        `Android target user is ambiguous: ${managedProfiles.length} managed profiles are running`,
+      );
+    }
+
+    const primary = users.find(
+      (user) => user.running && (user.profileType ?? classifyAndroidUser(user.flags)) === "primary",
+    );
+    if (primary) {
+      return { userId: primary.userId, source: "primary" };
+    }
+
+    throw new Error(
+      "Android target user is unavailable: no running primary or uniquely selectable managed profile",
+    );
   }
 }

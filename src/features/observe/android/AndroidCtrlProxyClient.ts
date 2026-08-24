@@ -20,7 +20,6 @@ import {
   defaultAdbClientFactory,
 } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { AdbClient } from "../../../utils/android-cmdline-tools/AdbClient";
 import { logger, type Logger } from "../../../utils/logger";
 import { rewriteUnknownCommandError } from "../shared/rewriteUnknownCommandError";
 import {
@@ -1412,7 +1411,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    */
   public static createForTesting(
     device: BootedDevice,
-    adb: AdbClient,
+    adb: AdbExecutor,
     webSocketFactory: (url: string) => WebSocket,
     timer?: Timer,
     installedAppsRepository?: InstalledAppsStore,

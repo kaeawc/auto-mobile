@@ -47,7 +47,7 @@ interface AppsQueryAppInfo {
   foreground: boolean;
   recent: boolean;
   userId?: number;
-  userProfile?: "personal" | "work";
+  userProfile?: "personal" | "work" | "secondary" | "unknown";
   userIds?: number[];
   displayName?: string;
 }
@@ -84,7 +84,7 @@ interface AppsResourceContent {
 interface AndroidInstalledAppInfo {
   packageName: string;
   userId: number;
-  userProfile: "personal" | "work";
+  userProfile: "personal" | "work" | "secondary" | "unknown";
   foreground: boolean;
   recent: boolean;
 }
@@ -111,15 +111,27 @@ const appCacheByDeviceId = new Map<string, AppsCacheEntry>();
 const registeredDeviceResources = new Map<string, string>();
 const appsQueryUrisByDeviceId = new Map<string, Map<string, number>>();
 
-function userProfileForUserId(userId: number): "personal" | "work" {
-  return userId >= 10 ? "work" : "personal";
+function userProfileForUserId(
+  userId: number,
+  profileType?: InstalledApp["profileType"],
+): "personal" | "work" | "secondary" | "unknown" {
+  if (profileType === "managed") {
+    return "work";
+  }
+  if (profileType === "secondary") {
+    return "secondary";
+  }
+  if (profileType === "primary" || userId === 0) {
+    return "personal";
+  }
+  return "unknown";
 }
 
 function toInstalledAppInfo(app: InstalledApp): InstalledAppInfo {
   return {
     packageName: app.packageName,
     userId: app.userId,
-    userProfile: userProfileForUserId(app.userId),
+    userProfile: userProfileForUserId(app.userId, app.profileType),
     foreground: app.foreground,
     recent: app.recent,
   };

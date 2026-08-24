@@ -742,7 +742,7 @@ export class LaunchApp extends BaseVisualChange {
 
     // Check if app is running
     const isRunning = await perf.track("checkRunning", async () => {
-      const isRunningCmd = `shell ps | grep ${packageName} | grep -v grep | wc -l`;
+      const isRunningCmd = `shell dumpsys activity processes | grep -E "${packageName}/u${targetUserId}a" | wc -l`;
       logger.info(`[LaunchApp] Checking if app is running: ${isRunningCmd}`);
       const isRunningOutput = await this.adb.executeCommand(isRunningCmd);
       const result = parseInt(isRunningOutput.trim(), 10) > 0;

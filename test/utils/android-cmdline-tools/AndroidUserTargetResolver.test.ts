@@ -65,25 +65,25 @@ const cases: ResolveCase[] = [
     name: "skips a paused managed profile and falls back to the primary user",
     request: {},
     users: [owner, pausedWork],
-    expected: { userId: 0, source: "primaryFallback" },
+    expected: { userId: 0, source: "primary" },
   },
   {
     name: "does not treat a running secondary user as managed",
     request: {},
     users: [owner, { userId: 10, name: "Secondary", flags: 0, running: true }],
-    expected: { userId: 0, source: "primaryFallback" },
+    expected: { userId: 0, source: "primary" },
   },
   {
-    name: "selects the first running managed profile in device order",
+    name: "rejects ambiguous running managed profiles",
     request: {},
     users: [pausedWork, work, otherWork],
-    expected: { userId: 12, source: "managedProfile" },
+    expected: { userId: 0, source: "primary" },
   },
   {
     name: "falls back to the primary user when no users are reported",
     request: {},
     users: [],
-    expected: { userId: 0, source: "primaryFallback" },
+    expected: { userId: 0, source: "primary" },
   },
 ];
 
@@ -97,6 +97,20 @@ describe("AndroidUserTargetResolver.resolve", () => {
       adb.setForegroundApp(foreground);
     }
 
-    await expect(new AndroidUserTargetResolver(adb).resolve(request)).resolves.toEqual(expected);
+    const resolution = new AndroidUserTargetResolver(adb).resolve(request);
+    if (users?.length === 0) {
+      await expect(resolution).rejects.toThrow("unavailable");
+    } else if (users?.filter((user) => user.running && (user.flags & 0x20) !== 0).length === 2) {
+      await expect(resolution).rejects.toThrow("ambiguous");
+    } else {
+      await expect(resolution).resolves.toEqual(expected);
+    }
+  });
+
+  test("rejects unavailable user state instead of fabricating user zero", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setUsers([]);
+
+    await expect(new AndroidUserTargetResolver(adb).resolve()).rejects.toThrow("unavailable");
   });
 });

@@ -2,7 +2,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { BootedDevice, TerminateAppResult } from "../../models";
+import { ActionableError, BootedDevice, TerminateAppResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
@@ -87,12 +87,12 @@ export class TerminateApp extends BaseVisualChange {
       const isInstalled = await perf.track("checkInstalled", async () => {
         try {
           const a11y = AndroidCtrlProxyClient.getInstance(this.device);
-          const result = await a11y.requestInstalledPackages(true, undefined, 3000);
+          const result = await a11y.requestInstalledPackages(true, targetUserId, 3000);
           if (result.success && result.userId === targetUserId) {
             return result.packages.some((p) => p.packageName === packageName);
           }
-        } catch {
-          // fall through
+        } catch (error) {
+          logger.debug(`[TerminateApp] CtrlProxy install check failed: ${error}`, error);
         }
         try {
           const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${packageName} | grep -c ${packageName}`;
@@ -122,8 +122,25 @@ export class TerminateApp extends BaseVisualChange {
         };
       }
 
-      // Check if app is running
-      const isRunning = true;
+      // `force-stop` is destructive, so determine the selected user's process
+      // state before changing it. A package running in another profile must not
+      // make this operation report that the selected profile was running.
+      const isRunning = await perf.track("checkRunning", async () => {
+        try {
+          const result = await this.adb.executeCommand(
+            `shell dumpsys activity processes | grep -E "${packageName}/u${targetUserId}a"`,
+            undefined,
+            undefined,
+            true,
+          );
+          return result.stdout.trim().length > 0;
+        } catch (error) {
+          logger.warn(`[TerminateApp] Running-state check failed for user ${targetUserId}`, error);
+          throw new ActionableError(
+            `Could not determine whether ${packageName} is running for Android user ${targetUserId}: ${errorMessage(error)}`,
+          );
+        }
+      });
 
       if (!isRunning) {
         return {

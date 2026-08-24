@@ -8,34 +8,34 @@ This guide explains how to set up and test Android work profiles with AutoMobile
 
 ## What is a Work Profile?
 
-An Android work profile is a separate user profile on a device that allows organizations to manage work-related apps and data separately from personal apps. Each profile has its own user ID:
-
-- **User 0**: Primary/Personal profile
-- **User 10+**: Work profiles or other managed profiles
+An Android work profile is a separate user profile on a device that allows organizations to manage work-related apps and data separately from personal apps. Each profile has its own user ID. Android also reports profile metadata through `pm list users`; user IDs are opaque identifiers and are not used to infer profile type.
 
 ## AutoMobile Work Profile Support
 
 AutoMobile automatically detects and handles work profiles across all app management features:
 
 - **Auto-detection**: Features automatically detect the appropriate user profile
-- **Priority order**:
+- **Selection order**:
 
   ```mermaid
   flowchart LR
       A["Select user profile"] --> B{"App in foreground?"};
       B -->|"yes"| C["Use foreground app user profile"];
-      B -->|"no"| D{"Running work profile exists?"};
-      D -->|"yes"| E["Use first running<br/>work profile"];
-      D -->|"no"| F["Use primary user<br/>(user 0)"];
+      B -->|"no"| D{"Running managed profile exists?"};
+      D -->|"one"| E["Use the running<br/>managed profile"];
+      D -->|"zero"| F["Use the metadata-identified<br/>primary profile"];
+      D -->|"multiple"| G["Fail: target is ambiguous"];
       classDef decision fill:#CC2200,stroke-width:0px,color:white;
       classDef logic fill:#525FE1,stroke-width:0px,color:white;
       classDef result stroke-width:0px;
       class A logic;
       class B,D decision;
-      class C,E,F result;
+      class C,E,F,G result;
   ```
 
 - **userId in responses**: App management tools include the `userId` field indicating which profile was used
+- **Ambiguous state**: Multiple running managed profiles or unavailable user
+  metadata causes the operation to fail instead of guessing a user
 - **Note**: MCP tool schemas do not currently accept a `userId` override; selection is automatic
 
 ### Supported Features
@@ -215,8 +215,9 @@ adb shell pm list users
 
 # AutoMobile will:
 # 1. Check foreground app first
-# 2. Fall back to first work profile (user 10)
-# 3. Fall back to primary (user 0)
+# 2. Use the sole running managed profile, when exactly one exists
+# 3. Fall back to the metadata-identified primary profile
+# 4. Fail when user discovery is unavailable or multiple managed profiles run
 ```
 
 ### Scenario 3: Same App in Both Profiles

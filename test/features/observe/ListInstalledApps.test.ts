@@ -410,6 +410,38 @@ describe("ListInstalledApps", function () {
       expect(fakeAdb.wasCommandExecuted("shell pm list packages")).toBe(false);
     });
 
+    test("preserves cached profile metadata when the profile is absent from user discovery", async function () {
+      const repo = new FakeInstalledAppsRepository();
+      const timer = new FakeTimer();
+      timer.advanceTime(1000);
+      const now = timer.now();
+      await repo.replaceInstalledApps(mockDevice.deviceId, [
+        {
+          device_id: mockDevice.deviceId,
+          user_id: 10,
+          package_name: "com.example.work",
+          is_system: 0,
+          installed_at: now,
+          last_verified_at: now,
+          profile_type: "managed",
+        },
+      ]);
+      fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
+
+      const cachedList = new ListInstalledApps(
+        mockDevice,
+        new FakeAdbClientFactory(fakeAdb),
+        null,
+        { cacheEnabled: true, installedAppsRepository: repo, timer },
+      );
+
+      await expect(cachedList.executeDetailed()).resolves.toMatchObject({
+        profiles: {
+          10: [{ packageName: "com.example.work", profileType: "managed" }],
+        },
+      });
+    });
+
     test("should rebuild cache when stale", async function () {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();

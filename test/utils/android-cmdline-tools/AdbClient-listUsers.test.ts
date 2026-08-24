@@ -1,10 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
-import type { AndroidUser, ExecResult } from "../../../src/models";
+import { classifyAndroidUser, type AndroidUser, type ExecResult } from "../../../src/models";
 
-const owner: AndroidUser = { userId: 0, name: "Owner", flags: 0x4c13, running: true };
-const workProfile: AndroidUser = { userId: 10, name: "Work profile", flags: 0x30, running: true };
-const fallbackOwner: AndroidUser = { userId: 0, name: "Owner", flags: 0x13, running: true };
+const owner: AndroidUser = {
+  userId: 0,
+  name: "Owner",
+  flags: 0x4c13,
+  profileType: "primary",
+  running: true,
+};
+const workProfile: AndroidUser = {
+  userId: 10,
+  name: "Work profile",
+  flags: 0x30,
+  profileType: "managed",
+  running: true,
+};
 
 function execResult(stdout: string): ExecResult {
   return {
@@ -74,7 +85,16 @@ Users:
 
   Owner name: Owner`,
     ],
-    expectedUsers: [owner, { userId: 10, name: "Secondary User", flags: 0, running: false }],
+    expectedUsers: [
+      owner,
+      {
+        userId: 10,
+        name: "Secondary User",
+        flags: 0,
+        profileType: "unknown",
+        running: false,
+      },
+    ],
     expectedCommandFragments: ["shell dumpsys user"],
   },
   {
@@ -96,7 +116,9 @@ Users:
   UserInfo{10:null:30} serialNo=10 isPrimary=false
     State: RUNNING_UNLOCKED`,
     ],
-    expectedUsers: [{ userId: 10, name: "User 10", flags: 0x30, running: true }],
+    expectedUsers: [
+      { userId: 10, name: "User 10", flags: 0x30, profileType: "managed", running: true },
+    ],
     expectedCommandFragments: ["shell dumpsys user"],
   },
   {
@@ -127,15 +149,15 @@ Users:
     expectedCommandFragments: ["shell dumpsys user", "shell pm list users"],
   },
   {
-    name: "returns the primary fallback when both user commands fail",
+    name: "returns no users when both user commands fail",
     outcomes: [new Error("dumpsys unavailable"), new Error("pm unavailable")],
-    expectedUsers: [fallbackOwner],
+    expectedUsers: [],
     expectedCommandFragments: ["shell dumpsys user", "shell pm list users"],
   },
   {
-    name: "returns the primary fallback when neither parser finds a user",
+    name: "returns no users when neither parser finds a user",
     outcomes: ["Some random output with no user info", "Still no user info"],
-    expectedUsers: [fallbackOwner],
+    expectedUsers: [],
     expectedCommandFragments: ["shell dumpsys user", "shell pm list users"],
   },
   {
@@ -146,7 +168,10 @@ Users:
 \tUserInfo{0:Owner:4c13} running
 \tUserInfo{10:Work:1a2b} running`,
     ],
-    expectedUsers: [owner, { userId: 10, name: "Work", flags: 0x1a2b, running: true }],
+    expectedUsers: [
+      owner,
+      { userId: 10, name: "Work", flags: 0x1a2b, profileType: "managed", running: true },
+    ],
     expectedCommandFragments: ["shell dumpsys user", "shell pm list users"],
   },
 ];
@@ -168,5 +193,12 @@ describe("AdbClient.listUsers", () => {
     expect(commands.map((command) => command.replace(/^.*\badb\s+/, ""))).toEqual(
       expectedCommandFragments,
     );
+  });
+});
+
+describe("classifyAndroidUser", () => {
+  test("recognizes FLAG_MAIN for headless-system-user devices", () => {
+    expect(classifyAndroidUser(0x800)).toBe("unknown");
+    expect(classifyAndroidUser(0x4412)).toBe("primary");
   });
 });

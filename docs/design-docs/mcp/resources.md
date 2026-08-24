@@ -191,6 +191,10 @@ Returns installed apps for booted devices. `deviceId` is required. Supports quer
 - `profile` (Android user ID, e.g. `0` or `10`)
 - `deviceId` (booted device ID, required)
 
+The response includes `observationComplete`. Only treat an app as absent when
+this is `true`; a false value means package inventory collection failed or was
+partial and should be retried.
+
 Example URIs:
 
 - `automobile:apps?deviceId=emulator-5554&platform=android&search=slack&type=user`

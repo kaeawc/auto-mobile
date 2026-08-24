@@ -25,6 +25,7 @@ All Interactions tools — including `pinchOn`, which routes coordinate-based pi
 - ❌ `terminateApp` force-stops an app by package name.
 - 📦 `installApp` installs an APK.
 - 📄 `putAppFile` writes a local file, UTF-8 text, or base64 binary content into logical app containers such as `documents`, `cache`, `tmp`, and `externalFiles`.
+- 📂 `stageSharedStorageFixtures` writes a batch of local, UTF-8, or base64 fixtures beneath the isolated Android `Download/AutoMobile/<namespace>` directory for document and media picker workflows.
 - 🔗 `getDeepLinks` reads registered deep links/intent filters for an Android package.
 
 Copy a fixture into an app container:
@@ -58,6 +59,36 @@ Write inline configuration without a temporary file:
 ```
 
 After writing, use `automobile:devices/{deviceId}/apps/{appId}/files/{container}` to list files or `automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}` to read one back. Prefer this API over direct `adb push`, `run-as`, or `simctl get_app_container` copy commands.
+
+Stage shared-storage fixtures for a system picker:
+
+```json
+{
+  "tool": "stageSharedStorageFixtures",
+  "params": {
+    "namespace": "checkout-123",
+    "reset": true,
+    "files": [
+      {
+        "destinationPath": "receipts/order.pdf",
+        "contentText": "receipt"
+      },
+      {
+        "destinationPath": "photos/item.png",
+        "sourcePath": "/Users/me/fixtures/item.png"
+      }
+    ],
+    "platform": "android"
+  }
+}
+```
+
+The namespace is limited to 1–64 letters, numbers, `_`, and `-`; file paths
+must be relative, and reset deletes only that namespace. The supported shared
+location is `/storage/emulated/0/Download/AutoMobile/<namespace>`, with at most
+100 files per call. Media extensions receive a media-scan request and report
+`dispatched`; Android completes indexing asynchronously, while non-media files
+are intended for the Downloads document picker.
 
 Android app files support `externalFiles` through `/sdcard/Android/data/{appId}/files`. Use this for app-readable fixture files that do not require private app storage:
 

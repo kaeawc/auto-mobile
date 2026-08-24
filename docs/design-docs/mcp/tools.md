@@ -87,7 +87,8 @@ The namespace is limited to 1–64 letters, numbers, `_`, and `-`; file paths
 must be relative, and reset deletes only that namespace. The supported shared
 location is `/storage/emulated/0/Download/AutoMobile/<namespace>`, with at most
 100 files per call. Media extensions receive a media-scan request and report
-`dispatched`; Android completes indexing asynchronously, while non-media files
+`verified` when MediaStore reports the file, or `dispatched` with a timeout
+reason when the asynchronous scan does not complete in time. Non-media files
 are intended for the Downloads document picker.
 
 Android app files support `externalFiles` through `/sdcard/Android/data/{appId}/files`. Use this for app-readable fixture files that do not require private app storage:

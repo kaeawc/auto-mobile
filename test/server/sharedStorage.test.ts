@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { stageSharedStorageSchema } from "../../src/server/sharedStorageContract";
 import { createSharedStorageServiceForTesting } from "../../src/server/sharedStorageService";
+import { shellQuote } from "../../src/utils/shellQuote";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 
 const device = { deviceId: "emulator-5554", name: "Pixel", platform: "android" as const };
@@ -38,6 +39,12 @@ describe("shared storage fixtures", () => {
 
   test("resets only the namespace and reports document/media outcomes", async () => {
     const adbFactory = new FakeAdbClientFactory();
+    adbFactory
+      .getFakeClient()
+      .setCommandResult(
+        `shell content query --uri content://media/external/file --projection _data --where ${shellQuote("_data='/storage/emulated/0/Download/AutoMobile/run-1/images/photo.png'")}`,
+        "_data=/storage/emulated/0/Download/AutoMobile/run-1/images/photo.png\n",
+      );
     const service = createSharedStorageServiceForTesting({ adbFactory });
     const result = await service.stage({
       device,
@@ -69,7 +76,7 @@ describe("shared storage fixtures", () => {
           destinationPath: "images/photo.png",
           devicePath: "/storage/emulated/0/Download/AutoMobile/run-1/images/photo.png",
           byteCount: 3,
-          indexing: "dispatched",
+          indexing: "verified",
         },
       ],
     });

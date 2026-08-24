@@ -26,7 +26,7 @@ export interface StagedSharedStorageFile {
   destinationPath: string;
   devicePath: string;
   byteCount: number;
-  indexing: "notRequested" | "dispatched";
+  indexing: "notRequested" | "verified" | "dispatched" | "failed";
   indexingReason?: string;
 }
 

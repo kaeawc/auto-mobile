@@ -400,6 +400,45 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     }
   });
 
+  // AC1: the ownership heartbeat is delivered before the best-effort notification
+  // subscription — subscribeToNotifications() is a daemon RPC that can stall, and
+  // must not delay the time-critical first heartbeat past the reclaim grace.
+  test("delivers the first heartbeat before subscribing to notifications", async () => {
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+
+    let subscribeCallsAtHeartbeat = -1;
+    const clientRef: { current: FakeDaemonClient | null } = { current: null };
+    const fakeClient = new FakeDaemonClient({
+      onCallDaemonMethod: (method, params) => {
+        if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
+          subscribeCallsAtHeartbeat = clientRef.current!.subscribeToNotificationsCalls;
+          sessionManager.recordHeartbeat(params.sessionId);
+        }
+      },
+    });
+    clientRef.current = fakeClient;
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    try {
+      await proxy.ensureConnected();
+      // The heartbeat ran while the subscription had not yet been requested.
+      expect(subscribeCallsAtHeartbeat).toBe(0);
+      // The subscription still happens (best-effort), just after the heartbeat.
+      expect(fakeClient.subscribeToNotificationsCalls).toBe(1);
+      expect(sessionManager.getSession(BOUND_SESSION)?.hasReceivedHeartbeat).toBe(true);
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
   // AC3 (terminal fencing intact): if the first heartbeat comes back
   // "Session not found" — the bound session was reaped before it arrived — the
   // binding is terminally fenced rather than silently proceeding, and no keeper

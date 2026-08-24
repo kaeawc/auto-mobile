@@ -723,6 +723,15 @@ export class DaemonMcpProxy {
     this.connected = true;
     logger.info("[DaemonMcpProxy] Connected to daemon");
 
+    // Deliver the ownership heartbeat FIRST — before the best-effort notification
+    // subscription (issue #5637). subscribeToNotifications() is a daemon RPC that
+    // can stall up to the connection timeout; awaiting it before the heartbeat
+    // would let the pre-first-heartbeat reclaim reap a bound session near the
+    // grace edge before the heartbeat is even sent. The notification handler is
+    // already registered above (before connect), so a session-released frame is
+    // still handled during the heartbeat even without the opt-in subscription.
+    await this.establishBoundSessionHeartbeat();
+
     if (supportsNotifications) {
       try {
         await client.subscribeToNotifications!();
@@ -733,7 +742,6 @@ export class DaemonMcpProxy {
         logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
       }
     }
-    await this.establishBoundSessionHeartbeat();
   }
 
   /**

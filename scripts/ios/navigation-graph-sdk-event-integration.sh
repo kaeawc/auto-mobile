@@ -45,7 +45,7 @@ ctrl_proxy_port_for_device() {
   # non-zero for unrelated diagnostics, but still emits the JSON round-trip
   # report that contains this ready runner's port.
   local session_uuid="${1:-}"
-  local doctor_report ctrl_proxy_port
+  local doctor_report ctrl_proxy_port renew_status=0
   if [[ -z "${session_uuid}" ]]; then
     doctor_report="$(auto-mobile --cli doctor --ios --json || true)"
   else
@@ -57,7 +57,13 @@ ctrl_proxy_port_for_device() {
     doctor_pid=$!
     while kill -0 "${doctor_pid}" 2>/dev/null; do
       sleep 2
-      if kill -0 "${doctor_pid}" 2>/dev/null && ! renew_session_ownership "${session_uuid}"; then
+      if kill -0 "${doctor_pid}" 2>/dev/null; then
+        set +e
+        renew_session_ownership "${session_uuid}"
+        renew_status=$?
+        set -e
+      fi
+      if [[ "${renew_status:-0}" -ne 0 ]]; then
         kill "${doctor_pid}" 2>/dev/null || true
         wait "${doctor_pid}" 2>/dev/null || true
         rm -f "${doctor_report_file}"
@@ -87,15 +93,21 @@ ctrl_proxy_port_for_device() {
 wait_for_ctrl_proxy_health() {
   local ctrl_proxy_port="$1"
   local session_uuid="${2:-}"
-  local attempt
+  local attempt renew_status
   for attempt in 1 2 3 4 5; do
     if curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:${ctrl_proxy_port}/health" >/dev/null; then
       return 0
     fi
     # One-shot CLI clients stop their proxy heartbeat after each public call.
     # Renew the graph session while this bounded runner-health retry is in progress.
-    if [[ -n "${session_uuid}" ]] && ! renew_session_ownership "${session_uuid}"; then
-      return 1
+    if [[ -n "${session_uuid}" ]]; then
+      set +e
+      renew_session_ownership "${session_uuid}"
+      renew_status=$?
+      set -e
+      if [[ "${renew_status}" -ne 0 ]]; then
+        return 1
+      fi
     fi
     if [[ "${attempt}" -lt 5 ]]; then
       echo "CtrlProxy health check attempt ${attempt} failed; retrying in 2s..." >&2

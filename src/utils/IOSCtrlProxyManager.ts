@@ -2015,7 +2015,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   private async findHealthyExternalDirectCtrlProxyProcess(): Promise<ExternalCtrlProxyProcess | null> {
     const candidatePids = await this.processClient.findStartupCandidatePids();
-    for (const pid of candidatePids.slice(0, MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES)) {
+    const eligibleCandidates: Array<{ pid: number; process: ListeningProcess }> = [];
+    for (const pid of candidatePids) {
       if (pid === this.xcTestProcessId) {
         continue;
       }
@@ -2036,11 +2037,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (daemonManagedRoot.kind === "root") {
         continue;
       }
-      if (!await this.checkHealthEndpointOnPortForDevice(port, this.device.deviceId)) {
+      eligibleCandidates.push({ pid, process });
+      if (eligibleCandidates.length >= MAX_STARTUP_ORPHAN_RUNNER_CANDIDATES) {
+        break;
+      }
+    }
+    for (const { pid, process } of eligibleCandidates) {
+      if (!await this.checkHealthEndpointOnPortForDevice(process.port, this.device.deviceId)) {
         continue;
       }
       logger.info(`[IOSCtrlProxy] Found healthy external direct CtrlProxy runner: ${pid}`);
-      return { pid, port };
+      return { pid, port: process.port };
     }
     return null;
   }

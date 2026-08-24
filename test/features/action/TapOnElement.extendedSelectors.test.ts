@@ -15,7 +15,7 @@ const createTapOnElement = (selector: FakeElementSelector) => {
     {
       timer: new FakeTimer(),
       elementSelector: selector,
-    }
+    },
   );
 };
 
@@ -29,7 +29,7 @@ const createDefaultTapOnElement = () => {
     new FakeAdbClient() as any,
     {
       timer: new FakeTimer(),
-    }
+    },
   );
 };
 
@@ -40,11 +40,12 @@ const longClickResult = (success: boolean, error?: string) => ({
   error,
 });
 
-const makeElement = (bounds = { left: 0, top: 0, right: 100, bottom: 50 }) => ({
-  bounds,
-  text: "Item",
-  clickable: "true",
-} as any);
+const makeElement = (bounds = { left: 0, top: 0, right: 100, bottom: 50 }) =>
+  ({
+    bounds,
+    text: "Item",
+    clickable: "true",
+  }) as any;
 
 describe("TapOnElement extended selectors", () => {
   describe("validation", () => {
@@ -146,7 +147,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = (tapOn as any).findElementInHierarchy(
         { text: "Login", action: "tap" },
-        { hierarchy: { node: {} } }
+        { hierarchy: { node: {} } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -159,7 +160,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = (tapOn as any).findElementInHierarchy(
         { elementId: "com.app:id/btn", action: "tap" },
-        { hierarchy: { node: {} } }
+        { hierarchy: { node: {} } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -172,7 +173,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = (tapOn as any).findElementInHierarchy(
         { testTag: "message_row_42", action: "tap" },
-        { hierarchy: { node: {} } }
+        { hierarchy: { node: {} } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -185,7 +186,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = (tapOn as any).findElementInHierarchy(
         { text: "Accept Terms", sibling: true, action: "tap" },
-        { hierarchy: { node: {} } }
+        { hierarchy: { node: {} } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -198,7 +199,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = (tapOn as any).findElementInHierarchy(
         { elementId: "com.app:id/label", sibling: true, action: "tap" },
-        { hierarchy: { node: {} } }
+        { hierarchy: { node: {} } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -217,7 +218,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = (tapOn as any).findElementInHierarchy(
         { textAny: ["Done", "Add"], action: "tap" },
-        { hierarchy: { node: {} } }
+        { hierarchy: { node: {} } },
       );
 
       expect(result.selection.element).not.toBeNull();
@@ -239,7 +240,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = (tapOn as any).findElementInHierarchy(
         { textAny: ["Done", "Add"], action: "tap" },
-        { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 }
+        { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 },
       );
 
       expect(result.selection.element).toBe(visibleElement);
@@ -261,7 +262,7 @@ describe("TapOnElement extended selectors", () => {
 
       const result = (tapOn as any).findElementInHierarchy(
         { textAny: ["Done", "Add"], action: "tap" },
-        { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 }
+        { hierarchy: { node: {} }, screenWidth: 200, screenHeight: 200 },
       );
 
       expect(result.selection.element).toBeNull();
@@ -287,11 +288,16 @@ describe("TapOnElement extended selectors", () => {
           },
           screenWidth: 200,
           screenHeight: 200,
-        }
+        },
       );
 
       expect(result.selection.element?.text).toBe("Done");
-      expect(result.selection.element?.bounds).toEqual({ left: 20, top: 20, right: 120, bottom: 70 });
+      expect(result.selection.element?.bounds).toEqual({
+        left: 20,
+        top: 20,
+        right: 120,
+        bottom: 70,
+      });
     });
 
     test("sibling respects selectionStrategy", () => {
@@ -300,7 +306,7 @@ describe("TapOnElement extended selectors", () => {
 
       (tapOn as any).findElementInHierarchy(
         { text: "Email", sibling: true, action: "tap", selectionStrategy: "random" },
-        { hierarchy: { node: {} } }
+        { hierarchy: { node: {} } },
       );
 
       expect(selector.lastStrategy).toBe("random");
@@ -310,8 +316,8 @@ describe("TapOnElement extended selectors", () => {
   describe("Android long press node selectors", () => {
     const testTagElement = {
       "test-tag": "message_row_42",
-      "actions": ["long_click"],
-      "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
+      actions: ["long_click"],
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
     } as any;
 
     test("uses ACTION_LONG_CLICK with a stable test-tag selector", async () => {
@@ -363,7 +369,7 @@ describe("TapOnElement extended selectors", () => {
       (tapOn as any).accessibilityService = service;
 
       await expect(
-        (tapOn as any).executeAndroidLongPress(50, 25, 1000, testTagElement)
+        (tapOn as any).executeAndroidLongPress(50, 25, 1000, testTagElement),
       ).rejects.toThrow("Semantic long press failed for the selected element: service unavailable");
       expect(nodeActions).toEqual([{ testTag: "message_row_42" }]);
       expect((tapOn as any).adb.getAllCommands()).toEqual([]);

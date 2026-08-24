@@ -12,7 +12,7 @@ const bounds = (left: number, top: number, right: number, bottom: number) => ({
   left,
   top,
   right,
-  bottom
+  bottom,
 });
 
 function makeHierarchy(nodes: any): ViewHierarchyResult {
@@ -45,13 +45,17 @@ describe("DefaultElementFinder", () => {
     });
 
     test("finds element by content-desc", () => {
-      const hierarchy = makeHierarchy({ $: { "content-desc": "Close button", "bounds": { left: 0, top: 0, right: 50, bottom: 50 } } });
+      const hierarchy = makeHierarchy({
+        $: { "content-desc": "Close button", bounds: { left: 0, top: 0, right: 50, bottom: 50 } },
+      });
       const results = finder.findElementsByText(hierarchy, "Close button");
       expect(results).toHaveLength(1);
     });
 
     test("partial match by default", () => {
-      const hierarchy = makeHierarchy({ $: { text: "Login to Account", bounds: bounds(0, 0, 100, 50) } });
+      const hierarchy = makeHierarchy({
+        $: { text: "Login to Account", bounds: bounds(0, 0, 100, 50) },
+      });
       const results = finder.findElementsByText(hierarchy, "Login");
       expect(results).toHaveLength(1);
     });
@@ -69,24 +73,18 @@ describe("DefaultElementFinder", () => {
 
     test("returns empty when container not found", () => {
       const hierarchy = makeHierarchy({ $: { text: "Login", bounds: bounds(0, 0, 100, 50) } });
-      const results = finder.findElementsByText(
-        hierarchy, "Login",
-        { elementId: "nonexistent-container" }
-      );
+      const results = finder.findElementsByText(hierarchy, "Login", {
+        elementId: "nonexistent-container",
+      });
       expect(results).toEqual([]);
     });
 
     test("searches within container by resource-id", () => {
       const hierarchy = makeHierarchy({
-        $: { "resource-id": "my-form", "bounds": { left: 0, top: 0, right: 500, bottom: 500 } },
-        node: [
-          { $: { text: "Login", bounds: bounds(10, 10, 200, 50) } },
-        ],
+        $: { "resource-id": "my-form", bounds: { left: 0, top: 0, right: 500, bottom: 500 } },
+        node: [{ $: { text: "Login", bounds: bounds(10, 10, 200, 50) } }],
       });
-      const results = finder.findElementsByText(
-        hierarchy, "Login",
-        { elementId: "my-form" }
-      );
+      const results = finder.findElementsByText(hierarchy, "Login", { elementId: "my-form" });
       expect(results).toHaveLength(1);
     });
   });
@@ -106,7 +104,10 @@ describe("DefaultElementFinder", () => {
 
     test("finds element by exact resource-id", () => {
       const hierarchy = makeHierarchy({
-        $: { "resource-id": "com.app:id/btn_login", "bounds": { left: 0, top: 0, right: 100, bottom: 50 } },
+        $: {
+          "resource-id": "com.app:id/btn_login",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+        },
       });
       const results = finder.findElementsByResourceId(hierarchy, "com.app:id/btn_login");
       expect(results).toHaveLength(1);
@@ -114,7 +115,10 @@ describe("DefaultElementFinder", () => {
 
     test("partial match when enabled", () => {
       const hierarchy = makeHierarchy({
-        $: { "resource-id": "com.app:id/btn_login", "bounds": { left: 0, top: 0, right: 100, bottom: 50 } },
+        $: {
+          "resource-id": "com.app:id/btn_login",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+        },
       });
       const results = finder.findElementsByResourceId(hierarchy, "btn_login", null, true);
       expect(results).toHaveLength(1);
@@ -122,7 +126,10 @@ describe("DefaultElementFinder", () => {
 
     test("no partial match when disabled", () => {
       const hierarchy = makeHierarchy({
-        $: { "resource-id": "com.app:id/btn_login", "bounds": { left: 0, top: 0, right: 100, bottom: 50 } },
+        $: {
+          "resource-id": "com.app:id/btn_login",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+        },
       });
       const results = finder.findElementsByResourceId(hierarchy, "btn_login", null, false);
       expect(results).toHaveLength(0);
@@ -135,13 +142,16 @@ describe("DefaultElementFinder", () => {
       // so this must match even with partialMatch disabled — it's the node's real ID, not
       // a fuzzy substring hit.
       const hierarchy = makeHierarchy({
-        $: { "resource-id": "personDetailsSpeedDial_Main", "bounds": { left: 0, top: 0, right: 100, bottom: 50 } },
+        $: {
+          "resource-id": "personDetailsSpeedDial_Main",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+        },
       });
       const results = finder.findElementsByResourceId(
         hierarchy,
         "com.followupboss.fubandroidstaging:id/personDetailsSpeedDial_Main",
         null,
-        false
+        false,
       );
       expect(results).toHaveLength(1);
     });
@@ -150,7 +160,7 @@ describe("DefaultElementFinder", () => {
   describe("findElementByResourceId", () => {
     test("returns first match or null", () => {
       const hierarchy = makeHierarchy({
-        $: { "resource-id": "btn_login", "bounds": { left: 0, top: 0, right: 100, bottom: 50 } },
+        $: { "resource-id": "btn_login", bounds: { left: 0, top: 0, right: 100, bottom: 50 } },
       });
       expect(finder.findElementByResourceId(hierarchy, "btn_login")).not.toBeNull();
       expect(finder.findElementByResourceId(hierarchy, "btn_signup")).toBeNull();
@@ -160,7 +170,7 @@ describe("DefaultElementFinder", () => {
   describe("findElementsByTestTag", () => {
     test("finds an exact top-level test tag", () => {
       const hierarchy = makeHierarchy({
-        $: { "test-tag": "message_row_42", "bounds": bounds(0, 0, 100, 50) },
+        $: { "test-tag": "message_row_42", bounds: bounds(0, 0, 100, 50) },
       });
 
       const results = finder.findElementsByTestTag(hierarchy, "message_row_42");
@@ -182,7 +192,7 @@ describe("DefaultElementFinder", () => {
 
     test("returns true when container found by resource-id", () => {
       const hierarchy = makeHierarchy({
-        $: { "resource-id": "my-form", "bounds": { left: 0, top: 0, right: 500, bottom: 500 } },
+        $: { "resource-id": "my-form", bounds: { left: 0, top: 0, right: 500, bottom: 500 } },
       });
       expect(finder.hasContainerElement(hierarchy, { elementId: "my-form" })).toBe(true);
     });
@@ -277,8 +287,20 @@ describe("DefaultElementFinder", () => {
 
     test("treats click accessibility actions as clickable", () => {
       const hierarchy = makeHierarchy([
-        { $: { "actions": ["click"], "resource-id": "com.example:id/icon_button", "bounds": bounds(0, 0, 100, 50) } },
-        { $: { "actions": ["focus"], "resource-id": "com.example:id/focus_only", "bounds": bounds(0, 50, 100, 100) } },
+        {
+          $: {
+            actions: ["click"],
+            "resource-id": "com.example:id/icon_button",
+            bounds: bounds(0, 0, 100, 50),
+          },
+        },
+        {
+          $: {
+            actions: ["focus"],
+            "resource-id": "com.example:id/focus_only",
+            bounds: bounds(0, 50, 100, 100),
+          },
+        },
       ]);
       const results = finder.findClickableElements(hierarchy);
       expect(results).toHaveLength(1);
@@ -353,7 +375,12 @@ describe("DefaultElementFinder", () => {
         {
           $: { bounds: bounds(0, 0, 1080, 200) },
           node: [
-            { $: { "resource-id": "com.app:id/label", "bounds": { left: 0, top: 0, right: 500, bottom: 100 } } },
+            {
+              $: {
+                "resource-id": "com.app:id/label",
+                bounds: { left: 0, top: 0, right: 500, bottom: 100 },
+              },
+            },
             { $: { clickable: "true", bounds: bounds(500, 0, 1080, 100) } },
           ],
         },
@@ -368,7 +395,13 @@ describe("DefaultElementFinder", () => {
         {
           $: { bounds: bounds(0, 0, 1080, 200) },
           node: [
-            { $: { "resource-id": "com.app:id/label", "clickable": "true", "bounds": { left: 0, top: 0, right: 500, bottom: 100 } } },
+            {
+              $: {
+                "resource-id": "com.app:id/label",
+                clickable: "true",
+                bounds: { left: 0, top: 0, right: 500, bottom: 100 },
+              },
+            },
             { $: { clickable: "true", bounds: bounds(500, 0, 1080, 100) } },
           ],
         },
@@ -383,12 +416,22 @@ describe("DefaultElementFinder", () => {
         {
           $: { bounds: bounds(0, 0, 1080, 200) },
           node: [
-            { $: { "resource-id": "com.app:id/label_title", "bounds": { left: 0, top: 0, right: 500, bottom: 100 } } },
+            {
+              $: {
+                "resource-id": "com.app:id/label_title",
+                bounds: { left: 0, top: 0, right: 500, bottom: 100 },
+              },
+            },
             { $: { clickable: "true", bounds: bounds(500, 0, 1080, 100) } },
           ],
         },
       ]);
-      const results = finder.findClickableSiblingsOfResourceId(hierarchy, "label_title", null, true);
+      const results = finder.findClickableSiblingsOfResourceId(
+        hierarchy,
+        "label_title",
+        null,
+        true,
+      );
       expect(results.length).toBe(1);
     });
 
@@ -397,7 +440,12 @@ describe("DefaultElementFinder", () => {
         {
           $: { bounds: bounds(0, 0, 1080, 200) },
           node: [
-            { $: { "resource-id": "com.app:id/other", "bounds": { left: 0, top: 0, right: 500, bottom: 100 } } },
+            {
+              $: {
+                "resource-id": "com.app:id/other",
+                bounds: { left: 0, top: 0, right: 500, bottom: 100 },
+              },
+            },
             { $: { clickable: "true", bounds: bounds(500, 0, 1080, 100) } },
           ],
         },
@@ -411,7 +459,7 @@ describe("DefaultElementFinder", () => {
         {
           $: { bounds: bounds(0, 0, 1080, 200) },
           node: [
-            { $: { "resource-id": "label", "bounds": { left: 0, top: 0, right: 500, bottom: 100 } } },
+            { $: { "resource-id": "label", bounds: { left: 0, top: 0, right: 500, bottom: 100 } } },
             { $: { clickable: "true", bounds: bounds(500, 0, 1080, 100) } },
           ],
         },

@@ -8,5 +8,5 @@ export function hasIosHeaderTrait(extras: unknown): boolean {
   }
 
   const traits = (extras as Record<string, unknown>)["sdk.accessibilityTraits"];
-  return typeof traits === "string" && traits.split(",").some(trait => trait.trim() === "header");
+  return typeof traits === "string" && traits.split(",").some((trait) => trait.trim() === "header");
 }

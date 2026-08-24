@@ -22,13 +22,11 @@ describe("stableStringify", () => {
   });
 
   test("objects nested inside arrays are sorted", () => {
-    expect(stableStringify({ v: [{ a: 1, b: 2 }] })).toBe(
-      stableStringify({ v: [{ b: 2, a: 1 }] })
-    );
+    expect(stableStringify({ v: [{ a: 1, b: 2 }] })).toBe(stableStringify({ v: [{ b: 2, a: 1 }] }));
   });
 
   test("primitives and null round-trip like JSON.stringify", () => {
-    expect(stableStringify("x")).toBe("\"x\"");
+    expect(stableStringify("x")).toBe('"x"');
     expect(stableStringify(3)).toBe("3");
     expect(stableStringify(null)).toBe("null");
     expect(stableStringify({ a: undefined, b: 1 })).toBe(stableStringify({ b: 1 }));

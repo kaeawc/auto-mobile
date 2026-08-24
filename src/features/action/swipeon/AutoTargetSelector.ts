@@ -1,9 +1,4 @@
-import {
-  Element,
-  ObserveResult,
-  SwipeDirection,
-  SwipeOnOptions
-} from "../../../models";
+import { Element, ObserveResult, SwipeDirection, SwipeOnOptions } from "../../../models";
 import { boundsArea, boundsEqual } from "../../../utils/bounds";
 import { getScreenBounds as getScreenBoundsFromSize } from "../../../utils/screenBounds";
 import { AutoTargetSelectorService } from "./types";
@@ -12,7 +7,7 @@ export class AutoTargetSelector implements AutoTargetSelectorService {
   selectAutoTargetScrollable(
     scrollables: Element[],
     screenBounds: Element["bounds"] | null,
-    direction: SwipeDirection
+    direction: SwipeDirection,
   ): Element | null {
     if (scrollables.length === 0) {
       return null;
@@ -23,7 +18,7 @@ export class AutoTargetSelector implements AutoTargetSelectorService {
     }
 
     const nonScreenScrollables = screenBounds
-      ? scrollables.filter(scrollable => !boundsEqual(scrollable.bounds, screenBounds))
+      ? scrollables.filter((scrollable) => !boundsEqual(scrollable.bounds, screenBounds))
       : scrollables.slice();
 
     const candidates = nonScreenScrollables.length > 0 ? nonScreenScrollables : scrollables;

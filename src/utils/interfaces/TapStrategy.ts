@@ -20,7 +20,7 @@ export interface TapStrategy {
   prepareViewHierarchyForResponse(
     rawHierarchy: ViewHierarchyResult,
     viewHierarchy: ViewHierarchy,
-    screenSize?: ObserveResult["screenSize"]
+    screenSize?: ObserveResult["screenSize"],
   ): ViewHierarchyResult | null;
 
   /**

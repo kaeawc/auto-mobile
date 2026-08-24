@@ -103,7 +103,7 @@ test("EVENT_TABLES is the canonical table list used by the telemetry index guard
  */
 async function explicitIndexInventory(
   db: Kysely<unknown>,
-  table: string
+  table: string,
 ): Promise<Record<string, string[]>> {
   const indexes = await sql<{ name: string; origin: string }>`
     SELECT name, origin FROM pragma_index_list(${table})
@@ -117,7 +117,7 @@ async function explicitIndexInventory(
     const columns = await sql<{ name: string }>`
       SELECT name FROM pragma_index_info(${index.name}) ORDER BY seqno
     `.execute(db);
-    inventory[index.name] = columns.rows.map(c => c.name);
+    inventory[index.name] = columns.rows.map((c) => c.name);
   }
   return inventory;
 }
@@ -129,7 +129,7 @@ async function liveEventTables(db: Kysely<unknown>): Promise<string[]> {
     WHERE type = 'table' AND name LIKE '%\\_events' ESCAPE '\\'
     ORDER BY name
   `.execute(db);
-  return result.rows.map(r => r.name);
+  return result.rows.map((r) => r.name);
 }
 
 describe("telemetry event tables index inventory drift guard (#2908)", () => {

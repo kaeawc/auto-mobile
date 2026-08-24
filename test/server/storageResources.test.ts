@@ -30,7 +30,7 @@ describe("storageResources", () => {
 
   test("storage-files resource reports device-not-found when no device is booted", async () => {
     const content = await readResource(
-      "automobile:devices/emulator-5554/storage/com.example.app/files"
+      "automobile:devices/emulator-5554/storage/com.example.app/files",
     );
     const body = JSON.parse(content.text ?? "{}");
     expect(content.mimeType).toBe("application/json");
@@ -39,7 +39,7 @@ describe("storageResources", () => {
 
   test("storage-entries resource reports device-not-found when no device is booted", async () => {
     const content = await readResource(
-      "automobile:devices/emulator-5554/storage/com.example.app/prefs.xml/entries"
+      "automobile:devices/emulator-5554/storage/com.example.app/prefs.xml/entries",
     );
     const body = JSON.parse(content.text ?? "{}");
     expect(content.mimeType).toBe("application/json");
@@ -58,8 +58,7 @@ describe("storageResources", () => {
   });
 
   test("storage-entries resource URI percent-encodes package and file segments round-trip", async () => {
-    const uri =
-      "automobile:devices/dev1/storage/com.example%20app/settings%20prefs.xml/entries";
+    const uri = "automobile:devices/dev1/storage/com.example%20app/settings%20prefs.xml/entries";
     const content = await readResource(uri);
     expect(content.uri).toBe(uri);
   });

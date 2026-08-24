@@ -3,7 +3,10 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ExecResult } from "../../src/models";
-import { assertArchiveEntriesSafe, DefaultArchiveExtractor } from "../../src/utils/ArchiveExtractor";
+import {
+  assertArchiveEntriesSafe,
+  DefaultArchiveExtractor,
+} from "../../src/utils/ArchiveExtractor";
 import { ActionableError } from "../../src/models/ActionableError";
 import type { HostCommandExecutor, HostCommandOptions } from "../../src/utils/HostCommandExecutor";
 
@@ -17,7 +20,7 @@ async function makeTempDir(): Promise<string> {
 }
 
 afterEach(async () => {
-  await Promise.all(tempDirs.splice(0).map(dir => fs.rm(dir, { recursive: true, force: true })));
+  await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
 function execResult(stdout: string): ExecResult {
@@ -26,7 +29,7 @@ function execResult(stdout: string): ExecResult {
     stderr: "",
     toString: () => stdout,
     trim: () => stdout.trim(),
-    includes: (s: string) => stdout.includes(s)
+    includes: (s: string) => stdout.includes(s),
   };
 }
 
@@ -46,7 +49,11 @@ class RecordingExecutor implements HostCommandExecutor {
   // Mode a malicious `./` member would leave on the staging dir after extraction.
   public stagingModeAfterExtract: number | null = null;
 
-  async executeCommand(file: string, args: string[] = [], options?: HostCommandOptions): Promise<ExecResult> {
+  async executeCommand(
+    file: string,
+    args: string[] = [],
+    options?: HostCommandOptions,
+  ): Promise<ExecResult> {
     this.calls.push({ file, args, options });
     if (args[0] === "-tzf") {
       if (this.listError) {
@@ -78,10 +85,12 @@ class RecordingExecutor implements HostCommandExecutor {
 
 describe("assertArchiveEntriesSafe", () => {
   test("accepts ordinary relative entries", () => {
-    expect(() => assertArchiveEntriesSafe(
-      ["libwebp-1.6.0/", "libwebp-1.6.0/bin/cwebp", "libwebp-1.6.0/README"],
-      "/tmp/dest"
-    )).not.toThrow();
+    expect(() =>
+      assertArchiveEntriesSafe(
+        ["libwebp-1.6.0/", "libwebp-1.6.0/bin/cwebp", "libwebp-1.6.0/README"],
+        "/tmp/dest",
+      ),
+    ).not.toThrow();
   });
 
   test("rejects a parent-directory traversal entry (zip-slip)", () => {
@@ -98,11 +107,15 @@ describe("assertArchiveEntriesSafe", () => {
   });
 
   test("rejects an absolute POSIX path entry", () => {
-    expect(() => assertArchiveEntriesSafe(["/etc/cron.d/evil"], "/tmp/dest")).toThrow(ActionableError);
+    expect(() => assertArchiveEntriesSafe(["/etc/cron.d/evil"], "/tmp/dest")).toThrow(
+      ActionableError,
+    );
   });
 
   test("rejects a Windows drive-qualified entry", () => {
-    expect(() => assertArchiveEntriesSafe(["C:\\Windows\\System32\\evil"], "/tmp/dest")).toThrow(ActionableError);
+    expect(() => assertArchiveEntriesSafe(["C:\\Windows\\System32\\evil"], "/tmp/dest")).toThrow(
+      ActionableError,
+    );
   });
 
   test("allows an inner '..' that stays within the destination", () => {
@@ -110,7 +123,9 @@ describe("assertArchiveEntriesSafe", () => {
   });
 
   test("ignores blank listing lines", () => {
-    expect(() => assertArchiveEntriesSafe(["", "  ", "libwebp/bin/cwebp"], "/tmp/dest")).not.toThrow();
+    expect(() =>
+      assertArchiveEntriesSafe(["", "  ", "libwebp/bin/cwebp"], "/tmp/dest"),
+    ).not.toThrow();
   });
 });
 
@@ -140,7 +155,9 @@ describe("DefaultArchiveExtractor", () => {
     expect(path.basename(stagingDir).startsWith(".am-extract-")).toBe(true);
 
     // Results landed in the destination and the staging dir was cleaned up.
-    expect(await fs.readFile(path.join(destinationDir, "libwebp-1.6.0", "bin", "cwebp"), "utf8")).toBe("payload");
+    expect(
+      await fs.readFile(path.join(destinationDir, "libwebp-1.6.0", "bin", "cwebp"), "utf8"),
+    ).toBe("payload");
     expect(await fs.readdir(destinationDir)).toEqual(["libwebp-1.6.0"]);
   });
 
@@ -181,7 +198,7 @@ describe("DefaultArchiveExtractor", () => {
 
     const thrown = await extractor
       .extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir })
-      .catch(error => error);
+      .catch((error) => error);
 
     expect(thrown).toBeInstanceOf(ActionableError);
     // Only the listing call ran; extraction was never attempted.
@@ -198,7 +215,7 @@ describe("DefaultArchiveExtractor", () => {
 
     const thrown = await extractor
       .extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir })
-      .catch(error => error);
+      .catch((error) => error);
 
     expect(thrown).toBeInstanceOf(ActionableError);
     expect((thrown as ActionableError).message).toContain("Failed to extract archive");
@@ -217,7 +234,7 @@ describe("DefaultArchiveExtractor", () => {
       archivePath: "/tmp/archive.tar.gz",
       destinationDir,
       timeoutMs: 5000,
-      signal: controller.signal
+      signal: controller.signal,
     });
 
     for (const call of executor.calls) {
@@ -234,7 +251,7 @@ describe("DefaultArchiveExtractor", () => {
 
     const thrown = await extractor
       .extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir })
-      .catch(error => error);
+      .catch((error) => error);
 
     expect(thrown).toBeInstanceOf(ActionableError);
     expect((thrown as ActionableError).message).toContain("missing or corrupt");
@@ -253,7 +270,7 @@ describe("DefaultArchiveExtractor", () => {
 
     const thrown = await extractor
       .extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir })
-      .catch(error => error);
+      .catch((error) => error);
 
     expect(thrown).toBeInstanceOf(ActionableError);
     expect((thrown as ActionableError).message).toContain("symlinks are not permitted");
@@ -270,7 +287,7 @@ describe("DefaultArchiveExtractor", () => {
 
     const thrown = await extractor
       .extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir })
-      .catch(error => error);
+      .catch((error) => error);
 
     expect(thrown).toBeInstanceOf(ActionableError);
     expect((thrown as ActionableError).message).toContain("symlinks are not permitted");
@@ -294,7 +311,7 @@ describe("DefaultArchiveExtractor", () => {
 
     const thrown = await extractor
       .extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir })
-      .catch(error => error);
+      .catch((error) => error);
 
     expect(thrown).toBeInstanceOf(ActionableError);
     expect((thrown as ActionableError).message).toContain("symlinks are not permitted");
@@ -315,7 +332,9 @@ describe("DefaultArchiveExtractor", () => {
     await extractor.extractTarGz({ archivePath: "/tmp/archive.tar.gz", destinationDir });
 
     // Results landed and no `.am-extract-*` staging tree was stranded.
-    expect(await fs.readFile(path.join(destinationDir, "pkg", "bin", "tool"), "utf8")).toBe("payload");
+    expect(await fs.readFile(path.join(destinationDir, "pkg", "bin", "tool"), "utf8")).toBe(
+      "payload",
+    );
     expect(await fs.readdir(destinationDir)).toEqual(["pkg"]);
   });
 });

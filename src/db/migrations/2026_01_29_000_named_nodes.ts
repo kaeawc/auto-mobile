@@ -12,21 +12,19 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("navigation_node_fingerprints")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("app_id", "text", col =>
-      col.notNull().references("navigation_apps.app_id").onDelete("cascade")
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("app_id", "text", (col) =>
+      col.notNull().references("navigation_apps.app_id").onDelete("cascade"),
     )
-    .addColumn("node_id", "integer", col =>
-      col.notNull().references("navigation_nodes.id").onDelete("cascade")
+    .addColumn("node_id", "integer", (col) =>
+      col.notNull().references("navigation_nodes.id").onDelete("cascade"),
     )
-    .addColumn("fingerprint_hash", "text", col => col.notNull())
-    .addColumn("fingerprint_data", "text", col => col.notNull())
-    .addColumn("first_seen_at", "integer", col => col.notNull())
-    .addColumn("last_seen_at", "integer", col => col.notNull())
-    .addColumn("occurrence_count", "integer", col => col.notNull().defaultTo(1))
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("fingerprint_hash", "text", (col) => col.notNull())
+    .addColumn("fingerprint_data", "text", (col) => col.notNull())
+    .addColumn("first_seen_at", "integer", (col) => col.notNull())
+    .addColumn("last_seen_at", "integer", (col) => col.notNull())
+    .addColumn("occurrence_count", "integer", (col) => col.notNull().defaultTo(1))
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create unique index on (app_id, fingerprint_hash) - fingerprints are unique per app
@@ -51,21 +49,19 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("navigation_suggestions")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("app_id", "text", col =>
-      col.notNull().references("navigation_apps.app_id").onDelete("cascade")
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("app_id", "text", (col) =>
+      col.notNull().references("navigation_apps.app_id").onDelete("cascade"),
     )
-    .addColumn("fingerprint_hash", "text", col => col.notNull())
-    .addColumn("fingerprint_data", "text", col => col.notNull())
-    .addColumn("first_seen_at", "integer", col => col.notNull())
-    .addColumn("last_seen_at", "integer", col => col.notNull())
-    .addColumn("occurrence_count", "integer", col => col.notNull().defaultTo(1))
-    .addColumn("promoted_to_fingerprint_id", "integer", col =>
-      col.references("navigation_node_fingerprints.id").onDelete("set null")
+    .addColumn("fingerprint_hash", "text", (col) => col.notNull())
+    .addColumn("fingerprint_data", "text", (col) => col.notNull())
+    .addColumn("first_seen_at", "integer", (col) => col.notNull())
+    .addColumn("last_seen_at", "integer", (col) => col.notNull())
+    .addColumn("occurrence_count", "integer", (col) => col.notNull().defaultTo(1))
+    .addColumn("promoted_to_fingerprint_id", "integer", (col) =>
+      col.references("navigation_node_fingerprints.id").onDelete("set null"),
     )
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create unique index on (app_id, fingerprint_hash) for deduplication

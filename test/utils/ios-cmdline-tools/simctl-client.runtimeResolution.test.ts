@@ -10,7 +10,10 @@ interface RuntimeFixture {
   isAvailable?: boolean;
 }
 
-function createClient(sdkVersion: string | null, runtimes: RuntimeFixture[]): {
+function createClient(
+  sdkVersion: string | null,
+  runtimes: RuntimeFixture[],
+): {
   simctl: SimCtlClient;
   calls: string[];
 } {
@@ -23,26 +26,29 @@ function createClient(sdkVersion: string | null, runtimes: RuntimeFixture[]): {
     }
     if (command === "xcrun --sdk iphonesimulator --show-sdk-version") {
       if (sdkVersion === null) {
-        throw new Error("xcrun: error: SDK \"iphonesimulator\" cannot be located");
+        throw new Error('xcrun: error: SDK "iphonesimulator" cannot be located');
       }
       return createExecResult(`${sdkVersion}\n`, "");
     }
     if (command === "xcrun simctl list runtimes iOS --json") {
-      return createExecResult(JSON.stringify({
-        runtimes: runtimes.map(runtime => ({
-          version: runtime.version,
-          identifier: runtime.identifier,
-          name: `iOS ${runtime.version}`,
-          isAvailable: runtime.isAvailable ?? true
-        }))
-      }), "");
+      return createExecResult(
+        JSON.stringify({
+          runtimes: runtimes.map((runtime) => ({
+            version: runtime.version,
+            identifier: runtime.identifier,
+            name: `iOS ${runtime.version}`,
+            isAvailable: runtime.isAvailable ?? true,
+          })),
+        }),
+        "",
+      );
     }
     return createExecResult("", "");
   };
 
   return {
     simctl: new SimCtlClient(null, execAsync, new FakeTimer(), "darwin"),
-    calls
+    calls,
   };
 }
 
@@ -51,20 +57,24 @@ describe("SimCtlClient runtime resolution", () => {
     const { simctl, calls } = createClient("26.3", [
       { version: "26.2.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-2" },
       { version: "26.3.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3" },
-      { version: "26.4.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-4" }
+      { version: "26.4.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-4" },
     ]);
 
-    expect(await simctl.resolveRuntimeIdentifier()).toBe("com.apple.CoreSimulator.SimRuntime.iOS-26-3");
+    expect(await simctl.resolveRuntimeIdentifier()).toBe(
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+    );
     expect(calls).toContain("xcrun --sdk iphonesimulator --show-sdk-version");
   });
 
   test("tier 2: major.minor fallback when the exact patch version is absent", async () => {
     const { simctl } = createClient("26.3.1", [
       { version: "26.3.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3" },
-      { version: "26.4.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-4" }
+      { version: "26.4.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-4" },
     ]);
 
-    expect(await simctl.resolveRuntimeIdentifier()).toBe("com.apple.CoreSimulator.SimRuntime.iOS-26-3");
+    expect(await simctl.resolveRuntimeIdentifier()).toBe(
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+    );
   });
 
   test("tier 3: highest runtime in the same major when the minor is absent", async () => {
@@ -72,35 +82,45 @@ describe("SimCtlClient runtime resolution", () => {
       { version: "25.5.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-25-5" },
       { version: "26.1.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-1" },
       { version: "26.10.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-10" },
-      { version: "26.2.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-2" }
+      { version: "26.2.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-2" },
     ]);
 
     // Numeric ordering: 26.10 > 26.2 (a string sort would pick 26.2).
-    expect(await simctl.resolveRuntimeIdentifier()).toBe("com.apple.CoreSimulator.SimRuntime.iOS-26-10");
+    expect(await simctl.resolveRuntimeIdentifier()).toBe(
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-10",
+    );
   });
 
   test("an explicit version overrides SDK detection", async () => {
     const { simctl, calls } = createClient("26.3", [
       { version: "18.2.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-18-2" },
-      { version: "26.3.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3" }
+      { version: "26.3.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3" },
     ]);
 
-    expect(await simctl.resolveRuntimeIdentifier("18.2")).toBe("com.apple.CoreSimulator.SimRuntime.iOS-18-2");
+    expect(await simctl.resolveRuntimeIdentifier("18.2")).toBe(
+      "com.apple.CoreSimulator.SimRuntime.iOS-18-2",
+    );
     expect(calls).not.toContain("xcrun --sdk iphonesimulator --show-sdk-version");
   });
 
   test("unavailable runtimes are ignored", async () => {
     const { simctl } = createClient("26.3", [
-      { version: "26.3.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3", isAvailable: false },
-      { version: "26.1.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-1" }
+      {
+        version: "26.3.0",
+        identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-3",
+        isAvailable: false,
+      },
+      { version: "26.1.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-1" },
     ]);
 
-    expect(await simctl.resolveRuntimeIdentifier()).toBe("com.apple.CoreSimulator.SimRuntime.iOS-26-1");
+    expect(await simctl.resolveRuntimeIdentifier()).toBe(
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-1",
+    );
   });
 
   test("no runtime in the major family fails actionably and lists what is installed", async () => {
     const { simctl } = createClient("26.3", [
-      { version: "18.2.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-18-2" }
+      { version: "18.2.0", identifier: "com.apple.CoreSimulator.SimRuntime.iOS-18-2" },
     ]);
 
     const error = await simctl.resolveRuntimeIdentifier().catch((err: unknown) => err);

@@ -52,11 +52,12 @@ function fakeFiles(seed?: Record<string, string>): FileStore & { store: Map<stri
  * forever). The dashboard/tests can still exercise realistic multi-day data
  * from this fixture.
  */
-const SAMPLE_SNAPSHOTS_JSONL = [
-  '{"date":"2026-07-29","github":[{"tag":"0.0.47","asset":"control-proxy-debug.apk","cumulative":150},{"tag":"0.0.47","asset":"control-proxy.ipa","cumulative":90},{"tag":"0.0.47","asset":"automobile-video.jar","cumulative":2},{"tag":"0.0.47","asset":"AutoMobile-0.0.47-macos.dmg","cumulative":1},{"tag":"0.0.46","asset":"control-proxy-debug.apk","cumulative":400},{"tag":"0.0.46","asset":"control-proxy.ipa","cumulative":330},{"tag":"0.0.45","asset":"control-proxy-debug.apk","cumulative":6050},{"tag":"0.0.45","asset":"control-proxy.ipa","cumulative":600}],"npm":[{"day":"2026-07-27","downloads":822},{"day":"2026-07-28","downloads":474},{"day":"2026-07-29","downloads":652}]}',
-  '{"date":"2026-07-30","github":[{"tag":"0.0.47","asset":"control-proxy-debug.apk","cumulative":180},{"tag":"0.0.47","asset":"control-proxy.ipa","cumulative":104},{"tag":"0.0.47","asset":"automobile-video.jar","cumulative":3},{"tag":"0.0.47","asset":"AutoMobile-0.0.47-macos.dmg","cumulative":2},{"tag":"0.0.46","asset":"control-proxy-debug.apk","cumulative":405},{"tag":"0.0.46","asset":"control-proxy.ipa","cumulative":334},{"tag":"0.0.45","asset":"control-proxy-debug.apk","cumulative":6088},{"tag":"0.0.45","asset":"control-proxy.ipa","cumulative":610}],"npm":[{"day":"2026-07-28","downloads":474},{"day":"2026-07-29","downloads":652},{"day":"2026-07-30","downloads":1013}]}',
-  '{"date":"2026-07-31","github":[{"tag":"0.0.47","asset":"control-proxy-debug.apk","cumulative":209},{"tag":"0.0.47","asset":"control-proxy.ipa","cumulative":119},{"tag":"0.0.47","asset":"automobile-video.jar","cumulative":3},{"tag":"0.0.47","asset":"AutoMobile-0.0.47-macos.dmg","cumulative":3},{"tag":"0.0.46","asset":"control-proxy-debug.apk","cumulative":410},{"tag":"0.0.46","asset":"control-proxy.ipa","cumulative":339},{"tag":"0.0.45","asset":"control-proxy-debug.apk","cumulative":6112},{"tag":"0.0.45","asset":"control-proxy.ipa","cumulative":620}],"npm":[{"day":"2026-07-29","downloads":652},{"day":"2026-07-30","downloads":1013},{"day":"2026-07-31","downloads":774}]}',
-].join("\n") + "\n";
+const SAMPLE_SNAPSHOTS_JSONL =
+  [
+    '{"date":"2026-07-29","github":[{"tag":"0.0.47","asset":"control-proxy-debug.apk","cumulative":150},{"tag":"0.0.47","asset":"control-proxy.ipa","cumulative":90},{"tag":"0.0.47","asset":"automobile-video.jar","cumulative":2},{"tag":"0.0.47","asset":"AutoMobile-0.0.47-macos.dmg","cumulative":1},{"tag":"0.0.46","asset":"control-proxy-debug.apk","cumulative":400},{"tag":"0.0.46","asset":"control-proxy.ipa","cumulative":330},{"tag":"0.0.45","asset":"control-proxy-debug.apk","cumulative":6050},{"tag":"0.0.45","asset":"control-proxy.ipa","cumulative":600}],"npm":[{"day":"2026-07-27","downloads":822},{"day":"2026-07-28","downloads":474},{"day":"2026-07-29","downloads":652}]}',
+    '{"date":"2026-07-30","github":[{"tag":"0.0.47","asset":"control-proxy-debug.apk","cumulative":180},{"tag":"0.0.47","asset":"control-proxy.ipa","cumulative":104},{"tag":"0.0.47","asset":"automobile-video.jar","cumulative":3},{"tag":"0.0.47","asset":"AutoMobile-0.0.47-macos.dmg","cumulative":2},{"tag":"0.0.46","asset":"control-proxy-debug.apk","cumulative":405},{"tag":"0.0.46","asset":"control-proxy.ipa","cumulative":334},{"tag":"0.0.45","asset":"control-proxy-debug.apk","cumulative":6088},{"tag":"0.0.45","asset":"control-proxy.ipa","cumulative":610}],"npm":[{"day":"2026-07-28","downloads":474},{"day":"2026-07-29","downloads":652},{"day":"2026-07-30","downloads":1013}]}',
+    '{"date":"2026-07-31","github":[{"tag":"0.0.47","asset":"control-proxy-debug.apk","cumulative":209},{"tag":"0.0.47","asset":"control-proxy.ipa","cumulative":119},{"tag":"0.0.47","asset":"automobile-video.jar","cumulative":3},{"tag":"0.0.47","asset":"AutoMobile-0.0.47-macos.dmg","cumulative":3},{"tag":"0.0.46","asset":"control-proxy-debug.apk","cumulative":410},{"tag":"0.0.46","asset":"control-proxy.ipa","cumulative":339},{"tag":"0.0.45","asset":"control-proxy-debug.apk","cumulative":6112},{"tag":"0.0.45","asset":"control-proxy.ipa","cumulative":620}],"npm":[{"day":"2026-07-29","downloads":652},{"day":"2026-07-30","downloads":1013},{"day":"2026-07-31","downloads":774}]}',
+  ].join("\n") + "\n";
 
 /** In-memory fake sources — tests never hit the network. */
 function fakeSources(github: GithubAssetCount[], npm: NpmDayCount[]): DownloadSources {
@@ -77,7 +78,7 @@ describe("downloadSnapshots pure logic", () => {
     const day1 = buildSnapshot("2026-07-29", [], []);
     const day2 = buildSnapshot("2026-07-30", [], []);
     const merged = mergeSnapshot([day2], day1);
-    expect(merged.map(s => s.date)).toEqual(["2026-07-29", "2026-07-30"]);
+    expect(merged.map((s) => s.date)).toEqual(["2026-07-29", "2026-07-30"]);
   });
 
   test("mergeSnapshot is idempotent — same UTC date overwrites, never duplicates", () => {
@@ -87,7 +88,7 @@ describe("downloadSnapshots pure logic", () => {
     const rerun = buildSnapshot(
       "2026-07-30",
       [{ tag: "v0.0.1", asset: "a.apk", cumulative: 12 }],
-      [{ day: "2026-07-29", downloads: 5 }]
+      [{ day: "2026-07-29", downloads: 5 }],
     );
     const merged = mergeSnapshot(existing, rerun);
     expect(merged).toHaveLength(1);
@@ -126,7 +127,7 @@ describe("downloadSnapshots pure logic", () => {
       buildSnapshot("2026-07-30", [{ tag: "v1", asset: "a.apk", cumulative: 137 }], []),
     ];
     const deltas = computeAssetDailyDeltas(snapshots);
-    const day2 = deltas.find(d => d.date === "2026-07-30");
+    const day2 = deltas.find((d) => d.date === "2026-07-30");
     expect(day2?.delta).toBe(37);
   });
 
@@ -135,7 +136,7 @@ describe("downloadSnapshots pure logic", () => {
       buildSnapshot("2026-07-29", [{ tag: "v1", asset: "a.apk", cumulative: 100 }], []),
       buildSnapshot("2026-07-30", [{ tag: "v1", asset: "a.apk", cumulative: 40 }], []),
     ];
-    const day2 = computeAssetDailyDeltas(snapshots).find(d => d.date === "2026-07-30");
+    const day2 = computeAssetDailyDeltas(snapshots).find((d) => d.date === "2026-07-30");
     expect(day2?.delta).toBeNull();
   });
 
@@ -147,7 +148,7 @@ describe("downloadSnapshots pure logic", () => {
       buildSnapshot("2026-07-29", [{ tag: "v1", asset: "a.apk", cumulative: 5, id: 111 }], []),
       buildSnapshot("2026-07-30", [{ tag: "v1", asset: "a.apk", cumulative: 8, id: 222 }], []),
     ];
-    const day2 = computeAssetDailyDeltas(snapshots).find(d => d.date === "2026-07-30");
+    const day2 = computeAssetDailyDeltas(snapshots).find((d) => d.date === "2026-07-30");
     expect(day2?.delta).toBeNull(); // not 3 — identity changed
     expect(day2?.cumulative).toBe(8);
   });
@@ -157,21 +158,25 @@ describe("downloadSnapshots pure logic", () => {
       buildSnapshot("2026-07-29", [{ tag: "v1", asset: "a.apk", cumulative: 5, id: 111 }], []),
       buildSnapshot("2026-07-30", [{ tag: "v1", asset: "a.apk", cumulative: 8, id: 111 }], []),
     ];
-    const day2 = computeAssetDailyDeltas(snapshots).find(d => d.date === "2026-07-30");
+    const day2 = computeAssetDailyDeltas(snapshots).find((d) => d.date === "2026-07-30");
     expect(day2?.delta).toBe(3); // same id, honest daily delta
   });
 
   test("computeAssetDailyDeltas: missing asset in later snapshot produces no row, does not carry forward", () => {
     const snapshots = [
-      buildSnapshot("2026-07-29", [
-        { tag: "v1", asset: "a.apk", cumulative: 10 },
-        { tag: "v1", asset: "b.ipa", cumulative: 5 },
-      ], []),
+      buildSnapshot(
+        "2026-07-29",
+        [
+          { tag: "v1", asset: "a.apk", cumulative: 10 },
+          { tag: "v1", asset: "b.ipa", cumulative: 5 },
+        ],
+        [],
+      ),
       // b.ipa absent on day 2.
       buildSnapshot("2026-07-30", [{ tag: "v1", asset: "a.apk", cumulative: 12 }], []),
     ];
     const deltas = computeAssetDailyDeltas(snapshots);
-    const day2 = deltas.filter(d => d.date === "2026-07-30");
+    const day2 = deltas.filter((d) => d.date === "2026-07-30");
     expect(day2).toHaveLength(1);
     expect(day2[0].asset).toBe("a.apk");
     expect(day2[0].delta).toBe(2);
@@ -184,7 +189,7 @@ describe("downloadSnapshots pure logic", () => {
       buildSnapshot("2026-07-30", [{ tag: "v1", asset: "b.ipa", cumulative: 9 }], []),
     ];
     const reappear = computeAssetDailyDeltas(snapshots).find(
-      d => d.date === "2026-07-30" && d.asset === "b.ipa"
+      (d) => d.date === "2026-07-30" && d.asset === "b.ipa",
     );
     // b.ipa's last observation was 2026-07-28 (two days back), so the +4 cannot
     // be attributed to a single day.
@@ -198,7 +203,7 @@ describe("downloadSnapshots pure logic", () => {
       buildSnapshot("2026-07-29", [{ tag: "v1", asset: "a.apk", cumulative: 100 }], []),
       buildSnapshot("2026-07-31", [{ tag: "v1", asset: "a.apk", cumulative: 140 }], []),
     ];
-    const day3 = computeAssetDailyDeltas(snapshots).find(d => d.date === "2026-07-31");
+    const day3 = computeAssetDailyDeltas(snapshots).find((d) => d.date === "2026-07-31");
     expect(day3?.delta).toBeNull(); // not 40
     expect(day3?.cumulative).toBe(140);
   });
@@ -217,7 +222,7 @@ describe("downloadSnapshots pure logic", () => {
       { day: "2026-07-31", downloads: 300 }, // partial — collector ran mid-day
     ];
     const trimmed = excludeIncompleteNpmDay(npm, new Date("2026-07-31T05:17:00.000Z"));
-    expect(trimmed.map(n => n.day)).toEqual(["2026-07-29", "2026-07-30"]);
+    expect(trimmed.map((n) => n.day)).toEqual(["2026-07-29", "2026-07-30"]);
   });
 
   test("parseSnapshots on an empty document yields no snapshots (empty production data file)", () => {
@@ -229,7 +234,7 @@ describe("downloadSnapshots pure logic", () => {
     // It lives here now so the production data file can start empty.
     const parsed = parseSnapshots(SAMPLE_SNAPSHOTS_JSONL);
     expect(parsed).toHaveLength(3);
-    expect(parsed.map(s => s.date)).toEqual(["2026-07-29", "2026-07-30", "2026-07-31"]);
+    expect(parsed.map((s) => s.date)).toEqual(["2026-07-29", "2026-07-30", "2026-07-31"]);
   });
 });
 
@@ -242,7 +247,7 @@ describe("classifyAssetType", () => {
     expect(classifyAssetType("AutoMobile-0.0.48-macos.dmg")).toBe("desktop-installer");
     expect(classifyAssetType("AutoMobile-0.0.48-windows.msi")).toBe("desktop-installer");
     expect(classifyAssetType("screen-capture-helper-macos-universal.zip")).toBe(
-      "screen-capture-helper"
+      "screen-capture-helper",
     );
   });
 
@@ -266,7 +271,7 @@ describe("summarizeDailyByAssetType", () => {
           { tag: "v1", asset: "control-proxy-debug.apk", cumulative: 500, id: 2 },
           { tag: "v2", asset: "control-proxy.ipa", cumulative: 50, id: 3 },
         ],
-        []
+        [],
       ),
       buildSnapshot(
         "2026-07-30",
@@ -275,19 +280,19 @@ describe("summarizeDailyByAssetType", () => {
           { tag: "v1", asset: "control-proxy-debug.apk", cumulative: 505, id: 2 }, // +5
           { tag: "v2", asset: "control-proxy.ipa", cumulative: 57, id: 3 }, // +7
         ],
-        []
+        [],
       ),
     ];
     const result = summarizeDailyByAssetType(snapshots);
     expect(result.dates).toEqual(["2026-07-29", "2026-07-30"]);
 
-    const apk = result.series.find(s => s.type === "android-apk");
+    const apk = result.series.find((s) => s.type === "android-apk");
     // Day 0 is all seed (null) → downloads 0 but partial; day 1 sums both releases.
     expect(apk?.points[0]).toMatchObject({ downloads: 0, partial: true });
     expect(apk?.points[1]).toMatchObject({ downloads: 15, partial: false });
     expect(apk?.total).toBe(15);
 
-    const ipa = result.series.find(s => s.type === "ios-ipa");
+    const ipa = result.series.find((s) => s.type === "ios-ipa");
     expect(ipa?.points[1].downloads).toBe(7);
   });
 
@@ -299,7 +304,7 @@ describe("summarizeDailyByAssetType", () => {
           { tag: "v1", asset: "a.apk", cumulative: 10, id: 1 },
           { tag: "v2", asset: "b.apk", cumulative: 20, id: 2 },
         ],
-        []
+        [],
       ),
       buildSnapshot(
         "2026-07-30",
@@ -307,10 +312,10 @@ describe("summarizeDailyByAssetType", () => {
           { tag: "v1", asset: "a.apk", cumulative: 18, id: 1 }, // +8, known
           { tag: "v2", asset: "b.apk", cumulative: 5, id: 2 }, // reset → null
         ],
-        []
+        [],
       ),
     ];
-    const apk = summarizeDailyByAssetType(snapshots).series.find(s => s.type === "android-apk");
+    const apk = summarizeDailyByAssetType(snapshots).series.find((s) => s.type === "android-apk");
     // Only the known +8 is summed; the reset asset is excluded but flags partial.
     expect(apk?.points[1]).toMatchObject({ downloads: 8, partial: true, observed: true });
   });
@@ -321,7 +326,7 @@ describe("summarizeDailyByAssetType", () => {
       buildSnapshot("2026-07-30", [{ tag: "v1", asset: "a.ipa", cumulative: 4 }], []),
     ];
     const result = summarizeDailyByAssetType(snapshots);
-    expect(result.series.map(s => s.type)).toEqual(["ios-ipa"]);
+    expect(result.series.map((s) => s.type)).toEqual(["ios-ipa"]);
   });
 });
 
@@ -335,11 +340,11 @@ describe("summarizeCumulativeByTag", () => {
           { tag: "0.0.47", asset: "a.ipa", cumulative: 40 },
           { tag: "0.0.46", asset: "a.apk", cumulative: 900 },
         ],
-        []
+        [],
       ),
     ];
     const result = summarizeCumulativeByTag(snapshots);
-    const newest = result.series.find(s => s.tag === "0.0.47");
+    const newest = result.series.find((s) => s.tag === "0.0.47");
     expect(newest?.points[0].value).toBe(140); // 100 + 40
     expect(newest?.latest).toBe(140);
   });
@@ -353,11 +358,11 @@ describe("summarizeCumulativeByTag", () => {
           { tag: "0.0.100", asset: "a.apk", cumulative: 1 },
           { tag: "0.0.46", asset: "a.apk", cumulative: 1 },
         ],
-        []
+        [],
       ),
     ];
     const capped = summarizeCumulativeByTag(snapshots, 2);
-    expect(capped.series.map(s => s.tag)).toEqual(["0.0.100", "0.0.47"]);
+    expect(capped.series.map((s) => s.tag)).toEqual(["0.0.100", "0.0.47"]);
   });
 
   test("a tag absent from a snapshot has a null point so the line breaks, not drops to zero", () => {
@@ -370,11 +375,11 @@ describe("summarizeCumulativeByTag", () => {
           { tag: "0.0.46", asset: "a.apk", cumulative: 905 },
           { tag: "0.0.47", asset: "a.apk", cumulative: 30 },
         ],
-        []
+        [],
       ),
     ];
     const result = summarizeCumulativeByTag(snapshots);
-    const newest = result.series.find(s => s.tag === "0.0.47");
+    const newest = result.series.find((s) => s.tag === "0.0.47");
     expect(newest?.points[0].value).toBeNull(); // did not exist on day 0
     expect(newest?.points[1].value).toBe(30);
     expect(newest?.latest).toBe(30);
@@ -413,7 +418,7 @@ describe("collect() CLI wiring with fakes", () => {
 
     const sources1 = fakeSources(
       [{ tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 10 }],
-      [{ day: "2026-07-30", downloads: 500 }]
+      [{ day: "2026-07-30", downloads: 500 }],
     );
     const first = await collect(sources1, files, DATA_FILE, now);
     expect(first.date).toBe("2026-07-31");
@@ -421,7 +426,7 @@ describe("collect() CLI wiring with fakes", () => {
     // Re-run same UTC date with a higher cumulative — must overwrite, not append.
     const sources2 = fakeSources(
       [{ tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 14 }],
-      [{ day: "2026-07-30", downloads: 500 }]
+      [{ day: "2026-07-30", downloads: 500 }],
     );
     await collect(sources2, files, DATA_FILE, now);
 
@@ -436,7 +441,7 @@ describe("collect() CLI wiring with fakes", () => {
     const now = new Date("2026-07-31T06:00:00.000Z");
     const sources = fakeSources(
       [{ tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 7 }],
-      [{ day: "2026-07-30", downloads: 42 }]
+      [{ day: "2026-07-30", downloads: 42 }],
     );
 
     const result = await collect(sources, files, DATA_FILE, now);
@@ -456,7 +461,7 @@ describe("collect() CLI wiring with fakes", () => {
     const now = new Date("2026-07-31T06:00:00.000Z");
     const sources = fakeSources(
       [{ tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 10 }],
-      [{ day: "2026-07-30", downloads: 5 }]
+      [{ day: "2026-07-30", downloads: 5 }],
     );
     await expect(collect(sources, files, DATA_FILE, now)).rejects.toThrow();
   });
@@ -490,7 +495,7 @@ describe("collect() CLI wiring with fakes", () => {
       buildSnapshot(
         "2026-07-31",
         [{ tag: "v0.0.45", asset: "control-proxy.apk", cumulative: 9 }],
-        [{ day: "2026-07-30", downloads: 500 }]
+        [{ day: "2026-07-30", downloads: 500 }],
       ),
     ]);
     const files = fakeFiles({ [DATA_FILE]: seeded });
@@ -534,12 +539,12 @@ describe("collect() CLI wiring with fakes", () => {
       [
         { day: "2026-07-30", downloads: 1013 },
         { day: "2026-07-31", downloads: 200 }, // partial day the job ran on
-      ]
+      ],
     );
     await collect(sources, files, DATA_FILE, now);
 
     const snapshots = parseSnapshots(files.store.get(DATA_FILE) ?? "");
     expect(snapshots).toHaveLength(1);
-    expect(snapshots[0].npm.map(n => n.day)).toEqual(["2026-07-30"]);
+    expect(snapshots[0].npm.map((n) => n.day)).toEqual(["2026-07-30"]);
   });
 });

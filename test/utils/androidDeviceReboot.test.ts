@@ -13,9 +13,11 @@ describe("BoundedAndroidDeviceReboot", () => {
     let attempts = 0;
     const recovery = new BoundedAndroidDeviceReboot(new FakeTimer(), 1);
 
-    await expect(recovery.run(target, async () => {
-      attempts++;
-    })).resolves.toBe(true);
+    await expect(
+      recovery.run(target, async () => {
+        attempts++;
+      }),
+    ).resolves.toBe(true);
 
     expect(attempts).toBe(1);
   });
@@ -24,10 +26,12 @@ describe("BoundedAndroidDeviceReboot", () => {
     let attempts = 0;
     const recovery = new BoundedAndroidDeviceReboot(new FakeTimer(), 1);
 
-    await expect(recovery.run(target, async () => {
-      attempts++;
-      throw new Error("emulator unavailable");
-    })).resolves.toBe(false);
+    await expect(
+      recovery.run(target, async () => {
+        attempts++;
+        throw new Error("emulator unavailable");
+      }),
+    ).resolves.toBe(false);
 
     expect(attempts).toBe(1);
   });
@@ -38,10 +42,12 @@ describe("BoundedAndroidDeviceReboot", () => {
     timer.enableAutoAdvance();
     const recovery = new BoundedAndroidDeviceReboot(timer, 2);
 
-    await expect(recovery.run(target, async () => {
-      attempts++;
-      throw new Error("emulator unavailable");
-    })).resolves.toBe(false);
+    await expect(
+      recovery.run(target, async () => {
+        attempts++;
+        throw new Error("emulator unavailable");
+      }),
+    ).resolves.toBe(false);
 
     expect(attempts).toBe(2);
     expect(timer.getSleepHistory()).toEqual([1_000]);

@@ -97,30 +97,32 @@ describe("GetBackStack real-output parsing (#4197)", () => {
   test("parses every activity out of a real-format multi-task dump", async () => {
     const result = await parse(LEGACY_MULTI_TASK);
 
-    expect(result.activities.map(a => a.name)).toEqual([
+    expect(result.activities.map((a) => a.name)).toEqual([
       "com.android.launcher3.Launcher",
       "dev.jasonpearson.automobile.playground.DetailActivity",
       "dev.jasonpearson.automobile.playground.ListActivity",
-      "dev.jasonpearson.automobile.playground.MainActivity"
+      "dev.jasonpearson.automobile.playground.MainActivity",
     ]);
   });
 
   test("reads each activity's task id from its own tNN suffix", async () => {
     const result = await parse(LEGACY_MULTI_TASK);
 
-    expect(result.activities.map(a => a.taskId)).toEqual([1, 123, 123, 123]);
+    expect(result.activities.map((a) => a.taskId)).toEqual([1, 123, 123, 123]);
   });
 
   test("marks Hist #0 as the task root, not the topmost activity", async () => {
     const result = await parse(LEGACY_MULTI_TASK);
 
-    const roots = result.activities.filter(a => a.isTaskRoot).map(a => a.name);
+    const roots = result.activities.filter((a) => a.isTaskRoot).map((a) => a.name);
     expect(roots).toEqual([
       "com.android.launcher3.Launcher",
-      "dev.jasonpearson.automobile.playground.MainActivity"
+      "dev.jasonpearson.automobile.playground.MainActivity",
     ]);
     // The topmost (resumed) activity is explicitly NOT the root.
-    expect(result.activities.find(a => a.name.endsWith(".DetailActivity"))?.isTaskRoot).toBe(false);
+    expect(result.activities.find((a) => a.name.endsWith(".DetailActivity"))?.isTaskRoot).toBe(
+      false,
+    );
   });
 
   test("computes depth as poppable entries in the current task", async () => {
@@ -133,12 +135,12 @@ describe("GetBackStack real-output parsing (#4197)", () => {
   test("parses the modern two-space Hist form and its task id", async () => {
     const result = await parse(MODERN_SINGLE_TASK);
 
-    expect(result.activities.map(a => a.name)).toEqual([
+    expect(result.activities.map((a) => a.name)).toEqual([
       "com.example.DetailActivity",
-      "com.example.MainActivity"
+      "com.example.MainActivity",
     ]);
-    expect(result.activities.map(a => a.taskId)).toEqual([61, 61]);
-    expect(result.activities.map(a => a.isTaskRoot)).toEqual([false, true]);
+    expect(result.activities.map((a) => a.taskId)).toEqual([61, 61]);
+    expect(result.activities.map((a) => a.isTaskRoot)).toEqual([false, true]);
     expect(result.depth).toBe(1);
   });
 
@@ -183,9 +185,9 @@ describe("GetBackStack real-output parsing (#4197)", () => {
   mResumedActivity: ActivityRecord{aaa u0 com.example/.TopActivity t9}
 `);
 
-      expect(result.activities.map(a => a.name)).toEqual([
+      expect(result.activities.map((a) => a.name)).toEqual([
         "com.example.TopActivity",
-        "com.example.MainActivity"
+        "com.example.MainActivity",
       ]);
       expect(result.depth).toBe(1);
     });
@@ -198,11 +200,11 @@ describe("GetBackStack real-output parsing (#4197)", () => {
       * Hist #0: ActivityRecord{bbb u0 com.example/.MainActivity t5}
 `);
 
-      expect(result.activities.map(a => a.name)).toEqual([
+      expect(result.activities.map((a) => a.name)).toEqual([
         "com.example.TopActivity",
-        "com.example.MainActivity"
+        "com.example.MainActivity",
       ]);
-      expect(result.activities.map(a => a.taskId)).toEqual([5, 5]);
+      expect(result.activities.map((a) => a.taskId)).toEqual([5, 5]);
     });
 
     test("API 33 shape ('...}' then ' tNN}') parses the component and its own task id", async () => {
@@ -221,12 +223,12 @@ describe("GetBackStack real-output parsing (#4197)", () => {
       * Hist  #0: ActivityRecord{3177c30 u0 com.google.android.apps.nexuslauncher/.NexusLauncherActivity} t7}
 `);
 
-      expect(result.activities.map(a => a.name)).toEqual([
+      expect(result.activities.map((a) => a.name)).toEqual([
         "com.android.settings.Settings",
-        "com.google.android.apps.nexuslauncher.NexusLauncherActivity"
+        "com.google.android.apps.nexuslauncher.NexusLauncherActivity",
       ]);
-      expect(result.activities.map(a => a.taskId)).toEqual([8, 7]);
-      expect(result.activities.map(a => a.isTaskRoot)).toEqual([false, true]);
+      expect(result.activities.map((a) => a.taskId)).toEqual([8, 7]);
+      expect(result.activities.map((a) => a.isTaskRoot)).toEqual([false, true]);
     });
 
     test("an activity with no task ('t??') falls back to the enclosing task", async () => {
@@ -272,7 +274,7 @@ Display #0 (activities from top to bottom):
         rootOfTask=false task=Task{d19dee2 #61 type=standard A=10164:com.example}
 `);
 
-      expect(result.activities.map(a => a.isTaskRoot)).toEqual([true, false]);
+      expect(result.activities.map((a) => a.isTaskRoot)).toEqual([true, false]);
     });
 
     test("a rootOfTask value never bleeds into the following record", async () => {
@@ -290,7 +292,7 @@ Display #0 (activities from top to bottom):
         packageName=com.example processName=com.example
 `);
 
-      expect(result.activities.map(a => a.isTaskRoot)).toEqual([false, true]);
+      expect(result.activities.map((a) => a.isTaskRoot)).toEqual([false, true]);
     });
 
     test("an unrecognized Hist row closes the previous record's block", async () => {

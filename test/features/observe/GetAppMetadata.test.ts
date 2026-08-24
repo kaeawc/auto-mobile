@@ -3,13 +3,13 @@ import {
   GetAppMetadata,
   IosAppMetadataSource,
   findAppByBundleId,
-  iosRecordToMetadata
+  iosRecordToMetadata,
 } from "../../../src/features/observe/GetAppMetadata";
 import type { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 
 const fakeAdbFactory = (fakeAdb: FakeAdbExecutor) => ({ create: () => fakeAdb as any });
-const nullAdbFactory = { create: () => ({} as any) };
+const nullAdbFactory = { create: () => ({}) as any };
 
 // --- Android tests ---
 
@@ -17,7 +17,7 @@ describe("GetAppMetadata (Android)", () => {
   const androidDevice: BootedDevice = {
     deviceId: "emulator-5554",
     name: "Pixel 7",
-    platform: "android"
+    platform: "android",
   };
 
   let fakeAdb: FakeAdbExecutor;
@@ -35,12 +35,18 @@ describe("GetAppMetadata (Android)", () => {
         "    versionName=1.2.3",
         "    codePath=/data/app/~~random/com.example.app-xyz==",
         "    firstInstallTime=2024-01-15 10:30:00",
-        "    lastUpdateTime=2024-06-20 14:45:00"
+        "    lastUpdateTime=2024-06-20 14:45:00",
       ].join("\n"),
       stderr: "",
-      toString() { return this.stdout; },
-      trim() { return this.stdout.trim(); },
-      includes(s: string) { return this.stdout.includes(s); }
+      toString() {
+        return this.stdout;
+      },
+      trim() {
+        return this.stdout.trim();
+      },
+      includes(s: string) {
+        return this.stdout.includes(s);
+      },
     });
 
     const metadata = new GetAppMetadata(androidDevice, fakeAdbFactory(fakeAdb));
@@ -60,9 +66,15 @@ describe("GetAppMetadata (Android)", () => {
     fakeAdb.setCommandResponse("shell dumpsys package com.missing.app", {
       stdout: "Unable to find package: com.missing.app",
       stderr: "",
-      toString() { return this.stdout; },
-      trim() { return this.stdout.trim(); },
-      includes(s: string) { return this.stdout.includes(s); }
+      toString() {
+        return this.stdout;
+      },
+      trim() {
+        return this.stdout.trim();
+      },
+      includes(s: string) {
+        return this.stdout.includes(s);
+      },
     });
 
     const metadata = new GetAppMetadata(androidDevice, fakeAdbFactory(fakeAdb));
@@ -84,9 +96,15 @@ describe("GetAppMetadata (Android)", () => {
     fakeAdb.setCommandResponse("shell dumpsys package com.empty.app", {
       stdout: "Packages:\n  Package [com.empty.app]:\n    flags=0\n",
       stderr: "",
-      toString() { return this.stdout; },
-      trim() { return this.stdout.trim(); },
-      includes(s: string) { return this.stdout.includes(s); }
+      toString() {
+        return this.stdout;
+      },
+      trim() {
+        return this.stdout.trim();
+      },
+      includes(s: string) {
+        return this.stdout.includes(s);
+      },
     });
 
     const metadata = new GetAppMetadata(androidDevice, fakeAdbFactory(fakeAdb));
@@ -102,12 +120,18 @@ describe("GetAppMetadata (Android)", () => {
         "  Package [com.example.app]:",
         "    versionCode=10 minSdk=21 targetSdk=34",
         "    versionName=2.0.0",
-        "    codePath=/data/app/com.example.app"
+        "    codePath=/data/app/com.example.app",
       ].join("\n"),
       stderr: "",
-      toString() { return this.stdout; },
-      trim() { return this.stdout.trim(); },
-      includes(s: string) { return this.stdout.includes(s); }
+      toString() {
+        return this.stdout;
+      },
+      trim() {
+        return this.stdout.trim();
+      },
+      includes(s: string) {
+        return this.stdout.includes(s);
+      },
     });
 
     const metadata = new GetAppMetadata(androidDevice, fakeAdbFactory(fakeAdb));
@@ -127,7 +151,7 @@ describe("GetAppMetadata (iOS simulator)", () => {
   const iosSimDevice: BootedDevice = {
     deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
     name: "iPhone 15",
-    platform: "ios"
+    platform: "ios",
   };
 
   let fakeIosSource: FakeIosMetadataSource;
@@ -142,8 +166,8 @@ describe("GetAppMetadata (iOS simulator)", () => {
         bundleId: "com.example.app",
         CFBundleShortVersionString: "3.1.0",
         CFBundleVersion: "456",
-        bundlePath: "/Library/Developer/CoreSimulator/Devices/.../com.example.app.app"
-      }
+        bundlePath: "/Library/Developer/CoreSimulator/Devices/.../com.example.app.app",
+      },
     ]);
 
     const metadata = new GetAppMetadata(iosSimDevice, nullAdbFactory, fakeIosSource);
@@ -172,8 +196,8 @@ describe("GetAppMetadata (iOS simulator)", () => {
         CFBundleIdentifier: "com.alt.app",
         bundleShortVersionString: "1.0",
         bundleVersion: "100",
-        bundleContainer: "/some/path"
-      }
+        bundleContainer: "/some/path",
+      },
     ]);
 
     const metadata = new GetAppMetadata(iosSimDevice, nullAdbFactory, fakeIosSource);
@@ -192,7 +216,7 @@ describe("GetAppMetadata (iOS physical)", () => {
   const iosPhysicalDevice: BootedDevice = {
     deviceId: "00008101-001A2B3C4D5E6F78",
     name: "Jason's iPhone",
-    platform: "ios"
+    platform: "ios",
   };
 
   let fakeIosSource: FakeIosMetadataSource;
@@ -206,7 +230,7 @@ describe("GetAppMetadata (iOS physical)", () => {
       bundleIdentifier: "com.example.app",
       CFBundleShortVersionString: "5.0.1",
       CFBundleVersion: "789",
-      bundlePath: "/private/var/containers/Bundle/Application/.../MyApp.app"
+      bundlePath: "/private/var/containers/Bundle/Application/.../MyApp.app",
     });
 
     const metadata = new GetAppMetadata(iosPhysicalDevice, nullAdbFactory, fakeIosSource);
@@ -252,7 +276,7 @@ describe("iosRecordToMetadata", () => {
     const result = iosRecordToMetadata("com.test", {
       CFBundleShortVersionString: "1.2.3",
       CFBundleVersion: "45",
-      bundlePath: "/path/to/app"
+      bundlePath: "/path/to/app",
     });
 
     expect(result).toEqual({
@@ -260,7 +284,7 @@ describe("iosRecordToMetadata", () => {
       platform: "ios",
       versionName: "1.2.3",
       buildNumber: "45",
-      installPath: "/path/to/app"
+      installPath: "/path/to/app",
     });
   });
 
@@ -291,7 +315,10 @@ class FakeIosMetadataSource implements IosAppMetadataSource {
     return this.apps;
   }
 
-  async getPhysicalDeviceAppInfo(_deviceId: string, bundleId: string): Promise<Record<string, unknown> | null> {
+  async getPhysicalDeviceAppInfo(
+    _deviceId: string,
+    bundleId: string,
+  ): Promise<Record<string, unknown> | null> {
     return this.physicalApps.get(bundleId) ?? null;
   }
 }

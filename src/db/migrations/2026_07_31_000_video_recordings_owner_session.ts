@@ -35,8 +35,5 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 export async function down(db: Kysely<unknown>): Promise<void> {
   await db.schema.dropIndex("idx_video_recordings_owner_session").execute();
 
-  await db.schema
-    .alterTable("video_recordings")
-    .dropColumn("owner_session_uuid")
-    .execute();
+  await db.schema.alterTable("video_recordings").dropColumn("owner_session_uuid").execute();
 }

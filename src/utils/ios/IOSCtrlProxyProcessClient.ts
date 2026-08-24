@@ -34,7 +34,7 @@ export class IOSCtrlProxyProcessClient {
   constructor(
     private readonly host: HostCommandExecutor = new DefaultHostCommandExecutor(),
     private readonly timer: Timer = defaultTimer,
-    options: ProcessClientOptions = {}
+    options: ProcessClientOptions = {},
   ) {
     this.releaseAttempts = options.releaseAttempts ?? 4;
     this.releaseGraceMs = options.releaseGraceMs ?? 250;
@@ -42,7 +42,7 @@ export class IOSCtrlProxyProcessClient {
 
   async findExternalXcodebuildCtrlProxyProcess(
     deviceId: string,
-    excludedPid?: number
+    excludedPid?: number,
   ): Promise<CtrlProxyExternalProcess | null> {
     const pids = await this.findPids("xcodebuild", true);
     for (const pid of pids) {
@@ -59,7 +59,13 @@ export class IOSCtrlProxyProcessClient {
       if (!this.hasDeviceIdentity(`${process.command} ${process.environment ?? ""}`, deviceId)) {
         continue;
       }
-      return { pid, port: this.parseCtrlProxyPort(process.command) ?? this.parseCtrlProxyPort(process.environment ?? "") ?? IOSCtrlProxyProcessClient.DEFAULT_PORT };
+      return {
+        pid,
+        port:
+          this.parseCtrlProxyPort(process.command) ??
+          this.parseCtrlProxyPort(process.environment ?? "") ??
+          IOSCtrlProxyProcessClient.DEFAULT_PORT,
+      };
     }
     return null;
   }
@@ -77,11 +83,20 @@ export class IOSCtrlProxyProcessClient {
 
   async findListeningPids(port: number): Promise<number[]> {
     try {
-      const { stdout } = await this.host.executeCommand("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fp"]);
-      return [...new Set(stdout.split("\n").flatMap(line => {
-        const match = line.match(/^p(\d+)$/);
-        return match ? [Number.parseInt(match[1], 10)] : [];
-      }))];
+      const { stdout } = await this.host.executeCommand("lsof", [
+        "-nP",
+        `-iTCP:${port}`,
+        "-sTCP:LISTEN",
+        "-Fp",
+      ]);
+      return [
+        ...new Set(
+          stdout.split("\n").flatMap((line) => {
+            const match = line.match(/^p(\d+)$/);
+            return match ? [Number.parseInt(match[1], 10)] : [];
+          }),
+        ),
+      ];
     } catch (error) {
       logger.debug(`[IOSCtrlProxy] Failed to find listener PIDs for port ${port}: ${error}`);
       return [];
@@ -93,7 +108,7 @@ export class IOSCtrlProxyProcessClient {
       const { stdout } = await this.executeCommand(
         "ps",
         ["-p", String(pid), "-o", "ppid=", "-o", "args="],
-        deadline
+        deadline,
       );
       const output = stdout.trim();
       if (!output) {
@@ -101,7 +116,9 @@ export class IOSCtrlProxyProcessClient {
       }
       const environment = await this.getProcessEnvironment(pid, deadline);
       const match = output.match(/^(\d+)\s+([\s\S]+)$/);
-      return match ? { ppid: Number.parseInt(match[1], 10), command: match[2], environment } : { command: output, environment };
+      return match
+        ? { ppid: Number.parseInt(match[1], 10), command: match[2], environment }
+        : { command: output, environment };
     } catch (error) {
       logger.debug(`[IOSCtrlProxy] Failed to inspect PID ${pid}: ${error}`);
       return null;
@@ -123,12 +140,15 @@ export class IOSCtrlProxyProcessClient {
   }
 
   async isOwnedRunnerAlive(pid: number, deviceId: string): Promise<boolean> {
-    if (!await this.isRunning(pid)) {
+    if (!(await this.isRunning(pid))) {
       return false;
     }
     const process = await this.getProcessInfo(pid);
-    return !!process && this.isCtrlProxyRunnerCommand(process.command) &&
-      this.hasDeviceIdentity(`${process.command} ${process.environment ?? ""}`, deviceId);
+    return (
+      !!process &&
+      this.isCtrlProxyRunnerCommand(process.command) &&
+      this.hasDeviceIdentity(`${process.command} ${process.environment ?? ""}`, deviceId)
+    );
   }
 
   async findDescendantProcessIds(rootPid: number, deadline?: number): Promise<number[]> {
@@ -137,7 +157,9 @@ export class IOSCtrlProxyProcessClient {
       const children = new Map<number, number[]>();
       for (const line of stdout.trim().split("\n")) {
         const match = line.trim().match(/^(\d+)\s+(\d+)$/);
-        if (!match) {continue;}
+        if (!match) {
+          continue;
+        }
         const pid = Number(match[1]);
         const parent = Number(match[2]);
         children.set(parent, [...(children.get(parent) ?? []), pid]);
@@ -147,7 +169,9 @@ export class IOSCtrlProxyProcessClient {
       const visited = new Set<number>();
       while (queue.length > 0) {
         const pid = queue.shift()!;
-        if (visited.has(pid)) {continue;}
+        if (visited.has(pid)) {
+          continue;
+        }
         visited.add(pid);
         descendants.push(pid);
         queue.push(...(children.get(pid) ?? []));
@@ -164,7 +188,9 @@ export class IOSCtrlProxyProcessClient {
     const targets = [...descendants].reverse().concat(pid);
     await this.signalGroup(pid, "TERM", deadline);
     await this.signalPids(targets, "TERM", deadline);
-    if (await this.waitForExit([pid, ...descendants], deadline)) {return;}
+    if (await this.waitForExit([pid, ...descendants], deadline)) {
+      return;
+    }
     await this.signalGroup(pid, "KILL", deadline);
     await this.signalPids(targets, "KILL", deadline);
     await this.waitForExit([pid, ...descendants], deadline);
@@ -172,17 +198,29 @@ export class IOSCtrlProxyProcessClient {
 
   async terminateProcess(pid: number): Promise<void> {
     await this.signalPids([pid], "TERM");
-    if (await this.waitForExit([pid])) {return;}
+    if (await this.waitForExit([pid])) {
+      return;
+    }
     await this.signalPids([pid], "KILL");
     await this.waitForExit([pid]);
   }
 
   hasDeviceIdentity(text: string, deviceId: string): boolean {
-    return text.includes(`id=${deviceId}`) || text.includes(`AUTOMOBILE_DEVICE_ID=${deviceId}`) || text.includes(`SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=${deviceId}`);
+    return (
+      text.includes(`id=${deviceId}`) ||
+      text.includes(`AUTOMOBILE_DEVICE_ID=${deviceId}`) ||
+      text.includes(`SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=${deviceId}`)
+    );
   }
 
   isCtrlProxyRunnerCommand(command: string): boolean {
-    return command.includes("CtrlProxy") && (command.includes("xcodebuild") || command.includes("CtrlProxyUITests") || command.includes("CtrlProxyUITests-Runner") || command.includes(".xctestrun"));
+    return (
+      command.includes("CtrlProxy") &&
+      (command.includes("xcodebuild") ||
+        command.includes("CtrlProxyUITests") ||
+        command.includes("CtrlProxyUITests-Runner") ||
+        command.includes(".xctestrun"))
+    );
   }
 
   isDirectCtrlProxyRunnerCommand(command: string): boolean {
@@ -191,17 +229,34 @@ export class IOSCtrlProxyProcessClient {
 
   isDaemonManagedSimulatorXcodebuildProcess(process: CtrlProxyProcessInfo): boolean {
     const command = process.command;
-    const shape = command.includes("xcodebuild") && command.includes("test-without-building") && command.includes("-xctestrun") && command.includes("platform=iOS Simulator") && command.includes("-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService") && !command.includes("CTRL_PROXY_IOS_PORT=") && !command.includes("AUTOMOBILE_DEVICE_ID=");
-    return shape && (process.ppid === 1 || !this.hasExternalXcodebuildIdentity(process.environment ?? ""));
+    const shape =
+      command.includes("xcodebuild") &&
+      command.includes("test-without-building") &&
+      command.includes("-xctestrun") &&
+      command.includes("platform=iOS Simulator") &&
+      command.includes("-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService") &&
+      !command.includes("CTRL_PROXY_IOS_PORT=") &&
+      !command.includes("AUTOMOBILE_DEVICE_ID=");
+    return (
+      shape &&
+      (process.ppid === 1 || !this.hasExternalXcodebuildIdentity(process.environment ?? ""))
+    );
   }
 
   private async findPids(pattern: string, exact: boolean, deadline?: number): Promise<number[]> {
     try {
-      const { stdout } = await this.executeCommand("pgrep", [exact ? "-x" : "-f", pattern], deadline);
-      return stdout.trim().split("\n").flatMap(line => {
-        const pid = Number.parseInt(line, 10);
-        return Number.isNaN(pid) ? [] : [pid];
-      });
+      const { stdout } = await this.executeCommand(
+        "pgrep",
+        [exact ? "-x" : "-f", pattern],
+        deadline,
+      );
+      return stdout
+        .trim()
+        .split("\n")
+        .flatMap((line) => {
+          const pid = Number.parseInt(line, 10);
+          return Number.isNaN(pid) ? [] : [pid];
+        });
     } catch (error) {
       logger.debug(`[IOSCtrlProxy] Failed to enumerate ${pattern} PIDs: ${error}`);
       return [];
@@ -213,7 +268,7 @@ export class IOSCtrlProxyProcessClient {
       const { stdout } = await this.executeCommand(
         "ps",
         ["eww", "-p", String(pid), "-o", "command="],
-        deadline
+        deadline,
       );
       return stdout.trim() || undefined;
     } catch (error) {
@@ -228,10 +283,18 @@ export class IOSCtrlProxyProcessClient {
   }
 
   private hasExternalXcodebuildIdentity(environment: string): boolean {
-    return environment.includes("CTRL_PROXY_IOS_PORT=") || environment.includes("AUTOMOBILE_DEVICE_ID=") || environment.includes("SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=");
+    return (
+      environment.includes("CTRL_PROXY_IOS_PORT=") ||
+      environment.includes("AUTOMOBILE_DEVICE_ID=") ||
+      environment.includes("SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID=")
+    );
   }
 
-  private async signalGroup(pid: number, signal: "TERM" | "KILL", deadline?: number): Promise<void> {
+  private async signalGroup(
+    pid: number,
+    signal: "TERM" | "KILL",
+    deadline?: number,
+  ): Promise<void> {
     try {
       await this.executeCommand("kill", [`-${signal}`, "--", `-${pid}`], deadline);
     } catch (error) {
@@ -239,7 +302,11 @@ export class IOSCtrlProxyProcessClient {
     }
   }
 
-  private async signalPids(pids: number[], signal: "TERM" | "KILL", deadline?: number): Promise<void> {
+  private async signalPids(
+    pids: number[],
+    signal: "TERM" | "KILL",
+    deadline?: number,
+  ): Promise<void> {
     for (const pid of pids) {
       try {
         await this.executeCommand("kill", [`-${signal}`, String(pid)], deadline);
@@ -251,16 +318,22 @@ export class IOSCtrlProxyProcessClient {
 
   private async waitForExit(pids: number[], deadline?: number): Promise<boolean> {
     for (let attempt = 0; attempt < this.releaseAttempts; attempt++) {
-      if (await this.haveExited(pids, deadline)) {return true;}
+      if (await this.haveExited(pids, deadline)) {
+        return true;
+      }
       const delayMs = this.remainingTimeoutMs(deadline);
-      await this.timer.sleep(delayMs === undefined ? this.releaseGraceMs : Math.min(this.releaseGraceMs, delayMs));
+      await this.timer.sleep(
+        delayMs === undefined ? this.releaseGraceMs : Math.min(this.releaseGraceMs, delayMs),
+      );
     }
     return this.haveExited(pids, deadline);
   }
 
   private async haveExited(pids: number[], deadline?: number): Promise<boolean> {
     for (const pid of pids) {
-      if (await this.isRunning(pid, deadline)) {return false;}
+      if (await this.isRunning(pid, deadline)) {
+        return false;
+      }
     }
     return true;
   }
@@ -268,10 +341,14 @@ export class IOSCtrlProxyProcessClient {
   private async executeCommand(
     file: string,
     args: string[],
-    deadline?: number
+    deadline?: number,
   ): Promise<Awaited<ReturnType<HostCommandExecutor["executeCommand"]>>> {
     const timeoutMs = this.remainingTimeoutMs(deadline);
-    return this.host.executeCommand(file, args, timeoutMs === undefined ? undefined : { timeoutMs });
+    return this.host.executeCommand(
+      file,
+      args,
+      timeoutMs === undefined ? undefined : { timeoutMs },
+    );
   }
 
   private remainingTimeoutMs(deadline: number | undefined): number | undefined {

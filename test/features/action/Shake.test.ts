@@ -2,7 +2,11 @@ import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { Shake } from "../../../src/features/action/Shake";
 import { BootedDevice, ObserveResult, ShakeOptions } from "../../../src/models";
 
-const testDevice: BootedDevice = { name: "test-device", platform: "android", deviceId: "emulator-5554" };
+const testDevice: BootedDevice = {
+  name: "test-device",
+  platform: "android",
+  deviceId: "emulator-5554",
+};
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -24,7 +28,7 @@ describe("Shake", () => {
     timestamp: 1700000000000,
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} }
+    viewHierarchy: { node: {} },
   });
 
   beforeEach(() => {
@@ -38,7 +42,11 @@ describe("Shake", () => {
 
     // Configure default responses
     fakeWindow.configureCachedActiveWindow(null);
-    fakeWindow.configureActiveWindow({ appId: "com.test.app", activityName: "MainActivity", layoutSeqSum: 123 });
+    fakeWindow.configureActiveWindow({
+      appId: "com.test.app",
+      activityName: "MainActivity",
+      layoutSeqSum: 123,
+    });
 
     // Set up default observe screen responses with valid viewHierarchy
     const defaultObserveResult = createObserveResult();
@@ -54,12 +62,32 @@ describe("Shake", () => {
     test.each([
       { name: "defaults", options: undefined, duration: 1000, intensity: 100 },
       { name: "a custom duration", options: { duration: 100 }, duration: 100, intensity: 100 },
-      { name: "a custom intensity", options: { duration: 100, intensity: 200 }, duration: 100, intensity: 200 },
-      { name: "custom duration and intensity", options: { duration: 100, intensity: 150 }, duration: 100, intensity: 150 },
+      {
+        name: "a custom intensity",
+        options: { duration: 100, intensity: 200 },
+        duration: 100,
+        intensity: 200,
+      },
+      {
+        name: "custom duration and intensity",
+        options: { duration: 100, intensity: 150 },
+        duration: 100,
+        intensity: 150,
+      },
       { name: "an empty options object", options: {}, duration: 1000, intensity: 100 },
       { name: "a zero duration", options: { duration: 0 }, duration: 0, intensity: 100 },
-      { name: "a zero intensity", options: { duration: 100, intensity: 0 }, duration: 100, intensity: 0 }
-    ] satisfies Array<{ name: string; options: ShakeOptions | undefined; duration: number; intensity: number }>)("executes shake with $name", async ({ options, duration, intensity }) => {
+      {
+        name: "a zero intensity",
+        options: { duration: 100, intensity: 0 },
+        duration: 100,
+        intensity: 0,
+      },
+    ] satisfies Array<{
+      name: string;
+      options: ShakeOptions | undefined;
+      duration: number;
+      intensity: number;
+    }>)("executes shake with $name", async ({ options, duration, intensity }) => {
       const result = await shake.execute(options);
 
       expect(result.success).toBe(true);
@@ -67,12 +95,19 @@ describe("Shake", () => {
       expect(result.intensity).toBe(intensity);
       expect(result.observation).toBeDefined();
       expect(fakeTimer.wasSleepCalled(duration)).toBe(true);
-      expect(fakeAdb.wasCommandExecuted(`emu sensor set acceleration ${intensity}:${intensity}:${intensity}`)).toBe(true);
+      expect(
+        fakeAdb.wasCommandExecuted(
+          `emu sensor set acceleration ${intensity}:${intensity}:${intensity}`,
+        ),
+      ).toBe(true);
       expect(fakeAdb.wasCommandExecuted("emu sensor set acceleration 0:0:0")).toBe(true);
     });
 
     test("should work with progress callback", async () => {
-      fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", {
+        stdout: "",
+        stderr: "",
+      });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
       fakeObserveScreen.setObserveResult(mockObservation);
@@ -92,14 +127,16 @@ describe("Shake", () => {
       const iosSimulator: BootedDevice = {
         name: "iPhone 16 Simulator",
         platform: "ios",
-        deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
+        deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
       };
       const iosShake = new Shake(iosSimulator, fakeAdb, fakeTimer);
       (iosShake as any).observeScreen = fakeObserveScreen;
       (iosShake as any).window = fakeWindow;
       (iosShake as any).awaitIdle = fakeAwaitIdle;
       const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIOSCtrlProxy as any);
+      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIOSCtrlProxy as any,
+      );
 
       try {
         const result = await iosShake.execute({ duration: 250, intensity: 77 });
@@ -120,7 +157,7 @@ describe("Shake", () => {
       const physicalIosDevice: BootedDevice = {
         name: "Jason's iPhone",
         platform: "ios",
-        deviceId: "00008110-0012345678901234"
+        deviceId: "00008110-0012345678901234",
       };
       const iosShake = new Shake(physicalIosDevice, fakeAdb, fakeTimer);
       const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance");
@@ -143,7 +180,7 @@ describe("Shake", () => {
       const iosSimulator: BootedDevice = {
         name: "iPhone 16 Simulator",
         platform: "ios",
-        deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
+        deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
       };
       const iosShake = new Shake(iosSimulator, fakeAdb, fakeTimer);
       (iosShake as any).observeScreen = fakeObserveScreen;
@@ -151,7 +188,9 @@ describe("Shake", () => {
       (iosShake as any).awaitIdle = fakeAwaitIdle;
       const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
       fakeIOSCtrlProxy.setFailureMode("shake", new Error("runner disconnected"));
-      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIOSCtrlProxy as any);
+      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIOSCtrlProxy as any,
+      );
 
       try {
         const result = await iosShake.execute({ duration: 250, intensity: 77 });
@@ -168,7 +207,10 @@ describe("Shake", () => {
     });
 
     test("should handle ADB command failure during shake start", async () => {
-      fakeAdb.setCommandError("emu sensor set acceleration 100:100:100", new Error("shake start failed"));
+      fakeAdb.setCommandError(
+        "emu sensor set acceleration 100:100:100",
+        new Error("shake start failed"),
+      );
 
       const result = await shake.execute({ duration: 100 });
 
@@ -194,7 +236,10 @@ describe("Shake", () => {
 
   describe("timing", () => {
     test("should respect the duration timing", async () => {
-      fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", {
+        stdout: "",
+        stderr: "",
+      });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
       fakeObserveScreen.setObserveResult(mockObservation);
@@ -215,7 +260,10 @@ describe("Shake", () => {
 
   describe("edge cases", () => {
     test("should handle very high intensity values", async () => {
-      fakeAdb.setCommandResponse("emu sensor set acceleration 9999:9999:9999", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu sensor set acceleration 9999:9999:9999", {
+        stdout: "",
+        stderr: "",
+      });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
       fakeObserveScreen.setObserveResult(mockObservation);
@@ -227,11 +275,16 @@ describe("Shake", () => {
       expect(result.intensity).toBe(9999);
 
       const executedCommands = fakeAdb.getExecutedCommands();
-      expect(executedCommands.some(cmd => cmd.includes("emu sensor set acceleration 9999:9999:9999"))).toBe(true);
+      expect(
+        executedCommands.some((cmd) => cmd.includes("emu sensor set acceleration 9999:9999:9999")),
+      ).toBe(true);
     });
 
     test("should handle very long duration", async () => {
-      fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", {
+        stdout: "",
+        stderr: "",
+      });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
       fakeObserveScreen.setObserveResult(mockObservation);
@@ -249,7 +302,10 @@ describe("Shake", () => {
     });
 
     test("should handle negative values gracefully", async () => {
-      fakeAdb.setCommandResponse("emu sensor set acceleration -50:-50:-50", { stdout: "", stderr: "" });
+      fakeAdb.setCommandResponse("emu sensor set acceleration -50:-50:-50", {
+        stdout: "",
+        stderr: "",
+      });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
       fakeObserveScreen.setObserveResult(mockObservation);

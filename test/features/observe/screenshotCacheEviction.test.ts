@@ -37,8 +37,8 @@ describe("selectScreenshotsToEvict", () => {
   test("evicts only the old files, protecting recent ones, even if still over limit", () => {
     const now = 1_000_000;
     const files = [
-      { path: "old", size: 60 * MB, mtimeMs: now - 60_000 },     // evictable
-      { path: "recent", size: 60 * MB, mtimeMs: now - 1_000 },   // protected
+      { path: "old", size: 60 * MB, mtimeMs: now - 60_000 }, // evictable
+      { path: "recent", size: 60 * MB, mtimeMs: now - 1_000 }, // protected
     ];
     // total 120MB, limit 50MB. Only "old" can go; "recent" stays even though we
     // remain over limit (correctness over disk bound for in-flight safety).

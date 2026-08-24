@@ -68,26 +68,26 @@ interface XcodeSigningDependencies {
 const plistParser = new Parser({
   explicitChildren: true,
   preserveChildrenOrder: true,
-  explicitRoot: false
+  explicitRoot: false,
 });
 
 type PlistNode = {
   "#name": string;
-  "_": string;
-  "$$"?: PlistNode[];
+  _: string;
+  $$?: PlistNode[];
 };
 
 const createDefaultDependencies = (): XcodeSigningDependencies => ({
   platform: () => process.platform,
   securityClient: new SecurityClient(),
   xcodebuild: new XcodebuildClient(),
-  readDir: async path => fs.readdir(path),
-  readFile: async path => fs.readFile(path, "utf-8"),
-  stat: async path => fs.stat(path),
+  readDir: async (path) => fs.readdir(path),
+  readFile: async (path) => fs.readFile(path, "utf-8"),
+  stat: async (path) => fs.stat(path),
   writeFile: async (path, data) => fs.writeFile(path, data, "utf-8"),
-  mkdir: async path => fs.mkdir(path, { recursive: true }),
+  mkdir: async (path) => fs.mkdir(path, { recursive: true }),
   homedir,
-  now: () => Date.now()
+  now: () => Date.now(),
 });
 
 const parsePlistValue = (node: PlistNode | undefined): unknown => {
@@ -110,7 +110,7 @@ const parsePlistValue = (node: PlistNode | undefined): unknown => {
       return result;
     }
     case "array":
-      return (node.$$ ?? []).map(child => parsePlistValue(child));
+      return (node.$$ ?? []).map((child) => parsePlistValue(child));
     case "string":
     case "data":
       return node._ ?? "";
@@ -129,7 +129,7 @@ const parsePlistValue = (node: PlistNode | undefined): unknown => {
 };
 
 const parsePlist = async (xml: string): Promise<unknown> => {
-  const parsed = await plistParser.parseStringPromise(xml) as PlistNode;
+  const parsed = (await plistParser.parseStringPromise(xml)) as PlistNode;
   const root = parsed["#name"] === "plist" ? parsed.$$?.[0] : parsed;
   return parsePlistValue(root);
 };
@@ -143,7 +143,7 @@ const fingerprintFromCertificate = (base64Der: string): CertificateInfo | null =
       fingerprint,
       validTo: new Date(cert.validTo),
       subject: cert.subject,
-      issuer: cert.issuer
+      issuer: cert.issuer,
     };
   } catch (error) {
     logger.warn(`[XcodeSigning] Failed to parse certificate: ${errorMessage(error)}`);
@@ -151,7 +151,11 @@ const fingerprintFromCertificate = (base64Der: string): CertificateInfo | null =
   }
 };
 
-const resolveProfileType = (entitlements: Record<string, unknown>, provisionsAllDevices: boolean, provisionedDevices: string[] | null): ProvisioningProfile["profileType"] => {
+const resolveProfileType = (
+  entitlements: Record<string, unknown>,
+  provisionsAllDevices: boolean,
+  provisionedDevices: string[] | null,
+): ProvisioningProfile["profileType"] => {
   if (provisionsAllDevices) {
     return "enterprise";
   }
@@ -173,8 +177,8 @@ const isAppleIssuer = (certificate: CertificateInfo): boolean => {
 };
 
 const formatBuildSettingValue = (value: string): string => {
-  if (value.includes("\"") || value.includes("\\")) {
-    const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+  if (value.includes('"') || value.includes("\\")) {
+    const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
     return `"${escaped}"`;
   }
   if (value.includes(" ") || value.includes("\t")) {
@@ -183,13 +187,14 @@ const formatBuildSettingValue = (value: string): string => {
   return value;
 };
 
-const buildSetting = (key: string, value: string): string => `${key}=${formatBuildSettingValue(value)}`;
+const buildSetting = (key: string, value: string): string =>
+  `${key}=${formatBuildSettingValue(value)}`;
 
 const buildSettingsForManual = (
   teamId: string | undefined,
   identity: SigningIdentity | undefined,
   profile: ProvisioningProfile,
-  entitlementsPath?: string
+  entitlementsPath?: string,
 ): string[] => {
   const settings: string[] = ["CODE_SIGN_STYLE=Manual"];
   if (teamId) {
@@ -233,7 +238,7 @@ const serializePlist = (value: unknown, indent: string = ""): string => {
     return `${indent}<date>${value.toISOString()}</date>`;
   }
   if (Array.isArray(value)) {
-    const items = value.map(item => serializePlist(item, nextIndent)).join("\n");
+    const items = value.map((item) => serializePlist(item, nextIndent)).join("\n");
     return `${indent}<array>\n${items}\n${indent}</array>`;
   }
   if (typeof value === "object") {
@@ -251,11 +256,11 @@ const serializePlist = (value: unknown, indent: string = ""): string => {
 const entitlementsPlist = (entitlements: Record<string, unknown>): string => {
   const body = serializePlist(entitlements, "  ");
   return [
-    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
-    "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">",
-    "<plist version=\"1.0\">",
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    '<plist version="1.0">',
     body,
-    "</plist>"
+    "</plist>",
   ].join("\n");
 };
 
@@ -301,7 +306,7 @@ export class XcodeSigningManager {
 
   public async detectTeamIdsFromXcode(): Promise<string[]> {
     const projectPath = resolvePathFromDaemonLaunchWorkingDirectory(
-      join("ios", "control-proxy", "CtrlProxy.xcodeproj")
+      join("ios", "control-proxy", "CtrlProxy.xcodeproj"),
     );
     try {
       if (this.dependencies.platform() !== "darwin") {
@@ -313,7 +318,7 @@ export class XcodeSigningManager {
 
       const result = await this.dependencies.xcodebuild.executeCommand(
         ["-showBuildSettings", "-project", projectPath, "-scheme", "CtrlProxyApp"],
-        { timeoutMs: 30000, maxBuffer: 10 * 1024 * 1024 }
+        { timeoutMs: 30000, maxBuffer: 10 * 1024 * 1024 },
       );
       const teams = new Set<string>();
       for (const line of result.stdout.split("\n")) {
@@ -338,15 +343,15 @@ export class XcodeSigningManager {
     const [profiles, identities, detectedTeams] = await Promise.all([
       this.listProvisioningProfiles(),
       this.listSigningIdentities(),
-      this.detectTeamIdsFromXcode()
+      this.detectTeamIdsFromXcode(),
     ]);
 
     const teamIds = preferredTeamIds.length > 0 ? preferredTeamIds : detectedTeams;
 
     let selectedProfile: ProvisioningProfile | undefined;
     if (preferredProfile) {
-      selectedProfile = profiles.find(profile =>
-        profile.uuid === preferredProfile || profile.name === preferredProfile
+      selectedProfile = profiles.find(
+        (profile) => profile.uuid === preferredProfile || profile.name === preferredProfile,
       );
       if (!selectedProfile) {
         warnings.push(`Requested provisioning profile '${preferredProfile}' not found`);
@@ -360,14 +365,16 @@ export class XcodeSigningManager {
     if (selectedProfile && !selectedProfile.provisionsAllDevices) {
       const matchesDevice = selectedProfile.provisionedDevices?.includes(deviceUdid) ?? false;
       if (!matchesDevice) {
-        warnings.push(`Provisioning profile '${selectedProfile.name}' does not include device ${deviceUdid}`);
+        warnings.push(
+          `Provisioning profile '${selectedProfile.name}' does not include device ${deviceUdid}`,
+        );
       }
     }
-    const eligibleProfiles = profiles.filter(profile => {
+    const eligibleProfiles = profiles.filter((profile) => {
       if (profile.expirationDate.getTime() <= now) {
         return false;
       }
-      if (teamIds.length > 0 && !profile.teamIds.some(teamId => teamIds.includes(teamId))) {
+      if (teamIds.length > 0 && !profile.teamIds.some((teamId) => teamIds.includes(teamId))) {
         return false;
       }
       if (profile.provisionsAllDevices) {
@@ -377,16 +384,25 @@ export class XcodeSigningManager {
     });
 
     if (!selectedProfile) {
-      const profileOrder: ProvisioningProfile["profileType"][] = ["development", "ad-hoc", "enterprise", "distribution", "unknown"];
-      const sorted = eligibleProfiles.sort((a, b) => profileOrder.indexOf(a.profileType) - profileOrder.indexOf(b.profileType));
+      const profileOrder: ProvisioningProfile["profileType"][] = [
+        "development",
+        "ad-hoc",
+        "enterprise",
+        "distribution",
+        "unknown",
+      ];
+      const sorted = eligibleProfiles.sort(
+        (a, b) => profileOrder.indexOf(a.profileType) - profileOrder.indexOf(b.profileType),
+      );
       selectedProfile = sorted[0];
     }
 
     let selectedIdentity: SigningIdentity | undefined;
     if (preferredIdentity) {
-      selectedIdentity = identities.find(identity =>
-        identity.fingerprint === preferredIdentity.toUpperCase() ||
-        identity.name.includes(preferredIdentity)
+      selectedIdentity = identities.find(
+        (identity) =>
+          identity.fingerprint === preferredIdentity.toUpperCase() ||
+          identity.name.includes(preferredIdentity),
       );
       if (!selectedIdentity) {
         warnings.push(`Requested signing identity '${preferredIdentity}' not found`);
@@ -394,23 +410,31 @@ export class XcodeSigningManager {
     }
 
     if (!selectedIdentity && selectedProfile) {
-      const fingerprints = new Set(selectedProfile.developerCertificates.map(cert => cert.fingerprint));
-      selectedIdentity = identities.find(identity => fingerprints.has(identity.fingerprint));
+      const fingerprints = new Set(
+        selectedProfile.developerCertificates.map((cert) => cert.fingerprint),
+      );
+      selectedIdentity = identities.find((identity) => fingerprints.has(identity.fingerprint));
     }
 
     const resolvedTeamId = teamIds[0] ?? selectedProfile?.teamIds[0];
 
     if (selectedProfile && selectedIdentity) {
-      const matchingCert = selectedProfile.developerCertificates.find(cert => cert.fingerprint === selectedIdentity?.fingerprint);
+      const matchingCert = selectedProfile.developerCertificates.find(
+        (cert) => cert.fingerprint === selectedIdentity?.fingerprint,
+      );
       if (matchingCert && isCertificateExpired(matchingCert, now)) {
         warnings.push(`Signing certificate for '${selectedProfile.name}' is expired`);
       }
       if (matchingCert && !isAppleIssuer(matchingCert)) {
-        warnings.push(`Signing certificate issuer for '${selectedProfile.name}' is not an Apple CA`);
+        warnings.push(
+          `Signing certificate issuer for '${selectedProfile.name}' is not an Apple CA`,
+        );
       }
       const allowTask = selectedProfile.entitlements["get-task-allow"] === true;
       if (selectedProfile.profileType === "development" && !allowTask) {
-        warnings.push(`Development profile '${selectedProfile.name}' missing get-task-allow entitlement`);
+        warnings.push(
+          `Development profile '${selectedProfile.name}' missing get-task-allow entitlement`,
+        );
       }
       if (selectedProfile.profileType === "distribution" && allowTask) {
         warnings.push(`Distribution profile '${selectedProfile.name}' enables get-task-allow`);
@@ -422,9 +446,14 @@ export class XcodeSigningManager {
         identity: selectedIdentity,
         profile: selectedProfile,
         entitlementsPath,
-        buildSettings: buildSettingsForManual(resolvedTeamId, selectedIdentity, selectedProfile, entitlementsPath),
+        buildSettings: buildSettingsForManual(
+          resolvedTeamId,
+          selectedIdentity,
+          selectedProfile,
+          entitlementsPath,
+        ),
         allowProvisioningUpdates: false,
-        warnings
+        warnings,
       };
     }
 
@@ -441,7 +470,7 @@ export class XcodeSigningManager {
       teamId: resolvedTeamId,
       buildSettings,
       allowProvisioningUpdates: true,
-      warnings
+      warnings,
     };
   }
 
@@ -450,13 +479,17 @@ export class XcodeSigningManager {
     if (!raw) {
       return [];
     }
-    return raw.split(",").map(value => value.trim()).filter(Boolean);
+    return raw
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
   }
 
   private readProfilePreference(): string | null {
-    const value = process.env.AUTOMOBILE_IOS_PROFILE_UUID
-      ?? process.env.AUTOMOBILE_IOS_PROFILE_NAME
-      ?? process.env.AUTOMOBILE_IOS_PROFILE_SPECIFIER;
+    const value =
+      process.env.AUTOMOBILE_IOS_PROFILE_UUID ??
+      process.env.AUTOMOBILE_IOS_PROFILE_NAME ??
+      process.env.AUTOMOBILE_IOS_PROFILE_SPECIFIER;
     return value?.trim() || null;
   }
 
@@ -477,28 +510,41 @@ export class XcodeSigningManager {
       const name = String(data.Name ?? "");
       const teamIds = Array.isArray(data.TeamIdentifier) ? data.TeamIdentifier.map(String) : [];
       const teamName = typeof data.TeamName === "string" ? data.TeamName : undefined;
-      const expirationDate = data.ExpirationDate instanceof Date ? data.ExpirationDate : new Date(String(data.ExpirationDate ?? ""));
-      const creationDate = data.CreationDate instanceof Date ? data.CreationDate : data.CreationDate ? new Date(String(data.CreationDate)) : undefined;
+      const expirationDate =
+        data.ExpirationDate instanceof Date
+          ? data.ExpirationDate
+          : new Date(String(data.ExpirationDate ?? ""));
+      const creationDate =
+        data.CreationDate instanceof Date
+          ? data.CreationDate
+          : data.CreationDate
+            ? new Date(String(data.CreationDate))
+            : undefined;
       const provisionsAllDevices = data.ProvisionsAllDevices === true;
       const provisionedDevices = Array.isArray(data.ProvisionedDevices)
         ? data.ProvisionedDevices.map(String)
         : null;
-      const entitlements = typeof data.Entitlements === "object" && data.Entitlements
-        ? data.Entitlements as Record<string, unknown>
-        : {};
+      const entitlements =
+        typeof data.Entitlements === "object" && data.Entitlements
+          ? (data.Entitlements as Record<string, unknown>)
+          : {};
       const developerCertificates = Array.isArray(data.DeveloperCertificates)
         ? data.DeveloperCertificates.map(String)
         : [];
       const certificates = developerCertificates
-        .map(cert => fingerprintFromCertificate(cert))
+        .map((cert) => fingerprintFromCertificate(cert))
         .filter(Boolean)
-        .map(cert => cert as CertificateInfo);
+        .map((cert) => cert as CertificateInfo);
 
       if (!uuid || !name || !expirationDate || Number.isNaN(expirationDate.getTime())) {
         return null;
       }
 
-      const profileType = resolveProfileType(entitlements, provisionsAllDevices, provisionedDevices);
+      const profileType = resolveProfileType(
+        entitlements,
+        provisionsAllDevices,
+        provisionedDevices,
+      );
 
       return {
         uuid,
@@ -512,7 +558,7 @@ export class XcodeSigningManager {
         entitlements,
         developerCertificates: certificates,
         profileType,
-        path
+        path,
       };
     } catch (error) {
       logger.warn(`[XcodeSigning] Failed to parse provisioning profile: ${errorMessage(error)}`);
@@ -520,7 +566,9 @@ export class XcodeSigningManager {
     }
   }
 
-  private async writeEntitlementsIfNeeded(profile: ProvisioningProfile): Promise<string | undefined> {
+  private async writeEntitlementsIfNeeded(
+    profile: ProvisioningProfile,
+  ): Promise<string | undefined> {
     const hasEntitlements = Object.keys(profile.entitlements ?? {}).length > 0;
     if (!hasEntitlements) {
       return undefined;

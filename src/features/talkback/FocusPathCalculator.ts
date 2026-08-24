@@ -19,7 +19,7 @@ export class FocusPathCalculator {
   calculatePath(
     currentFocus: Element | null,
     targetSelector: FocusElementSelector,
-    orderedElements: Element[]
+    orderedElements: Element[],
   ): FocusNavigationPath | null {
     if (!orderedElements.length) {
       return null;
@@ -39,13 +39,14 @@ export class FocusPathCalculator {
 
     const boundedCurrentIndex = this.clampIndex(currentIndex, orderedElements.length);
     const swipeCount = Math.abs(targetIndex - boundedCurrentIndex);
-    const direction: "forward" | "backward" = targetIndex >= boundedCurrentIndex ? "forward" : "backward";
+    const direction: "forward" | "backward" =
+      targetIndex >= boundedCurrentIndex ? "forward" : "backward";
 
     return {
       currentFocusIndex: resolvedCurrentIndex,
       targetFocusIndex: targetIndex,
       swipeCount,
-      direction
+      direction,
     };
   }
 

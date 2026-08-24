@@ -48,19 +48,19 @@ const DUMPSYS_WINDOW_OUTPUT = [
   "statusBars=Window{123 u0 StatusBar} frame=[0,0][1080,74]",
   "navigationBars=Window{456 u0 NavigationBar} frame=[0,2337][1080,2400]",
   "systemGestures=InsetsSource sideHint=LEFT frame=[0,0][78,2400]",
-  "systemGestures=InsetsSource sideHint=RIGHT frame=[1002,0][1080,2400]"
+  "systemGestures=InsetsSource sideHint=RIGHT frame=[1002,0][1080,2400]",
 ].join("\n");
 
 const DUMPSYS_WINDOW_WINDOWS_OUTPUT = [
   "WINDOW MANAGER WINDOWS (dumpsys window windows)",
-  "  imeControlTarget in display# 0 Window{abc u0 com.example.app/com.example.app.MainActivity}"
+  "  imeControlTarget in display# 0 Window{abc u0 com.example.app/com.example.app.MainActivity}",
 ].join("\n");
 
 const DUMPSYS_ACTIVITY_OUTPUT = [
   "Task id #123",
   "  affinity=com.example.app",
   "  * Hist #0: ActivityRecord{111 u0 com.example.app/.MainActivity t123}",
-  "mResumedActivity: ActivityRecord{111 u0 com.example.app/.MainActivity t123}"
+  "mResumedActivity: ActivityRecord{111 u0 com.example.app/.MainActivity t123}",
 ].join("\n");
 
 const DEFAULT_OPERATIONS: StressOperation[] = ["observe", "tapOn", "swipeOn", "inputText"];
@@ -85,14 +85,10 @@ export interface ResolvedStressConfig {
 
 function resolveFixtureImages(): string[] {
   const fixtureDir = path.join(process.cwd(), "test", "fixtures", "screenshots");
-  const candidates = [
-    "black-on-white.png",
-    "white-on-black.png",
-    "blue-on-yellow.png"
-  ];
+  const candidates = ["black-on-white.png", "white-on-black.png", "blue-on-yellow.png"];
   return candidates
-    .map(file => path.join(fixtureDir, file))
-    .filter(filePath => fs.existsSync(filePath));
+    .map((file) => path.join(fixtureDir, file))
+    .filter((filePath) => fs.existsSync(filePath));
 }
 
 function createMockDevice(): BootedDevice {
@@ -100,7 +96,7 @@ function createMockDevice(): BootedDevice {
     name: "memory-stress-device",
     platform: "android",
     deviceId: "memory-stress-001",
-    source: "local"
+    source: "local",
   };
 }
 
@@ -115,7 +111,7 @@ function parseDurationMs(value: string): number {
     ms: 1,
     s: 1000,
     m: 60_000,
-    h: 3_600_000
+    h: 3_600_000,
   };
   return amount * (multipliers[unit] ?? 1);
 }
@@ -145,7 +141,10 @@ export function parseStressArgs(argv: string[]): StressCliOptions {
     }
 
     if (arg === "--operations") {
-      const parsed = next.split(",").map(item => item.trim()).filter(Boolean) as StressOperation[];
+      const parsed = next
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean) as StressOperation[];
       options.operations = parsed;
       i++;
       continue;
@@ -181,9 +180,9 @@ export function resolveStressConfig(options: StressCliOptions = {}): ResolvedStr
       iterations,
       opsPerSecond,
       operations,
-      gcEvery
+      gcEvery,
     },
-    warmupIterations
+    warmupIterations,
   };
 }
 
@@ -192,15 +191,15 @@ function createFakeAccessibilityClient() {
     hierarchy: {
       node: {
         $: {
-          "text": "Mock Button",
+          text: "Mock Button",
           "resource-id": "com.example:id/mock",
-          "clickable": "true",
-          "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
-        }
-      }
+          clickable: "true",
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+        },
+      },
     },
     packageName: "com.example.app",
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
   };
 
   return {
@@ -239,26 +238,35 @@ function createFakeAccessibilityClient() {
     },
     isConnected() {
       return true;
-    }
+    },
   };
 }
 
 function createFakeAdb(screenshotBase64: string): FakeAdbExecutor {
   const fakeAdb = new FakeAdbExecutor();
   fakeAdb.setCommandResponse("wm size", { stdout: "Physical size: 1080x2400", stderr: "" });
-  fakeAdb.setCommandResponse("dumpsys window windows", { stdout: DUMPSYS_WINDOW_WINDOWS_OUTPUT, stderr: "" });
+  fakeAdb.setCommandResponse("dumpsys window windows", {
+    stdout: DUMPSYS_WINDOW_WINDOWS_OUTPUT,
+    stderr: "",
+  });
   fakeAdb.setCommandResponse("dumpsys window", { stdout: DUMPSYS_WINDOW_OUTPUT, stderr: "" });
-  fakeAdb.setCommandResponse("dumpsys activity activities", { stdout: DUMPSYS_ACTIVITY_OUTPUT, stderr: "" });
+  fakeAdb.setCommandResponse("dumpsys activity activities", {
+    stdout: DUMPSYS_ACTIVITY_OUTPUT,
+    stderr: "",
+  });
   fakeAdb.setCommandResponse("screencap -p", { stdout: screenshotBase64, stderr: "" });
   return fakeAdb;
 }
 
 export async function createStressHarness(): Promise<StressHarness> {
   const fixtureImages = resolveFixtureImages();
-  const fallbackImage = fixtureImages[0] ?? path.join(process.cwd(), "test", "fixtures", "screenshots", "black-on-white.png");
-  const imageBuffers = fixtureImages.length > 0
-    ? fixtureImages.map(filePath => fs.readFileSync(filePath))
-    : [fs.readFileSync(fallbackImage)];
+  const fallbackImage =
+    fixtureImages[0] ??
+    path.join(process.cwd(), "test", "fixtures", "screenshots", "black-on-white.png");
+  const imageBuffers =
+    fixtureImages.length > 0
+      ? fixtureImages.map((filePath) => fs.readFileSync(filePath))
+      : [fs.readFileSync(fallbackImage)];
   const screenshotBase64 = imageBuffers[0].toString("base64");
 
   const device = createMockDevice();
@@ -273,37 +281,26 @@ export async function createStressHarness(): Promise<StressHarness> {
 
   const fakeA11yClient = createFakeAccessibilityClient();
   const originalGetInstance = AndroidCtrlProxyClient.getInstance;
-  (AndroidCtrlProxyClient as unknown as { getInstance: () => unknown }).getInstance = () => fakeA11yClient;
+  (AndroidCtrlProxyClient as unknown as { getInstance: () => unknown }).getInstance = () =>
+    fakeA11yClient;
 
-  const viewHierarchy = new ViewHierarchy(
-    device,
-    fakeAdbFactory,
-    fakeA11yClient as unknown as any
-  );
+  const viewHierarchy = new ViewHierarchy(device, fakeAdbFactory, fakeA11yClient as unknown as any);
 
   const observeScreen = new RealObserveScreen(device, fakeAdbFactory);
   (observeScreen as unknown as { viewHierarchy: ViewHierarchy }).viewHierarchy = viewHierarchy;
 
-  const tapOnElement = new TapOnElement(
-    device,
-    fakeAdb as unknown as any,
-    undefined, // visionConfig
-    undefined, // selectionStateTracker
-    fakeAccessibilityDetector
-  );
+  const tapOnElement = new TapOnElement(device, fakeAdb as unknown as any, {
+    accessibilityDetector: fakeAccessibilityDetector,
+  });
 
-  const swipeOn = new SwipeOn(
-    device,
-    fakeAdb as unknown as any,
-    {
-      executeGesture: {
-        async swipe() {
-          return { success: true, totalTimeMs: 1 };
-        }
+  const swipeOn = new SwipeOn(device, fakeAdb as unknown as any, {
+    executeGesture: {
+      async swipe() {
+        return { success: true, totalTimeMs: 1 };
       },
-      accessibilityDetector: fakeAccessibilityDetector
-    }
-  );
+    },
+    accessibilityDetector: fakeAccessibilityDetector,
+  });
 
   const inputText = new InputText(device, fakeAdb as unknown as any);
   const imageUtils = new JimpImageUtils();
@@ -318,8 +315,8 @@ export async function createStressHarness(): Promise<StressHarness> {
     },
     tapOn: async () => {
       const element = {
-        "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
-        "resource-id": "com.example:id/button"
+        bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+        "resource-id": "com.example:id/button",
       };
       await (tapOnElement as unknown as any).executeAndroidTap(
         "tap",
@@ -330,7 +327,7 @@ export async function createStressHarness(): Promise<StressHarness> {
         undefined,
         undefined,
         undefined,
-        []
+        [],
       );
     },
     swipeOn: async () => {
@@ -340,16 +337,17 @@ export async function createStressHarness(): Promise<StressHarness> {
         200,
         10,
         "right",
-        null
+        null,
       );
     },
     inputText: async () => {
       await (inputText as unknown as any).executeAndroidTextInput("memory-test");
-    }
+    },
   };
 
   const cleanup = async () => {
-    (AndroidCtrlProxyClient as unknown as { getInstance: unknown }).getInstance = originalGetInstance;
+    (AndroidCtrlProxyClient as unknown as { getInstance: unknown }).getInstance =
+      originalGetInstance;
     AndroidCtrlProxyClient.resetInstances();
     RealObserveScreen.clearCache();
   };
@@ -361,20 +359,23 @@ export async function createStressHarness(): Promise<StressHarness> {
       device,
       viewHierarchy,
       observeScreen,
-      fixtureImagePaths: fixtureImages.length > 0 ? fixtureImages : [fallbackImage]
-    }
+      fixtureImagePaths: fixtureImages.length > 0 ? fixtureImages : [fallbackImage],
+    },
   };
 }
 
 export async function runStressOperations(
   harness: StressHarness,
-  config: StressRunConfig
+  config: StressRunConfig,
 ): Promise<StressRunResult> {
   const operations = config.operations.length > 0 ? config.operations : DEFAULT_OPERATIONS;
-  const operationCounts = operations.reduce((acc, op) => {
-    acc[op] = 0;
-    return acc;
-  }, {} as Record<StressOperation, number>);
+  const operationCounts = operations.reduce(
+    (acc, op) => {
+      acc[op] = 0;
+      return acc;
+    },
+    {} as Record<StressOperation, number>,
+  );
 
   const delayMs = config.opsPerSecond > 0 ? 1000 / config.opsPerSecond : 0;
   const startTime = performance.now();
@@ -385,7 +386,12 @@ export async function runStressOperations(
     await harness.operations[operation]();
     operationCounts[operation] += 1;
 
-    if (config.gcEvery > 0 && typeof global.gc === "function" && i > 0 && i % config.gcEvery === 0) {
+    if (
+      config.gcEvery > 0 &&
+      typeof global.gc === "function" &&
+      i > 0 &&
+      i % config.gcEvery === 0
+    ) {
       global.gc();
     }
 
@@ -403,6 +409,6 @@ export async function runStressOperations(
   return {
     iterations: config.iterations,
     durationMs,
-    operationCounts
+    operationCounts,
   };
 }

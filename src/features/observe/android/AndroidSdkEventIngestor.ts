@@ -113,7 +113,10 @@ export interface AndroidSdkEventIngestorDeps {
 export class DefaultAndroidSdkEventIngestor implements AndroidSdkEventIngestor {
   private readonly deviceId: string;
   private readonly getNavigationScreenSource: () => NavigationScreenSource;
-  private readonly parseStackTrace: (stackTrace: string, packageName: string) => StackTraceElement[];
+  private readonly parseStackTrace: (
+    stackTrace: string,
+    packageName: string,
+  ) => StackTraceElement[];
   private readonly now: () => number;
   private readonly telemetryRecorderOverride?: AndroidTelemetryRecorder;
   private readonly failureRecorderOverride?: FailureRecorderService;
@@ -146,7 +149,7 @@ export class DefaultAndroidSdkEventIngestor implements AndroidSdkEventIngestor {
    */
   async recordSdkEvent(
     sdkEvent: SdkEvent<AndroidSdkEventPayload>,
-    _applicationId: string | null
+    _applicationId: string | null,
   ): Promise<void> {
     try {
       const recorder = this.telemetryRecorder;
@@ -224,7 +227,9 @@ export class DefaultAndroidSdkEventIngestor implements AndroidSdkEventIngestor {
           // Custom events are merged into log events
           const properties = event.properties as Record<string, unknown> | undefined;
           const propsStr =
-            properties && Object.keys(properties).length > 0 ? ` ${JSON.stringify(properties)}` : "";
+            properties && Object.keys(properties).length > 0
+              ? ` ${JSON.stringify(properties)}`
+              : "";
           await recorder.recordLogEvent({
             timestamp: ts,
             applicationId: appId,
@@ -236,7 +241,9 @@ export class DefaultAndroidSdkEventIngestor implements AndroidSdkEventIngestor {
           break;
         }
         default:
-          logger.debug(`[AndroidSdkEventIngestor] Ignoring unknown SDK event type: ${sdkEvent.type}`);
+          logger.debug(
+            `[AndroidSdkEventIngestor] Ignoring unknown SDK event type: ${sdkEvent.type}`,
+          );
       }
     } catch (error) {
       // Non-fatal — telemetry recording must never break observation.
@@ -346,7 +353,10 @@ export class DefaultAndroidSdkEventIngestor implements AndroidSdkEventIngestor {
     } catch (error) {
       // The navigation session may not be bound yet when an ANR/crash event
       // arrives; omitting currentScreen is fine, it's supplementary context.
-      logger.debug(`src/features/observe/android/AndroidSdkEventIngestor.ts screen resolution failed: ${error}`, error);
+      logger.debug(
+        `src/features/observe/android/AndroidSdkEventIngestor.ts screen resolution failed: ${error}`,
+        error,
+      );
       return undefined;
     }
   }

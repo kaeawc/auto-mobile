@@ -20,7 +20,11 @@ export abstract class RequestResponseSocketServer<
   /** Map of socket to pending promise chain for sequential processing */
   private pendingBySocket: WeakMap<Socket, Promise<void>> = new WeakMap();
 
-  constructor(socketPath: string, timer: Timer = defaultTimer, serverName: string = "RequestResponse") {
+  constructor(
+    socketPath: string,
+    timer: Timer = defaultTimer,
+    serverName: string = "RequestResponse",
+  ) {
     super(socketPath, timer, serverName);
   }
 
@@ -34,7 +38,7 @@ export abstract class RequestResponseSocketServer<
     // Chain this request to run after any pending requests
     const newPending = pending
       .then(() => this.handleLine(socket, line))
-      .catch(error => {
+      .catch((error) => {
         logger.error(`[${this.serverName}] Request processing error: ${error}`);
       });
 
@@ -58,10 +62,7 @@ export abstract class RequestResponseSocketServer<
       this.sendJson(socket, response);
     } catch (error) {
       logger.error(`[${this.serverName}] Request handler error: ${error}`);
-      const errorResponse = this.createErrorResponse(
-        request.id,
-        errorMessage(error)
-      );
+      const errorResponse = this.createErrorResponse(request.id, errorMessage(error));
       this.sendJson(socket, errorResponse);
     }
   }

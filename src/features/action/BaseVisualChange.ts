@@ -1,4 +1,7 @@
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AwaitIdle } from "../observe/AwaitIdle";
 import { RealObserveScreen } from "../observe/ObserveScreen";
@@ -6,7 +9,13 @@ import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { Window } from "../observe/Window";
 import { logger } from "../../utils/logger";
 import { DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT } from "../../utils/constants";
-import { ActionableError, BootedDevice, DeviceLockState, GfxMetrics, ObserveResult } from "../../models";
+import {
+  ActionableError,
+  BootedDevice,
+  DeviceLockState,
+  GfxMetrics,
+  ObserveResult,
+} from "../../models";
 import { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOptions";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { NodeCryptoService } from "../../utils/crypto";
@@ -59,11 +68,14 @@ export class BaseVisualChange {
   constructor(
     device: BootedDevice,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
   ) {
     this.device = device;
     // Detect if the argument is a factory (has create method) or an executor
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
+    if (
+      adbFactoryOrExecutor &&
+      typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
+    ) {
       this.adbFactory = adbFactoryOrExecutor as AdbClientFactory;
       this.adb = this.adbFactory.create(device);
     } else if (adbFactoryOrExecutor) {
@@ -89,9 +101,8 @@ export class BaseVisualChange {
    */
   async observedInteraction(
     block: (observeResult: ObserveResult) => Promise<any>,
-    options: ObservedChangeOptions
+    options: ObservedChangeOptions,
   ): Promise<any> {
-
     const timeoutMs = options.timeoutMs || 12000;
     const progress = options.progress;
     const perf = options.perf ?? new NoOpPerformanceTracker();
@@ -114,13 +125,23 @@ export class BaseVisualChange {
         previousObserveResult = await perf.track("getPreviousObserve", async () => {
           const cached = await this.observeScreen.getMostRecentCachedObserveResult();
           if (!cached?.viewHierarchy || cached.viewHierarchy.hierarchy.error) {
-            return this.observeScreen.execute({ queryOptions: options.queryOptions, perf, skipWaitForFresh: true, signal: options.signal });
+            return this.observeScreen.execute({
+              queryOptions: options.queryOptions,
+              perf,
+              skipWaitForFresh: true,
+              signal: options.signal,
+            });
           }
           return cached;
         });
       } catch {
         previousObserveResult = await perf.track("getPreviousObserveFallback", async () => {
-          return this.observeScreen.execute({ queryOptions: options.queryOptions, perf, skipWaitForFresh: true, signal: options.signal });
+          return this.observeScreen.execute({
+            queryOptions: options.queryOptions,
+            perf,
+            skipWaitForFresh: true,
+            signal: options.signal,
+          });
         });
       }
 
@@ -147,12 +168,19 @@ export class BaseVisualChange {
 
     let observationStartTime = actionStartTime;
     const observationTimestampOverride = options.observationTimestampProvider?.();
-    if (typeof observationTimestampOverride === "number" && !Number.isNaN(observationTimestampOverride)) {
+    if (
+      typeof observationTimestampOverride === "number" &&
+      !Number.isNaN(observationTimestampOverride)
+    ) {
       if (observationTimestampOverride >= actionStartTime) {
         observationStartTime = observationTimestampOverride;
-        logger.debug(`[BaseVisualChange] Using observation timestamp override: ${observationStartTime}`);
+        logger.debug(
+          `[BaseVisualChange] Using observation timestamp override: ${observationStartTime}`,
+        );
       } else {
-        logger.debug(`[BaseVisualChange] Ignoring observation timestamp override (${observationTimestampOverride}) older than action start (${actionStartTime})`);
+        logger.debug(
+          `[BaseVisualChange] Ignoring observation timestamp override (${observationTimestampOverride}) older than action start (${actionStartTime})`,
+        );
       }
     }
 
@@ -184,24 +212,36 @@ export class BaseVisualChange {
     } else if (this.device.platform !== "android") {
       logger.debug("[BaseVisualChange] Skipping UI stability tracking (gfxinfo is Android-only)");
     } else if (packageName) {
-      logger.info(`[BaseVisualChange] Starting UI stability initialization with package: ${packageName}`);
-      initState = await perf.track("initUiStability", async () => {
-        return this.awaitIdle.initializeUiStabilityTracking(
-          packageName!,
-          timeoutMs
-        );
-      }).catch(error => {
-        logger.debug(`[BaseVisualChange] UI stability initialization failed: ${error}`);
-        return null;
-      });
+      logger.info(
+        `[BaseVisualChange] Starting UI stability initialization with package: ${packageName}`,
+      );
+      initState = await perf
+        .track("initUiStability", async () => {
+          return this.awaitIdle.initializeUiStabilityTracking(packageName!, timeoutMs);
+        })
+        .catch((error) => {
+          logger.debug(`[BaseVisualChange] UI stability initialization failed: ${error}`);
+          return null;
+        });
 
       // Execute UI stability waiting with appropriate state
       if (packageName.trim() !== "") {
         perf.serial("uiStability");
         if (initState !== null) {
-          gfxMetrics = await this.awaitIdle.waitForUiStabilityWithState(packageName, timeoutMs, initState, perf, options.signal);
+          gfxMetrics = await this.awaitIdle.waitForUiStabilityWithState(
+            packageName,
+            timeoutMs,
+            initState,
+            perf,
+            options.signal,
+          );
         } else {
-          gfxMetrics = await this.awaitIdle.waitForUiStability(packageName, timeoutMs, perf, options.signal);
+          gfxMetrics = await this.awaitIdle.waitForUiStability(
+            packageName,
+            timeoutMs,
+            perf,
+            options.signal,
+          );
         }
         perf.end();
       }
@@ -244,8 +284,7 @@ export class BaseVisualChange {
   }
 
   private static buildDeviceLockWarning(lock: DeviceLockState): string {
-    const preamble =
-      "Device is locked; this interaction likely did not reach the app under test.";
+    const preamble = "Device is locked; this interaction likely did not reach the app under test.";
     if (lock.secure === true) {
       return `${preamble} The lock is secure (PIN/pattern/password) — ask the user to unlock the device before continuing.`;
     }
@@ -275,7 +314,7 @@ export class BaseVisualChange {
       actionStartTime?: number;
       predictionContext?: PredictionActionContext;
       signal?: AbortSignal;
-    }
+    },
   ): Promise<any> {
     const perf = options.perf ?? new NoOpPerformanceTracker();
 
@@ -296,7 +335,14 @@ export class BaseVisualChange {
     perf.serial("finalObserve");
     // Wait for fresh data from accessibility service (skipWaitForFresh=false)
     // This ensures we get observation data that reflects the action that just completed
-    let latestObservation = await this.observeScreen.execute({ queryOptions: options.queryOptions, perf, skipWaitForFresh: false, minTimestamp, signal: options.signal, skipScreenshot });
+    let latestObservation = await this.observeScreen.execute({
+      queryOptions: options.queryOptions,
+      perf,
+      skipWaitForFresh: false,
+      minTimestamp,
+      signal: options.signal,
+      skipScreenshot,
+    });
     perf.end();
 
     const shouldRetry = (observation: ObserveResult): boolean => {
@@ -319,17 +365,27 @@ export class BaseVisualChange {
 
     for (let attempt = 0; attempt < maxRetryAttempts && shouldRetry(latestObservation); attempt++) {
       const delayMs = retryBackoff.delayForAttempt(attempt + 1);
-      logger.info(`[BaseVisualChange] Observation appears stale/unchanged, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetryAttempts})`);
+      logger.info(
+        `[BaseVisualChange] Observation appears stale/unchanged, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetryAttempts})`,
+      );
       await this.timer.sleep(delayMs);
       perf.serial(`finalObserve_retry_${attempt + 1}`);
-      latestObservation = await this.observeScreen.execute({ queryOptions: options.queryOptions, perf, skipWaitForFresh: false, minTimestamp, signal: options.signal, skipScreenshot });
+      latestObservation = await this.observeScreen.execute({
+        queryOptions: options.queryOptions,
+        perf,
+        skipWaitForFresh: false,
+        minTimestamp,
+        signal: options.signal,
+        skipScreenshot,
+      });
       perf.end();
     }
 
     if (shouldRetry(latestObservation)) {
-      const warning = minTimestamp > 0
-        ? "Observation may be stale after interaction"
-        : "Observation may not reflect expected visual change";
+      const warning =
+        minTimestamp > 0
+          ? "Observation may be stale after interaction"
+          : "Observation may not reflect expected visual change";
       // Spreading a possibly-undefined `freshness` used to drop the required
       // `isFresh`. When no freshness was computed at all, the honest value is
       // `false` (not confirmed fresh) — this branch only runs because the
@@ -340,10 +396,16 @@ export class BaseVisualChange {
       logger.warn(`[BaseVisualChange] ${warning}`);
     }
 
-    if (options.changeExpected && latestObservation.viewHierarchy && previousObserveResult && previousObserveResult?.viewHierarchy) {
+    if (
+      options.changeExpected &&
+      latestObservation.viewHierarchy &&
+      previousObserveResult &&
+      previousObserveResult?.viewHierarchy
+    ) {
       // Don't override an explicit failure from the inner block — the action itself failed
       if (blockResult.success !== false) {
-        blockResult.success = latestObservation.viewHierarchy !== previousObserveResult.viewHierarchy;
+        blockResult.success =
+          latestObservation.viewHierarchy !== previousObserveResult.viewHierarchy;
         if (!blockResult.success) {
           blockResult.error = "No visual change observed";
         }
@@ -377,7 +439,7 @@ export class BaseVisualChange {
       await this.predictionAnalyzer.recordOutcomeForAction(
         previousObserveResult,
         latestObservation,
-        options.predictionContext
+        options.predictionContext,
       );
     }
 
@@ -397,7 +459,7 @@ export class BaseVisualChange {
   }
 
   private buildPredictionContext(
-    context?: ObservedChangeOptions["predictionContext"]
+    context?: ObservedChangeOptions["predictionContext"],
   ): PredictionActionContext | undefined {
     if (!context) {
       return undefined;
@@ -415,7 +477,7 @@ export class BaseVisualChange {
       appId,
       fromScreen,
       toolName: context.toolName,
-      toolArgs: context.toolArgs
+      toolArgs: context.toolArgs,
     };
   }
 }

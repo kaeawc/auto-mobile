@@ -35,11 +35,7 @@ interface TestConfigInput {
 }
 
 type TestRequest = ConfigSocketRequest<"test_config_request", TestConfigInput>;
-type TestResponse = ConfigSocketResponse<
-  "test_config_response",
-  TestConfig,
-  "evictedItemIds"
->;
+type TestResponse = ConfigSocketResponse<"test_config_response", TestConfig, "evictedItemIds">;
 
 class TestableConfigSocketServer extends ConfigSocketServer<
   TestConfig,
@@ -65,7 +61,7 @@ class TestableConfigSocketServer extends ConfigSocketServer<
         this.getCalls += 1;
         return this.nextConfig;
       },
-      updateConfig: async update => {
+      updateConfig: async (update) => {
         this.updateCalls.push(update);
         return {
           config: this.nextConfig,
@@ -214,11 +210,7 @@ describe("ConfigSocketServer", () => {
   });
 });
 
-async function simulateLine(
-  server: unknown,
-  socket: FakeSocket,
-  line: string
-): Promise<void> {
+async function simulateLine(server: unknown, socket: FakeSocket, line: string): Promise<void> {
   await (server as any).processLine(socket as unknown as Socket, line);
   const pending = (server as any).pendingBySocket.get(socket);
   if (pending) {
@@ -235,7 +227,7 @@ describe("config socket wrappers", () => {
     const updates: Array<DeviceSnapshotConfigInput | null> = [];
     const server = new DeviceSnapshotSocketServer("/fake/path/device.sock", timer, {
       getConfig: async () => config,
-      updateConfig: async update => {
+      updateConfig: async (update) => {
         updates.push(update);
         return {
           config,
@@ -279,7 +271,7 @@ describe("config socket wrappers", () => {
       timer,
       {
         getConfig: async () => config,
-        updateConfig: async update => {
+        updateConfig: async (update) => {
           updates.push(update);
           return {
             config,
@@ -289,7 +281,7 @@ describe("config socket wrappers", () => {
       },
       // This suite exercises the config wrapper, not the auth gate (covered in
       // videoRecordingSocketServerAuth.test.ts); inject a permissive authenticator.
-      { authorize: () => {} }
+      { authorize: () => {} },
     );
     const request: VideoRecordingSocketRequest = {
       id: "video-set",

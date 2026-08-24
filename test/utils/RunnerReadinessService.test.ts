@@ -119,9 +119,15 @@ class FakeIosManager implements ReadinessIosManager {
   /** Optional hook to simulate elapsed provisioning time (e.g. a cold launch). */
   onStart?: () => Promise<void>;
   onSetup?: () => Promise<void>;
-  onForceRestart?: (options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }) => Promise<void>;
+  onForceRestart?: (options?: {
+    signal?: AbortSignal;
+    minimumHealthPollDurationMs?: number;
+  }) => Promise<void>;
 
-  async start(options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }): Promise<void> {
+  async start(options?: {
+    signal?: AbortSignal;
+    minimumHealthPollDurationMs?: number;
+  }): Promise<void> {
     this.startCalls++;
     this.startOptions = options;
     if (this.onStart) {
@@ -129,7 +135,10 @@ class FakeIosManager implements ReadinessIosManager {
     }
   }
 
-  async forceRestart(options?: { signal?: AbortSignal; minimumHealthPollDurationMs?: number }): Promise<void> {
+  async forceRestart(options?: {
+    signal?: AbortSignal;
+    minimumHealthPollDurationMs?: number;
+  }): Promise<void> {
     this.forceRestartCalls++;
     this.forceRestartOptions = options;
     await this.onForceRestart?.(options);
@@ -325,9 +334,8 @@ describe("RunnerReadinessService", () => {
   test("requires device replacement when the ANR persists after Wait", async () => {
     const androidClient = new FakeReadinessClient();
     androidClient.healthResults = [false];
-    androidClient.accessibilityHierarchies = Array.from(
-      { length: 32 },
-      () => systemUiAnrHierarchy(),
+    androidClient.accessibilityHierarchies = Array.from({ length: 32 }, () =>
+      systemUiAnrHierarchy(),
     );
     const { service } = createService({ androidClient });
 
@@ -523,13 +531,15 @@ describe("RunnerReadinessService", () => {
     androidManager.enabled = false;
     const { service } = createService({ androidManager });
 
-    await expect(service.ensureReady({
-      device: androidDevice(),
-      requestedIdentity: "platform=android",
-      totalDeadlineMs: 30_000,
-      readinessTimeoutMs: 30_000,
-      skipCtrlProxyDownload: true,
-    })).rejects.toThrow(/not installed.*downloads are disabled/);
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android",
+        totalDeadlineMs: 30_000,
+        readinessTimeoutMs: 30_000,
+        skipCtrlProxyDownload: true,
+      }),
+    ).rejects.toThrow(/not installed.*downloads are disabled/);
 
     expect(androidManager.setupCalls).toBe(0);
   });
@@ -561,12 +571,14 @@ describe("RunnerReadinessService", () => {
     };
     const { service } = createService({ androidManager });
 
-    const error = await service.ensureReady({
+    const error = await service
+      .ensureReady({
         device: androidDevice(),
         requestedIdentity: "platform=android",
         totalDeadlineMs: 30_000,
         readinessTimeoutMs: 30_000,
-      }).then(
+      })
+      .then(
         () => undefined,
         (reason: unknown) => reason,
       );
@@ -676,9 +688,12 @@ describe("RunnerReadinessService", () => {
     const iosManager = new FakeIosManager();
     const iosClient = new FakeReadinessClient();
     iosClient.healthResults = [false];
-    iosManager.onForceRestart = async (options) => await new Promise<void>((_resolve, reject) => {
-      options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), { once: true });
-    });
+    iosManager.onForceRestart = async (options) =>
+      await new Promise<void>((_resolve, reject) => {
+        options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+          once: true,
+        });
+      });
     const { service } = createService({ timer, iosManager, iosClient, autoAdvance: false });
 
     const ready = service.ensureReady({
@@ -688,7 +703,7 @@ describe("RunnerReadinessService", () => {
       readinessTimeoutMs: 1_000,
     });
     for (let attempt = 0; attempt < 20 && iosManager.forceRestartCalls === 0; attempt++) {
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
     }
 
     expect(iosManager.forceRestartCalls).toBe(1);

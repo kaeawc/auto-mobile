@@ -8,7 +8,7 @@ const abortContext = new AsyncLocalStorage<AbortContextState>();
 
 export const runWithAbortSignal = async <T>(
   signal: AbortSignal | undefined,
-  fn: () => Promise<T>
+  fn: () => Promise<T>,
 ): Promise<T> => {
   return abortContext.run({ signal }, fn);
 };

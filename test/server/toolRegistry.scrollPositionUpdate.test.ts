@@ -23,7 +23,11 @@ import type { ScrollPosition } from "../../src/utils/interfaces/NavigationGraph"
  * #2758 / PR #2891.
  */
 describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
-  const androidA: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
+  const androidA: BootedDevice = {
+    name: "Pixel A",
+    deviceId: "emulator-5554",
+    platform: "android",
+  };
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
@@ -42,7 +46,13 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA]);
-    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
     await pool.initializeWithDevices([androidA]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     const sessionId = (await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1"))!;
@@ -100,17 +110,14 @@ describe("ToolRegistry swipeOn scroll-position update repair (#2897)", () => {
   });
 
   function registerSwipeOn(found: boolean): void {
-    ToolRegistry.registerDeviceAware(
-      "swipeOn",
-      "swipeOn",
-      swipeSchema,
-      async () => createStructuredToolResponse({
+    ToolRegistry.registerDeviceAware("swipeOn", "swipeOn", swipeSchema, async () =>
+      createStructuredToolResponse({
         success: true,
         found,
         message: found ? "Swiped up and found element after 1 swipe(s)" : "Swiped up",
         observation: {},
         scrollIterations: 1,
-      })
+      }),
     );
   }
 

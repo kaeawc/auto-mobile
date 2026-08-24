@@ -58,7 +58,10 @@ export class DeviceSnapshotStore {
     return path.join(this.getAppDataPath(snapshotName, options), "backup.ab");
   }
 
-  async snapshotDirectoryExists(snapshotName: string, options?: SnapshotPathOptions): Promise<boolean> {
+  async snapshotDirectoryExists(
+    snapshotName: string,
+    options?: SnapshotPathOptions,
+  ): Promise<boolean> {
     try {
       await fs.access(this.getSnapshotPathWithOptions(snapshotName, options));
       return true;
@@ -81,10 +84,7 @@ export class DeviceSnapshotStore {
 
   generateSnapshotName(deviceName?: string): string {
     const now = new Date();
-    const timestamp = now.toISOString()
-      .replace(/[:.]/g, "-")
-      .replace("T", "_")
-      .split(".")[0];
+    const timestamp = now.toISOString().replace(/[:.]/g, "-").replace("T", "_").split(".")[0];
 
     if (deviceName) {
       const sanitized = deviceName.replace(/[^a-zA-Z0-9-_]/g, "_");

@@ -16,8 +16,8 @@ runA11yChecks({
   scope: "visible" | "screen",
   includeContrast: boolean,
   includeFocusOrder: boolean,
-  minTapTargetDp: 48
-})
+  minTapTargetDp: 48,
+});
 ```
 
 Return structure should include:

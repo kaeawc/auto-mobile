@@ -85,15 +85,17 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
     await proxy.listTools();
     // Second call is served from cache: no extra tools/list round-trip.
     await proxy.listTools();
-    const listCallsBefore = fakeClient.callDaemonMethodCalls
-      .filter(call => call.method === "tools/list").length;
+    const listCallsBefore = fakeClient.callDaemonMethodCalls.filter(
+      (call) => call.method === "tools/list",
+    ).length;
     expect(listCallsBefore).toBe(1);
 
     fakeClient.emitNotification("notifications/tools/list_changed");
     await proxy.listTools();
 
-    const listCallsAfter = fakeClient.callDaemonMethodCalls
-      .filter(call => call.method === "tools/list").length;
+    const listCallsAfter = fakeClient.callDaemonMethodCalls.filter(
+      (call) => call.method === "tools/list",
+    ).length;
     expect(listCallsAfter).toBe(2);
   });
 
@@ -106,8 +108,9 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
     fakeClient.emitNotification("notifications/tools/list_changed");
     await proxy.listResources();
 
-    const resourceListCalls = fakeClient.callDaemonMethodCalls
-      .filter(call => call.method === "resources/list").length;
+    const resourceListCalls = fakeClient.callDaemonMethodCalls.filter(
+      (call) => call.method === "resources/list",
+    ).length;
     expect(resourceListCalls).toBe(1);
   });
 
@@ -122,10 +125,12 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
     await proxy.listResources();
     await proxy.listResourceTemplates();
 
-    const resourceListCalls = fakeClient.callDaemonMethodCalls
-      .filter(call => call.method === "resources/list").length;
-    const templateListCalls = fakeClient.callDaemonMethodCalls
-      .filter(call => call.method === "resources/list-templates").length;
+    const resourceListCalls = fakeClient.callDaemonMethodCalls.filter(
+      (call) => call.method === "resources/list",
+    ).length;
+    const templateListCalls = fakeClient.callDaemonMethodCalls.filter(
+      (call) => call.method === "resources/list-templates",
+    ).length;
     expect(resourceListCalls).toBe(2);
     expect(templateListCalls).toBe(2);
   });
@@ -135,7 +140,7 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
     const fakeClient = createFakeClient();
     const proxy = createProxy(fakeClient);
     const kinds: string[] = [];
-    proxy.onListChanged(kind => {
+    proxy.onListChanged((kind) => {
       kinds.push(kind);
     });
 
@@ -154,7 +159,7 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
     proxy.onListChanged(() => {
       throw new Error("listener boom");
     });
-    proxy.onListChanged(kind => {
+    proxy.onListChanged((kind) => {
       kinds.push(kind);
     });
 
@@ -163,8 +168,9 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
     await proxy.listTools();
 
     expect(kinds).toEqual(["tools"]);
-    const listCalls = fakeClient.callDaemonMethodCalls
-      .filter(call => call.method === "tools/list").length;
+    const listCalls = fakeClient.callDaemonMethodCalls.filter(
+      (call) => call.method === "tools/list",
+    ).length;
     expect(listCalls).toBe(2);
   });
 
@@ -173,7 +179,7 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
     const fakeClient = createFakeClient();
     const proxy = createProxy(fakeClient);
     const kinds: string[] = [];
-    proxy.onListChanged(kind => {
+    proxy.onListChanged((kind) => {
       kinds.push(kind);
     });
 
@@ -182,8 +188,9 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
     await proxy.listTools();
 
     expect(kinds).toEqual([]);
-    const listCalls = fakeClient.callDaemonMethodCalls
-      .filter(call => call.method === "tools/list").length;
+    const listCalls = fakeClient.callDaemonMethodCalls.filter(
+      (call) => call.method === "tools/list",
+    ).length;
     expect(listCalls).toBe(1);
   });
 
@@ -192,7 +199,7 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
     const fakeClient = createFakeClient();
     const proxy = createProxy(fakeClient);
     const kinds: string[] = [];
-    const unsubscribe = proxy.onListChanged(kind => {
+    const unsubscribe = proxy.onListChanged((kind) => {
       kinds.push(kind);
     });
 
@@ -208,7 +215,7 @@ describe("DaemonMcpProxy list-changed forwarding", () => {
     const fakeClient = createFakeClient();
     const proxy = createProxy(fakeClient);
     const kinds: string[] = [];
-    proxy.onListChanged(kind => {
+    proxy.onListChanged((kind) => {
       kinds.push(kind);
     });
 

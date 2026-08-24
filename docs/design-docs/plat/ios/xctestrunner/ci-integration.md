@@ -16,9 +16,9 @@ AutoMobile tests need:
 The sections below walk through each step.
 
 !!! note "No cloud device service required"
-    Unlike Android — which uses [emulator.wtf](https://emulator.wtf) to provision managed cloud
-    emulators — iOS AutoMobile tests run on the macOS runner's built-in iOS Simulator. No external
-    device service or additional secrets are needed.
+Unlike Android — which uses [emulator.wtf](https://emulator.wtf) to provision managed cloud
+emulators — iOS AutoMobile tests run on the macOS runner's built-in iOS Simulator. No external
+device service or additional secrets are needed.
 
 ## Job structure
 
@@ -220,10 +220,10 @@ lifetime (macOS runners are ephemeral so no explicit teardown is needed).
 
 ### 8. Artifacts
 
-| Artifact | When uploaded | Contents |
-|---|---|---|
-| `automobile-test-results` | Always | `build/automobile-tests.xcresult` — pass/fail, timing, screenshots |
-| `automobile-simulator-logs` | On failure | `build/automobile-simulator.log` — simulator log stream filtered to your app's subsystem |
+| Artifact                    | When uploaded | Contents                                                                                 |
+| --------------------------- | ------------- | ---------------------------------------------------------------------------------------- |
+| `automobile-test-results`   | Always        | `build/automobile-tests.xcresult` — pass/fail, timing, screenshots                       |
+| `automobile-simulator-logs` | On failure    | `build/automobile-simulator.log` — simulator log stream filtered to your app's subsystem |
 
 ## Keeping unit tests and AutoMobile tests separate
 
@@ -250,9 +250,9 @@ and `testDebugUnitTest --tests '*.automobiletest.*'` runs the AutoMobile tests.
 The `build-for-testing` job uses two cache layers that the `automobile-tests` job benefits from
 indirectly through the artifact:
 
-| Cache | Key | What it stores |
-|---|---|---|
-| SPM packages | `runner-xcode<ver>-spm-<hash(project.yml)>` | Alamofire, XCTestRunner, etc. — avoids re-cloning |
+| Cache                     | Key                                                       | What it stores                                                         |
+| ------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------- |
+| SPM packages              | `runner-xcode<ver>-spm-<hash(project.yml)>`               | Alamofire, XCTestRunner, etc. — avoids re-cloning                      |
 | DerivedData intermediates | `runner-xcode<ver>-intermediates-<hash(sources+configs)>` | Compiled `.o` and `.swiftmodule` files — makes incremental builds fast |
 
 Both caches are keyed so a clean rebuild only triggers when sources actually change.

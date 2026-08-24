@@ -32,11 +32,11 @@ export class FakeProxyManager implements ProxyManager {
   }
 
   wasMethodCalled(operationName: string): boolean {
-    return this.executedOperations.some(op => op.includes(operationName));
+    return this.executedOperations.some((op) => op.includes(operationName));
   }
 
   getCallCount(operationName: string): number {
-    return this.executedOperations.filter(op => op.includes(operationName)).length;
+    return this.executedOperations.filter((op) => op.includes(operationName)).length;
   }
 
   clearHistory(): void {
@@ -60,13 +60,13 @@ export class FakeProxyManager implements ProxyManager {
       return {
         success: false,
         message: "Failed to setup proxy",
-        error: "Mock setup failure"
+        error: "Mock setup failure",
       };
     }
 
     return {
       success: true,
-      message: "Proxy setup succeeded"
+      message: "Proxy setup succeeded",
     };
   }
 

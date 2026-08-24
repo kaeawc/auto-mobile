@@ -25,7 +25,7 @@ export abstract class BaseSocketServer {
     socketPath: string,
     timer: Timer = defaultTimer,
     serverName: string = "Socket",
-    idleTimeoutMs: number = DEFAULT_SOCKET_IDLE_TIMEOUT_MS
+    idleTimeoutMs: number = DEFAULT_SOCKET_IDLE_TIMEOUT_MS,
   ) {
     this.socketPath = socketPath;
     this.timer = timer;
@@ -47,7 +47,7 @@ export abstract class BaseSocketServer {
       await unlink(this.socketPath);
     }
 
-    this.server = createServer(socket => {
+    this.server = createServer((socket) => {
       this.handleConnection(socket);
     });
 
@@ -66,7 +66,7 @@ export abstract class BaseSocketServer {
           .catch(reject);
       });
 
-      this.server!.on("error", error => {
+      this.server!.on("error", (error) => {
         logger.error(`[${this.serverName}] Socket error: ${error}`);
         reject(error);
       });
@@ -91,12 +91,12 @@ export abstract class BaseSocketServer {
     const ownsSocketPath = this.isOwnedSocketFile();
 
     if (ownsSocketPath || !existsSync(this.socketPath)) {
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve) => {
         this.server!.close(() => resolve());
       });
     } else {
       logger.warn(
-        `[${this.serverName}] Socket path ${this.socketPath} no longer belongs to this server; leaving listener for process teardown`
+        `[${this.serverName}] Socket path ${this.socketPath} no longer belongs to this server; leaving listener for process teardown`,
       );
       this.server.unref();
     }
@@ -125,8 +125,10 @@ export abstract class BaseSocketServer {
       return false;
     }
     const currentIdentity = this.readSocketFileIdentity();
-    return currentIdentity?.dev === this.socketFileIdentity.dev &&
-      currentIdentity.ino === this.socketFileIdentity.ino;
+    return (
+      currentIdentity?.dev === this.socketFileIdentity.dev &&
+      currentIdentity.ino === this.socketFileIdentity.ino
+    );
   }
 
   /**
@@ -162,27 +164,27 @@ export abstract class BaseSocketServer {
       socket.setTimeout(this.idleTimeoutMs);
       socket.on("timeout", () => {
         logger.warn(
-          `[${this.serverName}] Idle timeout after ${this.idleTimeoutMs}ms, destroying socket`
+          `[${this.serverName}] Idle timeout after ${this.idleTimeoutMs}ms, destroying socket`,
         );
         socket.destroy();
       });
     }
 
-    socket.on("data", data => {
+    socket.on("data", (data) => {
       buffer += data.toString();
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
 
       for (const line of lines) {
         if (line.trim()) {
-          this.processLine(socket, line).catch(error => {
+          this.processLine(socket, line).catch((error) => {
             logger.error(`[${this.serverName}] Request error: ${error}`);
           });
         }
       }
     });
 
-    socket.on("error", error => {
+    socket.on("error", (error) => {
       logger.error(`[${this.serverName}] Connection error: ${error}`);
       this.onConnectionError(socket, error);
     });
@@ -251,7 +253,10 @@ export abstract class BaseSocketServer {
     } catch (error) {
       // A malformed or partial line (e.g. from a client disconnecting mid-write)
       // is not actionable here; the caller drops it and waits for the next line.
-      logger.debug(`src/daemon/socketServer/BaseSocketServer.ts line parse failed: ${error}`, error);
+      logger.debug(
+        `src/daemon/socketServer/BaseSocketServer.ts line parse failed: ${error}`,
+        error,
+      );
       return null;
     }
   }

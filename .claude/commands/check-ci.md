@@ -75,15 +75,15 @@ it here.
 
 Reproduce a **PR-caused** failure with the narrowest authoritative command:
 
-| Failure | Command |
-| --- | --- |
-| TS lint / build | `bun run lint` · `bun run build` |
-| TS types | `bun run typecheck` (gate: new errors vs `scripts/typecheck-baseline.txt`) |
-| Tests | `bun test <file>` first, `bun test` only if needed |
-| Fast Validation | `bash scripts/all_fast_validate_checks.sh` (`--only <check>` to narrow) |
-| Shell / BATS | `shellcheck <script>` · `bats test/bats/<file>.bats` |
-| Android | `(cd android && ./gradlew <task>)` — Robolectric needs JDK 21 |
-| iOS | `bash scripts/ios/swift-build.sh` · `bash scripts/ios/swift-test.sh` |
+| Failure         | Command                                                                    |
+| --------------- | -------------------------------------------------------------------------- |
+| TS lint / build | `bun run lint` · `bun run build`                                           |
+| TS types        | `bun run typecheck` (gate: new errors vs `scripts/typecheck-baseline.txt`) |
+| Tests           | `bun test <file>` first, `bun test` only if needed                         |
+| Fast Validation | `bash scripts/all_fast_validate_checks.sh` (`--only <check>` to narrow)    |
+| Shell / BATS    | `shellcheck <script>` · `bats test/bats/<file>.bats`                       |
+| Android         | `(cd android && ./gradlew <task>)` — Robolectric needs JDK 21              |
+| iOS             | `bash scripts/ios/swift-build.sh` · `bash scripts/ios/swift-test.sh`       |
 
 A fresh worktree has no `node_modules`, so anything resolving an npm dependency fails there for
 environmental reasons that look like real findings. Reproduce in a populated checkout.

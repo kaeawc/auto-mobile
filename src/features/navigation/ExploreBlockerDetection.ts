@@ -40,12 +40,10 @@ const RATING_KEYWORDS = [
   "enjoyed",
   "enjoying",
   "star",
-  "stars"
+  "stars",
 ];
 
-const RATING_KEYWORD_PATTERN = new RegExp(
-  `\\b(?:${RATING_KEYWORDS.join("|")})\\b`
-);
+const RATING_KEYWORD_PATTERN = new RegExp(`\\b(?:${RATING_KEYWORDS.join("|")})\\b`);
 
 /**
  * Check if screen is a permission dialog
@@ -58,13 +56,12 @@ export function isPermissionDialog(elements: Element[]): boolean {
     "deny",
     "don't allow",
     "while using",
-    "only this time"
+    "only this time",
   ];
 
-  return elements.some(el => {
-    const text =
-      (el.text?.toLowerCase() ?? "") + (el["content-desc"]?.toLowerCase() ?? "");
-    return permissionKeywords.some(keyword => text.includes(keyword));
+  return elements.some((el) => {
+    const text = (el.text?.toLowerCase() ?? "") + (el["content-desc"]?.toLowerCase() ?? "");
+    return permissionKeywords.some((keyword) => text.includes(keyword));
   });
 }
 
@@ -72,22 +69,12 @@ export function isPermissionDialog(elements: Element[]): boolean {
  * Check if screen is a login/signup screen
  */
 export function isLoginScreen(elements: Element[]): boolean {
-  const loginKeywords = [
-    "login",
-    "sign in",
-    "sign up",
-    "username",
-    "password",
-    "email"
-  ];
-  const hasEditText = elements.some(el =>
-    el["class"]?.toLowerCase().includes("edittext")
-  );
+  const loginKeywords = ["login", "sign in", "sign up", "username", "password", "email"];
+  const hasEditText = elements.some((el) => el["class"]?.toLowerCase().includes("edittext"));
 
-  const hasLoginText = elements.some(el => {
-    const text =
-      (el.text?.toLowerCase() ?? "") + (el["content-desc"]?.toLowerCase() ?? "");
-    return loginKeywords.some(keyword => text.includes(keyword));
+  const hasLoginText = elements.some((el) => {
+    const text = (el.text?.toLowerCase() ?? "") + (el["content-desc"]?.toLowerCase() ?? "");
+    return loginKeywords.some((keyword) => text.includes(keyword));
   });
 
   // Login screen typically has text fields and login-related text
@@ -98,7 +85,7 @@ export function isLoginScreen(elements: Element[]): boolean {
  * Check if screen is a rating/review dialog
  */
 export function isRatingDialog(elements: Element[]): boolean {
-  return elements.some(el => RATING_KEYWORD_PATTERN.test(elementText(el)));
+  return elements.some((el) => RATING_KEYWORD_PATTERN.test(elementText(el)));
 }
 
 /**
@@ -108,7 +95,7 @@ export async function handlePermissionDialog(
   elements: Element[],
   device: BootedDevice,
   adb: AdbClient | null,
-  progress?: ProgressCallback
+  progress?: ProgressCallback,
 ): Promise<boolean> {
   // Look for "Allow" or "While using" buttons
   const allowKeywords = ["allow", "while using", "only this time", "ok"];
@@ -119,19 +106,18 @@ export async function handlePermissionDialog(
     }
 
     const text =
-      (element.text?.toLowerCase() ?? "") +
-      (element["content-desc"]?.toLowerCase() ?? "");
+      (element.text?.toLowerCase() ?? "") + (element["content-desc"]?.toLowerCase() ?? "");
 
-    if (allowKeywords.some(keyword => text.includes(keyword))) {
+    if (allowKeywords.some((keyword) => text.includes(keyword))) {
       try {
         const tapOn = new TapOnElement(device, adb);
         await tapOn.execute(
           {
             text: element.text,
             elementId: element["resource-id"],
-            action: "tap"
+            action: "tap",
           },
-          progress
+          progress,
         );
         await defaultTimer.sleep(1000);
         return true;
@@ -151,16 +137,9 @@ async function dismissDialog(
   elements: Element[],
   device: BootedDevice,
   adb: AdbClient | null,
-  progress?: ProgressCallback
+  progress?: ProgressCallback,
 ): Promise<boolean> {
-  const dismissKeywords = [
-    "not now",
-    "later",
-    "no thanks",
-    "dismiss",
-    "close",
-    "skip"
-  ];
+  const dismissKeywords = ["not now", "later", "no thanks", "dismiss", "close", "skip"];
 
   for (const element of elements) {
     if (!element.clickable) {
@@ -168,19 +147,18 @@ async function dismissDialog(
     }
 
     const text =
-      (element.text?.toLowerCase() ?? "") +
-      (element["content-desc"]?.toLowerCase() ?? "");
+      (element.text?.toLowerCase() ?? "") + (element["content-desc"]?.toLowerCase() ?? "");
 
-    if (dismissKeywords.some(keyword => text.includes(keyword))) {
+    if (dismissKeywords.some((keyword) => text.includes(keyword))) {
       try {
         const tapOn = new TapOnElement(device, adb);
         await tapOn.execute(
           {
             text: element.text,
             elementId: element["resource-id"],
-            action: "tap"
+            action: "tap",
           },
-          progress
+          progress,
         );
         await defaultTimer.sleep(1000);
         return true;
@@ -207,7 +185,7 @@ export async function detectAndHandleBlockers(
   adb: AdbClient | null,
   elementParser: ElementParser,
   handleDeadEnd: DeadEndHandler,
-  progress?: ProgressCallback
+  progress?: ProgressCallback,
 ): Promise<boolean> {
   const viewHierarchy = observation.viewHierarchy;
   if (!viewHierarchy || viewHierarchy.hierarchy.error) {

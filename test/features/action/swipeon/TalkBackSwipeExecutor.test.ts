@@ -30,7 +30,7 @@ function makeExecutor(
   fakeDetector: FakeAccessibilityDetector,
   fakeTimer: FakeTimer,
   fakeAdb: AdbExecutor = new FakeAdbClient() as unknown as AdbExecutor,
-  featureFlags?: FeatureFlagService
+  featureFlags?: FeatureFlagService,
 ): TalkBackSwipeExecutor {
   return new TalkBackSwipeExecutor(
     device,
@@ -39,7 +39,7 @@ function makeExecutor(
     fakeDetector,
     fakeAdb,
     fakeTimer,
-    featureFlags
+    featureFlags,
   );
 }
 
@@ -62,7 +62,7 @@ describe("TalkBackSwipeExecutor", () => {
       fakeGestureExecutor,
       fakeCtrlProxy,
       fakeAccessibilityDetector,
-      fakeTimer
+      fakeTimer,
     );
   });
 
@@ -75,15 +75,18 @@ describe("TalkBackSwipeExecutor", () => {
         fakeGestureExecutor,
         fakeCtrlProxy,
         fakeAccessibilityDetector,
-        fakeTimer
+        fakeTimer,
       );
 
       await iosExecutor.executeSwipeGesture(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         "up" as SwipeDirection,
         null,
         { duration: 300 },
-        perf
+        perf,
       );
 
       expect(fakeGestureExecutor.getSwipeCalls()).toHaveLength(1);
@@ -102,15 +105,18 @@ describe("TalkBackSwipeExecutor", () => {
         fakeCtrlProxy,
         fakeAccessibilityDetector,
         fakeTimer,
-        sentinelAdb
+        sentinelAdb,
       );
 
       await exec.executeSwipeGesture(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         "up" as SwipeDirection,
         null,
         { duration: 300 },
-        perf
+        perf,
       );
 
       // The bug passed `null`, which made detectMethod throw+swallow and report
@@ -134,15 +140,18 @@ describe("TalkBackSwipeExecutor", () => {
         fakeAccessibilityDetector,
         fakeTimer,
         new FakeAdbClient() as unknown as AdbExecutor,
-        sentinelFlags
+        sentinelFlags,
       );
 
       await exec.executeSwipeGesture(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         "up" as SwipeDirection,
         null,
         { duration: 300 },
-        perf
+        perf,
       );
 
       expect(fakeAccessibilityDetector.detectMethodFeatureFlagsArgs[0]).toBe(sentinelFlags);
@@ -156,11 +165,14 @@ describe("TalkBackSwipeExecutor", () => {
 
     test("dispatches to standard swipe method", async () => {
       await executor.executeSwipeGesture(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         "up" as SwipeDirection,
         null,
         { duration: 300 },
-        perf
+        perf,
       );
 
       expect(fakeGestureExecutor.getSwipeCalls()).toHaveLength(1);
@@ -170,7 +182,7 @@ describe("TalkBackSwipeExecutor", () => {
 
     test.each(["up", "down", "left", "right"] as SwipeDirection[])(
       "dispatches a standard coordinate swipe for direction %s",
-      async direction => {
+      async (direction) => {
         fakeGestureExecutor.getSwipeCalls().length = 0;
 
         const fresh = makeExecutor(
@@ -178,15 +190,18 @@ describe("TalkBackSwipeExecutor", () => {
           fakeGestureExecutor,
           fakeCtrlProxy,
           fakeAccessibilityDetector,
-          fakeTimer
+          fakeTimer,
         );
 
         await fresh.executeSwipeGesture(
-          100, 500, 100, 200,
+          100,
+          500,
+          100,
+          200,
           direction,
           null,
           { duration: 300 },
-          perf
+          perf,
         );
 
         // The dispatch the name claims: a single standard gesture swipe with the
@@ -196,7 +211,7 @@ describe("TalkBackSwipeExecutor", () => {
         expect(swipeCalls[0]).toMatchObject({ x1: 100, y1: 500, x2: 100, y2: 200 });
         expect(fakeCtrlProxy.getActionHistory()).toHaveLength(0);
         expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(0);
-      }
+      },
     );
   });
 
@@ -207,17 +222,20 @@ describe("TalkBackSwipeExecutor", () => {
 
     test("dispatches to accessibility-aware swipe method when container has resource-id", async () => {
       const containerElement = {
-        "bounds": { left: 0, top: 100, right: 400, bottom: 800 },
+        bounds: { left: 0, top: 100, right: 400, bottom: 800 },
         "resource-id": "test:id/scrollView",
-        "scrollable": true
+        scrollable: true,
       } as any;
 
       await executor.executeSwipeGesture(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         "up" as SwipeDirection,
         containerElement,
         { duration: 300 },
-        perf
+        perf,
       );
 
       // Should use accessibility action (not standard gesture swipe)
@@ -228,11 +246,14 @@ describe("TalkBackSwipeExecutor", () => {
 
     test("does not use standard gesture swipe when TalkBack is enabled", async () => {
       await executor.executeSwipeGesture(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         "up" as SwipeDirection,
         null,
         { duration: 300 },
-        perf
+        perf,
       );
 
       expect(fakeGestureExecutor.getSwipeCalls()).toHaveLength(0);
@@ -240,11 +261,14 @@ describe("TalkBackSwipeExecutor", () => {
 
     test("uses two-finger swipe when no container provided", async () => {
       await executor.executeSwipeGesture(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         "up" as SwipeDirection,
         null,
         { duration: 300 },
-        perf
+        perf,
       );
 
       expect(fakeCtrlProxy.getActionHistory()).toHaveLength(0);
@@ -252,37 +276,47 @@ describe("TalkBackSwipeExecutor", () => {
     });
 
     test("surfaces a failed two-finger swipe as an ActionableError instead of a successful scroll", async () => {
-      fakeCtrlProxy.setTwoFingerSwipeResult({ success: false, totalTimeMs: 1, error: "scroll rejected" });
+      fakeCtrlProxy.setTwoFingerSwipeResult({
+        success: false,
+        totalTimeMs: 1,
+        error: "scroll rejected",
+      });
 
       await expect(
         executor.executeSwipeGesture(
-          100, 500, 100, 200,
+          100,
+          500,
+          100,
+          200,
           "up" as SwipeDirection,
           null,
           { duration: 300 },
-          perf
-        )
+          perf,
+        ),
       ).rejects.toThrow("Two-finger swipe failed: scroll rejected");
     });
 
-    test("uses the \"Unknown error\" fallback when the two-finger failure carries an empty message", async () => {
+    test('uses the "Unknown error" fallback when the two-finger failure carries an empty message', async () => {
       // "" is falsy, so this exercises the `|| "Unknown error"` boundary.
       fakeCtrlProxy.setTwoFingerSwipeResult({ success: false, totalTimeMs: 1, error: "" });
 
       await expect(
         executor.executeSwipeGesture(
-          100, 500, 100, 200,
+          100,
+          500,
+          100,
+          200,
           "up" as SwipeDirection,
           null,
           { duration: 300 },
-          perf
-        )
+          perf,
+        ),
       ).rejects.toThrow("Two-finger swipe failed: Unknown error");
     });
 
     test.each(["up", "down", "left", "right"] as SwipeDirection[])(
       "dispatches an accessibility two-finger swipe for direction %s (no container)",
-      async direction => {
+      async (direction) => {
         fakeCtrlProxy.clearHistory();
         fakeGestureExecutor.getSwipeCalls().length = 0;
         const fresh = makeExecutor(
@@ -290,15 +324,18 @@ describe("TalkBackSwipeExecutor", () => {
           fakeGestureExecutor,
           fakeCtrlProxy,
           fakeAccessibilityDetector,
-          fakeTimer
+          fakeTimer,
         );
 
         await fresh.executeSwipeGesture(
-          100, 500, 100, 200,
+          100,
+          500,
+          100,
+          200,
           direction,
           null,
           { duration: 300 },
-          perf
+          perf,
         );
 
         // The dispatch the name claims: with TalkBack on and no container, the
@@ -306,28 +343,31 @@ describe("TalkBackSwipeExecutor", () => {
         // standard coordinate gesture.
         expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(1);
         expect(fakeGestureExecutor.getSwipeCalls()).toHaveLength(0);
-      }
+      },
     );
 
     test("boomerang mode announces swipeable element instead of swiping", async () => {
       const containerElement = {
-        "resource-id": "test:id/scrollView"
+        "resource-id": "test:id/scrollView",
       } as any;
 
       await executor.executeSwipeGesture(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         "up" as SwipeDirection,
         containerElement,
         { duration: 300 },
         perf,
-        { apexPauseMs: 100, returnSpeed: 1 }
+        { apexPauseMs: 100, returnSpeed: 1 },
       );
 
       expect(fakeCtrlProxy.getActionHistory()).toHaveLength(1);
       expect(fakeCtrlProxy.getActionHistory()[0]).toMatchObject({
         action: "focus",
         resourceId: "test:id/scrollView",
-        timeoutMs: 5000
+        timeoutMs: 5000,
       });
       expect(fakeGestureExecutor.getSwipeCalls()).toHaveLength(0);
       expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(0);
@@ -339,11 +379,14 @@ describe("TalkBackSwipeExecutor", () => {
       // First swipe with TalkBack disabled
       fakeAccessibilityDetector.setTalkBackEnabled(false);
       await executor.executeSwipeGesture(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         "up" as SwipeDirection,
         null,
         { duration: 300 },
-        perf
+        perf,
       );
       expect(fakeGestureExecutor.getSwipeCalls()).toHaveLength(1);
 
@@ -355,11 +398,14 @@ describe("TalkBackSwipeExecutor", () => {
 
       // Second swipe should use accessibility method (two-finger swipe since no container)
       await executor.executeSwipeGesture(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         "up" as SwipeDirection,
         null,
         { duration: 300 },
-        perf
+        perf,
       );
 
       expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(1);
@@ -375,81 +421,93 @@ describe("TalkBackSwipeExecutor", () => {
 
     test("tries ACTION_SCROLL (scroll_forward) when container has resource-id and direction is down", async () => {
       const containerElement = {
-        "bounds": { left: 0, top: 100, right: 400, bottom: 800 },
+        bounds: { left: 0, top: 100, right: 400, bottom: 800 },
         "resource-id": "test:id/scrollView",
-        "scrollable": true
+        scrollable: true,
       } as any;
 
       await executor.executeAndroidSwipeWithAccessibility(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         "down" as SwipeDirection,
         containerElement,
         { duration: 300 },
-        perf
+        perf,
       );
 
       expect(fakeCtrlProxy.getActionHistory()).toHaveLength(1);
       expect(fakeCtrlProxy.getActionHistory()[0]).toMatchObject({
         action: "scroll_forward",
         resourceId: "test:id/scrollView",
-        timeoutMs: 5000
+        timeoutMs: 5000,
       });
       expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(0);
     });
 
     test("maps up direction to scroll_backward", async () => {
       const containerElement = {
-        "resource-id": "test:id/scrollView"
+        "resource-id": "test:id/scrollView",
       } as any;
 
       await executor.executeAndroidSwipeWithAccessibility(
-        100, 500, 100, 700,
+        100,
+        500,
+        100,
+        700,
         "up" as SwipeDirection,
         containerElement,
         { duration: 300 },
-        perf
+        perf,
       );
 
       expect(fakeCtrlProxy.getActionHistory()).toHaveLength(1);
       expect(fakeCtrlProxy.getActionHistory()[0]).toMatchObject({
         action: "scroll_backward",
-        resourceId: "test:id/scrollView"
+        resourceId: "test:id/scrollView",
       });
     });
 
     test("maps right direction to scroll_forward", async () => {
       const containerElement = {
-        "resource-id": "test:id/scrollView"
+        "resource-id": "test:id/scrollView",
       } as any;
 
       await executor.executeAndroidSwipeWithAccessibility(
-        100, 200, 300, 200,
+        100,
+        200,
+        300,
+        200,
         "right" as SwipeDirection,
         containerElement,
         { duration: 300 },
-        perf
+        perf,
       );
 
       expect(fakeCtrlProxy.getActionHistory()[0]).toMatchObject({
-        action: "scroll_forward"
+        action: "scroll_forward",
       });
     });
 
     test("maps left direction to scroll_backward", async () => {
       const containerElement = {
-        "resource-id": "test:id/scrollView"
+        "resource-id": "test:id/scrollView",
       } as any;
 
       await executor.executeAndroidSwipeWithAccessibility(
-        300, 200, 100, 200,
+        300,
+        200,
+        100,
+        200,
         "left" as SwipeDirection,
         containerElement,
         { duration: 300 },
-        perf
+        perf,
       );
 
       expect(fakeCtrlProxy.getActionHistory()[0]).toMatchObject({
-        action: "scroll_backward"
+        action: "scroll_backward",
       });
     });
 
@@ -458,19 +516,22 @@ describe("TalkBackSwipeExecutor", () => {
         success: false,
         action: "scroll_backward",
         totalTimeMs: 100,
-        error: "Scroll not supported"
+        error: "Scroll not supported",
       });
 
       const containerElement = {
-        "resource-id": "test:id/scrollView"
+        "resource-id": "test:id/scrollView",
       } as any;
 
       await executor.executeAndroidSwipeWithAccessibility(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         "up" as SwipeDirection,
         containerElement,
         { duration: 300 },
-        perf
+        perf,
       );
 
       expect(fakeCtrlProxy.getTwoFingerSwipeHistory()).toHaveLength(1);
@@ -481,23 +542,26 @@ describe("TalkBackSwipeExecutor", () => {
         y2: 200,
         duration: 300,
         offset: 100,
-        timeoutMs: 5000
+        timeoutMs: 5000,
       });
     });
 
     test("uses two-finger swipe when container has no resource-id", async () => {
       const containerElement = {
-        "bounds": { left: 0, top: 100, right: 400, bottom: 800 },
-        "scrollable": true
+        bounds: { left: 0, top: 100, right: 400, bottom: 800 },
+        scrollable: true,
         // No resource-id
       } as any;
 
       await executor.executeAndroidSwipeWithAccessibility(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         "up" as SwipeDirection,
         containerElement,
         { duration: 300 },
-        perf
+        perf,
       );
 
       // Should not try ACTION_SCROLL
@@ -508,11 +572,14 @@ describe("TalkBackSwipeExecutor", () => {
 
     test("uses two-finger swipe when no container provided", async () => {
       await executor.executeAndroidSwipeWithAccessibility(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         "up" as SwipeDirection,
         null,
         { duration: 300 },
-        perf
+        perf,
       );
 
       expect(fakeCtrlProxy.getActionHistory()).toHaveLength(0);
@@ -523,10 +590,13 @@ describe("TalkBackSwipeExecutor", () => {
   describe("executeBoomerangGesture", () => {
     test("calls swipe twice: forward then return", async () => {
       await executor.executeBoomerangGesture(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         { duration: 300 },
         { apexPauseMs: 50, returnSpeed: 1 },
-        perf
+        perf,
       );
 
       const calls = fakeGestureExecutor.getSwipeCalls();
@@ -539,10 +609,13 @@ describe("TalkBackSwipeExecutor", () => {
 
     test("sleeps for apexPauseMs between forward and return swipe", async () => {
       await executor.executeBoomerangGesture(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         { duration: 300 },
         { apexPauseMs: 150, returnSpeed: 1 },
-        perf
+        perf,
       );
 
       expect(fakeTimer.wasSleepCalled(150)).toBe(true);
@@ -550,10 +623,13 @@ describe("TalkBackSwipeExecutor", () => {
 
     test("does not sleep when apexPauseMs is 0", async () => {
       await executor.executeBoomerangGesture(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         { duration: 300 },
         { apexPauseMs: 0, returnSpeed: 1 },
-        perf
+        perf,
       );
 
       expect(fakeTimer.getSleepCallCount()).toBe(0);
@@ -561,10 +637,13 @@ describe("TalkBackSwipeExecutor", () => {
 
     test("adjusts return duration based on returnSpeed", async () => {
       await executor.executeBoomerangGesture(
-        100, 500, 100, 200,
+        100,
+        500,
+        100,
+        200,
         { duration: 300 },
         { apexPauseMs: 0, returnSpeed: 2 },
-        perf
+        perf,
       );
 
       const calls = fakeGestureExecutor.getSwipeCalls();

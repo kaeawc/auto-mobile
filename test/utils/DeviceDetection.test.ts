@@ -41,7 +41,11 @@ describe("DeviceDetection.detectPlatform", () => {
     // --- Degenerate / boundary input ------------------------------------------
     ["empty string", "", "android"],
     ["whitespace only", "   ", "android"],
-    ["simulator UUID with surrounding whitespace", " 569C0F94-5D53-40D2-AF8F-F4AA5BAA7D5E ", "android"],
+    [
+      "simulator UUID with surrounding whitespace",
+      " 569C0F94-5D53-40D2-AF8F-F4AA5BAA7D5E ",
+      "android",
+    ],
     ["39 hex chars (one short of legacy)", "a".repeat(39), "android"],
     ["41 hex chars (one over legacy)", "a".repeat(41), "android"],
     ["A12+ form, 15 hex tail (one short)", "00008030-001C2D3E123456", "android"],
@@ -56,10 +60,13 @@ describe("DeviceDetection.detectPlatform", () => {
     expect(detection.detectPlatform(deviceId)).toBe(expected);
   });
 
-  test.each(cases)("isiOSDevice/isAndroidDevice agree with detectPlatform for %s", (_l, deviceId, expected) => {
-    expect(detection.isiOSDevice(deviceId)).toBe(expected === "ios");
-    expect(detection.isAndroidDevice(deviceId)).toBe(expected === "android");
-  });
+  test.each(cases)(
+    "isiOSDevice/isAndroidDevice agree with detectPlatform for %s",
+    (_l, deviceId, expected) => {
+      expect(detection.isiOSDevice(deviceId)).toBe(expected === "ios");
+      expect(detection.isAndroidDevice(deviceId)).toBe(expected === "android");
+    },
+  );
 
   test("static convenience methods match the instance methods", () => {
     expect(DeviceDetection.detectPlatform("00008030-001C2D3E1234567A")).toBe("ios");

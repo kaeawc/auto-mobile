@@ -2,14 +2,14 @@ import { promises as fsPromises } from "node:fs";
 import os from "os";
 import path from "path";
 import { randomBytes } from "crypto";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import {
-  BootedDevice,
-  BugReportResult,
-} from "../../models";
+import { BootedDevice, BugReportResult } from "../../models";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import type { ViewHierarchy as ViewHierarchyContract } from "../observe/interfaces/ViewHierarchy";
 import { TakeScreenshot } from "../observe/TakeScreenshot";
@@ -51,7 +51,7 @@ export class BugReport {
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     timer: Timer = defaultTimer,
     elementParser: ElementParser = new DefaultElementParser(),
-    viewHierarchy?: ViewHierarchyContract
+    viewHierarchy?: ViewHierarchyContract,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -78,14 +78,14 @@ export class BugReport {
       timestamp: startTime,
       device: {
         deviceId: this.device.deviceId,
-        platform: this.device.platform
+        platform: this.device.platform,
       },
       screenState: {},
       viewHierarchy: {
         elementCount: 0,
-        clickableElements: []
+        clickableElements: [],
       },
-      errors: []
+      errors: [],
     };
 
     await Promise.all([
@@ -94,7 +94,7 @@ export class BugReport {
       this.getWindowState(result),
       this.getHierarchy(result),
       this.getLogcat(result, logcatLines, options.appId),
-      this.getScreenshot(result)
+      this.getScreenshot(result),
     ]);
 
     const saveDir = options.saveDir
@@ -114,11 +114,21 @@ export class BugReport {
   private async getDeviceInfo(result: BugReportResult): Promise<void> {
     try {
       // Get device model
-      const modelResult = await this.adb.executeCommand("shell getprop ro.product.model", undefined, undefined, true);
+      const modelResult = await this.adb.executeCommand(
+        "shell getprop ro.product.model",
+        undefined,
+        undefined,
+        true,
+      );
       result.device.model = modelResult.stdout.trim();
 
       // Get OS version
-      const versionResult = await this.adb.executeCommand("shell getprop ro.build.version.release", undefined, undefined, true);
+      const versionResult = await this.adb.executeCommand(
+        "shell getprop ro.build.version.release",
+        undefined,
+        undefined,
+        true,
+      );
       result.device.osVersion = versionResult.stdout.trim();
     } catch (error) {
       result.errors?.push(`Failed to get device info: ${error}`);
@@ -135,12 +145,14 @@ export class BugReport {
         "shell dumpsys activity activities | grep -E 'mResumedActivity|mCurrentFocus'",
         5000,
         undefined,
-        true
+        true,
       );
       const activityOutput = activityResult.stdout;
 
       // Parse activity name
-      const activityMatch = activityOutput.match(/mResumedActivity.*?([A-Za-z0-9_.]+\/[A-Za-z0-9_.]+)/);
+      const activityMatch = activityOutput.match(
+        /mResumedActivity.*?([A-Za-z0-9_.]+\/[A-Za-z0-9_.]+)/,
+      );
       if (activityMatch) {
         const [packageName, activityName] = activityMatch[1].split("/");
         result.screenState.currentPackage = packageName;
@@ -153,7 +165,7 @@ export class BugReport {
       if (sizeMatch) {
         result.screenState.screenSize = {
           width: parseInt(sizeMatch[1], 10),
-          height: parseInt(sizeMatch[2], 10)
+          height: parseInt(sizeMatch[2], 10),
         };
       }
 
@@ -162,7 +174,7 @@ export class BugReport {
         "shell dumpsys input | grep SurfaceOrientation",
         undefined,
         undefined,
-        true
+        true,
       );
       const rotationMatch = rotationResult.stdout.match(/SurfaceOrientation:\s*(\d)/);
       if (rotationMatch) {
@@ -174,10 +186,10 @@ export class BugReport {
         "shell dumpsys power | grep -E 'mWakefulness|Display Power'",
         undefined,
         undefined,
-        true
+        true,
       );
-      result.screenState.screenOn = screenStateResult.stdout.includes("Awake") ||
-        screenStateResult.stdout.includes("state=ON");
+      result.screenState.screenOn =
+        screenStateResult.stdout.includes("Awake") || screenStateResult.stdout.includes("state=ON");
     } catch (error) {
       result.errors?.push(`Failed to get screen state: ${error}`);
     }
@@ -192,12 +204,12 @@ export class BugReport {
         "shell dumpsys window windows | grep -E 'mCurrentFocus|mFocusedApp|Window #'",
         5000,
         undefined,
-        true
+        true,
       );
       const lines = windowResult.stdout.split("\n").filter((l: string) => l.trim());
 
       result.windowState = {
-        windows: []
+        windows: [],
       };
 
       for (const line of lines) {
@@ -247,20 +259,25 @@ export class BugReport {
         let totalTraversedNodes = 0;
         const rootNodes = this.elementParser.extractRootNodes(hierarchy);
         for (const rootNode of rootNodes) {
-          this.elementParser.traverseNode(rootNode, () => { totalTraversedNodes++; });
+          this.elementParser.traverseNode(rootNode, () => {
+            totalTraversedNodes++;
+          });
         }
 
         result.viewHierarchy.elementCount = flattenedElements.length;
         result.viewHierarchy.filteredNodeCount = totalTraversedNodes - flattenedElements.length;
 
         const clickableElements = flattenedElements
-          .filter(({ element }) => element.clickable === true || element.clickable as unknown === "true")
+          .filter(
+            ({ element }) =>
+              element.clickable === true || (element.clickable as unknown) === "true",
+          )
           .map(({ element, text }) => ({
             resourceId: element["resource-id"],
             text: text ?? element.text,
             contentDesc: element["content-desc"],
             bounds: element.bounds,
-            className: element["class"] ?? element.className
+            className: element["class"] ?? element.className,
           }));
 
         result.viewHierarchy.clickableElements = clickableElements.slice(0, 50);
@@ -273,11 +290,7 @@ export class BugReport {
   /**
    * Get logcat entries
    */
-  private async getLogcat(
-    result: BugReportResult,
-    lines: number,
-    appId?: string
-  ): Promise<void> {
+  private async getLogcat(result: BugReportResult, lines: number, appId?: string): Promise<void> {
     try {
       result.logcat = {};
 
@@ -286,7 +299,7 @@ export class BugReport {
         `shell logcat -d -t ${lines} *:E`,
         10000,
         undefined,
-        true
+        true,
       );
       result.logcat.errors = errorResult.stdout
         .split("\n")
@@ -298,7 +311,7 @@ export class BugReport {
         `shell logcat -d -t ${lines} *:W`,
         10000,
         undefined,
-        true
+        true,
       );
       result.logcat.warnings = warnResult.stdout
         .split("\n")
@@ -312,7 +325,7 @@ export class BugReport {
           `shell pidof ${appId}`,
           undefined,
           undefined,
-          true
+          true,
         );
         const pid = pidResult.stdout.trim();
 
@@ -321,7 +334,7 @@ export class BugReport {
             `shell logcat -d -t ${lines * 2} --pid=${pid}`,
             10000,
             undefined,
-            true
+            true,
           );
           result.logcat.appLogs = appLogResult.stdout
             .split("\n")

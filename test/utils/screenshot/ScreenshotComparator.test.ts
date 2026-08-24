@@ -40,8 +40,9 @@ describe("ScreenshotComparator backend routing", () => {
       const backend = new FakeImageBackend();
       backend.setShouldThrowOnMetadata(true);
 
-      await expect(ScreenshotComparator.getImageDimensions(Buffer.from("nope"), backend))
-        .rejects.toThrow("Failed to get image dimensions");
+      await expect(
+        ScreenshotComparator.getImageDimensions(Buffer.from("nope"), backend),
+      ).rejects.toThrow("Failed to get image dimensions");
     });
   });
 
@@ -61,8 +62,9 @@ describe("ScreenshotComparator backend routing", () => {
       const backend = new FakeImageBackend();
       backend.setShouldThrowOnExecute(true);
 
-      await expect(ScreenshotComparator.convertToPng(Buffer.from("bad"), backend))
-        .rejects.toThrow("Failed to convert image to PNG");
+      await expect(ScreenshotComparator.convertToPng(Buffer.from("bad"), backend)).rejects.toThrow(
+        "Failed to convert image to PNG",
+      );
     });
   });
 
@@ -78,9 +80,9 @@ describe("ScreenshotComparator backend routing", () => {
       expect(out.toString()).toBe("resized");
       expect(backend.lastPipeline).toEqual({
         operations: [
-          { type: "resize", width: 160, height: 320, maintainAspectRatio: false, mode: "nearest" }
+          { type: "resize", width: 160, height: 320, maintainAspectRatio: false, mode: "nearest" },
         ],
-        encoding: { mime: "image/png" }
+        encoding: { mime: "image/png" },
       });
     });
 

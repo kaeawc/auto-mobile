@@ -4,7 +4,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
-  const promise = new Promise<void>(done => {
+  const promise = new Promise<void>((done) => {
     resolve = done;
   });
   return { promise, resolve };
@@ -66,12 +66,9 @@ describe("SingleFlightInterval", () => {
   test("bounds shutdown when an active tick does not settle", async () => {
     const timer = new FakeTimer();
     const activeTick = deferred();
-    const interval = new SingleFlightInterval(
-      timer,
-      5_000,
-      () => activeTick.promise,
-      { stopTimeoutMs: 50 },
-    );
+    const interval = new SingleFlightInterval(timer, 5_000, () => activeTick.promise, {
+      stopTimeoutMs: 50,
+    });
 
     interval.start();
     timer.advanceTime(5_000);
@@ -79,7 +76,9 @@ describe("SingleFlightInterval", () => {
 
     timer.advanceTime(49);
     let settled = false;
-    void stopped.then(() => { settled = true; });
+    void stopped.then(() => {
+      settled = true;
+    });
     await Promise.resolve();
     expect(settled).toBe(false);
 
@@ -90,14 +89,15 @@ describe("SingleFlightInterval", () => {
   test("reports a rejected active tick and treats it as settled during shutdown", async () => {
     const timer = new FakeTimer();
     let rejectTick!: (error: Error) => void;
-    const activeTick = new Promise<void>((_resolve, reject) => { rejectTick = reject; });
+    const activeTick = new Promise<void>((_resolve, reject) => {
+      rejectTick = reject;
+    });
     const errors: Error[] = [];
-    const interval = new SingleFlightInterval(
-      timer,
-      5_000,
-      () => activeTick,
-      { onError: error => { errors.push(error as Error); } },
-    );
+    const interval = new SingleFlightInterval(timer, 5_000, () => activeTick, {
+      onError: (error) => {
+        errors.push(error as Error);
+      },
+    });
 
     interval.start();
     timer.advanceTime(5_000);

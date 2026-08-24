@@ -81,8 +81,7 @@ export async function secureFile(filePath: string): Promise<void> {
   }
 }
 
-const normalize = (error: unknown): string =>
-  errorMessage(error);
+const normalize = (error: unknown): string => errorMessage(error);
 
 /** Default implementation backed by the real filesystem. */
 export const defaultSecurePermissions: SecurePermissions = {

@@ -63,16 +63,13 @@ describe("normalizeCrash", () => {
   test("passes through currentScreen when present", () => {
     const event = normalizeCrash(
       makeCrashPayload({ currentScreen: "HomeScreen" }),
-      "emulator-5554"
+      "emulator-5554",
     );
     expect(event.currentScreen).toBe("HomeScreen");
   });
 
   test("leaves optional message undefined when absent", () => {
-    const event = normalizeCrash(
-      makeCrashPayload({ message: undefined }),
-      "emulator-5554"
-    );
+    const event = normalizeCrash(makeCrashPayload({ message: undefined }), "emulator-5554");
     expect(event.exceptionMessage).toBeUndefined();
   });
 });
@@ -87,24 +84,19 @@ describe("normalizeAnr", () => {
     expect(event.processName).toBe("com.example.app");
     expect(event.importance).toBe("FOREGROUND");
     expect(event.reason).toBe("Input dispatching timed out");
-    expect(event.stacktrace).toBe(
-      "at android.os.MessageQueue.nativePollOnce(Native Method)"
-    );
+    expect(event.stacktrace).toBe("at android.os.MessageQueue.nativePollOnce(Native Method)");
   });
 
   test("falls back to processName when payload packageName is absent", () => {
     const event = normalizeAnr(
       makeAnrPayload({ packageName: undefined, processName: "com.proc.name" }),
-      "emulator-5554"
+      "emulator-5554",
     );
     expect(event.packageName).toBe("com.proc.name");
   });
 
   test("prefers payload packageName over processName", () => {
-    const event = normalizeAnr(
-      makeAnrPayload({ packageName: "com.payload.pkg" }),
-      "emulator-5554"
-    );
+    const event = normalizeAnr(makeAnrPayload({ packageName: "com.payload.pkg" }), "emulator-5554");
     expect(event.packageName).toBe("com.payload.pkg");
   });
 });

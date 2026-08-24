@@ -5,30 +5,26 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("navigation_apps")
     .ifNotExists()
-    .addColumn("app_id", "text", col => col.primaryKey())
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
-    .addColumn("updated_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+    .addColumn("app_id", "text", (col) => col.primaryKey())
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
+    .addColumn("updated_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create navigation_nodes table
   await db.schema
     .createTable("navigation_nodes")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("app_id", "text", col =>
-      col.notNull().references("navigation_apps.app_id").onDelete("cascade")
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("app_id", "text", (col) =>
+      col.notNull().references("navigation_apps.app_id").onDelete("cascade"),
     )
-    .addColumn("screen_name", "text", col => col.notNull())
-    .addColumn("first_seen_at", "integer", col => col.notNull())
-    .addColumn("last_seen_at", "integer", col => col.notNull())
-    .addColumn("visit_count", "integer", col => col.notNull().defaultTo(1))
+    .addColumn("screen_name", "text", (col) => col.notNull())
+    .addColumn("first_seen_at", "integer", (col) => col.notNull())
+    .addColumn("last_seen_at", "integer", (col) => col.notNull())
+    .addColumn("visit_count", "integer", (col) => col.notNull().defaultTo(1))
     .addColumn("back_stack_depth", "integer")
     .addColumn("task_id", "integer")
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create unique constraint on (app_id, screen_name)
@@ -44,18 +40,16 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("navigation_edges")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("app_id", "text", col =>
-      col.notNull().references("navigation_apps.app_id").onDelete("cascade")
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("app_id", "text", (col) =>
+      col.notNull().references("navigation_apps.app_id").onDelete("cascade"),
     )
-    .addColumn("from_screen", "text", col => col.notNull())
-    .addColumn("to_screen", "text", col => col.notNull())
+    .addColumn("from_screen", "text", (col) => col.notNull())
+    .addColumn("to_screen", "text", (col) => col.notNull())
     .addColumn("tool_name", "text")
     .addColumn("tool_args", "text")
-    .addColumn("timestamp", "integer", col => col.notNull())
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("timestamp", "integer", (col) => col.notNull())
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create indices for navigation_edges
@@ -84,9 +78,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("ui_elements")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("app_id", "text", col =>
-      col.notNull().references("navigation_apps.app_id").onDelete("cascade")
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("app_id", "text", (col) =>
+      col.notNull().references("navigation_apps.app_id").onDelete("cascade"),
     )
     .addColumn("text", "text")
     .addColumn("resource_id", "text")
@@ -98,11 +92,9 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("bounds_bottom", "integer")
     .addColumn("clickable", "integer")
     .addColumn("scrollable", "integer")
-    .addColumn("first_seen_at", "integer", col => col.notNull())
-    .addColumn("last_seen_at", "integer", col => col.notNull())
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("first_seen_at", "integer", (col) => col.notNull())
+    .addColumn("last_seen_at", "integer", (col) => col.notNull())
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create index on app_id for ui_elements
@@ -117,13 +109,13 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("edge_ui_elements")
     .ifNotExists()
-    .addColumn("edge_id", "integer", col =>
-      col.notNull().references("navigation_edges.id").onDelete("cascade")
+    .addColumn("edge_id", "integer", (col) =>
+      col.notNull().references("navigation_edges.id").onDelete("cascade"),
     )
-    .addColumn("ui_element_id", "integer", col =>
-      col.notNull().references("ui_elements.id").onDelete("cascade")
+    .addColumn("ui_element_id", "integer", (col) =>
+      col.notNull().references("ui_elements.id").onDelete("cascade"),
     )
-    .addColumn("selection_order", "integer", col => col.notNull().defaultTo(0))
+    .addColumn("selection_order", "integer", (col) => col.notNull().defaultTo(0))
     .execute();
 
   // Create primary key for edge_ui_elements
@@ -139,14 +131,12 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("node_modals")
     .ifNotExists()
-    .addColumn("node_id", "integer", col =>
-      col.notNull().references("navigation_nodes.id").onDelete("cascade")
+    .addColumn("node_id", "integer", (col) =>
+      col.notNull().references("navigation_nodes.id").onDelete("cascade"),
     )
-    .addColumn("modal_identifier", "text", col => col.notNull())
-    .addColumn("stack_level", "integer", col => col.notNull())
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("modal_identifier", "text", (col) => col.notNull())
+    .addColumn("stack_level", "integer", (col) => col.notNull())
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create primary key for node_modals
@@ -162,15 +152,13 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("edge_modals")
     .ifNotExists()
-    .addColumn("edge_id", "integer", col =>
-      col.notNull().references("navigation_edges.id").onDelete("cascade")
+    .addColumn("edge_id", "integer", (col) =>
+      col.notNull().references("navigation_edges.id").onDelete("cascade"),
     )
-    .addColumn("position", "text", col => col.notNull())
-    .addColumn("modal_identifier", "text", col => col.notNull())
-    .addColumn("stack_level", "integer", col => col.notNull())
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("position", "text", (col) => col.notNull())
+    .addColumn("modal_identifier", "text", (col) => col.notNull())
+    .addColumn("stack_level", "integer", (col) => col.notNull())
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create primary key for edge_modals
@@ -186,21 +174,15 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("scroll_positions")
     .ifNotExists()
-    .addColumn("edge_id", "integer", col =>
-      col.primaryKey().references("navigation_edges.id").onDelete("cascade")
+    .addColumn("edge_id", "integer", (col) =>
+      col.primaryKey().references("navigation_edges.id").onDelete("cascade"),
     )
-    .addColumn("target_element_id", "integer", col =>
-      col.notNull().references("ui_elements.id")
-    )
-    .addColumn("container_element_id", "integer", col =>
-      col.references("ui_elements.id")
-    )
-    .addColumn("direction", "text", col => col.notNull())
+    .addColumn("target_element_id", "integer", (col) => col.notNull().references("ui_elements.id"))
+    .addColumn("container_element_id", "integer", (col) => col.references("ui_elements.id"))
+    .addColumn("direction", "text", (col) => col.notNull())
     .addColumn("speed", "text")
     .addColumn("swipe_count", "integer")
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 }
 

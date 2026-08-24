@@ -14,7 +14,9 @@ describe("App file tools", () => {
   test("registers putAppFile with discoverable schema fields", () => {
     registerAppFileTools();
 
-    const toolDefinition = ToolRegistry.getToolDefinitions().find(tool => tool.name === "putAppFile");
+    const toolDefinition = ToolRegistry.getToolDefinitions().find(
+      (tool) => tool.name === "putAppFile",
+    );
     expect(toolDefinition).toBeDefined();
     expect(toolDefinition!.inputSchema.properties.appId).toBeDefined();
     expect(toolDefinition!.inputSchema.properties.container.enum).toContain("documents");
@@ -29,13 +31,15 @@ describe("App file tools", () => {
     registerAppFileTools();
     const tool = ToolRegistry.getTool("putAppFile");
 
-    expect(tool!.schema.parse({
-      platform: "ios",
-      appId: "com.example.app",
-      container: "documents",
-      sourcePath: "/Users/me/fixtures/welcome.png",
-      destinationPath: "fixtures/onboarding/welcome image.png",
-    })).toMatchObject({
+    expect(
+      tool!.schema.parse({
+        platform: "ios",
+        appId: "com.example.app",
+        container: "documents",
+        sourcePath: "/Users/me/fixtures/welcome.png",
+        destinationPath: "fixtures/onboarding/welcome image.png",
+      }),
+    ).toMatchObject({
       appId: "com.example.app",
       container: "documents",
       destinationPath: "fixtures/onboarding/welcome image.png",
@@ -46,21 +50,25 @@ describe("App file tools", () => {
     registerAppFileTools();
     const tool = ToolRegistry.getTool("putAppFile");
 
-    expect(() => tool!.schema.parse({
-      platform: "android",
-      appId: "com.example.app",
-      container: "documents",
-      contentText: "{\"enabled\":false}",
-      destinationPath: "config/experiments.json",
-    })).not.toThrow();
+    expect(() =>
+      tool!.schema.parse({
+        platform: "android",
+        appId: "com.example.app",
+        container: "documents",
+        contentText: '{"enabled":false}',
+        destinationPath: "config/experiments.json",
+      }),
+    ).not.toThrow();
 
-    expect(() => tool!.schema.parse({
-      platform: "android",
-      appId: "com.example.app",
-      container: "cache",
-      contentBase64: Buffer.from([0, 1, 2, 255]).toString("base64"),
-      destinationPath: "images/raw.bin",
-    })).not.toThrow();
+    expect(() =>
+      tool!.schema.parse({
+        platform: "android",
+        appId: "com.example.app",
+        container: "cache",
+        contentBase64: Buffer.from([0, 1, 2, 255]).toString("base64"),
+        destinationPath: "images/raw.bin",
+      }),
+    ).not.toThrow();
   });
 
   test("rejects invalid source combinations with actionable messages", () => {
@@ -92,7 +100,12 @@ describe("App file tools", () => {
     registerAppFileTools();
     const tool = ToolRegistry.getTool("putAppFile");
 
-    for (const destinationPath of ["/absolute/file.txt", "../escape.txt", "safe/../../escape.txt", ""]) {
+    for (const destinationPath of [
+      "/absolute/file.txt",
+      "../escape.txt",
+      "safe/../../escape.txt",
+      "",
+    ]) {
       const result = tool!.schema.safeParse({
         platform: "android",
         appId: "com.example.app",

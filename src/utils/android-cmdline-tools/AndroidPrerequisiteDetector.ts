@@ -4,7 +4,7 @@ import {
   isToolInPath,
   getAndroidSdkFromEnvironment,
   detectAndroidSdkTools,
-  detectHomebrewAndroidTools
+  detectHomebrewAndroidTools,
 } from "./detection";
 
 /**

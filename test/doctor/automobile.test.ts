@@ -76,7 +76,7 @@ describe("checkImageBackend", () => {
   test("reports active sharp backend and load status on macOS and Linux", async () => {
     const result = await checkImageBackend({
       platform: "linux",
-      sharpLoader: async () => ({} as never),
+      sharpLoader: async () => ({}) as never,
     });
 
     expect(result).toEqual({
@@ -95,13 +95,15 @@ describe("checkImageBackend", () => {
         throw new Error("sharp import failed");
       },
       logger: {
-        warn: message => warnings.push(message),
+        warn: (message) => warnings.push(message),
       },
     });
 
     expect(result.name).toBe("Image Backend");
     expect(result.status).toBe("fail");
-    expect(result.message).toBe("active=sharp; sharp=unavailable; webp=unavailable; error=sharp import failed");
+    expect(result.message).toBe(
+      "active=sharp; sharp=unavailable; webp=unavailable; error=sharp import failed",
+    );
     expect(result.recommendation).toContain("Reinstall dependencies");
     expect(result.recommendation).toContain("WebP support");
     expect(warnings).toEqual(["Image backend doctor check failed: sharp import failed"]);
@@ -134,7 +136,8 @@ describe("checkImageBackend", () => {
     expect(result).toEqual({
       name: "Image Backend",
       status: "pass",
-      message: "active=jimp-cli; cwebp=C:\\auto-mobile\\vendor\\libwebp\\cwebp.exe; dwebp=C:\\auto-mobile\\vendor\\libwebp\\dwebp.exe",
+      message:
+        "active=jimp-cli; cwebp=C:\\auto-mobile\\vendor\\libwebp\\cwebp.exe; dwebp=C:\\auto-mobile\\vendor\\libwebp\\dwebp.exe",
     });
   });
 
@@ -149,13 +152,15 @@ describe("checkImageBackend", () => {
         },
       },
       logger: {
-        warn: message => warnings.push(message),
+        warn: (message) => warnings.push(message),
       },
     });
 
     expect(result.name).toBe("Image Backend");
     expect(result.status).toBe("fail");
-    expect(result.message).toBe("active=jimp-cli; cwebp=unavailable; dwebp=unavailable; error=Unable to resolve cwebp");
+    expect(result.message).toBe(
+      "active=jimp-cli; cwebp=unavailable; dwebp=unavailable; error=Unable to resolve cwebp",
+    );
     expect(result.recommendation).toContain("AUTOMOBILE_CWEBP_PATH");
     expect(warnings).toEqual(["Image backend doctor check failed: Unable to resolve cwebp"]);
   });
@@ -359,18 +364,23 @@ describe("checkCtrlProxy", () => {
 
   test("logs unexpected failures at warn before returning typed skip", async () => {
     const log = new FakeLogger();
-    const result = await checkCtrlProxy({
-      create: () => {
-        throw new Error("adb unavailable");
+    const result = await checkCtrlProxy(
+      {
+        create: () => {
+          throw new Error("adb unavailable");
+        },
       },
-    }, { logger: log });
+      { logger: log },
+    );
 
     expect(result.name).toBe("CtrlProxy");
     expect(result.status).toBe("skip");
     expect(result.message).toBe("Could not check: adb unavailable");
-    expect(log.at("warn")).toContainEqual(expect.objectContaining({
-      message: "CtrlProxy check failed: adb unavailable",
-    }));
+    expect(log.at("warn")).toContainEqual(
+      expect.objectContaining({
+        message: "CtrlProxy check failed: adb unavailable",
+      }),
+    );
   });
 
   test("fails malformed mirror configuration even when no devices are connected (#2815)", async () => {
@@ -383,7 +393,9 @@ describe("checkCtrlProxy", () => {
 
       expect(result.name).toBe("CtrlProxy");
       expect(result.status).toBe("fail");
-      expect(result.message).toContain("AUTOMOBILE_ASSET_BASE_URL must not include a query string or fragment");
+      expect(result.message).toContain(
+        "AUTOMOBILE_ASSET_BASE_URL must not include a query string or fragment",
+      );
     } finally {
       if (prevBaseUrl === undefined) {
         delete process.env.AUTOMOBILE_ASSET_BASE_URL;
@@ -397,12 +409,14 @@ describe("checkCtrlProxy", () => {
     const prevVersion = process.env.AUTOMOBILE_VERSION;
     process.env.AUTOMOBILE_VERSION = "99.99.99";
     try {
-      fakeAdb.setDevices([{
-        deviceId: "emulator-5554",
-        platform: "android",
-        isEmulator: true,
-        name: "Pixel"
-      }]);
+      fakeAdb.setDevices([
+        {
+          deviceId: "emulator-5554",
+          platform: "android",
+          isEmulator: true,
+          name: "Pixel",
+        },
+      ]);
 
       const result = await checkCtrlProxy(fakeFactory);
 
@@ -424,29 +438,36 @@ describe("checkCtrlProxy", () => {
     const prevVersion = process.env.AUTOMOBILE_VERSION;
     process.env.AUTOMOBILE_VERSION = "0.0.18";
     try {
-      fakeAdb.setDevices([{
-        deviceId: "emulator-5554",
-        platform: "android",
-        isEmulator: true,
-        name: "Pixel"
-      }]);
-      fakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: ""
-      });
+      fakeAdb.setDevices([
+        {
+          deviceId: "emulator-5554",
+          platform: "android",
+          isEmulator: true,
+          name: "Pixel",
+        },
+      ]);
+      fakeAdb.setCommandResponse(
+        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+        {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: "",
+        },
+      );
       fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
         stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell sha256sum", {
         stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: ""
+        stderr: "",
       });
 
       const result = await checkCtrlProxy(fakeFactory);
 
       expect(result.status).toBe("fail");
-      expect(result.message).toContain("Installed CtrlProxy APK SHA differs from expected release checksum");
+      expect(result.message).toContain(
+        "Installed CtrlProxy APK SHA differs from expected release checksum",
+      );
       expect(result.message).toContain("AUTOMOBILE_VERSION=0.0.18");
     } finally {
       if (prevVersion === undefined) {
@@ -465,22 +486,30 @@ describe("checkCtrlProxy", () => {
       (AndroidCtrlProxyManager as any).defaultFileDownloader = {
         download: async (_url: string, destination: string) => {
           const zip = new AdmZip();
-          zip.addFile("AndroidManifest.xml", Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"));
+          zip.addFile(
+            "AndroidManifest.xml",
+            Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"),
+          );
           zip.addFile("classes.dex", crypto.randomBytes(15000));
           await fs.mkdir(path.dirname(destination), { recursive: true });
           zip.writeZip(destination);
-        }
+        },
       };
-      fakeAdb.setDevices([{
-        deviceId: "emulator-5554",
-        platform: "android",
-        isEmulator: true,
-        name: "Pixel"
-      }]);
-      fakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: "",
-        stderr: ""
-      });
+      fakeAdb.setDevices([
+        {
+          deviceId: "emulator-5554",
+          platform: "android",
+          isEmulator: true,
+          name: "Pixel",
+        },
+      ]);
+      fakeAdb.setCommandResponse(
+        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+        {
+          stdout: "",
+          stderr: "",
+        },
+      );
 
       const result = await checkCtrlProxy(fakeFactory);
 
@@ -503,31 +532,36 @@ describe("checkCtrlProxy", () => {
     (AndroidCtrlProxyManager as any).defaultFileDownloader = {
       download: async () => {
         throw new Error("network is unreachable");
-      }
+      },
     };
 
     try {
-      fakeAdb.setDevices([{
-        deviceId: "emulator-5554",
-        platform: "android",
-        isEmulator: true,
-        name: "Pixel"
-      }]);
-      fakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: ""
-      });
+      fakeAdb.setDevices([
+        {
+          deviceId: "emulator-5554",
+          platform: "android",
+          isEmulator: true,
+          name: "Pixel",
+        },
+      ]);
+      fakeAdb.setCommandResponse(
+        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+        {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: "",
+        },
+      );
       fakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
         stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell sha256sum", {
         stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("settings get secure", {
         stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
-        stderr: ""
+        stderr: "",
       });
 
       const result = await checkCtrlProxy(fakeFactory);
@@ -535,7 +569,9 @@ describe("checkCtrlProxy", () => {
       expect(result.status).toBe("warn");
       expect(result.message).toContain("versionStatus=skipped");
       expect(result.message).toContain("acceptedPreinstalled=true");
-      expect(result.recommendation).toBe("CtrlProxy is installed and enabled, but its APK SHA differs from the expected release. Re-run doctor after the background APK refresh completes or update CtrlProxy from the latest release.");
+      expect(result.recommendation).toBe(
+        "CtrlProxy is installed and enabled, but its APK SHA differs from the expected release. Re-run doctor after the background APK refresh completes or update CtrlProxy from the latest release.",
+      );
     } finally {
       (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
     }
@@ -547,19 +583,24 @@ describe("checkCtrlProxy", () => {
     process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = "true";
 
     try {
-      fakeAdb.setDevices([{
-        deviceId: "emulator-5554",
-        platform: "android",
-        isEmulator: true,
-        name: "Pixel"
-      }]);
-      fakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
-        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
-        stderr: ""
-      });
+      fakeAdb.setDevices([
+        {
+          deviceId: "emulator-5554",
+          platform: "android",
+          isEmulator: true,
+          name: "Pixel",
+        },
+      ]);
+      fakeAdb.setCommandResponse(
+        `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`,
+        {
+          stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+          stderr: "",
+        },
+      );
       fakeAdb.setCommandResponse("settings get secure", {
         stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
-        stderr: ""
+        stderr: "",
       });
 
       const result = await checkCtrlProxy(fakeFactory);
@@ -607,7 +648,7 @@ describe("runAutoMobileChecks", () => {
   test("skips Android CtrlProxy diagnostics during iOS-only doctor runs", async () => {
     const results = await runAutoMobileChecks({ ios: true }, stubChecks);
 
-    const ctrlProxy = results.find(result => result.name === "CtrlProxy");
+    const ctrlProxy = results.find((result) => result.name === "CtrlProxy");
 
     expect(ctrlProxy?.status).toBe("skip");
     expect(ctrlProxy?.message).toBe("Skipped for iOS-only doctor run");
@@ -617,7 +658,7 @@ describe("runAutoMobileChecks", () => {
   test("includes the daemon build identity check", async () => {
     const results = await runAutoMobileChecks({ ios: true }, stubChecks);
 
-    const buildIdentity = results.find(result => result.name === "Daemon Build Identity");
+    const buildIdentity = results.find((result) => result.name === "Daemon Build Identity");
 
     expect(buildIdentity).toBeDefined();
     expect(buildIdentity?.status).toBe("pass");
@@ -626,7 +667,7 @@ describe("runAutoMobileChecks", () => {
   test("includes the image backend provisioning check", async () => {
     const results = await runAutoMobileChecks({ ios: true }, stubChecks);
 
-    const imageBackend = results.find(result => result.name === "Image Backend");
+    const imageBackend = results.find((result) => result.name === "Image Backend");
 
     expect(imageBackend).toBeDefined();
     expect(imageBackend?.status).toBe("pass");
@@ -650,8 +691,8 @@ describe("runAutoMobileChecks", () => {
   test("runs the Android CtrlProxy and work-profile checks for an Android run", async () => {
     const results = await runAutoMobileChecks({ android: true }, androidStubChecks);
 
-    const ctrlProxy = results.find(result => result.name === "CtrlProxy");
-    const workProfile = results.find(result => result.name === "Work Profile Accessibility");
+    const ctrlProxy = results.find((result) => result.name === "CtrlProxy");
+    const workProfile = results.find((result) => result.name === "Work Profile Accessibility");
 
     expect(ctrlProxy?.status).toBe("pass");
     expect(ctrlProxy?.message).toBe("platform=android; device=emulator-5554");
@@ -669,10 +710,10 @@ describe("runAutoMobileChecks", () => {
           androidRan = true;
           return { name: "CtrlProxy", status: "pass" as const, message: "should not run" };
         },
-      }
+      },
     );
 
     expect(androidRan).toBe(false);
-    expect(results.find(result => result.name === "CtrlProxy")?.status).toBe("skip");
+    expect(results.find((result) => result.name === "CtrlProxy")?.status).toBe("skip");
   });
 });

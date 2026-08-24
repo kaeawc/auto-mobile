@@ -4,9 +4,7 @@ import {
   resetDeviceSnapshotManagerDependencies,
   setDeviceSnapshotManagerDependencies,
 } from "../../src/server/deviceSnapshotManager";
-import {
-  registerDeviceSnapshotResources,
-} from "../../src/server/deviceSnapshotResources";
+import { registerDeviceSnapshotResources } from "../../src/server/deviceSnapshotResources";
 import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "../../src/server/deviceSnapshotResourceUris";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { FakeTimer } from "../fakes/FakeTimer";

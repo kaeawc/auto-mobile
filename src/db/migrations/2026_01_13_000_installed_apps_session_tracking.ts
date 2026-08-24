@@ -2,10 +2,7 @@ import type { Kysely } from "kysely";
 
 export async function up(db: Kysely<unknown>): Promise<void> {
   // Add session tracking columns to installed_apps table
-  await db.schema
-    .alterTable("installed_apps")
-    .addColumn("daemon_session_id", "text")
-    .execute();
+  await db.schema.alterTable("installed_apps").addColumn("daemon_session_id", "text").execute();
 
   await db.schema
     .alterTable("installed_apps")
@@ -24,13 +21,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 export async function down(db: Kysely<unknown>): Promise<void> {
   await db.schema.dropIndex("idx_installed_apps_session").execute();
 
-  await db.schema
-    .alterTable("installed_apps")
-    .dropColumn("daemon_session_id")
-    .execute();
+  await db.schema.alterTable("installed_apps").dropColumn("daemon_session_id").execute();
 
-  await db.schema
-    .alterTable("installed_apps")
-    .dropColumn("device_session_start")
-    .execute();
+  await db.schema.alterTable("installed_apps").dropColumn("device_session_start").execute();
 }

@@ -6,7 +6,6 @@
 
 AutoMobile exposes resources through the Model Context Protocol for AI agents to access.
 
-
 MCP Resources provide read-only access to:
 
 - Navigation graph data

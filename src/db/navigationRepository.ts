@@ -132,10 +132,10 @@ export class NavigationRepository {
     const result = await db
       .insertInto("navigation_apps")
       .values(newApp)
-      .onConflict(oc =>
-        oc.column("app_id").doUpdateSet(eb => ({
+      .onConflict((oc) =>
+        oc.column("app_id").doUpdateSet((eb) => ({
           updated_at: eb.ref("navigation_apps.updated_at"),
-        }))
+        })),
       )
       .returningAll()
       .executeTakeFirstOrThrow();
@@ -173,8 +173,8 @@ export class NavigationRepository {
         exists(
           selectFrom("navigation_nodes")
             .select("navigation_nodes.id")
-            .whereRef("navigation_nodes.app_id", "=", "navigation_apps.app_id")
-        )
+            .whereRef("navigation_nodes.app_id", "=", "navigation_apps.app_id"),
+        ),
       )
       .orderBy("updated_at", "desc")
       .execute();
@@ -186,7 +186,7 @@ export class NavigationRepository {
   async getOrCreateNode(
     appId: string,
     screenName: string,
-    timestamp: number
+    timestamp: number,
   ): Promise<NavigationNode> {
     const db = this.getDb();
 
@@ -205,11 +205,11 @@ export class NavigationRepository {
     const result = await db
       .insertInto("navigation_nodes")
       .values(newNode)
-      .onConflict(oc =>
-        oc.columns(["app_id", "screen_name"]).doUpdateSet(eb => ({
+      .onConflict((oc) =>
+        oc.columns(["app_id", "screen_name"]).doUpdateSet((eb) => ({
           last_seen_at: timestamp,
           visit_count: eb("navigation_nodes.visit_count", "+", 1),
-        }))
+        })),
       )
       .returningAll()
       .executeTakeFirstOrThrow();
@@ -250,7 +250,7 @@ export class NavigationRepository {
     appId: string,
     screenName: string,
     backStackDepth: number,
-    taskId: number
+    taskId: number,
   ): Promise<void> {
     const db = this.getDb();
     await db
@@ -264,7 +264,7 @@ export class NavigationRepository {
       .execute();
 
     logger.debug(
-      `[NAV_REPO] Updated back stack for ${screenName}: depth=${backStackDepth}, taskId=${taskId}`
+      `[NAV_REPO] Updated back stack for ${screenName}: depth=${backStackDepth}, taskId=${taskId}`,
     );
   }
 
@@ -284,10 +284,7 @@ export class NavigationRepository {
   /**
    * Get nodes by screen name.
    */
-  async getNodesByScreenNames(
-    appId: string,
-    screenNames: string[]
-  ): Promise<NavigationNode[]> {
+  async getNodesByScreenNames(appId: string, screenNames: string[]): Promise<NavigationNode[]> {
     if (screenNames.length === 0) {
       return [];
     }
@@ -310,7 +307,7 @@ export class NavigationRepository {
     toScreen: string,
     toolName: string | null,
     toolArgs: Record<string, any> | null,
-    timestamp: number
+    timestamp: number,
   ): Promise<NavigationEdge> {
     const db = this.getDb();
 
@@ -331,7 +328,7 @@ export class NavigationRepository {
 
     const toolInfo = toolName ? ` via ${toolName}` : " (unknown)";
     logger.debug(
-      `[NAV_REPO] Edge created: ${fromScreen} → ${toScreen}${toolInfo} (id=${result.id})`
+      `[NAV_REPO] Edge created: ${fromScreen} → ${toScreen}${toolInfo} (id=${result.id})`,
     );
 
     return result;
@@ -358,23 +355,17 @@ export class NavigationRepository {
     options: {
       cursor?: { timestamp: number; id: number } | null;
       limit: number;
-    }
+    },
   ): Promise<{ edges: NavigationEdge[]; hasMore: boolean }> {
     const db = this.getDb();
-    let query = db
-      .selectFrom("navigation_edges")
-      .selectAll()
-      .where("app_id", "=", appId);
+    let query = db.selectFrom("navigation_edges").selectAll().where("app_id", "=", appId);
 
     if (options.cursor) {
       query = query.where(({ eb, or, and }) =>
         or([
           eb("timestamp", ">", options.cursor!.timestamp),
-          and([
-            eb("timestamp", "=", options.cursor!.timestamp),
-            eb("id", ">", options.cursor!.id),
-          ]),
-        ])
+          and([eb("timestamp", "=", options.cursor!.timestamp), eb("id", ">", options.cursor!.id)]),
+        ]),
       );
     }
 
@@ -430,7 +421,7 @@ export class NavigationRepository {
       clickable?: boolean;
       scrollable?: boolean;
     },
-    timestamp: number
+    timestamp: number,
   ): Promise<UIElement> {
     const db = this.getDb();
 
@@ -450,9 +441,9 @@ export class NavigationRepository {
     if (db.isTransaction) {
       return this.getOrCreateUIElementWithin(db, appId, element, timestamp);
     }
-    return db.transaction().execute(trx =>
-      this.getOrCreateUIElementWithin(trx, appId, element, timestamp)
-    );
+    return db
+      .transaction()
+      .execute((trx) => this.getOrCreateUIElementWithin(trx, appId, element, timestamp));
   }
 
   private async getOrCreateUIElementWithin(
@@ -467,13 +458,10 @@ export class NavigationRepository {
       clickable?: boolean;
       scrollable?: boolean;
     },
-    timestamp: number
+    timestamp: number,
   ): Promise<UIElement> {
     // Try to find existing element with same properties
-    let query = trx
-      .selectFrom("ui_elements")
-      .selectAll()
-      .where("app_id", "=", appId);
+    let query = trx.selectFrom("ui_elements").selectAll().where("app_id", "=", appId);
 
     if (element.text !== undefined) {
       query = query.where("text", "=", element.text);
@@ -540,11 +528,10 @@ export class NavigationRepository {
   /**
    * Link UI elements to an edge.
    */
-  async linkUIElementsToEdge(
-    edgeId: number,
-    uiElementIds: number[]
-  ): Promise<void> {
-    if (uiElementIds.length === 0) {return;}
+  async linkUIElementsToEdge(edgeId: number, uiElementIds: number[]): Promise<void> {
+    if (uiElementIds.length === 0) {
+      return;
+    }
 
     const db = this.getDb();
     const values: NewEdgeUIElement[] = uiElementIds.map((uiElementId, index) => ({
@@ -577,12 +564,11 @@ export class NavigationRepository {
     const db = this.getDb();
 
     // Delete existing modals
-    await db
-      .deleteFrom("node_modals")
-      .where("node_id", "=", nodeId)
-      .execute();
+    await db.deleteFrom("node_modals").where("node_id", "=", nodeId).execute();
 
-    if (modalStack.length === 0) {return;}
+    if (modalStack.length === 0) {
+      return;
+    }
 
     // Insert new modals
     const values: NewNodeModal[] = modalStack.map((modalId, index) => ({
@@ -606,7 +592,7 @@ export class NavigationRepository {
       .orderBy("stack_level", "asc")
       .execute();
 
-    return modals.map(m => m.modal_identifier);
+    return modals.map((m) => m.modal_identifier);
   }
 
   /**
@@ -615,7 +601,7 @@ export class NavigationRepository {
   async setEdgeModals(
     edgeId: number,
     position: "from" | "to",
-    modalStack: string[]
+    modalStack: string[],
   ): Promise<void> {
     const db = this.getDb();
 
@@ -626,7 +612,9 @@ export class NavigationRepository {
       .where("position", "=", position)
       .execute();
 
-    if (modalStack.length === 0) {return;}
+    if (modalStack.length === 0) {
+      return;
+    }
 
     // Insert new modals
     const values: NewEdgeModal[] = modalStack.map((modalId, index) => ({
@@ -652,7 +640,7 @@ export class NavigationRepository {
       .orderBy("stack_level", "asc")
       .execute();
 
-    return modals.map(m => m.modal_identifier);
+    return modals.map((m) => m.modal_identifier);
   }
 
   /**
@@ -664,7 +652,7 @@ export class NavigationRepository {
     direction: string,
     containerElementId?: number,
     speed?: string,
-    swipeCount?: number
+    swipeCount?: number,
   ): Promise<void> {
     const db = this.getDb();
 
@@ -678,10 +666,7 @@ export class NavigationRepository {
     };
 
     // Upsert: delete if exists, then insert
-    await db
-      .deleteFrom("scroll_positions")
-      .where("edge_id", "=", edgeId)
-      .execute();
+    await db.deleteFrom("scroll_positions").where("edge_id", "=", edgeId).execute();
 
     await db.insertInto("scroll_positions").values(scrollPos).execute();
   }
@@ -717,7 +702,9 @@ export class NavigationRepository {
       .where("edge_id", "=", edgeId)
       .executeTakeFirst();
 
-    if (!result) {return null;}
+    if (!result) {
+      return null;
+    }
 
     const response: {
       targetElement: UIElement;
@@ -824,10 +811,7 @@ export class NavigationRepository {
     const db = this.getDb();
 
     // Cascade deletes will handle related tables
-    await db
-      .deleteFrom("navigation_apps")
-      .where("app_id", "=", appId)
-      .execute();
+    await db.deleteFrom("navigation_apps").where("app_id", "=", appId).execute();
 
     logger.info(`[NAV_REPO] Cleared navigation data for app: ${appId}`);
   }
@@ -838,7 +822,7 @@ export class NavigationRepository {
   async updateNodeScreenshot(
     appId: string,
     screenName: string,
-    screenshotPath: string | null
+    screenshotPath: string | null,
   ): Promise<void> {
     const db = this.getDb();
     await db
@@ -854,10 +838,7 @@ export class NavigationRepository {
   /**
    * Update the screenshot path for a navigation node by node ID.
    */
-  async updateNodeScreenshotById(
-    nodeId: number,
-    screenshotPath: string | null
-  ): Promise<void> {
+  async updateNodeScreenshotById(nodeId: number, screenshotPath: string | null): Promise<void> {
     const db = this.getDb();
     await db
       .updateTable("navigation_nodes")
@@ -876,28 +857,16 @@ export class NavigationRepository {
     const db = this.getDb();
 
     // Delete edges first (they reference nodes via screen names, not FK, so no cascade)
-    await db
-      .deleteFrom("navigation_edges")
-      .where("app_id", "=", appId)
-      .execute();
+    await db.deleteFrom("navigation_edges").where("app_id", "=", appId).execute();
 
     // Delete nodes (cascade will delete node_modals and navigation_node_fingerprints)
-    await db
-      .deleteFrom("navigation_nodes")
-      .where("app_id", "=", appId)
-      .execute();
+    await db.deleteFrom("navigation_nodes").where("app_id", "=", appId).execute();
 
     // Delete any orphaned UI elements for this app
-    await db
-      .deleteFrom("ui_elements")
-      .where("app_id", "=", appId)
-      .execute();
+    await db.deleteFrom("ui_elements").where("app_id", "=", appId).execute();
 
     // Delete navigation suggestions for this app
-    await db
-      .deleteFrom("navigation_suggestions")
-      .where("app_id", "=", appId)
-      .execute();
+    await db.deleteFrom("navigation_suggestions").where("app_id", "=", appId).execute();
 
     logger.info(`[NAV_REPO] Cleared graph data for app: ${appId}`);
   }
@@ -915,7 +884,7 @@ export class NavigationRepository {
     nodeId: number,
     hash: string,
     data: string,
-    timestamp: number
+    timestamp: number,
   ): Promise<NavigationNodeFingerprint> {
     const db = this.getDb();
 
@@ -937,11 +906,11 @@ export class NavigationRepository {
     const result = await db
       .insertInto("navigation_node_fingerprints")
       .values(newFingerprint)
-      .onConflict(oc =>
-        oc.columns(["app_id", "fingerprint_hash"]).doUpdateSet(eb => ({
+      .onConflict((oc) =>
+        oc.columns(["app_id", "fingerprint_hash"]).doUpdateSet((eb) => ({
           last_seen_at: timestamp,
           occurrence_count: eb("navigation_node_fingerprints.occurrence_count", "+", 1),
-        }))
+        })),
       )
       .returningAll()
       .executeTakeFirstOrThrow();
@@ -993,7 +962,7 @@ export class NavigationRepository {
     appId: string,
     hash: string,
     data: string,
-    timestamp: number
+    timestamp: number,
   ): Promise<NavigationSuggestion> {
     const db = this.getDb();
 
@@ -1015,11 +984,11 @@ export class NavigationRepository {
     const result = await db
       .insertInto("navigation_suggestions")
       .values(newSuggestion)
-      .onConflict(oc =>
-        oc.columns(["app_id", "fingerprint_hash"]).doUpdateSet(eb => ({
+      .onConflict((oc) =>
+        oc.columns(["app_id", "fingerprint_hash"]).doUpdateSet((eb) => ({
           last_seen_at: timestamp,
           occurrence_count: eb("navigation_suggestions.occurrence_count", "+", 1),
-        }))
+        })),
       )
       .returningAll()
       .executeTakeFirstOrThrow();
@@ -1034,23 +1003,25 @@ export class NavigationRepository {
   async promoteSuggestion(
     suggestionId: number,
     nodeId: number,
-    timestamp: number
+    timestamp: number,
   ): Promise<NavigationNodeFingerprint> {
     const db = this.getDb();
     if (db.isTransaction) {
       return this.promoteSuggestionWithin(db, suggestionId, nodeId, timestamp);
     }
 
-    return db.transaction().execute(trx =>
-      this.withExecutor(trx).promoteSuggestionWithin(trx, suggestionId, nodeId, timestamp)
-    );
+    return db
+      .transaction()
+      .execute((trx) =>
+        this.withExecutor(trx).promoteSuggestionWithin(trx, suggestionId, nodeId, timestamp),
+      );
   }
 
   private async promoteSuggestionWithin(
     db: Kysely<Database>,
     suggestionId: number,
     nodeId: number,
-    timestamp: number
+    timestamp: number,
   ): Promise<NavigationNodeFingerprint> {
     // Get the suggestion
     const suggestion = await db
@@ -1069,7 +1040,7 @@ export class NavigationRepository {
       nodeId,
       suggestion.fingerprint_hash,
       suggestion.fingerprint_data,
-      timestamp
+      timestamp,
     );
 
     // Link suggestion to fingerprint
@@ -1079,9 +1050,7 @@ export class NavigationRepository {
       .where("id", "=", suggestionId)
       .execute();
 
-    logger.info(
-      `[NAV_REPO] Promoted suggestion ${suggestionId} to node ${nodeId}`
-    );
+    logger.info(`[NAV_REPO] Promoted suggestion ${suggestionId} to node ${nodeId}`);
 
     return fingerprint;
   }
@@ -1129,7 +1098,7 @@ export class NavigationRepository {
   async getOrCreateBuildKey(
     appId: string,
     versionCode: number,
-    contentHash: string
+    contentHash: string,
   ): Promise<NavigationBuildKey> {
     const db = this.getDb();
     const newBuildKey: NewNavigationBuildKey = {
@@ -1141,10 +1110,10 @@ export class NavigationRepository {
     return db
       .insertInto("navigation_build_keys")
       .values(newBuildKey)
-      .onConflict(oc =>
-        oc.columns(["app_id", "version_code", "content_hash"]).doUpdateSet(eb => ({
+      .onConflict((oc) =>
+        oc.columns(["app_id", "version_code", "content_hash"]).doUpdateSet((eb) => ({
           app_id: eb.ref("navigation_build_keys.app_id"),
-        }))
+        })),
       )
       .returningAll()
       .executeTakeFirstOrThrow();
@@ -1164,7 +1133,7 @@ export class NavigationRepository {
     buildKeyId: number,
     deviceId: string,
     sessionUuid: string,
-    seenAt: number
+    seenAt: number,
   ): Promise<void> {
     const db = this.getDb();
     const observation: NewNavigationNodeObservation = {
@@ -1179,13 +1148,11 @@ export class NavigationRepository {
     await db
       .insertInto("navigation_node_observations")
       .values(observation)
-      .onConflict(oc =>
-        oc
-          .columns(["node_id", "build_key_id", "device_id", "session_uuid"])
-          .doUpdateSet({
-            first_seen_at: sql`min(navigation_node_observations.first_seen_at, ${seenAt})`,
-            last_seen_at: sql`max(navigation_node_observations.last_seen_at, ${seenAt})`,
-          })
+      .onConflict((oc) =>
+        oc.columns(["node_id", "build_key_id", "device_id", "session_uuid"]).doUpdateSet({
+          first_seen_at: sql`min(navigation_node_observations.first_seen_at, ${seenAt})`,
+          last_seen_at: sql`max(navigation_node_observations.last_seen_at, ${seenAt})`,
+        }),
       )
       .execute();
   }
@@ -1199,7 +1166,7 @@ export class NavigationRepository {
     buildKeyId: number,
     deviceId: string,
     sessionUuid: string,
-    seenAt: number
+    seenAt: number,
   ): Promise<void> {
     const db = this.getDb();
     const observation: NewNavigationEdgeObservation = {
@@ -1214,13 +1181,11 @@ export class NavigationRepository {
     await db
       .insertInto("navigation_edge_observations")
       .values(observation)
-      .onConflict(oc =>
-        oc
-          .columns(["edge_id", "build_key_id", "device_id", "session_uuid"])
-          .doUpdateSet({
-            first_seen_at: sql`min(navigation_edge_observations.first_seen_at, ${seenAt})`,
-            last_seen_at: sql`max(navigation_edge_observations.last_seen_at, ${seenAt})`,
-          })
+      .onConflict((oc) =>
+        oc.columns(["edge_id", "build_key_id", "device_id", "session_uuid"]).doUpdateSet({
+          first_seen_at: sql`min(navigation_edge_observations.first_seen_at, ${seenAt})`,
+          last_seen_at: sql`max(navigation_edge_observations.last_seen_at, ${seenAt})`,
+        }),
       )
       .execute();
   }
@@ -1234,27 +1199,29 @@ export class NavigationRepository {
    */
   async getNodeProvenanceForApp(appId: string): Promise<NavigationNodeProvenanceRow[]> {
     const db = this.getDb();
-    return db
-      .selectFrom("navigation_node_observations as obs")
-      .innerJoin("navigation_build_keys as bk", "bk.id", "obs.build_key_id")
-      .innerJoin("navigation_nodes as n", "n.id", "obs.node_id")
-      .where("n.app_id", "=", appId)
-      // Constrain the build key to the node's own app: observation rows accept
-      // independent entity + build-key ids, so a mis-scoped build key must not
-      // surface another app's provenance in this app-union (#4985).
-      .whereRef("bk.app_id", "=", "n.app_id")
-      .select([
-        "obs.node_id as node_id",
-        "bk.app_id as package_id",
-        "bk.version_code as version_code",
-        "bk.content_hash as content_hash",
-        "obs.device_id as device_id",
-        "obs.session_uuid as session_uuid",
-        "obs.last_seen_at as last_seen_at",
-      ])
-      .orderBy("obs.last_seen_at", "desc")
-      .orderBy("obs.device_id", "asc")
-      .execute();
+    return (
+      db
+        .selectFrom("navigation_node_observations as obs")
+        .innerJoin("navigation_build_keys as bk", "bk.id", "obs.build_key_id")
+        .innerJoin("navigation_nodes as n", "n.id", "obs.node_id")
+        .where("n.app_id", "=", appId)
+        // Constrain the build key to the node's own app: observation rows accept
+        // independent entity + build-key ids, so a mis-scoped build key must not
+        // surface another app's provenance in this app-union (#4985).
+        .whereRef("bk.app_id", "=", "n.app_id")
+        .select([
+          "obs.node_id as node_id",
+          "bk.app_id as package_id",
+          "bk.version_code as version_code",
+          "bk.content_hash as content_hash",
+          "obs.device_id as device_id",
+          "obs.session_uuid as session_uuid",
+          "obs.last_seen_at as last_seen_at",
+        ])
+        .orderBy("obs.last_seen_at", "desc")
+        .orderBy("obs.device_id", "asc")
+        .execute()
+    );
   }
 
   /**
@@ -1266,26 +1233,28 @@ export class NavigationRepository {
    */
   async getEdgeProvenanceForApp(appId: string): Promise<NavigationEdgeProvenanceRow[]> {
     const db = this.getDb();
-    return db
-      .selectFrom("navigation_edge_observations as obs")
-      .innerJoin("navigation_build_keys as bk", "bk.id", "obs.build_key_id")
-      .innerJoin("navigation_edges as e", "e.id", "obs.edge_id")
-      .where("e.app_id", "=", appId)
-      // Symmetric to the node query: pin the build key to the edge's own app so
-      // a mis-scoped build key cannot leak another app's provenance (#4985).
-      .whereRef("bk.app_id", "=", "e.app_id")
-      .select([
-        "obs.edge_id as edge_id",
-        "bk.app_id as package_id",
-        "bk.version_code as version_code",
-        "bk.content_hash as content_hash",
-        "obs.device_id as device_id",
-        "obs.session_uuid as session_uuid",
-        "obs.last_seen_at as last_seen_at",
-      ])
-      .orderBy("obs.last_seen_at", "desc")
-      .orderBy("obs.device_id", "asc")
-      .execute();
+    return (
+      db
+        .selectFrom("navigation_edge_observations as obs")
+        .innerJoin("navigation_build_keys as bk", "bk.id", "obs.build_key_id")
+        .innerJoin("navigation_edges as e", "e.id", "obs.edge_id")
+        .where("e.app_id", "=", appId)
+        // Symmetric to the node query: pin the build key to the edge's own app so
+        // a mis-scoped build key cannot leak another app's provenance (#4985).
+        .whereRef("bk.app_id", "=", "e.app_id")
+        .select([
+          "obs.edge_id as edge_id",
+          "bk.app_id as package_id",
+          "bk.version_code as version_code",
+          "bk.content_hash as content_hash",
+          "obs.device_id as device_id",
+          "obs.session_uuid as session_uuid",
+          "obs.last_seen_at as last_seen_at",
+        ])
+        .orderBy("obs.last_seen_at", "desc")
+        .orderBy("obs.device_id", "asc")
+        .execute()
+    );
   }
 
   /**
@@ -1295,7 +1264,7 @@ export class NavigationRepository {
     const db = this.getDb();
     await db
       .updateTable("navigation_nodes")
-      .set(eb => ({
+      .set((eb) => ({
         last_seen_at: timestamp,
         visit_count: eb("visit_count", "+", 1),
       }))

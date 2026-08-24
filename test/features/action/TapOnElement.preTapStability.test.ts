@@ -12,10 +12,10 @@ const WITHIN_EPSILON_BOUNDS: Element["bounds"] = { left: 11, top: 21, right: 111
 
 function makeElement(bounds: Element["bounds"]): Element {
   return {
-    "text": "Contact Name",
+    text: "Contact Name",
     "resource-id": "com.app:id/contact_row",
-    "class": "android.widget.TextView",
-    bounds
+    class: "android.widget.TextView",
+    bounds,
   } as Element;
 }
 
@@ -33,7 +33,7 @@ function createTapOnElement(): { tap: TapOnElement; timer: FakeTimer } {
       deviceId: "emulator-5554",
     } as any,
     new FakeAdbClient() as any,
-    { timer }
+    { timer },
   );
   return { tap, timer };
 }
@@ -43,10 +43,7 @@ type StubSequenceEntry = {
   element: Element | null;
 };
 
-function stubStabilityDeps(
-  tap: TapOnElement,
-  sequence: StubSequenceEntry[]
-): void {
+function stubStabilityDeps(tap: TapOnElement, sequence: StubSequenceEntry[]): void {
   let callIdx = 0;
 
   (tap as any).refreshViewHierarchy = async () => {
@@ -59,13 +56,13 @@ function stubStabilityDeps(
     const entry = sequence[Math.min(callIdx - 1, sequence.length - 1)];
     return {
       selection: { element: entry.element },
-      containerFound: false
+      containerFound: false,
     };
   };
 
   (tap as any).resolveTapTargetElement = (el: Element) => ({
     element: el,
-    usedParent: false
+    usedParent: false,
   });
 }
 
@@ -81,7 +78,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(result.ok).toBe(true);
@@ -103,7 +100,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(result.ok).toBe(true);
@@ -120,7 +117,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Ghost Element", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(result.ok).toBe(false);
@@ -147,7 +144,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(result.ok).toBe(false);
@@ -160,13 +157,17 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
   // productive-poll floor, and assert elapsed time symbolically so the specific budget
   // values (not just "some big number") are what's under test.
   const BASE_BUDGET_MS = (TapOnElement as any).ANDROID_PRE_TAP_REFIND_BUDGET_MS as number;
-  const LOADING_BUDGET_MS = (TapOnElement as any).ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING as number;
+  const LOADING_BUDGET_MS = (TapOnElement as any)
+    .ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING as number;
   const MIN_POLLS = (TapOnElement as any).ANDROID_PRE_TAP_REFIND_MIN_POLLS as number;
 
   const LOADING_HIERARCHY: ViewHierarchyResult = {
     hierarchy: {
-      node: { "class": "android.widget.ProgressBar", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } }
-    }
+      node: {
+        class: "android.widget.ProgressBar",
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      },
+    },
   } as unknown as ViewHierarchyResult;
 
   // Stub that reveals the target only from `appearsOnCall` onward. Optional per-poll
@@ -181,7 +182,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       hierarchy?: ViewHierarchyResult;
       loadingFromCall?: number;
       refreshDelayMs?: number;
-    }
+    },
   ): { calls: () => number } {
     let call = 0;
     (tap as any).refreshViewHierarchy = async () => {
@@ -211,7 +212,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(result.ok).toBe(true);
@@ -231,7 +232,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(result.ok).toBe(false);
@@ -248,13 +249,16 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     // wall-clock deadline (2500ms) would allow only ~3 polls — fewer than the old fixed
     // 8. The floor must keep polling until MIN_POLLS regardless of elapsed wall-clock.
     const { tap, timer } = createTapOnElement();
-    const stub = stubLateAppearingTarget(tap, timer, { appearsOnCall: MIN_POLLS, refreshDelayMs: 800 });
+    const stub = stubLateAppearingTarget(tap, timer, {
+      appearsOnCall: MIN_POLLS,
+      refreshDelayMs: 800,
+    });
 
     const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     // The target sits exactly at the floor; a pure-deadline loop would have bailed at
@@ -274,7 +278,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(result.ok).toBe(true);
@@ -284,14 +288,17 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
   test("loading budget is bounded — a target that never appears still fails at the ceiling", async () => {
     const { tap, timer } = createTapOnElement();
     // Loading indicator present throughout, target never appears: must NOT wait forever.
-    stubLateAppearingTarget(tap, timer, { appearsOnCall: Number.MAX_SAFE_INTEGER, hierarchy: LOADING_HIERARCHY });
+    stubLateAppearingTarget(tap, timer, {
+      appearsOnCall: Number.MAX_SAFE_INTEGER,
+      hierarchy: LOADING_HIERARCHY,
+    });
 
     const t0 = timer.now();
     const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(result.ok).toBe(false);
@@ -311,7 +318,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     };
     (tap as any).findElementInHierarchy = () => ({
       selection: { element: call >= 40 ? makeElement(STABLE_BOUNDS) : null },
-      containerFound: false
+      containerFound: false,
     });
     (tap as any).resolveTapTargetElement = (el: Element) => ({ element: el, usedParent: false });
 
@@ -319,7 +326,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(result.ok).toBe(true);
@@ -340,7 +347,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(result.ok).toBe(true);
@@ -353,7 +360,10 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     const el = makeElement(STABLE_BOUNDS);
 
     const sequence: StubSequenceEntry[] = [
-      ...Array.from({ length: 10 }, () => ({ hierarchy: null, element: null } as StubSequenceEntry)),
+      ...Array.from(
+        { length: 10 },
+        () => ({ hierarchy: null, element: null }) as StubSequenceEntry,
+      ),
       { hierarchy: vh, element: el },
     ];
 
@@ -363,7 +373,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(result.ok).toBe(true);
@@ -379,7 +389,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(result.ok).toBe(false);
@@ -392,9 +402,9 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     const el = makeElement(STABLE_BOUNDS);
 
     const sequence: StubSequenceEntry[] = [
-      ...Array.from({ length: 5 }, () => ({ hierarchy: null, element: null } as StubSequenceEntry)),
+      ...Array.from({ length: 5 }, () => ({ hierarchy: null, element: null }) as StubSequenceEntry),
       { hierarchy: vh, element: el },
-      ...Array.from({ length: 5 }, () => ({ hierarchy: null, element: null } as StubSequenceEntry)),
+      ...Array.from({ length: 5 }, () => ({ hierarchy: null, element: null }) as StubSequenceEntry),
       { hierarchy: vh, element: el },
     ];
 
@@ -404,7 +414,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(result.ok).toBe(true);
@@ -433,7 +443,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Contact Name", action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(sleepDurations[0]).toBe(500);
@@ -457,7 +467,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { text: "Row", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
-      false
+      false,
     );
 
     expect(result.ok).toBe(true);
@@ -478,7 +488,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
       false,
-      controller.signal
+      controller.signal,
     );
 
     await expect(resultPromise).rejects.toThrow();

@@ -5,7 +5,7 @@ import { ToolRegistry } from "../../../src/server/toolRegistry";
 type AdvertisedTool = ReturnType<typeof ToolRegistry.getToolDefinitions>[number];
 
 function getTool(definitions: AdvertisedTool[], name: string): AdvertisedTool {
-  const tool = definitions.find(candidate => candidate.name === name);
+  const tool = definitions.find((candidate) => candidate.name === name);
   expect(tool, `${name} should be advertised`).toBeDefined();
   return tool!;
 }
@@ -31,16 +31,25 @@ describe("advertised deviceId schema", () => {
     const definitions = ToolRegistry.getToolDefinitions();
 
     for (const toolName of ["observe", "tapOn", "swipeOn", "changeLocalization"]) {
-      expect(propertiesFor(getTool(definitions, toolName)).deviceId, `${toolName} should hide injected deviceId`).toBeUndefined();
+      expect(
+        propertiesFor(getTool(definitions, toolName)).deviceId,
+        `${toolName} should hide injected deviceId`,
+      ).toBeUndefined();
     }
 
     for (const toolName of ["setActiveDevice", "videoRecording", "highlight"]) {
-      expect(propertiesFor(getTool(definitions, toolName)).deviceId, `${toolName} should keep agent-facing deviceId`).toBeDefined();
+      expect(
+        propertiesFor(getTool(definitions, toolName)).deviceId,
+        `${toolName} should keep agent-facing deviceId`,
+      ).toBeDefined();
     }
 
     const killDeviceProperties = propertiesFor(getTool(definitions, "killDevice"));
     const deviceProperty = killDeviceProperties.device as { properties?: Record<string, unknown> };
-    expect(deviceProperty.properties?.deviceId, "killDevice should keep agent-facing nested device.deviceId").toBeDefined();
+    expect(
+      deviceProperty.properties?.deviceId,
+      "killDevice should keep agent-facing nested device.deviceId",
+    ).toBeDefined();
   });
 
   test("keeps executor-injected deviceId accepted by runtime validation", () => {
@@ -49,6 +58,8 @@ describe("advertised deviceId schema", () => {
     const observeTool = ToolRegistry.getTool("observe");
     expect(observeTool, "observe should be registered").toBeDefined();
 
-    expect(() => observeTool!.schema.parse({ platform: "android", deviceId: "emulator-5554" })).not.toThrow();
+    expect(() =>
+      observeTool!.schema.parse({ platform: "android", deviceId: "emulator-5554" }),
+    ).not.toThrow();
   });
 });

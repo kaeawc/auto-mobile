@@ -28,7 +28,7 @@ describe("unit-test real-DB guard (issues #3067 / #3140)", () => {
     "AUTO_MOBILE_DB_DIR",
   ];
   const saved = new Map<string, string | undefined>(
-    trackedKeys.map(key => [key, process.env[key]])
+    trackedKeys.map((key) => [key, process.env[key]]),
   );
 
   function setEnv(key: string, value: string | undefined): void {

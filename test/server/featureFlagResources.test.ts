@@ -2,8 +2,14 @@ import { describe, expect, test, beforeEach } from "bun:test";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { registerFeatureFlagResources } from "../../src/server/featureFlagResources";
 import { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
-import type { FeatureFlagRepository, FeatureFlagRecord } from "../../src/features/featureFlags/FeatureFlagRepository";
-import type { FeatureFlagDefinition, FeatureFlagConfig } from "../../src/features/featureFlags/FeatureFlagDefinitions";
+import type {
+  FeatureFlagRepository,
+  FeatureFlagRecord,
+} from "../../src/features/featureFlags/FeatureFlagRepository";
+import type {
+  FeatureFlagDefinition,
+  FeatureFlagConfig,
+} from "../../src/features/featureFlags/FeatureFlagDefinitions";
 import type { FeatureFlagApplier } from "../../src/features/featureFlags/FeatureFlagApplier";
 
 class FakeFeatureFlagRepository implements FeatureFlagRepository {
@@ -15,11 +21,17 @@ class FakeFeatureFlagRepository implements FeatureFlagRepository {
     return this.flags;
   }
 
-  async upsertFlag(key: string, enabled: boolean, config?: FeatureFlagConfig | null): Promise<void> {
-    const existing = this.flags.find(f => f.key === key);
+  async upsertFlag(
+    key: string,
+    enabled: boolean,
+    config?: FeatureFlagConfig | null,
+  ): Promise<void> {
+    const existing = this.flags.find((f) => f.key === key);
     if (existing) {
       existing.enabled = enabled;
-      if (config !== undefined) {existing.config = config ?? undefined;}
+      if (config !== undefined) {
+        existing.config = config ?? undefined;
+      }
     } else {
       this.flags.push({ key, enabled, config: config ?? undefined });
     }
@@ -44,7 +56,9 @@ describe("featureFlagResources", () => {
     FeatureFlagService.getInstance = () => service;
 
     try {
-      const template = ResourceRegistry.matchTemplate("automobile:config/feature-flags/ai-recovery");
+      const template = ResourceRegistry.matchTemplate(
+        "automobile:config/feature-flags/ai-recovery",
+      );
       expect(template).toBeDefined();
 
       const result = await template!.template.handler(template!.params);
@@ -67,10 +81,14 @@ describe("featureFlagResources", () => {
     FeatureFlagService.getInstance = () => service;
 
     try {
-      const template = ResourceRegistry.matchTemplate("automobile:config/feature-flags/nonexistent");
+      const template = ResourceRegistry.matchTemplate(
+        "automobile:config/feature-flags/nonexistent",
+      );
       expect(template).toBeDefined();
 
-      await expect(template!.template.handler(template!.params)).rejects.toThrow("Unknown feature flag: nonexistent");
+      await expect(template!.template.handler(template!.params)).rejects.toThrow(
+        "Unknown feature flag: nonexistent",
+      );
     } finally {
       FeatureFlagService.getInstance = original;
     }

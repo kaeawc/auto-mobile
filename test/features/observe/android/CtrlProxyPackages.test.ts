@@ -5,21 +5,21 @@ import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { AndroidCtrlProxyManager } from "../../../../src/utils/CtrlProxyManager";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { BootedDevice } from "../../../../src/models";
-import {
-  FakeWebSocket,
-  WebSocketState
-} from "../../../fakes/FakeWebSocket";
+import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
-import { startDeviceDataStreamSocketServer, stopDeviceDataStreamSocketServer } from "../../../../src/daemon/deviceDataStreamSocketServer";
+import {
+  startDeviceDataStreamSocketServer,
+  stopDeviceDataStreamSocketServer,
+} from "../../../../src/daemon/deviceDataStreamSocketServer";
 
-describe("CtrlProxyPackages (Android)", function() {
+describe("CtrlProxyPackages (Android)", function () {
   let fakeAdb: FakeAdbExecutor;
   let testDevice: BootedDevice;
   let fakeTimer: FakeTimer;
   const serverPort: number = 8765;
 
-  beforeEach(function() {
+  beforeEach(function () {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
 
@@ -31,15 +31,18 @@ describe("CtrlProxyPackages (Android)", function() {
       deviceId: "test-device-packages",
       platform: "android",
       isEmulator: true,
-      name: "Test Device"
+      name: "Test Device",
     };
 
     AndroidCtrlProxyManager.resetInstances();
     AndroidCtrlProxyClient.resetInstances();
-    AndroidCtrlProxyManager.getInstance(testDevice, new FakeAdbClientFactory()).clearAvailabilityCache();
+    AndroidCtrlProxyManager.getInstance(
+      testDevice,
+      new FakeAdbClientFactory(),
+    ).clearAvailabilityCache();
   });
 
-  afterEach(async function() {
+  afterEach(async function () {
     NavigationGraphManager.getInstance();
     await stopDeviceDataStreamSocketServer();
   });
@@ -52,7 +55,9 @@ describe("CtrlProxyPackages (Android)", function() {
     }
   }
 
-  const createCapturingFactory = (timer?: FakeTimer): {
+  const createCapturingFactory = (
+    timer?: FakeTimer,
+  ): {
     factory: (url: string) => CapturingWebSocket;
     getSocket: () => CapturingWebSocket | null;
   } => {
@@ -62,42 +67,57 @@ describe("CtrlProxyPackages (Android)", function() {
         socket = new CapturingWebSocket(url, "none", 0, timer);
         return socket;
       },
-      getSocket: () => socket
+      getSocket: () => socket,
     };
   };
 
   const waitForSocketOpen = async (socket: FakeWebSocket | null): Promise<void> => {
-    if (!socket || socket.readyState === WebSocketState.OPEN) {return;}
-    await new Promise<void>(resolve => socket.once("open", () => resolve()));
+    if (!socket || socket.readyState === WebSocketState.OPEN) {
+      return;
+    }
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
   };
 
-  const waitForSocket = async (getSocket: () => CapturingWebSocket | null): Promise<CapturingWebSocket | null> => {
+  const waitForSocket = async (
+    getSocket: () => CapturingWebSocket | null,
+  ): Promise<CapturingWebSocket | null> => {
     for (let i = 0; i < 5; i++) {
       const s = getSocket();
-      if (s) {return s;}
-      await new Promise(r => setImmediate(r));
+      if (s) {
+        return s;
+      }
+      await new Promise((r) => setImmediate(r));
     }
     return getSocket();
   };
 
-  const waitForSentMessages = async (socket: CapturingWebSocket | null, minCount = 1): Promise<void> => {
-    if (!socket) {return;}
+  const waitForSentMessages = async (
+    socket: CapturingWebSocket | null,
+    minCount = 1,
+  ): Promise<void> => {
+    if (!socket) {
+      return;
+    }
     for (let i = 0; i < 10; i++) {
-      if (socket.sentMessages.length >= minCount) {return;}
-      await new Promise(r => setImmediate(r));
+      if (socket.sentMessages.length >= minCount) {
+        return;
+      }
+      await new Promise((r) => setImmediate(r));
     }
   };
 
   const flushPromises = async (iterations = 5): Promise<void> => {
     for (let i = 0; i < iterations; i++) {
-      await new Promise(r => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
     }
   };
 
   const waitForCondition = async (predicate: () => boolean, iterations = 20): Promise<void> => {
     for (let i = 0; i < iterations; i++) {
-      if (predicate()) {return;}
-      await new Promise(r => setImmediate(r));
+      if (predicate()) {
+        return;
+      }
+      await new Promise((r) => setImmediate(r));
     }
   };
 
@@ -109,7 +129,7 @@ describe("CtrlProxyPackages (Android)", function() {
    */
   const emitConnectedFrame = async (
     socket: CapturingWebSocket,
-    supportedCommands: string[]
+    supportedCommands: string[],
   ): Promise<void> => {
     socket.simulateMessage(JSON.stringify({ type: "connected", supportedCommands }));
     await flushPromises();
@@ -124,7 +144,9 @@ describe("CtrlProxyPackages (Android)", function() {
     for (let i = socket.sentMessages.length - 1; i >= 0; i--) {
       try {
         const parsed = JSON.parse(socket.sentMessages[i]);
-        if (parsed.type === type) {return parsed;}
+        if (parsed.type === type) {
+          return parsed;
+        }
       } catch {
         // skip
       }
@@ -132,10 +154,15 @@ describe("CtrlProxyPackages (Android)", function() {
     throw new Error(`No message of type ${type} in: ${socket.sentMessages.join(", ")}`);
   };
 
-  describe("connection lifecycle", function() {
-    test("cancels screenshot backoff when the underlying socket closes", async function() {
+  describe("connection lifecycle", function () {
+    test("cancels screenshot backoff when the underlying socket closes", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer,
+      );
       const scheduler = new FakeScreenshotBackoffScheduler();
       try {
         await client.ensureConnected();
@@ -155,9 +182,14 @@ describe("CtrlProxyPackages (Android)", function() {
       }
     });
 
-    test("refreshes screenshot cadence by rescheduling keepalive", function() {
+    test("refreshes screenshot cadence by rescheduling keepalive", function () {
       const { factory } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer,
+      );
       const scheduler = new FakeScreenshotBackoffScheduler();
 
       (client as any).screenshotBackoffScheduler = scheduler;
@@ -166,9 +198,14 @@ describe("CtrlProxyPackages (Android)", function() {
       expect(scheduler.rescheduleKeepAliveCalls).toBe(1);
     });
 
-    test("refreshes hierarchy cadence by sending interval config", async function() {
+    test("refreshes hierarchy cadence by sending interval config", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer,
+      );
 
       const connected = await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -182,9 +219,14 @@ describe("CtrlProxyPackages (Android)", function() {
       expect(message).toEqual({ type: "set_hierarchy_interval", intervalMs: 500 });
     });
 
-    test("skips hierarchy cadence refresh when runner does not advertise support", async function() {
+    test("skips hierarchy cadence refresh when runner does not advertise support", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer,
+      );
 
       const connected = await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -197,7 +239,7 @@ describe("CtrlProxyPackages (Android)", function() {
       expect(socket!.sentMessages).toEqual([]);
     });
 
-    test("refreshes hierarchy cadence from the stream server when no interval is passed", async function() {
+    test("refreshes hierarchy cadence from the stream server when no interval is passed", async function () {
       const streamServer = await startDeviceDataStreamSocketServer(fakeTimer);
       (streamServer as any).subscribers.set("hierarchy-cadence-test", {
         socket: { destroyed: false },
@@ -212,7 +254,12 @@ describe("CtrlProxyPackages (Android)", function() {
         },
       });
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer,
+      );
 
       const connected = await client.ensureConnected();
       const socket = await waitForSocket(getSocket);
@@ -227,10 +274,15 @@ describe("CtrlProxyPackages (Android)", function() {
     });
   });
 
-  describe("requestInstalledPackages", function() {
-    test("sends request_installed_packages and resolves on result", async function() {
+  describe("requestInstalledPackages", function () {
+    test("sends request_installed_packages and resolves on result", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer,
+      );
       try {
         // Trigger a connection (any method that calls ensureConnected works)
         await client.ensureConnected();
@@ -244,17 +296,24 @@ describe("CtrlProxyPackages (Android)", function() {
         const sent = findSentMessage(socket!, "request_installed_packages");
         expect(sent.includeSystem).toBe(true);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "installed_packages_result",
-          requestId: sent.requestId,
-          success: true,
-          userId: 0,
-          packages: [
-            { packageName: "com.example.app", isSystem: false, versionName: "1.0", versionCode: 1 },
-            { packageName: "com.android.systemui", isSystem: true },
-          ],
-          totalTimeMs: 10,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "installed_packages_result",
+            requestId: sent.requestId,
+            success: true,
+            userId: 0,
+            packages: [
+              {
+                packageName: "com.example.app",
+                isSystem: false,
+                versionName: "1.0",
+                versionCode: 1,
+              },
+              { packageName: "com.android.systemui", isSystem: true },
+            ],
+            totalTimeMs: 10,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(true);
@@ -268,9 +327,14 @@ describe("CtrlProxyPackages (Android)", function() {
       }
     });
 
-    test("returns error when WebSocket not connected", async function() {
+    test("returns error when WebSocket not connected", async function () {
       const { factory } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer,
+      );
       try {
         const result = await client.requestInstalledPackages(true);
         expect(result.success).toBe(false);
@@ -281,41 +345,50 @@ describe("CtrlProxyPackages (Android)", function() {
     });
   });
 
-  describe("requestPackageInfo", function() {
-    test("sends request_package_info and resolves with package details", async function() {
+  describe("requestPackageInfo", function () {
+    test("sends request_package_info and resolves with package details", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer,
+      );
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
 
         const baseCount = socket!.sentMessages.length;
-        const resultPromise = client.requestPackageInfo("com.example.app", { includePermissions: true });
+        const resultPromise = client.requestPackageInfo("com.example.app", {
+          includePermissions: true,
+        });
         await waitForSentMessages(socket, baseCount + 1);
 
         const sent = findSentMessage(socket!, "request_package_info");
         expect(sent.packageName).toBe("com.example.app");
         expect(sent.includePermissions).toBe(true);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "package_info_result",
-          requestId: sent.requestId,
-          success: true,
-          packageName: "com.example.app",
-          isSystem: false,
-          applicationLabel: "Example",
-          versionName: "1.2.3",
-          versionCode: 42,
-          installerPackage: "com.android.vending",
-          firstInstallTime: 100,
-          lastUpdateTime: 200,
-          allowBackup: true,
-          requestedPermissions: ["android.permission.CAMERA"],
-          grantedPermissions: { "android.permission.CAMERA": true },
-          mainActivity: "com.example.app/.MainActivity",
-          totalTimeMs: 5,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "package_info_result",
+            requestId: sent.requestId,
+            success: true,
+            packageName: "com.example.app",
+            isSystem: false,
+            applicationLabel: "Example",
+            versionName: "1.2.3",
+            versionCode: 42,
+            installerPackage: "com.android.vending",
+            firstInstallTime: 100,
+            lastUpdateTime: 200,
+            allowBackup: true,
+            requestedPermissions: ["android.permission.CAMERA"],
+            grantedPermissions: { "android.permission.CAMERA": true },
+            mainActivity: "com.example.app/.MainActivity",
+            totalTimeMs: 5,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(true);
@@ -330,9 +403,14 @@ describe("CtrlProxyPackages (Android)", function() {
       }
     });
 
-    test("returns error when package not found", async function() {
+    test("returns error when package not found", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer,
+      );
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
@@ -343,14 +421,16 @@ describe("CtrlProxyPackages (Android)", function() {
         await waitForSentMessages(socket, baseCount + 1);
 
         const sent = findSentMessage(socket!, "request_package_info");
-        socket!.simulateMessage(JSON.stringify({
-          type: "package_info_result",
-          requestId: sent.requestId,
-          success: false,
-          packageName: "com.missing.app",
-          error: "Package not installed or not visible: com.missing.app",
-          totalTimeMs: 1,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "package_info_result",
+            requestId: sent.requestId,
+            success: false,
+            packageName: "com.missing.app",
+            error: "Package not installed or not visible: com.missing.app",
+            totalTimeMs: 1,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(false);
@@ -361,10 +441,15 @@ describe("CtrlProxyPackages (Android)", function() {
     });
   });
 
-  describe("requestLaunchIntent", function() {
-    test("sends request_launch_intent and resolves with componentName", async function() {
+  describe("requestLaunchIntent", function () {
+    test("sends request_launch_intent and resolves with componentName", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer,
+      );
       try {
         await client.ensureConnected();
         const socket = await waitForSocket(getSocket);
@@ -377,14 +462,16 @@ describe("CtrlProxyPackages (Android)", function() {
         const sent = findSentMessage(socket!, "request_launch_intent");
         expect(sent.packageName).toBe("com.example.app");
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "launch_intent_result",
-          requestId: sent.requestId,
-          success: true,
-          packageName: "com.example.app",
-          componentName: "com.example.app/.MainActivity",
-          totalTimeMs: 2,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "launch_intent_result",
+            requestId: sent.requestId,
+            success: true,
+            packageName: "com.example.app",
+            componentName: "com.example.app/.MainActivity",
+            totalTimeMs: 2,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(true);

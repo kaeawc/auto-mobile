@@ -3,9 +3,9 @@ import { redactHomeDir } from "../../src/utils/redactPath";
 
 describe("redactHomeDir", () => {
   it("replaces a leading home-directory prefix with ~", () => {
-    expect(redactHomeDir("/Users/alice/.auto-mobile/video-archive/case-1.mp4", "/Users/alice")).toBe(
-      "~/.auto-mobile/video-archive/case-1.mp4"
-    );
+    expect(
+      redactHomeDir("/Users/alice/.auto-mobile/video-archive/case-1.mp4", "/Users/alice"),
+    ).toBe("~/.auto-mobile/video-archive/case-1.mp4");
   });
 
   it("leaves a path without the home prefix unchanged", () => {

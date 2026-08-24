@@ -44,7 +44,7 @@ describe("database startup migration failure contract", () => {
       const db = await harness.importFreshDatabaseModule();
 
       await expect(db.ensureMigrations()).rejects.toThrow(
-        /refusing to run queries until the daemon restarts/i
+        /refusing to run queries until the daemon restarts/i,
       );
 
       // The failure is cached and observable synchronously after the await.
@@ -54,7 +54,7 @@ describe("database startup migration failure contract", () => {
 
       // A second await still rejects (stable dead state, not auto-retried).
       await expect(db.ensureMigrations()).rejects.toThrow(
-        /refusing to run queries until the daemon restarts/i
+        /refusing to run queries until the daemon restarts/i,
       );
 
       // Give any stray microtasks a tick to surface an unhandled rejection.

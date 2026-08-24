@@ -690,7 +690,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
           );
           return;
         }
-        const errorMsg = "Accessibility service version mismatch detected. Run without skipCtrlProxyDownload to install a compatible version.";
+        const errorMsg =
+          "Accessibility service version mismatch detected. Run without skipCtrlProxyDownload to install a compatible version.";
         logger.warn(`[DeviceSessionManager] ${errorMsg} Device: ${deviceId}`);
         throw new ActionableError(errorMsg);
       };
@@ -958,12 +959,16 @@ export class DeviceSessionManager implements DeviceSessionManager {
       // Use the first available device
       const device = allDevices[0];
       const deviceId = device.deviceId!;
-      return await this.withLifecycleStart(lifecycleIdentityForDevice(device), options, async (signal) => {
-        perf.startOperation("verifyDevice");
-        await this.verifyAndroidDevice(deviceId, { ...options, signal });
-        perf.endOperation("verifyDevice");
-        return device;
-      });
+      return await this.withLifecycleStart(
+        lifecycleIdentityForDevice(device),
+        options,
+        async (signal) => {
+          perf.startOperation("verifyDevice");
+          await this.verifyAndroidDevice(deviceId, { ...options, signal });
+          perf.endOperation("verifyDevice");
+          return device;
+        },
+      );
     }
 
     // No devices - try to start a device from an image

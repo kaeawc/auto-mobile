@@ -49,60 +49,64 @@ describe("closeDatabase resets the migration/path lifecycle as one set (issue #2
       .execute();
   }
 
-  test("a FAILED boot + close makes the reopen a total cold start on every axis", () =>
-    runExclusiveResetTest(async () => {
-    // The first boot must FAIL so `migrationsError` is actually populated before
-    // close. A successful first boot leaves migrationsError null, so the healthy
-    // reopen's `getMigrationsError() === null` would pass trivially and a dropped
-    // `migrationsError` reset would go undetected — the axis would be un-proven.
-    // Booting failed-then-healthy exercises all four axes in one flow so a
-    // partial `reset()` that skips ANY single field fails here.
-      const failDir = await harness.makeTempDbDir("auto-mobile-lifecycle-fail-");
-      process.env.AUTOMOBILE_DB_DIR = failDir;
-      // Force a startup-migration failure: a migrations dir that does not exist.
-      process.env.AUTOMOBILE_MIGRATIONS_DIR = path.join(failDir, "missing-migrations");
-      delete process.env.AUTO_MOBILE_MIGRATIONS_DIR;
-      delete process.env[DAEMON_LAUNCH_CWD_ENV];
+  test(
+    "a FAILED boot + close makes the reopen a total cold start on every axis",
+    () =>
+      runExclusiveResetTest(async () => {
+        // The first boot must FAIL so `migrationsError` is actually populated before
+        // close. A successful first boot leaves migrationsError null, so the healthy
+        // reopen's `getMigrationsError() === null` would pass trivially and a dropped
+        // `migrationsError` reset would go undetected — the axis would be un-proven.
+        // Booting failed-then-healthy exercises all four axes in one flow so a
+        // partial `reset()` that skips ANY single field fails here.
+        const failDir = await harness.makeTempDbDir("auto-mobile-lifecycle-fail-");
+        process.env.AUTOMOBILE_DB_DIR = failDir;
+        // Force a startup-migration failure: a migrations dir that does not exist.
+        process.env.AUTOMOBILE_MIGRATIONS_DIR = path.join(failDir, "missing-migrations");
+        delete process.env.AUTO_MOBILE_MIGRATIONS_DIR;
+        delete process.env[DAEMON_LAUNCH_CWD_ENV];
 
-      const databaseModule = await harness.importFreshDatabaseModule();
+        const databaseModule = await harness.importFreshDatabaseModule();
 
-      // Cold start on the first DB: path resolves + caches, migrations START and
-      // FAIL, so migrationsPromise settles and migrationsError is cached non-null.
-      const failingDb = databaseModule.getDatabase();
-      expect(databaseModule.getDatabasePath()).toBe(path.join(failDir, "auto-mobile.db"));
-      await expect(queryToolCalls(failingDb)).rejects.toThrow(
-        "Database startup migrations failed; refusing to run queries until the daemon restarts."
-      );
-      // Precondition for the migrationsError axis: the error is really set before close.
-      expect(databaseModule.getMigrationsError()).not.toBeNull();
+        // Cold start on the first DB: path resolves + caches, migrations START and
+        // FAIL, so migrationsPromise settles and migrationsError is cached non-null.
+        const failingDb = databaseModule.getDatabase();
+        expect(databaseModule.getDatabasePath()).toBe(path.join(failDir, "auto-mobile.db"));
+        await expect(queryToolCalls(failingDb)).rejects.toThrow(
+          "Database startup migrations failed; refusing to run queries until the daemon restarts.",
+        );
+        // Precondition for the migrationsError axis: the error is really set before close.
+        expect(databaseModule.getMigrationsError()).not.toBeNull();
 
-      await databaseModule.closeDatabase();
+        await databaseModule.closeDatabase();
 
-      // Point at a brand-new, empty DB dir with a VALID migrations dir and reopen in
-      // the same process. A single un-reset axis breaks this flow:
-      //   - stale resolvedDbPath  -> path assertion below redirects to the old dir
-      //   - stale migrationsRun   -> ensureMigrationsStarted() no-ops, query hits an
-      //                              unmigrated schema ("no such table: tool_calls")
-      //   - stale migrationsPromise -> ditto (re-arm is gated on it being null)
-      //   - stale migrationsError -> the cached failed-boot error rethrows on query
-      //                              against the otherwise-healthy reopened DB
-      const healthyDir = await harness.makeTempDbDir("auto-mobile-lifecycle-healthy-");
-      process.env.AUTOMOBILE_DB_DIR = healthyDir;
-      delete process.env.AUTOMOBILE_MIGRATIONS_DIR;
+        // Point at a brand-new, empty DB dir with a VALID migrations dir and reopen in
+        // the same process. A single un-reset axis breaks this flow:
+        //   - stale resolvedDbPath  -> path assertion below redirects to the old dir
+        //   - stale migrationsRun   -> ensureMigrationsStarted() no-ops, query hits an
+        //                              unmigrated schema ("no such table: tool_calls")
+        //   - stale migrationsPromise -> ditto (re-arm is gated on it being null)
+        //   - stale migrationsError -> the cached failed-boot error rethrows on query
+        //                              against the otherwise-healthy reopened DB
+        const healthyDir = await harness.makeTempDbDir("auto-mobile-lifecycle-healthy-");
+        process.env.AUTOMOBILE_DB_DIR = healthyDir;
+        delete process.env.AUTOMOBILE_MIGRATIONS_DIR;
 
-      // resolvedDbPath reset: the reopen must bind the fresh file.
-      expect(databaseModule.getDatabasePath()).toBe(path.join(healthyDir, "auto-mobile.db"));
+        // resolvedDbPath reset: the reopen must bind the fresh file.
+        expect(databaseModule.getDatabasePath()).toBe(path.join(healthyDir, "auto-mobile.db"));
 
-      // migrationsError reset: the cached failed-boot error must not survive close.
-      expect(databaseModule.getMigrationsError()).toBeNull();
+        // migrationsError reset: the cached failed-boot error must not survive close.
+        expect(databaseModule.getMigrationsError()).toBeNull();
 
-      // migrationsRun + migrationsPromise + migrationsError reset: migrations must
-      // re-run against the fresh file and the query must succeed (not rethrow the
-      // stale error) against a migrated schema.
-      const healthyDb = databaseModule.getDatabase();
-      expect(await queryToolCalls(healthyDb)).toEqual([]);
-      expect(databaseModule.getMigrationsError()).toBeNull();
+        // migrationsRun + migrationsPromise + migrationsError reset: migrations must
+        // re-run against the fresh file and the query must succeed (not rethrow the
+        // stale error) against a migrated schema.
+        const healthyDb = databaseModule.getDatabase();
+        expect(await queryToolCalls(healthyDb)).toEqual([]);
+        expect(databaseModule.getMigrationsError()).toBeNull();
 
-      await databaseModule.closeDatabase();
-    }), WINDOWS_FILE_DB_TEST_TIMEOUT_MS);
+        await databaseModule.closeDatabase();
+      }),
+    WINDOWS_FILE_DB_TEST_TIMEOUT_MS,
+  );
 });

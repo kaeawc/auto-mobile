@@ -31,7 +31,7 @@ export class DefaultFileDownloader implements FileDownloader {
         throw error;
       }
       logger.warn("[FileDownloader] curl unavailable, falling back to wget", {
-        error: errorMessage(error)
+        error: errorMessage(error),
       });
     }
 
@@ -43,44 +43,54 @@ export class DefaultFileDownloader implements FileDownloader {
         throw error;
       }
       logger.warn("[FileDownloader] wget unavailable, falling back to Node HTTP", {
-        error: errorMessage(error)
+        error: errorMessage(error),
       });
     }
 
     await this.downloadWithNodeHttp(url, destination, 0, signal);
   }
 
-  private async downloadWithCurl(url: string, destination: string, signal?: AbortSignal): Promise<void> {
-    await execFileAsync("curl", [
-      "--fail",
-      "--location",
-      "--retry",
-      "3",
-      "--retry-delay",
-      "1",
-      "--silent",
-      "--show-error",
-      "-o",
-      destination,
-      url
-    ], { timeout: 120000, maxBuffer: 10 * 1024 * 1024, signal });
+  private async downloadWithCurl(
+    url: string,
+    destination: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await execFileAsync(
+      "curl",
+      [
+        "--fail",
+        "--location",
+        "--retry",
+        "3",
+        "--retry-delay",
+        "1",
+        "--silent",
+        "--show-error",
+        "-o",
+        destination,
+        url,
+      ],
+      { timeout: 120000, maxBuffer: 10 * 1024 * 1024, signal },
+    );
   }
 
-  private async downloadWithWget(url: string, destination: string, signal?: AbortSignal): Promise<void> {
-    await execFileAsync("wget", [
-      "--tries=3",
-      "--timeout=30",
-      "-O",
-      destination,
-      url
-    ], { timeout: 120000, maxBuffer: 10 * 1024 * 1024, signal });
+  private async downloadWithWget(
+    url: string,
+    destination: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await execFileAsync("wget", ["--tries=3", "--timeout=30", "-O", destination, url], {
+      timeout: 120000,
+      maxBuffer: 10 * 1024 * 1024,
+      signal,
+    });
   }
 
   private async downloadWithNodeHttp(
     url: string,
     destination: string,
     redirectCount: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<void> {
     if (redirectCount > 5) {
       throw new Error(`Too many redirects while downloading ${url}`);
@@ -94,7 +104,7 @@ export class DefaultFileDownloader implements FileDownloader {
       const request = transport.get(
         url,
         { headers: { "User-Agent": "auto-mobile" } },
-        response => {
+        (response) => {
           const statusCode = response.statusCode ?? 0;
           if (statusCode >= 300 && statusCode < 400 && response.headers.location) {
             response.resume();
@@ -114,11 +124,11 @@ export class DefaultFileDownloader implements FileDownloader {
           const fileStream = createWriteStream(destination);
           response.pipe(fileStream);
           fileStream.on("finish", () => fileStream.close(() => resolve()));
-          fileStream.on("error", err => {
+          fileStream.on("error", (err) => {
             fileStream.close();
             reject(err);
           });
-        }
+        },
       );
 
       request.setTimeout(30000, () => {
@@ -145,10 +155,12 @@ export class DefaultFileDownloader implements FileDownloader {
     }
 
     const combinedMessage = `${err.message ?? ""} ${err.stderr ?? ""}`.toLowerCase();
-    if (combinedMessage.includes("command not found") ||
+    if (
+      combinedMessage.includes("command not found") ||
       combinedMessage.includes("not recognized as an internal or external command") ||
       combinedMessage.includes(`${command}: not found`) ||
-      combinedMessage.includes(`not found: ${command}`)) {
+      combinedMessage.includes(`not found: ${command}`)
+    ) {
       return true;
     }
 

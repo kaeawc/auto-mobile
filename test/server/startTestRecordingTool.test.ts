@@ -10,12 +10,14 @@ describe("startTestRecording tool", () => {
     status: "booted" as const,
   };
 
-  const mockStartTestRecording = mock(() => Promise.resolve({
-    recordingId: "rec-123",
-    startedAt: "2024-01-01T00:00:00.000Z",
-    deviceId: "emulator-5554",
-    platform: "android",
-  }));
+  const mockStartTestRecording = mock(() =>
+    Promise.resolve({
+      recordingId: "rec-123",
+      startedAt: "2024-01-01T00:00:00.000Z",
+      deviceId: "emulator-5554",
+      platform: "android",
+    }),
+  );
 
   beforeAll(() => {
     if (!ToolRegistry.getTool("startTestRecording")) {
@@ -75,7 +77,9 @@ describe("startTestRecording tool", () => {
 
   test("returns error when recording fails to start", async () => {
     mock.module("../../src/server/testRecordingManager", () => ({
-      startTestRecording: mock(() => Promise.reject(new Error("Unable to connect to accessibility service"))),
+      startTestRecording: mock(() =>
+        Promise.reject(new Error("Unable to connect to accessibility service")),
+      ),
       stopTestRecording: mock(() => Promise.resolve({})),
       getTestRecordingStatus: mock(() => null),
     }));
@@ -99,9 +103,13 @@ describe("startTestRecording tool", () => {
     };
 
     mock.module("../../src/server/testRecordingManager", () => ({
-      startTestRecording: mock(() => Promise.reject(
-        new Error("Recording already active on device emulator-5554 (rec-123). Stop the existing recording before starting a new one on emulator-5556.")
-      )),
+      startTestRecording: mock(() =>
+        Promise.reject(
+          new Error(
+            "Recording already active on device emulator-5554 (rec-123). Stop the existing recording before starting a new one on emulator-5556.",
+          ),
+        ),
+      ),
       stopTestRecording: mock(() => Promise.resolve({})),
       getTestRecordingStatus: mock(() => ({
         recordingId: "rec-123",

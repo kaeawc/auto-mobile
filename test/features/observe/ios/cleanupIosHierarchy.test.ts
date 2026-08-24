@@ -16,7 +16,7 @@ describe("cleanupIosXCTestHierarchy", () => {
     const depth = 40;
     const noisyBounds = new Proxy([47, 811, 342, 841], {
       get: (target, property, receiver) => {
-        if (property === "length" || typeof property === "string" && /^[0-9]+$/.test(property)) {
+        if (property === "length" || (typeof property === "string" && /^[0-9]+$/.test(property))) {
           boundsReads += 1;
         }
         return Reflect.get(target, property, receiver);
@@ -61,7 +61,11 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
-    expect(collectNodes(result.hierarchy).filter(node => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
+    expect(
+      collectNodes(result.hierarchy).filter(
+        (node) => node.text === "Horizontal scroll bar, 1 page",
+      ),
+    ).toHaveLength(1);
     expect(boundsReads).toBeLessThan(20);
   });
 
@@ -72,24 +76,26 @@ describe("cleanupIosXCTestHierarchy", () => {
         className: "XCUIApplication",
         node: [
           {
-            "className": "UIButton",
-            "text": "Dictate",
+            className: "UIButton",
+            text: "Dictate",
             "resource-id": "Dictate",
-            "clickable": "true",
-            "bounds": [360, 108, 378, 130],
+            clickable: "true",
+            bounds: [360, 108, 378, 130],
           },
           {
-            "className": "UIButton",
-            "text": "Dictate",
+            className: "UIButton",
+            text: "Dictate",
             "resource-id": "Dictate",
-            "clickable": "true",
-            "bounds": [360, 108, 378, 130],
+            clickable: "true",
+            bounds: [360, 108, 378, 130],
           },
         ],
       },
     });
 
-    expect(collectNodes(result.hierarchy).filter(node => node.text === "Dictate")).toHaveLength(1);
+    expect(collectNodes(result.hierarchy).filter((node) => node.text === "Dictate")).toHaveLength(
+      1,
+    );
   });
 
   test("preserves focused known-noise leaf while deduping matching unfocused leaves", () => {
@@ -99,27 +105,27 @@ describe("cleanupIosXCTestHierarchy", () => {
         className: "XCUIApplication",
         node: [
           {
-            "className": "UIButton",
-            "text": "Dictate",
+            className: "UIButton",
+            text: "Dictate",
             "resource-id": "Dictate",
-            "clickable": "true",
-            "bounds": [360, 108, 378, 130],
+            clickable: "true",
+            bounds: [360, 108, 378, 130],
           },
           {
-            "className": "UIButton",
-            "text": "Dictate",
+            className: "UIButton",
+            text: "Dictate",
             "resource-id": "Dictate",
-            "clickable": "true",
-            "focused": "true",
-            "bounds": [360, 108, 378, 130],
+            clickable: "true",
+            focused: "true",
+            bounds: [360, 108, 378, 130],
           },
         ],
       },
     });
 
-    const dictateNodes = collectNodes(result.hierarchy).filter(node => node.text === "Dictate");
+    const dictateNodes = collectNodes(result.hierarchy).filter((node) => node.text === "Dictate");
     expect(dictateNodes).toHaveLength(2);
-    expect(dictateNodes.some(node => node.focused === "true")).toBe(true);
+    expect(dictateNodes.some((node) => node.focused === "true")).toBe(true);
   });
 
   test("preserves accessibility-focused known-noise leaf while deduping matching unfocused leaves", () => {
@@ -129,27 +135,27 @@ describe("cleanupIosXCTestHierarchy", () => {
         className: "XCUIApplication",
         node: [
           {
-            "className": "UIButton",
-            "text": "Dictate",
+            className: "UIButton",
+            text: "Dictate",
             "resource-id": "Dictate",
-            "clickable": "true",
-            "bounds": [360, 108, 378, 130],
+            clickable: "true",
+            bounds: [360, 108, 378, 130],
           },
           {
-            "className": "UIButton",
-            "text": "Dictate",
+            className: "UIButton",
+            text: "Dictate",
             "resource-id": "Dictate",
-            "clickable": "true",
+            clickable: "true",
             "accessibility-focused": "true",
-            "bounds": [360, 108, 378, 130],
+            bounds: [360, 108, 378, 130],
           },
         ],
       },
     });
 
-    const dictateNodes = collectNodes(result.hierarchy).filter(node => node.text === "Dictate");
+    const dictateNodes = collectNodes(result.hierarchy).filter((node) => node.text === "Dictate");
     expect(dictateNodes).toHaveLength(2);
-    expect(dictateNodes.some(node => node["accessibility-focused"] === "true")).toBe(true);
+    expect(dictateNodes.some((node) => node["accessibility-focused"] === "true")).toBe(true);
   });
 
   test("drops redundant static label child represented by actionable parent text", () => {
@@ -173,7 +179,7 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
-    const button = collectNodes(result.hierarchy).find(node => node.className === "UIButton");
+    const button = collectNodes(result.hierarchy).find((node) => node.className === "UIButton");
     expect(button.text).toBe("New Reminder");
     expect(button.node).toBeUndefined();
   });
@@ -198,38 +204,38 @@ describe("cleanupIosXCTestHierarchy", () => {
               bounds: [51, 128, 140, 150],
             },
             {
-              "className": "UILabel",
-              "text": "Options",
-              "role": "text",
+              className: "UILabel",
+              text: "Options",
+              role: "text",
               "long-clickable": "true",
-              "bounds": [51, 152, 140, 174],
+              bounds: [51, 152, 140, 174],
             },
             {
-              "className": "UILabel",
-              "text": "Options",
-              "role": "text",
+              className: "UILabel",
+              text: "Options",
+              role: "text",
               "resource-id": "options-label",
-              "bounds": [51, 176, 140, 198],
+              bounds: [51, 176, 140, 198],
             },
             {
-              "className": "UILabel",
-              "text": "Options",
-              "role": "text",
+              className: "UILabel",
+              text: "Options",
+              role: "text",
               "hint-text": "Options hint",
-              "bounds": [51, 200, 140, 222],
+              bounds: [51, 200, 140, 222],
             },
           ],
         },
       },
     });
 
-    const labels = collectNodes(result.hierarchy).filter(node => node.className === "UILabel");
-    expect(labels.map(node => node["resource-id"] ?? node.actions?.[0] ?? node["long-clickable"] ?? node["hint-text"])).toEqual([
-      "custom_action",
-      "true",
-      "options-label",
-      "Options hint",
-    ]);
+    const labels = collectNodes(result.hierarchy).filter((node) => node.className === "UILabel");
+    expect(
+      labels.map(
+        (node) =>
+          node["resource-id"] ?? node.actions?.[0] ?? node["long-clickable"] ?? node["hint-text"],
+      ),
+    ).toEqual(["custom_action", "true", "options-label", "Options hint"]);
   });
 
   test("drops redundant static label child whose only metadata is a generated view-id", () => {
@@ -244,17 +250,19 @@ describe("cleanupIosXCTestHierarchy", () => {
           clickable: "true",
           bounds: [20, 369, 382, 417],
           node: {
-            "className": "UILabel",
-            "text": "List",
-            "role": "text",
+            className: "UILabel",
+            text: "List",
+            role: "text",
             "view-id": "5513e3ea-bba6-d754-02c1-c34c7365c6fa",
-            "bounds": [85, 383, 249, 403],
+            bounds: [85, 383, 249, 403],
           },
         },
       },
     });
 
-    expect(collectNodes(result.hierarchy).filter(node => node.className === "UILabel")).toHaveLength(0);
+    expect(
+      collectNodes(result.hierarchy).filter((node) => node.className === "UILabel"),
+    ).toHaveLength(0);
   });
 
   test("dedupes known-noise leaves repeated in different descendant branches", () => {
@@ -283,7 +291,11 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
-    expect(collectNodes(result.hierarchy).filter(node => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
+    expect(
+      collectNodes(result.hierarchy).filter(
+        (node) => node.text === "Horizontal scroll bar, 1 page",
+      ),
+    ).toHaveLength(1);
   });
 
   test("drops structural wrappers containing only scroll bar noise", () => {
@@ -311,13 +323,17 @@ describe("cleanupIosXCTestHierarchy", () => {
     });
 
     const nodes = collectNodes(result.hierarchy);
-    expect(nodes.filter(node => node.text === "Vertical scroll bar, 1 page")).toHaveLength(1);
-    expect(nodes.some(node => {
-      const children = Array.isArray(node.node) ? node.node : node.node ? [node.node] : [];
-      return node.className === "UIView" &&
-        children.length > 0 &&
-        children.every(child => child.text === "Vertical scroll bar, 1 page");
-    })).toBe(false);
+    expect(nodes.filter((node) => node.text === "Vertical scroll bar, 1 page")).toHaveLength(1);
+    expect(
+      nodes.some((node) => {
+        const children = Array.isArray(node.node) ? node.node : node.node ? [node.node] : [];
+        return (
+          node.className === "UIView" &&
+          children.length > 0 &&
+          children.every((child) => child.text === "Vertical scroll bar, 1 page")
+        );
+      }),
+    ).toBe(false);
   });
 
   test("drops structural scroll bar wrappers after an earlier sibling registers the same noise", () => {
@@ -345,13 +361,13 @@ describe("cleanupIosXCTestHierarchy", () => {
     });
 
     const nodes = collectNodes(result.hierarchy);
-    expect(nodes.filter(node => node.text === "Vertical scroll bar, 1 page")).toHaveLength(1);
-    expect(nodes.some(node => {
-      const children = Array.isArray(node.node) ? node.node : node.node ? [node.node] : [];
-      return node.className === "UIView" &&
-        children.length === 0 &&
-        node.text === undefined;
-    })).toBe(false);
+    expect(nodes.filter((node) => node.text === "Vertical scroll bar, 1 page")).toHaveLength(1);
+    expect(
+      nodes.some((node) => {
+        const children = Array.isArray(node.node) ? node.node : node.node ? [node.node] : [];
+        return node.className === "UIView" && children.length === 0 && node.text === undefined;
+      }),
+    ).toBe(false);
   });
 
   test("drops Reminders fixture scroll bar wrappers in raw TS cleanup", () => {
@@ -359,12 +375,19 @@ describe("cleanupIosXCTestHierarchy", () => {
     const result = cleanupIosXCTestHierarchy(before.viewHierarchy);
     const nodes = collectNodes(result.hierarchy);
 
-    expect(nodes.some(node => {
-      const children = Array.isArray(node.node) ? node.node : node.node ? [node.node] : [];
-      return node.class === "UIView" &&
-        children.length > 0 &&
-        children.every(child => typeof child.text === "string" && child.text.toLowerCase().includes("scroll bar"));
-    })).toBe(false);
+    expect(
+      nodes.some((node) => {
+        const children = Array.isArray(node.node) ? node.node : node.node ? [node.node] : [];
+        return (
+          node.class === "UIView" &&
+          children.length > 0 &&
+          children.every(
+            (child) =>
+              typeof child.text === "string" && child.text.toLowerCase().includes("scroll bar"),
+          )
+        );
+      }),
+    ).toBe(false);
   });
 
   test("preserves focused static label child represented by a link parent", () => {
@@ -389,7 +412,7 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
-    const link = collectNodes(result.hierarchy).find(node => node.className === "UILink");
+    const link = collectNodes(result.hierarchy).find((node) => node.className === "UILink");
     expect(link.text).toBe("Privacy");
     expect(link.node).toEqual({
       className: "UILabel",
@@ -412,23 +435,23 @@ describe("cleanupIosXCTestHierarchy", () => {
           clickable: "true",
           bounds: [20, 700, 370, 744],
           node: {
-            "className": "UILabel",
-            "text": "Continue",
-            "role": "text",
+            className: "UILabel",
+            text: "Continue",
+            role: "text",
             "accessibility-focused": "true",
-            "bounds": [44, 710, 346, 734],
+            bounds: [44, 710, 346, 734],
           },
         },
       },
     });
 
-    const button = collectNodes(result.hierarchy).find(node => node.className === "UIButton");
+    const button = collectNodes(result.hierarchy).find((node) => node.className === "UIButton");
     expect(button.node).toEqual({
-      "className": "UILabel",
-      "text": "Continue",
-      "role": "text",
+      className: "UILabel",
+      text: "Continue",
+      role: "text",
       "accessibility-focused": "true",
-      "bounds": [44, 710, 346, 734],
+      bounds: [44, 710, 346, 734],
     });
   });
 
@@ -438,10 +461,10 @@ describe("cleanupIosXCTestHierarchy", () => {
       hierarchy: {
         className: "XCUIApplication",
         node: {
-          "className": "WKWebView",
+          className: "WKWebView",
           "resource-id": "WebView",
-          "bounds": [0, 0, 390, 844],
-          "node": {
+          bounds: [0, 0, 390, 844],
+          node: {
             className: "WKWebView",
             bounds: [0, 0, 390, 844],
             node: {
@@ -458,10 +481,12 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
-    const webViews = collectNodes(result.hierarchy).filter(node => node.className === "WKWebView");
+    const webViews = collectNodes(result.hierarchy).filter(
+      (node) => node.className === "WKWebView",
+    );
     expect(webViews).toHaveLength(1);
     expect(webViews[0]["resource-id"]).toBe("WebView");
-    expect(collectNodes(result.hierarchy).some(node => node.text === "Google")).toBe(true);
+    expect(collectNodes(result.hierarchy).some((node) => node.text === "Google")).toBe(true);
   });
 
   test("does not leave an empty WKWebView when duplicate noise removes its only child", () => {
@@ -489,8 +514,8 @@ describe("cleanupIosXCTestHierarchy", () => {
     });
 
     const nodes = collectNodes(result.hierarchy);
-    expect(nodes.filter(node => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
-    expect(nodes.filter(node => node.className === "WKWebView")).toHaveLength(0);
+    expect(nodes.filter((node) => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
+    expect(nodes.filter((node) => node.className === "WKWebView")).toHaveLength(0);
   });
 
   test("drops empty UIView wrappers when several noise children are pruned", () => {
@@ -529,8 +554,12 @@ describe("cleanupIosXCTestHierarchy", () => {
     });
 
     const nodes = collectNodes(result.hierarchy);
-    expect(nodes.filter(node => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
-    expect(nodes.some(node => node.className === "UIView" && node.text === undefined && node.node === undefined)).toBe(false);
+    expect(nodes.filter((node) => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
+    expect(
+      nodes.some(
+        (node) => node.className === "UIView" && node.text === undefined && node.node === undefined,
+      ),
+    ).toBe(false);
   });
 
   test("drops empty WKWebView wrappers when several noise children are pruned", () => {
@@ -569,8 +598,8 @@ describe("cleanupIosXCTestHierarchy", () => {
     });
 
     const nodes = collectNodes(result.hierarchy);
-    expect(nodes.filter(node => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
-    expect(nodes.filter(node => node.className === "WKWebView")).toHaveLength(0);
+    expect(nodes.filter((node) => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
+    expect(nodes.filter((node) => node.className === "WKWebView")).toHaveLength(0);
   });
 
   test("preserves unique noise when an idless WKWebView collapses", () => {
@@ -591,8 +620,8 @@ describe("cleanupIosXCTestHierarchy", () => {
     });
 
     const nodes = collectNodes(result.hierarchy);
-    expect(nodes.filter(node => node.text === "Vertical scroll bar, 1 page")).toHaveLength(1);
-    expect(nodes.filter(node => node.className === "WKWebView")).toHaveLength(0);
+    expect(nodes.filter((node) => node.text === "Vertical scroll bar, 1 page")).toHaveLength(1);
+    expect(nodes.filter((node) => node.className === "WKWebView")).toHaveLength(0);
   });
 
   test("preserves unique same-class noise when nested idless WKWebViews collapse", () => {
@@ -617,8 +646,13 @@ describe("cleanupIosXCTestHierarchy", () => {
     });
 
     const nodes = collectNodes(result.hierarchy);
-    expect(nodes.filter(node => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
-    expect(nodes.some(node => node.className === "WKWebView" && node.text === undefined && node.node === undefined)).toBe(false);
+    expect(nodes.filter((node) => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
+    expect(
+      nodes.some(
+        (node) =>
+          node.className === "WKWebView" && node.text === undefined && node.node === undefined,
+      ),
+    ).toBe(false);
   });
 
   test("preserves multi-child WKWebView wrappers after duplicate noise pruning", () => {
@@ -650,10 +684,14 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
-    const webViews = collectNodes(result.hierarchy).filter(node => node.className === "WKWebView");
+    const webViews = collectNodes(result.hierarchy).filter(
+      (node) => node.className === "WKWebView",
+    );
     expect(webViews).toHaveLength(1);
-    expect(collectNodes(webViews[0]).some(node => node.text === "Content")).toBe(true);
-    expect(collectNodes(result.hierarchy).filter(node => node.text === "Dictate")).toHaveLength(1);
+    expect(collectNodes(webViews[0]).some((node) => node.text === "Content")).toBe(true);
+    expect(collectNodes(result.hierarchy).filter((node) => node.text === "Dictate")).toHaveLength(
+      1,
+    );
   });
 
   test("collapses multi-child WKWebView wrappers when only noise remains", () => {
@@ -681,8 +719,8 @@ describe("cleanupIosXCTestHierarchy", () => {
     });
 
     const nodes = collectNodes(result.hierarchy);
-    expect(nodes.filter(node => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
-    expect(nodes.filter(node => node.className === "WKWebView")).toHaveLength(0);
+    expect(nodes.filter((node) => node.text === "Horizontal scroll bar, 1 page")).toHaveLength(1);
+    expect(nodes.filter((node) => node.className === "WKWebView")).toHaveLength(0);
   });
 
   test("preserves scrollable idless single-child WKWebView wrappers", () => {
@@ -703,9 +741,11 @@ describe("cleanupIosXCTestHierarchy", () => {
       },
     });
 
-    const webViews = collectNodes(result.hierarchy).filter(node => node.className === "WKWebView");
+    const webViews = collectNodes(result.hierarchy).filter(
+      (node) => node.className === "WKWebView",
+    );
     expect(webViews).toHaveLength(1);
     expect(webViews[0].scrollable).toBe("true");
-    expect(collectNodes(result.hierarchy).some(node => node.text === "Google")).toBe(true);
+    expect(collectNodes(result.hierarchy).some((node) => node.text === "Google")).toBe(true);
   });
 });

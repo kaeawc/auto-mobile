@@ -6,7 +6,7 @@ import {
 } from "../../src/vision/ClaudeVisionClient";
 import type { ClaudeVisionAnalysis } from "../../src/vision/VisionTypes";
 
-const makeResponse = (text: string) => ({ content: [{ type: "text", text }] } as any);
+const makeResponse = (text: string) => ({ content: [{ type: "text", text }] }) as any;
 
 const analysis = (overrides: Partial<ClaudeVisionAnalysis> = {}): ClaudeVisionAnalysis => ({
   elementFound: true,
@@ -20,17 +20,19 @@ const analysis = (overrides: Partial<ClaudeVisionAnalysis> = {}): ClaudeVisionAn
 
 describe("parseClaudeResponse", () => {
   test.each([
-    ["a malformed fenced JSON response", "```json\n{ \"elementFound\": tr,\n```"],
+    ["a malformed fenced JSON response", '```json\n{ "elementFound": tr,\n```'],
     ["a malformed inline JSON response", "here is a result: { not valid json at all }"],
     ["a prose-only response", "Claude returned only prose, no JSON here."],
   ])("throws a controlled error for %s", (_name, responseText) => {
-    expect(() => parseClaudeResponse(makeResponse(responseText))).toThrow(/Failed to parse JSON from Claude response/);
+    expect(() => parseClaudeResponse(makeResponse(responseText))).toThrow(
+      /Failed to parse JSON from Claude response/,
+    );
   });
 
   test("returns analysis fields from a well-formed fenced response", () => {
-    const parsed = parseClaudeResponse(makeResponse(
-      "```json\n{\"elementFound\": true, \"confidence\": 0.95, \"reasoning\": \"ok\"}\n```"
-    ));
+    const parsed = parseClaudeResponse(
+      makeResponse('```json\n{"elementFound": true, "confidence": 0.95, "reasoning": "ok"}\n```'),
+    );
 
     expect(parsed).toMatchObject({ elementFound: true, confidence: 0.95, reasoning: "ok" });
   });
@@ -56,9 +58,14 @@ describe("toClaudeVisionFallbackResult", () => {
   });
 
   test("defaults an unknown navigation action to tap while preserving its target", () => {
-    const result = toClaudeVisionFallbackResult(analysis({
-      steps: [{ action: "open details", target: "Settings", reasoning: "next screen" }],
-    }), 0.01, 12, "/screen.png");
+    const result = toClaudeVisionFallbackResult(
+      analysis({
+        steps: [{ action: "open details", target: "Settings", reasoning: "next screen" }],
+      }),
+      0.01,
+      12,
+      "/screen.png",
+    );
 
     expect(result.navigationSteps).toEqual([
       { action: "tap", target: "Settings", description: "next screen" },

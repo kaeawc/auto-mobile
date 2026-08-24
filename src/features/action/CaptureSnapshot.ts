@@ -1,18 +1,32 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { BootedDevice, ActionableError, DeviceSnapshotManifest, DeviceSnapshotType } from "../../models";
+import {
+  BootedDevice,
+  ActionableError,
+  DeviceSnapshotManifest,
+  DeviceSnapshotType,
+} from "../../models";
 import type { SnapshotCaptureProvider } from "../../utils/interfaces/SnapshotProvider";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
 import {
   buildVmSnapshotCommand,
   evaluateVmSnapshotResult,
-  formatVmSnapshotExecutionError
+  formatVmSnapshotExecutionError,
 } from "../../utils/android-cmdline-tools/vmSnapshot";
 import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS } from "../../utils/ios-cmdline-tools/iosAppContainer";
-import { captureIosSettings, type IosSettingsSnapshot } from "../../utils/ios-cmdline-tools/iosSettings";
+import {
+  getAppDataContainerPath,
+  IOS_APP_DATA_FOLDERS,
+} from "../../utils/ios-cmdline-tools/iosAppContainer";
+import {
+  captureIosSettings,
+  type IosSettingsSnapshot,
+} from "../../utils/ios-cmdline-tools/iosSettings";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { logger } from "../../utils/logger";
 import { promises as fs } from "fs";
@@ -60,7 +74,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     emulator?: AndroidEmulatorClient,
     timer: Timer = defaultTimer,
     store: DeviceSnapshotStore = new DeviceSnapshotStore(),
-    simctl?: SimCtlClient
+    simctl?: SimCtlClient,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -88,7 +102,9 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
       case "ios":
         return this.executeIos(args);
       default:
-        throw new ActionableError(`Snapshot capture is not supported for platform '${this.device.platform}'`);
+        throw new ActionableError(
+          `Snapshot capture is not supported for platform '${this.device.platform}'`,
+        );
     }
   }
 
@@ -101,7 +117,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
       strictBackupMode = false,
       backupTimeoutMs = 30000,
       userApps = "current",
-      vmSnapshotTimeoutMs = 30000
+      vmSnapshotTimeoutMs = 30000,
     } = args;
 
     logger.info(`Capturing snapshot '${snapshotName}' for device ${this.device.deviceId}`);
@@ -121,17 +137,19 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
         includeSettings,
         strictBackupMode,
         backupTimeoutMs,
-        userApps
+        userApps,
       );
     }
 
-    logger.info(`Snapshot '${snapshotName}' captured successfully (type: ${manifest.snapshotType})`);
+    logger.info(
+      `Snapshot '${snapshotName}' captured successfully (type: ${manifest.snapshotType})`,
+    );
 
     return {
       snapshotName: manifest.snapshotName,
       timestamp: manifest.timestamp,
       snapshotType: manifest.snapshotType,
-      manifest
+      manifest,
     };
   }
 
@@ -141,7 +159,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
   private async captureVmSnapshot(
     snapshotName: string,
     includeSettings: boolean,
-    vmSnapshotTimeoutMs: number
+    vmSnapshotTimeoutMs: number,
   ): Promise<DeviceSnapshotManifest> {
     logger.info(`Using VM snapshot for emulator ${this.device.deviceId}`);
 
@@ -184,7 +202,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
         includeAppData: true, // VM snapshot includes everything
         includeSettings: includeSettings,
         foregroundApp,
-        settings
+        settings,
       };
 
       return manifest;
@@ -204,7 +222,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     includeSettings: boolean,
     strictBackupMode: boolean,
     backupTimeoutMs: number,
-    userApps: "current" | "all"
+    userApps: "current" | "all",
   ): Promise<DeviceSnapshotManifest> {
     logger.info(`Using ADB-based snapshot for device ${this.device.deviceId}`);
 
@@ -232,7 +250,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
           strictBackupMode,
           backupTimeoutMs,
           userApps,
-          foregroundApp
+          foregroundApp,
         );
       }
 
@@ -249,7 +267,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
         packages,
         foregroundApp,
         settings,
-        appDataBackup
+        appDataBackup,
       };
 
       return manifest;
@@ -267,7 +285,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
       const result = await a11y.requestInstalledPackages(true, undefined, 4000);
       if (result.success) {
-        return result.packages.map(p => p.packageName);
+        return result.packages.map((p) => p.packageName);
       }
     } catch (error) {
       logger.debug(`[CaptureSnapshot] a11y package list failed, falling back to ADB: ${error}`);
@@ -275,9 +293,9 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     const result = await this.adb.executeCommand("shell pm list packages");
     return result.stdout
       .split("\n")
-      .map(line => line.trim())
-      .filter(line => line.startsWith("package:"))
-      .map(line => line.replace("package:", ""));
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("package:"))
+      .map((line) => line.replace("package:", ""));
   }
 
   /**
@@ -341,7 +359,9 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
 
     for (const line of output.split("\n")) {
       const trimmed = line.trim();
-      if (!trimmed) {continue;}
+      if (!trimmed) {
+        continue;
+      }
 
       const match = trimmed.match(/^(.+?)=(.*)$/);
       if (match) {
@@ -355,10 +375,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
   /**
    * Save settings to snapshot directory
    */
-  private async saveSettings(
-    snapshotName: string,
-    settings: any
-  ): Promise<void> {
+  private async saveSettings(snapshotName: string, settings: any): Promise<void> {
     // Ensure snapshot directory exists before writing
     const snapshotDir = this.store.getSnapshotPath(snapshotName);
     await fs.mkdir(snapshotDir, { recursive: true });
@@ -377,7 +394,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     strictBackupMode: boolean,
     backupTimeoutMs: number,
     userApps: "current" | "all",
-    foregroundApp: string | undefined
+    foregroundApp: string | undefined,
   ): Promise<DeviceSnapshotManifest["appDataBackup"]> {
     logger.info(`Capturing app data (scope: ${userApps})`);
 
@@ -390,7 +407,9 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
 
     // Filter to user apps only (exclude system apps)
     let userPackages = await this.filterUserPackages(packages);
-    logger.info(`Found ${userPackages.length} user-installed apps (excluding ${packages.length - userPackages.length} system apps)`);
+    logger.info(
+      `Found ${userPackages.length} user-installed apps (excluding ${packages.length - userPackages.length} system apps)`,
+    );
 
     // If userApps is "current", only backup the foreground app
     if (userApps === "current") {
@@ -401,7 +420,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
           totalPackages: packages.length,
           backedUpPackages: [],
           skippedPackages: [],
-          failedPackages: []
+          failedPackages: [],
         };
       }
 
@@ -415,17 +434,22 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
           totalPackages: packages.length,
           backedUpPackages: [],
           skippedPackages: [],
-          failedPackages: []
+          failedPackages: [],
         };
       }
     }
 
     // Filter out packages that don't allow backup
-    const { allowedPackages, skippedPackages } = await this.filterBackupAllowedPackages(userPackages);
-    logger.info(`${allowedPackages.length} apps allow backup, ${skippedPackages.length} apps disallow backup`);
+    const { allowedPackages, skippedPackages } =
+      await this.filterBackupAllowedPackages(userPackages);
+    logger.info(
+      `${allowedPackages.length} apps allow backup, ${skippedPackages.length} apps disallow backup`,
+    );
 
     if (skippedPackages.length > 0) {
-      logger.info(`Skipped apps (android:allowBackup="false"): ${skippedPackages.slice(0, 10).join(", ")}${skippedPackages.length > 10 ? "..." : ""}`);
+      logger.info(
+        `Skipped apps (android:allowBackup="false"): ${skippedPackages.slice(0, 10).join(", ")}${skippedPackages.length > 10 ? "..." : ""}`,
+      );
     }
 
     if (allowedPackages.length === 0) {
@@ -435,13 +459,17 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
         totalPackages: packages.length,
         backedUpPackages: [],
         skippedPackages,
-        failedPackages: []
+        failedPackages: [],
       };
     }
 
     // Attempt adb backup
     const backupFilePath = this.store.getBackupFilePath(snapshotName);
-    const backupResult = await this.performAdbBackup(allowedPackages, backupFilePath, backupTimeoutMs);
+    const backupResult = await this.performAdbBackup(
+      allowedPackages,
+      backupFilePath,
+      backupTimeoutMs,
+    );
 
     // Check if backup succeeded
     let backupSucceeded = false;
@@ -466,7 +494,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
         backedUpPackages: [],
         skippedPackages,
         failedPackages: allowedPackages,
-        backupTimedOut: backupResult.timedOut
+        backupTimedOut: backupResult.timedOut,
       };
     }
 
@@ -479,7 +507,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
       backedUpPackages: allowedPackages,
       skippedPackages,
       failedPackages: [],
-      backupTimedOut: false
+      backupTimedOut: false,
     };
   }
 
@@ -493,12 +521,14 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
       const result = await a11y.requestInstalledPackages(true, undefined, 4000);
       if (result.success) {
         const userSet = new Set(
-          result.packages.filter(p => !p.isSystem).map(p => p.packageName)
+          result.packages.filter((p) => !p.isSystem).map((p) => p.packageName),
         );
-        return packages.filter(p => userSet.has(p));
+        return packages.filter((p) => userSet.has(p));
       }
     } catch (error) {
-      logger.debug(`[CaptureSnapshot] a11y filterUserPackages failed, falling back to ADB: ${error}`);
+      logger.debug(
+        `[CaptureSnapshot] a11y filterUserPackages failed, falling back to ADB: ${error}`,
+      );
     }
 
     const userPackages: string[] = [];
@@ -534,7 +564,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
         const info = await a11y.requestPackageInfo(
           packageName,
           { includePermissions: false },
-          2000
+          2000,
         );
         if (info.success && info.allowBackup !== undefined) {
           if (info.allowBackup === false) {
@@ -547,7 +577,9 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
       } catch {
         // fall through to ADB
       }
-      if (resolved) {continue;}
+      if (resolved) {
+        continue;
+      }
 
       try {
         const result = await this.adb.executeCommand(`shell dumpsys package ${packageName}`);
@@ -571,7 +603,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
   private async performAdbBackup(
     packages: string[],
     backupFilePath: string,
-    timeoutMs: number
+    timeoutMs: number,
   ): Promise<{ timedOut: boolean }> {
     logger.info(`Starting adb backup for ${packages.length} packages (timeout: ${timeoutMs}ms)`);
     logger.info("Please confirm the backup on your device if prompted");
@@ -591,12 +623,12 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
 
       const result = await Promise.race([
         this.adb.executeCommand(command),
-        new Promise<{ stdout: string; stderr: string; timedOut: true }>(resolve => {
+        new Promise<{ stdout: string; stderr: string; timedOut: true }>((resolve) => {
           timeoutHandle = this.timer.setTimeout(() => {
             timedOut = true;
             resolve({ stdout: "", stderr: "Backup timed out", timedOut: true });
           }, timeoutMs);
-        })
+        }),
       ]);
 
       // Clear timeout if command completed first
@@ -605,7 +637,9 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
       }
 
       if ("timedOut" in result && result.timedOut) {
-        logger.warn(`Backup timed out after ${timeoutMs}ms - user may not have confirmed on device`);
+        logger.warn(
+          `Backup timed out after ${timeoutMs}ms - user may not have confirmed on device`,
+        );
         return { timedOut: true };
       }
 
@@ -665,7 +699,9 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
 
     await this.saveIosMetadata(snapshotName, manifest, pathOptions);
 
-    logger.info(`[iOS] Snapshot '${snapshotName}' captured successfully (type: ${manifest.snapshotType})`);
+    logger.info(
+      `[iOS] Snapshot '${snapshotName}' captured successfully (type: ${manifest.snapshotType})`,
+    );
 
     return {
       snapshotName: manifest.snapshotName,
@@ -683,7 +719,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     snapshotName: string,
     appBundleIds: string[] | undefined,
     strictBackupMode: boolean,
-    pathOptions: SnapshotPathOptions
+    pathOptions: SnapshotPathOptions,
   ): Promise<DeviceSnapshotManifest["appDataBackup"]> {
     logger.info("[iOS] Capturing app data containers");
 
@@ -714,7 +750,11 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     for (const bundleId of bundleIds) {
       try {
         logger.info(`[iOS] Backing up app data: ${bundleId}`);
-        const containerPath = await getAppDataContainerPath(this.simctl, this.device.deviceId, bundleId);
+        const containerPath = await getAppDataContainerPath(
+          this.simctl,
+          this.device.deviceId,
+          bundleId,
+        );
         if (!containerPath) {
           failedPackages.push(bundleId);
           continue;
@@ -730,7 +770,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
 
     if (strictBackupMode && failedPackages.length > 0) {
       throw new ActionableError(
-        `Failed to backup app data for ${failedPackages.length} app(s): ${failedPackages.join(", ")}`
+        `Failed to backup app data for ${failedPackages.length} app(s): ${failedPackages.join(", ")}`,
       );
     }
 
@@ -757,10 +797,10 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     }
 
     const sanitized = Array.from(
-      new Set(appBundleIds.map(value => value.trim()).filter(Boolean))
+      new Set(appBundleIds.map((value) => value.trim()).filter(Boolean)),
     );
-    const bundleIds = sanitized.filter(bundleId => !bundleId.startsWith("com.apple."));
-    const skippedBundles = sanitized.filter(bundleId => !bundleIds.includes(bundleId));
+    const bundleIds = sanitized.filter((bundleId) => !bundleId.startsWith("com.apple."));
+    const skippedBundles = sanitized.filter((bundleId) => !bundleIds.includes(bundleId));
 
     return {
       bundleIds,
@@ -772,7 +812,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
   private async copyIosAppContainer(
     containerPath: string,
     appDataPath: string,
-    bundleId: string
+    bundleId: string,
   ): Promise<void> {
     const targetRoot = path.join(appDataPath, bundleId);
     await fs.mkdir(targetRoot, { recursive: true });
@@ -798,7 +838,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
 
       if (!osVersion && deviceInfo.runtime) {
         const runtimes = await this.simctl.getRuntimes();
-        const runtime = runtimes.find(entry => entry.identifier === deviceInfo.runtime);
+        const runtime = runtimes.find((entry) => entry.identifier === deviceInfo.runtime);
         osVersion = runtime?.version || runtime?.name;
       }
 
@@ -812,7 +852,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
   private async saveIosMetadata(
     snapshotName: string,
     manifest: DeviceSnapshotManifest,
-    pathOptions: SnapshotPathOptions
+    pathOptions: SnapshotPathOptions,
   ): Promise<void> {
     const snapshotDir = this.store.getSnapshotPathWithOptions(snapshotName, pathOptions);
     await fs.mkdir(snapshotDir, { recursive: true });

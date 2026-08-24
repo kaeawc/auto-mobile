@@ -32,10 +32,10 @@ export async function findLatestScreenshotPath(): Promise<string | undefined> {
     }
 
     const fileStats = await Promise.all(
-      imageFiles.map(async fullPath => {
+      imageFiles.map(async (fullPath) => {
         const stat = await statAsync(fullPath);
         return { path: fullPath, mtime: stat.mtime };
-      })
+      }),
     );
 
     fileStats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
@@ -53,7 +53,7 @@ export async function findLatestScreenshotPath(): Promise<string | undefined> {
  * scanning the screenshots tempdir.
  */
 export async function resolveLatestScreenshotPath(
-  getCachedPath?: () => string | null | undefined
+  getCachedPath?: () => string | null | undefined,
 ): Promise<string | undefined> {
   try {
     const cachedPath = getCachedPath?.();
@@ -81,7 +81,8 @@ export class AccessibilityAuditor {
 
   constructor(opts: AccessibilityAuditorOptions) {
     this.device = opts.device;
-    this.screenshotPathResolver = opts.screenshotPathResolver ?? (() => resolveLatestScreenshotPath());
+    this.screenshotPathResolver =
+      opts.screenshotPathResolver ?? (() => resolveLatestScreenshotPath());
     this.getConfig = opts.getConfig ?? (() => serverConfig.getAccessibilityAuditConfig());
   }
 
@@ -113,15 +114,18 @@ export class AccessibilityAuditor {
 
     try {
       await perf.track("accessibilityAudit", async () => {
-        logger.info(`[AccessibilityAudit] Running WCAG ${auditConfig.level} audit for ${result.activeWindow?.appId}`);
+        logger.info(
+          `[AccessibilityAudit] Running WCAG ${auditConfig.level} audit for ${result.activeWindow?.appId}`,
+        );
 
         // Initialize audit
         const wcagAudit = new WcagAudit();
 
         // Extract elements directly from view hierarchy for audit
         const elementParser = new DefaultElementParser();
-        const allElements: Element[] = elementParser.flattenViewHierarchy(result.viewHierarchy!)
-          .map(entry => entry.element);
+        const allElements: Element[] = elementParser
+          .flattenViewHierarchy(result.viewHierarchy!)
+          .map((entry) => entry.element);
 
         // Get screenshot path if available (from TakeScreenshot cache)
         const screenshotPath = await this.screenshotPathResolver();
@@ -133,7 +137,7 @@ export class AccessibilityAuditor {
           screenshotPath,
           result.activeWindow!.appId,
           auditConfig,
-          result.viewHierarchy!.density
+          result.viewHierarchy!.density,
         );
 
         // Attach audit result to observe result
@@ -141,7 +145,7 @@ export class AccessibilityAuditor {
 
         if (!auditResult.summary.passed) {
           logger.warn(
-            `[AccessibilityAudit] Accessibility audit FAILED with ${auditResult.violations.length} violations (${auditResult.summary.bySeverity.error} errors, ${auditResult.summary.bySeverity.warning} warnings)`
+            `[AccessibilityAudit] Accessibility audit FAILED with ${auditResult.violations.length} violations (${auditResult.summary.bySeverity.error} errors, ${auditResult.summary.bySeverity.warning} warnings)`,
           );
         } else {
           logger.info("[AccessibilityAudit] Accessibility audit PASSED");

@@ -65,12 +65,12 @@ export class ThresholdManager {
 
   private async cleanupExpiredThresholdsWith(
     db: Kysely<Database>,
-    deviceId: string
+    deviceId: string,
   ): Promise<void> {
     await this.thresholds.cleanupExpiredThresholds(
       this.deviceWhere(deviceId),
       `device ${deviceId}`,
-      db
+      db,
     );
   }
 
@@ -83,13 +83,13 @@ export class ThresholdManager {
 
   private async getValidThresholdsWith(
     db: Kysely<Database>,
-    deviceId: string
+    deviceId: string,
   ): Promise<PerformanceThresholds[]> {
     return await this.thresholds.getValidThresholds(
       this.deviceWhere(deviceId),
       this.deviceWhere(deviceId),
       `device ${deviceId}`,
-      db
+      db,
     );
   }
 
@@ -97,11 +97,12 @@ export class ThresholdManager {
    * Calculate weighted average thresholds from historical data
    */
   calculateWeightedAverageThresholds(
-    thresholds: PerformanceThresholds[]
+    thresholds: PerformanceThresholds[],
   ): Omit<NewPerformanceThresholds, "device_id" | "session_id" | "created_at"> | null {
-    return this.thresholds.calculateWeightedAverageThresholds(thresholds) as
-      | Omit<NewPerformanceThresholds, "device_id" | "session_id" | "created_at">
-      | null;
+    return this.thresholds.calculateWeightedAverageThresholds(thresholds) as Omit<
+      NewPerformanceThresholds,
+      "device_id" | "session_id" | "created_at"
+    > | null;
   }
 
   /**
@@ -111,7 +112,7 @@ export class ThresholdManager {
    */
   async getOrCreateThresholds(
     deviceId: string,
-    capabilities: DeviceCapabilities
+    capabilities: DeviceCapabilities,
   ): Promise<{
     frameTimeThresholdMs: number;
     p50ThresholdMs: number;
@@ -132,7 +133,7 @@ export class ThresholdManager {
         const weighted = this.calculateWeightedAverageThresholds(existingThresholds);
         if (weighted) {
           logger.info(
-            `[ThresholdManager] Using weighted average of ${existingThresholds.length} threshold entries for device ${deviceId}`
+            `[ThresholdManager] Using weighted average of ${existingThresholds.length} threshold entries for device ${deviceId}`,
           );
           return {
             frameTimeThresholdMs: weighted.frame_time_threshold_ms,
@@ -180,7 +181,7 @@ export class ThresholdManager {
       touchLatencyThresholdMs: number;
     },
     weight: number = 1.0,
-    ttlHours: number = 24
+    ttlHours: number = 24,
   ): Promise<void> {
     await this.storeThresholdsWith(this.db, deviceId, capabilities, thresholds, weight, ttlHours);
   }
@@ -200,7 +201,7 @@ export class ThresholdManager {
       touchLatencyThresholdMs: number;
     },
     weight: number = 1.0,
-    ttlHours: number = 24
+    ttlHours: number = 24,
   ): Promise<void> {
     const sessionId = this.getCurrentSessionId();
 
@@ -223,7 +224,7 @@ export class ThresholdManager {
     await this.thresholds.storeThresholds(
       newThresholds,
       `device ${deviceId} session ${sessionId}`,
-      db
+      db,
     );
   }
 
@@ -231,21 +232,14 @@ export class ThresholdManager {
    * Update threshold weight based on audit results
    * Successful audits increase weight, failures decrease it
    */
-  async updateThresholdWeight(
-    deviceId: string,
-    sessionId: string,
-    passed: boolean
-  ): Promise<void> {
+  async updateThresholdWeight(deviceId: string, sessionId: string, passed: boolean): Promise<void> {
     await this.thresholds.updateThresholdWeight(
-      [
-        ...this.deviceWhere(deviceId),
-        { column: "session_id", value: sessionId },
-      ],
+      [...this.deviceWhere(deviceId), { column: "session_id", value: sessionId }],
       passed,
       {
         missingMessage: `No threshold found for device ${deviceId} session ${sessionId}`,
         updatedMessage: `Updated threshold weight (${passed ? "passed" : "failed"})`,
-      }
+      },
     );
   }
 

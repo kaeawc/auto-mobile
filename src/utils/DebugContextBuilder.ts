@@ -55,7 +55,7 @@ export async function buildElementSearchDebugContext(
       elementId?: string;
       text?: string;
     };
-  }
+  },
 ): Promise<ElementSearchDebugInfo | undefined> {
   // Only build debug context if debug mode is enabled
   if (!isDebugModeEnabled()) {
@@ -67,7 +67,7 @@ export async function buildElementSearchDebugContext(
     return {
       searchCriteria,
       nearMisses: [],
-      totalElementsChecked: 0
+      totalElementsChecked: 0,
     };
   }
 
@@ -80,20 +80,20 @@ export async function buildElementSearchDebugContext(
       includeNearMisses: true,
       maxNearMisses: 10,
       partialMatch: true,
-      caseSensitive: false
+      caseSensitive: false,
     });
 
     return {
       searchCriteria,
       nearMisses: result.nearMisses,
-      totalElementsChecked: result.totalElements
+      totalElementsChecked: result.totalElements,
     };
   } catch (error) {
     // If we can't build debug context, return basic info
     return {
       searchCriteria,
       nearMisses: [],
-      totalElementsChecked: 0
+      totalElementsChecked: 0,
     };
   }
 }

@@ -7,15 +7,15 @@ import type { IosPrerequisiteDetector } from "../../src/utils/ios-cmdline-tools/
  * Gate for the startup runner-bundle prefetch: it must skip cleanly when iOS
  * prerequisites are absent and still reach the builder when present (#4407).
  */
-describe("IOSCtrlProxyBuilder prefetch prerequisite gate", function() {
+describe("IOSCtrlProxyBuilder prefetch prerequisite gate", function () {
   let originalPlatform: PropertyDescriptor | undefined;
   let recordingBuilder: PrefetchBuilder & { needsRebuildCalls: number; buildCalls: number };
 
   const detectorReturning = (value: boolean): IosPrerequisiteDetector => ({
-    hasIosPrerequisites: async () => value
+    hasIosPrerequisites: async () => value,
   });
 
-  beforeEach(function() {
+  beforeEach(function () {
     IOSCtrlProxyBuilder.resetInstances();
     // prefetchBuild() early-returns off macOS; force darwin so the gate is what decides.
     originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
@@ -37,19 +37,19 @@ describe("IOSCtrlProxyBuilder prefetch prerequisite gate", function() {
       },
       async getXctestrunPath() {
         return null;
-      }
+      },
     } as PrefetchBuilder & { needsRebuildCalls: number; buildCalls: number };
     IOSCtrlProxyBuilder.setPrefetchBuilderForTesting(recordingBuilder);
   });
 
-  afterEach(function() {
+  afterEach(function () {
     IOSCtrlProxyBuilder.resetInstances();
     if (originalPlatform) {
       Object.defineProperty(process, "platform", originalPlatform);
     }
   });
 
-  test("does not reach the builder when iOS prerequisites are absent", async function() {
+  test("does not reach the builder when iOS prerequisites are absent", async function () {
     IOSCtrlProxyBuilder.setIosPrerequisiteDetectorForTesting(detectorReturning(false));
 
     IOSCtrlProxyBuilder.prefetchBuild();
@@ -63,7 +63,7 @@ describe("IOSCtrlProxyBuilder prefetch prerequisite gate", function() {
     expect(recordingBuilder.buildCalls).toBe(0);
   });
 
-  test("reaches the builder when iOS prerequisites are present", async function() {
+  test("reaches the builder when iOS prerequisites are present", async function () {
     IOSCtrlProxyBuilder.setIosPrerequisiteDetectorForTesting(detectorReturning(true));
 
     IOSCtrlProxyBuilder.prefetchBuild();

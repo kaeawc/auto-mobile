@@ -51,354 +51,727 @@
   "viewportToDevice": [
     {
       "comment": "Android 1080x2340 portrait, frame at half device size: frame center maps to device center",
-      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": 270, "viewportY": 585,
-      "expectedX": 540, "expectedY": 1170, "expectedInBounds": 1
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "viewportX": 270,
+      "viewportY": 585,
+      "expectedX": 540,
+      "expectedY": 1170,
+      "expectedInBounds": 1
     },
     {
       "comment": "zoom removal: at scale 2 a viewport point twice as far maps to the same device point",
-      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 2, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": 540, "viewportY": 1170,
-      "expectedX": 540, "expectedY": 1170, "expectedInBounds": 1
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 2,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "viewportX": 540,
+      "viewportY": 1170,
+      "expectedX": 540,
+      "expectedY": 1170,
+      "expectedInBounds": 1
     },
     {
       "comment": "pan removal: device origin sits at the pan offset",
-      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 100, "offsetY": 50,
-      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": 100, "viewportY": 50,
-      "expectedX": 0, "expectedY": 0, "expectedInBounds": 1
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 1,
+      "offsetX": 100,
+      "offsetY": 50,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "viewportX": 100,
+      "viewportY": 50,
+      "expectedX": 0,
+      "expectedY": 0,
+      "expectedInBounds": 1
     },
     {
       "comment": "pan + zoom combined: (370-100)/2=135 -> device 270; (635-50)/2=292.5 -> device 585",
-      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 2, "offsetX": 100, "offsetY": 50,
-      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": 370, "viewportY": 635,
-      "expectedX": 270, "expectedY": 585, "expectedInBounds": 1
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 2,
+      "offsetX": 100,
+      "offsetY": 50,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "viewportX": 370,
+      "viewportY": 635,
+      "expectedX": 270,
+      "expectedY": 585,
+      "expectedInBounds": 1
     },
     {
       "comment": "rounding boundary: viewport 0.25 * ratio 2 = device 0.5, halves round UP to 1",
-      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": 0.25, "viewportY": 0,
-      "expectedX": 1, "expectedY": 0, "expectedInBounds": 1
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "viewportX": 0.25,
+      "viewportY": 0,
+      "expectedX": 1,
+      "expectedY": 0,
+      "expectedInBounds": 1
     },
     {
       "comment": "negative rounding boundary: device -0.5 rounds toward positive infinity to 0 (Kotlin roundToInt tie rule)",
-      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": -0.25, "viewportY": 0,
-      "expectedX": 0, "expectedY": 0, "expectedInBounds": 1
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "viewportX": -0.25,
+      "viewportY": 0,
+      "expectedX": 0,
+      "expectedY": 0,
+      "expectedInBounds": 1
     },
     {
       "comment": "out of bounds at exactly deviceWidth: bounds are exclusive, no clamping",
-      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": 540, "viewportY": 585,
-      "expectedX": 1080, "expectedY": 1170, "expectedInBounds": 0
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "viewportX": 540,
+      "viewportY": 585,
+      "expectedX": 1080,
+      "expectedY": 1170,
+      "expectedInBounds": 0
     },
     {
       "comment": "negative out of bounds: raw negative coordinates are returned, never clamped",
-      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": -10, "viewportY": -10,
-      "expectedX": -20, "expectedY": -20, "expectedInBounds": 0
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "viewportX": -10,
+      "viewportY": -10,
+      "expectedX": -20,
+      "expectedY": -20,
+      "expectedInBounds": 0
     },
     {
       "comment": "x-only negative out of bounds: y well inside — pins the x lower-bound predicate independently (deleting x >= 0 flips only this row)",
-      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": -10, "viewportY": 585,
-      "expectedX": -20, "expectedY": 1170, "expectedInBounds": 0
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "viewportX": -10,
+      "viewportY": 585,
+      "expectedX": -20,
+      "expectedY": 1170,
+      "expectedInBounds": 0
     },
     {
       "comment": "y-only negative out of bounds: x well inside — pins the y lower-bound predicate independently (deleting y >= 0 flips only this row)",
-      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": 270, "viewportY": -10,
-      "expectedX": 540, "expectedY": -20, "expectedInBounds": 0
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "viewportX": 270,
+      "viewportY": -10,
+      "expectedX": 540,
+      "expectedY": -20,
+      "expectedInBounds": 0
     },
     {
       "comment": "y-only out of bounds: x well inside, y exactly at deviceHeight (exclusive) — pins the y bounds predicate independently of x",
-      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": 270, "viewportY": 1170,
-      "expectedX": 540, "expectedY": 2340, "expectedInBounds": 0
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "viewportX": 270,
+      "viewportY": 1170,
+      "expectedX": 540,
+      "expectedY": 2340,
+      "expectedInBounds": 0
     },
     {
       "comment": "far past the bottom-right edge: raw coordinates preserved, flagged out of bounds",
-      "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": 1000, "viewportY": 2000,
-      "expectedX": 2000, "expectedY": 4000, "expectedInBounds": 0
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "viewportX": 1000,
+      "viewportY": 2000,
+      "expectedX": 2000,
+      "expectedY": 4000,
+      "expectedInBounds": 0
     },
     {
       "comment": "landscape device space (rotation-aligned upstream): 2340x1080 with a landscape frame",
-      "frameWidthPx": 1170, "frameHeightPx": 540, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 2340, "deviceHeight": 1080, "viewportX": 585, "viewportY": 270,
-      "expectedX": 1170, "expectedY": 540, "expectedInBounds": 1
+      "frameWidthPx": 1170,
+      "frameHeightPx": 540,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 2340,
+      "deviceHeight": 1080,
+      "viewportX": 585,
+      "viewportY": 270,
+      "expectedX": 1170,
+      "expectedY": 540,
+      "expectedInBounds": 1
     },
     {
       "comment": "degenerate zero frame width: frame-to-device ratio falls back to 1 (identity)",
-      "frameWidthPx": 0, "frameHeightPx": 0, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 1080, "deviceHeight": 2340, "viewportX": 12.5, "viewportY": 7,
-      "expectedX": 13, "expectedY": 7, "expectedInBounds": 1
+      "frameWidthPx": 0,
+      "frameHeightPx": 0,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "viewportX": 12.5,
+      "viewportY": 7,
+      "expectedX": 13,
+      "expectedY": 7,
+      "expectedInBounds": 1
     },
     {
       "comment": "iOS 3x device (iPhone-class 390x844): CANONICAL PIXELS (#4549). The daemon now publishes device dimensions in physical pixels (390pt x nativeScale 3 = 1170x2532), so a frame still displayed at 390px maps up by deviceWidth/frameWidthPx = 3. The input path divides the returned pixel coordinate back by nativeScale, so the physical tap is unchanged (585/3 = 195).",
       "willChangeUnderCanonicalPixels": true,
-      "frameWidthPx": 390, "frameHeightPx": 844, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 1170, "deviceHeight": 2532, "viewportX": 195, "viewportY": 422,
-      "expectedX": 585, "expectedY": 1266, "expectedInBounds": 1
+      "frameWidthPx": 390,
+      "frameHeightPx": 844,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1170,
+      "deviceHeight": 2532,
+      "viewportX": 195,
+      "viewportY": 422,
+      "expectedX": 585,
+      "expectedY": 1266,
+      "expectedInBounds": 1
     },
     {
       "comment": "iOS 2x device (375x667 points) with fractional viewport input: CANONICAL PIXELS (#4549). Device dimensions become 750x1334 (nativeScale 2), so the expected coordinates roughly double modulo float32 rounding (100.4 -> 201, 200.6 -> 401).",
       "willChangeUnderCanonicalPixels": true,
-      "frameWidthPx": 375, "frameHeightPx": 667, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 750, "deviceHeight": 1334, "viewportX": 100.4, "viewportY": 200.6,
-      "expectedX": 201, "expectedY": 401, "expectedInBounds": 1
+      "frameWidthPx": 375,
+      "frameHeightPx": 667,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 750,
+      "deviceHeight": 1334,
+      "viewportX": 100.4,
+      "viewportY": 200.6,
+      "expectedX": 201,
+      "expectedY": 401,
+      "expectedInBounds": 1
     },
     {
       "comment": "iOS Display Zoom-like device (320x693 zoomed points at 3x): CANONICAL PIXELS (#4549). Device dimensions become 960x2079, so the frame-to-device ratio is 3 and the expected coordinates scale up (160 -> 480, 346.5 -> 1040).",
       "willChangeUnderCanonicalPixels": true,
-      "frameWidthPx": 320, "frameHeightPx": 693, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 960, "deviceHeight": 2079, "viewportX": 160, "viewportY": 346.5,
-      "expectedX": 480, "expectedY": 1040, "expectedInBounds": 1
+      "frameWidthPx": 320,
+      "frameHeightPx": 693,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 960,
+      "deviceHeight": 2079,
+      "viewportX": 160,
+      "viewportY": 346.5,
+      "expectedX": 480,
+      "expectedY": 1040,
+      "expectedInBounds": 1
     },
     {
       "comment": "width-derived-ratio invariant: deliberately aspect-MISMATCHED frame (500x500 frame, 1000x2000 device; width ratio 2, height ratio 4). Not a realistic aspect-fitted frame — the pipeline pre-aligns rotation and fits to the device aspect — but it pins the documented rule that BOTH axes scale by deviceWidth/frameWidthPx: a height-derived y would give 800, not 400.",
-      "frameWidthPx": 500, "frameHeightPx": 500, "scale": 1, "offsetX": 0, "offsetY": 0,
-      "deviceWidth": 1000, "deviceHeight": 2000, "viewportX": 100, "viewportY": 200,
-      "expectedX": 200, "expectedY": 400, "expectedInBounds": 1
+      "frameWidthPx": 500,
+      "frameHeightPx": 500,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1000,
+      "deviceHeight": 2000,
+      "viewportX": 100,
+      "viewportY": 200,
+      "expectedX": 200,
+      "expectedY": 400,
+      "expectedInBounds": 1
     }
   ],
   "deviceToViewport": [
     {
       "comment": "inverse of the identity half-frame case: device center back to frame center",
-      "deviceX": 540, "deviceY": 1170, "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1,
-      "offsetX": 0, "offsetY": 0, "deviceWidth": 1080, "deviceHeight": 2340,
-      "expectedX": 270, "expectedY": 585
+      "deviceX": 540,
+      "deviceY": 1170,
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "expectedX": 270,
+      "expectedY": 585
     },
     {
       "comment": "inverse with pan + zoom: device (270,585) -> frame (135,292.5) -> viewport (370,635)",
-      "deviceX": 270, "deviceY": 585, "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 2,
-      "offsetX": 100, "offsetY": 50, "deviceWidth": 1080, "deviceHeight": 2340,
-      "expectedX": 370, "expectedY": 635
+      "deviceX": 270,
+      "deviceY": 585,
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 2,
+      "offsetX": 100,
+      "offsetY": 50,
+      "deviceWidth": 1080,
+      "deviceHeight": 2340,
+      "expectedX": 370,
+      "expectedY": 635
     },
     {
       "comment": "degenerate zero device width: device-to-frame ratio falls back to 1 (identity + offset)",
-      "deviceX": 7, "deviceY": 9, "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 1,
-      "offsetX": 10, "offsetY": 20, "deviceWidth": 0, "deviceHeight": 2340,
-      "expectedX": 17, "expectedY": 29
+      "deviceX": 7,
+      "deviceY": 9,
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 1,
+      "offsetX": 10,
+      "offsetY": 20,
+      "deviceWidth": 0,
+      "deviceHeight": 2340,
+      "expectedX": 17,
+      "expectedY": 29
     },
     {
       "comment": "iOS 3x inverse: CANONICAL PIXELS (#4549). deviceWidth/deviceHeight become 1170x2532, so the SAME device point (195,422) — now interpreted in physical pixels near the top-left — maps back to a different viewport position (device-to-frame ratio 390/1170 = 1/3): 195 -> 65, 422 -> 140.667.",
       "willChangeUnderCanonicalPixels": true,
-      "deviceX": 195, "deviceY": 422, "frameWidthPx": 390, "frameHeightPx": 844, "scale": 1,
-      "offsetX": 0, "offsetY": 0, "deviceWidth": 1170, "deviceHeight": 2532,
-      "expectedX": 65, "expectedY": 140.66667
+      "deviceX": 195,
+      "deviceY": 422,
+      "frameWidthPx": 390,
+      "frameHeightPx": 844,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1170,
+      "deviceHeight": 2532,
+      "expectedX": 65,
+      "expectedY": 140.66667
     },
     {
       "comment": "width-derived-ratio invariant (inverse): deliberately aspect-MISMATCHED frame (500x500 frame, 1000x2000 device; width ratio 0.5, height ratio 0.25). Not a realistic aspect-fitted frame — it pins the documented rule that BOTH axes scale by frameWidthPx/deviceWidth: a height-derived y would give 100, not 200.",
-      "deviceX": 200, "deviceY": 400, "frameWidthPx": 500, "frameHeightPx": 500, "scale": 1,
-      "offsetX": 0, "offsetY": 0, "deviceWidth": 1000, "deviceHeight": 2000,
-      "expectedX": 100, "expectedY": 200
+      "deviceX": 200,
+      "deviceY": 400,
+      "frameWidthPx": 500,
+      "frameHeightPx": 500,
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "deviceWidth": 1000,
+      "deviceHeight": 2000,
+      "expectedX": 100,
+      "expectedY": 200
     },
     {
       "comment": "zero deviceWidth with pan + zoom: the ratio falls back to identity first, then the normal viewport transform still applies (7*2+10, 9*2+20)",
-      "deviceX": 7, "deviceY": 9, "frameWidthPx": 540, "frameHeightPx": 1170, "scale": 2,
-      "offsetX": 10, "offsetY": 20, "deviceWidth": 0, "deviceHeight": 2340,
-      "expectedX": 24, "expectedY": 38
+      "deviceX": 7,
+      "deviceY": 9,
+      "frameWidthPx": 540,
+      "frameHeightPx": 1170,
+      "scale": 2,
+      "offsetX": 10,
+      "offsetY": 20,
+      "deviceWidth": 0,
+      "deviceHeight": 2340,
+      "expectedX": 24,
+      "expectedY": 38
     }
   ],
   "clampedTo": [
     {
       "comment": "negative x and past-bottom y clamp independently to the first and last addressable pixels",
-      "x": -5, "y": 102, "width": 100, "height": 100,
-      "expectedX": 0, "expectedY": 99, "expectedInBounds": 1
+      "x": -5,
+      "y": 102,
+      "width": 100,
+      "height": 100,
+      "expectedX": 0,
+      "expectedY": 99,
+      "expectedInBounds": 1
     },
     {
       "comment": "past-right x and negative y clamp independently to the opposite two edges",
-      "x": 200, "y": -5, "width": 100, "height": 100,
-      "expectedX": 99, "expectedY": 0, "expectedInBounds": 1
+      "x": 200,
+      "y": -5,
+      "width": 100,
+      "height": 100,
+      "expectedX": 99,
+      "expectedY": 0,
+      "expectedInBounds": 1
     },
     {
       "comment": "zero-width screen: the non-zero axis still clamps, but no point is in bounds",
-      "x": 5, "y": 5, "width": 0, "height": 100,
-      "expectedX": 0, "expectedY": 5, "expectedInBounds": 0
+      "x": 5,
+      "y": 5,
+      "width": 0,
+      "height": 100,
+      "expectedX": 0,
+      "expectedY": 5,
+      "expectedInBounds": 0
     },
     {
       "comment": "zero-height screen: mirror of the zero-width contract",
-      "x": 5, "y": 5, "width": 100, "height": 0,
-      "expectedX": 5, "expectedY": 0, "expectedInBounds": 0
+      "x": 5,
+      "y": 5,
+      "width": 100,
+      "height": 0,
+      "expectedX": 5,
+      "expectedY": 0,
+      "expectedInBounds": 0
     }
   ],
   "fitToViewport": [
     {
       "comment": "height-constrained: 1080x2160 (aspect 2.0) in 800x800 with 32 padding -> 368x736",
-      "imageWidth": 1080, "imageHeight": 2160, "viewportWidth": 800, "viewportHeight": 800,
-      "padding": 32, "expectedWidthPx": 368, "expectedHeightPx": 736
+      "imageWidth": 1080,
+      "imageHeight": 2160,
+      "viewportWidth": 800,
+      "viewportHeight": 800,
+      "padding": 32,
+      "expectedWidthPx": 368,
+      "expectedHeightPx": 736
     },
     {
       "comment": "width-constrained: 1080x2160 in a narrow 400x2000 viewport -> 336x672",
-      "imageWidth": 1080, "imageHeight": 2160, "viewportWidth": 400, "viewportHeight": 2000,
-      "padding": 32, "expectedWidthPx": 336, "expectedHeightPx": 672
+      "imageWidth": 1080,
+      "imageHeight": 2160,
+      "viewportWidth": 400,
+      "viewportHeight": 2000,
+      "padding": 32,
+      "expectedWidthPx": 336,
+      "expectedHeightPx": 672
     },
     {
       "comment": "landscape image 2160x1080 (aspect 0.5) in 1200x1200 -> width-constrained 1136x568",
-      "imageWidth": 2160, "imageHeight": 1080, "viewportWidth": 1200, "viewportHeight": 1200,
-      "padding": 32, "expectedWidthPx": 1136, "expectedHeightPx": 568
+      "imageWidth": 2160,
+      "imageHeight": 1080,
+      "viewportWidth": 1200,
+      "viewportHeight": 1200,
+      "padding": 32,
+      "expectedWidthPx": 1136,
+      "expectedHeightPx": 568
     },
     {
       "comment": "unknown image width falls back to aspect ratio 2.16 -> height-constrained 340.7407x736",
-      "imageWidth": 0, "imageHeight": 0, "viewportWidth": 800, "viewportHeight": 800,
-      "padding": 32, "expectedWidthPx": 340.7407, "expectedHeightPx": 736
+      "imageWidth": 0,
+      "imageHeight": 0,
+      "viewportWidth": 800,
+      "viewportHeight": 800,
+      "padding": 32,
+      "expectedWidthPx": 340.7407,
+      "expectedHeightPx": 736
     },
     {
       "comment": "non-default padding 10 (not the 32 default): max sides 780, height-constrained 390x780 — substituting DEFAULT_PADDING would give 368x736",
-      "imageWidth": 1080, "imageHeight": 2160, "viewportWidth": 800, "viewportHeight": 800,
-      "padding": 10, "expectedWidthPx": 390, "expectedHeightPx": 780
+      "imageWidth": 1080,
+      "imageHeight": 2160,
+      "viewportWidth": 800,
+      "viewportHeight": 800,
+      "padding": 10,
+      "expectedWidthPx": 390,
+      "expectedHeightPx": 780
     },
     {
       "comment": "tiny viewport: max frame sides coerce to the 1px floor -> 0.5x1",
-      "imageWidth": 1080, "imageHeight": 2160, "viewportWidth": 10, "viewportHeight": 10,
-      "padding": 32, "expectedWidthPx": 0.5, "expectedHeightPx": 1
+      "imageWidth": 1080,
+      "imageHeight": 2160,
+      "viewportWidth": 10,
+      "viewportHeight": 10,
+      "padding": 32,
+      "expectedWidthPx": 0.5,
+      "expectedHeightPx": 1
     }
   ],
   "fitScale": [
     {
       "comment": "frame fits comfortably: scale caps at 1.0 (never enlarges)",
-      "frameWidthPx": 300, "frameHeightPx": 600, "viewportWidth": 800, "viewportHeight": 1200,
-      "padding": 32, "expected": 1
+      "frameWidthPx": 300,
+      "frameHeightPx": 600,
+      "viewportWidth": 800,
+      "viewportHeight": 1200,
+      "padding": 32,
+      "expected": 1
     },
     {
       "comment": "frame far larger than viewport: clamps to the 0.3 floor",
-      "frameWidthPx": 5000, "frameHeightPx": 5000, "viewportWidth": 400, "viewportHeight": 400,
-      "padding": 32, "expected": 0.3
+      "frameWidthPx": 5000,
+      "frameHeightPx": 5000,
+      "viewportWidth": 400,
+      "viewportHeight": 400,
+      "padding": 32,
+      "expected": 0.3
     },
     {
       "comment": "mid-range: 736+64=800 padded frame in a 400-wide viewport -> exactly 0.5 (WIDTH candidate decisive)",
-      "frameWidthPx": 736, "frameHeightPx": 736, "viewportWidth": 400, "viewportHeight": 800,
-      "padding": 32, "expected": 0.5
+      "frameWidthPx": 736,
+      "frameHeightPx": 736,
+      "viewportWidth": 400,
+      "viewportHeight": 800,
+      "padding": 32,
+      "expected": 0.5
     },
     {
       "comment": "HEIGHT candidate decisive mid-range: height ratio 400/(736+64)=0.5 binds while the width ratio is 800/(336+64)=2.0 — pins that the height term participates in the min",
-      "frameWidthPx": 336, "frameHeightPx": 736, "viewportWidth": 800, "viewportHeight": 400,
-      "padding": 32, "expected": 0.5
+      "frameWidthPx": 336,
+      "frameHeightPx": 736,
+      "viewportWidth": 800,
+      "viewportHeight": 400,
+      "padding": 32,
+      "expected": 0.5
     },
     {
       "comment": "non-default padding 20 (not the 32 default): padded sides 800, width candidate 400/800=0.5 — substituting DEFAULT_PADDING would give 400/824=0.4854",
-      "frameWidthPx": 760, "frameHeightPx": 760, "viewportWidth": 400, "viewportHeight": 800,
-      "padding": 20, "expected": 0.5
+      "frameWidthPx": 760,
+      "frameHeightPx": 760,
+      "viewportWidth": 400,
+      "viewportHeight": 800,
+      "padding": 20,
+      "expected": 0.5
     },
     {
       "comment": "exact cap boundary: padded frame is exactly 800x800 in an 800x800 viewport, so raw scale is exactly 1.0",
-      "frameWidthPx": 736, "frameHeightPx": 736, "viewportWidth": 800, "viewportHeight": 800,
-      "padding": 32, "expected": 1
+      "frameWidthPx": 736,
+      "frameHeightPx": 736,
+      "viewportWidth": 800,
+      "viewportHeight": 800,
+      "padding": 32,
+      "expected": 1
     },
     {
       "comment": "exact floor boundary: width candidate is exactly 240/(736+64)=0.3 while height candidate is 1.0",
-      "frameWidthPx": 736, "frameHeightPx": 736, "viewportWidth": 240, "viewportHeight": 800,
-      "padding": 32, "expected": 0.3
+      "frameWidthPx": 736,
+      "frameHeightPx": 736,
+      "viewportWidth": 240,
+      "viewportHeight": 800,
+      "padding": 32,
+      "expected": 0.3
     }
   ],
   "screenshotRotation": [
     {
       "comment": "portrait image, portrait bounds: no rotation",
-      "imageWidth": 1080, "imageHeight": 2340, "rootWidth": 1080, "rootHeight": 2340, "expected": 0
+      "imageWidth": 1080,
+      "imageHeight": 2340,
+      "rootWidth": 1080,
+      "rootHeight": 2340,
+      "expected": 0
     },
     {
       "comment": "landscape image, landscape bounds: no rotation",
-      "imageWidth": 2340, "imageHeight": 1080, "rootWidth": 2340, "rootHeight": 1080, "expected": 0
+      "imageWidth": 2340,
+      "imageHeight": 1080,
+      "rootWidth": 2340,
+      "rootHeight": 1080,
+      "expected": 0
     },
     {
       "comment": "portrait image, landscape bounds: rotate 90 CW (code 3)",
-      "imageWidth": 1080, "imageHeight": 2340, "rootWidth": 2340, "rootHeight": 1080, "expected": 3
+      "imageWidth": 1080,
+      "imageHeight": 2340,
+      "rootWidth": 2340,
+      "rootHeight": 1080,
+      "expected": 3
     },
     {
       "comment": "landscape image, portrait bounds: rotate 270 CW (code 1)",
-      "imageWidth": 2340, "imageHeight": 1080, "rootWidth": 1080, "rootHeight": 2340, "expected": 1
+      "imageWidth": 2340,
+      "imageHeight": 1080,
+      "rootWidth": 1080,
+      "rootHeight": 2340,
+      "expected": 1
     },
     {
       "comment": "non-positive image width: no rotation inferred",
-      "imageWidth": 0, "imageHeight": 2340, "rootWidth": 1080, "rootHeight": 2340, "expected": 0
+      "imageWidth": 0,
+      "imageHeight": 2340,
+      "rootWidth": 1080,
+      "rootHeight": 2340,
+      "expected": 0
     },
     {
       "comment": "non-positive root dimensions: no rotation inferred",
-      "imageWidth": 1080, "imageHeight": 2340, "rootWidth": 0, "rootHeight": 0, "expected": 0
+      "imageWidth": 1080,
+      "imageHeight": 2340,
+      "rootWidth": 0,
+      "rootHeight": 0,
+      "expected": 0
     },
     {
       "comment": "iOS pixel screenshot (1170x2532) vs point-space root (390x844): orientations agree across units, so no rotation. Output survives #4549 but the cross-unit comparison it pins does not.",
-      "imageWidth": 1170, "imageHeight": 2532, "rootWidth": 390, "rootHeight": 844, "expected": 0
+      "imageWidth": 1170,
+      "imageHeight": 2532,
+      "rootWidth": 390,
+      "rootHeight": 844,
+      "expected": 0
     },
     {
       "comment": "square image counts as landscape (height > width is false) against portrait bounds -> code 1",
-      "imageWidth": 1000, "imageHeight": 1000, "rootWidth": 1080, "rootHeight": 2340, "expected": 1
+      "imageWidth": 1000,
+      "imageHeight": 1000,
+      "rootWidth": 1080,
+      "rootHeight": 2340,
+      "expected": 1
     },
     {
       "comment": "square ROOT bounds count as landscape against a portrait screenshot -> code 3: pins strict rootHeight > rootWidth (a >= mutation flips this to 0)",
-      "imageWidth": 1080, "imageHeight": 2340, "rootWidth": 1000, "rootHeight": 1000, "expected": 3
+      "imageWidth": 1080,
+      "imageHeight": 2340,
+      "rootWidth": 1000,
+      "rootHeight": 1000,
+      "expected": 3
     },
     {
       "comment": "DECISIVE zero imageWidth: orientations would MISMATCH (portrait-by-height image, landscape bounds), so deleting the imageWidth guard clause changes the result to 3",
-      "imageWidth": 0, "imageHeight": 2340, "rootWidth": 2340, "rootHeight": 1080, "expected": 0
+      "imageWidth": 0,
+      "imageHeight": 2340,
+      "rootWidth": 2340,
+      "rootHeight": 1080,
+      "expected": 0
     },
     {
       "comment": "DECISIVE zero imageHeight alone: landscape-by-default image vs portrait bounds, so deleting the imageHeight guard clause changes the result to 1",
-      "imageWidth": 2340, "imageHeight": 0, "rootWidth": 1080, "rootHeight": 2340, "expected": 0
+      "imageWidth": 2340,
+      "imageHeight": 0,
+      "rootWidth": 1080,
+      "rootHeight": 2340,
+      "expected": 0
     },
     {
       "comment": "DECISIVE zero rootWidth alone: portrait-by-height bounds vs landscape image, so deleting the rootWidth guard clause changes the result to 1",
-      "imageWidth": 2340, "imageHeight": 1080, "rootWidth": 0, "rootHeight": 2340, "expected": 0
+      "imageWidth": 2340,
+      "imageHeight": 1080,
+      "rootWidth": 0,
+      "rootHeight": 2340,
+      "expected": 0
     },
     {
       "comment": "DECISIVE zero rootHeight alone: landscape-by-default bounds vs portrait image, so deleting the rootHeight guard clause changes the result to 3",
-      "imageWidth": 1080, "imageHeight": 2340, "rootWidth": 1080, "rootHeight": 0, "expected": 0
+      "imageWidth": 1080,
+      "imageHeight": 2340,
+      "rootWidth": 1080,
+      "rootHeight": 0,
+      "expected": 0
     }
   ],
   "geometryPairing": [
     {
       "comment": "exact match: measured pixels equal the claimed geometry",
-      "measuredWidth": 1080, "measuredHeight": 2340, "claimedWidth": 1080, "claimedHeight": 2340,
+      "measuredWidth": 1080,
+      "measuredHeight": 2340,
+      "claimedWidth": 1080,
+      "claimedHeight": 2340,
       "expectedMatch": 1
     },
     {
       "comment": "orientation swap accepted: iOS landscape claim (2532x1170) with native-portrait pixels",
-      "measuredWidth": 1170, "measuredHeight": 2532, "claimedWidth": 2532, "claimedHeight": 1170,
+      "measuredWidth": 1170,
+      "measuredHeight": 2532,
+      "claimedWidth": 2532,
+      "claimedHeight": 1170,
       "expectedMatch": 1
     },
     {
       "comment": "aspect-preserving scale change rejected: 720x1560 pixels against a 1080x2340 claim",
-      "measuredWidth": 720, "measuredHeight": 1560, "claimedWidth": 1080, "claimedHeight": 2340,
+      "measuredWidth": 720,
+      "measuredHeight": 1560,
+      "claimedWidth": 1080,
+      "claimedHeight": 2340,
       "expectedMatch": 0
     },
     {
       "comment": "unrelated dimensions rejected",
-      "measuredWidth": 800, "measuredHeight": 600, "claimedWidth": 1080, "claimedHeight": 2340,
+      "measuredWidth": 800,
+      "measuredHeight": 600,
+      "claimedWidth": 1080,
+      "claimedHeight": 2340,
       "expectedMatch": 0
     },
     {
       "comment": "unmeasurable frame (-1/-1 sentinel) never matches",
-      "measuredWidth": -1, "measuredHeight": -1, "claimedWidth": 1080, "claimedHeight": 2340,
+      "measuredWidth": -1,
+      "measuredHeight": -1,
+      "claimedWidth": 1080,
+      "claimedHeight": 2340,
       "expectedMatch": 0
     },
     {
       "comment": "iOS exact pixel match (claims are already pixel-space today via the daemon's point*scale conversion)",
-      "measuredWidth": 1170, "measuredHeight": 2532, "claimedWidth": 1170, "claimedHeight": 2532,
+      "measuredWidth": 1170,
+      "measuredHeight": 2532,
+      "claimedWidth": 1170,
+      "claimedHeight": 2532,
       "expectedMatch": 1
     },
     {
       "comment": "iOS exact-half scale: the 375x811 point hierarchy and its screenshot both resolve to 1313x2839 pixels at nativeScale 3.5, so exact px pairing enables control",
-      "measuredWidth": 1313, "measuredHeight": 2839, "claimedWidth": 1313, "claimedHeight": 2839,
+      "measuredWidth": 1313,
+      "measuredHeight": 2839,
+      "claimedWidth": 1313,
+      "claimedHeight": 2839,
       "expectedMatch": 1
     },
     {
       "comment": "square frame: same-orientation and swapped checks coincide, accepted",
-      "measuredWidth": 1000, "measuredHeight": 1000, "claimedWidth": 1000, "claimedHeight": 1000,
+      "measuredWidth": 1000,
+      "measuredHeight": 1000,
+      "claimedWidth": 1000,
+      "claimedHeight": 1000,
       "expectedMatch": 1
     },
     {
       "comment": "single-axis off-by-one rejected: the check is exact, not approximate",
-      "measuredWidth": 1080, "measuredHeight": 2339, "claimedWidth": 1080, "claimedHeight": 2340,
+      "measuredWidth": 1080,
+      "measuredHeight": 2339,
+      "claimedWidth": 1080,
+      "claimedHeight": 2340,
       "expectedMatch": 0
     },
     {
       "comment": "ONE-axis swap rejected: measured.width == claimedHeight (1170) but measured.height != claimedWidth (2532 vs 2500) — the swap acceptance is a conjunction, so a frame matching only one opposite axis must never receive a capture identity",
-      "measuredWidth": 1170, "measuredHeight": 2532, "claimedWidth": 2500, "claimedHeight": 1170,
+      "measuredWidth": 1170,
+      "measuredHeight": 2532,
+      "claimedWidth": 2500,
+      "claimedHeight": 1170,
       "expectedMatch": 0
     },
     {
       "comment": "mirror ONE-axis swap rejected: measured.height == claimedWidth (1170) but measured.width != claimedHeight (2532 vs 2500), so the swapped orientation conjunction remains false",
-      "measuredWidth": 2532, "measuredHeight": 1170, "claimedWidth": 1170, "claimedHeight": 2500,
+      "measuredWidth": 2532,
+      "measuredHeight": 1170,
+      "claimedWidth": 1170,
+      "claimedHeight": 2500,
       "expectedMatch": 0
     }
   ],
@@ -406,87 +779,132 @@
     {
       "comment": "2x device: a 375x667 point rect converts to 750x1334 canonical pixels. Under #4549 `scale` is the runner-reported nativeScale (#4548): the daemon converts iOS element bounds points->pixels with round-half-away-from-zero and publishes screenshot dims from the reported pixel dimensions — the old getIosScreenshotDimensions points*screenScale multiply disappears. Numeric value is unchanged on a non-Display-Zoom 2x device (nativeScale == screenScale == 2); what changed is the source (nativeScale, authoritative under Display Zoom) and the coordinateSpace:px declaration.",
       "willChangeUnderCanonicalPixels": true,
-      "pointWidth": 375, "pointHeight": 667, "scale": 2,
-      "expectedPixelWidth": 750, "expectedPixelHeight": 1334
+      "pointWidth": 375,
+      "pointHeight": 667,
+      "scale": 2,
+      "expectedPixelWidth": 750,
+      "expectedPixelHeight": 1334
     },
     {
       "comment": "3x device: 390x844 point rect -> 1170x2532 canonical pixels via nativeScale 3",
       "willChangeUnderCanonicalPixels": true,
-      "pointWidth": 390, "pointHeight": 844, "scale": 3,
-      "expectedPixelWidth": 1170, "expectedPixelHeight": 2532
+      "pointWidth": 390,
+      "pointHeight": 844,
+      "scale": 3,
+      "expectedPixelWidth": 1170,
+      "expectedPixelHeight": 2532
     },
     {
       "comment": "Display Zoom-like: 320x693 point rect -> 960x2079 canonical pixels via nativeScale 3",
       "willChangeUnderCanonicalPixels": true,
-      "pointWidth": 320, "pointHeight": 693, "scale": 3,
-      "expectedPixelWidth": 960, "expectedPixelHeight": 2079
+      "pointWidth": 320,
+      "pointHeight": 693,
+      "scale": 3,
+      "expectedPixelWidth": 960,
+      "expectedPixelHeight": 2079
     },
     {
       "comment": "fractional nativeScale rounding boundary: 375*2.5 = 937.5 -> 938 (round-half-away-from-zero)",
       "willChangeUnderCanonicalPixels": true,
-      "pointWidth": 375, "pointHeight": 812, "scale": 2.5,
-      "expectedPixelWidth": 938, "expectedPixelHeight": 2030
+      "pointWidth": 375,
+      "pointHeight": 812,
+      "scale": 2.5,
+      "expectedPixelWidth": 938,
+      "expectedPixelHeight": 2030
     },
     {
       "comment": "iPhone Plus-like nativeScale precision: runner-reported Float metadata is widened to float64 in the daemon, then 450*2.61 = 1174.5 -> 1175 and 750*2.61 = 1957.5 -> 1958",
       "willChangeUnderCanonicalPixels": true,
-      "pointWidth": 450, "pointHeight": 750, "scale": 2.61,
-      "expectedPixelWidth": 1175, "expectedPixelHeight": 1958
+      "pointWidth": 450,
+      "pointHeight": 750,
+      "scale": 2.61,
+      "expectedPixelWidth": 1175,
+      "expectedPixelHeight": 1958
     },
     {
       "comment": "no runner metadata (0 sentinel = pre-#4548 runner): the daemon does NOT convert — bounds stay point-space and the frame is not stamped coordinateSpace:px (legacy fallback), so the identity 390x844 is preserved",
       "willChangeUnderCanonicalPixels": true,
-      "pointWidth": 390, "pointHeight": 844, "scale": 0,
-      "expectedPixelWidth": 390, "expectedPixelHeight": 844
+      "pointWidth": 390,
+      "pointHeight": 844,
+      "scale": 0,
+      "expectedPixelWidth": 390,
+      "expectedPixelHeight": 844
     },
     {
       "comment": "fractional HEIGHT product isolated: 667*2.5 = 1667.5 -> 1668 (round-half-away-from-zero) while the width product (400*2.5=1000) is integral — a height-axis-only rounding regression cannot hide behind the width case",
       "willChangeUnderCanonicalPixels": true,
-      "pointWidth": 400, "pointHeight": 667, "scale": 2.5,
-      "expectedPixelWidth": 1000, "expectedPixelHeight": 1668
+      "pointWidth": 400,
+      "pointHeight": 667,
+      "scale": 2.5,
+      "expectedPixelWidth": 1000,
+      "expectedPixelHeight": 1668
     },
     {
       "comment": "exact-half tie on both axes: 375*3.5 = 1312.5 -> 1313 and 811*3.5 = 2838.5 -> 2839. This differs from half-even and must match the runner's claimed screenshot dimensions exactly.",
       "willChangeUnderCanonicalPixels": true,
-      "pointWidth": 375, "pointHeight": 811, "scale": 3.5,
-      "expectedPixelWidth": 1313, "expectedPixelHeight": 2839
+      "pointWidth": 375,
+      "pointHeight": 811,
+      "scale": 3.5,
+      "expectedPixelWidth": 1313,
+      "expectedPixelHeight": 2839
     }
   ],
   "scaleReporting": [
     {
       "comment": "standard 3x device: 393x852 points at nativeScale 3.0 -> 1179x2556 pixels (scale == nativeScale here, so this row alone cannot distinguish them)",
-      "pointWidth": 393, "pointHeight": 852, "nativeScale": 3.0,
-      "expectedPixelWidth": 1179, "expectedPixelHeight": 2556
+      "pointWidth": 393,
+      "pointHeight": 852,
+      "nativeScale": 3.0,
+      "expectedPixelWidth": 1179,
+      "expectedPixelHeight": 2556
     },
     {
       "comment": "Display Zoom: nativeScale 3.144 while UIScreen.scale stays 3.0 — using scale would report 2436, not the screenshot's true 2553 (812*3.144=2552.928 rounds to 2553)",
-      "pointWidth": 375, "pointHeight": 812, "nativeScale": 3.144,
-      "expectedPixelWidth": 1179, "expectedPixelHeight": 2553
+      "pointWidth": 375,
+      "pointHeight": 812,
+      "nativeScale": 3.144,
+      "expectedPixelWidth": 1179,
+      "expectedPixelHeight": 2553
     },
     {
       "comment": "iPhone Plus downsampling panel: scale 3.0 but nativeScale 2.608696 -> the physical 1080x1920",
-      "pointWidth": 414, "pointHeight": 736, "nativeScale": 2.608696,
-      "expectedPixelWidth": 1080, "expectedPixelHeight": 1920
+      "pointWidth": 414,
+      "pointHeight": 736,
+      "nativeScale": 2.608696,
+      "expectedPixelWidth": 1080,
+      "expectedPixelHeight": 1920
     },
     {
       "comment": "2x device: 320x568 points -> 640x1136 pixels",
-      "pointWidth": 320, "pointHeight": 568, "nativeScale": 2.0,
-      "expectedPixelWidth": 640, "expectedPixelHeight": 1136
+      "pointWidth": 320,
+      "pointHeight": 568,
+      "nativeScale": 2.0,
+      "expectedPixelWidth": 640,
+      "expectedPixelHeight": 1136
     },
     {
       "comment": "iPhone Plus-like nativeScale precision: retaining 2.61 as a Double gives 450*2.61 = 1174.5 -> 1175 and 750*2.61 = 1957.5 -> 1958; a Float narrowing would produce 1174x1957",
-      "pointWidth": 450, "pointHeight": 750, "nativeScale": 2.61,
-      "expectedPixelWidth": 1175, "expectedPixelHeight": 1958
+      "pointWidth": 450,
+      "pointHeight": 750,
+      "nativeScale": 2.61,
+      "expectedPixelWidth": 1175,
+      "expectedPixelHeight": 1958
     },
     {
       "comment": "rounding tie on both axes: 375*3.5=1312.5 and 811*3.5=2838.5 round half away from zero (== JS Math.round for positive values)",
-      "pointWidth": 375, "pointHeight": 811, "nativeScale": 3.5,
-      "expectedPixelWidth": 1313, "expectedPixelHeight": 2839
+      "pointWidth": 375,
+      "pointHeight": 811,
+      "nativeScale": 3.5,
+      "expectedPixelWidth": 1313,
+      "expectedPixelHeight": 2839
     },
     {
       "comment": "Android identity contract: bounds are already physical pixels so the runner reports exactly nativeScale 1 with pixel == screen dims",
-      "pointWidth": 1080, "pointHeight": 2340, "nativeScale": 1.0,
-      "expectedPixelWidth": 1080, "expectedPixelHeight": 2340
+      "pointWidth": 1080,
+      "pointHeight": 2340,
+      "nativeScale": 1.0,
+      "expectedPixelWidth": 1080,
+      "expectedPixelHeight": 2340
     }
   ]
 }

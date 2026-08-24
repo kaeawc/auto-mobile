@@ -45,7 +45,7 @@ function normalizeCandidateLine(candidate: string): string {
  */
 export function serializeTrickleFragment(
   candidate: TrickleCandidate,
-  context: TrickleIceMediaContext
+  context: TrickleIceMediaContext,
 ): string {
   const lines = [
     context.mLine,
@@ -101,7 +101,7 @@ export class TrickleIceForwarder {
 
   constructor(
     private readonly send: (resourceUrl: string, fragment: string) => void,
-    private readonly contexts: Map<string, TrickleIceMediaContext>
+    private readonly contexts: Map<string, TrickleIceMediaContext>,
   ) {}
 
   addCandidate(candidate: TrickleCandidate): void {
@@ -159,7 +159,7 @@ export class TrickleIceForwarder {
   }
 
   private contextFor(mid: string | undefined): TrickleIceMediaContext | undefined {
-    return (mid === undefined ? this.contexts.values().next().value : this.contexts.get(mid));
+    return mid === undefined ? this.contexts.values().next().value : this.contexts.get(mid);
   }
 }
 
@@ -170,7 +170,7 @@ export function parseTrickleIceMediaContexts(sdp: string): Map<string, TrickleIc
   for (const section of sdp.split(/\r?\n(?=m=)/).slice(1)) {
     const lines = section.split(/\r?\n/).filter(Boolean);
     const mLine = lines[0];
-    const mid = lines.find(line => line.startsWith("a=mid:"))?.slice("a=mid:".length);
+    const mid = lines.find((line) => line.startsWith("a=mid:"))?.slice("a=mid:".length);
     const ice = { ...sessionIce, ...extractIceCredentials(section) };
     if (mLine && mid && ice.ufrag && ice.pwd) {
       contexts.set(mid, { mLine, mid, ice: { ufrag: ice.ufrag, pwd: ice.pwd } });

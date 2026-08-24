@@ -45,9 +45,10 @@ export function deviceLostErrorFromCancellationReason(reason: string): DeviceLos
   const incidentDelimiter = ";incident=";
   const incidentIndex = details.indexOf(incidentDelimiter);
   const deviceId = incidentIndex === -1 ? details : details.slice(0, incidentIndex);
-  const incidentId = incidentIndex === -1
-    ? undefined
-    : details.slice(incidentIndex + incidentDelimiter.length) || undefined;
+  const incidentId =
+    incidentIndex === -1
+      ? undefined
+      : details.slice(incidentIndex + incidentDelimiter.length) || undefined;
   return deviceId ? new DeviceLostError(deviceId, reason, incidentId) : undefined;
 }
 
@@ -61,9 +62,7 @@ export function rememberDeviceLossAbort(signal: AbortSignal, error: DeviceLostEr
 }
 
 export function deviceLostErrorFromAbortSignal(signal: AbortSignal): DeviceLostError | undefined {
-  return isDeviceLostError(signal.reason)
-    ? signal.reason
-    : deviceLossAbortErrors.get(signal);
+  return isDeviceLostError(signal.reason) ? signal.reason : deviceLossAbortErrors.get(signal);
 }
 
 export function throwDeviceLostFromAbortSignal(signal?: AbortSignal): void {

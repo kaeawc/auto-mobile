@@ -25,15 +25,19 @@ describe("AdbClient.getBootedAndroidDevices", () => {
   });
 
   test("exposes offline and unauthorized rows through the raw state probe", async () => {
-    const adb = new AdbClient(null, async (command: string): Promise<ExecResult> => command.includes("adb devices")
-      ? createExecResult([
-        "List of devices attached",
-        "emulator-5554\toffline",
-        "emulator-5556\tunauthorized",
-        "emulator-5558\tdevice",
-        "",
-      ].join("\n"))
-      : createExecResult(""));
+    const adb = new AdbClient(null, async (command: string): Promise<ExecResult> =>
+      command.includes("adb devices")
+        ? createExecResult(
+            [
+              "List of devices attached",
+              "emulator-5554\toffline",
+              "emulator-5556\tunauthorized",
+              "emulator-5558\tdevice",
+              "",
+            ].join("\n"),
+          )
+        : createExecResult(""),
+    );
 
     await expect(adb.getDeviceStates()).resolves.toEqual([
       { deviceId: "emulator-5554", state: "offline" },
@@ -49,14 +53,16 @@ describe("AdbClient.getBootedAndroidDevices", () => {
   test("only reports adb rows in device state as booted", async () => {
     const execAsync = async (command: string): Promise<ExecResult> => {
       if (command.includes("adb devices")) {
-        return createExecResult([
-          "List of devices attached",
-          "emulator-5554\tdevice product:sdk_gphone64_arm64 transport_id:42",
-          "emulator-5556\tbooting",
-          "emulator-5558\toffline",
-          "emulator-5560\tunauthorized",
-          "",
-        ].join("\n"));
+        return createExecResult(
+          [
+            "List of devices attached",
+            "emulator-5554\tdevice product:sdk_gphone64_arm64 transport_id:42",
+            "emulator-5556\tbooting",
+            "emulator-5558\toffline",
+            "emulator-5560\tunauthorized",
+            "",
+          ].join("\n"),
+        );
       }
       return createExecResult("");
     };
@@ -81,15 +87,15 @@ describe("AdbClient.getBootedAndroidDevices", () => {
         return createExecResult("");
       }
       calls++;
-      return createExecResult([
-        "List of devices attached",
-        `emulator-5554\tdevice transport_id:${calls}`,
-        "",
-      ].join("\n"));
+      return createExecResult(
+        ["List of devices attached", `emulator-5554\tdevice transport_id:${calls}`, ""].join("\n"),
+      );
     });
 
     expect(await adb.getBootedAndroidDevices()).toMatchObject([{ transportId: "1" }]);
-    expect(await adb.getBootedAndroidDevices({ bypassCache: true })).toMatchObject([{ transportId: "2" }]);
+    expect(await adb.getBootedAndroidDevices({ bypassCache: true })).toMatchObject([
+      { transportId: "2" },
+    ]);
     expect(calls).toBe(2);
   });
 
@@ -98,17 +104,15 @@ describe("AdbClient.getBootedAndroidDevices", () => {
       throw new Error("spawn adb ENOENT");
     });
 
-    await expect(
-      adb.getBootedAndroidDevices({ throwOnMissingAdb: true })
-    ).rejects.toBeInstanceOf(AdbUnavailableError);
+    await expect(adb.getBootedAndroidDevices({ throwOnMissingAdb: true })).rejects.toBeInstanceOf(
+      AdbUnavailableError,
+    );
   });
 
   test("serves the device-list cache for strict discovery unless the caller bypasses it", async () => {
-    const availableAdb = new AdbClient(null, async () => createExecResult([
-      "List of devices attached",
-      "emulator-5554\tdevice",
-      "",
-    ].join("\n")));
+    const availableAdb = new AdbClient(null, async () =>
+      createExecResult(["List of devices attached", "emulator-5554\tdevice", ""].join("\n")),
+    );
     await expect(availableAdb.getBootedAndroidDevices()).resolves.toMatchObject([
       { deviceId: "emulator-5554" },
     ]);
@@ -120,10 +124,10 @@ describe("AdbClient.getBootedAndroidDevices", () => {
       throw new Error("spawn adb ENOENT");
     });
     await expect(
-      unavailableAdb.getBootedAndroidDevices({ throwOnMissingAdb: true })
+      unavailableAdb.getBootedAndroidDevices({ throwOnMissingAdb: true }),
     ).resolves.toMatchObject([{ deviceId: "emulator-5554" }]);
     await expect(
-      unavailableAdb.getBootedAndroidDevices({ throwOnMissingAdb: true, bypassCache: true })
+      unavailableAdb.getBootedAndroidDevices({ throwOnMissingAdb: true, bypassCache: true }),
     ).rejects.toBeInstanceOf(AdbUnavailableError);
   });
 
@@ -131,33 +135,44 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     let calls = 0;
     const execAsync = async (): Promise<ExecResult> => {
       calls++;
-      throw new Error("Command failed: adb -s emulator-5554 shell true\nstderr: adb: device 'emulator-5554' not found");
+      throw new Error(
+        "Command failed: adb -s emulator-5554 shell true\nstderr: adb: device 'emulator-5554' not found",
+      );
     };
     const adb = new AdbClient(
       { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" },
-      execAsync
+      execAsync,
     );
 
-    await expect(adb.executeCommand("shell true")).rejects.toThrow(/device 'emulator-5554' not found/);
+    await expect(adb.executeCommand("shell true")).rejects.toThrow(
+      /device 'emulator-5554' not found/,
+    );
     expect(calls).toBe(1);
   });
 
   test("does not treat generic no-device output as serial-specific disappearance", () => {
-    expect(isAdbMissingDeviceError(new Error("error: no devices/emulators found"), "emulator-5554")).toBe(false);
-    expect(isAdbMissingDeviceError(new Error("error: device not found"), "emulator-5554")).toBe(false);
-    expect(isAdbMissingDeviceError(new Error("adb: device 'emulator-5554' not found"), "emulator-5554")).toBe(true);
+    expect(
+      isAdbMissingDeviceError(new Error("error: no devices/emulators found"), "emulator-5554"),
+    ).toBe(false);
+    expect(isAdbMissingDeviceError(new Error("error: device not found"), "emulator-5554")).toBe(
+      false,
+    );
+    expect(
+      isAdbMissingDeviceError(new Error("adb: device 'emulator-5554' not found"), "emulator-5554"),
+    ).toBe(true);
   });
 
   test("keeps default aborts on the Operation cancelled contract", async () => {
     const adb = new AdbClient(
       { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" },
-      async () => createExecResult("")
+      async () => createExecResult(""),
     );
     const controller = new AbortController();
     controller.abort();
 
-    await expect(adb.executeCommand("shell true", undefined, undefined, true, controller.signal))
-      .rejects.toThrow("Operation cancelled");
+    await expect(
+      adb.executeCommand("shell true", undefined, undefined, true, controller.signal),
+    ).rejects.toThrow("Operation cancelled");
   });
 
   test("executes argv with one device selector and the resolved executable", async () => {
@@ -167,15 +182,13 @@ describe("AdbClient.getBootedAndroidDevices", () => {
       async (file: string, args: string[], _maxBuffer?: number): Promise<ExecResult> => {
         received = { file, args };
         return createExecResult("ok");
-      }
+      },
     );
 
     await adb.execute(["shell", "getprop", "ro.product.model"], { noRetry: true });
 
     expect(received?.file).toEndWith("adb");
-    expect(received?.args).toEqual([
-      "-s", "emulator-5554", "shell", "getprop", "ro.product.model",
-    ]);
+    expect(received?.args).toEqual(["-s", "emulator-5554", "shell", "getprop", "ro.product.model"]);
   });
 
   test("spawns argv without retry and terminates only its child on abort", async () => {
@@ -184,7 +197,10 @@ describe("AdbClient.getBootedAndroidDevices", () => {
       stdout: new PassThrough(),
       stderr: new PassThrough(),
       killCalls: [] as string[],
-      kill(signal?: string) { this.killCalls.push(signal ?? "SIGTERM"); return true; },
+      kill(signal?: string) {
+        this.killCalls.push(signal ?? "SIGTERM");
+        return true;
+      },
     });
     let received: { file: string; args: string[] } | undefined;
     const adb = new AdbClient(
@@ -193,7 +209,7 @@ describe("AdbClient.getBootedAndroidDevices", () => {
       ((file: string, args: string[]) => {
         received = { file, args };
         return child;
-      }) as never
+      }) as never,
     );
     const controller = new AbortController();
 
@@ -209,23 +225,32 @@ describe("AdbClient.getBootedAndroidDevices", () => {
 
     expect(process.stdout).toBe(child.stdout);
     expect(received?.file).toEndWith("adb");
-    expect(received?.args).toEqual(["-s", "emulator-5554", "exec-out", "screenrecord", "--output-format=h264", "-"]);
+    expect(received?.args).toEqual([
+      "-s",
+      "emulator-5554",
+      "exec-out",
+      "screenrecord",
+      "--output-format=h264",
+      "-",
+    ]);
     expect(child.killCalls).toEqual(["SIGTERM"]);
   });
 
   test("does not spawn when cancellation arrives during executable resolution", async () => {
     let resolveBase: ((value: { adbPath: string; baseArgs: string[] }) => void) | undefined;
     let spawnCalls = 0;
-    const adb = new AdbClient(
-      null,
-      async (): Promise<ExecResult> => createExecResult(""),
-      (() => {
-        spawnCalls++;
-        throw new Error("must not spawn");
-      }) as never
-    );
-    (adb as unknown as { getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }> }).getBaseCommandParts = () =>
-      new Promise(resolve => { resolveBase = resolve; });
+    const adb = new AdbClient(null, async (): Promise<ExecResult> => createExecResult(""), (() => {
+      spawnCalls++;
+      throw new Error("must not spawn");
+    }) as never);
+    (
+      adb as unknown as {
+        getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
+      }
+    ).getBaseCommandParts = () =>
+      new Promise((resolve) => {
+        resolveBase = resolve;
+      });
     const controller = new AbortController();
     const pending = adb.spawn(["get-state"], { signal: controller.signal });
     controller.abort();

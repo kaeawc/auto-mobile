@@ -61,11 +61,14 @@ export class DefaultSystemDetection implements SystemDetection {
   async fileExists(path: string): Promise<boolean> {
     return access(path).then(
       () => true,
-      () => false
+      () => false,
     );
   }
 
-  async executeCommand(file: string, args: string[] = []): Promise<{ stdout: string; stderr: string }> {
+  async executeCommand(
+    file: string,
+    args: string[] = [],
+  ): Promise<{ stdout: string; stderr: string }> {
     const execFileAsync = promisify(execFile);
     return execFileAsync(file, args) as Promise<{ stdout: string; stderr: string }>;
   }

@@ -700,9 +700,11 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * a non-null UUID with a null `deviceId` schedules none.
    */
   private subscriberWantsDevice(filter: DeviceDataFilter, deviceId: string): boolean {
-    return filter.deviceSessionUuid === null ||
+    return (
+      filter.deviceSessionUuid === null ||
       (filter.deviceId === deviceId &&
-        this.deviceSessionResolver.resolveUuid(deviceId) === filter.deviceSessionUuid);
+        this.deviceSessionResolver.resolveUuid(deviceId) === filter.deviceSessionUuid)
+    );
   }
 
   /**

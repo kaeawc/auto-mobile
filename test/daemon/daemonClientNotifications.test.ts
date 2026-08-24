@@ -8,13 +8,18 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // line-parsing path directly (no real socket) so they stay fast and hermetic.
 
 function feed(client: DaemonClient, frames: unknown[]): void {
-  const payload = frames.map(frame => JSON.stringify(frame)).join("\n") + "\n";
+  const payload = frames.map((frame) => JSON.stringify(frame)).join("\n") + "\n";
   (client as unknown as { handleData(data: Buffer): void }).handleData(Buffer.from(payload));
 }
 
 describe("isDaemonNotification", () => {
   test("accepts a well-formed notification frame", () => {
-    expect(isDaemonNotification({ type: "daemon_notification", method: "notifications/tools/list_changed" })).toBe(true);
+    expect(
+      isDaemonNotification({
+        type: "daemon_notification",
+        method: "notifications/tools/list_changed",
+      }),
+    ).toBe(true);
   });
 
   test("rejects responses, null, and malformed frames", () => {
@@ -30,7 +35,7 @@ describe("DaemonClient notification frames", () => {
   test("routes notification frames to registered handlers", () => {
     const client = new DaemonClient("/tmp/never-connected.sock", 1000, new FakeTimer());
     const received: DaemonNotification[] = [];
-    client.onNotification(notification => {
+    client.onNotification((notification) => {
       received.push(notification);
     });
 
@@ -44,7 +49,7 @@ describe("DaemonClient notification frames", () => {
   test("notification frames interleaved with responses do not disturb response handling", () => {
     const client = new DaemonClient("/tmp/never-connected.sock", 1000, new FakeTimer());
     const received: string[] = [];
-    client.onNotification(notification => {
+    client.onNotification((notification) => {
       received.push(notification.method);
     });
 
@@ -63,12 +68,12 @@ describe("DaemonClient notification frames", () => {
     client.onNotification(() => {
       throw new Error("handler boom");
     });
-    client.onNotification(notification => {
+    client.onNotification((notification) => {
       received.push(notification.method);
     });
 
     expect(() =>
-      feed(client, [{ type: "daemon_notification", method: "notifications/tools/list_changed" }])
+      feed(client, [{ type: "daemon_notification", method: "notifications/tools/list_changed" }]),
     ).not.toThrow();
     expect(received).toEqual(["notifications/tools/list_changed"]);
   });
@@ -76,7 +81,7 @@ describe("DaemonClient notification frames", () => {
   test("onNotification returns an unsubscribe function", () => {
     const client = new DaemonClient("/tmp/never-connected.sock", 1000, new FakeTimer());
     const received: string[] = [];
-    const unsubscribe = client.onNotification(notification => {
+    const unsubscribe = client.onNotification((notification) => {
       received.push(notification.method);
     });
 

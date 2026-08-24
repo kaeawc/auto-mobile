@@ -18,7 +18,11 @@ export class DeviceLockStore implements LockCredentialStore {
     return this.repository.getCredential(deviceId);
   }
 
-  async rememberLock(deviceId: string, lockType: DeviceLockType, credential: string | null): Promise<void> {
+  async rememberLock(
+    deviceId: string,
+    lockType: DeviceLockType,
+    credential: string | null,
+  ): Promise<void> {
     await this.repository.rememberLock(deviceId, lockType, credential);
   }
 }

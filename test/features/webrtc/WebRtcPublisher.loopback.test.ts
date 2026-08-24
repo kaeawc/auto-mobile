@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import {
-  MediaStreamTrack,
-  RTCPeerConnection,
-  RtpPacket,
-  useH264,
-} from "werift";
+import { MediaStreamTrack, RTCPeerConnection, RtpPacket, useH264 } from "werift";
 import { WebRtcPublisher } from "../../../src/features/webrtc/WebRtcPublisher";
 import { WhipClient, type FetchLike } from "../../../src/features/webrtc/WhipClient";
 import { defaultTimer } from "../../../src/utils/SystemTimer";
@@ -34,8 +29,13 @@ async function withDeadline<T>(step: string, timeoutMs: number, run: () => Promi
   let timer: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = defaultTimer.setTimeout(
-      () => reject(new Error(`${step} did not complete within ${timeoutMs}ms — bounded real-I/O deadline hit`)),
-      timeoutMs
+      () =>
+        reject(
+          new Error(
+            `${step} did not complete within ${timeoutMs}ms — bounded real-I/O deadline hit`,
+          ),
+        ),
+      timeoutMs,
     );
   });
   try {
@@ -63,9 +63,12 @@ function nal(type: number, size: number, fill: number): Buffer {
 function keyframeStream(): Buffer {
   return Buffer.concat([
     // Constrained-baseline Level 4.2, matching the publisher's SDP contract.
-    START, Buffer.from([0x67, 0x42, 0xe0, 0x2a, 0x11, 0x11, 0x11, 0x11]),
-    START, nal(8, 6, 0x22), // PPS
-    START, nal(5, 4000, 0x33), // IDR large enough to force FU-A fragmentation
+    START,
+    Buffer.from([0x67, 0x42, 0xe0, 0x2a, 0x11, 0x11, 0x11, 0x11]),
+    START,
+    nal(8, 6, 0x22), // PPS
+    START,
+    nal(5, 4000, 0x33), // IDR large enough to force FU-A fragmentation
     START, // trailing start code so the IDR NAL is emitted immediately
   ]);
 }
@@ -78,84 +81,86 @@ async function waitForIceComplete(pc: RTCPeerConnection): Promise<void> {
   if (pc.iceGatheringState === "complete") {
     return;
   }
-  await pc.iceGatheringStateChange.watch(state => state === "complete", 5000);
+  await pc.iceGatheringStateChange.watch((state) => state === "complete", 5000);
 }
 
 describeLoopback("WebRtcPublisher loopback", () => {
-  test(
-    "publishes an H.264 stream over WHIP and the receiver gets RTP frames",
-    async () => {
-      const receiver = new RTCPeerConnection({ codecs: { video: [useH264()] } });
-      const receivedPackets: RtpPacket[] = [];
-      let sawMarker = false;
+  test("publishes an H.264 stream over WHIP and the receiver gets RTP frames", async () => {
+    const receiver = new RTCPeerConnection({ codecs: { video: [useH264()] } });
+    const receivedPackets: RtpPacket[] = [];
+    let sawMarker = false;
 
-      receiver.onTrack.subscribe((track: MediaStreamTrack) => {
-        track.onReceiveRtp.subscribe((rtp: RtpPacket) => {
-          receivedPackets.push(rtp);
-          if (rtp.header.marker) {
-            sawMarker = true;
-          }
-        });
+    receiver.onTrack.subscribe((track: MediaStreamTrack) => {
+      track.onReceiveRtp.subscribe((rtp: RtpPacket) => {
+        receivedPackets.push(rtp);
+        if (rtp.header.marker) {
+          sawMarker = true;
+        }
       });
+    });
 
-      // Fake fetch that drives the in-process receiver as a WHIP ingest server.
-      const fetchImpl: FetchLike = async (url, init) => {
-        if (init.method === "DELETE") {
-          return jsonlessResponse(200, "");
-        }
-        await receiver.setRemoteDescription({ type: "offer", sdp: init.body ?? "" });
-        const answer = await receiver.createAnswer();
-        await receiver.setLocalDescription(answer);
-        await waitForIceComplete(receiver);
-        return {
-          status: 201,
-          ok: true,
-          headers: { get: (name: string) => (name.toLowerCase() === "location" ? "/whip/loopback" : null) },
-          text: async () => receiver.localDescription?.sdp ?? "",
-        };
-      };
-
-      const publisher = new WebRtcPublisher(
-        {
-          streamId: "loopback-test",
-          whipEndpoint: "https://ingest.local/whip",
-        },
-        {
-          createWhipClient: options => new WhipClient({ ...options, fetchImpl }),
-        }
-      );
-
-      try {
-        await withDeadline("publisher.start (WHIP offer/answer + ICE)", 10_000, () => publisher.start());
-        expect(publisher.getState()).toBe("connected");
-
-        // Wait for the DTLS/ICE transport to connect before pumping media.
-        await waitForConnected(receiver, 8000);
-
-        // Pump a keyframe then a series of P-frames.
-        publisher.writeH264Chunk(keyframeStream());
-        for (let i = 0; i < 20; i++) {
-          publisher.writeH264Chunk(pFrameStream(0x40 + i));
-          await sleep(20);
-        }
-
-        await waitFor(() => receivedPackets.length > 5, 5000);
-
-        expect(receivedPackets.length).toBeGreaterThan(5);
-        expect(sawMarker).toBe(true);
-
-        const descriptor = publisher.getDescriptor();
-        expect(descriptor.resourceUrl).toBe("https://ingest.local/whip/loopback");
-        expect(descriptor.framesSent).toBeGreaterThan(0);
-      } finally {
-        // Teardown must be bounded too: a hung stop/close would leak the real
-        // UDP sockets and keep the worker process alive after the test fails.
-        await withDeadline("publisher.stop", 5_000, () => publisher.stop());
-        await withDeadline("receiver.close", 5_000, async () => { await receiver.close(); });
+    // Fake fetch that drives the in-process receiver as a WHIP ingest server.
+    const fetchImpl: FetchLike = async (url, init) => {
+      if (init.method === "DELETE") {
+        return jsonlessResponse(200, "");
       }
-    },
-    20000
-  );
+      await receiver.setRemoteDescription({ type: "offer", sdp: init.body ?? "" });
+      const answer = await receiver.createAnswer();
+      await receiver.setLocalDescription(answer);
+      await waitForIceComplete(receiver);
+      return {
+        status: 201,
+        ok: true,
+        headers: {
+          get: (name: string) => (name.toLowerCase() === "location" ? "/whip/loopback" : null),
+        },
+        text: async () => receiver.localDescription?.sdp ?? "",
+      };
+    };
+
+    const publisher = new WebRtcPublisher(
+      {
+        streamId: "loopback-test",
+        whipEndpoint: "https://ingest.local/whip",
+      },
+      {
+        createWhipClient: (options) => new WhipClient({ ...options, fetchImpl }),
+      },
+    );
+
+    try {
+      await withDeadline("publisher.start (WHIP offer/answer + ICE)", 10_000, () =>
+        publisher.start(),
+      );
+      expect(publisher.getState()).toBe("connected");
+
+      // Wait for the DTLS/ICE transport to connect before pumping media.
+      await waitForConnected(receiver, 8000);
+
+      // Pump a keyframe then a series of P-frames.
+      publisher.writeH264Chunk(keyframeStream());
+      for (let i = 0; i < 20; i++) {
+        publisher.writeH264Chunk(pFrameStream(0x40 + i));
+        await sleep(20);
+      }
+
+      await waitFor(() => receivedPackets.length > 5, 5000);
+
+      expect(receivedPackets.length).toBeGreaterThan(5);
+      expect(sawMarker).toBe(true);
+
+      const descriptor = publisher.getDescriptor();
+      expect(descriptor.resourceUrl).toBe("https://ingest.local/whip/loopback");
+      expect(descriptor.framesSent).toBeGreaterThan(0);
+    } finally {
+      // Teardown must be bounded too: a hung stop/close would leak the real
+      // UDP sockets and keep the worker process alive after the test fails.
+      await withDeadline("publisher.stop", 5_000, () => publisher.stop());
+      await withDeadline("receiver.close", 5_000, async () => {
+        await receiver.close();
+      });
+    }
+  }, 20000);
 });
 
 function jsonlessResponse(status: number, body: string) {

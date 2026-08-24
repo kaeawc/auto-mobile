@@ -38,7 +38,7 @@ export class PlanSchemaValidator {
     this.ajv = new Ajv({
       allErrors: true,
       verbose: true,
-      strict: false
+      strict: false,
     });
     // Bun installs ajv-formats' compatible Ajv v8 dependency separately from
     // our direct v8 dependency. They share the runtime plugin contract, but
@@ -63,7 +63,9 @@ export class PlanSchemaValidator {
 
     logger.info(`[PlanSchemaValidator] Loading schema from: ${__dirname}`);
     logger.info(`[PlanSchemaValidator] Current working directory: ${process.cwd()}`);
-    logger.info(`[PlanSchemaValidator] GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE || "not set"}`);
+    logger.info(
+      `[PlanSchemaValidator] GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE || "not set"}`,
+    );
 
     // Try multiple paths to support different execution contexts:
     const possiblePaths = [
@@ -106,7 +108,9 @@ export class PlanSchemaValidator {
         logger.info(`[PlanSchemaValidator] ✓ Schema found at: ${schemaPath}`);
         break;
       } catch (error: any) {
-        logger.debug(`[PlanSchemaValidator] ✗ Schema not found at: ${path.resolve(tryPath)} (${error.code})`);
+        logger.debug(
+          `[PlanSchemaValidator] ✗ Schema not found at: ${path.resolve(tryPath)} (${error.code})`,
+        );
         // Try next path
       }
     }
@@ -118,7 +122,7 @@ export class PlanSchemaValidator {
         `Module directory: ${__dirname}`,
         `GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE || "not set"}`,
         "Tried paths:",
-        ...attemptedPaths.map(p => `  - ${p}`)
+        ...attemptedPaths.map((p) => `  - ${p}`),
       ].join("\n");
 
       logger.error(`[PlanSchemaValidator] ${errorMessage}`);
@@ -152,12 +156,14 @@ export class PlanSchemaValidator {
 
       return {
         valid: false,
-        errors: [{
-          field: "root",
-          message: `YAML parsing failed: ${error.message}`,
-          line,
-          column
-        }]
+        errors: [
+          {
+            field: "root",
+            message: `YAML parsing failed: ${error.message}`,
+            line,
+            column,
+          },
+        ],
       };
     }
 
@@ -174,7 +180,7 @@ export class PlanSchemaValidator {
 
     return {
       valid: false,
-      errors
+      errors,
     };
   }
 
@@ -187,10 +193,12 @@ export class PlanSchemaValidator {
     if (!this.schemaLoaded) {
       return {
         valid: false,
-        errors: [{
-          field: "schema",
-          message: "Schema not loaded. Call loadSchema() first."
-        }]
+        errors: [
+          {
+            field: "schema",
+            message: "Schema not loaded. Call loadSchema() first.",
+          },
+        ],
       };
     }
 
@@ -200,10 +208,12 @@ export class PlanSchemaValidator {
     } catch (error: any) {
       return {
         valid: false,
-        errors: [{
-          field: "file",
-          message: `Failed to read file: ${error.message}`
-        }]
+        errors: [
+          {
+            field: "file",
+            message: `Failed to read file: ${error.message}`,
+          },
+        ],
       };
     }
   }
@@ -212,7 +222,7 @@ export class PlanSchemaValidator {
    * Format AJV errors into structured validation errors
    */
   private formatErrors(ajvErrors: ErrorObject[], yamlContent: string): ValidationError[] {
-    return ajvErrors.map(err => {
+    return ajvErrors.map((err) => {
       let field = err.instancePath || "root";
 
       // Remove leading slash
@@ -253,7 +263,7 @@ export class PlanSchemaValidator {
         field: field || "root",
         message,
         line: lineInfo?.line,
-        column: lineInfo?.column
+        column: lineInfo?.column,
       };
     });
   }
@@ -262,7 +272,10 @@ export class PlanSchemaValidator {
    * Attempt to find the line number of a field in YAML content
    * This is a best-effort approach using regex matching
    */
-  private findLineNumber(yamlContent: string, fieldPath: string): { line: number; column: number } | undefined {
+  private findLineNumber(
+    yamlContent: string,
+    fieldPath: string,
+  ): { line: number; column: number } | undefined {
     const lines = yamlContent.split("\n");
 
     // Handle root-level fields
@@ -277,7 +290,7 @@ export class PlanSchemaValidator {
     }
 
     // Handle nested fields like "steps[0].tool" or "metadata.version"
-    const parts = fieldPath.split(/[.\[\]]+/).filter(p => p);
+    const parts = fieldPath.split(/[.\[\]]+/).filter((p) => p);
 
     // Try to find the deepest field we can locate
     for (let depth = parts.length; depth > 0; depth--) {

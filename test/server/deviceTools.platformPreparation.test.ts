@@ -44,7 +44,10 @@ describe("platform device preparation tools", () => {
     sessionManager?.stopCleanupTimer();
   });
 
-  async function callTool(name: "getAndroid" | "getApple" | "startDevice", args: Record<string, unknown>) {
+  async function callTool(
+    name: "getAndroid" | "getApple" | "startDevice",
+    args: Record<string, unknown>,
+  ) {
     const tool = ToolRegistry.getTool(name);
     if (!tool) {
       throw new Error(`${name} is not registered`);
@@ -228,7 +231,7 @@ describe("platform device preparation tools", () => {
     const detached = await pool.detachAdbServerResetCohort([pool.getDevice(stale.deviceId)!]);
 
     let settled = false;
-    const preparation = callTool("getAndroid", { avdName: stale.name }).then(result => {
+    const preparation = callTool("getAndroid", { avdName: stale.name }).then((result) => {
       settled = true;
       return result;
     });

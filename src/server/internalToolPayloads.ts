@@ -45,7 +45,7 @@ export type InternalToolName = keyof InternalToolPayloads;
  */
 export const narrowInternalToolEnvelope = <K extends InternalToolName>(
   _name: K,
-  response: unknown
+  response: unknown,
 ): StructuredToolResponse<InternalToolPayloads[K]> | undefined => {
   if (!response || typeof response !== "object") {
     return undefined;

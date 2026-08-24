@@ -18,7 +18,9 @@ export interface ScreenshotComparisonResult {
 }
 
 export class ScreenshotComparator {
-  private static readonly PNG_HEADER = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+  private static readonly PNG_HEADER = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  ]);
 
   /**
    * Check if a buffer contains PNG image data
@@ -40,7 +42,7 @@ export class ScreenshotComparator {
    */
   static async convertToPng(
     buffer: Buffer,
-    backend: ImageBackend = resolveImageBackend()
+    backend: ImageBackend = resolveImageBackend(),
   ): Promise<Buffer> {
     try {
       return await backend.execute(buffer, { operations: [], encoding: { mime: "image/png" } });
@@ -57,7 +59,7 @@ export class ScreenshotComparator {
    */
   static async getImageDimensions(
     buffer: Buffer,
-    backend: ImageBackend = resolveImageBackend()
+    backend: ImageBackend = resolveImageBackend(),
   ): Promise<{ width: number; height: number }> {
     // Fast path: PNG stores dimensions in the IHDR chunk, no full decode needed.
     // Kept ahead of backend.metadata() (which does a full decode) so the hot PNG
@@ -65,7 +67,7 @@ export class ScreenshotComparator {
     if (ScreenshotComparator.isPngBuffer(buffer) && buffer.length >= 24) {
       return {
         width: buffer.readUInt32BE(16),
-        height: buffer.readUInt32BE(20)
+        height: buffer.readUInt32BE(20),
       };
     }
 
@@ -89,7 +91,7 @@ export class ScreenshotComparator {
     buffer: Buffer,
     targetWidth: number,
     targetHeight: number,
-    backend: ImageBackend = resolveImageBackend()
+    backend: ImageBackend = resolveImageBackend(),
   ): Promise<Buffer> {
     const { width, height } = await ScreenshotComparator.getImageDimensions(buffer, backend);
 
@@ -105,9 +107,15 @@ export class ScreenshotComparator {
       // neighboring pixels and quietly shift the pixelmatch diff.
       return await backend.execute(buffer, {
         operations: [
-          { type: "resize", width: targetWidth, height: targetHeight, maintainAspectRatio: false, mode: "nearest" }
+          {
+            type: "resize",
+            width: targetWidth,
+            height: targetHeight,
+            maintainAspectRatio: false,
+            mode: "nearest",
+          },
         ],
-        encoding: { mime: "image/png" }
+        encoding: { mime: "image/png" },
       });
     } catch (error) {
       throw new Error(`Failed to resize image: ${(error as Error).message}`);
@@ -128,15 +136,21 @@ export class ScreenshotComparator {
     threshold: number = 0.1,
     fastMode: boolean = false,
     timer: Timer = defaultTimer,
-    backend: ImageBackend = resolveImageBackend()
+    backend: ImageBackend = resolveImageBackend(),
   ): Promise<ScreenshotComparisonResult> {
     const comparisonStart = timer.now();
-    logger.debug(`Starting image comparison with threshold ${threshold}${fastMode ? " (fast mode)" : ""}`);
+    logger.debug(
+      `Starting image comparison with threshold ${threshold}${fastMode ? " (fast mode)" : ""}`,
+    );
 
     try {
       // Ensure both images are PNG format
-      let png1Buffer = ScreenshotComparator.isPngBuffer(buffer1) ? buffer1 : await ScreenshotComparator.convertToPng(buffer1, backend);
-      let png2Buffer = ScreenshotComparator.isPngBuffer(buffer2) ? buffer2 : await ScreenshotComparator.convertToPng(buffer2, backend);
+      let png1Buffer = ScreenshotComparator.isPngBuffer(buffer1)
+        ? buffer1
+        : await ScreenshotComparator.convertToPng(buffer1, backend);
+      let png2Buffer = ScreenshotComparator.isPngBuffer(buffer2)
+        ? buffer2
+        : await ScreenshotComparator.convertToPng(buffer2, backend);
 
       // Get dimensions
       const dims1 = await ScreenshotComparator.getImageDimensions(png1Buffer, backend);
@@ -155,10 +169,20 @@ export class ScreenshotComparator {
 
       // Resize images to match if needed (use the smaller dimensions for performance)
       if (dims1.width !== targetWidth || dims1.height !== targetHeight) {
-        png1Buffer = await ScreenshotComparator.resizeImageIfNeeded(png1Buffer, targetWidth, targetHeight, backend);
+        png1Buffer = await ScreenshotComparator.resizeImageIfNeeded(
+          png1Buffer,
+          targetWidth,
+          targetHeight,
+          backend,
+        );
       }
       if (dims2.width !== targetWidth || dims2.height !== targetHeight) {
-        png2Buffer = await ScreenshotComparator.resizeImageIfNeeded(png2Buffer, targetWidth, targetHeight, backend);
+        png2Buffer = await ScreenshotComparator.resizeImageIfNeeded(
+          png2Buffer,
+          targetWidth,
+          targetHeight,
+          backend,
+        );
       }
 
       // Parse PNG data
@@ -181,19 +205,21 @@ export class ScreenshotComparator {
         height,
         {
           threshold: adjustedThreshold,
-          includeAA: false // Ignore anti-aliased pixels
-        }
+          includeAA: false, // Ignore anti-aliased pixels
+        },
       );
 
       const similarity = ((totalPixels - pixelDifference) / totalPixels) * 100;
       const comparisonTime = timer.now() - comparisonStart;
 
-      logger.debug(`Image comparison completed in ${comparisonTime}ms: ${pixelDifference}/${totalPixels} different pixels (${similarity.toFixed(2)}% similar)`);
+      logger.debug(
+        `Image comparison completed in ${comparisonTime}ms: ${pixelDifference}/${totalPixels} different pixels (${similarity.toFixed(2)}% similar)`,
+      );
 
       return {
         similarity,
         pixelDifference,
-        totalPixels
+        totalPixels,
       };
     } catch (error) {
       const comparisonTime = timer.now() - comparisonStart;
@@ -202,7 +228,7 @@ export class ScreenshotComparator {
       return {
         similarity: 0,
         pixelDifference: -1,
-        totalPixels: 0
+        totalPixels: 0,
       };
     }
   }

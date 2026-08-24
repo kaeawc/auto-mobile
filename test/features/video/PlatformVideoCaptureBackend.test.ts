@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
-import { PlatformVideoCaptureBackend, clampBitrateKbps } from "../../../src/features/video/PlatformVideoCaptureBackend";
+import {
+  PlatformVideoCaptureBackend,
+  clampBitrateKbps,
+} from "../../../src/features/video/PlatformVideoCaptureBackend";
 import type {
   RecordingHandle,
   VideoCaptureConfig,
@@ -48,9 +51,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         format: "mp4",
       };
 
-      await expect(backend.start(configWithoutDevice)).rejects.toThrow(
-        "Device is required"
-      );
+      await expect(backend.start(configWithoutDevice)).rejects.toThrow("Device is required");
     });
 
     test("rejects unsupported platform", async () => {
@@ -90,10 +91,19 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
 
     await expect(
       backend.start({
-        recordingId: "recording", outputDirectory: tempDir, outputPath: path.join(tempDir, "video.mp4"),
-        fileName: "video.mp4", startedAt: new Date().toISOString(), qualityPreset: "low", targetBitrateKbps: 1000,
-        maxThroughputMbps: 5, fps: 15, maxArchiveSizeMb: 2048, format: "mp4", device,
-      })
+        recordingId: "recording",
+        outputDirectory: tempDir,
+        outputPath: path.join(tempDir, "video.mp4"),
+        fileName: "video.mp4",
+        startedAt: new Date().toISOString(),
+        qualityPreset: "low",
+        targetBitrateKbps: 1000,
+        maxThroughputMbps: 5,
+        fps: 15,
+        maxArchiveSizeMb: 2048,
+        format: "mp4",
+        device,
+      }),
     ).rejects.toThrow(/FfmpegVideoProcessingBackend/);
   });
 
@@ -106,9 +116,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
         backendHandle: undefined,
       };
 
-      await expect(backend.stop(invalidHandle)).rejects.toThrow(
-        "Missing backend handle"
-      );
+      await expect(backend.stop(invalidHandle)).rejects.toThrow("Missing backend handle");
     });
 
     test("rejects stop when backend handle has wrong type", async () => {
@@ -126,7 +134,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
   describe("Android stop sequence (issue #1960)", () => {
     function buildAndroidStopHandle(
       outputPath: string,
-      fakeProcess: FakeChildProcess
+      fakeProcess: FakeChildProcess,
     ): RecordingHandle {
       const androidHandle = {
         kind: "android" as const,
@@ -174,7 +182,9 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
 
       await backend.forceStop(handle);
 
-      expect(fakeFactory.getFakeClient().wasCommandExecuted("shell pkill -9 screenrecord")).toBe(true);
+      expect(fakeFactory.getFakeClient().wasCommandExecuted("shell pkill -9 screenrecord")).toBe(
+        true,
+      );
       expect(signals).toContain("SIGKILL");
     });
 
@@ -186,7 +196,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       const signals = spyOnKill(fakeProcess);
 
       const pendingForceStop = backend.forceStop(
-        buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess)
+        buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess),
       );
       await Promise.resolve();
 
@@ -280,10 +290,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
     test("falls back to host SIGINT when device-side pkill fails and host adb is still running", async () => {
       const fakeFactory = new FakeAdbClientFactory();
       const fakeClient = fakeFactory.getFakeClient();
-      fakeClient.setCommandError(
-        "shell pkill -2 screenrecord",
-        new Error("device offline")
-      );
+      fakeClient.setCommandError("shell pkill -2 screenrecord", new Error("device offline"));
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
 
@@ -293,7 +300,9 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       const killSignals: Array<NodeJS.Signals | number | undefined> = [];
 
       let resolveExit!: () => void;
-      const exitPromise = new Promise<void>(resolve => { resolveExit = resolve; });
+      const exitPromise = new Promise<void>((resolve) => {
+        resolveExit = resolve;
+      });
 
       fakeProcess.kill = (signal?: NodeJS.Signals | number) => {
         killSignals.push(signal);
@@ -439,7 +448,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       "maps target=%p / maxMbps=%p to %p (%s)",
       (targetBitrateKbps, maxThroughputMbps, expected, _why) => {
         expect(clampBitrateKbps(cfg(targetBitrateKbps, maxThroughputMbps))).toBe(expected);
-      }
+      },
     );
   });
 
@@ -448,9 +457,11 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
     // rather than a self-healing `?? reimplementation` fallback keeping the test
     // green against a method that no longer exists.
     function resolve(backendInstance: PlatformVideoCaptureBackend, maxDuration?: number): number {
-      return (backendInstance as unknown as {
-        resolveAndroidTimeLimit(maxDuration?: number): number;
-      }).resolveAndroidTimeLimit(maxDuration);
+      return (
+        backendInstance as unknown as {
+          resolveAndroidTimeLimit(maxDuration?: number): number;
+        }
+      ).resolveAndroidTimeLimit(maxDuration);
     }
 
     test.each([

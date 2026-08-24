@@ -8,7 +8,7 @@ import { BootedDevice } from "../../../src/models";
 import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 
-describe("Parallel Execution Across Multiple Devices", function() {
+describe("Parallel Execution Across Multiple Devices", function () {
   let sessionManager: SessionManager;
   let devicePool: DevicePool;
   let fakeTimer: FakeTimer;
@@ -16,29 +16,36 @@ describe("Parallel Execution Across Multiple Devices", function() {
   const createBootedDevice = (deviceId: string): BootedDevice => ({
     name: deviceId,
     platform: "android",
-    deviceId
+    deviceId,
   });
 
-  beforeEach(async function() {
+  beforeEach(async function () {
     fakeTimer = new FakeTimer();
     sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     fakeAppsRepo = new FakeInstalledAppsRepository();
     // Create a RetryExecutor that uses the fakeTimer so time advancement works correctly
     const retryExecutor = new DefaultRetryExecutor(fakeTimer);
-    devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, undefined, retryExecutor);
+    devicePool = new DevicePool(
+      sessionManager,
+      "test-daemon-session-id",
+      fakeTimer,
+      fakeAppsRepo,
+      undefined,
+      retryExecutor,
+    );
     await devicePool.initializeWithDevices([
       createBootedDevice("device-1"),
       createBootedDevice("device-2"),
-      createBootedDevice("device-3")
+      createBootedDevice("device-3"),
     ]);
   });
 
-  afterEach(function() {
+  afterEach(function () {
     sessionManager.stopCleanupTimer();
   });
 
-  describe("Multiple Concurrent Sessions", function() {
-    test("should assign different devices to different sessions", async function() {
+  describe("Multiple Concurrent Sessions", function () {
+    test("should assign different devices to different sessions", async function () {
       // Create three concurrent sessions
       const session1Id = "session-uuid-1";
       const session2Id = "session-uuid-2";
@@ -60,7 +67,7 @@ describe("Parallel Execution Across Multiple Devices", function() {
       expect(["device-1", "device-2", "device-3"]).toContain(device3);
     });
 
-    test("should respect max concurrent sessions equal to device count", async function() {
+    test("should respect max concurrent sessions equal to device count", async function () {
       // Create three sessions (matching the three devices)
       const session1Id = "session-uuid-1";
       const session2Id = "session-uuid-2";
@@ -75,7 +82,7 @@ describe("Parallel Execution Across Multiple Devices", function() {
       expect(devicePool.getAssignedDevices().length).toBe(3);
     });
 
-    test("should throw error when exceeding device capacity after timeout", async function() {
+    test("should throw error when exceeding device capacity after timeout", async function () {
       // Use manual mode so we can control time advancement
 
       // Assign devices to all three sessions
@@ -90,15 +97,17 @@ describe("Parallel Execution Across Multiple Devices", function() {
 
       // Attempting a fourth session should wait, then fail after timeout
       let error: Error | null = null;
-      const assignPromise = devicePool.assignDeviceToSession(session4Id).catch(e => {
+      const assignPromise = devicePool.assignDeviceToSession(session4Id).catch((e) => {
         error = e as Error;
       });
 
       // Advance time past the 60 second timeout with multiple iterations
       for (let i = 0; i < 70; i++) {
         fakeTimer.advanceTime(1000);
-        await new Promise(resolve => setImmediate(resolve));
-        if (error) {break;}
+        await new Promise((resolve) => setImmediate(resolve));
+        if (error) {
+          break;
+        }
       }
 
       await assignPromise;
@@ -108,8 +117,8 @@ describe("Parallel Execution Across Multiple Devices", function() {
     });
   });
 
-  describe("Session Lifecycle with Device Reuse", function() {
-    test("should reuse just-released device when others are idle", async function() {
+  describe("Session Lifecycle with Device Reuse", function () {
+    test("should reuse just-released device when others are idle", async function () {
       const session1Id = "session-uuid-1";
       const session2Id = "session-uuid-2";
 
@@ -121,7 +130,7 @@ describe("Parallel Execution Across Multiple Devices", function() {
 
       const deviceIds = ["device-1", "device-2", "device-3"];
       const releasedDevice = devicePool.getDevice(device1);
-      const otherDevices = deviceIds.filter(id => id !== device1);
+      const otherDevices = deviceIds.filter((id) => id !== device1);
       const firstOtherDevice = devicePool.getDevice(otherDevices[0]);
       const secondOtherDevice = otherDevices[1] ? devicePool.getDevice(otherDevices[1]) : null;
 
@@ -141,7 +150,7 @@ describe("Parallel Execution Across Multiple Devices", function() {
       expect(device2).toBe(device1);
     });
 
-    test("should handle rapid session creation and release cycles", async function() {
+    test("should handle rapid session creation and release cycles", async function () {
       const numberOfCycles = 5;
 
       for (let i = 0; i < numberOfCycles; i++) {
@@ -175,8 +184,8 @@ describe("Parallel Execution Across Multiple Devices", function() {
     });
   });
 
-  describe("Session Isolation", function() {
-    test("should maintain separate cache per session", async function() {
+  describe("Session Isolation", function () {
+    test("should maintain separate cache per session", async function () {
       const session1Id = "session-uuid-1";
       const session2Id = "session-uuid-2";
 
@@ -185,8 +194,12 @@ describe("Parallel Execution Across Multiple Devices", function() {
       await devicePool.assignDeviceToSession(session2Id);
 
       // Set different cache data for each session
-      const hierarchy1: ViewHierarchyResult = { hierarchy: { node: { "$": {}, "view-id": "session-1" } } };
-      const hierarchy2: ViewHierarchyResult = { hierarchy: { node: { "$": {}, "view-id": "session-2" } } };
+      const hierarchy1: ViewHierarchyResult = {
+        hierarchy: { node: { $: {}, "view-id": "session-1" } },
+      };
+      const hierarchy2: ViewHierarchyResult = {
+        hierarchy: { node: { $: {}, "view-id": "session-2" } },
+      };
       sessionManager.updateSessionCache(session1Id, {
         lastHierarchy: hierarchy1,
         deviceLabels: { A: session1Id },
@@ -211,7 +224,7 @@ describe("Parallel Execution Across Multiple Devices", function() {
       expect(cache1?.deviceLabels).not.toEqual(cache2?.deviceLabels);
     });
 
-    test("should ensure device assignment persistence across session operations", async function() {
+    test("should ensure device assignment persistence across session operations", async function () {
       const sessionId = "session-uuid-persistence-test";
 
       // Assign device to session
@@ -239,17 +252,13 @@ describe("Parallel Execution Across Multiple Devices", function() {
     });
   });
 
-  describe("Parallel Execution Simulation", function() {
-    test("should handle parallel session creation with Promise.all", async function() {
-      const sessionIds = [
-        "session-parallel-1",
-        "session-parallel-2",
-        "session-parallel-3",
-      ];
+  describe("Parallel Execution Simulation", function () {
+    test("should handle parallel session creation with Promise.all", async function () {
+      const sessionIds = ["session-parallel-1", "session-parallel-2", "session-parallel-3"];
 
       // Create all sessions in parallel
-      const assignmentPromises = sessionIds.map(sessionId =>
-        devicePool.assignDeviceToSession(sessionId)
+      const assignmentPromises = sessionIds.map((sessionId) =>
+        devicePool.assignDeviceToSession(sessionId),
       );
 
       const assignedDevices = await Promise.all(assignmentPromises);
@@ -270,7 +279,7 @@ describe("Parallel Execution Across Multiple Devices", function() {
 
       // Release all in parallel
       const releasePromises = assignedDevices.map((deviceId, index) =>
-        devicePool.releaseDevice(deviceId, sessionIds[index]!)
+        devicePool.releaseDevice(deviceId, sessionIds[index]!),
       );
 
       await Promise.all(releasePromises);

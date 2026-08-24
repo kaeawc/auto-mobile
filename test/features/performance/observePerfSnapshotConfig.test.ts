@@ -42,12 +42,12 @@ describe("observePerfSnapshotConfig", () => {
       expect(isObservePerfSnapshotEnabled()).toBe(false);
     });
 
-    it.each(["1", "true", "TRUE", "yes", " Yes "])("enables on %p", value => {
+    it.each(["1", "true", "TRUE", "yes", " Yes "])("enables on %p", (value) => {
       process.env[ENABLE_ENV] = value;
       expect(isObservePerfSnapshotEnabled()).toBe(true);
     });
 
-    it.each(["0", "false", "no", "", "off"])("stays disabled on %p", value => {
+    it.each(["0", "false", "no", "", "off"])("stays disabled on %p", (value) => {
       process.env[ENABLE_ENV] = value;
       expect(isObservePerfSnapshotEnabled()).toBe(false);
     });

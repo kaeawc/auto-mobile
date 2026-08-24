@@ -5,7 +5,7 @@ import {
   getAndroidSdkFromEnvironment,
   getTypicalAndroidSdkPaths,
   isToolInPath,
-  getToolPathFromPath
+  getToolPathFromPath,
 } from "./detection";
 
 type AaptToolName = "aapt2" | "aapt";
@@ -25,7 +25,7 @@ export class DefaultAndroidBuildToolsLocator implements AndroidBuildToolsLocator
 
   constructor(
     fileSystem: FileSystem = new DefaultFileSystem(),
-    systemDetection: SystemDetection = new DefaultSystemDetection()
+    systemDetection: SystemDetection = new DefaultSystemDetection(),
   ) {
     this.fileSystem = fileSystem;
     this.systemDetection = systemDetection;
@@ -132,7 +132,7 @@ export class DefaultAndroidBuildToolsLocator implements AndroidBuildToolsLocator
   private parseVersion(version: string): number[] {
     return version
       .split(".")
-      .map(part => Number.parseInt(part.replace(/\D/g, ""), 10))
-      .map(value => (Number.isNaN(value) ? 0 : value));
+      .map((part) => Number.parseInt(part.replace(/\D/g, ""), 10))
+      .map((value) => (Number.isNaN(value) ? 0 : value));
   }
 }

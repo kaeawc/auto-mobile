@@ -21,7 +21,7 @@ function sortValue(value: unknown): unknown {
     return Object.fromEntries(
       Object.keys(record)
         .sort()
-        .map(key => [key, sortValue(record[key])])
+        .map((key) => [key, sortValue(record[key])]),
     );
   }
   return value;

@@ -16,7 +16,7 @@ export async function runConcurrentSameKeyStress<T>({
   }
 
   let release: () => void = () => {};
-  const gate = new Promise<void>(resolve => {
+  const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
   const tasks = Array.from({ length: count }, async (_unused, index) => {

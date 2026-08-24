@@ -1,5 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { BootedDevice, ScreenSize } from "../../models";
@@ -34,7 +37,11 @@ export class TouchLatencyTracker {
   private idle: Idle;
   private timer: Timer;
 
-  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory, timer: Timer = defaultTimer) {
+  constructor(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    timer: Timer = defaultTimer,
+  ) {
     this.device = device;
     this.adb = adbFactory.create(device);
     this.idle = new Idle(device, adbFactory);
@@ -63,14 +70,8 @@ export class TouchLatencyTracker {
    * @param y - Y coordinate
    * @param perf - Performance tracker
    */
-  private async injectTouch(
-    x: number,
-    y: number,
-    perf: PerformanceTracker
-  ): Promise<void> {
-    await perf.track("adbInputTap", () =>
-      this.adb.executeCommand(`shell input tap ${x} ${y}`)
-    );
+  private async injectTouch(x: number, y: number, perf: PerformanceTracker): Promise<void> {
+    await perf.track("adbInputTap", () => this.adb.executeCommand(`shell input tap ${x} ${y}`));
   }
 
   /**
@@ -84,9 +85,13 @@ export class TouchLatencyTracker {
    */
   private async measureFrameResponse(
     packageName: string,
-    beforeStats: { missedVsync: number | null; slowUiThread: number | null; frameDeadlineMissed: number | null },
+    beforeStats: {
+      missedVsync: number | null;
+      slowUiThread: number | null;
+      frameDeadlineMissed: number | null;
+    },
     maxWaitMs: number,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
   ): Promise<number | null> {
     const startTime = this.timer.now();
     const pollIntervalMs = 10; // Poll every 10ms for quick response
@@ -96,19 +101,22 @@ export class TouchLatencyTracker {
 
       try {
         const { stdout } = await perf.track("adbGfxinfoCheck", () =>
-          this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`)
+          this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
         );
 
         const currentStats = this.idle.parseMetrics(stdout);
 
         // Check if any jank indicator has changed (indicates frame processing)
         const hasFrameActivity =
-          (beforeStats.missedVsync !== null && currentStats.missedVsync !== null &&
-           currentStats.missedVsync > beforeStats.missedVsync) ||
-          (beforeStats.slowUiThread !== null && currentStats.slowUiThread !== null &&
-           currentStats.slowUiThread > beforeStats.slowUiThread) ||
-          (beforeStats.frameDeadlineMissed !== null && currentStats.frameDeadlineMissed !== null &&
-           currentStats.frameDeadlineMissed > beforeStats.frameDeadlineMissed);
+          (beforeStats.missedVsync !== null &&
+            currentStats.missedVsync !== null &&
+            currentStats.missedVsync > beforeStats.missedVsync) ||
+          (beforeStats.slowUiThread !== null &&
+            currentStats.slowUiThread !== null &&
+            currentStats.slowUiThread > beforeStats.slowUiThread) ||
+          (beforeStats.frameDeadlineMissed !== null &&
+            currentStats.frameDeadlineMissed !== null &&
+            currentStats.frameDeadlineMissed > beforeStats.frameDeadlineMissed);
 
         if (hasFrameActivity) {
           const latency = this.timer.now() - startTime;
@@ -140,12 +148,14 @@ export class TouchLatencyTracker {
       sampleCount?: number;
       maxWaitMs?: number;
     } = {},
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<TouchLatencyResult> {
     const sampleCount = options.sampleCount || 3;
     const maxWaitMs = options.maxWaitMs || 200; // 200ms max wait per sample
 
-    logger.info(`[TouchLatency] Measuring touch latency for ${packageName} (${sampleCount} samples)`);
+    logger.info(
+      `[TouchLatency] Measuring touch latency for ${packageName} (${sampleCount} samples)`,
+    );
 
     const touchLocation = this.selectSafeTouchLocation(screenSize);
     const measurements: number[] = [];
@@ -156,7 +166,7 @@ export class TouchLatencyTracker {
 
         // Reset gfxinfo to get clean baseline
         await perf.track("adbGfxinfoReset", () =>
-          this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName} reset`)
+          this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName} reset`),
         );
 
         // Small delay to ensure reset is processed
@@ -164,7 +174,7 @@ export class TouchLatencyTracker {
 
         // Get baseline frame stats
         const { stdout: baselineStdout } = await perf.track("adbGfxinfoBaseline", () =>
-          this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`)
+          this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
         );
         const baselineStats = this.idle.parseMetrics(baselineStdout);
 
@@ -176,7 +186,7 @@ export class TouchLatencyTracker {
           packageName,
           baselineStats,
           maxWaitMs,
-          perf
+          perf,
         );
 
         if (latency !== null) {
@@ -198,22 +208,23 @@ export class TouchLatencyTracker {
           touchCoordinates: touchLocation,
           success: false,
           error: "No successful measurements - UI may be frozen or gfxinfo unavailable",
-          sampleCount: 0
+          sampleCount: 0,
         };
       }
 
       // Median latency (more robust than average). The empty case is handled above.
       const medianLatency = calculateMedian(measurements) ?? 0;
 
-      logger.info(`[TouchLatency] Measured latency: ${medianLatency}ms (from ${measurements.length} samples)`);
+      logger.info(
+        `[TouchLatency] Measured latency: ${medianLatency}ms (from ${measurements.length} samples)`,
+      );
 
       return {
         latencyMs: medianLatency,
         touchCoordinates: touchLocation,
         success: true,
-        sampleCount: measurements.length
+        sampleCount: measurements.length,
       };
-
     } catch (error) {
       logger.error(`[TouchLatency] Failed to measure touch latency: ${error}`);
       return {
@@ -221,7 +232,7 @@ export class TouchLatencyTracker {
         touchCoordinates: touchLocation,
         success: false,
         error: errorMessage(error),
-        sampleCount: measurements.length
+        sampleCount: measurements.length,
       };
     }
   }

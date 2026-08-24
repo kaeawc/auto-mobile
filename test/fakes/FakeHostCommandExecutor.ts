@@ -15,7 +15,7 @@ export class FakeHostCommandExecutor implements HostCommandExecutor {
       stderr,
       toString: () => stdout,
       trim: () => stdout.trim(),
-      includes: (searchString: string) => stdout.includes(searchString)
+      includes: (searchString: string) => stdout.includes(searchString),
     };
   }
 
@@ -28,17 +28,17 @@ export class FakeHostCommandExecutor implements HostCommandExecutor {
   }
 
   getExecutedCommands(): string[] {
-    return this.executedCommands.map(entry => [entry.command, ...entry.args].join(" ").trim());
+    return this.executedCommands.map((entry) => [entry.command, ...entry.args].join(" ").trim());
   }
 
   wasCommandExecuted(pattern: string): boolean {
-    return this.getExecutedCommands().some(command => command.includes(pattern));
+    return this.getExecutedCommands().some((command) => command.includes(pattern));
   }
 
   async executeCommand(
     command: string,
     args: string[] = [],
-    _options?: HostCommandOptions
+    _options?: HostCommandOptions,
   ): Promise<ExecResult> {
     this.executedCommands.push({ command, args });
 
@@ -59,9 +59,14 @@ export class FakeHostCommandExecutor implements HostCommandExecutor {
     return {
       stdout,
       stderr,
-      toString: typeof response.toString === "function" ? response.toString.bind(response) : () => stdout,
-      trim: typeof response.trim === "function" ? response.trim.bind(response) : () => stdout.trim(),
-      includes: typeof response.includes === "function" ? response.includes.bind(response) : (searchString: string) => stdout.includes(searchString)
+      toString:
+        typeof response.toString === "function" ? response.toString.bind(response) : () => stdout,
+      trim:
+        typeof response.trim === "function" ? response.trim.bind(response) : () => stdout.trim(),
+      includes:
+        typeof response.includes === "function"
+          ? response.includes.bind(response)
+          : (searchString: string) => stdout.includes(searchString),
     };
   }
 }

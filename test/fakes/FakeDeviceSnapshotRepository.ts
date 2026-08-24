@@ -26,10 +26,7 @@ export class FakeDeviceSnapshotRepository implements DeviceSnapshotRepositoryCon
     });
   }
 
-  async updateSnapshot(
-    snapshotName: string,
-    update: Partial<DeviceSnapshotRecord>
-  ): Promise<void> {
+  async updateSnapshot(snapshotName: string, update: Partial<DeviceSnapshotRecord>): Promise<void> {
     const existing = this.records.get(snapshotName);
     if (!existing) {
       return;
@@ -51,13 +48,13 @@ export class FakeDeviceSnapshotRepository implements DeviceSnapshotRepositoryCon
     let results = Array.from(this.records.values());
 
     if (query.deviceId) {
-      results = results.filter(record => record.deviceId === query.deviceId);
+      results = results.filter((record) => record.deviceId === query.deviceId);
     }
     if (query.platform) {
-      results = results.filter(record => record.platform === query.platform);
+      results = results.filter((record) => record.platform === query.platform);
     }
     if (query.snapshotType) {
-      results = results.filter(record => record.snapshotType === query.snapshotType);
+      results = results.filter((record) => record.snapshotType === query.snapshotType);
     }
     // Mirror the real SQL, which emits the ORDER BY clauses in the same order the
     // repository adds them: last_accessed_at FIRST (primary), created_at SECOND
@@ -70,11 +67,15 @@ export class FakeDeviceSnapshotRepository implements DeviceSnapshotRepositoryCon
     // can differ from Date.parse() instant order. Byte order on ASCII timestamp
     // strings equals JS string comparison. This also sidesteps NaN from an
     // unparseable date producing an unstable comparator.
-    const comparators: Array<(left: DeviceSnapshotRecord, right: DeviceSnapshotRecord) => number> = [];
-    const compareText = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
+    const comparators: Array<(left: DeviceSnapshotRecord, right: DeviceSnapshotRecord) => number> =
+      [];
+    const compareText = (left: string, right: string): number =>
+      left < right ? -1 : left > right ? 1 : 0;
     if (query.orderByLastAccessed) {
       const sign = query.orderByLastAccessed === "asc" ? 1 : -1;
-      comparators.push((left, right) => compareText(left.lastAccessedAt, right.lastAccessedAt) * sign);
+      comparators.push(
+        (left, right) => compareText(left.lastAccessedAt, right.lastAccessedAt) * sign,
+      );
     }
     if (query.orderByCreatedAt) {
       const sign = query.orderByCreatedAt === "asc" ? 1 : -1;

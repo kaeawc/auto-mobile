@@ -2,7 +2,11 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import AdmZip from "adm-zip";
 import { type FileDownloader, DefaultFileDownloader } from "./FileDownloader";
-import { type ChecksumCalculator, type Sha256Source, DefaultChecksumCalculator } from "./ChecksumCalculator";
+import {
+  type ChecksumCalculator,
+  type Sha256Source,
+  DefaultChecksumCalculator,
+} from "./ChecksumCalculator";
 import { ensureSecureDir } from "./filesystem/securePermissions";
 import { ActionableError } from "../models/ActionableError";
 
@@ -21,13 +25,12 @@ export function assertZipEntriesContained(zip: AdmZip, destination: string): voi
   for (const entry of zip.getEntries()) {
     const target = path.resolve(resolvedRoot, entry.entryName);
     const relative = path.relative(resolvedRoot, target);
-    const escapes = relative === ".." ||
-      relative.startsWith(`..${path.sep}`) ||
-      path.isAbsolute(relative);
+    const escapes =
+      relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
     if (escapes) {
       throw new ActionableError(
         `Refusing to extract CtrlProxy bundle: entry "${entry.entryName}" resolves outside the ` +
-        `extraction directory ${resolvedRoot} (zip-slip / path traversal).`
+          `extraction directory ${resolvedRoot} (zip-slip / path traversal).`,
       );
     }
   }
@@ -45,7 +48,7 @@ export class DefaultIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDo
 
   constructor(
     fileDownloader: FileDownloader = new DefaultFileDownloader(),
-    checksumCalculator: ChecksumCalculator = new DefaultChecksumCalculator()
+    checksumCalculator: ChecksumCalculator = new DefaultChecksumCalculator(),
   ) {
     this.fileDownloader = fileDownloader;
     this.checksumCalculator = checksumCalculator;
@@ -55,7 +58,9 @@ export class DefaultIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDo
     return this.fileDownloader.download(url, destination);
   }
 
-  public async computeFileSha256(filePath: string): Promise<{ checksum: string; source: Sha256Source }> {
+  public async computeFileSha256(
+    filePath: string,
+  ): Promise<{ checksum: string; source: Sha256Source }> {
     return this.checksumCalculator.computeFileSha256(filePath);
   }
 

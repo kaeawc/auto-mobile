@@ -1156,8 +1156,8 @@ export class DaemonMcpProxy {
 
   private shouldSkipLeaseRefreshForDeviceControlTransportError(error: unknown): boolean {
     return (
-      error instanceof DeviceControlTransportError
-      && (error.failure.phase === "connect" || !error.failure.sessionValid)
+      error instanceof DeviceControlTransportError &&
+      (error.failure.phase === "connect" || !error.failure.sessionValid)
     );
   }
 

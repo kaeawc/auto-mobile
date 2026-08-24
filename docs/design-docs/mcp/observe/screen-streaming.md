@@ -77,12 +77,13 @@ constructing MCP tool payloads directly.
 
 The capture mechanism differs significantly between platforms:
 
-| Platform | Capture Location | Frame Format | Decoder Needed |
-|----------|-----------------|--------------|----------------|
-| Android | On device | H.264 encoded | Yes (bytedeco FFmpeg) |
-| iOS | On Mac | Raw BGRA | No |
+| Platform | Capture Location | Frame Format  | Decoder Needed        |
+| -------- | ---------------- | ------------- | --------------------- |
+| Android  | On device        | H.264 encoded | Yes (bytedeco FFmpeg) |
+| iOS      | On Mac           | Raw BGRA      | No                    |
 
 See platform-specific documentation for implementation details:
+
 - **[Android Screen Streaming](../../plat/android/screen-streaming.md)** - VirtualDisplay + MediaCodec via shell-user JAR
 - **[iOS Screen Streaming](../../plat/ios/screen-streaming.md)** - AVFoundation + ScreenCaptureKit on macOS
 
@@ -124,6 +125,7 @@ parses the same framing for Android and iOS. iOS captures raw BGRA internally an
 re-encodes it to H.264 before it reaches the relay, so relay clients never see raw frames:
 
 **Relay wire (both platforms, H.264):**
+
 ```
 ┌─────────────────┬─────────────────┬─────────────────┐
 │ codec_id (4)    │ width (4)       │ height (4)      │
@@ -132,12 +134,14 @@ Then per-packet: pts_flags (8) + size (4) + H.264 data
 ```
 
 **Internal only — iOS capture-helper → daemon (raw BGRA, NOT the relay wire):**
+
 ```
 ┌──────────┬─────────────┬──────────┬───────────┬─────────────┬───────────┐
 │ magic(4) │ checksum(4) │ width(4) │ height(4) │ bytesPerRow │ timestamp │
 └──────────┴─────────────┴──────────┴───────────┴─────────────┴───────────┘
 Then: height * bytesPerRow bytes of BGRA pixel data
 ```
+
 `magic` ("AMF1") + CRC-32 `checksum` over the field bytes make frame boundaries
 self-describing, so corruption recovery is deterministic (issue #4270). This format is consumed
 by the daemon's iOS H.264 encoder and is never sent to relay subscribers.
@@ -151,10 +155,10 @@ when the last subscriber for a device disconnects.
 ## Quality Presets
 
 | Quality | Android Bitrate | Resolution | Preset FPS |
-|---------|-----------------|------------|------------|
-| Low | 2 Mbps | 540p | 30 |
-| Medium | 4 Mbps | 720p | 30 |
-| High | 8 Mbps | 1080p | 30 |
+| ------- | --------------- | ---------- | ---------- |
+| Low     | 2 Mbps          | 540p       | 30         |
+| Medium  | 4 Mbps          | 720p       | 30         |
+| High    | 8 Mbps          | 1080p      | 30         |
 
 The preset FPS is the on-device encoder default (`QualityPreset` — 30fps for every preset, since UI
 automation is mostly static frames and 30fps roughly halves encode load versus 60 for no observable
@@ -167,6 +171,7 @@ iOS streams raw frames, so quality is controlled by resolution scaling only.
 ## Fallback Behavior
 
 When video streaming is unavailable:
+
 1. Detect stream failure or unsupported device
 2. Automatically switch to existing screenshot-based observation
 3. Display indicator in UI showing "Screenshot mode"
@@ -174,16 +179,16 @@ When video streaming is unavailable:
 
 ## Decisions
 
-| Question | Decision |
-|----------|----------|
-| Audio streaming | Include audio for complete mirroring |
-| Touch input | Plan for it, implement later |
+| Question                | Decision                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Audio streaming         | Include audio for complete mirroring                                                                                                                                                                                                                                                                                                                                                                                        |
+| Touch input             | Plan for it, implement later                                                                                                                                                                                                                                                                                                                                                                                                |
 | Quality auto-adjustment | Client-side on the desktop mirror: a per-pane controller measures the decoded frame rate and steps the preset down on a sustained drop / back up once healthy, applied by re-subscribing. Because a shared per-device capture's encode is fixed by the first subscriber (see Stream Control), this takes effect for a sole subscriber / the next subscribe; reconfiguring a live shared capture is a server-side follow-up. |
-| Multiple devices | Concurrent per-device streams — one shared capture per device, fanned out to its subscribers, so the desktop workspace mirrors many device panes at once |
-| Android decoder | `org.bytedeco:ffmpeg` (in-process JNI), host-platform classifier only. Klarity was the original choice but cannot consume a live stream — its API takes file paths only. No FFmpeg *subprocess* fallback. |
-| iOS Swift integration | Swift-to-Node bridge |
-| macOS permissions | User handles permission prompts |
-| macOS entitlements | No special entitlements needed for iOS capture |
+| Multiple devices        | Concurrent per-device streams — one shared capture per device, fanned out to its subscribers, so the desktop workspace mirrors many device panes at once                                                                                                                                                                                                                                                                    |
+| Android decoder         | `org.bytedeco:ffmpeg` (in-process JNI), host-platform classifier only. Klarity was the original choice but cannot consume a live stream — its API takes file paths only. No FFmpeg _subprocess_ fallback.                                                                                                                                                                                                                   |
+| iOS Swift integration   | Swift-to-Node bridge                                                                                                                                                                                                                                                                                                                                                                                                        |
+| macOS permissions       | User handles permission prompts                                                                                                                                                                                                                                                                                                                                                                                             |
+| macOS entitlements      | No special entitlements needed for iOS capture                                                                                                                                                                                                                                                                                                                                                                              |
 
 ## Related: browser/CI streaming over WebRTC
 

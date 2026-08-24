@@ -255,7 +255,7 @@ steps:
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
       expect(result.errors).toBeDefined();
-      const nameError = result.errors!.find(e => e.message.includes("name"));
+      const nameError = result.errors!.find((e) => e.message.includes("name"));
       expect(nameError).toBeDefined();
       expect(nameError!.message).toContain("Missing required property 'name'");
     });
@@ -266,7 +266,7 @@ name: test-plan
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
-      const stepsError = result.errors!.find(e => e.message.includes("steps"));
+      const stepsError = result.errors!.find((e) => e.message.includes("steps"));
       expect(stepsError).toBeDefined();
       expect(stepsError!.message).toContain("Missing required property 'steps'");
     });
@@ -279,7 +279,7 @@ steps:
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
-      expect(result.errors!.some(e => e.field.includes("name"))).toBe(true);
+      expect(result.errors!.some((e) => e.field.includes("name"))).toBe(true);
     });
 
     it("should report empty steps array", () => {
@@ -289,7 +289,7 @@ steps: []
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
-      expect(result.errors!.some(e => e.message.includes("at least 1"))).toBe(true);
+      expect(result.errors!.some((e) => e.message.includes("at least 1"))).toBe(true);
     });
 
     it("should report missing tool in step", () => {
@@ -301,7 +301,7 @@ steps:
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
-      const toolError = result.errors!.find(e => e.message.includes("tool"));
+      const toolError = result.errors!.find((e) => e.message.includes("tool"));
       expect(toolError).toBeDefined();
       expect(toolError!.message).toContain("Missing required property 'tool'");
     });
@@ -314,7 +314,7 @@ steps:
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
-      expect(result.errors!.some(e => e.field.includes("tool"))).toBe(true);
+      expect(result.errors!.some((e) => e.field.includes("tool"))).toBe(true);
     });
 
     it("should report wrong type for steps", () => {
@@ -324,7 +324,9 @@ steps: "not an array"
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
-      expect(result.errors!.some(e => e.field.includes("steps") && e.message.includes("type"))).toBe(true);
+      expect(
+        result.errors!.some((e) => e.field.includes("steps") && e.message.includes("type")),
+      ).toBe(true);
     });
 
     it("should report invalid mcpVersion format", () => {
@@ -336,7 +338,7 @@ steps:
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
-      expect(result.errors!.some(e => e.field.includes("mcpVersion"))).toBe(true);
+      expect(result.errors!.some((e) => e.field.includes("mcpVersion"))).toBe(true);
     });
 
     it("should report duplicate devices", () => {
@@ -352,7 +354,7 @@ steps:
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
-      expect(result.errors!.some(e => e.field.includes("devices"))).toBe(true);
+      expect(result.errors!.some((e) => e.field.includes("devices"))).toBe(true);
     });
 
     it("should report empty device label", () => {
@@ -365,7 +367,7 @@ steps:
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
-      expect(result.errors!.some(e => e.field.includes("devices"))).toBe(true);
+      expect(result.errors!.some((e) => e.field.includes("devices"))).toBe(true);
     });
 
     it("should provide line numbers for field errors when possible", () => {
@@ -377,7 +379,9 @@ invalidField: value
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
-      const error = result.errors!.find(e => e.message.includes("invalidField") || e.message.includes("Unknown property"));
+      const error = result.errors!.find(
+        (e) => e.message.includes("invalidField") || e.message.includes("Unknown property"),
+      );
       if (error) {
         // Line number may or may not be available depending on the error type
         // Just verify the error structure is correct
@@ -643,7 +647,7 @@ unknownTopLevelField: value
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
-      const error = result.errors!.find(e => e.message.includes("Unknown property"));
+      const error = result.errors!.find((e) => e.message.includes("Unknown property"));
       expect(error).toBeDefined();
       expect(error!.message).toContain("legacy field");
     });
@@ -658,7 +662,7 @@ steps:
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);
       // Should have error for steps[1] missing tool
-      const error = result.errors!.find(e => e.field.includes("steps[1]"));
+      const error = result.errors!.find((e) => e.field.includes("steps[1]"));
       expect(error).toBeDefined();
     });
   });

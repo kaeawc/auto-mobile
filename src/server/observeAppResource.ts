@@ -56,8 +56,8 @@ function collectOverlayBoxes(observe: ObserveResult): OverlayBox[] {
   }
   return elementParser
     .flattenViewHierarchy(observe.viewHierarchy)
-    .filter(entry => entry.element?.bounds)
-    .map(entry => {
+    .filter((entry) => entry.element?.bounds)
+    .map((entry) => {
       const element = entry.element;
       const label =
         entry.text ||
@@ -72,7 +72,10 @@ function collectOverlayBoxes(observe: ObserveResult): OverlayBox[] {
 // Bounds coordinate space (the units the flattened bounds are in). The SVG
 // viewBox is set to this space so overlay rects align to the screenshot
 // regardless of the screenshot's physical pixel resolution.
-function resolveScreenSize(observe: ObserveResult, boxes: OverlayBox[]): { width: number; height: number } {
+function resolveScreenSize(
+  observe: ObserveResult,
+  boxes: OverlayBox[],
+): { width: number; height: number } {
   const vh = observe.viewHierarchy;
   if (vh?.screenWidth && vh?.screenHeight) {
     return { width: vh.screenWidth, height: vh.screenHeight };
@@ -97,7 +100,8 @@ export function renderObserveAppHtml(observe: ObserveResult, screenshotDataUri?:
   const { width, height } = resolveScreenSize(observe, boxes);
   const state = boxes.length > 0 ? "observe" : "empty";
 
-  const hasScreenshot = typeof screenshotDataUri === "string" && screenshotDataUri.startsWith("data:");
+  const hasScreenshot =
+    typeof screenshotDataUri === "string" && screenshotDataUri.startsWith("data:");
   const image = hasScreenshot
     ? `<image href="${escapeHtml(screenshotDataUri!)}" x="0" y="0" width="${fmt(width)}" height="${fmt(height)}" preserveAspectRatio="none"/>`
     : "";
@@ -191,12 +195,14 @@ async function buildAppContent(dataSource: ObserveAppDataSource): Promise<Resour
 }
 
 /** Register the `ui://automobile/observe` App resource. */
-export function registerObserveAppResource(dataSource: ObserveAppDataSource = defaultDataSource): void {
+export function registerObserveAppResource(
+  dataSource: ObserveAppDataSource = defaultDataSource,
+): void {
   ResourceRegistry.register(
     OBSERVE_APP_RESOURCE_URI,
     "Observe App UI",
     "Interactive MCP App view of the latest observe result: screenshot with the view-hierarchy overlaid.",
     MCP_APP_MIME_TYPE,
-    () => buildAppContent(dataSource)
+    () => buildAppContent(dataSource),
   );
 }

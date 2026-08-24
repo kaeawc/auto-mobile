@@ -8,19 +8,18 @@ export const DEFAULT_APPEARANCE_CONFIG: AppearanceConfig = {
 
 const APPEARANCE_MODES = new Set<AppearanceSyncMode>(["light", "dark", "auto"]);
 
-export function parseAppearanceConfig(
-  input?: AppearanceConfigInput | null
-): AppearanceConfig {
-  const safeInput: AppearanceConfigInput =
-    input && typeof input === "object" ? input : {};
+export function parseAppearanceConfig(input?: AppearanceConfigInput | null): AppearanceConfig {
+  const safeInput: AppearanceConfigInput = input && typeof input === "object" ? input : {};
 
   const defaultMode = parseAppearanceMode(safeInput.defaultMode);
-  const syncWithHost = typeof safeInput.syncWithHost === "boolean"
-    ? safeInput.syncWithHost
-    : DEFAULT_APPEARANCE_CONFIG.syncWithHost;
-  const applyOnConnect = typeof safeInput.applyOnConnect === "boolean"
-    ? safeInput.applyOnConnect
-    : DEFAULT_APPEARANCE_CONFIG.applyOnConnect;
+  const syncWithHost =
+    typeof safeInput.syncWithHost === "boolean"
+      ? safeInput.syncWithHost
+      : DEFAULT_APPEARANCE_CONFIG.syncWithHost;
+  const applyOnConnect =
+    typeof safeInput.applyOnConnect === "boolean"
+      ? safeInput.applyOnConnect
+      : DEFAULT_APPEARANCE_CONFIG.applyOnConnect;
 
   return {
     syncWithHost,

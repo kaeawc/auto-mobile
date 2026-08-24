@@ -9,10 +9,10 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 // argv flags and keeping the inline `--flag=value` split unambiguous.
 const flagName = fc
   .array(fc.constantFrom("a", "b", "c", "d", "e", "f"), { minLength: 1, maxLength: 6 })
-  .map(chars => `--${chars.join("")}`);
+  .map((chars) => `--${chars.join("")}`);
 
 // A value usable in the space-separated form: non-empty and not itself a flag.
-const spaceValue = fc.string({ minLength: 1, maxLength: 16 }).filter(v => !v.startsWith("--"));
+const spaceValue = fc.string({ minLength: 1, maxLength: 16 }).filter((v) => !v.startsWith("--"));
 
 describe("firstFlagValue (property-based)", () => {
   test("never throws and returns a string or undefined for arbitrary argv", () => {
@@ -21,7 +21,7 @@ describe("firstFlagValue (property-based)", () => {
         const result = firstFlagValue(args, flags);
         return result === undefined || typeof result === "string";
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -31,7 +31,7 @@ describe("firstFlagValue (property-based)", () => {
       fc.property(flagName, fc.string({ maxLength: 24 }), (flag, value) => {
         return firstFlagValue([`${flag}=${value}`], [flag]) === value;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -40,7 +40,7 @@ describe("firstFlagValue (property-based)", () => {
       fc.property(flagName, spaceValue, (flag, value) => {
         return firstFlagValue([flag, value], [flag]) === value;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -51,18 +51,25 @@ describe("firstFlagValue (property-based)", () => {
         const followedByFlag = firstFlagValue([flag, other], [flag]) === undefined;
         return loneAtEnd && followedByFlag;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("argv with no matching flag yields undefined", () => {
     // Prefixing every token with "p" guarantees none is a `--flag` or `--flag=…`.
-    const positionals = fc.array(fc.string({ maxLength: 12 }).map(t => `p${t}`), { maxLength: 10 });
+    const positionals = fc.array(
+      fc.string({ maxLength: 12 }).map((t) => `p${t}`),
+      { maxLength: 10 },
+    );
     fc.assert(
-      fc.property(positionals, fc.array(flagName, { minLength: 1, maxLength: 3 }), (args, flags) => {
-        return firstFlagValue(args, flags) === undefined;
-      }),
-      RUN_OPTIONS
+      fc.property(
+        positionals,
+        fc.array(flagName, { minLength: 1, maxLength: 3 }),
+        (args, flags) => {
+          return firstFlagValue(args, flags) === undefined;
+        },
+      ),
+      RUN_OPTIONS,
     );
   });
 
@@ -72,7 +79,7 @@ describe("firstFlagValue (property-based)", () => {
         const result = firstFlagValue(["--one=" + v1, "--two=" + v2], ["--one", "--two"]);
         return result === v1;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

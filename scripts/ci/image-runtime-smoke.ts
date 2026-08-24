@@ -21,25 +21,30 @@ if (metadata.width !== 64 || metadata.height !== 64 || metadata.format !== "png"
   throw new Error(`Unexpected image metadata: ${JSON.stringify(metadata)}`);
 }
 
-const transformed = await Image.fromBuffer(input)
-  .resize(2, 2, false)
-  .png()
-  .toBuffer();
+const transformed = await Image.fromBuffer(input).resize(2, 2, false).png().toBuffer();
 
 // WebP is the primary screenshot output format — verify encode/decode roundtrip
 // AND that the three encode modes are actually distinct. A silently-dropped
 // option key (e.g. wrong casing) would collapse near-lossless onto lossless.
 const lossy = await Image.fromBuffer(input).webp({ quality: 60 }).toBuffer();
 const lossless = await Image.fromBuffer(input).webp({ lossless: true }).toBuffer();
-const nearLossless = await Image.fromBuffer(input).webp({ nearLossless: true, quality: 40 }).toBuffer();
+const nearLossless = await Image.fromBuffer(input)
+  .webp({ nearLossless: true, quality: 40 })
+  .toBuffer();
 
-for (const [name, buf] of [["lossy", lossy], ["lossless", lossless], ["nearLossless", nearLossless]] as const) {
+for (const [name, buf] of [
+  ["lossy", lossy],
+  ["lossless", lossless],
+  ["nearLossless", nearLossless],
+] as const) {
   if (buf.subarray(0, 4).toString() !== "RIFF" || buf.subarray(8, 12).toString() !== "WEBP") {
     throw new Error(`WebP ${name} encode did not produce a RIFF/WEBP container`);
   }
 }
 if (nearLossless.length === lossless.length) {
-  throw new Error("WebP nearLossless produced byte-identical output to lossless — option was dropped");
+  throw new Error(
+    "WebP nearLossless produced byte-identical output to lossless — option was dropped",
+  );
 }
 
 const webpMetadata = await Image.fromBuffer(lossy).getMetadata();

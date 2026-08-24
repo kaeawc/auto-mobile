@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME, h264MacroblocksPerFrame } from "../../../src/features/webrtc/h264Level";
+import {
+  WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME,
+  h264MacroblocksPerFrame,
+} from "../../../src/features/webrtc/h264Level";
 import {
   resolveIosEncoderScale,
   defaultIosBitrateBps,
@@ -37,7 +40,10 @@ interface Golden {
 }
 
 const golden: Golden = JSON.parse(
-  readFileSync(new URL("../../fixtures/h264-level42-scale-golden-vectors.json", import.meta.url), "utf8")
+  readFileSync(
+    new URL("../../fixtures/h264-level42-scale-golden-vectors.json", import.meta.url),
+    "utf8",
+  ),
 );
 
 describe("H.264 Level 4.2 scale/bitrate golden vectors (issue #4788)", () => {
@@ -48,9 +54,11 @@ describe("H.264 Level 4.2 scale/bitrate golden vectors (issue #4788)", () => {
 
   for (const scaleCase of golden.scaleCases) {
     test(`resolveIosEncoderScale reproduces ${scaleCase.width}x${scaleCase.height}`, () => {
-      expect(h264MacroblocksPerFrame(scaleCase.width, scaleCase.height)).toBe(scaleCase.macroblocks);
+      expect(h264MacroblocksPerFrame(scaleCase.width, scaleCase.height)).toBe(
+        scaleCase.macroblocks,
+      );
       expect(resolveIosEncoderScale({ width: scaleCase.width, height: scaleCase.height })).toEqual(
-        scaleCase.scaled
+        scaleCase.scaled,
       );
     });
   }
@@ -58,7 +66,10 @@ describe("H.264 Level 4.2 scale/bitrate golden vectors (issue #4788)", () => {
   for (const bitrateCase of golden.bitrateCases) {
     test(`defaultIosBitrateBps reproduces ${bitrateCase.width}x${bitrateCase.height}@${bitrateCase.fps}`, () => {
       expect(
-        defaultIosBitrateBps({ width: bitrateCase.width, height: bitrateCase.height }, bitrateCase.fps)
+        defaultIosBitrateBps(
+          { width: bitrateCase.width, height: bitrateCase.height },
+          bitrateCase.fps,
+        ),
       ).toBe(bitrateCase.bitrateBps);
     });
   }

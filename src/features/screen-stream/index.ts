@@ -16,10 +16,7 @@ export {
   type MalformedFrameError,
   type FrameDecoderMetrics,
 } from "./frameProtocol";
-export {
-  LatestFrameQueue,
-  type FrameQueueMetrics,
-} from "./LatestFrameQueue";
+export { LatestFrameQueue, type FrameQueueMetrics } from "./LatestFrameQueue";
 export {
   IOSScreenCaptureHelper,
   IOS_SCREEN_CAPTURE_MAX_FRAME_BYTES,

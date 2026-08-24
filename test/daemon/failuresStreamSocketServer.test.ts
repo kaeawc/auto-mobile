@@ -21,21 +21,21 @@ class FakeFailuresRepository implements FailuresStreamRepository {
   acknowledgedIds?: number[];
 
   async getNotificationsSince(
-    query: Parameters<FailuresStreamRepository["getNotificationsSince"]>[0]
+    query: Parameters<FailuresStreamRepository["getNotificationsSince"]>[0],
   ): ReturnType<FailuresStreamRepository["getNotificationsSince"]> {
     this.lastNotificationsQuery = query;
     return { notifications: [], lastTimestamp: undefined, lastId: undefined };
   }
 
   async getAggregatedGroups(
-    query: Parameters<FailuresStreamRepository["getAggregatedGroups"]>[0]
+    query: Parameters<FailuresStreamRepository["getAggregatedGroups"]>[0],
   ): ReturnType<FailuresStreamRepository["getAggregatedGroups"]> {
     this.lastGroupsQuery = query;
     return { groups: [], totals: { crashes: 0, anrs: 0, toolFailures: 0 } };
   }
 
   async getTimelineData(
-    query: Parameters<FailuresStreamRepository["getTimelineData"]>[0]
+    query: Parameters<FailuresStreamRepository["getTimelineData"]>[0],
   ): ReturnType<FailuresStreamRepository["getTimelineData"]> {
     this.lastTimelineQuery = query;
     return { dataPoints: [], previousPeriodTotals: undefined as never };
@@ -64,15 +64,27 @@ describe("FailuresStreamSocketServer sinceTimestamp normalization", () => {
   // Table rows are the spec. `expected` is the epoch-ms value the handler must
   // forward to the repository; `throws` marks inputs rejected before any query.
   const rows: Array<{ name: string; input: unknown; expected?: number; throws?: boolean }> = [
-    { name: "a bare numeric string is an epoch-ms number, not the year 1000", input: "1000", expected: 1000 },
+    {
+      name: "a bare numeric string is an epoch-ms number, not the year 1000",
+      input: "1000",
+      expected: 1000,
+    },
     { name: "a padded numeric string is trimmed then read as a number", input: " 1 ", expected: 1 },
     { name: "a numeric value passes through unchanged", input: 1000, expected: 1000 },
     { name: "zero is a valid cursor", input: 0, expected: 0 },
-    { name: "an ISO 8601 string is parsed to its epoch ms", input: "2020-01-01T00:00:00.000Z", expected: Date.parse("2020-01-01T00:00:00.000Z") },
+    {
+      name: "an ISO 8601 string is parsed to its epoch ms",
+      input: "2020-01-01T00:00:00.000Z",
+      expected: Date.parse("2020-01-01T00:00:00.000Z"),
+    },
     { name: "undefined leaves the cursor unset", input: undefined, expected: undefined },
     { name: "an empty string leaves the cursor unset", input: "", expected: undefined },
     { name: "a whitespace-only string leaves the cursor unset", input: "   ", expected: undefined },
-    { name: "a negative numeric string is rejected by the negative guard", input: "-5", throws: true },
+    {
+      name: "a negative numeric string is rejected by the negative guard",
+      input: "-5",
+      throws: true,
+    },
     { name: "a negative number is rejected", input: -5, throws: true },
     { name: "a non-numeric non-date string is rejected", input: "not-a-date", throws: true },
   ];
@@ -80,7 +92,10 @@ describe("FailuresStreamSocketServer sinceTimestamp normalization", () => {
   for (const row of rows) {
     test(`poll_notifications forwards ${row.name}`, async () => {
       const { server, repo } = makeServer();
-      const request = { command: "poll_notifications", sinceTimestamp: row.input } as unknown as FailuresStreamSocketRequest;
+      const request = {
+        command: "poll_notifications",
+        sinceTimestamp: row.input,
+      } as unknown as FailuresStreamSocketRequest;
 
       if (row.throws) {
         await expect(server.run(request)).rejects.toThrow(/Invalid sinceTimestamp/);
@@ -98,7 +113,10 @@ describe("FailuresStreamSocketServer sinceTimestamp normalization", () => {
 describe("FailuresStreamSocketServer command validation", () => {
   test("poll_timeline rejects an unknown aggregation before touching the repository", async () => {
     const { server, repo } = makeServer();
-    const request = { command: "poll_timeline", aggregation: "fortnight" } as unknown as FailuresStreamSocketRequest;
+    const request = {
+      command: "poll_timeline",
+      aggregation: "fortnight",
+    } as unknown as FailuresStreamSocketRequest;
 
     await expect(server.run(request)).rejects.toThrow(/Invalid aggregation: fortnight/);
     expect(repo.lastTimelineQuery).toBeUndefined();
@@ -106,7 +124,10 @@ describe("FailuresStreamSocketServer command validation", () => {
 
   test("poll_timeline forwards a valid aggregation to the repository", async () => {
     const { server, repo } = makeServer();
-    const response = await server.run({ command: "poll_timeline", aggregation: "day" } as FailuresStreamSocketRequest);
+    const response = await server.run({
+      command: "poll_timeline",
+      aggregation: "day",
+    } as FailuresStreamSocketRequest);
 
     expect(response.success).toBe(true);
     expect(repo.lastTimelineQuery?.aggregation).toBe("day");
@@ -114,7 +135,10 @@ describe("FailuresStreamSocketServer command validation", () => {
 
   test("acknowledge rejects a non-integer id before touching the repository", async () => {
     const { server, repo } = makeServer();
-    const request = { command: "acknowledge", notificationIds: [1, 2.5] } as unknown as FailuresStreamSocketRequest;
+    const request = {
+      command: "acknowledge",
+      notificationIds: [1, 2.5],
+    } as unknown as FailuresStreamSocketRequest;
 
     await expect(server.run(request)).rejects.toThrow(/Invalid notification ID/);
     expect(repo.acknowledgedIds).toBeUndefined();
@@ -122,7 +146,10 @@ describe("FailuresStreamSocketServer command validation", () => {
 
   test("acknowledge forwards a valid id list and reports the count", async () => {
     const { server, repo } = makeServer();
-    const response = await server.run({ command: "acknowledge", notificationIds: [7, 8] } as FailuresStreamSocketRequest);
+    const response = await server.run({
+      command: "acknowledge",
+      notificationIds: [7, 8],
+    } as FailuresStreamSocketRequest);
 
     expect(response).toEqual({ success: true, acknowledgedCount: 2 });
     expect(repo.acknowledgedIds).toEqual([7, 8]);

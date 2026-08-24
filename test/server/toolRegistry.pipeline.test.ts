@@ -1,16 +1,27 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
-import { DefaultAfterToolCallHandler, ToolRegistry, ToolRegistryClass } from "../../src/server/toolRegistry";
+import {
+  DefaultAfterToolCallHandler,
+  ToolRegistry,
+  ToolRegistryClass,
+} from "../../src/server/toolRegistry";
 import type { BootedDevice } from "../../src/models";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
-import type { ObservationArtifactPayload, ObservationArtifactWriter } from "../../src/server/finalizeToolResponse";
+import type {
+  ObservationArtifactPayload,
+  ObservationArtifactWriter,
+} from "../../src/server/finalizeToolResponse";
 import { createStructuredToolResponse, stringifyToolResponse } from "../../src/utils/toolUtils";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { TelemetryRecorder } from "../../src/features/telemetry/TelemetryRecorder";
-import { getMcpRecordingStatus, resetMcpRecordingState, startMcpRecording } from "../../src/server/mcpRecordingManager";
+import {
+  getMcpRecordingStatus,
+  resetMcpRecordingState,
+  startMcpRecording,
+} from "../../src/server/mcpRecordingManager";
 import {
   stripToolResultStructuredContent,
   structuredContentOmissionReason,
@@ -52,7 +63,7 @@ describe("ToolRegistry device-aware pipeline", () => {
         embeddedSdkOnly: true,
         planExecutable: true,
         outputSchema: z.object({ success: z.boolean() }),
-      }
+      },
     );
 
     const tool = ToolRegistry.getAllTools({ includeUnavailable: true })[0];
@@ -73,7 +84,7 @@ describe("ToolRegistry device-aware pipeline", () => {
         supportsProgress: true,
         debugOnly: true,
         outputSchema: z.object({ success: z.boolean() }),
-      }
+      },
     );
 
     const tool = ToolRegistry.getAllTools({ includeUnavailable: true })[0];
@@ -143,7 +154,7 @@ describe("ToolRegistry device-aware pipeline", () => {
         events.push("handler");
         return { success: true };
       },
-      { supportsProgress: true }
+      { supportsProgress: true },
     );
 
     const tool = ToolRegistry.getTool("pipelineProbe")!;
@@ -174,14 +185,20 @@ describe("ToolRegistry device-aware pipeline", () => {
         "bindFailureProbe",
         "Bind failure probe",
         z.object({}),
-        async () => ({ success: true })
+        async () => ({ success: true }),
       );
 
       const tool = registry.getTool("bindFailureProbe")!;
-      await expect(tool.handler({ platform: "android", sessionUuid: "session-1" })).resolves.toEqual({ success: true });
-      expect(log.at("debug")).toContainEqual(expect.objectContaining({
-        message: expect.stringContaining("[ToolRegistry] Best-effort CtrlProxy session bind skipped for bindFailureProbe: Error: bind unavailable"),
-      }));
+      await expect(
+        tool.handler({ platform: "android", sessionUuid: "session-1" }),
+      ).resolves.toEqual({ success: true });
+      expect(log.at("debug")).toContainEqual(
+        expect.objectContaining({
+          message: expect.stringContaining(
+            "[ToolRegistry] Best-effort CtrlProxy session bind skipped for bindFailureProbe: Error: bind unavailable",
+          ),
+        }),
+      );
     } finally {
       (AndroidCtrlProxyClient as any).getInstance = originalGetInstance;
     }
@@ -235,21 +252,21 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
           node: {
             "resource-id": "com.example:id/root",
             "view-id": "com.example:id/root",
-            "node": [
+            node: [
               {
                 "resource-id": overlayId,
                 "view-id": overlayId,
-                "bounds": { left: 850, top: 1500, right: 1030, bottom: 1680 },
+                bounds: { left: 850, top: 1500, right: 1030, bottom: 1680 },
                 "content-desc": "Compose floating action button",
               },
               ...Array.from({ length: 900 }, (_, index) => ({
                 "resource-id": `com.example:id/card_${index}`,
                 "view-id": `com.example:id/card_${index}`,
-                "text": `Occlusion-heavy card row ${index} ${"detail ".repeat(12)}`,
-                "bounds": { left: 24, top: index * 4, right: 1056, bottom: index * 4 + 120 },
-                "occlusionState": "partial",
-                "occludedBy": "Compose floating action button",
-                "occludedByViewId": overlayId,
+                text: `Occlusion-heavy card row ${index} ${"detail ".repeat(12)}`,
+                bounds: { left: 24, top: index * 4, right: 1056, bottom: index * 4 + 120 },
+                occlusionState: "partial",
+                occludedBy: "Compose floating action button",
+                occludedByViewId: overlayId,
               })),
             ],
           },
@@ -304,7 +321,9 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
         tool: "observe",
       },
     });
-    expect(result.finalizedResponse.content[0].text).toBe(stringifyToolResponse(result.finalizedResponse.structuredContent));
+    expect(result.finalizedResponse.content[0].text).toBe(
+      stringifyToolResponse(result.finalizedResponse.structuredContent),
+    );
   });
 
   test("oversized occlusion-heavy observe auto-spills to an artifact when no directory is configured", async () => {
@@ -340,7 +359,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       });
       const wireResult = stripToolResultStructuredContent(
         result.finalizedResponse,
-        structuredContentOmissionReason(true)
+        structuredContentOmissionReason(true),
       );
 
       expect(requestedDirectories).toEqual([expect.stringContaining("tool_outputs")]);
@@ -395,13 +414,15 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     expect(writer.writes).toHaveLength(0);
     expect((result.finalizedResponse.structuredContent as any).viewHierarchy).toBeDefined();
     expect((result.finalizedResponse.structuredContent as any).artifact).toBeUndefined();
-    expect(result.finalizedResponse.content[0].text).toBe(stringifyToolResponse(result.finalizedResponse.structuredContent));
+    expect(result.finalizedResponse.content[0].text).toBe(
+      stringifyToolResponse(result.finalizedResponse.structuredContent),
+    );
   });
 
   test("internal calls bypass configured artifact writers", async () => {
     const writer = new FakeObservationArtifactWriter();
     const requestedDirectories: string[] = [];
-    const handler = new DefaultAfterToolCallHandler(outputDirectory => {
+    const handler = new DefaultAfterToolCallHandler((outputDirectory) => {
       requestedDirectories.push(outputDirectory);
       return writer;
     });
@@ -444,17 +465,19 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
     try {
       const handler = new DefaultAfterToolCallHandler(() => writer);
 
-      await expect(handler.handle({
-        name: "observe",
-        args: {},
-        device: undefined,
-        internalCall: false,
-        response: createStructuredToolResponse(makeObservePayload()),
-        sessionUuid: "session-1",
-        shouldResolveDevice: false,
-        timer,
-        toolStartMs: 20,
-      })).rejects.toThrow("artifact disk is full");
+      await expect(
+        handler.handle({
+          name: "observe",
+          args: {},
+          device: undefined,
+          internalCall: false,
+          response: createStructuredToolResponse(makeObservePayload()),
+          sessionUuid: "session-1",
+          shouldResolveDevice: false,
+          timer,
+          toolStartMs: 20,
+        }),
+      ).rejects.toThrow("artifact disk is full");
 
       expect(telemetryEvents).toHaveLength(0);
       expect(getMcpRecordingStatus(timer)?.stepCount).toBe(0);
@@ -480,17 +503,19 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       // and message live inside a nested `error` object.
       const response = {
         isError: true,
-        content: [{
-          type: "text" as const,
-          text: JSON.stringify({
-            success: false,
-            message: "Failed to kill android device: Emulator is not running",
-            error: {
-              code: "device_already_stopped",
+        content: [
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              success: false,
               message: "Failed to kill android device: Emulator is not running",
-            },
-          }),
-        }],
+              error: {
+                code: "device_already_stopped",
+                message: "Failed to kill android device: Emulator is not running",
+              },
+            }),
+          },
+        ],
       };
 
       await handler.handle({
@@ -508,7 +533,7 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
       expect(telemetryEvents).toHaveLength(1);
       expect(telemetryEvents[0].success).toBe(false);
       expect(telemetryEvents[0].error).toBe(
-        "device_already_stopped: Failed to kill android device: Emulator is not running"
+        "device_already_stopped: Failed to kill android device: Emulator is not running",
       );
     } finally {
       (TelemetryRecorder as any).getInstance = originalGetInstance;

@@ -32,31 +32,31 @@ describe("Plan Utils", () => {
           timestamp: "2023-01-01T10:00:00.000Z",
           tool: "launchApp",
           params: { packageName: "com.example.app" },
-          result: { success: true }
+          result: { success: true },
         },
         {
           timestamp: "2023-01-01T10:00:01.000Z",
           tool: "observe",
           params: { withViewHierarchy: true },
-          result: { success: true }
+          result: { success: true },
         },
         {
           timestamp: "2023-01-01T10:00:02.000Z",
           tool: "tapOnText",
           params: { text: "Login" },
-          result: { success: true }
+          result: { success: true },
         },
         {
           timestamp: "2023-01-01T10:00:03.000Z",
           tool: "observe",
           params: { withViewHierarchy: true },
-          result: { success: true }
-        }
+          result: { success: true },
+        },
       ];
 
       // Write log entries to files
       const logFile = path.join(testDir, "test.json");
-      const logContent = logEntries.map(entry => JSON.stringify(entry)).join("\n");
+      const logContent = logEntries.map((entry) => JSON.stringify(entry)).join("\n");
       await fs.writeFile(logFile, logContent);
 
       // Export plan
@@ -77,24 +77,24 @@ describe("Plan Utils", () => {
           timestamp: "2023-01-01T10:00:00.000Z",
           tool: "startDevice",
           params: { avdName: "test" },
-          result: { success: true }
+          result: { success: true },
         },
         {
           timestamp: "2023-01-01T10:00:00.500Z",
           tool: "deleteDevice",
           params: { operationId: "35e6f783-b794-47b8-b8a1-8619677820f0" },
-          result: { success: true }
+          result: { success: true },
         },
         {
           timestamp: "2023-01-01T10:00:01.000Z",
           tool: "launchApp",
           params: { packageName: "com.example.app" },
-          result: { success: true }
-        }
+          result: { success: true },
+        },
       ];
 
       const logFile = path.join(testDir, "test.json");
-      const logContent = logEntries.map(entry => JSON.stringify(entry)).join("\n");
+      const logContent = logEntries.map((entry) => JSON.stringify(entry)).join("\n");
       await fs.writeFile(logFile, logContent);
 
       const outputPath = path.join(testDir, "test-plan.yaml");
@@ -113,24 +113,24 @@ describe("Plan Utils", () => {
           timestamp: "2023-01-01T10:00:00.000Z",
           tool: "observe",
           params: { withViewHierarchy: true },
-          result: { success: true }
+          result: { success: true },
         },
         {
           timestamp: "2023-01-01T10:00:01.000Z",
           tool: "tapOnText",
           params: { text: "Login" },
-          result: { success: true }
+          result: { success: true },
         },
         {
           timestamp: "2023-01-01T10:00:02.000Z",
           tool: "observe",
           params: { withViewHierarchy: false },
-          result: { success: true }
-        }
+          result: { success: true },
+        },
       ];
 
       const logFile = path.join(testDir, "test.json");
-      const logContent = logEntries.map(entry => JSON.stringify(entry)).join("\n");
+      const logContent = logEntries.map((entry) => JSON.stringify(entry)).join("\n");
       await fs.writeFile(logFile, logContent);
 
       const outputPath = path.join(testDir, "test-plan.yaml");
@@ -141,7 +141,7 @@ describe("Plan Utils", () => {
 
       // Check that the last observe has the correct params
       const planLines = result.planContent!.split("\n");
-      const observeLines = planLines.filter(line => line.includes("withViewHierarchy"));
+      const observeLines = planLines.filter((line) => line.includes("withViewHierarchy"));
       expect(observeLines.length).toBe(1);
       expect(observeLines[0]).toContain("false");
     });
@@ -160,12 +160,12 @@ describe("Plan Utils", () => {
           timestamp: "2023-01-01T10:00:00.000Z",
           tool: "launchApp",
           params: { packageName: "com.example.app" },
-          result: { success: true }
-        }
+          result: { success: true },
+        },
       ];
 
       const logFile = path.join(testDir, "test.json");
-      const logContent = logEntries.map(entry => JSON.stringify(entry)).join("\n");
+      const logContent = logEntries.map((entry) => JSON.stringify(entry)).join("\n");
       await fs.writeFile(logFile, logContent);
 
       const outputPath = path.join(testDir, "plan.yaml");
@@ -295,7 +295,7 @@ steps:
     test("should return success for empty plan", async () => {
       const plan: Plan = {
         name: "Empty Plan",
-        steps: []
+        steps: [],
       };
 
       const result = await executePlan(plan, 0);
@@ -308,7 +308,7 @@ steps:
     test("should start from step 0 when no startStep is provided", async () => {
       const plan: Plan = {
         name: "Test Plan",
-        steps: []
+        steps: [],
       };
 
       const result = await executePlan(plan, 0);
@@ -321,7 +321,7 @@ steps:
     test("should start from step 0 when startStep is negative", async () => {
       const plan: Plan = {
         name: "Test Plan",
-        steps: []
+        steps: [],
       };
 
       const result = await executePlan(plan, -5);
@@ -334,7 +334,7 @@ steps:
     test("should start from step 0 when startStep is not a number", async () => {
       const plan: Plan = {
         name: "Test Plan",
-        steps: []
+        steps: [],
       };
 
       // @ts-ignore - Intentionally passing non-number for testing
@@ -350,8 +350,8 @@ steps:
         name: "Test Plan",
         steps: [
           { tool: "observe", params: { withViewHierarchy: false } },
-          { tool: "observe", params: { withViewHierarchy: true } }
-        ]
+          { tool: "observe", params: { withViewHierarchy: true } },
+        ],
       };
 
       const result = await executePlan(plan, 5);
@@ -364,9 +364,7 @@ steps:
     test("should throw error when startStep equals total steps", async () => {
       const plan: Plan = {
         name: "Test Plan",
-        steps: [
-          { tool: "observe", params: { withViewHierarchy: false } }
-        ]
+        steps: [{ tool: "observe", params: { withViewHierarchy: false } }],
       };
 
       const result = await executePlan(plan, 1);
@@ -381,8 +379,8 @@ steps:
         name: "Test Plan",
         steps: [
           { tool: "unknownTool1", params: {} },
-          { tool: "unknownTool2", params: {} }
-        ]
+          { tool: "unknownTool2", params: {} },
+        ],
       };
 
       const result = await executePlan(plan, 0);
@@ -399,8 +397,8 @@ steps:
         name: "Test Plan",
         steps: [
           { tool: "skippedTool", params: {} },
-          { tool: "unknownTool", params: {} }
-        ]
+          { tool: "unknownTool", params: {} },
+        ],
       };
 
       const result = await executePlan(plan, 1);
@@ -416,9 +414,7 @@ steps:
     test("should handle valid startStep for single step plan", async () => {
       const plan: Plan = {
         name: "Single Step Plan",
-        steps: [
-          { tool: "unknownTool", params: {} }
-        ]
+        steps: [{ tool: "unknownTool", params: {} }],
       };
 
       const result = await executePlan(plan, 0);

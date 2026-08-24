@@ -35,5 +35,5 @@ export function appendObserveError(result: ObserveResult, err: ObserveError): vo
     }
   }
   result.errors.push(err);
-  result.error = result.errors.map(e => e.message).join("; ");
+  result.error = result.errors.map((e) => e.message).join("; ");
 }

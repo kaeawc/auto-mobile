@@ -16,13 +16,13 @@ import {
   createIosObserveRoundTripInspector,
   createIosCtrlProxyRunnerInspector,
   IOS_RUNNER_FEATURE_COMMANDS,
-  runIosChecks
+  runIosChecks,
 } from "../../src/doctor/checks/ios";
 import type {
   IosObserveRoundTripInspection,
   IosObserveRoundTripInspectorHooks,
   IosRunnerInspection,
-  IosRunnerInspectorHooks
+  IosRunnerInspectorHooks,
 } from "../../src/doctor/checks/ios";
 import type { ExecResult } from "../../src/models";
 import type { SecurityClient } from "../../src/utils/ios-cmdline-tools/SecurityClient";
@@ -39,21 +39,21 @@ const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   },
   includes(searchString: string) {
     return this.stdout.includes(searchString);
-  }
+  },
 });
 
 const baseDependencies: IosDoctorDependencies = {
   platform: () => "darwin",
   execFile: async () => createExecResult(""),
   xcodebuild: {
-    executeCommand: async () => createExecResult("")
+    executeCommand: async () => createExecResult(""),
   },
   fileExists: () => true,
   readDir: async () => [],
   homedir: () => "/Users/test",
   securityClient: {
     getDiagnostics: async () => ({ available: true, version: null }),
-    listCodeSigningIdentities: async () => []
+    listCodeSigningIdentities: async () => [],
   } as SecurityClient,
   logger: new FakeLogger(),
   createSimctlClient: () => ({
@@ -61,7 +61,7 @@ const baseDependencies: IosDoctorDependencies = {
     executeCommand: async () => createExecResult(""),
     isAvailable: async () => true,
     isSimulatorRunning: async () => false,
-    startSimulator: async () => ({} as any),
+    startSimulator: async () => ({}) as any,
     killSimulator: async () => {},
     waitForSimulatorReady: async () => ({ name: "sim", platform: "ios", deviceId: "123" }),
     listSimulatorImages: async () => [],
@@ -76,14 +76,14 @@ const baseDependencies: IosDoctorDependencies = {
     launchApp: async () => ({ success: true }),
     terminateApp: async () => {},
     getScreenSize: async () => ({ width: 100, height: 100 }),
-    setAppearance: async () => {}
+    setAppearance: async () => {},
   }),
   runnerInspector: {
-    inspectBootedRunners: async () => []
+    inspectBootedRunners: async () => [],
   },
   observeRoundTripInspector: {
-    inspectBootedObserveRoundTrips: async () => []
-  }
+    inspectBootedObserveRoundTrips: async () => [],
+  },
 };
 
 describe("iOS doctor checks", () => {
@@ -91,7 +91,9 @@ describe("iOS doctor checks", () => {
     test("passes when version meets minimum", async () => {
       const result = await checkXcodeInstallation("15.0", {
         ...baseDependencies,
-        xcodebuild: { executeCommand: async () => createExecResult("Xcode 15.2\nBuild version 15C500b") }
+        xcodebuild: {
+          executeCommand: async () => createExecResult("Xcode 15.2\nBuild version 15C500b"),
+        },
       });
 
       expect(result.status).toBe("pass");
@@ -102,7 +104,9 @@ describe("iOS doctor checks", () => {
     test("fails when Xcode version is below minimum", async () => {
       const result = await checkXcodeInstallation("15.0", {
         ...baseDependencies,
-        xcodebuild: { executeCommand: async () => createExecResult("Xcode 14.2\nBuild version 14C18") }
+        xcodebuild: {
+          executeCommand: async () => createExecResult("Xcode 14.2\nBuild version 14C18"),
+        },
       });
 
       expect(result.status).toBe("fail");
@@ -112,7 +116,7 @@ describe("iOS doctor checks", () => {
     test("fails when unable to determine version", async () => {
       const result = await checkXcodeInstallation("15.0", {
         ...baseDependencies,
-        xcodebuild: { executeCommand: async () => createExecResult("some unexpected output") }
+        xcodebuild: { executeCommand: async () => createExecResult("some unexpected output") },
       });
 
       expect(result.status).toBe("fail");
@@ -122,7 +126,7 @@ describe("iOS doctor checks", () => {
     test("skips when not on darwin", async () => {
       const result = await checkXcodeInstallation("15.0", {
         ...baseDependencies,
-        platform: () => "linux"
+        platform: () => "linux",
       });
 
       expect(result.status).toBe("skip");
@@ -132,9 +136,11 @@ describe("iOS doctor checks", () => {
     test("fails when xcodebuild throws", async () => {
       const result = await checkXcodeInstallation("15.0", {
         ...baseDependencies,
-        xcodebuild: { executeCommand: async () => {
-          throw new Error("xcodebuild not found");
-        } }
+        xcodebuild: {
+          executeCommand: async () => {
+            throw new Error("xcodebuild not found");
+          },
+        },
       });
 
       expect(result.status).toBe("fail");
@@ -145,11 +151,14 @@ describe("iOS doctor checks", () => {
 
   describe("checkXcodeCommandLineTools", () => {
     test("passes when path exists and contains CommandLineTools", async () => {
-      const result = await checkXcodeCommandLineTools({}, {
-        ...baseDependencies,
-        execFile: async () => createExecResult("/Library/Developer/CommandLineTools\n"),
-        fileExists: () => true
-      });
+      const result = await checkXcodeCommandLineTools(
+        {},
+        {
+          ...baseDependencies,
+          execFile: async () => createExecResult("/Library/Developer/CommandLineTools\n"),
+          fileExists: () => true,
+        },
+      );
 
       expect(result.status).toBe("pass");
       expect(result.message).toBe("Command Line Tools installed");
@@ -157,11 +166,14 @@ describe("iOS doctor checks", () => {
     });
 
     test("passes when Xcode developer dir is selected", async () => {
-      const result = await checkXcodeCommandLineTools({}, {
-        ...baseDependencies,
-        execFile: async () => createExecResult("/Applications/Xcode.app/Contents/Developer\n"),
-        fileExists: () => true
-      });
+      const result = await checkXcodeCommandLineTools(
+        {},
+        {
+          ...baseDependencies,
+          execFile: async () => createExecResult("/Applications/Xcode.app/Contents/Developer\n"),
+          fileExists: () => true,
+        },
+      );
 
       expect(result.status).toBe("pass");
       expect(result.message).toBe("Xcode developer directory selected");
@@ -169,33 +181,38 @@ describe("iOS doctor checks", () => {
     });
 
     test("fails when path doesn't exist", async () => {
-      const result = await checkXcodeCommandLineTools({}, {
-        ...baseDependencies,
-        execFile: async () => createExecResult("/Library/Developer/CommandLineTools\n"),
-        fileExists: () => false
-      });
+      const result = await checkXcodeCommandLineTools(
+        {},
+        {
+          ...baseDependencies,
+          execFile: async () => createExecResult("/Library/Developer/CommandLineTools\n"),
+          fileExists: () => false,
+        },
+      );
 
       expect(result.status).toBe("fail");
       expect(result.message).toContain("path missing");
     });
 
     test("skips when not on darwin", async () => {
-      const result = await checkXcodeCommandLineTools({}, {
-        ...baseDependencies,
-        platform: () => "linux"
-      });
+      const result = await checkXcodeCommandLineTools(
+        {},
+        {
+          ...baseDependencies,
+          platform: () => "linux",
+        },
+      );
 
       expect(result.status).toBe("skip");
       expect(result.message).toContain("requires macOS");
     });
-
   });
 
   describe("checkXcrunAvailable", () => {
     test("passes when xcrun works", async () => {
       const result = await checkXcrunAvailable({
         ...baseDependencies,
-        execFile: async () => createExecResult("xcrun version 75.")
+        execFile: async () => createExecResult("xcrun version 75."),
       });
 
       expect(result.status).toBe("pass");
@@ -207,7 +224,7 @@ describe("iOS doctor checks", () => {
         ...baseDependencies,
         execFile: async () => {
           throw new Error("xcrun: error: unable to find utility");
-        }
+        },
       });
 
       expect(result.status).toBe("fail");
@@ -217,7 +234,7 @@ describe("iOS doctor checks", () => {
     test("skips when not on darwin", async () => {
       const result = await checkXcrunAvailable({
         ...baseDependencies,
-        platform: () => "win32"
+        platform: () => "win32",
       });
 
       expect(result.status).toBe("skip");
@@ -231,8 +248,8 @@ describe("iOS doctor checks", () => {
         ...baseDependencies,
         createSimctlClient: () => ({
           ...baseDependencies.createSimctlClient(),
-          isAvailable: async () => true
-        })
+          isAvailable: async () => true,
+        }),
       });
 
       expect(result.status).toBe("pass");
@@ -244,8 +261,8 @@ describe("iOS doctor checks", () => {
         ...baseDependencies,
         createSimctlClient: () => ({
           ...baseDependencies.createSimctlClient(),
-          isAvailable: async () => false
-        })
+          isAvailable: async () => false,
+        }),
       });
 
       expect(result.status).toBe("fail");
@@ -260,7 +277,7 @@ describe("iOS doctor checks", () => {
         createSimctlClient: () => {
           createSimctlClientCalls++;
           throw new Error("createSimctlClient should not be called on non-darwin");
-        }
+        },
       });
 
       expect(result.status).toBe("skip");
@@ -278,7 +295,7 @@ describe("iOS doctor checks", () => {
         createSimctlClient: () => {
           createSimctlClientCalls++;
           throw new Error("createSimctlClient should not be called on non-darwin");
-        }
+        },
       });
 
       expect(result.status).toBe("skip");
@@ -291,8 +308,8 @@ describe("iOS doctor checks", () => {
         ...baseDependencies,
         createSimctlClient: () => ({
           ...baseDependencies.createSimctlClient(),
-          getRuntimes: async () => []
-        })
+          getRuntimes: async () => [],
+        }),
       });
 
       expect(result.status).toBe("fail");
@@ -312,10 +329,10 @@ describe("iOS doctor checks", () => {
               identifier: "com.apple.CoreSimulator.SimRuntime.iOS-17-0",
               version: "17.0",
               isAvailable: true,
-              name: "iOS 17.0"
-            }
-          ]
-        })
+              name: "iOS 17.0",
+            },
+          ],
+        }),
       });
 
       expect(result.status).toBe("pass");
@@ -329,8 +346,8 @@ describe("iOS doctor checks", () => {
         ...baseDependencies,
         securityClient: {
           ...baseDependencies.securityClient,
-          listCodeSigningIdentities: async () => []
-        } as SecurityClient
+          listCodeSigningIdentities: async () => [],
+        } as SecurityClient,
       });
 
       expect(result.status).toBe("warn");
@@ -342,8 +359,10 @@ describe("iOS doctor checks", () => {
         ...baseDependencies,
         securityClient: {
           ...baseDependencies.securityClient,
-          listCodeSigningIdentities: async () => [{ fingerprint: "ABC123", name: "Apple Development: test@test.com" }]
-        } as SecurityClient
+          listCodeSigningIdentities: async () => [
+            { fingerprint: "ABC123", name: "Apple Development: test@test.com" },
+          ],
+        } as SecurityClient,
       });
 
       expect(result.status).toBe("pass");
@@ -365,11 +384,11 @@ describe("iOS doctor checks", () => {
         ...baseDependencies,
         securityClient: {
           ...baseDependencies.securityClient,
-          getDiagnostics: async options => {
+          getDiagnostics: async (options) => {
             timeoutMs = options?.timeoutMs;
             return { available: true, version: null };
-          }
-        } as SecurityClient
+          },
+        } as SecurityClient,
       });
 
       expect(timeoutMs).toBe(5000);
@@ -380,8 +399,8 @@ describe("iOS doctor checks", () => {
         ...baseDependencies,
         securityClient: {
           ...baseDependencies.securityClient,
-          getDiagnostics: async () => ({ available: false, version: null })
-        } as SecurityClient
+          getDiagnostics: async () => ({ available: false, version: null }),
+        } as SecurityClient,
       });
 
       expect(result.status).toBe("fail");
@@ -397,8 +416,8 @@ describe("iOS doctor checks", () => {
           ...baseDependencies.securityClient,
           getDiagnostics: async () => {
             throw new Error("security probe failed");
-          }
-        } as SecurityClient
+          },
+        } as SecurityClient,
       });
 
       expect(result.status).toBe("fail");
@@ -410,7 +429,7 @@ describe("iOS doctor checks", () => {
     test("warns when no Apple Developer account is configured", async () => {
       const result = await checkAppleDeveloperAccount({
         ...baseDependencies,
-        readDir: async () => []
+        readDir: async () => [],
       });
 
       expect(result.status).toBe("warn");
@@ -420,7 +439,7 @@ describe("iOS doctor checks", () => {
     test("passes when account entries exist", async () => {
       const result = await checkAppleDeveloperAccount({
         ...baseDependencies,
-        readDir: async () => ["account.plist"]
+        readDir: async () => ["account.plist"],
       });
 
       expect(result.status).toBe("pass");
@@ -432,7 +451,7 @@ describe("iOS doctor checks", () => {
     test("passes when profiles exist", async () => {
       const result = await checkProvisioningProfiles({
         ...baseDependencies,
-        readDir: async () => ["dev.mobileprovision", "dist.mobileprovision"]
+        readDir: async () => ["dev.mobileprovision", "dist.mobileprovision"],
       });
 
       expect(result.status).toBe("pass");
@@ -443,7 +462,7 @@ describe("iOS doctor checks", () => {
     test("warns when no profiles", async () => {
       const result = await checkProvisioningProfiles({
         ...baseDependencies,
-        readDir: async () => []
+        readDir: async () => [],
       });
 
       expect(result.status).toBe("warn");
@@ -453,7 +472,7 @@ describe("iOS doctor checks", () => {
     test("skips when not on darwin", async () => {
       const result = await checkProvisioningProfiles({
         ...baseDependencies,
-        platform: () => "linux"
+        platform: () => "linux",
       });
 
       expect(result.status).toBe("skip");
@@ -469,9 +488,9 @@ describe("iOS doctor checks", () => {
           ...baseDependencies.createSimctlClient(),
           getBootedSimulators: async () => [
             { name: "iPhone 15", platform: "ios", deviceId: "ABC-123" },
-            { name: "iPad Air", platform: "ios", deviceId: "DEF-456" }
-          ]
-        })
+            { name: "iPad Air", platform: "ios", deviceId: "DEF-456" },
+          ],
+        }),
       });
 
       expect(result.status).toBe("pass");
@@ -486,8 +505,8 @@ describe("iOS doctor checks", () => {
         ...baseDependencies,
         createSimctlClient: () => ({
           ...baseDependencies.createSimctlClient(),
-          getBootedSimulators: async () => []
-        })
+          getBootedSimulators: async () => [],
+        }),
       });
 
       expect(result.status).toBe("pass");
@@ -503,7 +522,7 @@ describe("iOS doctor checks", () => {
         createSimctlClient: () => {
           createSimctlClientCalls++;
           throw new Error("createSimctlClient should not be called on non-darwin");
-        }
+        },
       });
 
       expect(result.status).toBe("skip");
@@ -522,7 +541,7 @@ describe("iOS doctor checks", () => {
       const result = await checkXcodeInstallation("15.0", {
         ...baseDependencies,
         logger,
-        xcodebuild: { executeCommand: throwingExecFile }
+        xcodebuild: { executeCommand: throwingExecFile },
       });
 
       expect(result.status).toBe("fail");
@@ -533,11 +552,14 @@ describe("iOS doctor checks", () => {
 
     test("checkXcodeCommandLineTools logs the underlying error before returning fail", async () => {
       const logger = new FakeLogger();
-      const result = await checkXcodeCommandLineTools({}, {
-        ...baseDependencies,
-        logger,
-        execFile: throwingExecFile
-      });
+      const result = await checkXcodeCommandLineTools(
+        {},
+        {
+          ...baseDependencies,
+          logger,
+          execFile: throwingExecFile,
+        },
+      );
 
       expect(result.status).toBe("fail");
       expect(logger.at("warn").length).toBeGreaterThan(0);
@@ -548,7 +570,7 @@ describe("iOS doctor checks", () => {
       const result = await checkXcrunAvailable({
         ...baseDependencies,
         logger,
-        execFile: throwingExecFile
+        execFile: throwingExecFile,
       });
 
       expect(result.status).toBe("fail");
@@ -562,7 +584,7 @@ describe("iOS doctor checks", () => {
         logger,
         createSimctlClient: () => {
           throw new Error("simctl exploded");
-        }
+        },
       });
 
       expect(result.status).toBe("fail");
@@ -579,8 +601,8 @@ describe("iOS doctor checks", () => {
           isAvailable: async () => true,
           getRuntimes: async () => {
             throw new Error("runtimes exploded");
-          }
-        })
+          },
+        }),
       });
 
       expect(result.status).toBe("fail");
@@ -596,8 +618,8 @@ describe("iOS doctor checks", () => {
           ...baseDependencies.securityClient,
           listCodeSigningIdentities: async () => {
             throw new Error("security exploded");
-          }
-        } as SecurityClient
+          },
+        } as SecurityClient,
       });
 
       expect(result.status).toBe("warn");
@@ -611,7 +633,7 @@ describe("iOS doctor checks", () => {
         logger,
         readDir: async () => {
           throw new Error("home dir unreadable");
-        }
+        },
       });
 
       expect(result.status).toBe("warn");
@@ -625,7 +647,7 @@ describe("iOS doctor checks", () => {
         logger,
         readDir: async () => {
           throw new Error("profiles unreadable");
-        }
+        },
       });
 
       expect(result.status).toBe("warn");
@@ -639,7 +661,7 @@ describe("iOS doctor checks", () => {
         logger,
         createSimctlClient: () => {
           throw new Error("booted lookup failed");
-        }
+        },
       });
 
       expect(result.status).toBe("skip");
@@ -654,11 +676,11 @@ describe("checkIosCtrlProxyRunner", () => {
     ...IOS_RUNNER_FEATURE_COMMANDS,
     "request_hierarchy",
     "request_screenshot",
-    "request_tap_coordinates"
+    "request_tap_coordinates",
   ];
   // Remove a required feature command so the stale fixture remains meaningfully
   // different from a fresh runner even while append has a compatibility fallback.
-  const STALE_COMMANDS = FRESH_COMMANDS.filter(command => command !== "request_shake");
+  const STALE_COMMANDS = FRESH_COMMANDS.filter((command) => command !== "request_shake");
 
   const inspection = (over: Partial<IosRunnerInspection> = {}): IosRunnerInspection => ({
     deviceId: "SIM-1",
@@ -666,12 +688,12 @@ describe("checkIosCtrlProxyRunner", () => {
     installed: true,
     running: true,
     supportedCommands: [...FRESH_COMMANDS],
-    ...over
+    ...over,
   });
 
   const withRunners = (inspections: IosRunnerInspection[]) => ({
     ...baseDependencies,
-    runnerInspector: { inspectBootedRunners: async () => inspections }
+    runnerInspector: { inspectBootedRunners: async () => inspections },
   });
 
   test("passes when a booted runner advertises every feature command", async () => {
@@ -719,7 +741,7 @@ describe("checkIosCtrlProxyRunner", () => {
 
   test("warns and lists missing commands when the runner is stale", async () => {
     const result = await checkIosCtrlProxyRunner(
-      withRunners([inspection({ supportedCommands: [...STALE_COMMANDS] })])
+      withRunners([inspection({ supportedCommands: [...STALE_COMMANDS] })]),
     );
 
     expect(result.status).toBe("warn");
@@ -734,7 +756,7 @@ describe("checkIosCtrlProxyRunner", () => {
 
   test("reports unknown when the runner is installed but not running", async () => {
     const result = await checkIosCtrlProxyRunner(
-      withRunners([inspection({ running: false, supportedCommands: null })])
+      withRunners([inspection({ running: false, supportedCommands: null })]),
     );
 
     expect(result.status).toBe("warn");
@@ -744,7 +766,7 @@ describe("checkIosCtrlProxyRunner", () => {
 
   test("reports unknown when the runner is running but unreachable", async () => {
     const result = await checkIosCtrlProxyRunner(
-      withRunners([inspection({ supportedCommands: null })])
+      withRunners([inspection({ supportedCommands: null })]),
     );
 
     expect(result.status).toBe("warn");
@@ -753,7 +775,7 @@ describe("checkIosCtrlProxyRunner", () => {
 
   test("reports unknown when the runner is not installed", async () => {
     const result = await checkIosCtrlProxyRunner(
-      withRunners([inspection({ installed: false, running: false, supportedCommands: null })])
+      withRunners([inspection({ installed: false, running: false, supportedCommands: null })]),
     );
 
     expect(result.status).toBe("warn");
@@ -769,7 +791,7 @@ describe("checkIosCtrlProxyRunner", () => {
   test("skips on non-macOS platforms", async () => {
     const result = await checkIosCtrlProxyRunner({
       ...baseDependencies,
-      platform: () => "linux"
+      platform: () => "linux",
     });
     expect(result.status).toBe("skip");
   });
@@ -778,8 +800,8 @@ describe("checkIosCtrlProxyRunner", () => {
     const result = await checkIosCtrlProxyRunner(
       withRunners([
         inspection({ deviceId: "SIM-A" }),
-        inspection({ deviceId: "SIM-B", supportedCommands: [...STALE_COMMANDS] })
-      ])
+        inspection({ deviceId: "SIM-B", supportedCommands: [...STALE_COMMANDS] }),
+      ]),
     );
 
     expect(result.status).toBe("warn");
@@ -795,8 +817,8 @@ describe("checkIosCtrlProxyRunner", () => {
       runnerInspector: {
         inspectBootedRunners: async () => {
           throw new Error("inspection failed");
-        }
-      }
+        },
+      },
     });
 
     expect(result.status).toBe("skip");
@@ -805,14 +827,14 @@ describe("checkIosCtrlProxyRunner", () => {
 
   test("runIosChecks includes the iOS CtrlProxy runner check", async () => {
     const results = await runIosChecks({}, baseDependencies);
-    const names = results.map(check => check.name);
+    const names = results.map((check) => check.name);
     expect(names).toContain("iOS CtrlProxy Runner");
   });
 });
 
 describe("checkIosObserveRoundTrip", () => {
   const inspection = (
-    over: Partial<IosObserveRoundTripInspection> = {}
+    over: Partial<IosObserveRoundTripInspection> = {},
   ): IosObserveRoundTripInspection => ({
     deviceId: "SIM-1",
     name: "iPhone 15",
@@ -822,14 +844,14 @@ describe("checkIosObserveRoundTrip", () => {
     screenSize: { width: 390, height: 844 },
     hierarchyError: null,
     elementCount: 7,
-    ...over
+    ...over,
   });
 
   const withRoundTrips = (inspections: IosObserveRoundTripInspection[]) => ({
     ...baseDependencies,
     observeRoundTripInspector: {
-      inspectBootedObserveRoundTrips: async () => inspections
-    }
+      inspectBootedObserveRoundTrips: async () => inspections,
+    },
   });
 
   test("passes when the client port matches the runner port and observe returns a usable hierarchy", async () => {
@@ -845,7 +867,7 @@ describe("checkIosObserveRoundTrip", () => {
 
   test("fails when the client port diverges from the runner serving port", async () => {
     const result = await checkIosObserveRoundTrip(
-      withRoundTrips([inspection({ runnerPort: 8765, clientPort: 8766 })])
+      withRoundTrips([inspection({ runnerPort: 8765, clientPort: 8766 })]),
     );
 
     expect(result.status).toBe("fail");
@@ -861,9 +883,9 @@ describe("checkIosObserveRoundTrip", () => {
           connected: false,
           screenSize: { width: 0, height: 0 },
           hierarchyError: "Failed to retrieve iOS view hierarchy from CtrlProxy iOS",
-          elementCount: 0
-        })
-      ])
+          elementCount: 0,
+        }),
+      ]),
     );
 
     expect(result.status).toBe("fail");
@@ -874,7 +896,7 @@ describe("checkIosObserveRoundTrip", () => {
 
   test("fails for a degenerate observe result with zero screen size", async () => {
     const result = await checkIosObserveRoundTrip(
-      withRoundTrips([inspection({ screenSize: { width: 0, height: 0 } })])
+      withRoundTrips([inspection({ screenSize: { width: 0, height: 0 } })]),
     );
 
     expect(result.status).toBe("fail");
@@ -883,7 +905,7 @@ describe("checkIosObserveRoundTrip", () => {
 
   test("fails when observe returns no elements from the known simulator screen", async () => {
     const result = await checkIosObserveRoundTrip(
-      withRoundTrips([inspection({ elementCount: 0 })])
+      withRoundTrips([inspection({ elementCount: 0 })]),
     );
 
     expect(result.status).toBe("fail");
@@ -899,7 +921,7 @@ describe("checkIosObserveRoundTrip", () => {
   test("skips on non-macOS platforms", async () => {
     const result = await checkIosObserveRoundTrip({
       ...baseDependencies,
-      platform: () => "linux"
+      platform: () => "linux",
     });
 
     expect(result.status).toBe("skip");
@@ -913,8 +935,8 @@ describe("checkIosObserveRoundTrip", () => {
       observeRoundTripInspector: {
         inspectBootedObserveRoundTrips: async () => {
           throw new Error("round trip failed");
-        }
-      }
+        },
+      },
     });
 
     expect(result.status).toBe("fail");
@@ -924,7 +946,7 @@ describe("checkIosObserveRoundTrip", () => {
 
   test("runIosChecks includes the iOS observe round-trip check", async () => {
     const results = await runIosChecks({}, baseDependencies);
-    const names = results.map(check => check.name);
+    const names = results.map((check) => check.name);
     expect(names).toContain("iOS Observe Round Trip");
   });
 });
@@ -933,32 +955,35 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
   const simctlReturning = (devices: { name: string; deviceId: string }[]) => ({
     ...baseDependencies.createSimctlClient(),
     isAvailable: async () => true,
-    getBootedSimulators: async () => devices.map(d => ({ name: d.name, platform: "ios" as const, deviceId: d.deviceId }))
+    getBootedSimulators: async () =>
+      devices.map((d) => ({ name: d.name, platform: "ios" as const, deviceId: d.deviceId })),
   });
 
   const runningManager = {
     isInstalled: async () => true,
     isRunning: async () => true,
     getServicePort: () => 8765,
-    getReportedRunnerPort: async () => 8765
+    getReportedRunnerPort: async () => 8765,
   };
 
   test("closes a probe client it created (no pre-existing client)", async () => {
     let closes = 0;
     const probe = {
       getSupportedCommands: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
-      close: async () => { closes += 1; }
+      close: async () => {
+        closes += 1;
+      },
     };
     const hooks: IosRunnerInspectorHooks = {
       getManager: () => runningManager,
       getExistingClient: () => null,
-      createClient: () => probe
+      createClient: () => probe,
     };
 
     const inspector = createIosCtrlProxyRunnerInspector(
       () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
       new FakeLogger(),
-      hooks
+      hooks,
     );
     const inspections = await inspector.inspectBootedRunners();
 
@@ -970,19 +995,24 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     let closes = 0;
     const existing = {
       getSupportedCommands: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
-      close: async () => { closes += 1; }
+      close: async () => {
+        closes += 1;
+      },
     };
     let created = false;
     const hooks: IosRunnerInspectorHooks = {
       getManager: () => runningManager,
       getExistingClient: () => existing,
-      createClient: () => { created = true; return existing; }
+      createClient: () => {
+        created = true;
+        return existing;
+      },
     };
 
     const inspector = createIosCtrlProxyRunnerInspector(
       () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
       new FakeLogger(),
-      hooks
+      hooks,
     );
     await inspector.inspectBootedRunners();
 
@@ -993,19 +1023,23 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
   test("closes the created probe client even when the command read throws", async () => {
     let closes = 0;
     const probe = {
-      getSupportedCommands: async () => { throw new Error("unreachable"); },
-      close: async () => { closes += 1; }
+      getSupportedCommands: async () => {
+        throw new Error("unreachable");
+      },
+      close: async () => {
+        closes += 1;
+      },
     };
     const hooks: IosRunnerInspectorHooks = {
       getManager: () => runningManager,
       getExistingClient: () => null,
-      createClient: () => probe
+      createClient: () => probe,
     };
 
     const inspector = createIosCtrlProxyRunnerInspector(
       () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
       new FakeLogger(),
-      hooks
+      hooks,
     );
     const inspections = await inspector.inspectBootedRunners();
 
@@ -1018,27 +1052,28 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
   const simctlReturning = (devices: { name: string; deviceId: string }[]) => ({
     ...baseDependencies.createSimctlClient(),
     isAvailable: async () => true,
-    getBootedSimulators: async () => devices.map(d => ({ name: d.name, platform: "ios" as const, deviceId: d.deviceId }))
+    getBootedSimulators: async () =>
+      devices.map((d) => ({ name: d.name, platform: "ios" as const, deviceId: d.deviceId })),
   });
 
   const runningManager = {
     isInstalled: async () => true,
     isRunning: async () => true,
     getServicePort: () => 8790,
-    getReportedRunnerPort: async () => 8790
+    getReportedRunnerPort: async () => 8790,
   };
   const viewHierarchy = {
     hierarchy: { node: { $: { text: "Home" } } },
     screenWidth: 390,
-    screenHeight: 844
+    screenHeight: 844,
   };
   const elementsBuilder = {
     build: () => ({
       clickable: [{ index: 0 }],
       scrollable: [],
       text: [{ index: 1 }],
-      media: []
-    })
+      media: [],
+    }),
   } as any;
 
   test("passes the manager service port to the probe factory and closes the probe", async () => {
@@ -1051,18 +1086,22 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
         requestedPorts.push(port);
         return {
           getConnectionPortForDiagnostics: () => port,
-          requestHierarchySync: async () => ({ hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any }),
+          requestHierarchySync: async () => ({
+            hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any,
+          }),
           convertToViewHierarchyResult: () => viewHierarchy as any,
-          close: async () => { closes += 1; }
+          close: async () => {
+            closes += 1;
+          },
         };
       },
-      elementsBuilder
+      elementsBuilder,
     };
 
     const inspector = createIosObserveRoundTripInspector(
       () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
       new FakeLogger(),
-      hooks
+      hooks,
     );
     const inspections = await inspector.inspectBootedObserveRoundTrips();
 
@@ -1076,7 +1115,7 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
       connected: true,
       screenSize: { width: 390, height: 844 },
       hierarchyError: null,
-      elementCount: 2
+      elementCount: 2,
     });
   });
 
@@ -1085,9 +1124,13 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
     let created = false;
     const existing = {
       getConnectionPortForDiagnostics: () => 8765,
-      requestHierarchySync: async () => ({ hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any }),
+      requestHierarchySync: async () => ({
+        hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any,
+      }),
       convertToViewHierarchyResult: () => viewHierarchy as any,
-      close: async () => { closes += 1; }
+      close: async () => {
+        closes += 1;
+      },
     };
     const hooks: IosObserveRoundTripInspectorHooks = {
       getManager: () => runningManager,
@@ -1096,13 +1139,13 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
         created = true;
         return existing;
       },
-      elementsBuilder
+      elementsBuilder,
     };
 
     const inspector = createIosObserveRoundTripInspector(
       () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
       new FakeLogger(),
-      hooks
+      hooks,
     );
     const inspections = await inspector.inspectBootedObserveRoundTrips();
 
@@ -1121,19 +1164,19 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
         return { hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any };
       },
       convertToViewHierarchyResult: () => viewHierarchy as any,
-      close: async () => {}
+      close: async () => {},
     };
     const hooks: IosObserveRoundTripInspectorHooks = {
       getManager: () => runningManager,
       getExistingClient: () => existing,
       createClient: () => existing,
-      elementsBuilder
+      elementsBuilder,
     };
 
     const inspector = createIosObserveRoundTripInspector(
       () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
       new FakeLogger(),
-      hooks
+      hooks,
     );
     const inspections = await inspector.inspectBootedObserveRoundTrips();
 
@@ -1147,20 +1190,20 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
         isInstalled: async () => true,
         isRunning: async () => false,
         getServicePort: () => 8790,
-        getReportedRunnerPort: async () => null
+        getReportedRunnerPort: async () => null,
       }),
       getExistingClient: () => null,
       createClient: () => {
         created = true;
         throw new Error("should not create client for stopped runner");
       },
-      elementsBuilder
+      elementsBuilder,
     };
 
     const inspector = createIosObserveRoundTripInspector(
       () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
       new FakeLogger(),
-      hooks
+      hooks,
     );
     const inspections = await inspector.inspectBootedObserveRoundTrips();
 
@@ -1178,19 +1221,19 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
         isInstalled: async () => true,
         isRunning: async () => false,
         getServicePort: () => 8767,
-        getReportedRunnerPort: async () => 8765
+        getReportedRunnerPort: async () => 8765,
       }),
       getExistingClient: () => null,
       createClient: () => {
         throw new Error("should not create client when runner unreachable on client port");
       },
-      elementsBuilder
+      elementsBuilder,
     };
 
     const inspector = createIosObserveRoundTripInspector(
       () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
       new FakeLogger(),
-      hooks
+      hooks,
     );
     const inspections = await inspector.inspectBootedObserveRoundTrips();
 
@@ -1207,19 +1250,19 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
         isInstalled: async () => true,
         isRunning: async () => false,
         getServicePort: () => 8767,
-        getReportedRunnerPort: async () => 8765
+        getReportedRunnerPort: async () => 8765,
       }),
       getExistingClient: () => null,
       createClient: () => {
         throw new Error("should not create client when runner unreachable on client port");
       },
-      elementsBuilder
+      elementsBuilder,
     };
 
     const inspector = createIosObserveRoundTripInspector(
       () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
       new FakeLogger(),
-      hooks
+      hooks,
     );
     const inspections = await inspector.inspectBootedObserveRoundTrips();
 
@@ -1236,22 +1279,24 @@ describe("createIosObserveRoundTripInspector lifecycle", () => {
         isInstalled: async () => true,
         isRunning: async () => true,
         getServicePort: () => 8790,
-        getReportedRunnerPort: async () => null
+        getReportedRunnerPort: async () => null,
       }),
       getExistingClient: () => null,
       createClient: (_device, port) => ({
         getConnectionPortForDiagnostics: () => port,
-        requestHierarchySync: async () => ({ hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any }),
+        requestHierarchySync: async () => ({
+          hierarchy: { updatedAt: 1, packageName: "SpringBoard", hierarchy: {} } as any,
+        }),
         convertToViewHierarchyResult: () => viewHierarchy as any,
-        close: async () => {}
+        close: async () => {},
       }),
-      elementsBuilder
+      elementsBuilder,
     };
 
     const inspector = createIosObserveRoundTripInspector(
       () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
       new FakeLogger(),
-      hooks
+      hooks,
     );
     const inspections = await inspector.inspectBootedObserveRoundTrips();
 

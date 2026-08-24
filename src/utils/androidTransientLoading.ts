@@ -1,7 +1,8 @@
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ElementParser } from "./interfaces/ElementParser";
 
-const RESOURCE_ID_LOADING_HINT = /progress_bar|loading_indicator|progress_indicator|shimmer|content_loading/i;
+const RESOURCE_ID_LOADING_HINT =
+  /progress_bar|loading_indicator|progress_indicator|shimmer|content_loading/i;
 
 const CLASS_LOADING_HINT =
   /ProgressBar$|ProgressIndicator|ShimmerFrameLayout|ContentLoadingProgressBar/i;
@@ -12,11 +13,11 @@ const CLASS_LOADING_HINT =
  */
 export function androidViewHierarchyIndicatesLikelyBlockingLoading(
   viewHierarchy: ViewHierarchyResult,
-  elementParser: ElementParser
+  elementParser: ElementParser,
 ): boolean {
   const roots = [
     ...elementParser.extractRootNodes(viewHierarchy),
-    ...elementParser.extractWindowRootNodes(viewHierarchy, "topmost-first")
+    ...elementParser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
   ];
 
   let found = false;

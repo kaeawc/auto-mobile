@@ -16,21 +16,21 @@ describe("Keyboard", () => {
   const testDevice: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    name: "Test Device"
+    name: "Test Device",
   };
 
   const iosDevice: BootedDevice = {
     deviceId: "ios-device",
     platform: "ios",
-    name: "iPhone"
+    name: "iPhone",
   };
 
   const baseHierarchy = (): ViewHierarchyResult => ({
     hierarchy: {
       node: {
-        $: {}
-      }
-    }
+        $: {},
+      },
+    },
   });
 
   const keyboardWindowHierarchy = (): ViewHierarchyResult => ({
@@ -38,19 +38,19 @@ describe("Keyboard", () => {
     windows: [
       {
         type: 2,
-        bounds: { left: 0, top: 1200, right: 1080, bottom: 1920 }
-      }
-    ]
+        bounds: { left: 0, top: 1200, right: 1080, bottom: 1920 },
+      },
+    ],
   });
 
   const keyboardNodeHierarchy = (): ViewHierarchyResult => ({
     hierarchy: {
       node: {
         $: {
-          "content-desc": "Delete"
-        }
-      }
-    }
+          "content-desc": "Delete",
+        },
+      },
+    },
   });
 
   const focusedInputHierarchy = (): ViewHierarchyResult => ({
@@ -59,10 +59,10 @@ describe("Keyboard", () => {
         $: {
           focused: "true",
           class: "android.widget.EditText",
-          bounds: { left: 10, top: 20, right: 210, bottom: 120 }
-        }
-      }
-    }
+          bounds: { left: 10, top: 20, right: 210, bottom: 120 },
+        },
+      },
+    },
   });
 
   beforeEach(() => {
@@ -81,9 +81,7 @@ describe("Keyboard", () => {
 
     expect(result.success).toBe(true);
     expect(result.open).toBe(true);
-    expect(result.bounds).toEqual([
-      { left: 0, top: 1200, right: 1080, bottom: 1920 }
-    ]);
+    expect(result.bounds).toEqual([{ left: 0, top: 1200, right: 1080, bottom: 1920 }]);
   });
 
   test("detect falls back to hierarchy when window info is missing", async () => {
@@ -137,7 +135,7 @@ describe("Keyboard", () => {
       baseHierarchy(),
       baseHierarchy(),
       baseHierarchy(),
-      keyboardWindowHierarchy()
+      keyboardWindowHierarchy(),
     ]);
     const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
 
@@ -153,7 +151,7 @@ describe("Keyboard", () => {
     fakeHierarchy.setResults([
       keyboardWindowHierarchy(),
       keyboardWindowHierarchy(),
-      baseHierarchy()
+      baseHierarchy(),
     ]);
     const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
 
@@ -231,7 +229,7 @@ describe("Keyboard", () => {
     const options = fakeHierarchy.getReadOptions();
     // The pre-action read is a plain read; every confirmation read is bounded.
     expect(options[0]).toBeUndefined();
-    const confirmationTimeouts = options.slice(1).map(option => option?.timeoutMs);
+    const confirmationTimeouts = options.slice(1).map((option) => option?.timeoutMs);
     expect(confirmationTimeouts[0]).toBe(2000);
     expect(confirmationTimeouts[1]).toBe(1900);
     expect(confirmationTimeouts[confirmationTimeouts.length - 1]).toBe(100);
@@ -260,18 +258,14 @@ describe("Keyboard", () => {
   });
 
   test("every confirmation read forces past the hierarchy cache", async () => {
-    fakeHierarchy.setResults([
-      focusedInputHierarchy(),
-      baseHierarchy(),
-      keyboardWindowHierarchy()
-    ]);
+    fakeHierarchy.setResults([focusedInputHierarchy(), baseHierarchy(), keyboardWindowHierarchy()]);
     const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
 
     await keyboard.execute("open");
 
     const confirmationOptions = fakeHierarchy.getReadOptions().slice(1);
     expect(confirmationOptions.length).toBe(2);
-    confirmationOptions.forEach(option => expect(option?.forceFresh).toBe(true));
+    confirmationOptions.forEach((option) => expect(option?.forceFresh).toBe(true));
   });
 
   test("close stops polling promptly once the signal aborts", async () => {
@@ -307,8 +301,8 @@ describe("Keyboard", () => {
       requestKeyboard: async (action: string) => ({
         success: true,
         open: action === "detect",
-        totalTimeMs: 5
-      })
+        totalTimeMs: 5,
+      }),
     } as any);
 
     try {
@@ -329,8 +323,8 @@ describe("Keyboard", () => {
         success: false,
         open: true,
         totalTimeMs: 5,
-        error: "No keyboard focus"
-      })
+        error: "No keyboard focus",
+      }),
     } as any);
 
     try {
@@ -350,8 +344,8 @@ describe("Keyboard", () => {
       requestKeyboard: async () => ({
         success: true,
         open: false,
-        totalTimeMs: 5
-      })
+        totalTimeMs: 5,
+      }),
     } as any);
 
     try {

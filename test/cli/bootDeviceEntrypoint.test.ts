@@ -2,7 +2,9 @@ import { expect, test } from "bun:test";
 
 test("boot-device dispatches before normal server imports and CtrlProxy warm-up", async () => {
   const entrypoint = await Bun.file("src/index.ts").text();
-  const bootDispatch = entrypoint.indexOf('const bootDeviceIndex = rawArgs.indexOf("--boot-device")');
+  const bootDispatch = entrypoint.indexOf(
+    'const bootDeviceIndex = rawArgs.indexOf("--boot-device")',
+  );
   const serverImport = entrypoint.indexOf('await import("./server")');
   const ctrlProxyWarmup = entrypoint.indexOf("AndroidCtrlProxyManager.prefetchApk()");
   const bootExit = entrypoint.indexOf("process.exit(0);", bootDispatch);

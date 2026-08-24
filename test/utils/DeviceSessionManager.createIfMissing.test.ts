@@ -41,7 +41,11 @@ function makeSimctl(recorder: SimctlRecorder, simulatorImages: DeviceInfo[] = []
       return { deviceId: udid, name: "AutoMobile-iPhone-17", platform: "ios" };
     },
     // verifyIosDevice returns early for a non-Booted, available device.
-    getDeviceInfo: async () => ({ name: "AutoMobile-iPhone-17", isAvailable: true, state: "Shutdown" }),
+    getDeviceInfo: async () => ({
+      name: "AutoMobile-iPhone-17",
+      isAvailable: true,
+      state: "Shutdown",
+    }),
   } as unknown as SimCtlClient;
 }
 
@@ -83,7 +87,7 @@ describe("findOrStartIosDevice creation gate", () => {
     setDeviceCreationGate(new FakeDeviceCreationGate(false));
 
     await expect(manager.findOrStartIosDevice()).rejects.toThrow(
-      "No iOS simulators are available. Please create an iOS simulator using Xcode or the Simulator app."
+      "No iOS simulators are available. Please create an iOS simulator using Xcode or the Simulator app.",
     );
     expect(recorder.createCalls).toEqual([]);
     expect(recorder.bootCalls).toEqual([]);
@@ -95,7 +99,9 @@ describe("findOrStartIosDevice creation gate", () => {
     const device = await manager.findOrStartIosDevice();
 
     expect(recorder.createCalls).toHaveLength(1);
-    expect(recorder.createCalls[0].deviceType).toBe("com.apple.CoreSimulator.SimDeviceType.iPhone-17");
+    expect(recorder.createCalls[0].deviceType).toBe(
+      "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+    );
     expect(recorder.createCalls[0].runtime).toBe("com.apple.CoreSimulator.SimRuntime.iOS-26-3");
     expect(recorder.createCalls[0].name).toStartWith("AutoMobile-iPhone-17-");
     expect(recorder.bootCalls).toEqual(["CREATED-UDID"]);
@@ -151,7 +157,7 @@ describe("findOrStartIosDevice creation gate", () => {
     setDeviceCreationGate(new FakeDeviceCreationGate(false));
 
     await expect(manager.findOrStartIosDevice()).rejects.toThrow(
-      "No available iOS simulators. Unavailable simulators: iPhone unavailable (unavailable): runtime unavailable."
+      "No available iOS simulators. Unavailable simulators: iPhone unavailable (unavailable): runtime unavailable.",
     );
     expect(recorder.createCalls).toEqual([]);
     expect(recorder.bootCalls).toEqual([]);

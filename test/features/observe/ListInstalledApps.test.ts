@@ -21,18 +21,18 @@ class FailsFirstInstalledAppsReplaceRepository extends FakeInstalledAppsReposito
   }
 }
 
-describe("ListInstalledApps", function() {
+describe("ListInstalledApps", function () {
   let listInstalledApps: ListInstalledApps;
   let fakeAdb: FakeAdbExecutor;
   let mockDevice: BootedDevice;
 
-  beforeEach(function() {
+  beforeEach(function () {
     mockDevice = {
       // The installed-apps write coordinator is process-global. Keep this
       // fixture distinct from generic device fixtures in concurrently loaded
       // test files so their invalidations cannot bypass this seeded cache.
       deviceId: "list-installed-apps-test-device",
-      platform: "android"
+      platform: "android",
     } as BootedDevice;
 
     fakeAdb = new FakeAdbExecutor();
@@ -41,17 +41,18 @@ describe("ListInstalledApps", function() {
     listInstalledApps = new ListInstalledApps(mockDevice, new FakeAdbClientFactory(fakeAdb));
   });
 
-  describe("execute", function() {
-    test("should list all installed packages", async function() {
+  describe("execute", function () {
+    test("should list all installed packages", async function () {
       // Set up single user with packages
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
       fakeAdb.setCommandResponse("shell pm list packages --user 0", {
-        stdout: "package:com.android.chrome\npackage:com.google.android.gms\npackage:com.example.myapp\n",
-        stderr: ""
+        stdout:
+          "package:com.android.chrome\npackage:com.google.android.gms\npackage:com.example.myapp\n",
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
         stdout: "package:com.android.chrome\npackage:com.google.android.gms\n",
-        stderr: ""
+        stderr: "",
       });
 
       const result = await listInstalledApps.execute();
@@ -63,15 +64,15 @@ describe("ListInstalledApps", function() {
       expect(result).toContain("com.example.myapp");
     });
 
-    test("should filter out empty lines and non-package lines", async function() {
+    test("should filter out empty lines and non-package lines", async function () {
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
       fakeAdb.setCommandResponse("shell pm list packages --user 0", {
         stdout: "package:com.example.app\n\nsome other line\npackage:com.test.app\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
         stdout: "",
-        stderr: ""
+        stderr: "",
       });
 
       const result = await listInstalledApps.execute();
@@ -81,15 +82,15 @@ describe("ListInstalledApps", function() {
       expect(result).toContain("com.test.app");
     });
 
-    test("should handle adb command failure gracefully", async function() {
+    test("should handle adb command failure gracefully", async function () {
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
       fakeAdb.setCommandResponse("shell pm list packages --user 0", {
         stdout: "",
-        stderr: "error"
+        stderr: "error",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
         stdout: "",
-        stderr: ""
+        stderr: "",
       });
 
       const result = await listInstalledApps.execute();
@@ -98,15 +99,15 @@ describe("ListInstalledApps", function() {
       expect(result).toHaveLength(0);
     });
 
-    test("should trim package names correctly", async function() {
+    test("should trim package names correctly", async function () {
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
       fakeAdb.setCommandResponse("shell pm list packages --user 0", {
         stdout: "package: com.example.app \npackage:com.test.app\t\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
         stdout: "",
-        stderr: ""
+        stderr: "",
       });
 
       const result = await listInstalledApps.execute();
@@ -117,31 +118,31 @@ describe("ListInstalledApps", function() {
     });
   });
 
-  describe("executeDetailed", function() {
-    test("should list apps from all user profiles", async function() {
+  describe("executeDetailed", function () {
+    test("should list apps from all user profiles", async function () {
       // Configure two users: primary and work profile
       const users: AndroidUser[] = [
         { userId: 0, name: "Owner", flags: 13, running: true },
-        { userId: 10, name: "Work profile", flags: 30, running: true }
+        { userId: 10, name: "Work profile", flags: 30, running: true },
       ];
       fakeAdb.setUsers(users);
 
       // Configure packages for each user
       fakeAdb.setCommandResponse("shell pm list packages --user 0", {
         stdout: "package:com.android.chrome\npackage:com.example.personalapp\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
         stdout: "package:com.android.chrome\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages --user 10", {
         stdout: "package:com.android.chrome\npackage:com.example.workapp\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 10", {
         stdout: "package:com.android.chrome\n",
-        stderr: ""
+        stderr: "",
       });
 
       const result = await listInstalledApps.executeDetailed();
@@ -153,14 +154,14 @@ describe("ListInstalledApps", function() {
       // Check personal apps
       const personalApps = result.profiles[0];
       expect(Array.isArray(personalApps)).toBe(true);
-      const personalApp = personalApps.find(app => app.packageName === "com.example.personalapp");
+      const personalApp = personalApps.find((app) => app.packageName === "com.example.personalapp");
       expect(personalApp).toBeDefined();
       expect(personalApp?.foreground).toBe(false);
 
       // Check work profile apps
       const workApps = result.profiles[10];
       expect(Array.isArray(workApps)).toBe(true);
-      const workApp = workApps.find(app => app.packageName === "com.example.workapp");
+      const workApp = workApps.find((app) => app.packageName === "com.example.workapp");
       expect(workApp).toBeDefined();
 
       // Check system apps are deduped
@@ -169,29 +170,29 @@ describe("ListInstalledApps", function() {
       expect(result.system[0].userIds.sort()).toEqual([0, 10]);
     });
 
-    test("should dedupe system apps across profiles", async function() {
+    test("should dedupe system apps across profiles", async function () {
       const users: AndroidUser[] = [
         { userId: 0, name: "Owner", flags: 13, running: true },
-        { userId: 10, name: "Work profile", flags: 30, running: true }
+        { userId: 10, name: "Work profile", flags: 30, running: true },
       ];
       fakeAdb.setUsers(users);
       fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 10 });
 
       fakeAdb.setCommandResponse("shell pm list packages --user 0", {
         stdout: "package:com.android.settings\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
         stdout: "package:com.android.settings\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages --user 10", {
         stdout: "package:com.android.settings\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 10", {
         stdout: "package:com.android.settings\n",
-        stderr: ""
+        stderr: "",
       });
 
       const result = await listInstalledApps.executeDetailed();
@@ -202,32 +203,32 @@ describe("ListInstalledApps", function() {
       expect(result.system[0].foreground).toBe(true);
     });
 
-    test("should treat non-system packages as user apps even if not listed in -s", async function() {
-      const users: AndroidUser[] = [
-        { userId: 0, name: "Owner", flags: 13, running: true }
-      ];
+    test("should treat non-system packages as user apps even if not listed in -s", async function () {
+      const users: AndroidUser[] = [{ userId: 0, name: "Owner", flags: 13, running: true }];
       fakeAdb.setUsers(users);
 
       fakeAdb.setCommandResponse("shell pm list packages --user 0", {
         stdout: "package:com.android.chrome\npackage:com.google.android.apps.weather\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
         stdout: "package:com.android.chrome\n",
-        stderr: ""
+        stderr: "",
       });
 
       const result = await listInstalledApps.executeDetailed();
 
-      const userPackages = result.profiles[0].map(app => app.packageName);
+      const userPackages = result.profiles[0].map((app) => app.packageName);
       expect(userPackages).toContain("com.google.android.apps.weather");
-      expect(result.system.some(app => app.packageName === "com.google.android.apps.weather")).toBe(false);
+      expect(
+        result.system.some((app) => app.packageName === "com.google.android.apps.weather"),
+      ).toBe(false);
     });
 
-    test("should mark foreground app correctly", async function() {
+    test("should mark foreground app correctly", async function () {
       const users: AndroidUser[] = [
         { userId: 0, name: "Owner", flags: 13, running: true },
-        { userId: 10, name: "Work profile", flags: 30, running: true }
+        { userId: 10, name: "Work profile", flags: 30, running: true },
       ];
       fakeAdb.setUsers(users);
 
@@ -236,43 +237,43 @@ describe("ListInstalledApps", function() {
 
       fakeAdb.setCommandResponse("shell pm list packages --user 0", {
         stdout: "package:com.example.personalapp\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
         stdout: "",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages --user 10", {
         stdout: "package:com.example.workapp\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 10", {
         stdout: "",
-        stderr: ""
+        stderr: "",
       });
 
       const result = await listInstalledApps.executeDetailed();
 
-      const personalApp = result.profiles[0].find(app => app.packageName === "com.example.personalapp");
+      const personalApp = result.profiles[0].find(
+        (app) => app.packageName === "com.example.personalapp",
+      );
       expect(personalApp?.foreground).toBe(false);
 
-      const workApp = result.profiles[10].find(app => app.packageName === "com.example.workapp");
+      const workApp = result.profiles[10].find((app) => app.packageName === "com.example.workapp");
       expect(workApp?.foreground).toBe(true);
     });
 
-    test("should handle single user (no work profile)", async function() {
-      const users: AndroidUser[] = [
-        { userId: 0, name: "Owner", flags: 13, running: true }
-      ];
+    test("should handle single user (no work profile)", async function () {
+      const users: AndroidUser[] = [{ userId: 0, name: "Owner", flags: 13, running: true }];
       fakeAdb.setUsers(users);
 
       fakeAdb.setCommandResponse("shell pm list packages --user 0", {
         stdout: "package:com.android.chrome\npackage:com.example.app\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
         stdout: "package:com.android.chrome\n",
-        stderr: ""
+        stderr: "",
       });
 
       const result = await listInstalledApps.executeDetailed();
@@ -282,10 +283,10 @@ describe("ListInstalledApps", function() {
       expect(result.system).toHaveLength(1);
     });
 
-    test("should return empty result for non-Android platforms", async function() {
+    test("should return empty result for non-Android platforms", async function () {
       const iosDevice: BootedDevice = {
         deviceId: "test-device",
-        platform: "ios"
+        platform: "ios",
       } as BootedDevice;
 
       const iosListApps = new ListInstalledApps(iosDevice, new FakeAdbClientFactory(fakeAdb));
@@ -295,76 +296,81 @@ describe("ListInstalledApps", function() {
     });
   });
 
-  describe("cache", function() {
-    test("lists iOS bundle IDs live after an out-of-band app change", async function() {
+  describe("cache", function () {
+    test("lists iOS bundle IDs live after an out-of-band app change", async function () {
       const iosDevice: BootedDevice = {
         deviceId: "ios-cache-device",
-        platform: "ios"
+        platform: "ios",
       } as BootedDevice;
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();
       timer.advanceTime(1_000);
       const simctl = new FakeSimctl();
       simctl.setInstalledApps([{ bundleId: "com.example.cached" }]);
-      const list = new ListInstalledApps(
-        iosDevice,
-        new FakeAdbClientFactory(fakeAdb),
-        simctl,
-        { cacheEnabled: true, installedAppsRepository: repo, timer }
-      );
+      const list = new ListInstalledApps(iosDevice, new FakeAdbClientFactory(fakeAdb), simctl, {
+        cacheEnabled: true,
+        installedAppsRepository: repo,
+        timer,
+      });
 
       await expect(list.execute()).resolves.toEqual(["com.example.cached"]);
       simctl.setInstalledApps([{ bundleIdentifier: "com.example.updated" }]);
       await expect(list.execute()).resolves.toEqual(["com.example.updated"]);
     });
 
-    test("preserves iOS app metadata for the apps resource path", async function() {
+    test("preserves iOS app metadata for the apps resource path", async function () {
       const iosDevice: BootedDevice = {
         deviceId: "ios-metadata-cache-device",
-        platform: "ios"
+        platform: "ios",
       } as BootedDevice;
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();
       timer.advanceTime(1_000);
       const simctl = new FakeSimctl();
-      simctl.setInstalledApps([{
-        bundleId: "com.example.cached",
-        bundleDisplayName: "Cached App",
-        bundleShortVersionString: "1.2.3",
-        bundlePath: "/Applications/Cached.app"
-      }]);
-      const list = new ListInstalledApps(
-        iosDevice,
-        new FakeAdbClientFactory(fakeAdb),
-        simctl,
-        { cacheEnabled: true, installedAppsRepository: repo, timer }
-      );
+      simctl.setInstalledApps([
+        {
+          bundleId: "com.example.cached",
+          bundleDisplayName: "Cached App",
+          bundleShortVersionString: "1.2.3",
+          bundlePath: "/Applications/Cached.app",
+        },
+      ]);
+      const list = new ListInstalledApps(iosDevice, new FakeAdbClientFactory(fakeAdb), simctl, {
+        cacheEnabled: true,
+        installedAppsRepository: repo,
+        timer,
+      });
 
-      await expect(list.executeIosDetailed()).resolves.toEqual([{
-        bundleId: "com.example.cached",
-        bundleDisplayName: "Cached App",
-        bundleShortVersionString: "1.2.3",
-        bundlePath: "/Applications/Cached.app"
-      }]);
+      await expect(list.executeIosDetailed()).resolves.toEqual([
+        {
+          bundleId: "com.example.cached",
+          bundleDisplayName: "Cached App",
+          bundleShortVersionString: "1.2.3",
+          bundlePath: "/Applications/Cached.app",
+        },
+      ]);
       expect(simctl.getMethodCallCount("listApps")).toBe(1);
     });
 
-    test("normalizes all supported iOS bundle ID fields", async function() {
-      const iosDevice: BootedDevice = { deviceId: "ios-bundle-id-fields", platform: "ios" } as BootedDevice;
+    test("normalizes all supported iOS bundle ID fields", async function () {
+      const iosDevice: BootedDevice = {
+        deviceId: "ios-bundle-id-fields",
+        platform: "ios",
+      } as BootedDevice;
       const simctl = new FakeSimctl();
       simctl.setInstalledApps([
         { bundleID: "  com.example.bundle-id  " },
-        { CFBundleIdentifier: "com.example.cf-bundle-id" }
+        { CFBundleIdentifier: "com.example.cf-bundle-id" },
       ]);
       const list = new ListInstalledApps(iosDevice, new FakeAdbClientFactory(fakeAdb), simctl);
 
       await expect(list.execute()).resolves.toEqual([
         "com.example.bundle-id",
-        "com.example.cf-bundle-id"
+        "com.example.cf-bundle-id",
       ]);
     });
 
-    test("should use cached apps when fresh", async function() {
+    test("should use cached apps when fresh", async function () {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();
       timer.advanceTime(1000);
@@ -376,7 +382,7 @@ describe("ListInstalledApps", function() {
           package_name: "com.cached.app",
           is_system: 0,
           installed_at: now,
-          last_verified_at: now
+          last_verified_at: now,
         },
         {
           device_id: mockDevice.deviceId,
@@ -384,8 +390,8 @@ describe("ListInstalledApps", function() {
           package_name: "com.android.settings",
           is_system: 1,
           installed_at: now,
-          last_verified_at: now
-        }
+          last_verified_at: now,
+        },
       ];
 
       await repo.replaceInstalledApps(mockDevice.deviceId, entries);
@@ -395,16 +401,16 @@ describe("ListInstalledApps", function() {
         mockDevice,
         new FakeAdbClientFactory(fakeAdb),
         null,
-        { cacheEnabled: true, installedAppsRepository: repo, timer }
+        { cacheEnabled: true, installedAppsRepository: repo, timer },
       );
       const result = await cachedList.executeDetailed();
 
-      expect(result.profiles[0].some(app => app.packageName === "com.cached.app")).toBe(true);
-      expect(result.system.some(app => app.packageName === "com.android.settings")).toBe(true);
+      expect(result.profiles[0].some((app) => app.packageName === "com.cached.app")).toBe(true);
+      expect(result.system.some((app) => app.packageName === "com.android.settings")).toBe(true);
       expect(fakeAdb.wasCommandExecuted("shell pm list packages")).toBe(false);
     });
 
-    test("should rebuild cache when stale", async function() {
+    test("should rebuild cache when stale", async function () {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();
       const staleTime = timer.now();
@@ -415,8 +421,8 @@ describe("ListInstalledApps", function() {
           package_name: "com.stale.app",
           is_system: 0,
           installed_at: staleTime,
-          last_verified_at: staleTime
-        }
+          last_verified_at: staleTime,
+        },
       ]);
 
       timer.advanceTime(5 * 60 * 1000 + 1);
@@ -424,130 +430,142 @@ describe("ListInstalledApps", function() {
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
       fakeAdb.setCommandResponse("shell pm list packages --user 0", {
         stdout: "package:com.example.fresh\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
         stdout: "",
-        stderr: ""
+        stderr: "",
       });
 
       const cachedList = new ListInstalledApps(
         mockDevice,
         new FakeAdbClientFactory(fakeAdb),
         null,
-        { cacheEnabled: true, installedAppsRepository: repo, timer }
+        { cacheEnabled: true, installedAppsRepository: repo, timer },
       );
       await cachedList.executeDetailed();
 
       expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
 
       const stored = await repo.listInstalledApps(mockDevice.deviceId);
-      expect(stored.some(row => row.package_name === "com.example.fresh")).toBe(true);
-      expect(stored.some(row => row.package_name === "com.stale.app")).toBe(false);
+      expect(stored.some((row) => row.package_name === "com.example.fresh")).toBe(true);
+      expect(stored.some((row) => row.package_name === "com.stale.app")).toBe(false);
     });
 
-    test("should rebuild immediately when a package mutation marks the cache stale", async function() {
+    test("should rebuild immediately when a package mutation marks the cache stale", async function () {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();
       const now = timer.now();
-      await repo.replaceInstalledApps(mockDevice.deviceId, [{
-        device_id: mockDevice.deviceId,
-        user_id: 0,
-        package_name: "com.removed.app",
-        is_system: 0,
-        installed_at: now,
-        last_verified_at: now
-      }]);
+      await repo.replaceInstalledApps(mockDevice.deviceId, [
+        {
+          device_id: mockDevice.deviceId,
+          user_id: 0,
+          package_name: "com.removed.app",
+          is_system: 0,
+          installed_at: now,
+          last_verified_at: now,
+        },
+      ]);
       await repo.markDeviceStale(mockDevice.deviceId);
 
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
       fakeAdb.setCommandResponse("shell pm list packages --user 0", {
         stdout: "package:com.installed.app\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 0", {
         stdout: "",
-        stderr: ""
+        stderr: "",
       });
 
       const cachedList = new ListInstalledApps(
         mockDevice,
         new FakeAdbClientFactory(fakeAdb),
         null,
-        { cacheEnabled: true, installedAppsRepository: repo, timer }
+        { cacheEnabled: true, installedAppsRepository: repo, timer },
       );
       const result = await cachedList.executeDetailed();
 
-      expect(result.profiles[0].map(app => app.packageName)).toEqual(["com.installed.app"]);
+      expect(result.profiles[0].map((app) => app.packageName)).toEqual(["com.installed.app"]);
       expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
     });
 
-    test("rebuilds a dirty cache after a stale-marker write fails", async function() {
-      const device: BootedDevice = { deviceId: "dirty-cache-device", platform: "android" } as BootedDevice;
+    test("rebuilds a dirty cache after a stale-marker write fails", async function () {
+      const device: BootedDevice = {
+        deviceId: "dirty-cache-device",
+        platform: "android",
+      } as BootedDevice;
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();
       timer.advanceTime(1_000);
-      await repo.replaceInstalledApps(device.deviceId, [{
-        device_id: device.deviceId,
-        user_id: 0,
-        package_name: "com.example.stale",
-        is_system: 0,
-        installed_at: timer.now(),
-        last_verified_at: timer.now()
-      }]);
-      await expect(getInstalledAppsCacheWriteCoordinator().invalidate(device.deviceId, async () => {
-        throw new Error("transient stale-marker failure");
-      })).rejects.toThrow("transient stale-marker failure");
+      await repo.replaceInstalledApps(device.deviceId, [
+        {
+          device_id: device.deviceId,
+          user_id: 0,
+          package_name: "com.example.stale",
+          is_system: 0,
+          installed_at: timer.now(),
+          last_verified_at: timer.now(),
+        },
+      ]);
+      await expect(
+        getInstalledAppsCacheWriteCoordinator().invalidate(device.deviceId, async () => {
+          throw new Error("transient stale-marker failure");
+        }),
+      ).rejects.toThrow("transient stale-marker failure");
 
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
       fakeAdb.setCommandResponse("shell pm list packages --user 0", {
         stdout: "package:com.example.fresh\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
-      const list = new ListInstalledApps(
-        device,
-        new FakeAdbClientFactory(fakeAdb),
-        null,
-        { cacheEnabled: true, installedAppsRepository: repo, timer }
-      );
+      const list = new ListInstalledApps(device, new FakeAdbClientFactory(fakeAdb), null, {
+        cacheEnabled: true,
+        installedAppsRepository: repo,
+        timer,
+      });
 
       await expect(list.executeDetailed()).resolves.toMatchObject({
-        profiles: { 0: [{ packageName: "com.example.fresh" }] }
+        profiles: { 0: [{ packageName: "com.example.fresh" }] },
       });
       expect(fakeAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
       expect(getInstalledAppsCacheWriteCoordinator().isDirty(device.deviceId)).toBe(false);
     });
 
-    test("returns the live result and retries after a cache replacement failure", async function() {
-      const device: BootedDevice = { deviceId: "replace-failure-device", platform: "android" } as BootedDevice;
+    test("returns the live result and retries after a cache replacement failure", async function () {
+      const device: BootedDevice = {
+        deviceId: "replace-failure-device",
+        platform: "android",
+      } as BootedDevice;
       const repo = new FailsFirstInstalledAppsReplaceRepository();
       const timer = new FakeTimer();
       timer.advanceTime(1_000);
-      await expect(getInstalledAppsCacheWriteCoordinator().invalidate(device.deviceId, async () => {
-        throw new Error("stale cache row");
-      })).rejects.toThrow("stale cache row");
+      await expect(
+        getInstalledAppsCacheWriteCoordinator().invalidate(device.deviceId, async () => {
+          throw new Error("stale cache row");
+        }),
+      ).rejects.toThrow("stale cache row");
 
       fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
       fakeAdb.setCommandResponse("shell pm list packages --user 0", {
         stdout: "package:com.example.live\n",
-        stderr: ""
+        stderr: "",
       });
       fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
-      const list = new ListInstalledApps(
-        device,
-        new FakeAdbClientFactory(fakeAdb),
-        null,
-        { cacheEnabled: true, installedAppsRepository: repo, timer }
-      );
+      const list = new ListInstalledApps(device, new FakeAdbClientFactory(fakeAdb), null, {
+        cacheEnabled: true,
+        installedAppsRepository: repo,
+        timer,
+      });
 
       await expect(list.executeDetailed()).resolves.toMatchObject({
-        profiles: { 0: [{ packageName: "com.example.live" }] }
+        profiles: { 0: [{ packageName: "com.example.live" }] },
       });
       expect(getInstalledAppsCacheWriteCoordinator().isDirty(device.deviceId)).toBe(true);
 
       await expect(list.executeDetailed()).resolves.toMatchObject({
-        profiles: { 0: [{ packageName: "com.example.live" }] }
+        profiles: { 0: [{ packageName: "com.example.live" }] },
       });
       expect(getInstalledAppsCacheWriteCoordinator().isDirty(device.deviceId)).toBe(false);
     });

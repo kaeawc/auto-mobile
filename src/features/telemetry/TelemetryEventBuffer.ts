@@ -26,10 +26,10 @@ export interface BatchTelemetryRepository {
 }
 
 export const defaultBatchTelemetryRepository: BatchTelemetryRepository = {
-  recordLogEvents: inputs => defaultRecordLogEvents(inputs),
-  recordOsEvents: inputs => defaultRecordOsEvents(inputs),
-  recordNavigationEvents: inputs => defaultRecordNavigationEvents(inputs),
-  recordLayoutEvents: inputs => defaultRecordLayoutEvents(inputs),
+  recordLogEvents: (inputs) => defaultRecordLogEvents(inputs),
+  recordOsEvents: (inputs) => defaultRecordOsEvents(inputs),
+  recordNavigationEvents: (inputs) => defaultRecordNavigationEvents(inputs),
+  recordLayoutEvents: (inputs) => defaultRecordLayoutEvents(inputs),
 };
 
 export interface TelemetryEventBufferOptions {
@@ -72,7 +72,7 @@ export class TelemetryEventBuffer {
   constructor(
     repository: BatchTelemetryRepository = defaultBatchTelemetryRepository,
     timer: Timer = defaultTimer,
-    options: TelemetryEventBufferOptions = {}
+    options: TelemetryEventBufferOptions = {},
   ) {
     this.repository = repository;
     this.timer = timer;
@@ -163,28 +163,40 @@ export class TelemetryEventBuffer {
         await this.repository.recordLogEvents(logs);
       }
     } catch (error) {
-      logger.warn(`[TelemetryEventBuffer] log batch flush failed (${logs.length} rows): ${error}`, error);
+      logger.warn(
+        `[TelemetryEventBuffer] log batch flush failed (${logs.length} rows): ${error}`,
+        error,
+      );
     }
     try {
       if (os.length > 0) {
         await this.repository.recordOsEvents(os);
       }
     } catch (error) {
-      logger.warn(`[TelemetryEventBuffer] os batch flush failed (${os.length} rows): ${error}`, error);
+      logger.warn(
+        `[TelemetryEventBuffer] os batch flush failed (${os.length} rows): ${error}`,
+        error,
+      );
     }
     try {
       if (navigation.length > 0) {
         await this.repository.recordNavigationEvents(navigation);
       }
     } catch (error) {
-      logger.warn(`[TelemetryEventBuffer] navigation batch flush failed (${navigation.length} rows): ${error}`, error);
+      logger.warn(
+        `[TelemetryEventBuffer] navigation batch flush failed (${navigation.length} rows): ${error}`,
+        error,
+      );
     }
     try {
       if (layout.length > 0) {
         await this.repository.recordLayoutEvents(layout);
       }
     } catch (error) {
-      logger.warn(`[TelemetryEventBuffer] layout batch flush failed (${layout.length} rows): ${error}`, error);
+      logger.warn(
+        `[TelemetryEventBuffer] layout batch flush failed (${layout.length} rows): ${error}`,
+        error,
+      );
     }
   }
 }

@@ -24,7 +24,7 @@ function createFakeDaemonState() {
 
 async function sendRequest(
   socketPath: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): Promise<DaemonResponse> {
   const { response } = await sendRawSocketRequest(socketPath, payload);
   return response;
@@ -50,7 +50,7 @@ describe("UnixSocketServer version/build-identity handshake gate", () => {
       createFakeDaemonState(),
       new FakeTimer(),
       null,
-      { identity: daemonIdentity, enforce }
+      { identity: daemonIdentity, enforce },
     );
     await server.start();
   }

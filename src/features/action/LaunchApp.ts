@@ -1,7 +1,13 @@
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BaseVisualChange } from "./BaseVisualChange";
-import { BootedDevice, ClearAppDataResult, LaunchAppResult, ObserveResult, TerminateAppResult } from "../../models";
+import {
+  BootedDevice,
+  ClearAppDataResult,
+  LaunchAppResult,
+  ObserveResult,
+  TerminateAppResult,
+} from "../../models";
 import { ActionableError } from "../../models";
 import { TerminateApp } from "./TerminateApp";
 import { ClearAppData } from "./ClearAppData";
@@ -41,7 +47,7 @@ export interface AndroidClearAppDataAction {
 export interface AndroidColdBootAction {
   execute(
     packageName: string,
-    options?: { skipObservation?: boolean; userId?: number }
+    options?: { skipObservation?: boolean; userId?: number },
   ): Promise<TerminateAppResult>;
 }
 
@@ -56,7 +62,7 @@ export interface DeviceAppLauncher {
   launchApp(
     deviceUdid: string,
     bundleId: string,
-    options?: { terminateExisting?: boolean }
+    options?: { terminateExisting?: boolean },
   ): Promise<{ success: boolean; pid?: number; error?: string }>;
 }
 
@@ -71,13 +77,15 @@ interface LaunchAppDependencies {
 }
 
 export class LaunchApp extends BaseVisualChange {
-
   private simctl: SimCtlClient;
   private deviceAppLauncher: DeviceAppLauncher;
   private targetUserDetector: TargetUserDetector;
   private installedAppsProvider: InstalledAppsProvider;
   private performanceTrackerFactory: () => PerformanceTracker;
-  private clearAppDataFactory: (device: BootedDevice, simctl: SimCtlClient) => IosClearAppDataRunner;
+  private clearAppDataFactory: (
+    device: BootedDevice,
+    simctl: SimCtlClient,
+  ) => IosClearAppDataRunner;
   private createAndroidClearAppData: (device: BootedDevice) => AndroidClearAppDataAction;
   private createAndroidColdBoot: (device: BootedDevice) => AndroidColdBootAction;
   /**
@@ -92,35 +100,42 @@ export class LaunchApp extends BaseVisualChange {
     adb: AdbClient | null = null,
     simctl: SimCtlClient | null = null,
     timer: Timer = defaultTimer,
-    dependencies: LaunchAppDependencies = {}) {
+    dependencies: LaunchAppDependencies = {},
+  ) {
     super(device, adb, timer);
     this.device = device;
     this.simctl = simctl || new SimCtlClient(this.device);
     this.deviceAppLauncher = dependencies.deviceAppLauncher ?? new DeviceAppManager();
     this.targetUserDetector = dependencies.targetUserDetector ?? {
-      detectTargetUserId: (packageName: string, userId?: number) => this.detectTargetUserId(packageName, userId)
+      detectTargetUserId: (packageName: string, userId?: number) =>
+        this.detectTargetUserId(packageName, userId),
     };
     this.installedAppsProvider = dependencies.installedAppsProvider ?? {
-      listInstalledApps: () => this.listInstalledApps()
+      listInstalledApps: () => this.listInstalledApps(),
     };
-    this.performanceTrackerFactory = dependencies.performanceTrackerFactory ?? createGlobalPerformanceTracker;
-    this.clearAppDataFactory = dependencies.clearAppDataFactory ?? (
-      (device, simctl) => new ClearAppData(device, undefined, simctl)
+    this.performanceTrackerFactory =
+      dependencies.performanceTrackerFactory ?? createGlobalPerformanceTracker;
+    this.clearAppDataFactory =
+      dependencies.clearAppDataFactory ??
+      ((device, simctl) => new ClearAppData(device, undefined, simctl));
+    this.createAndroidClearAppData = this.resolveAndroidClearAppDataFactory(
+      dependencies.createAndroidClearAppData,
     );
-    this.createAndroidClearAppData = this.resolveAndroidClearAppDataFactory(dependencies.createAndroidClearAppData);
-    this.createAndroidColdBoot = this.resolveAndroidColdBootFactory(dependencies.createAndroidColdBoot);
+    this.createAndroidColdBoot = this.resolveAndroidColdBootFactory(
+      dependencies.createAndroidColdBoot,
+    );
   }
 
   private resolveAndroidClearAppDataFactory(
-    factory: ((device: BootedDevice) => AndroidClearAppDataAction) | undefined
+    factory: ((device: BootedDevice) => AndroidClearAppDataAction) | undefined,
   ): (device: BootedDevice) => AndroidClearAppDataAction {
-    return factory ?? (device => new ClearAppData(device));
+    return factory ?? ((device) => new ClearAppData(device));
   }
 
   private resolveAndroidColdBootFactory(
-    factory: ((device: BootedDevice) => AndroidColdBootAction) | undefined
+    factory: ((device: BootedDevice) => AndroidColdBootAction) | undefined,
   ): (device: BootedDevice) => AndroidColdBootAction {
-    return factory ?? (device => new TerminateApp(device));
+    return factory ?? ((device) => new TerminateApp(device));
   }
 
   /**
@@ -173,7 +188,7 @@ export class LaunchApp extends BaseVisualChange {
         // Approach 2: Query resolver activities
         `shell cmd package query-activities --brief android.intent.action.MAIN android.intent.category.LAUNCHER | grep ${packageName}`,
         // Approach 3: Direct pm list activities
-        `shell pm list packages -f ${packageName} && pm dump ${packageName} | grep -A 10 "Activity filter"`
+        `shell pm list packages -f ${packageName} && pm dump ${packageName} | grep -A 10 "Activity filter"`,
       ];
 
       for (let i = 0; i < approaches.length; i++) {
@@ -182,17 +197,13 @@ export class LaunchApp extends BaseVisualChange {
           logger.info(`[LaunchApp] Trying approach ${i + 1}: ${approaches[i]}`);
           const result = perf
             ? await perf.track(`activityApproach_${i + 1}`, () =>
-                this.adb.executeCommand(approaches[i], undefined, undefined, undefined, signal)
+                this.adb.executeCommand(approaches[i], undefined, undefined, undefined, signal),
               )
-            : await this.adb.executeCommand(
-                approaches[i],
-                undefined,
-                undefined,
-                undefined,
-                signal,
-              );
+            : await this.adb.executeCommand(approaches[i], undefined, undefined, undefined, signal);
           this.assertLaunchNotAborted(signal);
-          logger.info(`[LaunchApp] Approach ${i + 1} result: ${result.stdout.length} chars of output`);
+          logger.info(
+            `[LaunchApp] Approach ${i + 1} result: ${result.stdout.length} chars of output`,
+          );
 
           if (result.stdout.trim()) {
             // Extract activity name from various patterns
@@ -202,13 +213,15 @@ export class LaunchApp extends BaseVisualChange {
               // Pattern 2: Activity class names
               new RegExp(`${packageName}\\.[^\\s]*Activity[^\\s]*`, "g"),
               // Pattern 3: Full class names in the package
-              new RegExp(`${packageName}\\.[^\\s]+`, "g")
+              new RegExp(`${packageName}\\.[^\\s]+`, "g"),
             ];
 
             for (const pattern of patterns) {
               const matches = result.stdout.match(pattern);
               if (matches) {
-                logger.info(`[LaunchApp] Found ${matches.length} potential activities with pattern: ${pattern}`);
+                logger.info(
+                  `[LaunchApp] Found ${matches.length} potential activities with pattern: ${pattern}`,
+                );
                 for (const match of matches) {
                   if (match.includes("/")) {
                     const activityName = match.split("/")[1];
@@ -228,7 +241,9 @@ export class LaunchApp extends BaseVisualChange {
             }
 
             if (activities.length > 0) {
-              logger.info(`[LaunchApp] Successfully found ${activities.length} activities using approach ${i + 1}`);
+              logger.info(
+                `[LaunchApp] Successfully found ${activities.length} activities using approach ${i + 1}`,
+              );
               break;
             }
           }
@@ -251,7 +266,7 @@ export class LaunchApp extends BaseVisualChange {
                   undefined,
                   undefined,
                   signal,
-                )
+                ),
               )
             : await this.adb.executeCommand(
                 `shell pm dump ${packageName}`,
@@ -264,7 +279,11 @@ export class LaunchApp extends BaseVisualChange {
           const lines = simpleResult.stdout.split("\n");
 
           for (const line of lines) {
-            if (line.includes("android.intent.action.MAIN") || line.includes("MainActivity") || line.includes(".Main")) {
+            if (
+              line.includes("android.intent.action.MAIN") ||
+              line.includes("MainActivity") ||
+              line.includes(".Main")
+            ) {
               logger.info(`[LaunchApp] Found potential main activity line: ${line.trim()}`);
               // Look for activity names in surrounding lines
               const activityMatch = line.match(new RegExp(`${packageName}[^\\s]*`, "g"));
@@ -283,7 +302,6 @@ export class LaunchApp extends BaseVisualChange {
           logger.warn(`[LaunchApp] Fallback approach failed:`, error);
         }
       }
-
     } catch (error) {
       this.assertLaunchNotAborted(signal);
       logger.warn(`[LaunchApp] Failed to extract launcher activities for ${packageName}:`, error);
@@ -404,7 +422,7 @@ export class LaunchApp extends BaseVisualChange {
           // we never want to wipe SpringBoard/Settings data.
           if (clearAppData && !isSystemBundleId) {
             const clearResult = await perf.track("clearAppData", () =>
-              this.clearAppDataFactory(this.device, this.simctl).execute(bundleId)
+              this.clearAppDataFactory(this.device, this.simctl).execute(bundleId),
             );
             this.assertLaunchNotAborted(signal);
             if (!clearResult.success) {
@@ -430,13 +448,17 @@ export class LaunchApp extends BaseVisualChange {
           // fails — and pre-terminate data for a wiped app must never be served.
           const ctrlProxyClient = IOSCtrlProxyClient.getInstance(this.device);
           ctrlProxyClient.clearCache();
-          IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(bundleId);
+          IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(
+            bundleId,
+          );
           launchResult = await perf.track("launch", () =>
             simulator
               ? this.simctl.launchApp(bundleId, { foregroundIfRunning: false })
-              // devicectl has no foreground-if-running verb; --terminate-existing
-              // gives cold-boot relaunch semantics (a fresh process foregrounds).
-              : this.deviceAppLauncher.launchApp(this.device.deviceId, bundleId, { terminateExisting: true })
+              : // devicectl has no foreground-if-running verb; --terminate-existing
+                // gives cold-boot relaunch semantics (a fresh process foregrounds).
+                this.deviceAppLauncher.launchApp(this.device.deviceId, bundleId, {
+                  terminateExisting: true,
+                }),
           );
           this.assertLaunchNotAborted(signal);
         } else {
@@ -446,7 +468,9 @@ export class LaunchApp extends BaseVisualChange {
           launchResult = await perf.track("launch", () =>
             simulator
               ? this.simctl.launchApp(bundleId)
-              : this.deviceAppLauncher.launchApp(this.device.deviceId, bundleId, { terminateExisting: true })
+              : this.deviceAppLauncher.launchApp(this.device.deviceId, bundleId, {
+                  terminateExisting: true,
+                }),
           );
           this.assertLaunchNotAborted(signal);
 
@@ -458,7 +482,7 @@ export class LaunchApp extends BaseVisualChange {
             // a physical device, where devicectl's launch error is authoritative.
             if (!isSystemBundleId && simulator) {
               const installedApps = await perf.track("checkInstalled", () =>
-                this.installedAppsProvider.listInstalledApps()
+                this.installedAppsProvider.listInstalledApps(),
               );
               this.assertLaunchNotAborted(signal);
               if (installedApps.length > 0 && !installedApps.includes(bundleId)) {
@@ -467,7 +491,7 @@ export class LaunchApp extends BaseVisualChange {
                 return {
                   success: false,
                   packageName: bundleId,
-                  error: "App is not installed"
+                  error: "App is not installed",
                 };
               }
             }
@@ -548,7 +572,9 @@ export class LaunchApp extends BaseVisualChange {
     const cached = await xcTestClient.getLatestHierarchy(false, 0, undefined, true, 0);
     const cachedPkg = (cached?.hierarchy as { packageName?: string } | null)?.packageName;
     if (cachedPkg && (!expectedPackageName || cachedPkg === expectedPackageName)) {
-      logger.info(`[LaunchApp] iOS hierarchy already cached (pkg=${cachedPkg}, ${this.timer.now() - startTime}ms)`);
+      logger.info(
+        `[LaunchApp] iOS hierarchy already cached (pkg=${cachedPkg}, ${this.timer.now() - startTime}ms)`,
+      );
       return;
     }
 
@@ -561,21 +587,22 @@ export class LaunchApp extends BaseVisualChange {
       let timeoutHandle: NodeJS.Timeout | undefined;
       let abortListener: (() => void) | undefined;
 
-      const pushPromise = new Promise<string>(resolve => {
+      const pushPromise = new Promise<string>((resolve) => {
         timeoutHandle = this.timer.setTimeout(() => resolve("timeout"), timeoutMs);
-        pushUnsubscribe = xcTestClient.onPushUpdate(hierarchy => {
+        pushUnsubscribe = xcTestClient.onPushUpdate((hierarchy) => {
           if (hierarchy.packageName === expectedPackageName) {
             resolve("push");
           }
         });
       });
 
-      const syncPromise = xcTestClient.requestHierarchySync(undefined, true, undefined, timeoutMs)
-        .then(result => {
+      const syncPromise = xcTestClient
+        .requestHierarchySync(undefined, true, undefined, timeoutMs)
+        .then((result) => {
           const pkg = (result?.hierarchy as { packageName?: string } | null)?.packageName;
           return pkg === expectedPackageName ? "sync" : "wrong_app";
         })
-        .catch(err => {
+        .catch((err) => {
           logger.warn(`[LaunchApp] iOS hierarchy sync failed during race: ${err}`);
           return "error" as string;
         });
@@ -614,7 +641,9 @@ export class LaunchApp extends BaseVisualChange {
       }
 
       if (winner === "push" || winner === "sync") {
-        logger.info(`[LaunchApp] iOS hierarchy ready via ${winner} after ${this.timer.now() - startTime}ms (pkg=${expectedPackageName})`);
+        logger.info(
+          `[LaunchApp] iOS hierarchy ready via ${winner} after ${this.timer.now() - startTime}ms (pkg=${expectedPackageName})`,
+        );
 
         return;
       }
@@ -629,13 +658,12 @@ export class LaunchApp extends BaseVisualChange {
       }
     }
 
-    logger.warn(`[LaunchApp] Timed out waiting for iOS hierarchy after ${timeoutMs}ms (expected=${expectedPackageName})`);
+    logger.warn(
+      `[LaunchApp] Timed out waiting for iOS hierarchy after ${timeoutMs}ms (expected=${expectedPackageName})`,
+    );
   }
 
-  private async detectTargetUserId(
-    packageName: string,
-    userId?: number
-  ): Promise<number> {
+  private async detectTargetUserId(packageName: string, userId?: number): Promise<number> {
     const target = await new AndroidUserTargetResolver(this.adb).resolve({
       packageName,
       explicitUserId: userId,
@@ -645,7 +673,7 @@ export class LaunchApp extends BaseVisualChange {
   }
 
   private async listInstalledApps(): Promise<string[]> {
-    return (new ListInstalledApps(this.device, this.adbFactory)).execute();
+    return new ListInstalledApps(this.device, this.adbFactory).execute();
   }
 
   /**
@@ -708,7 +736,7 @@ export class LaunchApp extends BaseVisualChange {
         success: false,
         packageName: packageName,
         userId: targetUserId,
-        error: "App is not installed"
+        error: "App is not installed",
       };
     }
 
@@ -735,7 +763,10 @@ export class LaunchApp extends BaseVisualChange {
         didTerminateOrClear = true;
       } else if (coldBoot) {
         await perf.track("terminateApp", async () => {
-          return this.createAndroidColdBoot(this.device).execute(packageName, { skipObservation: true, userId: targetUserId });
+          return this.createAndroidColdBoot(this.device).execute(packageName, {
+            skipObservation: true,
+            userId: targetUserId,
+          });
         });
         this.assertLaunchNotAborted(signal);
         didTerminateOrClear = true;
@@ -749,12 +780,15 @@ export class LaunchApp extends BaseVisualChange {
         });
         this.assertLaunchNotAborted(signal);
 
-        alreadyForeground = foregroundApp &&
-                            foregroundApp.packageName === packageName &&
-                            foregroundApp.userId === targetUserId;
+        alreadyForeground =
+          foregroundApp &&
+          foregroundApp.packageName === packageName &&
+          foregroundApp.userId === targetUserId;
 
         if (alreadyForeground) {
-          logger.info(`[LaunchApp] App ${packageName} is already in foreground in user ${targetUserId}`);
+          logger.info(
+            `[LaunchApp] App ${packageName} is already in foreground in user ${targetUserId}`,
+          );
         }
       }
     } else {
@@ -775,7 +809,7 @@ export class LaunchApp extends BaseVisualChange {
             success: true,
             packageName,
             activityName,
-            userId: targetUserId
+            userId: targetUserId,
           };
         },
         {
@@ -784,8 +818,8 @@ export class LaunchApp extends BaseVisualChange {
           packageName,
           signal,
           skipPreviousObserve: true,
-          skipUiStability: skipUiStability ?? false
-        }
+          skipUiStability: skipUiStability ?? false,
+        },
       );
       result.error = "App is already in foreground";
       result.success = true;
@@ -796,7 +830,9 @@ export class LaunchApp extends BaseVisualChange {
     this.assertLaunchNotAborted(signal);
 
     const captureDisplayedMetrics = serverConfig.isUiPerfModeEnabled();
-    logger.info(`[LaunchApp] captureDisplayedMetrics=${captureDisplayedMetrics} (isUiPerfModeEnabled)`);
+    logger.info(
+      `[LaunchApp] captureDisplayedMetrics=${captureDisplayedMetrics} (isUiPerfModeEnabled)`,
+    );
     const displayedMetricsCollector = captureDisplayedMetrics
       ? new DisplayedTimeMetricsCollector(this.device, this.adbFactory)
       : null;
@@ -887,7 +923,9 @@ export class LaunchApp extends BaseVisualChange {
       if (displayedTimeMetrics.length > 0) {
         const firstMetric = displayedTimeMetrics[0];
         setLastTtiMs(packageName, firstMetric.displayedTimeMs);
-        logger.info(`[LaunchApp] Recorded TTI for ${packageName}: ${firstMetric.displayedTimeMs}ms`);
+        logger.info(
+          `[LaunchApp] Recorded TTI for ${packageName}: ${firstMetric.displayedTimeMs}ms`,
+        );
       } else {
         logger.info(`[LaunchApp] No displayed metrics found for ${packageName}`);
       }
@@ -975,21 +1013,21 @@ export class LaunchApp extends BaseVisualChange {
       {
         ...result,
         success: false,
-        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${this.describeLaunchObservationPackages(latestObservation)}`
+        error: `Timed out waiting for launch observation to show ${expectedPackageName}; last observation reported ${this.describeLaunchObservationPackages(latestObservation)}`,
       },
       expectedPackageName,
-      latestObservation
+      latestObservation,
     );
   }
 
   private withoutStaleLaunchObservation(
     result: LaunchAppResult,
     expectedPackageName: string,
-    staleObservation: ObserveResult
+    staleObservation: ObserveResult,
   ): LaunchAppResult {
     logger.warn(
       `[LaunchApp] Omitting stale launch observation for ${expectedPackageName}; ` +
-      `last observation reported ${this.describeLaunchObservationPackages(staleObservation)}`
+        `last observation reported ${this.describeLaunchObservationPackages(staleObservation)}`,
     );
     const resultWithoutObservation = { ...result };
     delete resultWithoutObservation.observation;
@@ -998,27 +1036,35 @@ export class LaunchApp extends BaseVisualChange {
 
   private preserveLaunchObservationMetadata(
     observation: ObserveResult,
-    previousObservation: ObserveResult
+    previousObservation: ObserveResult,
   ): ObserveResult {
     return {
       ...observation,
       gfxMetrics: observation.gfxMetrics ?? previousObservation.gfxMetrics,
-      perfTiming: observation.perfTiming ?? previousObservation.perfTiming
+      perfTiming: observation.perfTiming ?? previousObservation.perfTiming,
     };
   }
 
-  private launchObservationMatchesPackage(observation: ObserveResult, expectedPackageName: string): boolean {
+  private launchObservationMatchesPackage(
+    observation: ObserveResult,
+    expectedPackageName: string,
+  ): boolean {
     if (this.isLaunchPermissionDialogObservation(observation)) {
       return true;
     }
 
     const packageNames = this.getLaunchObservationPackageNames(observation);
-    return packageNames.length === 0 || packageNames.every(packageName => packageName === expectedPackageName);
+    return (
+      packageNames.length === 0 ||
+      packageNames.every((packageName) => packageName === expectedPackageName)
+    );
   }
 
   private isLaunchPermissionDialogObservation(observation: ObserveResult): boolean {
-    return observation.notificationPermissionDetected === true &&
-      observation.activeWindow?.type === "notification_permission_dialog";
+    return (
+      observation.notificationPermissionDetected === true &&
+      observation.activeWindow?.type === "notification_permission_dialog"
+    );
   }
 
   private describeLaunchObservationPackages(observation: ObserveResult): string {
@@ -1029,7 +1075,7 @@ export class LaunchApp extends BaseVisualChange {
   private getLaunchObservationPackageNames(observation: ObserveResult): string[] {
     const packageNames = [
       observation.activeWindow?.appId,
-      observation.viewHierarchy?.packageName
+      observation.viewHierarchy?.packageName,
     ].filter((packageName): packageName is string => !!packageName);
 
     return [...new Set(packageNames)];
@@ -1092,7 +1138,7 @@ export class LaunchApp extends BaseVisualChange {
   private async checkAppForeground(
     packageName: string,
     perf?: PerformanceTracker,
-    userId?: number
+    userId?: number,
   ): Promise<boolean> {
     logger.info("[LaunchApp] Checking if app is in foreground");
 
@@ -1116,7 +1162,10 @@ export class LaunchApp extends BaseVisualChange {
   /**
    * Foreground check using a single dumpsys call.
    */
-  private async checkForegroundDumpsys(packageName: string, perf?: PerformanceTracker): Promise<boolean> {
+  private async checkForegroundDumpsys(
+    packageName: string,
+    perf?: PerformanceTracker,
+  ): Promise<boolean> {
     try {
       // Use a single dumpsys activity activities call and parse the output
       const cmd = `shell dumpsys activity activities | grep -E "(mResumedActivity|mFocusedActivity|topResumedActivity)" | head -5`;
@@ -1166,7 +1215,11 @@ export class LaunchApp extends BaseVisualChange {
           const result = await this.adb.executeCommand(intentCmd);
           this.assertLaunchNotAborted(signal);
           // am start may report launch errors on stderr while still returning exit code 0.
-          if (result.stdout && !result.stdout.includes("Error") && !result.stderr.includes("Error")) {
+          if (
+            result.stdout &&
+            !result.stdout.includes("Error") &&
+            !result.stderr.includes("Error")
+          ) {
             logger.info(`[LaunchApp] Intent launch completed successfully`);
             return { success: true };
           }
@@ -1186,7 +1239,7 @@ export class LaunchApp extends BaseVisualChange {
           success: true,
           packageName,
           activityName: "intent_launch",
-          userId
+          userId,
         };
       }
     }
@@ -1204,7 +1257,9 @@ export class LaunchApp extends BaseVisualChange {
           return { success: true };
         } catch (error) {
           this.assertLaunchNotAborted(signal);
-          logger.info(`[LaunchApp] Monkey launch failed: ${error}, falling back to activity discovery`);
+          logger.info(
+            `[LaunchApp] Monkey launch failed: ${error}, falling back to activity discovery`,
+          );
           return { success: false };
         }
       });
@@ -1216,7 +1271,7 @@ export class LaunchApp extends BaseVisualChange {
           success: true,
           packageName,
           activityName: "monkey_launch",
-          userId
+          userId,
         };
       }
     }
@@ -1242,14 +1297,16 @@ export class LaunchApp extends BaseVisualChange {
             `${packageName}.main.MainActivity`,
             `${packageName}.activity.MainActivity`,
             `${packageName}.LauncherActivity`,
-            `${packageName}.MainLauncherActivity`
+            `${packageName}.MainLauncherActivity`,
           ];
 
           for (const pattern of commonPatterns) {
             this.assertLaunchNotAborted(signal);
             try {
               logger.info(`[LaunchApp] Trying common pattern: ${pattern}`);
-              await this.adb.executeCommand(`shell am start --user ${userId} -n ${packageName}/${pattern}`);
+              await this.adb.executeCommand(
+                `shell am start --user ${userId} -n ${packageName}/${pattern}`,
+              );
               this.assertLaunchNotAborted(signal);
               logger.info(`[LaunchApp] Successfully launched with pattern: ${pattern}`);
               return { success: true, pattern };
@@ -1268,7 +1325,7 @@ export class LaunchApp extends BaseVisualChange {
             success: true,
             packageName,
             activityName: patternResult.pattern,
-            userId
+            userId,
           };
         }
       }
@@ -1308,7 +1365,7 @@ export class LaunchApp extends BaseVisualChange {
       success: true,
       packageName,
       activityName: targetActivity,
-      userId
+      userId,
     };
   }
 }

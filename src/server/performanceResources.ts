@@ -11,14 +11,13 @@ const PERFORMANCE_RESOURCE_URIS = {
 } as const;
 
 const PERFORMANCE_QUERY_KEYS = ["startTime", "endTime", "limit", "offset", "deviceId"] as const;
-const PERFORMANCE_QUERY_TEMPLATE =
-  `${PERFORMANCE_RESOURCE_URIS.BASE}{?${PERFORMANCE_QUERY_KEYS.join(",")}}`;
+const PERFORMANCE_QUERY_TEMPLATE = `${PERFORMANCE_RESOURCE_URIS.BASE}{?${PERFORMANCE_QUERY_KEYS.join(",")}}`;
 const PERFORMANCE_QUERY_PARAM_KEYS = new Set<string>(PERFORMANCE_QUERY_KEYS);
 
 function parseInteger(
   value: string | undefined,
   label: string,
-  options: { min?: number; max?: number } = {}
+  options: { min?: number; max?: number } = {},
 ): number | undefined {
   if (!value) {
     return undefined;
@@ -41,7 +40,10 @@ function parseInteger(
   return parsed;
 }
 
-function parseTimestampParam(value: string | undefined, label: string): string | number | undefined {
+function parseTimestampParam(
+  value: string | undefined,
+  label: string,
+): string | number | undefined {
   if (!value) {
     return undefined;
   }
@@ -63,9 +65,9 @@ function parseTimestampParam(value: string | undefined, label: string): string |
 }
 
 function parsePerformanceParams(
-  params: Record<string, string>
+  params: Record<string, string>,
 ): Pick<PerformanceAuditQueryArgs, "startTime" | "endTime" | "limit" | "offset" | "deviceId"> {
-  const unknownKeys = Object.keys(params).filter(key => !PERFORMANCE_QUERY_PARAM_KEYS.has(key));
+  const unknownKeys = Object.keys(params).filter((key) => !PERFORMANCE_QUERY_PARAM_KEYS.has(key));
   if (unknownKeys.length > 0) {
     throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
   }
@@ -104,28 +106,34 @@ function buildPerformanceUri(options: PerformanceAuditQueryArgs): string {
   }
 
   const queryString = query.toString();
-  return queryString ? `${PERFORMANCE_RESOURCE_URIS.BASE}?${queryString}` : PERFORMANCE_RESOURCE_URIS.BASE;
+  return queryString
+    ? `${PERFORMANCE_RESOURCE_URIS.BASE}?${queryString}`
+    : PERFORMANCE_RESOURCE_URIS.BASE;
 }
 
 async function getPerformanceResource(
   args: PerformanceAuditQueryArgs,
-  uri: string
+  uri: string,
 ): Promise<ResourceContent> {
   try {
     const response = await buildPerformanceAuditResponse(args);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify(response, null, 2)
+      text: JSON.stringify(response, null, 2),
     };
   } catch (error) {
     logger.error(`[PerformanceResources] Failed to get performance audit results: ${error}`);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to retrieve performance audit results: ${error}`
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          error: `Failed to retrieve performance audit results: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -136,7 +144,7 @@ export function registerPerformanceResources(): void {
     "Performance Results",
     "List UI performance audit results from the local database.",
     "application/json",
-    () => getPerformanceResource({}, PERFORMANCE_RESOURCE_URIS.BASE)
+    () => getPerformanceResource({}, PERFORMANCE_RESOURCE_URIS.BASE),
   );
 
   ResourceRegistry.registerTemplate(
@@ -144,22 +152,27 @@ export function registerPerformanceResources(): void {
     "Performance Results",
     "List UI performance audit results from the local database.",
     "application/json",
-    async params => {
-    try {
-      const options = parsePerformanceParams(params);
-      const uri = buildPerformanceUri(options);
-      return getPerformanceResource(options, uri);
-    } catch (error) {
-      logger.error(`[PerformanceResources] Failed to parse query params: ${error}`);
-      return {
-        uri: PERFORMANCE_RESOURCE_URIS.BASE,
-        mimeType: "application/json",
-        text: JSON.stringify({
-          error: `Invalid performance query parameters: ${error}`
-        }, null, 2)
-      };
-    }
-  });
+    async (params) => {
+      try {
+        const options = parsePerformanceParams(params);
+        const uri = buildPerformanceUri(options);
+        return getPerformanceResource(options, uri);
+      } catch (error) {
+        logger.error(`[PerformanceResources] Failed to parse query params: ${error}`);
+        return {
+          uri: PERFORMANCE_RESOURCE_URIS.BASE,
+          mimeType: "application/json",
+          text: JSON.stringify(
+            {
+              error: `Invalid performance query parameters: ${error}`,
+            },
+            null,
+            2,
+          ),
+        };
+      }
+    },
+  );
 
   logger.info("[PerformanceResources] Registered performance resources");
 }

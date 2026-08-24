@@ -8,7 +8,10 @@ import {
 } from "../../src/server/observeAppResource";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
-import { loadAndroidHomeObserve, loadIosFractionalObserve } from "../fixtures/observe/observeFixture";
+import {
+  loadAndroidHomeObserve,
+  loadIosFractionalObserve,
+} from "../fixtures/observe/observeFixture";
 import type { ObserveResult } from "../../src/models/ObserveResult";
 import { z } from "zod/v4";
 
@@ -82,7 +85,9 @@ describe("registerObserveAppResource", () => {
 
   test("advertises ui://automobile/observe with the MCP App mime type", () => {
     registerObserveAppResource(fakeSource);
-    const def = ResourceRegistry.getResourceDefinitions().find(d => d.uri === OBSERVE_APP_RESOURCE_URI);
+    const def = ResourceRegistry.getResourceDefinitions().find(
+      (d) => d.uri === OBSERVE_APP_RESOURCE_URI,
+    );
     expect(def).toBeDefined();
     expect(def?.mimeType).toBe(MCP_APP_MIME_TYPE);
   });
@@ -110,18 +115,26 @@ describe("ui:// resource resolves through the MCP read path (scheme guard)", () 
     try {
       const { client } = fixture.getContext();
 
-      const listSchema = z.object({ resources: z.array(z.object({ uri: z.string(), mimeType: z.string().optional() })) });
+      const listSchema = z.object({
+        resources: z.array(z.object({ uri: z.string(), mimeType: z.string().optional() })),
+      });
       const list = await client.request({ method: "resources/list", params: {} }, listSchema);
-      const listed = list.resources.find(r => r.uri === OBSERVE_APP_RESOURCE_URI);
+      const listed = list.resources.find((r) => r.uri === OBSERVE_APP_RESOURCE_URI);
       expect(listed).toBeDefined();
       expect(listed?.mimeType).toBe(MCP_APP_MIME_TYPE);
 
       const readSchema = z.object({
-        contents: z.array(z.object({ uri: z.string(), mimeType: z.string().optional(), text: z.string().optional() })),
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+          }),
+        ),
       });
       const read = await client.request(
         { method: "resources/read", params: { uri: OBSERVE_APP_RESOURCE_URI } },
-        readSchema
+        readSchema,
       );
       expect(read.contents).toHaveLength(1);
       expect(read.contents[0].mimeType).toBe(MCP_APP_MIME_TYPE);

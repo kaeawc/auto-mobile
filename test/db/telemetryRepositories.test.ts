@@ -18,22 +18,25 @@ describe("NetworkEventRepository", () => {
   });
 
   test("recordNetworkEvent inserts and retrieves", async () => {
-    await recordNetworkEvent({
-      deviceId: "emulator-5554",
-      timestamp: 1000,
-      applicationId: "com.example.app",
-      sessionId: "s1",
-      url: "https://api.example.com/users",
-      method: "GET",
-      statusCode: 200,
-      durationMs: 150,
-      requestBodySize: 0,
-      responseBodySize: 1024,
-      protocol: "h2",
-      host: "api.example.com",
-      path: "/users",
-      error: null,
-    }, db);
+    await recordNetworkEvent(
+      {
+        deviceId: "emulator-5554",
+        timestamp: 1000,
+        applicationId: "com.example.app",
+        sessionId: "s1",
+        url: "https://api.example.com/users",
+        method: "GET",
+        statusCode: 200,
+        durationMs: 150,
+        requestBodySize: 0,
+        responseBodySize: 1024,
+        protocol: "h2",
+        host: "api.example.com",
+        path: "/users",
+        error: null,
+      },
+      db,
+    );
 
     const events = await getNetworkEvents({ deviceId: "emulator-5554" }, db);
     expect(events).toHaveLength(1);
@@ -43,16 +46,44 @@ describe("NetworkEventRepository", () => {
   });
 
   test("getNetworkEvents filters by sinceTimestamp", async () => {
-    await recordNetworkEvent({
-      deviceId: "d1", timestamp: 100, applicationId: null, sessionId: null,
-      url: "u1", method: "GET", statusCode: 200, durationMs: 10,
-      requestBodySize: -1, responseBodySize: -1, protocol: null, host: null, path: null, error: null,
-    }, db);
-    await recordNetworkEvent({
-      deviceId: "d1", timestamp: 200, applicationId: null, sessionId: null,
-      url: "u2", method: "POST", statusCode: 201, durationMs: 20,
-      requestBodySize: -1, responseBodySize: -1, protocol: null, host: null, path: null, error: null,
-    }, db);
+    await recordNetworkEvent(
+      {
+        deviceId: "d1",
+        timestamp: 100,
+        applicationId: null,
+        sessionId: null,
+        url: "u1",
+        method: "GET",
+        statusCode: 200,
+        durationMs: 10,
+        requestBodySize: -1,
+        responseBodySize: -1,
+        protocol: null,
+        host: null,
+        path: null,
+        error: null,
+      },
+      db,
+    );
+    await recordNetworkEvent(
+      {
+        deviceId: "d1",
+        timestamp: 200,
+        applicationId: null,
+        sessionId: null,
+        url: "u2",
+        method: "POST",
+        statusCode: 201,
+        durationMs: 20,
+        requestBodySize: -1,
+        responseBodySize: -1,
+        protocol: null,
+        host: null,
+        path: null,
+        error: null,
+      },
+      db,
+    );
 
     const events = await getNetworkEvents({ sinceTimestamp: 150 }, db);
     expect(events).toHaveLength(1);
@@ -60,25 +91,61 @@ describe("NetworkEventRepository", () => {
   });
 
   test("recordNetworkEvent stores and retrieves request/response headers", async () => {
-    await recordNetworkEvent({
-      deviceId: "d1", timestamp: 1000, applicationId: null, sessionId: null,
-      url: "https://api.test/get", method: "GET", statusCode: 200, durationMs: 50,
-      requestBodySize: 0, responseBodySize: 100, protocol: null, host: "api.test", path: "/get", error: null,
-      requestHeaders: { "Accept": "application/json", "Authorization": "Bearer tok" },
-      responseHeaders: { "Content-Type": "application/json", "X-Request-Id": "abc" },
-    }, db);
+    await recordNetworkEvent(
+      {
+        deviceId: "d1",
+        timestamp: 1000,
+        applicationId: null,
+        sessionId: null,
+        url: "https://api.test/get",
+        method: "GET",
+        statusCode: 200,
+        durationMs: 50,
+        requestBodySize: 0,
+        responseBodySize: 100,
+        protocol: null,
+        host: "api.test",
+        path: "/get",
+        error: null,
+        requestHeaders: { Accept: "application/json", Authorization: "Bearer tok" },
+        responseHeaders: { "Content-Type": "application/json", "X-Request-Id": "abc" },
+      },
+      db,
+    );
     const events = await getNetworkEvents({}, db);
-    expect(events[0].requestHeaders).toEqual({ "Accept": "application/json", "Authorization": "Bearer tok" });
-    expect(events[0].responseHeaders).toEqual({ "Content-Type": "application/json", "X-Request-Id": "abc" });
+    expect(events[0].requestHeaders).toEqual({
+      Accept: "application/json",
+      Authorization: "Bearer tok",
+    });
+    expect(events[0].responseHeaders).toEqual({
+      "Content-Type": "application/json",
+      "X-Request-Id": "abc",
+    });
   });
 
   test("recordNetworkEvent stores and retrieves request/response bodies", async () => {
-    await recordNetworkEvent({
-      deviceId: "d1", timestamp: 1000, applicationId: null, sessionId: null,
-      url: "https://api.test/post", method: "POST", statusCode: 201, durationMs: 100,
-      requestBodySize: 20, responseBodySize: 50, protocol: null, host: "api.test", path: "/post", error: null,
-      requestBody: '{"name":"test"}', responseBody: '{"id":1}', contentType: "application/json",
-    }, db);
+    await recordNetworkEvent(
+      {
+        deviceId: "d1",
+        timestamp: 1000,
+        applicationId: null,
+        sessionId: null,
+        url: "https://api.test/post",
+        method: "POST",
+        statusCode: 201,
+        durationMs: 100,
+        requestBodySize: 20,
+        responseBodySize: 50,
+        protocol: null,
+        host: "api.test",
+        path: "/post",
+        error: null,
+        requestBody: '{"name":"test"}',
+        responseBody: '{"id":1}',
+        contentType: "application/json",
+      },
+      db,
+    );
     const events = await getNetworkEvents({}, db);
     expect(events[0].requestBody).toBe('{"name":"test"}');
     expect(events[0].responseBody).toBe('{"id":1}');
@@ -86,11 +153,25 @@ describe("NetworkEventRepository", () => {
   });
 
   test("null headers and bodies stored as null not string", async () => {
-    await recordNetworkEvent({
-      deviceId: "d1", timestamp: 1000, applicationId: null, sessionId: null,
-      url: "u", method: "GET", statusCode: 200, durationMs: 10,
-      requestBodySize: -1, responseBodySize: -1, protocol: null, host: null, path: null, error: null,
-    }, db);
+    await recordNetworkEvent(
+      {
+        deviceId: "d1",
+        timestamp: 1000,
+        applicationId: null,
+        sessionId: null,
+        url: "u",
+        method: "GET",
+        statusCode: 200,
+        durationMs: 10,
+        requestBodySize: -1,
+        responseBodySize: -1,
+        protocol: null,
+        host: null,
+        path: null,
+        error: null,
+      },
+      db,
+    );
     const events = await getNetworkEvents({}, db);
     expect(events[0].requestHeaders).toBeNull();
     expect(events[0].responseHeaders).toBeNull();
@@ -112,16 +193,19 @@ describe("LogEventRepository", () => {
   });
 
   test("recordLogEvent inserts and retrieves", async () => {
-    await recordLogEvent({
-      deviceId: "d1",
-      timestamp: 1000,
-      applicationId: "com.example.app",
-      sessionId: "s1",
-      level: 4,
-      tag: "OkHttp",
-      message: "HTTP 200",
-      filterName: "http",
-    }, db);
+    await recordLogEvent(
+      {
+        deviceId: "d1",
+        timestamp: 1000,
+        applicationId: "com.example.app",
+        sessionId: "s1",
+        level: 4,
+        tag: "OkHttp",
+        message: "HTTP 200",
+        filterName: "http",
+      },
+      db,
+    );
 
     const events = await getLogEvents({ tag: "OkHttp" }, db);
     expect(events).toHaveLength(1);
@@ -142,15 +226,18 @@ describe("OsEventRepository", () => {
   });
 
   test("recordOsEvent inserts lifecycle event", async () => {
-    await recordOsEvent({
-      deviceId: "d1",
-      timestamp: 1000,
-      applicationId: "com.example.app",
-      sessionId: "s1",
-      category: "lifecycle",
-      kind: "foreground",
-      details: null,
-    }, db);
+    await recordOsEvent(
+      {
+        deviceId: "d1",
+        timestamp: 1000,
+        applicationId: "com.example.app",
+        sessionId: "s1",
+        category: "lifecycle",
+        kind: "foreground",
+        details: null,
+      },
+      db,
+    );
 
     const events = await getOsEvents({ category: "lifecycle" }, db);
     expect(events).toHaveLength(1);
@@ -158,15 +245,18 @@ describe("OsEventRepository", () => {
   });
 
   test("recordOsEvent inserts broadcast with details", async () => {
-    await recordOsEvent({
-      deviceId: "d1",
-      timestamp: 2000,
-      applicationId: null,
-      sessionId: null,
-      category: "broadcast",
-      kind: "android.intent.action.LOCALE_CHANGED",
-      details: { locale: "String" },
-    }, db);
+    await recordOsEvent(
+      {
+        deviceId: "d1",
+        timestamp: 2000,
+        applicationId: null,
+        sessionId: null,
+        category: "broadcast",
+        kind: "android.intent.action.LOCALE_CHANGED",
+        details: { locale: "String" },
+      },
+      db,
+    );
 
     const events = await getOsEvents({ category: "broadcast" }, db);
     expect(events).toHaveLength(1);
@@ -174,14 +264,30 @@ describe("OsEventRepository", () => {
   });
 
   test("getOsEvents filters by device and timestamp", async () => {
-    await recordOsEvent({
-      deviceId: "d1", timestamp: 100, applicationId: null, sessionId: null,
-      category: "lifecycle", kind: "foreground", details: null,
-    }, db);
-    await recordOsEvent({
-      deviceId: "d2", timestamp: 200, applicationId: null, sessionId: null,
-      category: "lifecycle", kind: "background", details: null,
-    }, db);
+    await recordOsEvent(
+      {
+        deviceId: "d1",
+        timestamp: 100,
+        applicationId: null,
+        sessionId: null,
+        category: "lifecycle",
+        kind: "foreground",
+        details: null,
+      },
+      db,
+    );
+    await recordOsEvent(
+      {
+        deviceId: "d2",
+        timestamp: 200,
+        applicationId: null,
+        sessionId: null,
+        category: "lifecycle",
+        kind: "background",
+        details: null,
+      },
+      db,
+    );
 
     const d1Events = await getOsEvents({ deviceId: "d1" }, db);
     expect(d1Events).toHaveLength(1);

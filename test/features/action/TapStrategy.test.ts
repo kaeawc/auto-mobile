@@ -50,11 +50,10 @@ describe("TapStrategy", () => {
 
       await fake.isAccessibilityServiceEnabled();
       fake.shouldRunPreTapStability({ action: "tap" } as TapOnElementOptions);
-      fake.prepareViewHierarchyForResponse(
-        minimalHierarchy,
-        buildViewHierarchy(androidDevice),
-        { width: 1080, height: 1920 }
-      );
+      fake.prepareViewHierarchyForResponse(minimalHierarchy, buildViewHierarchy(androidDevice), {
+        width: 1080,
+        height: 1920,
+      });
 
       expect(fake.wasMethodCalled("isAccessibilityServiceEnabled")).toBe(true);
       expect(fake.wasMethodCalled("shouldRunPreTapStability")).toBe(true);
@@ -100,11 +99,19 @@ describe("TapStrategy", () => {
       device: androidDevice,
       build: () => {
         const detector = new FakeAccessibilityDetector();
-        const strategy = new AndroidTapStrategy(androidDevice, new FakeAdbClient() as any, detector);
+        const strategy = new AndroidTapStrategy(
+          androidDevice,
+          new FakeAdbClient() as any,
+          detector,
+        );
         return {
           strategy,
-          setA11y: enabled =>
-            detector.setDetectionResult(androidDevice.deviceId, enabled, enabled ? "talkback" : null),
+          setA11y: (enabled) =>
+            detector.setDetectionResult(
+              androidDevice.deviceId,
+              enabled,
+              enabled ? "talkback" : null,
+            ),
         };
       },
       longPressMs: 500,
@@ -117,7 +124,7 @@ describe("TapStrategy", () => {
       build: () => {
         const detector = new FakeIosVoiceOverDetector();
         const strategy = new IosTapStrategy(iosDevice, detector);
-        return { strategy, setA11y: enabled => detector.setVoiceOverEnabled(enabled) };
+        return { strategy, setA11y: (enabled) => detector.setVoiceOverEnabled(enabled) };
       },
       longPressMs: 1000,
       retryTapIfNoChange: false,
@@ -148,7 +155,9 @@ describe("TapStrategy", () => {
         const withFlag = { action: "tap", preTapStability: true } as TapOnElementOptions;
         const withoutFlag = { action: "tap" } as TapOnElementOptions;
         expect(strategy.shouldRunPreTapStability(withoutFlag)).toBe(false);
-        expect(strategy.shouldRunPreTapStability(withFlag)).toBe(c.runsPreTapStabilityWhenRequested);
+        expect(strategy.shouldRunPreTapStability(withFlag)).toBe(
+          c.runsPreTapStabilityWhenRequested,
+        );
       });
 
       it("filters the response hierarchy without crashing", () => {
@@ -156,7 +165,7 @@ describe("TapStrategy", () => {
         const result = strategy.prepareViewHierarchyForResponse(
           minimalHierarchy,
           buildViewHierarchy(c.device),
-          { width: 390, height: 844 }
+          { width: 390, height: 844 },
         );
         // Android always returns a filtered tree; iOS returns null when
         // screenSize is missing (covered separately below) but returns
@@ -180,7 +189,7 @@ describe("TapStrategy", () => {
       const strategy = new IosTapStrategy(iosDevice, new FakeIosVoiceOverDetector());
       const result = strategy.prepareViewHierarchyForResponse(
         minimalHierarchy,
-        buildViewHierarchy(iosDevice)
+        buildViewHierarchy(iosDevice),
       );
       expect(result).toBeNull();
     });
@@ -198,7 +207,7 @@ describe("TapStrategy", () => {
         androidDevice,
         new FakeAdbClient() as any,
         detector,
-        sentinelFlags
+        sentinelFlags,
       );
       await strategy.isAccessibilityServiceEnabled();
       expect(detector.detectMethodFeatureFlagsArgs).toEqual([sentinelFlags]);
@@ -218,7 +227,7 @@ describe("TapStrategy", () => {
         new FakeAdbClient() as any,
         detector,
         new FakeIosVoiceOverDetector(),
-        sentinelFlags
+        sentinelFlags,
       );
       await strategy.isAccessibilityServiceEnabled();
       expect(detector.detectMethodFeatureFlagsArgs).toEqual([sentinelFlags]);
@@ -231,7 +240,7 @@ describe("TapStrategy", () => {
         new FakeAdbClient() as any,
         new FakeAccessibilityDetector(),
         detector,
-        sentinelFlags
+        sentinelFlags,
       );
       await strategy.isAccessibilityServiceEnabled();
       expect(detector.isVoiceOverEnabledFeatureFlagsArgs).toEqual([sentinelFlags]);
@@ -244,7 +253,7 @@ describe("TapStrategy", () => {
         androidDevice,
         new FakeAdbClient() as any,
         new FakeAccessibilityDetector(),
-        new FakeIosVoiceOverDetector()
+        new FakeIosVoiceOverDetector(),
       );
       expect(strategy).toBeInstanceOf(AndroidTapStrategy);
       expect(strategy.longPressDurationMs).toBe(500);
@@ -255,7 +264,7 @@ describe("TapStrategy", () => {
         iosDevice,
         new FakeAdbClient() as any,
         new FakeAccessibilityDetector(),
-        new FakeIosVoiceOverDetector()
+        new FakeIosVoiceOverDetector(),
       );
       expect(strategy).toBeInstanceOf(IosTapStrategy);
       expect(strategy.longPressDurationMs).toBe(1000);

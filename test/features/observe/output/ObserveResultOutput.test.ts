@@ -27,7 +27,7 @@ import {
 
 /** Normalize a `node` slot (single or array, as real captures vary) to array. */
 function toNodeArray(
-  node: ViewHierarchyNode | ViewHierarchyNode[] | undefined
+  node: ViewHierarchyNode | ViewHierarchyNode[] | undefined,
 ): ViewHierarchyNode[] {
   if (!node) {
     return [];
@@ -72,7 +72,7 @@ type BoundsTuple = [number, number, number, number];
 
 /** True when `v` is a compacted bounds tuple `[left, top, right, bottom]`. */
 function isBoundsTuple(v: unknown): v is BoundsTuple {
-  return Array.isArray(v) && v.length === 4 && v.every(n => typeof n === "number");
+  return Array.isArray(v) && v.length === 4 && v.every((n) => typeof n === "number");
 }
 
 describe("sanitizeObserveResult", () => {
@@ -110,9 +110,10 @@ describe("sanitizeObserveResult", () => {
         },
       };
 
-      expect(sanitizeObserveResult(observe, COMPACT).screenIdentity).toEqual(observe.screenIdentity);
+      expect(sanitizeObserveResult(observe, COMPACT).screenIdentity).toEqual(
+        observe.screenIdentity,
+      );
     });
-
   });
 
   describe("perf-audit strip (always)", () => {
@@ -319,7 +320,9 @@ describe("sanitizeObserveResult", () => {
       const { observe } = loadAndroidHomeObserve();
       // Precondition: the baseline has nodes where view-id === resource-id.
       const dupBefore = allHierarchyNodes(observe).filter(
-        n => n["view-id"] !== undefined && n["view-id"] === (n as Record<string, unknown>)["resource-id"]
+        (n) =>
+          n["view-id"] !== undefined &&
+          n["view-id"] === (n as Record<string, unknown>)["resource-id"],
       );
       expect(dupBefore.length).toBeGreaterThan(0);
 
@@ -327,13 +330,15 @@ describe("sanitizeObserveResult", () => {
       // resource-id and must survive the dedup. Without this, a trim that
       // deleted EVERY view-id would pass the loop below vacuously.
       const distinctBefore = allHierarchyNodes(observe).filter(
-        n => n["view-id"] !== undefined && n["view-id"] !== (n as Record<string, unknown>)["resource-id"]
+        (n) =>
+          n["view-id"] !== undefined &&
+          n["view-id"] !== (n as Record<string, unknown>)["resource-id"],
       );
       expect(distinctBefore.length).toBeGreaterThan(0);
 
       const out = sanitizeObserveResult(observe, DROP_NONE);
 
-      const survivingViewIds = allHierarchyNodes(out).filter(n => n["view-id"] !== undefined);
+      const survivingViewIds = allHierarchyNodes(out).filter((n) => n["view-id"] !== undefined);
       // The distinct view-ids are not collateral damage of the dedup.
       expect(survivingViewIds.length).toBeGreaterThan(0);
       for (const n of allHierarchyNodes(out)) {
@@ -353,8 +358,8 @@ describe("sanitizeObserveResult", () => {
           hierarchy: {
             node: {
               "view-id": "distinct-uuid",
-              "node": [],
-              "$": {},
+              node: [],
+              $: {},
             } as any,
           },
         },
@@ -377,21 +382,21 @@ describe("sanitizeObserveResult", () => {
               {
                 "resource-id": "id/covered",
                 "view-id": "id/covered",
-                "occludedByViewId": "id/overlay",
-                "node": [],
-                "$": {},
+                occludedByViewId: "id/overlay",
+                node: [],
+                $: {},
               },
               {
                 "resource-id": "id/overlay",
                 "view-id": "id/overlay",
-                "node": [],
-                "$": {},
+                node: [],
+                $: {},
               },
               {
                 "resource-id": "id/unreferenced",
                 "view-id": "id/unreferenced",
-                "node": [],
-                "$": {},
+                node: [],
+                $: {},
               },
             ] as any,
           },
@@ -399,9 +404,8 @@ describe("sanitizeObserveResult", () => {
       };
 
       const out = sanitizeObserveResult(obs, DROP_NONE);
-      const [covered, overlay, unreferenced] = out.viewHierarchy!.hierarchy!.node as unknown as Array<
-        Record<string, unknown>
-      >;
+      const [covered, overlay, unreferenced] = out.viewHierarchy!.hierarchy!
+        .node as unknown as Array<Record<string, unknown>>;
 
       expect(covered.occludedByViewId).toBe("id/overlay");
       expect(covered["view-id"]).toBeUndefined();
@@ -417,14 +421,14 @@ describe("sanitizeObserveResult", () => {
         viewHierarchy: {
           hierarchy: {
             node: {
-              "clickable": "false",
+              clickable: "false",
               "long-clickable": false,
-              "focusable": "true",
-              "text": "",
+              focusable: "true",
+              text: "",
               "content-desc": "Keep me",
               "resource-id": "id/keep",
-              "node": [],
-              "$": {},
+              node: [],
+              $: {},
             } as any,
           },
         },
@@ -452,10 +456,10 @@ describe("sanitizeObserveResult", () => {
         viewHierarchy: {
           hierarchy: {
             node: {
-              "enabled": enabled,
+              enabled: enabled,
               "resource-id": "id/keep",
-              "node": [],
-              "$": {},
+              node: [],
+              $: {},
             } as any,
           },
         },
@@ -463,8 +467,14 @@ describe("sanitizeObserveResult", () => {
 
       const enabledTrue = sanitizeObserveResult(makeObs("true"), DROP_NONE);
       const enabledFalse = sanitizeObserveResult(makeObs("false"), DROP_NONE);
-      const trueNode = enabledTrue.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
-      const falseNode = enabledFalse.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+      const trueNode = enabledTrue.viewHierarchy!.hierarchy!.node as unknown as Record<
+        string,
+        unknown
+      >;
+      const falseNode = enabledFalse.viewHierarchy!.hierarchy!.node as unknown as Record<
+        string,
+        unknown
+      >;
 
       // enabled defaults to true → absence is lossless; a disabled control is high-signal.
       expect(trueNode).not.toHaveProperty("enabled");
@@ -491,9 +501,9 @@ describe("sanitizeObserveResult", () => {
           }
         }
       }
-      const falseBooleanCandidates = allHierarchyNodes(obs).filter(node => {
+      const falseBooleanCandidates = allHierarchyNodes(obs).filter((node) => {
         const attrs = node as unknown as Record<string, unknown>;
-        return DEFAULT_FALSE_BOOLEAN_KEYS.some(key => attrs[key] === "false");
+        return DEFAULT_FALSE_BOOLEAN_KEYS.some((key) => attrs[key] === "false");
       });
       expect(falseBooleanCandidates.length).toBeGreaterThan(0);
 
@@ -512,8 +522,8 @@ describe("sanitizeObserveResult", () => {
           delete attrs[key];
         }
       }
-      const emptyStringCandidates = allHierarchyNodes(obs).filter(node =>
-        Object.values(node as unknown as Record<string, unknown>).some(value => value === "")
+      const emptyStringCandidates = allHierarchyNodes(obs).filter((node) =>
+        Object.values(node as unknown as Record<string, unknown>).some((value) => value === ""),
       );
       expect(emptyStringCandidates.length).toBeGreaterThan(0);
 
@@ -536,8 +546,8 @@ describe("sanitizeObserveResult", () => {
           }
         }
       }
-      const enabledTrueCandidates = allHierarchyNodes(obs).filter(node =>
-        (node as unknown as Record<string, unknown>).enabled === "true"
+      const enabledTrueCandidates = allHierarchyNodes(obs).filter(
+        (node) => (node as unknown as Record<string, unknown>).enabled === "true",
       );
       expect(enabledTrueCandidates.length).toBeGreaterThan(0);
 
@@ -554,10 +564,10 @@ describe("sanitizeObserveResult", () => {
           node: {
             "view-id": "android:id/content",
             "resource-id": "android:id/content",
-            "clickable": "false",
-            "text": "",
-            "node": [],
-            "$": {},
+            clickable: "false",
+            text: "",
+            node: [],
+            $: {},
           },
         } as any,
       };
@@ -572,7 +582,9 @@ describe("sanitizeObserveResult", () => {
       const { observe } = loadAndroidHomeObserve();
       const out = sanitizeObserveResult(observe, { dropElements: false, trimNodes: false });
       const dup = allHierarchyNodes(out).filter(
-        n => n["view-id"] !== undefined && n["view-id"] === (n as Record<string, unknown>)["resource-id"]
+        (n) =>
+          n["view-id"] !== undefined &&
+          n["view-id"] === (n as Record<string, unknown>)["resource-id"],
       );
       expect(dup.length).toBeGreaterThan(0);
     });
@@ -605,13 +617,13 @@ describe("sanitizeObserveResult", () => {
     test("flattens every node's bounds object to a [left,top,right,bottom] tuple when compact is on", () => {
       const { observe } = loadAndroidHomeObserve();
       // Precondition: the baseline carries object-shaped bounds on nodes.
-      const withBoundsBefore = allHierarchyNodes(observe).filter(n => n.bounds !== undefined);
+      const withBoundsBefore = allHierarchyNodes(observe).filter((n) => n.bounds !== undefined);
       expect(withBoundsBefore.length).toBeGreaterThan(0);
-      expect(withBoundsBefore.every(n => !Array.isArray(n.bounds))).toBe(true);
+      expect(withBoundsBefore.every((n) => !Array.isArray(n.bounds))).toBe(true);
 
       const out = sanitizeObserveResult(observe, COMPACT);
 
-      const withBoundsAfter = allHierarchyNodes(out).filter(n => n.bounds !== undefined);
+      const withBoundsAfter = allHierarchyNodes(out).filter((n) => n.bounds !== undefined);
       expect(withBoundsAfter.length).toBe(withBoundsBefore.length);
       for (const n of withBoundsAfter) {
         expect(isBoundsTuple(n.bounds)).toBe(true);
@@ -649,7 +661,12 @@ describe("sanitizeObserveResult", () => {
       for (const n of allHierarchyNodes(out)) {
         const id = (n as Record<string, unknown>)["view-id"];
         if (typeof id === "string" && isBoundsTuple(n.bounds)) {
-          const orig = originalByViewId.get(id) as { left: number; top: number; right: number; bottom: number };
+          const orig = originalByViewId.get(id) as {
+            left: number;
+            top: number;
+            right: number;
+            bottom: number;
+          };
           expect(orig).toBeDefined();
           const [left, top, right, bottom] = n.bounds;
           expect({ left, top, right, bottom }).toEqual(orig);
@@ -681,7 +698,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: { "resource-id": "id/no-bounds", "node": [], "$": {} } as any,
+            node: { "resource-id": "id/no-bounds", node: [], $: {} } as any,
           },
         },
       };
@@ -700,10 +717,12 @@ describe("sanitizeObserveResult", () => {
             node: [
               {
                 "resource-id": "a",
-                "bounds": { left: 1, top: 2, right: 3, bottom: 4 },
-                "node": [{ "resource-id": "a-child", "bounds": { left: 5, top: 6, right: 7, bottom: 8 } }],
+                bounds: { left: 1, top: 2, right: 3, bottom: 4 },
+                node: [
+                  { "resource-id": "a-child", bounds: { left: 5, top: 6, right: 7, bottom: 8 } },
+                ],
               },
-              { "resource-id": "b", "bounds": { left: 9, top: 10, right: 11, bottom: 12 } },
+              { "resource-id": "b", bounds: { left: 9, top: 10, right: 11, bottom: 12 } },
             ] as any,
           },
         },
@@ -725,17 +744,21 @@ describe("sanitizeObserveResult", () => {
             node: {
               "resource-id": "id/root",
               "view-id": "id/root", // dup → trimmed
-              "clickable": "false", // default-false → trimmed
-              "text": "", // empty → trimmed
-              "bounds": { left: 0, top: 0, right: 100, bottom: 200 },
-              "node": [],
-              "$": {},
+              clickable: "false", // default-false → trimmed
+              text: "", // empty → trimmed
+              bounds: { left: 0, top: 0, right: 100, bottom: 200 },
+              node: [],
+              $: {},
             } as any,
           },
         },
         elements: { clickable: [], scrollable: [], text: [], media: [] },
       };
-      const out = sanitizeObserveResult(obs, { dropElements: true, trimNodes: true, compact: true });
+      const out = sanitizeObserveResult(obs, {
+        dropElements: true,
+        trimNodes: true,
+        compact: true,
+      });
       const node = out.viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
       expect(node.bounds).toEqual([0, 0, 100, 200]);
       expect(node["view-id"]).toBeUndefined();
@@ -783,11 +806,12 @@ describe("sanitizeObserveResult", () => {
           systemInsets: { top: 1, bottom: 2, left: 3, right: 4 },
           hierarchy: {
             bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } as any,
-            node: { "resource-id": "root", "bounds": { left: 60, top: 61, right: 62, bottom: 63 } } as any,
+            node: {
+              "resource-id": "root",
+              bounds: { left: 60, top: 61, right: 62, bottom: 63 },
+            } as any,
           },
-          windows: [
-            { bounds: { left: 70, top: 71, right: 72, bottom: 73 } } as any,
-          ],
+          windows: [{ bounds: { left: 70, top: 71, right: 72, bottom: 73 } } as any],
           contentHiddenRegions: [
             { bounds: { left: 80, top: 81, right: 82, bottom: 83 }, reason: "x", areaPercent: 1 },
           ],
@@ -829,7 +853,9 @@ describe("sanitizeObserveResult", () => {
     test("leaves rawViewHierarchy untouched (raw stays raw)", () => {
       const obs = makeMultiSiteObserve();
       obs.rawViewHierarchy = {
-        hierarchy: { node: { "resource-id": "raw", "bounds": { left: 90, top: 91, right: 92, bottom: 93 } } },
+        hierarchy: {
+          node: { "resource-id": "raw", bounds: { left: 90, top: 91, right: 92, bottom: 93 } },
+        },
       } as any;
       const rawBefore = JSON.stringify(obs.rawViewHierarchy);
 
@@ -958,26 +984,27 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: { "class": "android.view.View", ...attrs, "node": [], "$": {} } as any,
+            node: { class: "android.view.View", ...attrs, node: [], $: {} } as any,
           },
         },
       };
-      return sanitizeObserveResult(obs, DROP_NONE).viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+      return sanitizeObserveResult(obs, DROP_NONE).viewHierarchy!.hierarchy!
+        .node as unknown as Record<string, unknown>;
     }
 
-    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s='false' (string default) is dropped", key => {
+    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s='false' (string default) is dropped", (key) => {
       expect(trimmedNode({ [key]: "false" })).not.toHaveProperty(key);
     });
 
-    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s=false (boolean default) is dropped", key => {
+    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s=false (boolean default) is dropped", (key) => {
       expect(trimmedNode({ [key]: false })).not.toHaveProperty(key);
     });
 
-    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s='true' (non-default) is kept", key => {
+    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s='true' (non-default) is kept", (key) => {
       expect(trimmedNode({ [key]: "true" })[key]).toBe("true");
     });
 
-    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s=true (boolean non-default) is kept", key => {
+    test.each(DEFAULT_FALSE_BOOLEAN_KEYS)("%s=true (boolean non-default) is kept", (key) => {
       expect(trimmedNode({ [key]: true })[key]).toBe(true);
     });
 
@@ -1020,7 +1047,7 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
         viewHierarchy: {
           hierarchy: {
-            node: { "resource-id": "r", "bounds": input as any, "node": [], "$": {} } as any,
+            node: { "resource-id": "r", bounds: input as any, node: [], $: {} } as any,
           },
         },
       };
@@ -1031,12 +1058,28 @@ describe("sanitizeObserveResult", () => {
       ["full object", { left: 1, top: 2, right: 3, bottom: 4 }, [1, 2, 3, 4]],
       ["zero values", { left: 0, top: 0, right: 0, bottom: 0 }, [0, 0, 0, 0]],
       ["negative values", { left: -5, top: -10, right: 5, bottom: 10 }, [-5, -10, 5, 10]],
-      ["fractional values", { left: 1.5, top: 2.25, right: 3.75, bottom: 4.5 }, [1.5, 2.25, 3.75, 4.5]],
+      [
+        "fractional values",
+        { left: 1.5, top: 2.25, right: 3.75, bottom: 4.5 },
+        [1.5, 2.25, 3.75, 4.5],
+      ],
       // Partial holes: the ONLY rows that catch a hole-dropping compactor. Holes
       // are `undefined` in-memory (they only serialize to `null` via JSON).
-      ["missing left+top (leading holes)", { right: 30, bottom: 40 }, [undefined, undefined, 30, 40]],
-      ["missing right+bottom (trailing holes)", { left: 10, top: 20 }, [10, 20, undefined, undefined]],
-      ["null-valued left (kept as null, not dropped)", { left: null, top: 0, right: 10, bottom: 10 }, [null, 0, 10, 10]],
+      [
+        "missing left+top (leading holes)",
+        { right: 30, bottom: 40 },
+        [undefined, undefined, 30, 40],
+      ],
+      [
+        "missing right+bottom (trailing holes)",
+        { left: 10, top: 20 },
+        [10, 20, undefined, undefined],
+      ],
+      [
+        "null-valued left (kept as null, not dropped)",
+        { left: null, top: 0, right: 10, bottom: 10 },
+        [null, 0, 10, 10],
+      ],
       ["large values", { left: 0, top: 0, right: 100000, bottom: 250000 }, [0, 0, 100000, 250000]],
       // Non-object bounds are left untouched → idempotent.
       ["already a tuple (idempotent)", [1, 2, 3, 4], [1, 2, 3, 4]],
@@ -1065,7 +1108,12 @@ describe("sanitizeObserveResult", () => {
         systemInsets: { top: 5, bottom: 6, left: 7, right: 8 },
         viewHierarchy: { hierarchy: { node: { "resource-id": "r" } as any } },
       };
-      expect(sanitizeObserveResult(obs, COMPACT).systemInsets).toEqual({ top: 5, bottom: 6, left: 7, right: 8 });
+      expect(sanitizeObserveResult(obs, COMPACT).systemInsets).toEqual({
+        top: 5,
+        bottom: 6,
+        left: 7,
+        right: 8,
+      });
     });
   });
 
@@ -1103,20 +1151,23 @@ describe("sanitizeObserveResult", () => {
       };
     }
 
-    test.each(GFX_AUDIT_PAIRS)("a 0-valued audit %s still drops redundant gfxMetrics.%s", (auditKey, gfxKey) => {
-      const { observe } = loadAndroidHomeObserve();
-      const m = observe.performanceAudit!.metrics as unknown as Record<string, unknown>;
-      // Null every frame replacement so ONLY the tested field's 0 can drive a drop.
-      for (const [ak] of GFX_AUDIT_PAIRS) {
-        m[ak] = null;
-      }
-      m[auditKey] = 0; // a genuine measurement of zero, not "no data"
-      observe.gfxMetrics = fullGfxMetrics();
+    test.each(GFX_AUDIT_PAIRS)(
+      "a 0-valued audit %s still drops redundant gfxMetrics.%s",
+      (auditKey, gfxKey) => {
+        const { observe } = loadAndroidHomeObserve();
+        const m = observe.performanceAudit!.metrics as unknown as Record<string, unknown>;
+        // Null every frame replacement so ONLY the tested field's 0 can drive a drop.
+        for (const [ak] of GFX_AUDIT_PAIRS) {
+          m[ak] = null;
+        }
+        m[auditKey] = 0; // a genuine measurement of zero, not "no data"
+        observe.gfxMetrics = fullGfxMetrics();
 
-      const out = sanitizeObserveResult(observe, DROP_NONE);
+        const out = sanitizeObserveResult(observe, DROP_NONE);
 
-      expect(out.gfxMetrics).not.toHaveProperty(gfxKey);
-    });
+        expect(out.gfxMetrics).not.toHaveProperty(gfxKey);
+      },
+    );
 
     test("keeps every non-frame UI-stability gfxMetrics field", () => {
       const { observe } = loadAndroidHomeObserve();
@@ -1146,11 +1197,15 @@ describe("sanitizeObserveResult", () => {
     });
 
     test("an absent marker leaves diagnostics untouched", () => {
-      expect(strippedDiagnostics("Summary only, no dump present")).toBe("Summary only, no dump present");
+      expect(strippedDiagnostics("Summary only, no dump present")).toBe(
+        "Summary only, no dump present",
+      );
     });
 
     test("a marker mid-string keeps the summary above it and drops the dump", () => {
-      const diag = strippedDiagnostics(`Performance issues detected:\nline\n${GFXINFO_DUMP_MARKER}\nraw`);
+      const diag = strippedDiagnostics(
+        `Performance issues detected:\nline\n${GFXINFO_DUMP_MARKER}\nraw`,
+      );
       expect(diag).toBe("Performance issues detected:\nline");
       expect(diag).not.toContain(GFXINFO_DUMP_MARKER);
     });
@@ -1166,9 +1221,12 @@ describe("sanitizeObserveResult", () => {
         updatedAt: 0,
         screenSize: { width: 1, height: 1 },
         systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-        viewHierarchy: { hierarchy: { node: { "resource-id": "r", ...attrs, "node": [], "$": {} } as any } },
+        viewHierarchy: {
+          hierarchy: { node: { "resource-id": "r", ...attrs, node: [], $: {} } as any },
+        },
       };
-      return sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!.node as unknown as Record<string, unknown>;
+      return sanitizeObserveResult(obs, COMPACT).viewHierarchy!.hierarchy!
+        .node as unknown as Record<string, unknown>;
     }
 
     const UNICODE_TEXTS: ReadonlyArray<readonly [string, string]> = [
@@ -1180,9 +1238,12 @@ describe("sanitizeObserveResult", () => {
       ["CJK", "設定"],
     ];
 
-    test.each(UNICODE_TEXTS)("preserves %s in text verbatim through trim+compact", (_label, text) => {
-      expect(trimmedCompactNode({ text })["text"]).toBe(text);
-    });
+    test.each(UNICODE_TEXTS)(
+      "preserves %s in text verbatim through trim+compact",
+      (_label, text) => {
+        expect(trimmedCompactNode({ text })["text"]).toBe(text);
+      },
+    );
 
     test("NFC and NFD forms are preserved as distinct byte sequences (no normalization)", () => {
       const nfc = trimmedCompactNode({ text: "café" })["text"];
@@ -1216,7 +1277,10 @@ describe("sanitizeObserveResult", () => {
         reduced: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, DROP_NONE),
         reference: () => {
           const { observe } = loadAndroidHomeObserve();
-          return { ...sanitizeObserveResult(observe, DROP_NONE), performanceAudit: observe.performanceAudit };
+          return {
+            ...sanitizeObserveResult(observe, DROP_NONE),
+            performanceAudit: observe.performanceAudit,
+          };
         },
         tokensToo: true,
       },
@@ -1243,14 +1307,22 @@ describe("sanitizeObserveResult", () => {
       },
       {
         label: "skeleton projection",
-        reduced: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, { dropElements: false, project: "skeleton" }),
+        reduced: () =>
+          sanitizeObserveResult(loadAndroidHomeObserve().observe, {
+            dropElements: false,
+            project: "skeleton",
+          }),
         reference: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, DROP_NONE),
         tokensToo: true,
       },
       {
         label: "node trim (view-id dedup)",
         reduced: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, DROP_NONE),
-        reference: () => sanitizeObserveResult(loadAndroidHomeObserve().observe, { dropElements: false, trimNodes: false }),
+        reference: () =>
+          sanitizeObserveResult(loadAndroidHomeObserve().observe, {
+            dropElements: false,
+            trimNodes: false,
+          }),
         // View-id dedup removes a duplicate id string: bytes shrink, tokens may not.
         tokensToo: false,
       },
@@ -1262,16 +1334,19 @@ describe("sanitizeObserveResult", () => {
       },
     ];
 
-    test.each(ROWS)("$label measurably shrinks the payload", ({ reduced, reference, tokensToo }) => {
-      const r = measureValue(reduced());
-      const ref = measureValue(reference());
-      expect(r.bytes).toBeLessThan(ref.bytes);
-      if (tokensToo) {
-        expect(r.tokens).toBeLessThan(ref.tokens);
-      } else {
-        expect(r.tokens).toBeLessThanOrEqual(ref.tokens);
-      }
-    });
+    test.each(ROWS)(
+      "$label measurably shrinks the payload",
+      ({ reduced, reference, tokensToo }) => {
+        const r = measureValue(reduced());
+        const ref = measureValue(reference());
+        expect(r.bytes).toBeLessThan(ref.bytes);
+        if (tokensToo) {
+          expect(r.tokens).toBeLessThan(ref.tokens);
+        } else {
+          expect(r.tokens).toBeLessThanOrEqual(ref.tokens);
+        }
+      },
+    );
 
     // Boundary: a reduction applied to an observation LACKING its target field
     // must be a no-op — never grow the payload.
@@ -1279,7 +1354,7 @@ describe("sanitizeObserveResult", () => {
       updatedAt: 0,
       screenSize: { width: 1, height: 1 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      viewHierarchy: { hierarchy: { node: { "resource-id": "r", "node": [], "$": {} } as any } },
+      viewHierarchy: { hierarchy: { node: { "resource-id": "r", node: [], $: {} } as any } },
     };
 
     test("compact on a bounds-free observation does not grow it", () => {

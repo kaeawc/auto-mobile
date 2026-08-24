@@ -54,7 +54,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
       "testDaemonNotInitializedTool",
       "Test tool for daemon not initialized case",
       testToolSchema,
-      mockHandler
+      mockHandler,
     );
 
     // Mark it as requiring a device so params get injected
@@ -82,7 +82,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
       0,
       "android",
       deviceId, // Should be injected because daemon is not initialized
-      sessionUuid
+      sessionUuid,
     );
 
     // Verify BOTH deviceId and sessionUuid were injected
@@ -98,7 +98,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
     const daemonState = DaemonState.getInstance();
     daemonState.initialize(
       {} as any, // sessionManager - not used in this test
-      {} as any  // devicePool - not used in this test
+      {} as any, // devicePool - not used in this test
     );
 
     expect(daemonState.isInitialized()).toBe(true);
@@ -121,7 +121,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
       "testDaemonInitializedTool",
       "Test tool for daemon initialized case",
       testToolSchema,
-      mockHandler
+      mockHandler,
     );
 
     const tool = ToolRegistry.getTool("testDaemonInitializedTool")!;
@@ -154,7 +154,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
       0,
       "android",
       deviceId, // Should NOT be injected because daemon is initialized and sessionUuid present
-      sessionUuid
+      sessionUuid,
     );
 
     // Verify sessionUuid was injected but deviceId was NOT
@@ -192,7 +192,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
       "testDeviceIdInjectionTool",
       "Test tool for deviceId injection",
       testToolSchema,
-      mockHandler
+      mockHandler,
     );
 
     // Mark it as requiring a device so params get injected
@@ -221,7 +221,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
       0, // startStep
       "android", // platform
       deviceId, // deviceId - should be injected
-      undefined // no sessionUuid
+      undefined, // no sessionUuid
     );
 
     // Verify the tool was called
@@ -256,7 +256,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
       "Test tool that declares __lockNamespace",
       testToolSchema,
       mockHandler,
-      { acceptsPlanLockNamespace: true }
+      { acceptsPlanLockNamespace: true },
     );
     (ToolRegistry.getTool("testLockNamespaceTool")! as any).requiresDevice = true;
 
@@ -282,17 +282,19 @@ describe("PlanExecutor - Session-based Device Routing", () => {
       return { success: true };
     });
 
-    const testToolSchema = z.object({
-      platform: z.string().optional(),
-      sessionUuid: z.string().optional(),
-      testParam: z.string().optional(),
-    }).strict();
+    const testToolSchema = z
+      .object({
+        platform: z.string().optional(),
+        sessionUuid: z.string().optional(),
+        testParam: z.string().optional(),
+      })
+      .strict();
 
     ToolRegistry.register(
       "testNoLockNamespaceTool",
       "Test tool that does not declare __lockNamespace",
       testToolSchema,
-      mockHandler
+      mockHandler,
     );
     (ToolRegistry.getTool("testNoLockNamespaceTool")! as any).requiresDevice = true;
 
@@ -326,7 +328,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
       "testNoOverrideTool",
       "Test tool for no override",
       testToolSchema,
-      mockHandler
+      mockHandler,
     );
 
     // Mark it as requiring a device
@@ -353,7 +355,7 @@ describe("PlanExecutor - Session-based Device Routing", () => {
       0,
       "android",
       "emulator-5554", // Different deviceId - should NOT override the step's explicit deviceId
-      undefined
+      undefined,
     );
 
     // Verify the step's explicit deviceId was preserved

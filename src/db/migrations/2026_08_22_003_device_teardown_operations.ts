@@ -9,12 +9,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("status", "text", (column) => column.notNull())
     .addColumn("result_json", "text")
     .addColumn("expires_at_ms", "integer", (column) => column.notNull())
-    .addColumn("created_at", "text", (column) =>
-      column.notNull().defaultTo(sql`(datetime('now'))`),
-    )
-    .addColumn("updated_at", "text", (column) =>
-      column.notNull().defaultTo(sql`(datetime('now'))`),
-    )
+    .addColumn("created_at", "text", (column) => column.notNull().defaultTo(sql`(datetime('now'))`))
+    .addColumn("updated_at", "text", (column) => column.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 }
 

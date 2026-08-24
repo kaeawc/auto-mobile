@@ -34,27 +34,30 @@ export class DeviceControlTransportError extends Error {
   }
 }
 
-function hasTransportFailureHeader(
-  record: Record<string, unknown>,
-): record is Record<string, unknown> & {
+function hasTransportFailureHeader(record: Record<string, unknown>): record is Record<
+  string,
+  unknown
+> & {
   code: typeof DEVICE_CONTROL_TRANSPORT_FAILURE_CODE;
   transport: "daemon_loopback_http";
   toolName: string;
 } {
   return (
-    record.code === DEVICE_CONTROL_TRANSPORT_FAILURE_CODE
-    && record.transport === "daemon_loopback_http"
-    && typeof record.toolName === "string"
-    && record.toolName.length > 0
+    record.code === DEVICE_CONTROL_TRANSPORT_FAILURE_CODE &&
+    record.transport === "daemon_loopback_http" &&
+    typeof record.toolName === "string" &&
+    record.toolName.length > 0
   );
 }
 
 function sanitizeTransportFailureIdentity(
   record: Record<string, unknown>,
-): Pick<
-  DeviceControlTransportFailure,
-  "deviceId" | "deviceSessionUuid" | "sessionUuid" | "routingSessionUuid"
-> | undefined {
+):
+  | Pick<
+      DeviceControlTransportFailure,
+      "deviceId" | "deviceSessionUuid" | "sessionUuid" | "routingSessionUuid"
+    >
+  | undefined {
   const identity: Pick<
     DeviceControlTransportFailure,
     "deviceId" | "deviceSessionUuid" | "sessionUuid" | "routingSessionUuid"
@@ -86,9 +89,10 @@ function sanitizeTransportFailureIdentity(
   return identity;
 }
 
-function hasTransportFailureState(
-  record: Record<string, unknown>,
-): record is Record<string, unknown> & {
+function hasTransportFailureState(record: Record<string, unknown>): record is Record<
+  string,
+  unknown
+> & {
   sessionValid: boolean;
   deviceSessionValid: boolean;
   phase: DeviceControlTransportPhase;
@@ -97,12 +101,12 @@ function hasTransportFailureState(
   replayAttempted: boolean;
 } {
   return (
-    typeof record.sessionValid === "boolean"
-    && typeof record.deviceSessionValid === "boolean"
-    && (record.phase === "connect" || record.phase === "response")
-    && typeof record.retryable === "boolean"
-    && typeof record.reconnectAttempted === "boolean"
-    && typeof record.replayAttempted === "boolean"
+    typeof record.sessionValid === "boolean" &&
+    typeof record.deviceSessionValid === "boolean" &&
+    (record.phase === "connect" || record.phase === "response") &&
+    typeof record.retryable === "boolean" &&
+    typeof record.reconnectAttempted === "boolean" &&
+    typeof record.replayAttempted === "boolean"
   );
 }
 
@@ -114,11 +118,7 @@ export function sanitizeDeviceControlTransportFailure(
   }
   const record = value as Record<string, unknown>;
   const identity = sanitizeTransportFailureIdentity(record);
-  if (
-    !hasTransportFailureHeader(record)
-    || !identity
-    || !hasTransportFailureState(record)
-  ) {
+  if (!hasTransportFailureHeader(record) || !identity || !hasTransportFailureState(record)) {
     return undefined;
   }
   return {

@@ -30,7 +30,11 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
   let isAvailableSpy: ReturnType<typeof spyOn>;
   let fakeTimer: FakeTimer;
 
-  function writePidFile(fields: { version?: string; startedAt?: number; assetVersion?: string }): void {
+  function writePidFile(fields: {
+    version?: string;
+    startedAt?: number;
+    assetVersion?: string;
+  }): void {
     const data: PidFileData = {
       pid: process.pid,
       socketPath: join(tempDir, "test.sock"),
@@ -61,14 +65,20 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
     restartOptions?: DaemonOptions;
     startCalled: boolean;
     waitForReadyResult: boolean;
-    } {
+  } {
     let restartCalled = false;
     let restartOptions: DaemonOptions | undefined;
     let startCalled = false;
     const tracker: any = {
-      get restartCalled() { return restartCalled; },
-      get restartOptions() { return restartOptions; },
-      get startCalled() { return startCalled; },
+      get restartCalled() {
+        return restartCalled;
+      },
+      get restartOptions() {
+        return restartOptions;
+      },
+      get startCalled() {
+        return startCalled;
+      },
       waitForReadyResult: true,
       async status(): Promise<DaemonStatus> {
         return realManager.status();
@@ -273,8 +283,8 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
 
   test("real PID file exposes socket path map through status", async () => {
     const sockets = {
-      "control": join(tempDir, "test.sock"),
-      "appearance": join(tempDir, "appearance.sock"),
+      control: join(tempDir, "test.sock"),
+      appearance: join(tempDir, "appearance.sock"),
       "device-snapshot": join(tempDir, "device-snapshot.sock"),
       "failures-push": join(tempDir, "failures-push.sock"),
       "failures-stream": join(tempDir, "failures-stream.sock"),

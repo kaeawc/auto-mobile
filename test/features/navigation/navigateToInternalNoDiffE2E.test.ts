@@ -35,7 +35,11 @@ import type { ScreenTransitionWaiter } from "../../../src/features/navigation/in
  * baseline WOULD be overwritten with this internal observation.
  */
 describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
-  const androidA: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
+  const androidA: BootedDevice = {
+    name: "Pixel A",
+    deviceId: "emulator-5554",
+    platform: "android",
+  };
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
@@ -50,7 +54,9 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
       activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 1 },
       viewHierarchy: {
         packageName: "com.example",
-        hierarchy: { node: { "resource-id": "com.example:id/root", "content-desc": "keep" } as any },
+        hierarchy: {
+          node: { "resource-id": "com.example:id/root", "content-desc": "keep" } as any,
+        },
       },
     } as ObserveResult;
   }
@@ -65,7 +71,13 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA]);
-    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
     await pool.initializeWithDevices([androidA]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     return (await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1"))!;
@@ -95,13 +107,18 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
     serverConfig.setActionsDiffObserveEnabled(true);
     const sessionId = await setupAutolockedSession();
 
-    ToolRegistry.registerDeviceAware("observe", "observe", baseSchema,
-                                     async () => createStructuredToolResponse(sameScreenObserve()));
-    ToolRegistry.registerDeviceAware("tapOn", "tapOn", baseSchema,
-                                     async () => createStructuredToolResponse({ success: true, observation: sameScreenObserve() }));
+    ToolRegistry.registerDeviceAware("observe", "observe", baseSchema, async () =>
+      createStructuredToolResponse(sameScreenObserve()),
+    );
+    ToolRegistry.registerDeviceAware("tapOn", "tapOn", baseSchema, async () =>
+      createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+    );
 
     // Seed the agent-facing baseline via a normal (non-nav) observe call.
-    await ToolRegistry.getTool("observe")!.handler({ platform: "android", __mcpSessionId: "mcp-session-1" });
+    await ToolRegistry.getTool("observe")!.handler({
+      platform: "android",
+      __mcpSessionId: "mcp-session-1",
+    });
     const baselineAfterObserve = daemonSessionManager!.getLastRenderedObservation(sessionId);
     expect(baselineAfterObserve).toBeDefined();
 
@@ -121,8 +138,19 @@ describe("NavigateTo → finalize internal no-diff (end-to-end, #3087)", () => {
     };
     const navManager = {
       getCurrentScreen: () => "Home",
-      getNode: async () => ({ screenName: "Home", firstSeenAt: 0, lastSeenAt: 0, visitCount: 1, backStackDepth: 0 }),
-      findPath: async () => ({ found: true, path: [edge], startScreen: "Home", targetScreen: "Detail" }),
+      getNode: async () => ({
+        screenName: "Home",
+        firstSeenAt: 0,
+        lastSeenAt: 0,
+        visitCount: 1,
+        backStackDepth: 0,
+      }),
+      findPath: async () => ({
+        found: true,
+        path: [edge],
+        startScreen: "Home",
+        targetScreen: "Detail",
+      }),
       getKnownScreens: async () => ["Home", "Detail"],
     } as unknown as NavigationGraphService;
     const uiStateSetup: UIStateSetup = {

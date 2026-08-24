@@ -34,7 +34,7 @@ export class JimpCliBackend implements ImageBackend {
     if (requestedEncoding === "image/webp" || (pipeline.encoding === null && sourceIsWebp)) {
       const png = await this.jimpBackend.execute(decodedSource, {
         operations: pipeline.operations,
-        encoding: { mime: "image/png" }
+        encoding: { mime: "image/png" },
       });
       return this.webpCodec.encode(png, toCliWebpEncodeOptions(pipeline.encoding?.options));
     }
@@ -52,7 +52,7 @@ export class JimpCliBackend implements ImageBackend {
     return {
       ...metadata,
       format: "webp",
-      size: source.length
+      size: source.length,
     };
   }
 

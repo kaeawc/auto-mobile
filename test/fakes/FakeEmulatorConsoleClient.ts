@@ -23,11 +23,21 @@ export class FakeEmulatorConsoleClient implements EmulatorConsoleClient {
     return Promise.resolve();
   }
 
-  gsmCall(phoneNumber: string): Promise<void> { return this.record("gsmCall", [phoneNumber]); }
-  gsmAccept(phoneNumber: string): Promise<void> { return this.record("gsmAccept", [phoneNumber]); }
-  gsmCancel(phoneNumber: string): Promise<void> { return this.record("gsmCancel", [phoneNumber]); }
-  gsmBusy(phoneNumber: string): Promise<void> { return this.record("gsmBusy", [phoneNumber]); }
-  gsmHold(): Promise<void> { return this.record("gsmHold", []); }
+  gsmCall(phoneNumber: string): Promise<void> {
+    return this.record("gsmCall", [phoneNumber]);
+  }
+  gsmAccept(phoneNumber: string): Promise<void> {
+    return this.record("gsmAccept", [phoneNumber]);
+  }
+  gsmCancel(phoneNumber: string): Promise<void> {
+    return this.record("gsmCancel", [phoneNumber]);
+  }
+  gsmBusy(phoneNumber: string): Promise<void> {
+    return this.record("gsmBusy", [phoneNumber]);
+  }
+  gsmHold(): Promise<void> {
+    return this.record("gsmHold", []);
+  }
   smsSend(phoneNumber: string, message: string): Promise<void> {
     return this.record("smsSend", [phoneNumber, message]);
   }

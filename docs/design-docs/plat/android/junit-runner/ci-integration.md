@@ -20,10 +20,10 @@ Downstream forks and maintainers enable a **separate** job from the default GitH
 
 ### Default CI vs emulator.wtf
 
-| Path | Workflow | When it runs |
-|------|-----------|----------------|
-| **GitHub emulator** | `.github/actions/android-emulator` (`reactivecircus/android-emulator-runner`) | Android jobs on, no extra repo variable |
-| **emulator.wtf** | `.github/actions/android-emulator-wtf` | Android jobs on **and** `EMULATOR_WTF_ENABLED` **and** API secret set |
+| Path                | Workflow                                                                      | When it runs                                                          |
+| ------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| **GitHub emulator** | `.github/actions/android-emulator` (`reactivecircus/android-emulator-runner`) | Android jobs on, no extra repo variable                               |
+| **emulator.wtf**    | `.github/actions/android-emulator-wtf`                                        | Android jobs on **and** `EMULATOR_WTF_ENABLED` **and** API secret set |
 
 The emulator.wtf job in **`.github/workflows/pull_request.yml`** is named **`junit-runner-emulator-wtf-tests`**. It depends on **`build-android-control-proxy`** for the CtrlProxy APK artifact.
 
@@ -46,13 +46,13 @@ If the variable is on but the secret is missing, the job fails fast with an expl
 
 ### Source files to read
 
-| Piece | Location |
-|-------|-----------|
-| Job definition | `.github/workflows/pull_request.yml` → `junit-runner-emulator-wtf-tests` |
-| Composite action | `.github/actions/android-emulator-wtf/action.yml` |
-| Session lifecycle | `scripts/android/start-emulator-wtf-session.sh`, `stop-emulator-wtf-session.sh` |
-| CLI install | `scripts/android/install-ew-cli.sh` |
-| APK + Gradle wrapper | `scripts/android/run-emulator-tests.sh` |
+| Piece                | Location                                                                        |
+| -------------------- | ------------------------------------------------------------------------------- |
+| Job definition       | `.github/workflows/pull_request.yml` → `junit-runner-emulator-wtf-tests`        |
+| Composite action     | `.github/actions/android-emulator-wtf/action.yml`                               |
+| Session lifecycle    | `scripts/android/start-emulator-wtf-session.sh`, `stop-emulator-wtf-session.sh` |
+| CLI install          | `scripts/android/install-ew-cli.sh`                                             |
+| APK + Gradle wrapper | `scripts/android/run-emulator-tests.sh`                                         |
 
 ---
 
@@ -62,26 +62,26 @@ The flow above is wired to **this** repository (`:junit-runner:test`, `android/`
 
 ### 1. Reuse vs copy
 
-| Approach | What to do |
-|----------|------------|
+| Approach                  | What to do                                                                                                                                                                                                                                                                                                           |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Copy scripts + action** | Vendor `scripts/android/start-emulator-wtf-session.sh`, `stop-emulator-wtf-session.sh`, `install-ew-cli.sh`, and `run-emulator-tests.sh` from auto-mobile-mcp into your repo (preserve paths or update workflow references). Copy `.github/actions/android-emulator-wtf` and adjust only if script locations change. |
-| **Minimal custom job** | Implement the same steps inline (ew-cli `start-session --adb`, `adb wait-for-device`, boot wait, install CtrlProxy, Gradle, cleanup). The scripts mainly encode retries, env vars, and session PID handling—worth copying to avoid drift. |
+| **Minimal custom job**    | Implement the same steps inline (ew-cli `start-session --adb`, `adb wait-for-device`, boot wait, install CtrlProxy, Gradle, cleanup). The scripts mainly encode retries, env vars, and session PID handling—worth copying to avoid drift.                                                                            |
 
 ### 2. Workflow and job graph
 
-| In auto-mobile-mcp | In your repo |
-|--------------------|--------------|
-| Job `junit-runner-emulator-wtf-tests` | Name it however you like; keep `needs:` pointing at whatever job **builds** artifacts you require. |
+| In auto-mobile-mcp                        | In your repo                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Job `junit-runner-emulator-wtf-tests`     | Name it however you like; keep `needs:` pointing at whatever job **builds** artifacts you require.                                                                                                                                                                                             |
 | `needs: […, build-android-control-proxy]` | `needs` must include a job that produces the **CtrlProxy** APK (or downloads a pinned release) **before** tests. If you also need your **app** APK for `launchApp` / plans, add a job (or step) that builds it and install it with `adb install` **before** or **as part of** the test script. |
 
 ### 3. Composite action inputs (`android-emulator-wtf`)
 
-| Input | Replace with |
-|-------|----------------|
-| `working-directory` | Your Gradle project root if not `./android/` (e.g. monorepo `apps/myapp/`). |
-| `script` | The Gradle invocation that runs **your** JVM tests, e.g. `./gradlew :app:testDebugUnitTest --tests 'com.mycompany.automobile.*'` or `./gradlew :feature-ui-tests:test`. Use the same module and task you use locally. |
-| `accessibility-apk-path` | Path to **CtrlProxy** debug (or compatible) APK **relative to `working-directory`**, or absolute from repo root if your wrapper script expects it. Must match what you document for `AUTOMOBILE_CTRL_PROXY_APK_PATH` in [Project Setup](project-setup.md). |
-| `device` / `max-time-limit` | Adjust for API level, GPU, and how long cold boot + app install + tests take; under-provisioning causes flaky timeouts. |
+| Input                       | Replace with                                                                                                                                                                                                                                               |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `working-directory`         | Your Gradle project root if not `./android/` (e.g. monorepo `apps/myapp/`).                                                                                                                                                                                |
+| `script`                    | The Gradle invocation that runs **your** JVM tests, e.g. `./gradlew :app:testDebugUnitTest --tests 'com.mycompany.automobile.*'` or `./gradlew :feature-ui-tests:test`. Use the same module and task you use locally.                                      |
+| `accessibility-apk-path`    | Path to **CtrlProxy** debug (or compatible) APK **relative to `working-directory`**, or absolute from repo root if your wrapper script expects it. Must match what you document for `AUTOMOBILE_CTRL_PROXY_APK_PATH` in [Project Setup](project-setup.md). |
+| `device` / `max-time-limit` | Adjust for API level, GPU, and how long cold boot + app install + tests take; under-provisioning causes flaky timeouts.                                                                                                                                    |
 
 ### 4. CtrlProxy APK source
 
@@ -109,10 +109,10 @@ JUnit tests expect a **daemon** reachable via the usual socket (see [Project Set
 
 ### 7. Secrets, variables, and naming
 
-| Purpose | auto-mobile-mcp | Your repo (example) |
-|---------|-----------------|----------------------|
+| Purpose            | auto-mobile-mcp                                              | Your repo (example)                                                                  |
+| ------------------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
 | emulator.wtf token | Secret `EMULATOR_WTF_API_KEY` → `EW_API_TOKEN` in the action | Same pattern, or define `EW_API_TOKEN` secret directly if you do not use the rename. |
-| Optional job gate | Variable `EMULATOR_WTF_ENABLED` | Reuse the name or drop the `if:` once you always want cloud devices. |
+| Optional job gate  | Variable `EMULATOR_WTF_ENABLED`                              | Reuse the name or drop the `if:` once you always want cloud devices.                 |
 
 ### 8. Reports and artifacts
 
@@ -198,7 +198,7 @@ auto-mobile-tests:
       uses: actions/setup-java@v5
       with:
         distribution: zulu
-        java-version: '21'
+        java-version: "21"
 
     - name: "Setup Gradle"
       uses: gradle/actions/setup-gradle@v4
@@ -249,7 +249,7 @@ auto-mobile-tests:
       if: always()
       with:
         check_name: "AutoMobile Test Report"
-        report_paths: 'app/build/test-results/**/*.xml'
+        report_paths: "app/build/test-results/**/*.xml"
 ```
 
 ## Step-by-step breakdown
@@ -281,8 +281,8 @@ ew-cli start-session \
 ```
 
 !!! note "Closed alpha feature"
-    `start-session --adb` is a closed alpha feature. Contact
-    [support@emulator.wtf](mailto:support@emulator.wtf) to request access.
+`start-session --adb` is a closed alpha feature. Contact
+[support@emulator.wtf](mailto:support@emulator.wtf) to request access.
 
 After starting the session in the background, the step waits for the device to finish booting:
 
@@ -293,12 +293,12 @@ adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
 
 #### Device configuration options
 
-| Flag | Example values | Notes |
-|---|---|---|
-| `model` | `Pixel6`, `Pixel9Pro`, `GalaxyS22` | Physical model to emulate |
-| `version` | `30`–`35` | Android API level |
-| `gpu` | `auto`, `swiftshader_indirect`, `host` | GPU rendering mode; `auto` picks the best available |
-| `--max-time-limit` | `10m`, `20m`, `30m` | Hard session time limit; the session ends and billing stops after this |
+| Flag               | Example values                         | Notes                                                                  |
+| ------------------ | -------------------------------------- | ---------------------------------------------------------------------- |
+| `model`            | `Pixel6`, `Pixel9Pro`, `GalaxyS22`     | Physical model to emulate                                              |
+| `version`          | `30`–`35`                              | Android API level                                                      |
+| `gpu`              | `auto`, `swiftshader_indirect`, `host` | GPU rendering mode; `auto` picks the best available                    |
+| `--max-time-limit` | `10m`, `20m`, `30m`                    | Hard session time limit; the session ends and billing stops after this |
 
 ### 3. App APK installation
 
@@ -351,7 +351,7 @@ own repository, expand it to these steps:
   uses: actions/setup-java@v5
   with:
     distribution: zulu
-    java-version: '21'
+    java-version: "21"
 
 - name: "Setup Gradle"
   uses: gradle/actions/setup-gradle@v4
@@ -416,7 +416,7 @@ Killing the `ew-cli` background process ends the emulator.wtf session and stops 
   if: always()
   with:
     check_name: "AutoMobile Test Report"
-    report_paths: 'app/build/test-results/**/*.xml'
+    report_paths: "app/build/test-results/**/*.xml"
 ```
 
 The JUnit XML reports written to `app/build/test-results/` are picked up and published as a GitHub
@@ -426,17 +426,17 @@ check, making failures visible in the PR Checks tab.
 
 ### This repository (`auto-mobile-mcp`)
 
-| Name | Type | Used by |
-|---|---|---|
-| `EMULATOR_WTF_API_KEY` | Secret | Passed as `EW_API_TOKEN` to `android-emulator-wtf` / `ew-cli` |
-| `EMULATOR_WTF_ENABLED` | Variable | Must be `true` for job `junit-runner-emulator-wtf-tests` to run |
-| `GRADLE_ENCRYPTION_KEY` | Secret | Gradle configuration cache (shared with other Android CI jobs) |
+| Name                    | Type     | Used by                                                         |
+| ----------------------- | -------- | --------------------------------------------------------------- |
+| `EMULATOR_WTF_API_KEY`  | Secret   | Passed as `EW_API_TOKEN` to `android-emulator-wtf` / `ew-cli`   |
+| `EMULATOR_WTF_ENABLED`  | Variable | Must be `true` for job `junit-runner-emulator-wtf-tests` to run |
+| `GRADLE_ENCRYPTION_KEY` | Secret   | Gradle configuration cache (shared with other Android CI jobs)  |
 
 ### Generic / fork template (YAML below)
 
-| Secret | Used by | How to obtain |
-|---|---|---|
-| `EW_API_TOKEN` | `ew-cli start-session` | [emulator.wtf dashboard](https://emulator.wtf) → API tokens |
+| Secret                  | Used by                               | How to obtain                                                     |
+| ----------------------- | ------------------------------------- | ----------------------------------------------------------------- |
+| `EW_API_TOKEN`          | `ew-cli start-session`                | [emulator.wtf dashboard](https://emulator.wtf) → API tokens       |
 | `GRADLE_ENCRYPTION_KEY` | Gradle configuration cache encryption | Generate a random 256-bit base64 key; store in repository secrets |
 
 Configure these under **Settings → Secrets and variables → Actions** in your GitHub repository.
@@ -497,11 +497,11 @@ The JUnit runner can start the daemon from a **local checkout** instead of the p
 
 Pick one:
 
-| Approach | Outline |
-|----------|---------|
-| **Git submodule** | Add the repo as a submodule pinned to the commit you need; clone recursively in CI. |
-| **Clone step** | `git clone --depth 1 --branch ryebread/connection_refused_in_ci_fix https://github.com/kaeawc/auto-mobile.git auto-mobile-mcp` (or another branch / SHA once merged). |
-| **CI job artifact** | Another pipeline builds AutoMobile and passes `dist/` + `package.json` + lockfile as an artifact; extract beside your app. |
+| Approach            | Outline                                                                                                                                                               |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Git submodule**   | Add the repo as a submodule pinned to the commit you need; clone recursively in CI.                                                                                   |
+| **Clone step**      | `git clone --depth 1 --branch ryebread/connection_refused_in_ci_fix https://github.com/kaeawc/auto-mobile.git auto-mobile-mcp` (or another branch / SHA once merged). |
+| **CI job artifact** | Another pipeline builds AutoMobile and passes `dist/` + `package.json` + lockfile as an artifact; extract beside your app.                                            |
 
 The path you will pass to the runner must be the **repository root** (the directory that contains **`dist/src/index.js`** after build).
 
@@ -547,7 +547,7 @@ android-ui-tests:
     - test -d auto-mobile-mcp || git clone --depth 1 --branch ryebread/connection_refused_in_ci_fix https://github.com/kaeawc/auto-mobile.git auto-mobile-mcp
     - cd "${CI_PROJECT_DIR}/auto-mobile-mcp" && bun install && bun run build
   script:
-    - ./gradlew -Dautomobile.daemon.dismiss.keyboard.after.input=true :your-module:connectedCheck   # or your AutoMobile JUnit task
+    - ./gradlew -Dautomobile.daemon.dismiss.keyboard.after.input=true :your-module:connectedCheck # or your AutoMobile JUnit task
 ```
 
 Use **`main`** instead of **`ryebread/connection_refused_in_ci_fix`** after the fix is merged. Adjust paths, Gradle task name, and image (Bun + Android SDK + emulator or ADB session) to match your project.

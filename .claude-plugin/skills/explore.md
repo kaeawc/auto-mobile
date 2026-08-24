@@ -8,6 +8,7 @@ Explore and interact with connected mobile devices. This skill combines all inte
 ## Getting Started
 
 Use `observe` to capture the initial screen state when starting a session. Most interaction tools automatically return updated screen state, so you only need to call `observe` again if:
+
 - Starting a new session or switching devices
 - An action resulted in an incomplete or loading state
 - You need to verify state after a delay or background process
@@ -26,6 +27,7 @@ For detailed usage of specific capabilities, see these focused skills:
 ## Quick Reference
 
 ### App Management
+
 ```
 launchApp with packageName: "com.example.app"
 terminateApp with packageName: "com.example.app"
@@ -33,6 +35,7 @@ openLink with url: "https://example.com"
 ```
 
 ### System Navigation
+
 ```
 homeScreen
 recentApps
@@ -41,6 +44,7 @@ rotate with orientation: "landscape"
 ```
 
 ### Notifications
+
 ```
 systemTray with action: "open"
 systemTray with action: "find", notification: {title: "Message"}
@@ -48,6 +52,7 @@ systemTray with action: "tap"
 ```
 
 ### Gestures
+
 ```
 tapOn with text: "Submit"
 tapOn with text: "Item", action: "longPress"
@@ -58,6 +63,7 @@ pinchOn with direction: "out"
 ```
 
 ### Text Input
+
 ```
 tapOn with text: "Email", action: "focus"
 inputText with text: "user@example.com"
@@ -68,6 +74,7 @@ clipboard with action: "paste"
 ```
 
 ### Device State
+
 ```
 deviceSnapshot with action: "capture", snapshotName: "baseline"
 deviceSnapshot with action: "restore", snapshotName: "baseline"

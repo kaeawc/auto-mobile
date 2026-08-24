@@ -1,6 +1,9 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { Builder, parseStringPromise } from "xml2js";
-import { defaultAdbClientFactory, type AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { shellQuote } from "../../utils/shellQuote";
@@ -44,7 +47,10 @@ export interface PreferenceResult {
 
 interface IosSimulatorPreferenceClient {
   executeCommand(command: string, timeoutMs?: number): Promise<{ stdout: string; stderr: string }>;
-  executeCommandArgs(args: string[], timeoutMs?: number): Promise<{ stdout: string; stderr: string }>;
+  executeCommandArgs(
+    args: string[],
+    timeoutMs?: number,
+  ): Promise<{ stdout: string; stderr: string }>;
 }
 
 export interface AppPreferencesDependencies {
@@ -76,7 +82,7 @@ export class AppPreferences {
 
   constructor(
     private readonly device: BootedDevice,
-    dependencies: AppPreferencesDependencies = {}
+    dependencies: AppPreferencesDependencies = {},
   ) {
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.simctl = dependencies.simctl;
@@ -102,7 +108,7 @@ export class AppPreferences {
     if (this.device.platform === "android") {
       if (input.scope === "systemProperty") {
         await this.adb().executeCommand(
-          `shell setprop ${shellQuoteUnlessSafe(input.key)} ${shellQuoteUnlessSafe(stringValue(normalizedValue))}`
+          `shell setprop ${shellQuoteUnlessSafe(input.key)} ${shellQuoteUnlessSafe(stringValue(normalizedValue))}`,
         );
       } else {
         await this.setAndroidSharedPreference({ ...input, value: normalizedValue });
@@ -115,7 +121,9 @@ export class AppPreferences {
     return {
       ...readBack,
       type: input.type,
-      value: readBack.found ? parsePreferenceValue(stringValue(readBack.value), input.type) : readBack.value,
+      value: readBack.found
+        ? parsePreferenceValue(stringValue(readBack.value), input.type)
+        : readBack.value,
       verified: readBack.found && valuesEqual(readBack.value, normalizedValue, input.type),
       warning: preferenceWriteWarning(this.device.platform, input.scope),
     };
@@ -138,7 +146,9 @@ export class AppPreferences {
   }
 
   private async getAndroidSystemProperty(input: GetPreferenceInput): Promise<PreferenceResult> {
-    const result = await this.adb().executeCommand(`shell getprop ${shellQuoteUnlessSafe(input.key)}`);
+    const result = await this.adb().executeCommand(
+      `shell getprop ${shellQuoteUnlessSafe(input.key)}`,
+    );
     const value = removeOneTrailingLineEnding(result.stdout);
     if (value.length > 0) {
       return this.result(input, true, value, "string");
@@ -151,7 +161,9 @@ export class AppPreferences {
   private async readEmptyAndroidSystemProperty(key: string): Promise<boolean> {
     const result = await this.adb().executeCommand("shell getprop");
     const prefix = `[${key}]: [`;
-    return result.stdout.split(/\r?\n/).some(line => line.startsWith(prefix) && line.endsWith("]"));
+    return result.stdout
+      .split(/\r?\n/)
+      .some((line) => line.startsWith(prefix) && line.endsWith("]"));
   }
 
   private async getAndroidSharedPreference(input: GetPreferenceInput): Promise<PreferenceResult> {
@@ -164,18 +176,23 @@ export class AppPreferences {
   private async setAndroidSharedPreference(input: SetPreferenceInput): Promise<void> {
     const fileName = androidSharedPreferencesFileName(input);
     const existingXml = await this.readAndroidSharedPreferencesXml(input.appId!, fileName);
-    const updatedXml = await writeAndroidPreferenceEntry(existingXml, input.key, input.value, input.type);
+    const updatedXml = await writeAndroidPreferenceEntry(
+      existingXml,
+      input.key,
+      input.value,
+      input.type,
+    );
     const encodedXml = Buffer.from(updatedXml, "utf8").toString("base64");
     const innerCommand = `mkdir -p shared_prefs && printf '%s' '${encodedXml}' | base64 -d > shared_prefs/${fileName}.xml`;
     await this.adb().executeCommand(
-      `shell run-as ${shellQuoteUnlessSafe(input.appId!)} sh -c ${shellQuoteUnlessSafe(innerCommand)}`
+      `shell run-as ${shellQuoteUnlessSafe(input.appId!)} sh -c ${shellQuoteUnlessSafe(innerCommand)}`,
     );
   }
 
   private async readAndroidSharedPreferencesXml(appId: string, fileName: string): Promise<string> {
     try {
       const result = await this.adb().executeCommand(
-        `shell run-as ${shellQuoteUnlessSafe(appId)} cat shared_prefs/${fileName}.xml`
+        `shell run-as ${shellQuoteUnlessSafe(appId)} cat shared_prefs/${fileName}.xml`,
       );
       return result.stdout;
     } catch (error) {
@@ -183,7 +200,7 @@ export class AppPreferences {
         return "<map/>";
       }
       throw new ActionableError(
-        `Failed to read Android SharedPreferences via run-as. This requires a debuggable/test build for ${appId}. ${error}`
+        `Failed to read Android SharedPreferences via run-as. This requires a debuggable/test build for ${appId}. ${error}`,
       );
     }
   }
@@ -195,14 +212,10 @@ export class AppPreferences {
 
     const domain = iosDefaultsDomain(input);
     try {
-      const result = await this.getSimctl().executeCommandArgs([
-        "spawn",
-        this.device.deviceId,
-        "defaults",
-        "read",
-        domain,
-        input.key,
-      ], IOS_DEFAULTS_TIMEOUT_MS);
+      const result = await this.getSimctl().executeCommandArgs(
+        ["spawn", this.device.deviceId, "defaults", "read", domain, input.key],
+        IOS_DEFAULTS_TIMEOUT_MS,
+      );
       const type = await this.readIosDefaultsType(input);
       return this.result(input, true, parseIosDefaultsValue(result.stdout, type), type ?? "string");
     } catch (error) {
@@ -220,34 +233,38 @@ export class AppPreferences {
 
     const domain = iosDefaultsDomain(input);
     const typeFlag = iosDefaultsTypeFlag(input.type);
-    await this.getSimctl().executeCommandArgs([
-      "spawn",
-      this.device.deviceId,
-      "defaults",
-      "write",
-      domain,
-      input.key,
-      typeFlag,
-      stringValue(input.value),
-    ], IOS_DEFAULTS_TIMEOUT_MS);
-  }
-
-  private async readIosDefaultsType(input: GetPreferenceInput): Promise<PreferenceValueType | undefined> {
-    const domain = iosDefaultsDomain(input);
-    try {
-      const result = await this.getSimctl().executeCommandArgs([
+    await this.getSimctl().executeCommandArgs(
+      [
         "spawn",
         this.device.deviceId,
         "defaults",
-        "read-type",
+        "write",
         domain,
         input.key,
-      ], IOS_DEFAULTS_TIMEOUT_MS);
+        typeFlag,
+        stringValue(input.value),
+      ],
+      IOS_DEFAULTS_TIMEOUT_MS,
+    );
+  }
+
+  private async readIosDefaultsType(
+    input: GetPreferenceInput,
+  ): Promise<PreferenceValueType | undefined> {
+    const domain = iosDefaultsDomain(input);
+    try {
+      const result = await this.getSimctl().executeCommandArgs(
+        ["spawn", this.device.deviceId, "defaults", "read-type", domain, input.key],
+        IOS_DEFAULTS_TIMEOUT_MS,
+      );
       return parseIosDefaultsType(result.stdout);
     } catch (error) {
       // `defaults read-type` fails when the key doesn't exist yet, which is a
       // normal "no preference set" state; undefined lets callers fall back.
-      logger.debug(`src/features/preferences/AppPreferences.ts defaults type parse failed: ${error}`, error);
+      logger.debug(
+        `src/features/preferences/AppPreferences.ts defaults type parse failed: ${error}`,
+        error,
+      );
       return undefined;
     }
   }
@@ -265,7 +282,7 @@ export class AppPreferences {
     input: GetPreferenceInput,
     found: boolean,
     value: PreferenceResultValue | null,
-    type?: PreferenceResultType
+    type?: PreferenceResultType,
   ): PreferenceResult {
     return {
       success: true,
@@ -286,12 +303,17 @@ function androidSharedPreferencesFileName(input: GetPreferenceInput): string {
   const name = input.suite ?? `${input.appId}_preferences`;
   const fileName = name.endsWith(".xml") ? name.slice(0, -4) : name;
   if (!/^[A-Za-z0-9_.-]+$/.test(fileName) || fileName === "." || fileName === "..") {
-    throw new ActionableError("Android SharedPreferences suite must be a safe file name using letters, numbers, underscore, dash, or dot.");
+    throw new ActionableError(
+      "Android SharedPreferences suite must be a safe file name using letters, numbers, underscore, dash, or dot.",
+    );
   }
   return fileName;
 }
 
-async function readAndroidPreferenceEntry(xml: string, key: string): Promise<AndroidPreferenceEntry | null> {
+async function readAndroidPreferenceEntry(
+  xml: string,
+  key: string,
+): Promise<AndroidPreferenceEntry | null> {
   const document = await parseAndroidPreferencesXml(xml);
   const map = document.map ?? {};
 
@@ -332,7 +354,7 @@ async function writeAndroidPreferenceEntry(
   xml: string,
   key: string,
   value: PreferenceValue,
-  type: PreferenceValueType
+  type: PreferenceValueType,
 ): Promise<string> {
   const document = await parseAndroidPreferencesXml(xml);
   document.map ??= {};
@@ -381,13 +403,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function findNamedNode(nodes: unknown, key: string): any | null {
-  return arrayOfNodes(nodes).find(node => node?.$?.name === key) ?? null;
+  return arrayOfNodes(nodes).find((node) => node?.$?.name === key) ?? null;
 }
 
 function removeNamedNodes(map: Record<string, unknown>, key: string): void {
   for (const [tag, nodes] of Object.entries(map)) {
     if (Array.isArray(nodes)) {
-      map[tag] = nodes.filter(node => node?.$?.name !== key);
+      map[tag] = nodes.filter((node) => node?.$?.name !== key);
     }
   }
 }
@@ -403,7 +425,7 @@ function arrayOfNodes(nodes: unknown): any[] {
 }
 
 function readAndroidStringSetValues(node: any): string[] {
-  return arrayOfNodes(node.string).map(stringNode => {
+  return arrayOfNodes(node.string).map((stringNode) => {
     if (typeof stringNode === "string") {
       return stringNode;
     }
@@ -411,7 +433,11 @@ function readAndroidStringSetValues(node: any): string[] {
   });
 }
 
-function androidNodeFor(key: string, value: PreferenceValue, type: PreferenceValueType): Record<string, unknown> {
+function androidNodeFor(
+  key: string,
+  value: PreferenceValue,
+  type: PreferenceValueType,
+): Record<string, unknown> {
   if (type === "string") {
     return { _: stringValue(value), $: { name: key } };
   }
@@ -427,9 +453,14 @@ function androidNodeFor(key: string, value: PreferenceValue, type: PreferenceVal
 }
 
 function assertAndroidSharedPreferencesInt(value: PreferenceValue): void {
-  if (typeof value !== "number" || !Number.isInteger(value) || value < ANDROID_INT_MIN || value > ANDROID_INT_MAX) {
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < ANDROID_INT_MIN ||
+    value > ANDROID_INT_MAX
+  ) {
     throw new ActionableError(
-      `Android SharedPreferences int values must fit in the signed 32-bit range (${ANDROID_INT_MIN} to ${ANDROID_INT_MAX}).`
+      `Android SharedPreferences int values must fit in the signed 32-bit range (${ANDROID_INT_MIN} to ${ANDROID_INT_MAX}).`,
     );
   }
 }
@@ -471,7 +502,10 @@ function parsePreferenceValue(value: string, type: PreferenceValueType): Prefere
   }
 }
 
-function parseIosDefaultsValue(value: string, type: PreferenceValueType | undefined): PreferenceValue {
+function parseIosDefaultsValue(
+  value: string,
+  type: PreferenceValueType | undefined,
+): PreferenceValue {
   if (type === undefined || type === "string") {
     return removeOneTrailingLineEnding(value);
   }
@@ -526,7 +560,9 @@ function parseInteger(value: string): number {
   }
   const parsed = Number.parseInt(trimmed, 10);
   if (!Number.isSafeInteger(parsed)) {
-    throw new ActionableError(`Expected int preference value within JavaScript's safe integer range, got '${value}'.`);
+    throw new ActionableError(
+      `Expected int preference value within JavaScript's safe integer range, got '${value}'.`,
+    );
   }
   return parsed;
 }
@@ -580,7 +616,11 @@ function stringValue(value: PreferenceValue | null): string {
   return String(value);
 }
 
-function valuesEqual(actual: PreferenceValue | null, expected: PreferenceValue, type: PreferenceValueType): boolean {
+function valuesEqual(
+  actual: PreferenceValue | null,
+  expected: PreferenceValue,
+  type: PreferenceValueType,
+): boolean {
   if (actual === null) {
     return false;
   }
@@ -607,7 +647,10 @@ function looksLikeMissingIosDefault(error: unknown): boolean {
   return /does not exist|Domain .* does not exist|does not contain/i.test(message);
 }
 
-function preferenceWriteWarning(platform: "android" | "ios", scope: PreferenceScope): string | undefined {
+function preferenceWriteWarning(
+  platform: "android" | "ios",
+  scope: PreferenceScope,
+): string | undefined {
   if (platform === "ios" && scope === "userDefaults") {
     return "UserDefaults writes go through the preferences daemon; a running app that cached the value may need a cold relaunch to observe the change.";
   }
@@ -623,7 +666,7 @@ function preferenceWriteWarning(platform: "android" | "ios", scope: PreferenceSc
 function unsupportedPhysicalIosUserDefaultsError(): ActionableError {
   return new ActionableError(
     "iOS physical devices are not supported for UserDefaults preferences yet. " +
-    "The available CtrlProxy storage APIs run in the runner process and cannot safely read or write another app's UserDefaults sandbox. " +
-    "Use an iOS Simulator for UserDefaults automation."
+      "The available CtrlProxy storage APIs run in the runner process and cannot safely read or write another app's UserDefaults sandbox. " +
+      "Use an iOS Simulator for UserDefaults automation.",
   );
 }

@@ -21,6 +21,7 @@ For device interactions during bug reproduction, use these skills:
 ### 1. Understand the Bug Report
 
 Gather information:
+
 - What is the expected behavior?
 - What is the actual behavior?
 - What conditions trigger it? (device, OS version, user state)
@@ -39,6 +40,7 @@ Use `observe` at the start of a session to capture initial state. After that, in
 ### 3. Attempt Reproduction
 
 Follow the reported steps using interaction skills:
+
 - Use `/gesture` for taps, swipes, scrolls
 - Use `/text` for text input
 - Use `/system` for hardware button presses
@@ -56,6 +58,7 @@ Record the exact sequence that triggered the issue. If the screen showed a loadi
 ### 5. Document Findings
 
 Create a structured report with:
+
 - Exact reproduction steps (numbered list)
 - Environment details (device, OS, app version)
 - Expected vs actual behavior
@@ -85,25 +88,31 @@ Create a structured report with:
 **Status**: Reproduced / Not Reproduced / Intermittent
 
 ### Environment
+
 - Device: [model]
 - OS: [version]
 - App Version: [version]
 
 ### Reproduction Steps
+
 1. [Step 1]
 2. [Step 2]
-...
+   ...
 
 ### Expected Behavior
+
 [Description]
 
 ### Actual Behavior
+
 [Description]
 
 ### Evidence
+
 - Screenshots: [attached/described]
 
 ### Notes
+
 [Any additional observations]
 ```
 

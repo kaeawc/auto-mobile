@@ -4,12 +4,7 @@
   "config": {
     "iterations": 1000,
     "opsPerSecond": 10,
-    "operations": [
-      "observe",
-      "tapOn",
-      "swipeOn",
-      "inputText"
-    ],
+    "operations": ["observe", "tapOn", "swipeOn", "inputText"],
     "heapGrowthLimitMb": 50,
     "warmupIterations": 100,
     "gcEvery": 100

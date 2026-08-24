@@ -41,5 +41,4 @@ describe("pull_request job timeouts", () => {
     const checkout = stepNamed(loadJobSteps(WORKFLOW, "mcp-build-and-test"), "Git Checkout");
     expect(checkout?.with?.["fetch-depth"]).toBe(0);
   });
-
 });

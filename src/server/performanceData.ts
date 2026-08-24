@@ -60,7 +60,7 @@ function getTimestampRange(timestamps: string[]): { start: string; end: string }
 
 export async function buildPerformanceAuditResponse(
   args: PerformanceAuditQueryArgs,
-  repositories: PerformanceAuditRepositories = { auditRepository, toolCallRepository }
+  repositories: PerformanceAuditRepositories = { auditRepository, toolCallRepository },
 ): Promise<PerformanceAuditResponse> {
   const startTime = normalizeTimestamp(args.startTime);
   const endTime = normalizeTimestamp(args.endTime);
@@ -75,7 +75,7 @@ export async function buildPerformanceAuditResponse(
     deviceId: args.deviceId,
   });
 
-  const range = getTimestampRange(page.results.map(result => result.timestamp));
+  const range = getTimestampRange(page.results.map((result) => result.timestamp));
   const toolCalls = range
     ? await repositories.toolCallRepository.listToolNamesBetween(range.start, range.end)
     : [];

@@ -21,10 +21,10 @@ describe("ListChangedBroadcaster", () => {
   test("emit reaches all subscribers; unsubscribe stops delivery", () => {
     const first: string[] = [];
     const second: string[] = [];
-    const unsubscribeFirst = ListChangedBroadcaster.subscribe(kind => {
+    const unsubscribeFirst = ListChangedBroadcaster.subscribe((kind) => {
       first.push(kind);
     });
-    const unsubscribeSecond = ListChangedBroadcaster.subscribe(kind => {
+    const unsubscribeSecond = ListChangedBroadcaster.subscribe((kind) => {
       second.push(kind);
     });
 
@@ -46,7 +46,7 @@ describe("ListChangedBroadcaster", () => {
     const unsubscribeThrowing = ListChangedBroadcaster.subscribe(() => {
       throw new Error("listener boom");
     });
-    const unsubscribeHealthy = ListChangedBroadcaster.subscribe(kind => {
+    const unsubscribeHealthy = ListChangedBroadcaster.subscribe((kind) => {
       received.push(kind);
     });
 

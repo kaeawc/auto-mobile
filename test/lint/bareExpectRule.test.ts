@@ -9,7 +9,7 @@ function lintSnippet(code: string): string[] {
 }
 
 function matches(messages: string[], fragment: string): boolean {
-  return messages.some(message => message.startsWith(fragment));
+  return messages.some((message) => message.startsWith(fragment));
 }
 
 describe("auto-mobile/no-bare-expect", () => {

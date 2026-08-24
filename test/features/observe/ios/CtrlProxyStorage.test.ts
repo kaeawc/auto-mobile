@@ -8,12 +8,12 @@ import {
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
-describe("CtrlProxyStorage (iOS)", function() {
+describe("CtrlProxyStorage (iOS)", function () {
   let testDevice: BootedDevice;
   let fakeTimer: FakeTimer;
   const serverPort = 8765;
 
-  beforeEach(function() {
+  beforeEach(function () {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
 
@@ -40,8 +40,11 @@ describe("CtrlProxyStorage (iOS)", function() {
   }
 
   const createCapturingFactory = (
-    timer?: FakeTimer
-  ): { factory: (url: string) => CapturingWebSocket; getSocket: () => CapturingWebSocket | null } => {
+    timer?: FakeTimer,
+  ): {
+    factory: (url: string) => CapturingWebSocket;
+    getSocket: () => CapturingWebSocket | null;
+  } => {
     let socket: CapturingWebSocket | null = null;
     return {
       factory: (url: string) => {
@@ -53,29 +56,37 @@ describe("CtrlProxyStorage (iOS)", function() {
   };
 
   const waitForSocket = async (
-    getSocket: () => CapturingWebSocket | null
+    getSocket: () => CapturingWebSocket | null,
   ): Promise<CapturingWebSocket | null> => {
     for (let i = 0; i < 5; i++) {
       const s = getSocket();
-      if (s) {return s;}
-      await new Promise(r => setImmediate(r));
+      if (s) {
+        return s;
+      }
+      await new Promise((r) => setImmediate(r));
     }
     return getSocket();
   };
 
   const waitForSocketOpen = async (socket: FakeWebSocket | null): Promise<void> => {
-    if (!socket || socket.readyState === WebSocketState.OPEN) {return;}
-    await new Promise<void>(resolve => socket.once("open", () => resolve()));
+    if (!socket || socket.readyState === WebSocketState.OPEN) {
+      return;
+    }
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
   };
 
   const waitForSentMessages = async (
     socket: CapturingWebSocket | null,
-    minCount = 1
+    minCount = 1,
   ): Promise<void> => {
-    if (!socket) {return;}
+    if (!socket) {
+      return;
+    }
     for (let i = 0; i < 10; i++) {
-      if (commandPayloads(socket).length >= minCount) {return;}
-      await new Promise(r => setImmediate(r));
+      if (commandPayloads(socket).length >= minCount) {
+        return;
+      }
+      await new Promise((r) => setImmediate(r));
     }
   };
 
@@ -87,17 +98,22 @@ describe("CtrlProxyStorage (iOS)", function() {
 
   const commandPayloads = (socket: CapturingWebSocket): any[] =>
     socket.sentMessages
-      .map(message => JSON.parse(message))
-      .filter(payload => !syncMessageTypes.has(payload.type));
+      .map((message) => JSON.parse(message))
+      .filter((payload) => !syncMessageTypes.has(payload.type));
 
   // ---------------------------------------------------------------------------
   // listPreferenceFiles
   // ---------------------------------------------------------------------------
 
-  describe("listPreferenceFiles", function() {
-    test("sends list_preference_files request and returns files", async function() {
+  describe("listPreferenceFiles", function () {
+    test("sends list_preference_files request and returns files", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
         const resultPromise = client.listPreferenceFiles("com.example.app");
@@ -110,16 +126,23 @@ describe("CtrlProxyStorage (iOS)", function() {
         expect(sentMsg.type).toBe("list_preference_files");
         expect(typeof sentMsg.requestId).toBe("string");
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "preference_files",
-          requestId: sentMsg.requestId,
-          success: true,
-          files: [
-            { name: "Standard", path: "Standard", displayName: "Standard", entryCount: 5 },
-            { name: "group.com.example", path: "group.com.example", displayName: "group.com.example", entryCount: 3 },
-          ],
-          totalTimeMs: 10,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "preference_files",
+            requestId: sentMsg.requestId,
+            success: true,
+            files: [
+              { name: "Standard", path: "Standard", displayName: "Standard", entryCount: 5 },
+              {
+                name: "group.com.example",
+                path: "group.com.example",
+                displayName: "group.com.example",
+                entryCount: 3,
+              },
+            ],
+            totalTimeMs: 10,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result).toHaveLength(2);
@@ -133,11 +156,12 @@ describe("CtrlProxyStorage (iOS)", function() {
       }
     });
 
-    test("throws on connection failure", async function() {
+    test("throws on connection failure", async function () {
       const client = IOSCtrlProxyClient.createForTesting(
-        testDevice, serverPort,
+        testDevice,
+        serverPort,
         createInstantFailureWebSocketFactory(fakeTimer),
-        fakeTimer
+        fakeTimer,
       );
 
       try {
@@ -152,10 +176,15 @@ describe("CtrlProxyStorage (iOS)", function() {
   // getPreferenceEntries
   // ---------------------------------------------------------------------------
 
-  describe("getPreferenceEntries", function() {
-    test("sends get_preferences and returns entries", async function() {
+  describe("getPreferenceEntries", function () {
+    test("sends get_preferences and returns entries", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
         const resultPromise = client.getPreferenceEntries("com.example.app", "Standard");
@@ -167,16 +196,18 @@ describe("CtrlProxyStorage (iOS)", function() {
         expect(sentMsg.type).toBe("get_preferences");
         expect(sentMsg.fileName).toBe("Standard");
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "preferences",
-          requestId: sentMsg.requestId,
-          success: true,
-          entries: [
-            { key: "theme", value: "dark", type: "STRING" },
-            { key: "count", value: "42", type: "INT" },
-          ],
-          totalTimeMs: 5,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "preferences",
+            requestId: sentMsg.requestId,
+            success: true,
+            entries: [
+              { key: "theme", value: "dark", type: "STRING" },
+              { key: "count", value: "42", type: "INT" },
+            ],
+            totalTimeMs: 5,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result).toHaveLength(2);
@@ -194,10 +225,15 @@ describe("CtrlProxyStorage (iOS)", function() {
   // getPreference
   // ---------------------------------------------------------------------------
 
-  describe("getPreference", function() {
-    test("returns entry when found", async function() {
+  describe("getPreference", function () {
+    test("returns entry when found", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
         const resultPromise = client.getPreference("com.example.app", "Standard", "theme");
@@ -210,16 +246,18 @@ describe("CtrlProxyStorage (iOS)", function() {
         expect(sentMsg.fileName).toBe("Standard");
         expect(sentMsg.key).toBe("theme");
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "get_preference_result",
-          requestId: sentMsg.requestId,
-          success: true,
-          found: true,
-          key: "theme",
-          value: "dark",
-          valueType: "STRING",
-          totalTimeMs: 3,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "get_preference_result",
+            requestId: sentMsg.requestId,
+            success: true,
+            found: true,
+            key: "theme",
+            value: "dark",
+            valueType: "STRING",
+            totalTimeMs: 3,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result).not.toBeNull();
@@ -231,9 +269,14 @@ describe("CtrlProxyStorage (iOS)", function() {
       }
     });
 
-    test("returns null when not found", async function() {
+    test("returns null when not found", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
         const resultPromise = client.getPreference("com.example.app", "Standard", "missing");
@@ -243,13 +286,15 @@ describe("CtrlProxyStorage (iOS)", function() {
 
         const sentMsg = commandPayloads(socket!)[0];
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "get_preference_result",
-          requestId: sentMsg.requestId,
-          success: true,
-          found: false,
-          totalTimeMs: 2,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "get_preference_result",
+            requestId: sentMsg.requestId,
+            success: true,
+            found: false,
+            totalTimeMs: 2,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result).toBeNull();
@@ -263,13 +308,24 @@ describe("CtrlProxyStorage (iOS)", function() {
   // setPreference
   // ---------------------------------------------------------------------------
 
-  describe("setPreference", function() {
-    test("sends set_preference with correct parameters", async function() {
+  describe("setPreference", function () {
+    test("sends set_preference with correct parameters", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
-        const resultPromise = client.setPreference("com.example.app", "Standard", "theme", "dark", "STRING");
+        const resultPromise = client.setPreference(
+          "com.example.app",
+          "Standard",
+          "theme",
+          "dark",
+          "STRING",
+        );
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
@@ -281,12 +337,14 @@ describe("CtrlProxyStorage (iOS)", function() {
         expect(sentMsg.value).toBe("dark");
         expect(sentMsg.valueType).toBe("STRING");
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "set_preference_result",
-          requestId: sentMsg.requestId,
-          success: true,
-          totalTimeMs: 5,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "set_preference_result",
+            requestId: sentMsg.requestId,
+            success: true,
+            totalTimeMs: 5,
+          }),
+        );
 
         await resultPromise; // should not throw
       } finally {
@@ -294,25 +352,38 @@ describe("CtrlProxyStorage (iOS)", function() {
       }
     });
 
-    test("throws on failure response", async function() {
+    test("throws on failure response", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
-        const resultPromise = client.setPreference("com.example.app", "Standard", "count", "bad", "INT");
+        const resultPromise = client.setPreference(
+          "com.example.app",
+          "Standard",
+          "count",
+          "bad",
+          "INT",
+        );
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
         const sentMsg = commandPayloads(socket!)[0];
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "set_preference_result",
-          requestId: sentMsg.requestId,
-          success: false,
-          error: "Cannot parse 'bad' as INT",
-          totalTimeMs: 2,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "set_preference_result",
+            requestId: sentMsg.requestId,
+            success: false,
+            error: "Cannot parse 'bad' as INT",
+            totalTimeMs: 2,
+          }),
+        );
 
         await expect(resultPromise).rejects.toThrow("Cannot parse");
       } finally {
@@ -325,10 +396,15 @@ describe("CtrlProxyStorage (iOS)", function() {
   // removePreference
   // ---------------------------------------------------------------------------
 
-  describe("removePreference", function() {
-    test("sends remove_preference request", async function() {
+  describe("removePreference", function () {
+    test("sends remove_preference request", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
         const resultPromise = client.removePreference("com.example.app", "Standard", "theme");
@@ -341,12 +417,14 @@ describe("CtrlProxyStorage (iOS)", function() {
         expect(sentMsg.fileName).toBe("Standard");
         expect(sentMsg.key).toBe("theme");
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "remove_preference_result",
-          requestId: sentMsg.requestId,
-          success: true,
-          totalTimeMs: 3,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "remove_preference_result",
+            requestId: sentMsg.requestId,
+            success: true,
+            totalTimeMs: 3,
+          }),
+        );
 
         await resultPromise; // should not throw
       } finally {
@@ -359,13 +437,21 @@ describe("CtrlProxyStorage (iOS)", function() {
   // clearPreferenceStore
   // ---------------------------------------------------------------------------
 
-  describe("clearPreferenceStore", function() {
-    test("sends clear_preferences request", async function() {
+  describe("clearPreferenceStore", function () {
+    test("sends clear_preferences request", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
-        const resultPromise = client.clearPreferenceStore("com.example.app", "com.example.settings");
+        const resultPromise = client.clearPreferenceStore(
+          "com.example.app",
+          "com.example.settings",
+        );
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
@@ -374,12 +460,14 @@ describe("CtrlProxyStorage (iOS)", function() {
         expect(sentMsg.type).toBe("clear_preferences");
         expect(sentMsg.fileName).toBe("com.example.settings");
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "clear_preferences_result",
-          requestId: sentMsg.requestId,
-          success: true,
-          totalTimeMs: 8,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "clear_preferences_result",
+            requestId: sentMsg.requestId,
+            success: true,
+            totalTimeMs: 8,
+          }),
+        );
 
         await resultPromise; // should not throw
       } finally {
@@ -400,11 +488,14 @@ describe("CtrlProxyStorage (iOS)", function() {
 // silent hang. Time is fully controlled: the timeout rows fire by advancing the
 // fake clock and asserting the message, never by a real 5s hang.
 // ---------------------------------------------------------------------------
-import { createIosDelegateHarness, type IosDelegateHarness } from "../../../helpers/iosDelegateHarness";
+import {
+  createIosDelegateHarness,
+  type IosDelegateHarness,
+} from "../../../helpers/iosDelegateHarness";
 import { CtrlProxyStorage } from "../../../../src/features/observe/ios/CtrlProxyStorage";
 
 describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
-  const flush = (): Promise<void> => new Promise<void>(resolve => setImmediate(resolve));
+  const flush = (): Promise<void> => new Promise<void>((resolve) => setImmediate(resolve));
   const TIMEOUT = 5000;
 
   let h: IosDelegateHarness;
@@ -432,8 +523,12 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
       timeoutMsg: `List preference files timeout after ${TIMEOUT}ms`,
       defaultErrorMsg: "Failed to list preference files",
       call: () => storage.listPreferenceFiles("com.app", TIMEOUT),
-      successPayload: { success: true, totalTimeMs: 1, files: [{ name: "Standard", path: "Standard", entryCount: 2 }] },
-      assertSuccess: value => {
+      successPayload: {
+        success: true,
+        totalTimeMs: 1,
+        files: [{ name: "Standard", path: "Standard", entryCount: 2 }],
+      },
+      assertSuccess: (value) => {
         expect(value).toEqual([{ name: "Standard", path: "Standard", entryCount: 2 }]);
       },
     },
@@ -443,8 +538,12 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
       timeoutMsg: `Get preferences timeout after ${TIMEOUT}ms`,
       defaultErrorMsg: "Failed to get preference entries",
       call: () => storage.getPreferenceEntries("com.app", "Standard", TIMEOUT),
-      successPayload: { success: true, totalTimeMs: 1, entries: [{ key: "theme", value: "dark", type: "STRING" }] },
-      assertSuccess: value => {
+      successPayload: {
+        success: true,
+        totalTimeMs: 1,
+        entries: [{ key: "theme", value: "dark", type: "STRING" }],
+      },
+      assertSuccess: (value) => {
         expect(value).toEqual([{ key: "theme", value: "dark", type: "STRING" }]);
       },
     },
@@ -454,8 +553,13 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
       timeoutMsg: `Get preference timeout after ${TIMEOUT}ms`,
       defaultErrorMsg: "Failed to get preference",
       call: () => storage.getPreference("com.app", "Standard", "theme", TIMEOUT),
-      successPayload: { success: true, found: true, totalTimeMs: 1, entry: { key: "theme", value: "dark", type: "STRING" } },
-      assertSuccess: value => {
+      successPayload: {
+        success: true,
+        found: true,
+        totalTimeMs: 1,
+        entry: { key: "theme", value: "dark", type: "STRING" },
+      },
+      assertSuccess: (value) => {
         expect(value).toEqual({ key: "theme", value: "dark", type: "STRING" });
       },
     },
@@ -466,7 +570,7 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
       defaultErrorMsg: "Failed to set preference",
       call: () => storage.setPreference("com.app", "Standard", "theme", "dark", "STRING", TIMEOUT),
       successPayload: { success: true, totalTimeMs: 1 },
-      assertSuccess: value => {
+      assertSuccess: (value) => {
         expect(value).toBeUndefined();
       },
     },
@@ -477,7 +581,7 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
       defaultErrorMsg: "Failed to remove preference",
       call: () => storage.removePreference("com.app", "Standard", "theme", TIMEOUT),
       successPayload: { success: true, totalTimeMs: 1 },
-      assertSuccess: value => {
+      assertSuccess: (value) => {
         expect(value).toBeUndefined();
       },
     },
@@ -488,7 +592,7 @@ describe("CtrlProxyStorage delegate outcomes (6 ops x 4)", () => {
       defaultErrorMsg: "Failed to clear preferences",
       call: () => storage.clearPreferenceStore("com.app", "Standard", TIMEOUT),
       successPayload: { success: true, totalTimeMs: 1 },
-      assertSuccess: value => {
+      assertSuccess: (value) => {
         expect(value).toBeUndefined();
       },
     },

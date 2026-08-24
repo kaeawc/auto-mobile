@@ -24,16 +24,14 @@ describe("parseIceServers", () => {
   });
 
   test("parses a JSON array of servers", () => {
-    expect(
-      parseIceServers('[{"urls":"turn:b:2","username":"u","credential":"c"}]')
-    ).toEqual([{ urls: "turn:b:2", username: "u", credential: "c" }]);
+    expect(parseIceServers('[{"urls":"turn:b:2","username":"u","credential":"c"}]')).toEqual([
+      { urls: "turn:b:2", username: "u", credential: "c" },
+    ]);
   });
 
   test("expands an array-valued urls into one server per URL, sharing creds", () => {
     expect(
-      parseIceServers(
-        '[{"urls":["turn:t:3478","turns:t:5349"],"username":"u","credential":"p"}]'
-      )
+      parseIceServers('[{"urls":["turn:t:3478","turns:t:5349"],"username":"u","credential":"p"}]'),
     ).toEqual([
       { urls: "turn:t:3478", username: "u", credential: "p" },
       { urls: "turns:t:5349", username: "u", credential: "p" },
@@ -124,7 +122,7 @@ describe("resolveWebRtcStreamingConfig", () => {
     const env = { [WEBRTC_ENV.WHIP_ENDPOINT]: "https://env/whip" } as NodeJS.ProcessEnv;
     const config = resolveWebRtcStreamingConfig(
       { whipEndpoint: "https://override/whip", bitrateKbps: 8000 },
-      env
+      env,
     );
     expect(config.whipEndpoint).toBe("https://override/whip");
     expect(config.bitrateKbps).toBe(8000);
@@ -132,18 +130,23 @@ describe("resolveWebRtcStreamingConfig", () => {
 
   test("rejects invalid per-request size, bitrate, and WHIP endpoint", () => {
     expect(() =>
-      resolveWebRtcStreamingConfig({ whipEndpoint: "https://coord/whip", size: { width: 1, height: 2 } })
+      resolveWebRtcStreamingConfig({
+        whipEndpoint: "https://coord/whip",
+        size: { width: 1, height: 2 },
+      }),
     ).toThrow(/positive even integers/);
     expect(() =>
-      resolveWebRtcStreamingConfig({ whipEndpoint: "https://coord/whip", bitrateKbps: 0 })
+      resolveWebRtcStreamingConfig({ whipEndpoint: "https://coord/whip", bitrateKbps: 0 }),
     ).toThrow(/positive number/);
-    expect(() => resolveWebRtcStreamingConfig({ whipEndpoint: "not a URL" })).toThrow(/absolute http/);
+    expect(() => resolveWebRtcStreamingConfig({ whipEndpoint: "not a URL" })).toThrow(
+      /absolute http/,
+    );
   });
 
   test("defaults the iOS Simulator capture rate to the streaming default, not the observation default", () => {
     const config = resolveWebRtcStreamingConfig(
       { whipEndpoint: "https://coord/whip" },
-      {} as NodeJS.ProcessEnv
+      {} as NodeJS.ProcessEnv,
     );
     expect(config.iosSimulatorFps).toBe(WEBRTC_IOS_SIMULATOR_FPS_DEFAULT);
     // Pin the literal too: three docs files quote 15, and asserting only the
@@ -175,26 +178,32 @@ describe("resolveWebRtcStreamingConfig", () => {
   test("rejects an iOS Simulator fps outside the documented safe range", () => {
     const endpoint = { whipEndpoint: "https://coord/whip" };
     expect(() =>
-      resolveWebRtcStreamingConfig({ ...endpoint, iosSimulatorFps: WEBRTC_IOS_SIMULATOR_FPS_MIN - 1 })
+      resolveWebRtcStreamingConfig({
+        ...endpoint,
+        iosSimulatorFps: WEBRTC_IOS_SIMULATOR_FPS_MIN - 1,
+      }),
     ).toThrow(/integer in \[5, 60\]/);
     expect(() =>
-      resolveWebRtcStreamingConfig({ ...endpoint, iosSimulatorFps: WEBRTC_IOS_SIMULATOR_FPS_MAX + 1 })
+      resolveWebRtcStreamingConfig({
+        ...endpoint,
+        iosSimulatorFps: WEBRTC_IOS_SIMULATOR_FPS_MAX + 1,
+      }),
     ).toThrow(/integer in \[5, 60\]/);
-    expect(() =>
-      resolveWebRtcStreamingConfig({ ...endpoint, iosSimulatorFps: 12.5 })
-    ).toThrow(/integer in \[5, 60\]/);
+    expect(() => resolveWebRtcStreamingConfig({ ...endpoint, iosSimulatorFps: 12.5 })).toThrow(
+      /integer in \[5, 60\]/,
+    );
     expect(() =>
       resolveWebRtcStreamingConfig({}, {
         [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip",
         [WEBRTC_ENV.IOS_SIMULATOR_FPS]: "not-a-number",
-      } as NodeJS.ProcessEnv)
+      } as NodeJS.ProcessEnv),
     ).toThrow(/integer in \[5, 60\]/);
   });
 
   test("defaults the Android capture rate to 30fps, not the iOS-tuned rate", () => {
     const config = resolveWebRtcStreamingConfig(
       { whipEndpoint: "https://coord/whip" },
-      {} as NodeJS.ProcessEnv
+      {} as NodeJS.ProcessEnv,
     );
     expect(config.androidFps).toBe(WEBRTC_ANDROID_FPS_DEFAULT);
     // Pin the literal: the issue calls for lowering the Android default to 30fps.
@@ -222,26 +231,26 @@ describe("resolveWebRtcStreamingConfig", () => {
   test("rejects an Android fps outside the documented safe range", () => {
     const endpoint = { whipEndpoint: "https://coord/whip" };
     expect(() =>
-      resolveWebRtcStreamingConfig({ ...endpoint, androidFps: WEBRTC_ANDROID_FPS_MIN - 1 })
+      resolveWebRtcStreamingConfig({ ...endpoint, androidFps: WEBRTC_ANDROID_FPS_MIN - 1 }),
     ).toThrow(/integer in \[1, 60\]/);
     expect(() =>
-      resolveWebRtcStreamingConfig({ ...endpoint, androidFps: WEBRTC_ANDROID_FPS_MAX + 1 })
+      resolveWebRtcStreamingConfig({ ...endpoint, androidFps: WEBRTC_ANDROID_FPS_MAX + 1 }),
     ).toThrow(/integer in \[1, 60\]/);
-    expect(() =>
-      resolveWebRtcStreamingConfig({ ...endpoint, androidFps: 29.5 })
-    ).toThrow(/integer in \[1, 60\]/);
+    expect(() => resolveWebRtcStreamingConfig({ ...endpoint, androidFps: 29.5 })).toThrow(
+      /integer in \[1, 60\]/,
+    );
     expect(() =>
       resolveWebRtcStreamingConfig({}, {
         [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip",
         [WEBRTC_ENV.ANDROID_FPS]: "not-a-number",
-      } as NodeJS.ProcessEnv)
+      } as NodeJS.ProcessEnv),
     ).toThrow(/integer in \[1, 60\]/);
   });
 
   test("falls back to a default STUN server", () => {
     const config = resolveWebRtcStreamingConfig(
       { whipEndpoint: "https://coord/whip" },
-      {} as NodeJS.ProcessEnv
+      {} as NodeJS.ProcessEnv,
     );
     expect(config.iceServers.length).toBeGreaterThan(0);
     expect(config.iceServers[0].urls).toContain("stun:");
@@ -249,7 +258,7 @@ describe("resolveWebRtcStreamingConfig", () => {
 
   test("throws when no WHIP endpoint is configured", () => {
     expect(() => resolveWebRtcStreamingConfig({}, {} as NodeJS.ProcessEnv)).toThrow(
-      /WHIP endpoint/
+      /WHIP endpoint/,
     );
   });
 });
@@ -258,7 +267,10 @@ describe("WHIP endpoint protocol policy (issue #4751)", () => {
   const env = { [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord/whip" } as NodeJS.ProcessEnv;
 
   test("permits https on any host", () => {
-    const config = resolveWebRtcStreamingConfig({ whipEndpoint: "https://remote.example/whip" }, env);
+    const config = resolveWebRtcStreamingConfig(
+      { whipEndpoint: "https://remote.example/whip" },
+      env,
+    );
     expect(config.whipEndpoint).toBe("https://remote.example/whip");
   });
 
@@ -268,13 +280,15 @@ describe("WHIP endpoint protocol policy (issue #4751)", () => {
       "http://localhost:8000/whip",
       "http://[::1]:8000/whip",
     ]) {
-      expect(resolveWebRtcStreamingConfig({ whipEndpoint: endpoint }, env).whipEndpoint).toBe(endpoint);
+      expect(resolveWebRtcStreamingConfig({ whipEndpoint: endpoint }, env).whipEndpoint).toBe(
+        endpoint,
+      );
     }
   });
 
   test("rejects plaintext http on a non-loopback host", () => {
     expect(() =>
-      resolveWebRtcStreamingConfig({ whipEndpoint: "http://remote.example/whip" }, env)
+      resolveWebRtcStreamingConfig({ whipEndpoint: "http://remote.example/whip" }, env),
     ).toThrow(/only permitted for loopback/);
   });
 
@@ -284,7 +298,8 @@ describe("WHIP endpoint protocol policy (issue #4751)", () => {
       [WEBRTC_ENV.ALLOW_INSECURE_WHIP]: "1",
     } as NodeJS.ProcessEnv;
     expect(
-      resolveWebRtcStreamingConfig({ whipEndpoint: "http://remote.example/whip" }, hatchEnv).whipEndpoint
+      resolveWebRtcStreamingConfig({ whipEndpoint: "http://remote.example/whip" }, hatchEnv)
+        .whipEndpoint,
     ).toBe("http://remote.example/whip");
   });
 
@@ -301,20 +316,20 @@ describe("WHIP endpoint protocol policy (issue #4751)", () => {
 describe("assertWhipOverrideAllowed (issue #4751)", () => {
   test("always permits loopback overrides", () => {
     expect(() =>
-      assertWhipOverrideAllowed("http://127.0.0.1:8000/whip", {} as NodeJS.ProcessEnv)
+      assertWhipOverrideAllowed("http://127.0.0.1:8000/whip", {} as NodeJS.ProcessEnv),
     ).not.toThrow();
   });
 
   test("rejects an arbitrary origin with no allow-list configured", () => {
     expect(() =>
-      assertWhipOverrideAllowed("https://attacker.example/whip", {} as NodeJS.ProcessEnv)
+      assertWhipOverrideAllowed("https://attacker.example/whip", {} as NodeJS.ProcessEnv),
     ).toThrow(/not allow-listed/);
   });
 
   test("permits an origin matching the daemon's configured endpoint", () => {
     const env = { [WEBRTC_ENV.WHIP_ENDPOINT]: "https://coord.example/whip" } as NodeJS.ProcessEnv;
     expect(() =>
-      assertWhipOverrideAllowed("https://coord.example/whip?streamId=1", env)
+      assertWhipOverrideAllowed("https://coord.example/whip?streamId=1", env),
     ).not.toThrow();
   });
 
@@ -324,7 +339,9 @@ describe("assertWhipOverrideAllowed (issue #4751)", () => {
     } as NodeJS.ProcessEnv;
     expect(() => assertWhipOverrideAllowed("https://a.example/whip", env)).not.toThrow();
     expect(() => assertWhipOverrideAllowed("https://b.example:9000/whip", env)).not.toThrow();
-    expect(() => assertWhipOverrideAllowed("https://c.example/whip", env)).toThrow(/not allow-listed/);
+    expect(() => assertWhipOverrideAllowed("https://c.example/whip", env)).toThrow(
+      /not allow-listed/,
+    );
   });
 
   test("the escape hatch accepts any origin", () => {

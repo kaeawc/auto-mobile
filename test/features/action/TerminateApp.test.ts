@@ -17,7 +17,7 @@ describe("TerminateApp (iOS)", () => {
   const iosDevice: BootedDevice = {
     deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
     name: "iPhone 15",
-    platform: "ios"
+    platform: "ios",
   };
 
   let fakeSimctl: FakeSimctl;
@@ -129,7 +129,7 @@ describe("TerminateApp (iOS physical device)", () => {
   const iosPhysicalDevice: BootedDevice = {
     deviceId: "00008110-001A2B3C4D5E6F70",
     name: "iPhone 15 Pro (physical)",
-    platform: "ios"
+    platform: "ios",
   };
 
   let fakeSimctl: FakeSimctl;
@@ -142,9 +142,17 @@ describe("TerminateApp (iOS physical device)", () => {
   });
 
   test("terminates a running app via devicectl (not simctl)", async () => {
-    const terminator = new FakeDeviceAppTerminator({ result: { wasInstalled: true, wasRunning: true } });
+    const terminator = new FakeDeviceAppTerminator({
+      result: { wasInstalled: true, wasRunning: true },
+    });
 
-    const terminateApp = new TerminateApp(iosPhysicalDevice, null, fakeSimctl, fakeTimer, terminator);
+    const terminateApp = new TerminateApp(
+      iosPhysicalDevice,
+      null,
+      fakeSimctl,
+      fakeTimer,
+      terminator,
+    );
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -154,15 +162,23 @@ describe("TerminateApp (iOS physical device)", () => {
     expect(result.packageName).toBe("com.example.app");
     // Physical path must route through devicectl terminator, never simctl.
     expect(terminator.terminateCalls).toEqual([
-      { deviceUdid: "00008110-001A2B3C4D5E6F70", bundleId: "com.example.app" }
+      { deviceUdid: "00008110-001A2B3C4D5E6F70", bundleId: "com.example.app" },
     ]);
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(false);
   });
 
   test("reports wasRunning:false when the app is installed but not running", async () => {
-    const terminator = new FakeDeviceAppTerminator({ result: { wasInstalled: true, wasRunning: false } });
+    const terminator = new FakeDeviceAppTerminator({
+      result: { wasInstalled: true, wasRunning: false },
+    });
 
-    const terminateApp = new TerminateApp(iosPhysicalDevice, null, fakeSimctl, fakeTimer, terminator);
+    const terminateApp = new TerminateApp(
+      iosPhysicalDevice,
+      null,
+      fakeSimctl,
+      fakeTimer,
+      terminator,
+    );
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -172,9 +188,17 @@ describe("TerminateApp (iOS physical device)", () => {
   });
 
   test("reports wasInstalled:false when the app is not installed", async () => {
-    const terminator = new FakeDeviceAppTerminator({ result: { wasInstalled: false, wasRunning: false } });
+    const terminator = new FakeDeviceAppTerminator({
+      result: { wasInstalled: false, wasRunning: false },
+    });
 
-    const terminateApp = new TerminateApp(iosPhysicalDevice, null, fakeSimctl, fakeTimer, terminator);
+    const terminateApp = new TerminateApp(
+      iosPhysicalDevice,
+      null,
+      fakeSimctl,
+      fakeTimer,
+      terminator,
+    );
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(true);
@@ -187,7 +211,13 @@ describe("TerminateApp (iOS physical device)", () => {
     const terminator = new FakeDeviceAppTerminator();
     terminator.setError(new Error("Physical iOS device app termination requires macOS"));
 
-    const terminateApp = new TerminateApp(iosPhysicalDevice, null, fakeSimctl, fakeTimer, terminator);
+    const terminateApp = new TerminateApp(
+      iosPhysicalDevice,
+      null,
+      fakeSimctl,
+      fakeTimer,
+      terminator,
+    );
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.success).toBe(false);
@@ -204,7 +234,7 @@ describe("TerminateApp (iOS physical device)", () => {
     const simDevice: BootedDevice = {
       deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
       name: "iPhone 15",
-      platform: "ios"
+      platform: "ios",
     };
     const terminator = new FakeDeviceAppTerminator();
     fakeSimctl.setInstalledApps([{ bundleId: "com.example.app" }]);
@@ -223,7 +253,7 @@ describe("TerminateApp (Android)", () => {
   const androidDevice: BootedDevice = {
     deviceId: "emulator-5554",
     name: "Pixel 7",
-    platform: "android"
+    platform: "android",
   };
 
   let fakeAdb: FakeAdbClient;
@@ -240,12 +270,9 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);
     fakeAdb.setCommandResult(
       "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
-      "1"
+      "1",
     );
-    fakeAdb.setCommandResult(
-      "shell am force-stop --user 0 com.example.app",
-      ""
-    );
+    fakeAdb.setCommandResult("shell am force-stop --user 0 com.example.app", "");
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
@@ -263,7 +290,7 @@ describe("TerminateApp (Android)", () => {
     fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);
     fakeAdb.setCommandResult(
       "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
-      "0"
+      "0",
     );
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
@@ -286,7 +313,7 @@ describe("TerminateApp (Android)", () => {
     // the catch-and-degrade path stays untested (issue #4169 item 5).
     fakeAdb.setCommandError(
       "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
-      new Error("Command failed with exit code 1")
+      new Error("Command failed with exit code 1"),
     );
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
@@ -316,17 +343,17 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
   const iosSimDevice: BootedDevice = {
     deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
     name: "iPhone 15",
-    platform: "ios"
+    platform: "ios",
   };
   const iosPhysicalDevice: BootedDevice = {
     deviceId: "00008110-001A2B3C4D5E6F70",
     name: "iPhone 15 Pro (physical)",
-    platform: "ios"
+    platform: "ios",
   };
   const androidDevice: BootedDevice = {
     deviceId: "emulator-5554",
     name: "Pixel 7",
-    platform: "android"
+    platform: "android",
   };
 
   // Names that `observedInteraction`/`takeObservation` add AFTER the block runs.
@@ -341,22 +368,22 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     viewHierarchy: {
       hierarchy: { node: [] },
       packageName: "com.example.app",
-      updatedAt: Date.now()
-    }
+      updatedAt: Date.now(),
+    },
   });
 
   const topLevelNames = (timings: TimingData): string[] =>
-    Array.isArray(timings) ? timings.map(e => e.name) : Object.keys(timings);
+    Array.isArray(timings) ? timings.map((e) => e.name) : Object.keys(timings);
 
   const findEntry = (timings: TimingData, name: string): TimingEntry | undefined => {
     const list = Array.isArray(timings) ? timings : Object.values(timings);
-    return list.find(e => e.name === name);
+    return list.find((e) => e.name === name);
   };
 
   // Recursively collect every entry name anywhere in the tree.
   const allNames = (timings: TimingData): string[] => {
     const list = Array.isArray(timings) ? timings : Object.values(timings);
-    return list.flatMap(e => [e.name, ...(e.children ? allNames(e.children) : [])]);
+    return list.flatMap((e) => [e.name, ...(e.children ? allNames(e.children) : [])]);
   };
 
   /**
@@ -440,9 +467,17 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
   });
 
   test("iOS physical: terminates via devicectl and produces a well-formed perf tree", async () => {
-    const terminator = new FakeDeviceAppTerminator({ result: { wasInstalled: true, wasRunning: true } });
+    const terminator = new FakeDeviceAppTerminator({
+      result: { wasInstalled: true, wasRunning: true },
+    });
 
-    const terminateApp = new TerminateApp(iosPhysicalDevice, null, fakeSimctl, fakeTimer, terminator);
+    const terminateApp = new TerminateApp(
+      iosPhysicalDevice,
+      null,
+      fakeSimctl,
+      fakeTimer,
+      terminator,
+    );
     wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
@@ -450,7 +485,7 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     expect(result.wasInstalled).toBe(true);
     expect(result.wasRunning).toBe(true);
     expect(terminator.terminateCalls).toEqual([
-      { deviceUdid: "00008110-001A2B3C4D5E6F70", bundleId: "com.example.app" }
+      { deviceUdid: "00008110-001A2B3C4D5E6F70", bundleId: "com.example.app" },
     ]);
     expect(fakeSimctl.wasMethodCalled("terminateApp")).toBe(false);
     assertWellFormedPerfTree(result);
@@ -460,7 +495,13 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     const terminator = new FakeDeviceAppTerminator();
     terminator.setError(new Error("Physical iOS device app termination requires macOS"));
 
-    const terminateApp = new TerminateApp(iosPhysicalDevice, null, fakeSimctl, fakeTimer, terminator);
+    const terminateApp = new TerminateApp(
+      iosPhysicalDevice,
+      null,
+      fakeSimctl,
+      fakeTimer,
+      terminator,
+    );
     wireDeps(terminateApp);
     const result = await terminateApp.execute("com.example.app");
 
@@ -475,7 +516,7 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
     fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);
     fakeAdb.setCommandResult(
       "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
-      "1"
+      "1",
     );
     fakeAdb.setCommandResult("shell am force-stop --user 0 com.example.app", "");
 

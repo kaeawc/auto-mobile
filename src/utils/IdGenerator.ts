@@ -37,7 +37,7 @@ export const defaultIdGenerator: IdGenerator = new NodeIdGenerator();
 export function createTimestampedId(
   prefix: string,
   timer: Pick<Timer, "now">,
-  idGenerator: IdGenerator = defaultIdGenerator
+  idGenerator: IdGenerator = defaultIdGenerator,
 ): string {
   return `${prefix}_${timer.now()}_${idGenerator.next()}`;
 }

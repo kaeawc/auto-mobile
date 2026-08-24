@@ -5,7 +5,7 @@ import type { FailureObservationSummary } from "../../models/FailureObservation"
  */
 export function trimObservationForStepCapture(
   summary: FailureObservationSummary,
-  mode: "summary" | "full"
+  mode: "summary" | "full",
 ): FailureObservationSummary {
   if (mode === "full") {
     return summary;
@@ -25,7 +25,9 @@ const ELEMENT_BUCKETS = ["clickable", "text", "scrollable"] as const;
  * Builds failure-observation payload from a full observe structured result.
  * Includes entire viewHierarchy / rawViewHierarchy plus compact element digests.
  */
-export function summarizeObserveResultForFailure(raw: Record<string, unknown>): FailureObservationSummary {
+export function summarizeObserveResultForFailure(
+  raw: Record<string, unknown>,
+): FailureObservationSummary {
   const capturedAtMs = Date.now();
   const texts = new Set<string>();
   const resourceIds = new Set<string>();
@@ -54,7 +56,10 @@ export function summarizeObserveResultForFailure(raw: Record<string, unknown>): 
           }
         }
         if (typeof e.resourceId === "string" && e.resourceId.length > 0) {
-          const id = e.resourceId.length > MAX_ID_LEN ? `${e.resourceId.slice(0, MAX_ID_LEN)}…` : e.resourceId;
+          const id =
+            e.resourceId.length > MAX_ID_LEN
+              ? `${e.resourceId.slice(0, MAX_ID_LEN)}…`
+              : e.resourceId;
           resourceIds.add(id);
         }
         if (texts.size >= MAX_SAMPLES && resourceIds.size >= MAX_SAMPLES) {
@@ -75,6 +80,6 @@ export function summarizeObserveResultForFailure(raw: Record<string, unknown>): 
     rawViewHierarchy: raw.rawViewHierarchy,
     visibleTextsSample: [...texts].slice(0, MAX_SAMPLES),
     resourceIdsSample: [...resourceIds].slice(0, MAX_SAMPLES),
-    observeError: typeof raw.error === "string" ? raw.error : undefined
+    observeError: typeof raw.error === "string" ? raw.error : undefined,
   };
 }

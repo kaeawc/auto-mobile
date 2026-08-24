@@ -9,25 +9,20 @@ interface AppBundleHasherDependencies {
 }
 
 const defaultDependencies: AppBundleHasherDependencies = {
-  readDir: async path => fs.readdir(path),
-  stat: async path => fs.stat(path),
-  readFile: async path => fs.readFile(path)
+  readDir: async (path) => fs.readdir(path),
+  stat: async (path) => fs.stat(path),
+  readFile: async (path) => fs.readFile(path),
 };
 
-const skipPathSegment = (segment: string): boolean => (
-  segment === "_CodeSignature" ||
-  segment === "SC_Info"
-);
+const skipPathSegment = (segment: string): boolean =>
+  segment === "_CodeSignature" || segment === "SC_Info";
 
-const skipFileName = (name: string): boolean => (
-  name === "embedded.mobileprovision" ||
-  name === "PkgInfo" ||
-  name.endsWith(".xcent")
-);
+const skipFileName = (name: string): boolean =>
+  name === "embedded.mobileprovision" || name === "PkgInfo" || name.endsWith(".xcent");
 
 const shouldSkipPath = (relativePath: string): boolean => {
   const segments = relativePath.split("/").filter(Boolean);
-  if (segments.some(segment => skipPathSegment(segment))) {
+  if (segments.some((segment) => skipPathSegment(segment))) {
     return true;
   }
   const fileName = segments[segments.length - 1] ?? "";
@@ -38,7 +33,7 @@ const collectPaths = async (
   root: string,
   current: string,
   deps: AppBundleHasherDependencies,
-  output: string[]
+  output: string[],
 ): Promise<void> => {
   const entries = await deps.readDir(current);
   entries.sort();
@@ -59,7 +54,7 @@ const collectPaths = async (
 
 export const hashAppBundle = async (
   bundlePath: string,
-  deps: AppBundleHasherDependencies = defaultDependencies
+  deps: AppBundleHasherDependencies = defaultDependencies,
 ): Promise<string> => {
   const hash = createHash("sha256");
   const files: string[] = [];

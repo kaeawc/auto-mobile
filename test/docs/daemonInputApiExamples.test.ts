@@ -18,7 +18,7 @@ const implementedInputMethods = [
   "input/key",
 ] as const;
 
-type ImplementedInputMethod = typeof implementedInputMethods[number];
+type ImplementedInputMethod = (typeof implementedInputMethods)[number];
 
 function extractRawSocketExampleSection(markdown: string): string {
   const start = markdown.indexOf("### Copy-paste raw socket examples");
@@ -29,8 +29,9 @@ function extractRawSocketExampleSection(markdown: string): string {
 }
 
 function parseRequestExamples(section: string): Array<Record<string, unknown>> {
-  return Array.from(section.matchAll(/printf '%s\\n' '([^']+)'/g), match =>
-    JSON.parse(match[1]) as Record<string, unknown>
+  return Array.from(
+    section.matchAll(/printf '%s\\n' '([^']+)'/g),
+    (match) => JSON.parse(match[1]) as Record<string, unknown>,
   );
 }
 
@@ -40,8 +41,8 @@ function parseResponseExamples(section: string): Array<Record<string, unknown>> 
   return section
     .slice(responseStart)
     .split("\n")
-    .filter(line => line.startsWith("{ \"id\":"))
-    .map(line => JSON.parse(line) as Record<string, unknown>);
+    .filter((line) => line.startsWith('{ "id":'))
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 
 describe("daemon input API consumer docs", () => {
@@ -51,18 +52,18 @@ describe("daemon input API consumer docs", () => {
     const requestExamples = parseRequestExamples(rawExampleSection);
     const responseExamples = parseResponseExamples(rawExampleSection);
     const requestsByMethod = new Map(
-      requestExamples.map(request => [String(request.method), request])
+      requestExamples.map((request) => [String(request.method), request]),
     );
     const responsesByAction = new Map(
-      responseExamples.map(response => {
+      responseExamples.map((response) => {
         const result = response.result as Record<string, unknown>;
         return [String(result.action), response];
-      })
+      }),
     );
 
     expect(unixSocketApi).toContain("Copy-paste raw socket examples");
     expect(unixSocketApi).toContain("printf '%s\\n'");
-    expect(unixSocketApi).toContain("nc -U -w 2 \"$AUTOMOBILE_DAEMON_SOCKET_PATH\"");
+    expect(unixSocketApi).toContain('nc -U -w 2 "$AUTOMOBILE_DAEMON_SOCKET_PATH"');
     expect(requestExamples).toHaveLength(implementedInputMethods.length);
     expect(responseExamples).toHaveLength(implementedInputMethods.length);
 
@@ -162,7 +163,9 @@ describe("daemon input API consumer docs", () => {
 
   test("documents frame-context pairing, echoing, and recovery for third-party screen control", async () => {
     const clientGuide = await readRepoFile("docs/design-docs/mcp/daemon/client-screen-control.md");
-    const snapshotGuide = await readRepoFile("docs/design-docs/mcp/daemon/client-frame-snapshot.md");
+    const snapshotGuide = await readRepoFile(
+      "docs/design-docs/mcp/daemon/client-frame-snapshot.md",
+    );
     const unixSocketApi = await readRepoFile("docs/design-docs/mcp/daemon/unix-socket-api.md");
 
     expect(clientGuide).toContain('"frameContext": "android-generation-42"');
@@ -172,7 +175,9 @@ describe("daemon input API consumer docs", () => {
     expect(clientGuide).toContain("opaque `frameContext` on every request");
     expect(clientGuide).toContain("stale-context rejection");
     expect(clientGuide).toContain("wait for a newly paired snapshot before");
-    expect(clientGuide).toContain("runner that does not publish `frameContext` cannot produce a controllable");
+    expect(clientGuide).toContain(
+      "runner that does not publish `frameContext` cannot produce a controllable",
+    );
     expect(clientGuide).toContain(
       `default \`${defaultReleaseVersion}\` CtrlProxy artifacts predate \`frameContext\``,
     );
@@ -189,19 +194,31 @@ describe("daemon input API consumer docs", () => {
       /`input\/tap` and `input\/swipe`, the\s+daemon rejects a stale echoed context/,
     );
     expect(snapshotGuide).toContain("[#4586](https://github.com/kaeawc/auto-mobile/issues/4586)");
-    expect(unixSocketApi).toContain("`frameContext` | `string` | No |");
+    expect(unixSocketApi).toMatch(/\|\s*`frameContext`\s*\|\s*`string`\s*\|\s*No\s*\|/);
     expect(unixSocketApi).toContain(
       `default \`${defaultReleaseVersion}\` CtrlProxy artifacts are legacy`,
     );
     expect(unixSocketApi).toContain(
       "device-boundary guarantee applies to `input/tap`, `input/swipe`, `input/pressButton`",
     );
-    expect(unixSocketApi).toMatch(/"duration": 50,\r?\n    "frameContext": "android-generation-42"/);
-    expect(unixSocketApi).toMatch(/"durationMs": 350,\r?\n    "frameContext": "android-generation-42"/);
-    expect(unixSocketApi).toMatch(/"button": "back",\r?\n    "frameContext": "android-generation-42"/);
-    expect(unixSocketApi).toMatch(/"submit": false,\r?\n    "frameContext": "android-generation-42"/);
-    expect(unixSocketApi).toMatch(/"mode": "append",\r?\n    "frameContext": "android-generation-42"/);
-    expect(unixSocketApi).toMatch(/"key": "enter",\r?\n    "frameContext": "android-generation-42"/);
+    expect(unixSocketApi).toMatch(
+      /"duration": 50,\r?\n    "frameContext": "android-generation-42"/,
+    );
+    expect(unixSocketApi).toMatch(
+      /"durationMs": 350,\r?\n    "frameContext": "android-generation-42"/,
+    );
+    expect(unixSocketApi).toMatch(
+      /"button": "back",\r?\n    "frameContext": "android-generation-42"/,
+    );
+    expect(unixSocketApi).toMatch(
+      /"submit": false,\r?\n    "frameContext": "android-generation-42"/,
+    );
+    expect(unixSocketApi).toMatch(
+      /"mode": "append",\r?\n    "frameContext": "android-generation-42"/,
+    );
+    expect(unixSocketApi).toMatch(
+      /"key": "enter",\r?\n    "frameContext": "android-generation-42"/,
+    );
   });
 
   test("frames direct input as input methods and tools/call as fallback", async () => {
@@ -220,22 +237,30 @@ describe("daemon input API consumer docs", () => {
       "| `input/swipe` | Supported | Supported | Absolute device-screen start/end coordinates. Use for drag gestures until `input/drag` has distinct semantics. |",
       "| `input/pressButton` | Supported | Supported with platform gaps | Device/navigation buttons aligned with MCP `pressButton`. Unsupported buttons fail instead of being ignored. |",
       "| `input/typeText` | Supported | Supported | Sends committed text only; IME composition is deferred. " +
-        "Non-destructive `mode: \"append\"` is supported on both platforms. |",
+        'Non-destructive `mode: "append"` is supported on both platforms. |',
       "| `input/key` | Supported | Unsupported | Discrete non-text key presses. Modifiers are deferred. |",
     ];
 
     for (const row of expectedStatusRows) {
-      expect(unixSocketApi).toContain(row);
+      const whitespaceFlexibleRow = row
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+        .replace(/\s+/g, "\\s+");
+      expect(unixSocketApi).toMatch(new RegExp(whitespaceFlexibleRow));
     }
 
     // The append mode is the only non-destructive keyboard path a third-party client
     // has; document its support on both platforms and Android's character limitation.
-    expect(unixSocketApi).toContain("| `mode` | `\"append\"` | No |");
-    expect(unixSocketApi).toContain("**iOS.** Append dispatches to CtrlProxy's focused-field insert primitive");
+    expect(unixSocketApi).toMatch(/\|\s*`mode`\s*\|\s*`"append"`\s*\|\s*No\s*\|/);
+    expect(unixSocketApi).toContain(
+      "**iOS.** Append dispatches to CtrlProxy's focused-field insert primitive",
+    );
     expect(unixSocketApi).toContain("append cannot type");
     expect(unixSocketApi).toContain('"mode": "append"');
 
-    expect(unixSocketApi).toContain("Unsupported platforms or unsupported actions return `success: false`");
+    expect(unixSocketApi).toContain(
+      "Unsupported platforms or unsupported actions return `success: false`",
+    );
     expect(unixSocketApi).toContain("do not include a fresh observation");
     expect(unixSocketApi).not.toContain("Unsupported input action input/key on ios");
     expect(unixSocketApi).toContain("input/key is unsupported on ios");
@@ -252,7 +277,9 @@ describe("daemon input API consumer docs", () => {
       "subject to the normal socket version and build-identity handshake; clients must surface a mismatch",
     );
     expect(unixSocketApi).toContain("that leaves append support unknown");
-    expect(unixSocketApi).toContain("translate only the exact `input/typeText unsupported params: mode` response");
+    expect(unixSocketApi).toContain(
+      "translate only the exact `input/typeText unsupported params: mode` response",
+    );
     expect(unixSocketApi).toContain("Unsupported daemon method: daemon/capabilities");
     expect(unixSocketApi).toContain('"clientVersion": "1.2.3"');
     expect(unixSocketApi).toContain('"clientBuildId": "sha256:..."');
@@ -262,7 +289,9 @@ describe("daemon input API consumer docs", () => {
   test("documents pressButton values that the socket actually accepts", async () => {
     const unixSocketApi = await readRepoFile("docs/design-docs/mcp/daemon/unix-socket-api.md");
 
-    expect(unixSocketApi).toContain('"back" \\| "home" \\| "app_switch" \\| "volume_up" \\| "volume_down" \\| "power"');
+    expect(unixSocketApi).toContain(
+      '"back" \\| "home" \\| "app_switch" \\| "volume_up" \\| "volume_down" \\| "power"',
+    );
     expect(unixSocketApi).toContain("`input/key` for a discrete Enter press");
     expect(unixSocketApi).not.toContain('"power" \\| "enter"');
     expect(unixSocketApi).not.toContain("`enter` is reserved by the socket contract");
@@ -275,6 +304,8 @@ describe("daemon input API consumer docs", () => {
 
     expect(unixSocketApi).toContain("[Screen Streaming](../observe/screen-streaming.md)");
     expect(screenStreaming).toContain("[daemon input API](../daemon/unix-socket-api.md#input-api)");
-    expect(androidIde).toContain("[daemon input API](../../../mcp/daemon/unix-socket-api.md#input-api)");
+    expect(androidIde).toContain(
+      "[daemon input API](../../../mcp/daemon/unix-socket-api.md#input-api)",
+    );
   });
 });

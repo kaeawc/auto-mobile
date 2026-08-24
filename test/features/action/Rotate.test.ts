@@ -24,7 +24,7 @@ describe("Rotate", () => {
     stderr: "",
     toString: () => stdout,
     trim: () => stdout.trim(),
-    includes: (searchString: string) => stdout.includes(searchString)
+    includes: (searchString: string) => stdout.includes(searchString),
   });
 
   // Helper function to create mock ObserveResult
@@ -32,9 +32,8 @@ describe("Rotate", () => {
     timestamp: Date.now(),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { node: {} }
+    viewHierarchy: { node: {} },
   });
-
 
   beforeEach(() => {
     // Create mock BootedDevice
@@ -42,7 +41,7 @@ describe("Rotate", () => {
       name: "Test Device",
       platform: "android",
       deviceId: "test-device",
-      source: "local"
+      source: "local",
     };
 
     // Create fakes for testing
@@ -56,7 +55,11 @@ describe("Rotate", () => {
 
     // Configure default responses
     fakeWindow.configureCachedActiveWindow(null);
-    fakeWindow.configureActiveWindow({ appId: "com.test.app", activityName: "MainActivity", layoutSeqSum: 123 });
+    fakeWindow.configureActiveWindow({
+      appId: "com.test.app",
+      activityName: "MainActivity",
+      layoutSeqSum: 123,
+    });
 
     // Set up default observe screen responses with valid viewHierarchy
     // Use a factory to create different objects on each call (avoids BaseVisualChange
@@ -65,7 +68,10 @@ describe("Rotate", () => {
 
     // Set default responses for common ADB commands
     fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
-    fakeAdb.setCommandResponse("shell settings get system accelerometer_rotation", createExecResult("1"));
+    fakeAdb.setCommandResponse(
+      "shell settings get system accelerometer_rotation",
+      createExecResult("1"),
+    );
 
     // Instantiate Rotate with fake ADB
     rotate = new Rotate(mockDevice, fakeAdb, fakeTimer);
@@ -114,9 +120,15 @@ describe("Rotate", () => {
       fakeAdb.setDefaultResponse({
         stdout: "",
         stderr: "Error",
-        toString() { return this.stderr; },
-        trim() { return this.stderr.trim(); },
-        includes(s: string) { return this.stderr.includes(s); }
+        toString() {
+          return this.stderr;
+        },
+        trim() {
+          return this.stderr.trim();
+        },
+        includes(s: string) {
+          return this.stderr.includes(s);
+        },
       });
 
       const orientation = await rotate.getCurrentOrientation();
@@ -127,16 +139,24 @@ describe("Rotate", () => {
 
   describe("isOrientationLocked", () => {
     test("should return true when accelerometer_rotation is 0", async () => {
-      fakeAdb.setCommandResponse("shell settings get system accelerometer_rotation", createExecResult("0"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("0"),
+      );
 
       const isLocked = await rotate.isOrientationLocked();
 
       expect(isLocked).toBe(true);
-      expect(fakeAdb.wasCommandExecuted("shell settings get system accelerometer_rotation")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings get system accelerometer_rotation")).toBe(
+        true,
+      );
     });
 
     test("should return false when accelerometer_rotation is 1", async () => {
-      fakeAdb.setCommandResponse("shell settings get system accelerometer_rotation", createExecResult("1"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
 
       const isLocked = await rotate.isOrientationLocked();
 
@@ -147,9 +167,15 @@ describe("Rotate", () => {
       fakeAdb.setDefaultResponse({
         stdout: "",
         stderr: "Error",
-        toString() { return this.stderr; },
-        trim() { return this.stderr.trim(); },
-        includes(s: string) { return this.stderr.includes(s); }
+        toString() {
+          return this.stderr;
+        },
+        trim() {
+          return this.stderr.trim();
+        },
+        includes(s: string) {
+          return this.stderr.includes(s);
+        },
       });
 
       const isLocked = await rotate.isOrientationLocked();
@@ -179,52 +205,84 @@ describe("Rotate", () => {
     test("should get current orientation and lock status before rotation", async () => {
       // Setup: device starts in portrait, needs to rotate to landscape
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
-      fakeAdb.setCommandResponse("shell settings get system accelerometer_rotation", createExecResult("1"));
-      fakeAdb.setCommandResponse("shell \"settings put system accelerometer_rotation 0; settings put system user_rotation 1\"", createExecResult());
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponse(
+        'shell "settings put system accelerometer_rotation 0; settings put system user_rotation 1"',
+        createExecResult(),
+      );
 
       await rotate.execute("landscape");
 
       // Verify ADB calls were made to check orientation state
       expect(fakeAdb.wasCommandExecuted("shell settings get system user_rotation")).toBe(true);
-      expect(fakeAdb.wasCommandExecuted("shell settings get system accelerometer_rotation")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings get system accelerometer_rotation")).toBe(
+        true,
+      );
     });
 
     test("should attempt rotation command when orientation differs", async () => {
       // Setup: device is in portrait, rotating to landscape
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
-      fakeAdb.setCommandResponse("shell settings get system accelerometer_rotation", createExecResult("1"));
-      fakeAdb.setCommandResponse("shell settings put system accelerometer_rotation 0", createExecResult());
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("1"),
+      );
+      fakeAdb.setCommandResponse(
+        "shell settings put system accelerometer_rotation 0",
+        createExecResult(),
+      );
       fakeAdb.setCommandResponse("shell settings put system user_rotation 1", createExecResult());
 
       await rotate.execute("landscape");
 
       // Verify both rotation commands were executed
-      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 0")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 0")).toBe(
+        true,
+      );
       expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 1")).toBe(true);
     });
 
     test("should unlock orientation if locked before rotation", async () => {
       // Setup: device is landscape with orientation locked
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("1"));
-      fakeAdb.setCommandResponse("shell settings get system accelerometer_rotation", createExecResult("0")); // Locked
-      fakeAdb.setCommandResponse("shell settings put system accelerometer_rotation 1", createExecResult()); // Unlock
-      fakeAdb.setCommandResponse("shell settings put system accelerometer_rotation 0", createExecResult());
+      fakeAdb.setCommandResponse(
+        "shell settings get system accelerometer_rotation",
+        createExecResult("0"),
+      ); // Locked
+      fakeAdb.setCommandResponse(
+        "shell settings put system accelerometer_rotation 1",
+        createExecResult(),
+      ); // Unlock
+      fakeAdb.setCommandResponse(
+        "shell settings put system accelerometer_rotation 0",
+        createExecResult(),
+      );
       fakeAdb.setCommandResponse("shell settings put system user_rotation 0", createExecResult());
 
       const result = await rotate.execute("portrait");
 
       expect(result.success).toBe(true);
       // Verify that the unlock command was executed
-      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(
+        true,
+      );
       // Verify the rotation commands were executed
-      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 0")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 0")).toBe(
+        true,
+      );
       expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0")).toBe(true);
     });
   });
 
   describe("edge cases", () => {
     test("should handle whitespace in ADB output", async () => {
-      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("  1  \n"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system user_rotation",
+        createExecResult("  1  \n"),
+      );
 
       const orientation = await rotate.getCurrentOrientation();
 
@@ -232,7 +290,10 @@ describe("Rotate", () => {
     });
 
     test("should handle non-numeric ADB output", async () => {
-      fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("not-a-number"));
+      fakeAdb.setCommandResponse(
+        "shell settings get system user_rotation",
+        createExecResult("not-a-number"),
+      );
 
       const orientation = await rotate.getCurrentOrientation();
 
@@ -258,12 +319,12 @@ describe("Rotate", () => {
         name: "iPhone 15",
         platform: "ios",
         deviceId: "ios-device",
-        source: "local"
+        source: "local",
       };
 
       fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
       getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any
+        fakeIOSCtrlProxy as any,
       );
     });
 
@@ -325,7 +386,9 @@ describe("Rotate", () => {
       try {
         await iosRotate.execute("landscape");
         expect(fakeAdb.wasCommandExecuted("shell settings get system user_rotation")).toBe(false);
-        expect(fakeAdb.wasCommandExecuted("shell settings get system accelerometer_rotation")).toBe(false);
+        expect(fakeAdb.wasCommandExecuted("shell settings get system accelerometer_rotation")).toBe(
+          false,
+        );
       } finally {
         getInstanceSpy.mockRestore();
       }

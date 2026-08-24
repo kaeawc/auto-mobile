@@ -16,7 +16,7 @@ describe("PinchOn", () => {
   const device: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    name: "Test Device"
+    name: "Test Device",
   };
 
   let pinchOn: PinchOn;
@@ -37,22 +37,22 @@ describe("PinchOn", () => {
         {
           $: {
             "resource-id": "container-id",
-            "text": "Container",
-            "bounds": { left: 0, top: 0, right: 200, bottom: 200 },
-            "class": "android.widget.FrameLayout"
-          }
-        }
-      ]
+            text: "Container",
+            bounds: { left: 0, top: 0, right: 200, bottom: 200 },
+            class: "android.widget.FrameLayout",
+          },
+        },
+      ],
     },
     packageName: "com.test.app",
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
   });
 
   const createObserveResult = (): ObserveResult => ({
     updatedAt: Date.now(),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: createHierarchy()
+    viewHierarchy: createHierarchy(),
   });
 
   beforeEach(() => {
@@ -67,13 +67,21 @@ describe("PinchOn", () => {
 
     fakeObserveScreen.setObserveResult(() => createObserveResult());
     fakeWindow.configureCachedActiveWindow(null);
-    fakeWindow.configureActiveWindow({ appId: "com.test.app", activityName: "MainActivity", layoutSeqSum: 123 });
+    fakeWindow.configureActiveWindow({
+      appId: "com.test.app",
+      activityName: "MainActivity",
+      layoutSeqSum: 123,
+    });
 
     managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-      isAvailable: async () => true
+      isAvailable: async () => true,
     } as any);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService as any);
-    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosService as any);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeA11yService as any,
+    );
+    iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeIosService as any,
+    );
 
     pinchOn = new PinchOn(device);
     (pinchOn as any).observeScreen = fakeObserveScreen;
@@ -92,7 +100,7 @@ describe("PinchOn", () => {
   test("returns error when container specifies both elementId and text", async () => {
     const result = await pinchOn.execute({
       direction: "in",
-      container: { elementId: "container-id", text: "Container" }
+      container: { elementId: "container-id", text: "Container" },
     });
 
     expect(result.success).toBe(false);
@@ -103,7 +111,7 @@ describe("PinchOn", () => {
   test("returns error when container specifies neither selector", async () => {
     const result = await pinchOn.execute({
       direction: "in",
-      container: {}
+      container: {},
     });
 
     expect(result.success).toBe(false);
@@ -114,7 +122,7 @@ describe("PinchOn", () => {
   test("requests pinch when container elementId is valid", async () => {
     const result = await pinchOn.execute({
       direction: "out",
-      container: { elementId: "container-id" }
+      container: { elementId: "container-id" },
     });
 
     expect(result.success).toBe(true);
@@ -130,10 +138,10 @@ describe("PinchOn", () => {
     const iosDevice: BootedDevice = {
       deviceId: "11111111-2222-3333-4444-555555555555",
       platform: "ios",
-      name: "iPhone 16 Pro"
+      name: "iPhone 16 Pro",
     };
     managerSpy?.mockReturnValue({
-      isAvailable: async () => false
+      isAvailable: async () => false,
     } as any);
     fakeIosService.setPinchResult({ success: true, totalTimeMs: 710, gestureTimeMs: 700 });
     pinchOn = new PinchOn(iosDevice);
@@ -147,7 +155,7 @@ describe("PinchOn", () => {
       direction: "out",
       container: { elementId: "container-id" },
       duration: 700,
-      rotationDegrees: 15
+      rotationDegrees: 15,
     });
 
     expect(result.success).toBe(true);
@@ -164,7 +172,7 @@ describe("PinchOn", () => {
       distanceEnd: 120,
       rotationDegrees: 15,
       duration: 700,
-      timeoutMs: 5000
+      timeoutMs: 5000,
     });
   });
 
@@ -172,13 +180,13 @@ describe("PinchOn", () => {
     const iosDevice: BootedDevice = {
       deviceId: "11111111-2222-3333-4444-555555555555",
       platform: "ios",
-      name: "iPhone 16 Pro"
+      name: "iPhone 16 Pro",
     };
     fakeObserveScreen.setObserveResult(() => ({
       updatedAt: Date.now(),
       screenSize: { width: 393, height: 852 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: createHierarchy()
+      viewHierarchy: createHierarchy(),
     }));
     fakeIosService.setPinchResult({ success: true, totalTimeMs: 300, gestureTimeMs: 300 });
     pinchOn = new PinchOn(iosDevice);
@@ -190,7 +198,7 @@ describe("PinchOn", () => {
 
     const result = await pinchOn.execute({
       direction: "out",
-      autoTarget: false
+      autoTarget: false,
     });
 
     expect(result.success).toBe(true);
@@ -207,7 +215,7 @@ describe("PinchOn", () => {
     const iosDevice: BootedDevice = {
       deviceId: "11111111-2222-3333-4444-555555555555",
       platform: "ios",
-      name: "iPhone 16 Pro"
+      name: "iPhone 16 Pro",
     };
     fakeIosService.setPinchResult({ success: false, error: "Pinch failed on runner" });
     pinchOn = new PinchOn(iosDevice);
@@ -219,7 +227,7 @@ describe("PinchOn", () => {
 
     const result = await pinchOn.execute({
       direction: "in",
-      autoTarget: false
+      autoTarget: false,
     });
 
     expect(result.success).toBe(false);
@@ -232,13 +240,13 @@ describe("PinchOn", () => {
     const iosDevice: BootedDevice = {
       deviceId: "11111111-2222-3333-4444-555555555555",
       platform: "ios",
-      name: "iPhone 16 Pro"
+      name: "iPhone 16 Pro",
     };
     fakeIosService.setPinchResult({
       success: true,
       totalTimeMs: 300,
       gestureTimeMs: 300,
-      pinchPath: "element-anchored"
+      pinchPath: "element-anchored",
     });
     pinchOn = new PinchOn(iosDevice);
     (pinchOn as any).observeScreen = fakeObserveScreen;
@@ -257,13 +265,13 @@ describe("PinchOn", () => {
     const iosDevice: BootedDevice = {
       deviceId: "11111111-2222-3333-4444-555555555555",
       platform: "ios",
-      name: "iPhone 16 Pro"
+      name: "iPhone 16 Pro",
     };
     fakeIosService.setPinchResult({
       success: true,
       totalTimeMs: 300,
       gestureTimeMs: 300,
-      pinchPath: "event-path"
+      pinchPath: "event-path",
     });
     pinchOn = new PinchOn(iosDevice);
     (pinchOn as any).observeScreen = fakeObserveScreen;

@@ -68,7 +68,7 @@ export class FakeObserveCacheStore implements ObserveResultCacheStore {
 
   /** Test helper: snapshot of every entry currently held. */
   getAllEntries(): Array<{ deviceId: string; timestamp: number; observeResult: ObserveResult }> {
-    return Array.from(this.entries.values()).map(entry => ({
+    return Array.from(this.entries.values()).map((entry) => ({
       deviceId: entry.deviceId,
       timestamp: entry.timestamp,
       observeResult: entry.observeResult,

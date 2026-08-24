@@ -1,6 +1,12 @@
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { logger } from "../utils/logger";
-import { optionalBoolean, optionalEnum, optionalInteger, optionalString, queryParamsToRecord } from "./queryParamValidation";
+import {
+  optionalBoolean,
+  optionalEnum,
+  optionalInteger,
+  optionalString,
+  queryParamsToRecord,
+} from "./queryParamValidation";
 import {
   buildTestTimingResponse,
   TEST_TIMING_LIMIT_MAX,
@@ -35,7 +41,7 @@ const TEST_TIMING_QUERY_PARAM_KEYS = new Set([
 ] as const);
 
 function parseTestTimingParams(params: Record<string, string>): TestTimingQueryArgs {
-  const unknownKeys = Object.keys(params).filter(key => !TEST_TIMING_QUERY_PARAM_KEYS.has(key));
+  const unknownKeys = Object.keys(params).filter((key) => !TEST_TIMING_QUERY_PARAM_KEYS.has(key));
   if (unknownKeys.length > 0) {
     throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
   }
@@ -123,28 +129,34 @@ function buildTestTimingUri(options: TestTimingQueryArgs): string {
     query.set("sessionUuid", options.sessionUuid);
   }
   const queryString = query.toString();
-  return queryString ? `${TEST_TIMING_RESOURCE_URIS.BASE}?${queryString}` : TEST_TIMING_RESOURCE_URIS.BASE;
+  return queryString
+    ? `${TEST_TIMING_RESOURCE_URIS.BASE}?${queryString}`
+    : TEST_TIMING_RESOURCE_URIS.BASE;
 }
 
 async function getTestTimingResource(
   args: TestTimingQueryArgs,
-  uri: string
+  uri: string,
 ): Promise<ResourceContent> {
   try {
     const response = await buildTestTimingResponse(args);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify(response, null, 2)
+      text: JSON.stringify(response, null, 2),
     };
   } catch (error) {
     logger.error(`[TestTimingResources] Failed to get test timing data: ${error}`);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to retrieve test timing data: ${error}`
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          error: `Failed to retrieve test timing data: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -155,7 +167,7 @@ export function registerTestTimingResources(): void {
     "Test Timing History",
     "Historical aggregated test execution timing statistics.",
     "application/json",
-    () => getTestTimingResource({}, TEST_TIMING_RESOURCE_URIS.BASE)
+    () => getTestTimingResource({}, TEST_TIMING_RESOURCE_URIS.BASE),
   );
 
   ResourceRegistry.registerTemplate(
@@ -163,7 +175,7 @@ export function registerTestTimingResources(): void {
     "Test Timing History",
     "Historical aggregated test execution timing statistics.",
     "application/json",
-    async params => {
+    async (params) => {
       try {
         const queryParams = queryParamsToRecord(params.params ?? "");
         const options = parseTestTimingParams(queryParams);
@@ -174,12 +186,16 @@ export function registerTestTimingResources(): void {
         return {
           uri: TEST_TIMING_RESOURCE_URIS.BASE,
           mimeType: "application/json",
-          text: JSON.stringify({
-            error: `Invalid test timing query parameters: ${error}`
-          }, null, 2)
+          text: JSON.stringify(
+            {
+              error: `Invalid test timing query parameters: ${error}`,
+            },
+            null,
+            2,
+          ),
         };
       }
-    }
+    },
   );
 
   logger.info("[TestTimingResources] Registered test timing resources");

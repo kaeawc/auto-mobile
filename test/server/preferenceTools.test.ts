@@ -3,7 +3,7 @@ import {
   getPreferenceSchema,
   registerPreferenceTools,
   resetPreferenceToolsDependencies,
-  setPreferenceSchema
+  setPreferenceSchema,
 } from "../../src/server/preferenceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
@@ -30,53 +30,65 @@ describe("preference tools", () => {
   });
 
   test("accepts Android system property requests without appId", () => {
-    expect(() => getPreferenceSchema.parse({
-      platform: "android",
-      scope: "systemProperty",
-      key: "debug.example.api.url",
-    })).not.toThrow();
+    expect(() =>
+      getPreferenceSchema.parse({
+        platform: "android",
+        scope: "systemProperty",
+        key: "debug.example.api.url",
+      }),
+    ).not.toThrow();
 
-    expect(() => setPreferenceSchema.parse({
-      platform: "android",
-      scope: "systemProperty",
-      key: "debug.example.api.url",
-      value: "https://dev.example.com/",
-      type: "string",
-    })).not.toThrow();
+    expect(() =>
+      setPreferenceSchema.parse({
+        platform: "android",
+        scope: "systemProperty",
+        key: "debug.example.api.url",
+        value: "https://dev.example.com/",
+        type: "string",
+      }),
+    ).not.toThrow();
   });
 
   test("requires appId for app-scoped stores", () => {
-    expect(() => getPreferenceSchema.parse({
-      platform: "android",
-      scope: "sharedPreferences",
-      suite: "settings",
-      key: "onboarding_complete",
-    })).toThrow();
+    expect(() =>
+      getPreferenceSchema.parse({
+        platform: "android",
+        scope: "sharedPreferences",
+        suite: "settings",
+        key: "onboarding_complete",
+      }),
+    ).toThrow();
 
-    expect(() => setPreferenceSchema.parse({
-      platform: "ios",
-      scope: "userDefaults",
-      key: "onboardingComplete",
-      value: true,
-      type: "bool",
-    })).toThrow();
+    expect(() =>
+      setPreferenceSchema.parse({
+        platform: "ios",
+        scope: "userDefaults",
+        key: "onboardingComplete",
+        value: true,
+        type: "bool",
+      }),
+    ).toThrow();
   });
 
   test("rejects scopes that do not match the requested platform", () => {
-    expect(() => getPreferenceSchema.parse({
-      platform: "ios",
-      scope: "systemProperty",
-      key: "debug.example.api.url",
-    })).toThrow();
+    expect(() =>
+      getPreferenceSchema.parse({
+        platform: "ios",
+        scope: "systemProperty",
+        key: "debug.example.api.url",
+      }),
+    ).toThrow();
 
-    expect(() => setPreferenceSchema.parse({
-      platform: "android",
-      scope: "userDefaults",
-      appId: "com.example.app",
-      key: "flag",
-      value: true,
-      type: "bool",
-    })).toThrow();
+    expect(() =>
+      setPreferenceSchema.parse({
+        platform: "android",
+        scope: "userDefaults",
+        appId: "com.example.app",
+        key: "flag",
+        value: true,
+        type: "bool",
+      }),
+    ).toThrow();
   });
 
   test("normalizes appId aliases", () => {

@@ -5,7 +5,7 @@ describe("PlanNormalizer", () => {
   test("merges inline fields into params", () => {
     const normalized = PlanNormalizer.normalizeStep(
       { tool: "tapOn", text: "Hello", device: "A" },
-      0
+      0,
     );
 
     expect(normalized.tool).toBe("tapOn");
@@ -20,7 +20,7 @@ describe("PlanNormalizer", () => {
         params: { text: "params", device: "B" },
         label: "Tap button",
       },
-      0
+      0,
     );
 
     expect(normalized.params).toEqual({ text: "params", device: "B" });
@@ -30,7 +30,7 @@ describe("PlanNormalizer", () => {
   test("promotes optional flag to the step, not into tool params", () => {
     const normalized = PlanNormalizer.normalizeStep(
       { tool: "tapOn", text: "Not Now", optional: true },
-      0
+      0,
     );
 
     expect(normalized.optional).toBe(true);

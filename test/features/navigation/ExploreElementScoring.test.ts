@@ -12,7 +12,7 @@ import {
   predictOutcomeForElement,
   scoreEdgeMatch,
   scoreSelectedElementMatch,
-  scoreIdentifierMatch
+  scoreIdentifierMatch,
 } from "../../../src/features/navigation/ExploreElementScoring";
 import { getElementKey } from "../../../src/features/navigation/ExploreElementExtraction";
 import type { TrackedElement } from "../../../src/features/navigation/ExploreTypes";
@@ -21,13 +21,13 @@ import type { NavigationEdge } from "../../../src/features/navigation/Navigation
 describe("ExploreElementScoring", () => {
   function createMockElement(overrides: Partial<Element> = {}): Element {
     return {
-      "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
-      "clickable": true,
-      "enabled": true,
-      "text": "Button",
-      "class": "android.widget.Button",
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      clickable: true,
+      enabled: true,
+      text: "Button",
+      class: "android.widget.Button",
       "resource-id": "com.test:id/button",
-      ...overrides
+      ...overrides,
     } as Element;
   }
 
@@ -44,7 +44,7 @@ describe("ExploreElementScoring", () => {
     test("should give scrollable elements additional score", () => {
       const element = createMockElement({
         clickable: false,
-        scrollable: true
+        scrollable: true,
       });
       (element as any).hierarchyDepth = 99;
 
@@ -79,7 +79,7 @@ describe("ExploreElementScoring", () => {
     test("should handle elements with both clickable and scrollable", () => {
       const element = createMockElement({
         clickable: true,
-        scrollable: true
+        scrollable: true,
       });
       (element as any).hierarchyDepth = 99;
 
@@ -104,7 +104,7 @@ describe("ExploreElementScoring", () => {
       const explored = new Map<string, TrackedElement>();
       explored.set(getElementKey(element), {
         interactionCount: 3,
-        lastInteractionScreen: "Screen1"
+        lastInteractionScreen: "Screen1",
       });
 
       const score = calculateNoveltyScore(element, explored);
@@ -117,7 +117,7 @@ describe("ExploreElementScoring", () => {
       const explored = new Map<string, TrackedElement>();
       explored.set(getElementKey(element), {
         interactionCount: 100,
-        lastInteractionScreen: "Screen1"
+        lastInteractionScreen: "Screen1",
       });
 
       const score = calculateNoveltyScore(element, explored);
@@ -183,7 +183,7 @@ describe("ExploreElementScoring", () => {
       const input = [lowScore, highScore];
       selectBreadthFirst(input);
 
-      expect(input.map(e => e.text)).toEqual(["Low", "High"]);
+      expect(input.map((e) => e.text)).toEqual(["Low", "High"]);
     });
   });
 
@@ -202,7 +202,7 @@ describe("ExploreElementScoring", () => {
       const trackedElements = new Map<string, TrackedElement>();
       trackedElements.set(getElementKey(explored), {
         interactionCount: 1,
-        lastInteractionScreen: "Screen1"
+        lastInteractionScreen: "Screen1",
       });
 
       const selected = selectDepthFirst([explored, unexplored], trackedElements);
@@ -220,11 +220,11 @@ describe("ExploreElementScoring", () => {
       const trackedElements = new Map<string, TrackedElement>();
       trackedElements.set(getElementKey(lowScore), {
         interactionCount: 1,
-        lastInteractionScreen: "Screen1"
+        lastInteractionScreen: "Screen1",
       });
       trackedElements.set(getElementKey(highScore), {
         interactionCount: 1,
-        lastInteractionScreen: "Screen1"
+        lastInteractionScreen: "Screen1",
       });
 
       const selected = selectDepthFirst([lowScore, highScore], trackedElements);
@@ -249,13 +249,13 @@ describe("ExploreElementScoring", () => {
       const trackedElements = new Map<string, TrackedElement>();
       trackedElements.set(getElementKey(explored), {
         interactionCount: 1,
-        lastInteractionScreen: "Screen1"
+        lastInteractionScreen: "Screen1",
       });
 
       const input = [explored, unexplored];
       selectDepthFirst(input, trackedElements);
 
-      expect(input.map(e => e.text)).toEqual(["Explored", "Unexplored"]);
+      expect(input.map((e) => e.text)).toEqual(["Explored", "Unexplored"]);
     });
   });
 
@@ -287,7 +287,7 @@ describe("ExploreElementScoring", () => {
       const trackedElements = new Map<string, TrackedElement>();
       trackedElements.set(getElementKey(explored), {
         interactionCount: 8, // High interaction count = low novelty
-        lastInteractionScreen: "Screen1"
+        lastInteractionScreen: "Screen1",
       });
 
       const result = selectWeighted([explored, unexplored], "discover", trackedElements);
@@ -340,8 +340,8 @@ describe("ExploreElementScoring", () => {
 
     test("should use content-desc if no text", () => {
       const element = createMockElement({
-        "text": undefined,
-        "content-desc": "Description"
+        text: undefined,
+        "content-desc": "Description",
       });
 
       const target = getElementTarget(element);
@@ -352,9 +352,9 @@ describe("ExploreElementScoring", () => {
 
     test("should use resource-id if no text or content-desc", () => {
       const element = createMockElement({
-        "text": undefined,
+        text: undefined,
         "content-desc": undefined,
-        "resource-id": "com.test:id/btn"
+        "resource-id": "com.test:id/btn",
       });
 
       const target = getElementTarget(element);
@@ -365,9 +365,9 @@ describe("ExploreElementScoring", () => {
 
     test("should use coordinates as fallback", () => {
       const element = createMockElement({
-        "text": undefined,
+        text: undefined,
         "content-desc": undefined,
-        "resource-id": undefined
+        "resource-id": undefined,
       });
 
       const target = getElementTarget(element);
@@ -389,8 +389,8 @@ describe("ExploreElementScoring", () => {
 
     test("should predict screen from matching edge", () => {
       const element = createMockElement({
-        "text": "Settings",
-        "resource-id": "com.test:id/settings"
+        text: "Settings",
+        "resource-id": "com.test:id/settings",
       });
 
       const edges: NavigationEdge[] = [
@@ -401,10 +401,10 @@ describe("ExploreElementScoring", () => {
           edgeType: "tool",
           uiState: {
             selectedElements: [
-              { text: "Settings", resourceId: "com.test:id/settings", contentDesc: "" }
-            ]
-          }
-        }
+              { text: "Settings", resourceId: "com.test:id/settings", contentDesc: "" },
+            ],
+          },
+        },
       ];
 
       const outcome = predictOutcomeForElement(element, edges);
@@ -421,7 +421,7 @@ describe("ExploreElementScoring", () => {
         from: "A",
         to: "B",
         timestamp: Date.now(),
-        edgeType: "tool"
+        edgeType: "tool",
       };
 
       expect(scoreEdgeMatch(element, edge)).toBe(0);
@@ -429,7 +429,7 @@ describe("ExploreElementScoring", () => {
 
     test("should score based on selected elements", () => {
       const element = createMockElement({
-        "resource-id": "com.test:id/btn"
+        "resource-id": "com.test:id/btn",
       });
 
       const edge: NavigationEdge = {
@@ -438,10 +438,8 @@ describe("ExploreElementScoring", () => {
         timestamp: Date.now(),
         edgeType: "tool",
         uiState: {
-          selectedElements: [
-            { resourceId: "com.test:id/btn", text: "", contentDesc: "" }
-          ]
-        }
+          selectedElements: [{ resourceId: "com.test:id/btn", text: "", contentDesc: "" }],
+        },
       };
 
       const score = scoreEdgeMatch(element, edge);
@@ -453,11 +451,11 @@ describe("ExploreElementScoring", () => {
   describe("scoreSelectedElementMatch", () => {
     test("should match on resource-id", () => {
       const element = createMockElement({
-        "resource-id": "com.test:id/btn"
+        "resource-id": "com.test:id/btn",
       });
 
       const score = scoreSelectedElementMatch(element, {
-        resourceId: "com.test:id/btn"
+        resourceId: "com.test:id/btn",
       });
 
       expect(score).toBe(0.95);
@@ -465,11 +463,11 @@ describe("ExploreElementScoring", () => {
 
     test("should match on text", () => {
       const element = createMockElement({
-        text: "Submit"
+        text: "Submit",
       });
 
       const score = scoreSelectedElementMatch(element, {
-        text: "Submit"
+        text: "Submit",
       });
 
       expect(score).toBe(0.9);
@@ -477,13 +475,13 @@ describe("ExploreElementScoring", () => {
 
     test("should return 0 for no match", () => {
       const element = createMockElement({
-        "text": "A",
-        "resource-id": "x"
+        text: "A",
+        "resource-id": "x",
       });
 
       const score = scoreSelectedElementMatch(element, {
         text: "B",
-        resourceId: "y"
+        resourceId: "y",
       });
 
       expect(score).toBe(0);

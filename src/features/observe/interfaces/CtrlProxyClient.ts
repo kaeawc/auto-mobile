@@ -23,7 +23,7 @@ export interface CtrlProxyClient extends DeviceService {
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
-    disableAllFiltering?: boolean
+    disableAllFiltering?: boolean,
   ): Promise<ViewHierarchyResult | null>;
 
   verifyServiceReady(maxAttempts?: number, delayMs?: number, timeoutMs?: number): Promise<boolean>;

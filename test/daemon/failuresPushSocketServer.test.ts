@@ -102,8 +102,8 @@ describe("FailuresPushSocketServer device-session attribution (#5259)", () => {
     server.pushFailure(notification({ occurrenceId: "occ-a", deviceId: "emulator-5554" }));
     server.pushFailure(notification({ occurrenceId: "occ-b", deviceId: "emulator-5556" }));
 
-    expect(pushed(a.socket).map(m => m.data.occurrenceId)).toEqual(["occ-a"]);
-    expect(pushed(b.socket).map(m => m.data.occurrenceId)).toEqual(["occ-b"]);
+    expect(pushed(a.socket).map((m) => m.data.occurrenceId)).toEqual(["occ-a"]);
+    expect(pushed(b.socket).map((m) => m.data.occurrenceId)).toEqual(["occ-b"]);
   });
 
   it("delivers every device's failures to a null (all-devices) subscriber", () => {
@@ -111,7 +111,7 @@ describe("FailuresPushSocketServer device-session attribution (#5259)", () => {
     server.pushFailure(notification({ occurrenceId: "occ-a", deviceId: "emulator-5554" }));
     server.pushFailure(notification({ occurrenceId: "occ-b", deviceId: "emulator-5556" }));
 
-    expect(pushed(socket).map(m => m.data.occurrenceId)).toEqual(["occ-a", "occ-b"]);
+    expect(pushed(socket).map((m) => m.data.occurrenceId)).toEqual(["occ-a", "occ-b"]);
   });
 
   it("yields zero events to a stale/retired deviceSessionUuid filter (AC4)", () => {
@@ -130,7 +130,7 @@ describe("FailuresPushSocketServer device-session attribution (#5259)", () => {
     server.pushFailure(notification({ type: "crash", deviceId: "emulator-5554" }));
     server.pushFailure(notification({ type: "anr", deviceId: "emulator-5554" }));
 
-    expect(pushed(socket).map(m => m.data.type)).toEqual(["anr"]);
+    expect(pushed(socket).map((m) => m.data.type)).toEqual(["anr"]);
   });
 
   it("carries a null deviceSessionUuid for a device-less failure", () => {

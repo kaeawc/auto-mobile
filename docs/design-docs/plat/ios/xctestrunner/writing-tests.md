@@ -50,17 +50,17 @@ daemon returns a result and throws on a connectivity failure.
 Override any of these properties in your subclass. All are read during `setUpWithError` before the
 test method is called.
 
-| Property | Type | Default | Description |
-|---|---|---|---|
-| `planPath` | `String` | `""` (env: `AUTOMOBILE_TEST_PLAN`) | Path to the YAML plan. Resolved from the test bundle resources, then the filesystem. **Required** — the test fails if empty. |
-| `cleanupOptions` | `CleanupOptions?` | `nil` | Terminates and optionally clears app data after each test. Pass `nil` to skip cleanup. |
-| `retryCount` | `Int` | `0` (env: `AUTOMOBILE_TEST_RETRY_COUNT`) | Number of automatic retry attempts before the test fails. |
-| `timeoutSeconds` | `TimeInterval` | `300` (env: `AUTOMOBILE_TEST_TIMEOUT_SECONDS`) | Maximum wall-clock seconds the executor waits for the daemon. |
-| `retryDelaySeconds` | `TimeInterval` | `1` (env: `AUTOMOBILE_TEST_RETRY_DELAY_SECONDS`) | Seconds to wait between retry attempts. |
-| `startStep` | `Int` | `0` | Resume execution from this step index (0-based). Useful when debugging a specific step. |
-| `aiAssistance` | `Bool` | `true` (env: `AUTOMOBILE_AI_ASSISTANCE`) | Per-test switch for AI-assisted failure recovery. When true (and the `ai-recovery` flag is on and a model API key is configured), a failed step triggers one recovery attempt before the test fails. See [AI-assisted recovery](#ai-assisted-recovery). |
-| `planParameters` | `[String: String]` | `[:]` | Key–value substitutions applied to `${KEY}` references in the plan at execution time. |
-| `planBundle` | `Bundle?` | `Bundle(for: type(of: self))` | Bundle used to resolve the `planPath`. Defaults to the test bundle. |
+| Property            | Type               | Default                                          | Description                                                                                                                                                                                                                                             |
+| ------------------- | ------------------ | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `planPath`          | `String`           | `""` (env: `AUTOMOBILE_TEST_PLAN`)               | Path to the YAML plan. Resolved from the test bundle resources, then the filesystem. **Required** — the test fails if empty.                                                                                                                            |
+| `cleanupOptions`    | `CleanupOptions?`  | `nil`                                            | Terminates and optionally clears app data after each test. Pass `nil` to skip cleanup.                                                                                                                                                                  |
+| `retryCount`        | `Int`              | `0` (env: `AUTOMOBILE_TEST_RETRY_COUNT`)         | Number of automatic retry attempts before the test fails.                                                                                                                                                                                               |
+| `timeoutSeconds`    | `TimeInterval`     | `300` (env: `AUTOMOBILE_TEST_TIMEOUT_SECONDS`)   | Maximum wall-clock seconds the executor waits for the daemon.                                                                                                                                                                                           |
+| `retryDelaySeconds` | `TimeInterval`     | `1` (env: `AUTOMOBILE_TEST_RETRY_DELAY_SECONDS`) | Seconds to wait between retry attempts.                                                                                                                                                                                                                 |
+| `startStep`         | `Int`              | `0`                                              | Resume execution from this step index (0-based). Useful when debugging a specific step.                                                                                                                                                                 |
+| `aiAssistance`      | `Bool`             | `true` (env: `AUTOMOBILE_AI_ASSISTANCE`)         | Per-test switch for AI-assisted failure recovery. When true (and the `ai-recovery` flag is on and a model API key is configured), a failed step triggers one recovery attempt before the test fails. See [AI-assisted recovery](#ai-assisted-recovery). |
+| `planParameters`    | `[String: String]` | `[:]`                                            | Key–value substitutions applied to `${KEY}` references in the plan at execution time.                                                                                                                                                                   |
+| `planBundle`        | `Bundle?`          | `Bundle(for: type(of: self))`                    | Bundle used to resolve the `planPath`. Defaults to the test bundle.                                                                                                                                                                                     |
 
 ### Cleanup options
 
@@ -141,11 +141,11 @@ Recovery runs only when **all** of the following hold, and it is attempted **at 
 
 Model selection is env-driven:
 
-| Env var | Default | Purpose |
-|---|---|---|
-| `AUTOMOBILE_AI_PROVIDER` | `anthropic` | `anthropic`, `openai`, or `google`. |
-| `AUTOMOBILE_AI_MODEL` | provider default (Anthropic: `claude-sonnet-4-20250514`) | Override the model. |
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | — | Read by Tachikoma for the selected provider. |
+| Env var                                                   | Default                                                  | Purpose                                      |
+| --------------------------------------------------------- | -------------------------------------------------------- | -------------------------------------------- |
+| `AUTOMOBILE_AI_PROVIDER`                                  | `anthropic`                                              | `anthropic`, `openai`, or `google`.          |
+| `AUTOMOBILE_AI_MODEL`                                     | provider default (Anthropic: `claude-sonnet-4-20250514`) | Override the model.                          |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | —                                                        | Read by Tachikoma for the selected provider. |
 
 "Recovered" means a post-recovery `observe` succeeded; the resumed step is the real test of whether
 recovery worked. If recovery fails or the resumed run still fails, the test fails with the original
@@ -201,14 +201,14 @@ YourApp/
 A minimal plan:
 
 ```yaml
-name: launch-app                                         # (1) plan identifier (no spaces)
-description: Launch the app and verify it starts         # (2) human-readable description
-platform: ios                                            # (3) platform hint for the daemon
+name: launch-app # (1) plan identifier (no spaces)
+description: Launch the app and verify it starts # (2) human-readable description
+platform: ios # (3) platform hint for the daemon
 steps:
-  - tool: launchApp                                      # (4) tool name (camelCase)
+  - tool: launchApp # (4) tool name (camelCase)
     appId: com.example.ios.YourApp
     clearAppData: true
-    label: Launch the app with a clean state             # (5) optional label shown in logs
+    label: Launch the app with a clean state # (5) optional label shown in logs
 
   - tool: observe
     label: Verify app UI renders without crashing
@@ -221,9 +221,9 @@ steps:
 Each step must have a `tool` key. All other keys are parameters specific to that tool.
 
 !!! note "iOS bundle identifiers"
-    iOS app identifiers use the reverse-DNS bundle ID format: `com.example.ios.YourApp`.
-    This is the same value as `PRODUCT_BUNDLE_IDENTIFIER` in your Xcode build settings, not
-    a package name or display name.
+iOS app identifiers use the reverse-DNS bundle ID format: `com.example.ios.YourApp`.
+This is the same value as `PRODUCT_BUNDLE_IDENTIFIER` in your Xcode build settings, not
+a package name or display name.
 
 ## Available tools
 
@@ -237,7 +237,7 @@ Starts an app by bundle ID. Optionally clears app data first.
 ```yaml
 - tool: launchApp
   appId: com.example.ios.YourApp
-  clearAppData: true       # clears data and kills the process before launching (default: false)
+  clearAppData: true # clears data and kills the process before launching (default: false)
   label: Launch with clean state
 ```
 
@@ -260,13 +260,13 @@ Wait for a specific element before proceeding:
 ```yaml
 - tool: observe
   waitFor:
-    text: "Sessions"         # wait until this text appears anywhere on screen
-    timeout: 15000           # ms (default: 5000)
+    text: "Sessions" # wait until this text appears anywhere on screen
+    timeout: 15000 # ms (default: 5000)
 ```
 
 !!! warning "`waitFor` requires `text` or `elementId`"
-    A `waitFor` block with only `timeout` is a validation error. Include `text` or `elementId`.
-    To observe without waiting for a specific element, omit `waitFor` entirely.
+A `waitFor` block with only `timeout` is a validation error. Include `text` or `elementId`.
+To observe without waiting for a specific element, omit `waitFor` entirely.
 
 ### `tapOn`
 
@@ -278,8 +278,8 @@ Taps an element identified by visible text or accessibility identifier.
   label: Tap the Sign In button
 
 - tool: tapOn
-  elementId: "submitButton"   # matches accessibilityIdentifier
-  action: tap                 # tap | doubleTap | longPress
+  elementId: "submitButton" # matches accessibilityIdentifier
+  action: tap # tap | doubleTap | longPress
 ```
 
 ### `inputText`
@@ -302,12 +302,12 @@ Presses a device or navigation button.
 ```
 
 !!! note "Supported iOS buttons"
-    The iOS runtime supports `button: home`, `button: back`, and `button: recent`.
-    `back` performs app-level navigation through CtrlProxy because iOS has no hardware
-    back button. On physical iOS devices, `volume_up`, `volume_down`, and `power` are
-    routed through hardware-button support. On iOS simulators, those hardware buttons
-    return an explicit "unavailable on the iOS simulator" error. `menu` has no iOS
-    hardware analogue and is unsupported.
+The iOS runtime supports `button: home`, `button: back`, and `button: recent`.
+`back` performs app-level navigation through CtrlProxy because iOS has no hardware
+back button. On physical iOS devices, `volume_up`, `volume_down`, and `power` are
+routed through hardware-button support. On iOS simulators, those hardware buttons
+return an explicit "unavailable on the iOS simulator" error. `menu` has no iOS
+hardware analogue and is unsupported.
 
 ### `terminateApp`
 
@@ -325,7 +325,7 @@ Swipes in a direction within an element or the whole screen.
 
 ```yaml
 - tool: swipeOn
-  direction: up    # up | down | left | right
+  direction: up # up | down | left | right
   label: Scroll down the list
 ```
 
@@ -473,20 +473,20 @@ class run the same plan. Use separate classes for separate plans:
 ```
 
 !!! tip "Recommended naming convention"
-    Suffix classes with `AutoMobileTests` to distinguish them from unit tests in the same
-    target directory tree. This makes filtering with `-only-testing:YourAppAutoMobileTests`
-    work at the bundle level.
+Suffix classes with `AutoMobileTests` to distinguish them from unit tests in the same
+target directory tree. This makes filtering with `-only-testing:YourAppAutoMobileTests`
+work at the bundle level.
 
 ## Plan validation
 
 Plans are validated against a JSON schema before execution. Common validation errors:
 
-| Error | Cause | Fix |
-|---|---|---|
-| `Missing required property 'tool'` | A step is missing the `tool` key | Add `tool: <toolName>` to the step |
-| `Invalid option for 'button'` | Unsupported button name | Use `home` or `back` on iOS |
-| `waitFor` with only `timeout` | Missing `text` or `elementId` in `waitFor` | Add `text: "…"` or `elementId: "…"` |
-| `Unknown property 'foo'` | Misspelled or Android-only field | Check the [MCP Tools](../../../mcp/tools.md) reference |
+| Error                              | Cause                                      | Fix                                                    |
+| ---------------------------------- | ------------------------------------------ | ------------------------------------------------------ |
+| `Missing required property 'tool'` | A step is missing the `tool` key           | Add `tool: <toolName>` to the step                     |
+| `Invalid option for 'button'`      | Unsupported button name                    | Use `home` or `back` on iOS                            |
+| `waitFor` with only `timeout`      | Missing `text` or `elementId` in `waitFor` | Add `text: "…"` or `elementId: "…"`                    |
+| `Unknown property 'foo'`           | Misspelled or Android-only field           | Check the [MCP Tools](../../../mcp/tools.md) reference |
 
 ## Debugging a failing test
 
@@ -506,13 +506,13 @@ Crash logs for simulator runs land in `~/Library/Logs/DiagnosticReports/YourApp*
 
 **Common failure patterns:**
 
-| Symptom | Likely cause |
-|---|---|
-| `waitFor` times out | Screen transition slower than `timeout`; increase `timeout` or add a preceding `observe` |
-| `element not found` for tap | Wrong `text` value; insert a plain `observe` step before the tap and check the log |
-| `Plan not found at path` | YAML file not in the test bundle; verify it appears in Build Phases → Copy Bundle Resources |
-| `executorUnavailable` | `setUpWithError` threw before executor was created; check `setUpAutoMobile` output |
-| All steps fail with socket error | Daemon not running; run `auto-mobile --daemon start &` |
+| Symptom                          | Likely cause                                                                                |
+| -------------------------------- | ------------------------------------------------------------------------------------------- |
+| `waitFor` times out              | Screen transition slower than `timeout`; increase `timeout` or add a preceding `observe`    |
+| `element not found` for tap      | Wrong `text` value; insert a plain `observe` step before the tap and check the log          |
+| `Plan not found at path`         | YAML file not in the test bundle; verify it appears in Build Phases → Copy Bundle Resources |
+| `executorUnavailable`            | `setUpWithError` threw before executor was created; check `setUpAutoMobile` output          |
+| All steps fail with socket error | Daemon not running; run `auto-mobile --daemon start &`                                      |
 
 ## See also
 

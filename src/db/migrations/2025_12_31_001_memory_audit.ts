@@ -5,19 +5,17 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("memory_thresholds")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("device_id", "text", col => col.notNull())
-    .addColumn("package_name", "text", col => col.notNull())
-    .addColumn("heap_growth_threshold_mb", "real", col => col.notNull()) // Max heap growth after GC
-    .addColumn("native_heap_growth_threshold_mb", "real", col => col.notNull()) // Max native heap growth
-    .addColumn("gc_count_threshold", "integer", col => col.notNull()) // Max GC events per action
-    .addColumn("gc_duration_threshold_ms", "real", col => col.notNull()) // Max total GC pause time
-    .addColumn("unreachable_objects_threshold", "integer", col => col.notNull()) // Max unreachable objects
-    .addColumn("weight", "real", col => col.notNull().defaultTo(1.0)) // For weighted threshold calculation
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
-    .addColumn("ttl_hours", "integer", col => col.notNull().defaultTo(24)) // TTL in hours
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("device_id", "text", (col) => col.notNull())
+    .addColumn("package_name", "text", (col) => col.notNull())
+    .addColumn("heap_growth_threshold_mb", "real", (col) => col.notNull()) // Max heap growth after GC
+    .addColumn("native_heap_growth_threshold_mb", "real", (col) => col.notNull()) // Max native heap growth
+    .addColumn("gc_count_threshold", "integer", (col) => col.notNull()) // Max GC events per action
+    .addColumn("gc_duration_threshold_ms", "real", (col) => col.notNull()) // Max total GC pause time
+    .addColumn("unreachable_objects_threshold", "integer", (col) => col.notNull()) // Max unreachable objects
+    .addColumn("weight", "real", (col) => col.notNull().defaultTo(1.0)) // For weighted threshold calculation
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
+    .addColumn("ttl_hours", "integer", (col) => col.notNull().defaultTo(24)) // TTL in hours
     .execute();
 
   // Create index on device_id + package_name for fast lookups
@@ -32,20 +30,18 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("memory_baselines")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("device_id", "text", col => col.notNull())
-    .addColumn("package_name", "text", col => col.notNull())
-    .addColumn("tool_name", "text", col => col.notNull()) // Which tool action this baseline is for
-    .addColumn("java_heap_baseline_mb", "real", col => col.notNull())
-    .addColumn("native_heap_baseline_mb", "real", col => col.notNull())
-    .addColumn("gc_count_baseline", "real", col => col.notNull()) // Average GC count
-    .addColumn("gc_duration_baseline_ms", "real", col => col.notNull()) // Average GC duration
-    .addColumn("unreachable_objects_baseline", "real", col => col.notNull()) // Average unreachable count
-    .addColumn("sample_count", "integer", col => col.notNull().defaultTo(1)) // Number of samples in baseline
-    .addColumn("last_updated", "text", col => col.notNull())
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("device_id", "text", (col) => col.notNull())
+    .addColumn("package_name", "text", (col) => col.notNull())
+    .addColumn("tool_name", "text", (col) => col.notNull()) // Which tool action this baseline is for
+    .addColumn("java_heap_baseline_mb", "real", (col) => col.notNull())
+    .addColumn("native_heap_baseline_mb", "real", (col) => col.notNull())
+    .addColumn("gc_count_baseline", "real", (col) => col.notNull()) // Average GC count
+    .addColumn("gc_duration_baseline_ms", "real", (col) => col.notNull()) // Average GC duration
+    .addColumn("unreachable_objects_baseline", "real", (col) => col.notNull()) // Average unreachable count
+    .addColumn("sample_count", "integer", (col) => col.notNull().defaultTo(1)) // Number of samples in baseline
+    .addColumn("last_updated", "text", (col) => col.notNull())
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create unique index on device_id + package_name + tool_name
@@ -61,14 +57,14 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("memory_audit_results")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("device_id", "text", col => col.notNull())
-    .addColumn("session_id", "text", col => col.notNull())
-    .addColumn("package_name", "text", col => col.notNull())
-    .addColumn("tool_name", "text", col => col.notNull())
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("device_id", "text", (col) => col.notNull())
+    .addColumn("session_id", "text", (col) => col.notNull())
+    .addColumn("package_name", "text", (col) => col.notNull())
+    .addColumn("tool_name", "text", (col) => col.notNull())
     .addColumn("tool_args", "text") // JSON blob of tool arguments
-    .addColumn("timestamp", "text", col => col.notNull())
-    .addColumn("passed", "integer", col => col.notNull()) // 0 = failed, 1 = passed
+    .addColumn("timestamp", "text", (col) => col.notNull())
+    .addColumn("passed", "integer", (col) => col.notNull()) // 0 = failed, 1 = passed
     // Pre-action measurements
     .addColumn("pre_java_heap_mb", "real")
     .addColumn("pre_native_heap_mb", "real")
@@ -89,9 +85,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     // Diagnostics
     .addColumn("violations_json", "text") // JSON array of MemoryViolation[]
     .addColumn("diagnostics_json", "text") // JSON blob for detailed diagnostics
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create index on device_id + timestamp for historical queries

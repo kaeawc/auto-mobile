@@ -171,7 +171,10 @@ function getDateRangeDuration(preset: string): number {
   }
 }
 
-async function getTimelineResource(params: Record<string, string>, timer: Timer = defaultTimer): Promise<ResourceContent> {
+async function getTimelineResource(
+  params: Record<string, string>,
+  timer: Timer = defaultTimer,
+): Promise<ResourceContent> {
   try {
     const dateRange = params.dateRange || "24h";
     const aggregation = (params.aggregation || "hour") as "minute" | "hour" | "day" | "week";
@@ -218,7 +221,7 @@ export function registerFailuresResources(): void {
     "Failures",
     "List all failure groups (crashes, ANRs, tool failures) with aggregated data.",
     "application/json",
-    () => getFailuresResource(FAILURES_RESOURCE_URIS.BASE)
+    () => getFailuresResource(FAILURES_RESOURCE_URIS.BASE),
   );
 
   // Register timeline resource template
@@ -227,7 +230,7 @@ export function registerFailuresResources(): void {
     "Failures Timeline",
     "Get timeline data for failures with configurable date range and aggregation.",
     "application/json",
-    getTimelineResource
+    getTimelineResource,
   );
 
   logger.info("[FailuresResources] Registered failures resources");

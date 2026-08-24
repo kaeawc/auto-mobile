@@ -31,7 +31,7 @@ class BenchmarkCtrlProxyService {
   constructor(
     delayMs: number = 30,
     voiceOverEnabled: boolean = true,
-    timer: Timer = new SystemTimer()
+    timer: Timer = new SystemTimer(),
   ) {
     this.delayMs = delayMs;
     this.voiceOverEnabled = voiceOverEnabled;
@@ -86,7 +86,7 @@ async function runScenario(
   name: string,
   fn: () => Promise<void>,
   client: BenchmarkCtrlProxyService,
-  iterations: number = 1
+  iterations: number = 1,
 ): Promise<BenchmarkResult> {
   client.reset();
   const startTime = performance.now();
@@ -117,20 +117,20 @@ function printResults(results: BenchmarkResult[]): void {
   console.log("─".repeat(80));
   console.log(
     "Scenario".padEnd(42) +
-    "Total".padStart(9) +
-    "Avg/call".padStart(11) +
-    "CtrlProxy".padStart(12) +
-    "Iters".padStart(7)
+      "Total".padStart(9) +
+      "Avg/call".padStart(11) +
+      "CtrlProxy".padStart(12) +
+      "Iters".padStart(7),
   );
   console.log("─".repeat(80));
 
   for (const result of results) {
     console.log(
       result.name.padEnd(42) +
-      `${result.duration.toFixed(1)} ms`.padStart(9) +
-      `${result.avgPerIteration.toFixed(2)} ms`.padStart(11) +
-      result.ctrlProxyCallCount.toString().padStart(12) +
-      result.iterationCount.toString().padStart(7)
+        `${result.duration.toFixed(1)} ms`.padStart(9) +
+        `${result.avgPerIteration.toFixed(2)} ms`.padStart(11) +
+        result.ctrlProxyCallCount.toString().padStart(12) +
+        result.iterationCount.toString().padStart(7),
     );
   }
 
@@ -145,10 +145,10 @@ function printAcceptanceCriteria(results: BenchmarkResult[]): boolean {
   console.log("Acceptance Criteria:");
   console.log("─".repeat(60));
 
-  const cold = results.find(r => r.name.startsWith("1."));
-  const warm = results.find(r => r.name.startsWith("2."));
-  const afterInvalidate = results.find(r => r.name.startsWith("3."));
-  const featureFlag = results.find(r => r.name.startsWith("4."));
+  const cold = results.find((r) => r.name.startsWith("1."));
+  const warm = results.find((r) => r.name.startsWith("2."));
+  const afterInvalidate = results.find((r) => r.name.startsWith("3."));
+  const featureFlag = results.find((r) => r.name.startsWith("4."));
 
   let allPassed = true;
 
@@ -157,18 +157,22 @@ function printAcceptanceCriteria(results: BenchmarkResult[]): boolean {
     const simulatedCtrlProxyMs = 30;
     const overhead = cold.avgPerIteration - simulatedCtrlProxyMs;
     const pass = overhead < 50;
-    if (!pass) {allPassed = false;}
+    if (!pass) {
+      allPassed = false;
+    }
     console.log(
-      `  ${pass ? "PASS" : "FAIL"} Cache miss overhead <50ms:     ${overhead.toFixed(2)} ms (total: ${cold.avgPerIteration.toFixed(2)} ms)`
+      `  ${pass ? "PASS" : "FAIL"} Cache miss overhead <50ms:     ${overhead.toFixed(2)} ms (total: ${cold.avgPerIteration.toFixed(2)} ms)`,
     );
   }
 
   // Cache hit: warm calls must be very fast
   if (warm) {
     const pass = warm.avgPerIteration < 5;
-    if (!pass) {allPassed = false;}
+    if (!pass) {
+      allPassed = false;
+    }
     console.log(
-      `  ${pass ? "PASS" : "FAIL"} Cache hit (warm) <5ms:         ${warm.avgPerIteration.toFixed(2)} ms`
+      `  ${pass ? "PASS" : "FAIL"} Cache hit (warm) <5ms:         ${warm.avgPerIteration.toFixed(2)} ms`,
     );
   }
 
@@ -177,18 +181,22 @@ function printAcceptanceCriteria(results: BenchmarkResult[]): boolean {
     const simulatedCtrlProxyMs = 30;
     const overhead = afterInvalidate.avgPerIteration - simulatedCtrlProxyMs;
     const pass = overhead < 50;
-    if (!pass) {allPassed = false;}
+    if (!pass) {
+      allPassed = false;
+    }
     console.log(
-      `  ${pass ? "PASS" : "FAIL"} Post-invalidate overhead <50ms: ${overhead.toFixed(2)} ms (total: ${afterInvalidate.avgPerIteration.toFixed(2)} ms)`
+      `  ${pass ? "PASS" : "FAIL"} Post-invalidate overhead <50ms: ${overhead.toFixed(2)} ms (total: ${afterInvalidate.avgPerIteration.toFixed(2)} ms)`,
     );
   }
 
   // Feature flag override: no CtrlProxy call, must be sub-millisecond
   if (featureFlag) {
     const pass = featureFlag.avgPerIteration < 1 && featureFlag.ctrlProxyCallCount === 0;
-    if (!pass) {allPassed = false;}
+    if (!pass) {
+      allPassed = false;
+    }
     console.log(
-      `  ${pass ? "PASS" : "FAIL"} Feature flag override <1ms:    ${featureFlag.avgPerIteration.toFixed(3)} ms, CtrlProxy calls: ${featureFlag.ctrlProxyCallCount}`
+      `  ${pass ? "PASS" : "FAIL"} Feature flag override <1ms:    ${featureFlag.avgPerIteration.toFixed(3)} ms, CtrlProxy calls: ${featureFlag.ctrlProxyCallCount}`,
     );
   }
 
@@ -204,7 +212,9 @@ async function main() {
   const simulatedCtrlProxyDelayMs = 30; // Realistic mid-range WebSocket round-trip latency
   const warmIterations = 1000;
 
-  console.log(`\nBenchmarking VoiceOver detection (simulated CtrlProxy delay: ${simulatedCtrlProxyDelayMs}ms)...\n`);
+  console.log(
+    `\nBenchmarking VoiceOver detection (simulated CtrlProxy delay: ${simulatedCtrlProxyDelayMs}ms)...\n`,
+  );
 
   const results: BenchmarkResult[] = [];
 
@@ -224,8 +234,8 @@ async function main() {
           await detector.isVoiceOverEnabled(deviceId, client as unknown as IOSCtrlProxy);
         },
         client,
-        1
-      )
+        1,
+      ),
     );
   }
 
@@ -248,8 +258,8 @@ async function main() {
           await detector.isVoiceOverEnabled(deviceId, client as unknown as IOSCtrlProxy);
         },
         client,
-        warmIterations
-      )
+        warmIterations,
+      ),
     );
   }
 
@@ -274,8 +284,8 @@ async function main() {
           await detector.isVoiceOverEnabled(deviceId, client as unknown as IOSCtrlProxy);
         },
         client,
-        1
-      )
+        1,
+      ),
     );
   }
 
@@ -295,12 +305,12 @@ async function main() {
           await detector.isVoiceOverEnabled(
             deviceId,
             client as unknown as IOSCtrlProxy,
-            featureFlags as unknown as FeatureFlagService
+            featureFlags as unknown as FeatureFlagService,
           );
         },
         client,
-        warmIterations
-      )
+        warmIterations,
+      ),
     );
   }
 
@@ -319,8 +329,8 @@ async function main() {
           await detector.isVoiceOverEnabled(deviceId, client as unknown as IOSCtrlProxy);
         },
         client,
-        100
-      )
+        100,
+      ),
     );
   }
 
@@ -343,8 +353,8 @@ async function main() {
           await detector.isVoiceOverEnabled(deviceId, client as unknown as IOSCtrlProxy);
         },
         client,
-        warmIterations
-      )
+        warmIterations,
+      ),
     );
   }
 
@@ -364,7 +374,9 @@ async function main() {
   const speedup = cold.avgPerIteration / (warm.avgPerIteration || 0.001);
   console.log("Summary:");
   console.log("─".repeat(60));
-  console.log(`  Cold detection (~${simulatedCtrlProxyDelayMs}ms CtrlProxy RTT):  ${cold.avgPerIteration.toFixed(1)} ms`);
+  console.log(
+    `  Cold detection (~${simulatedCtrlProxyDelayMs}ms CtrlProxy RTT):  ${cold.avgPerIteration.toFixed(1)} ms`,
+  );
   console.log(`  Warm detection (cache hit):               ${warm.avgPerIteration.toFixed(3)} ms`);
   console.log(`  Cache speedup:                            ${speedup.toFixed(0)}x faster`);
   console.log();

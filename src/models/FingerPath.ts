@@ -5,5 +5,5 @@ import { Point } from "./Point";
  */
 export interface FingerPath {
   points: Point[];
-  finger: number;  // finger identifier (0-9)
+  finger: number; // finger identifier (0-9)
 }

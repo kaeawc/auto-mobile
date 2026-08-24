@@ -7,7 +7,10 @@ import {
 import { ActionableError } from "../../src/models/ActionableError";
 import type { NavigationGraphSummary } from "../../src/utils/interfaces/NavigationGraph";
 import { logger } from "../../src/utils/logger";
-import { DeviceDataStreamSocketServer, type NavigationGraphStreamData } from "../../src/daemon/deviceDataStreamSocketServer";
+import {
+  DeviceDataStreamSocketServer,
+  type NavigationGraphStreamData,
+} from "../../src/daemon/deviceDataStreamSocketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeSocket } from "../fakes/FakeNetServer";
 import { Socket } from "node:net";
@@ -33,7 +36,7 @@ class FakeExporter implements NavigationGraphSummaryExporter {
   constructor(
     private readonly result:
       | { kind: "resolve"; summary: NavigationGraphSummary }
-      | { kind: "reject"; error: unknown }
+      | { kind: "reject"; error: unknown },
   ) {}
 
   async exportGraphSummary(): Promise<NavigationGraphSummary> {
@@ -122,16 +125,23 @@ describe("createNavigationGraphRequestHandler", () => {
 
     it("emits a typed error frame (not a silent success ack) when the export fails", async () => {
       server.setOnNavigationGraphRequested(
-        createNavigationGraphRequestHandler(new FakeExporter({ kind: "reject", error: new Error("db down") }))
+        createNavigationGraphRequestHandler(
+          new FakeExporter({ kind: "reject", error: new Error("db down") }),
+        ),
       );
       const socket = new FakeSocket();
 
       await server.processLineForTest(
         socket,
-        JSON.stringify({ id: "req-err", command: "request_navigation_graph" })
+        JSON.stringify({ id: "req-err", command: "request_navigation_graph" }),
       );
 
-      const msgs = socket.getWrittenMessages<{ id?: string; type: string; success?: boolean; error?: string }>();
+      const msgs = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        success?: boolean;
+        error?: string;
+      }>();
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("error");
       expect(msgs[0].id).toBe("req-err");
@@ -141,16 +151,22 @@ describe("createNavigationGraphRequestHandler", () => {
 
     it("emits a navigation_update for the empty-graph success path (distinct from failure)", async () => {
       server.setOnNavigationGraphRequested(
-        createNavigationGraphRequestHandler(new FakeExporter({ kind: "resolve", summary: EMPTY_SUMMARY }))
+        createNavigationGraphRequestHandler(
+          new FakeExporter({ kind: "resolve", summary: EMPTY_SUMMARY }),
+        ),
       );
       const socket = new FakeSocket();
 
       await server.processLineForTest(
         socket,
-        JSON.stringify({ id: "req-empty", command: "request_navigation_graph" })
+        JSON.stringify({ id: "req-empty", command: "request_navigation_graph" }),
       );
 
-      const msgs = socket.getWrittenMessages<{ id?: string; type: string; navigationGraph?: NavigationGraphStreamData }>();
+      const msgs = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        navigationGraph?: NavigationGraphStreamData;
+      }>();
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("navigation_update");
       expect(msgs[0].id).toBe("req-empty");
@@ -160,18 +176,25 @@ describe("createNavigationGraphRequestHandler", () => {
 
     it("serializes the error frame so an unknown-frame-tolerant decoder handles it without throwing", async () => {
       server.setOnNavigationGraphRequested(
-        createNavigationGraphRequestHandler(new FakeExporter({ kind: "reject", error: new Error("db down") }))
+        createNavigationGraphRequestHandler(
+          new FakeExporter({ kind: "reject", error: new Error("db down") }),
+        ),
       );
       const socket = new FakeSocket();
 
       await server.processLineForTest(
         socket,
-        JSON.stringify({ id: "req-decode", command: "request_navigation_graph" })
+        JSON.stringify({ id: "req-decode", command: "request_navigation_graph" }),
       );
 
       // Round-trip the raw wire bytes exactly as a client would receive them.
       const rawLine = socket.getWrittenDataString().trim();
-      const decoded = JSON.parse(rawLine) as { type: string; success?: boolean; error?: string; id?: string };
+      const decoded = JSON.parse(rawLine) as {
+        type: string;
+        success?: boolean;
+        error?: string;
+        id?: string;
+      };
 
       // Mirror the desktop client's `when (type) { ... else -> ignore }` dispatch: every known
       // frame type routes, and any unrecognized type is silently ignored rather than throwing.
@@ -200,6 +223,11 @@ describe("convertSummaryToStreamData", () => {
     expect(streamData.appId).toBe("com.example.app");
     expect(streamData.currentScreen).toBe("Home");
     expect(streamData.nodes[0]).toMatchObject({ id: 1, screenName: "Home", visitCount: 3 });
-    expect(streamData.edges[0]).toMatchObject({ from: "Home", to: "Settings", toolName: "tapOn", traversalCount: 2 });
+    expect(streamData.edges[0]).toMatchObject({
+      from: "Home",
+      to: "Settings",
+      toolName: "tapOn",
+      traversalCount: 2,
+    });
   });
 });

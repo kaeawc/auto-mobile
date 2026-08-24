@@ -25,18 +25,14 @@ interface Manifest {
   bundledRuntimeDependencyOwners: Record<string, Record<string, string[]>>;
 }
 
-function resolveInstalledVersion(
-  nodeModulesDirs: string[],
-  name: string,
-): string | undefined {
+function resolveInstalledVersion(nodeModulesDirs: string[], name: string): string | undefined {
   for (const nodeModulesDir of nodeModulesDirs) {
     const pkgJson = path.join(nodeModulesDir, name, "package.json");
     if (!existsSync(pkgJson)) {
       continue;
     }
     try {
-      return (JSON.parse(readFileSync(pkgJson, "utf8")) as { version?: string })
-        .version;
+      return (JSON.parse(readFileSync(pkgJson, "utf8")) as { version?: string }).version;
     } catch {
       continue;
     }
@@ -65,11 +61,7 @@ export function findBundledOwnerMismatches(
           : [{ owner, dependency, expected: wanted, resolved: actual }];
       }),
     )
-    .sort(
-      (a, b) =>
-        a.owner.localeCompare(b.owner) ||
-        a.dependency.localeCompare(b.dependency),
-    );
+    .sort((a, b) => a.owner.localeCompare(b.owner) || a.dependency.localeCompare(b.dependency));
 }
 
 function collectBundledOwnerVersions(
@@ -106,10 +98,7 @@ function resolveBundledOwnerVersion(
 ): string | undefined {
   const nodeModulesDirs: string[] = [];
   let current = ownerDirectory;
-  while (
-    current === packageNodeModules ||
-    current.startsWith(`${packageNodeModules}${path.sep}`)
-  ) {
+  while (current === packageNodeModules || current.startsWith(`${packageNodeModules}${path.sep}`)) {
     nodeModulesDirs.push(path.join(current, "node_modules"));
     current = path.dirname(current);
   }
@@ -138,36 +127,24 @@ export function assertInstalledRuntimeGraph(
 
   const resolved: Record<string, string | undefined> = {};
   for (const name of Object.keys(manifest.dependencies)) {
-    resolved[name] = resolveInstalledVersion(
-      [packageNodeModules, consumerNodeModules],
-      name,
-    );
+    resolved[name] = resolveInstalledVersion([packageNodeModules, consumerNodeModules], name);
   }
 
   const mismatches = findGraphMismatches(manifest.dependencies, resolved);
   if (mismatches.length > 0) {
-    console.error(
-      "Clean-room install did NOT reproduce the pinned runtime graph (#5421):",
-    );
+    console.error("Clean-room install did NOT reproduce the pinned runtime graph (#5421):");
     for (const m of mismatches) {
-      console.error(
-        `  - ${m.name}: expected ${m.expected}, resolved ${m.resolved ?? "(absent)"}`,
-      );
+      console.error(`  - ${m.name}: expected ${m.expected}, resolved ${m.resolved ?? "(absent)"}`);
     }
     process.exit(1);
   }
 
   const bundledMismatches = findBundledOwnerMismatches(
     manifest.bundledRuntimeDependencyOwners,
-    collectBundledOwnerVersions(
-      packageNodeModules,
-      manifest.bundledRuntimeDependencyOwners,
-    ),
+    collectBundledOwnerVersions(packageNodeModules, manifest.bundledRuntimeDependencyOwners),
   );
   if (bundledMismatches.length > 0) {
-    console.error(
-      "Clean-room install did NOT reproduce the bundled runtime graph (#5421):",
-    );
+    console.error("Clean-room install did NOT reproduce the bundled runtime graph (#5421):");
     for (const mismatch of bundledMismatches) {
       console.error(
         `  - ${mismatch.owner} -> ${mismatch.dependency}: expected [${mismatch.expected.join(", ")}], resolved ${mismatch.resolved ?? "(absent)"}`,

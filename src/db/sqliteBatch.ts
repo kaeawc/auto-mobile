@@ -3,13 +3,13 @@ export const SQLITE_MAX_BOUND_PARAMETERS = 999;
 export function chunkBySqliteParameterLimit<T>(
   values: readonly T[],
   fixedParameterCount = 0,
-  maxBoundParameters = SQLITE_MAX_BOUND_PARAMETERS
+  maxBoundParameters = SQLITE_MAX_BOUND_PARAMETERS,
 ): T[][] {
   const chunkSize = maxBoundParameters - fixedParameterCount;
   if (chunkSize < 1) {
     throw new Error(
       `SQLite batch query has ${fixedParameterCount} fixed parameters, exceeding ` +
-      `${maxBoundParameters} available bound parameters`
+        `${maxBoundParameters} available bound parameters`,
     );
   }
 

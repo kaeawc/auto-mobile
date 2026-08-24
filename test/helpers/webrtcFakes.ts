@@ -68,7 +68,7 @@ export function createSuccessfulWhipFetch(
   location: string = "/whip/resource/debug-1",
   // Default Baseline; an Android session negotiates Main and its WHIP server
   // must answer Main (issue #4756), so callers targeting Android pass `4d002a`.
-  profileLevelId: string = "42e02a"
+  profileLevelId: string = "42e02a",
 ): FetchLike {
   const answerSdp = videoOnlyWhipAnswer(profileLevelId);
   return async (url, init) => {
@@ -76,7 +76,7 @@ export function createSuccessfulWhipFetch(
     return {
       status: 201,
       ok: true,
-      headers: { get: name => (name.toLowerCase() === "location" ? location : null) },
+      headers: { get: (name) => (name.toLowerCase() === "location" ? location : null) },
       text: async () => answerSdp,
     };
   };

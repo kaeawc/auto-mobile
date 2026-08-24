@@ -30,7 +30,9 @@ describe("observe scope input schema", () => {
 
   test("accepts overview and a combined scope", () => {
     expect(parse({ overview: true }).success).toBe(true);
-    expect(parse({ focus: true, region: { x1: 0, y1: 0.25, x2: 1, y2: 0.75 }, overview: true }).success).toBe(true);
+    expect(
+      parse({ focus: true, region: { x1: 0, y1: 0.25, x2: 1, y2: 0.75 }, overview: true }).success,
+    ).toBe(true);
   });
 
   test("rejects a region box outside [0,1]", () => {

@@ -18,11 +18,15 @@ describe("FocusElementMatcher.findCurrentFocusIndex", () => {
   const boundsAt = (i: number) => ({ left: i, top: i, right: i + 5, bottom: i + 5 });
 
   test("returns null when there is no current focus", () => {
-    expect(matcher.findCurrentFocusIndex(null, [{ "resource-id": "a", "bounds": boundsAt(0) }])).toBeNull();
+    expect(
+      matcher.findCurrentFocusIndex(null, [{ "resource-id": "a", bounds: boundsAt(0) }]),
+    ).toBeNull();
   });
 
   test("returns null when the traversal order is empty", () => {
-    expect(matcher.findCurrentFocusIndex({ "resource-id": "a", "bounds": boundsAt(0) }, [])).toBeNull();
+    expect(
+      matcher.findCurrentFocusIndex({ "resource-id": "a", bounds: boundsAt(0) }, []),
+    ).toBeNull();
   });
 
   // Each row: an ordered traversal list, the current-focus element, and the index
@@ -31,28 +35,33 @@ describe("FocusElementMatcher.findCurrentFocusIndex", () => {
     [
       "resource-id wins",
       [
-        { "resource-id": "row-0", "content-desc": "shared", "text": "shared", "bounds": boundsAt(0) },
-        { "resource-id": "row-1", "content-desc": "shared", "text": "shared", "bounds": boundsAt(1) },
+        { "resource-id": "row-0", "content-desc": "shared", text: "shared", bounds: boundsAt(0) },
+        { "resource-id": "row-1", "content-desc": "shared", text: "shared", bounds: boundsAt(1) },
       ] as Element[],
-      { "resource-id": "row-1", "content-desc": "shared", "text": "shared", "bounds": boundsAt(9) } as Element,
+      {
+        "resource-id": "row-1",
+        "content-desc": "shared",
+        text: "shared",
+        bounds: boundsAt(9),
+      } as Element,
       1,
     ],
     [
       "test-tag wins when resource-id is absent",
       [
-        { "test-tag": "tag-0", "content-desc": "shared", "bounds": boundsAt(0) },
-        { "test-tag": "tag-1", "content-desc": "shared", "bounds": boundsAt(1) },
+        { "test-tag": "tag-0", "content-desc": "shared", bounds: boundsAt(0) },
+        { "test-tag": "tag-1", "content-desc": "shared", bounds: boundsAt(1) },
       ] as Element[],
-      { "test-tag": "tag-1", "content-desc": "shared", "bounds": boundsAt(9) } as Element,
+      { "test-tag": "tag-1", "content-desc": "shared", bounds: boundsAt(9) } as Element,
       1,
     ],
     [
       "content-desc wins when resource-id and test-tag are absent",
       [
-        { "content-desc": "desc-0", "text": "shared", "bounds": boundsAt(0) },
-        { "content-desc": "desc-1", "text": "shared", "bounds": boundsAt(1) },
+        { "content-desc": "desc-0", text: "shared", bounds: boundsAt(0) },
+        { "content-desc": "desc-1", text: "shared", bounds: boundsAt(1) },
       ] as Element[],
-      { "content-desc": "desc-1", "text": "shared", "bounds": boundsAt(9) } as Element,
+      { "content-desc": "desc-1", text: "shared", bounds: boundsAt(9) } as Element,
       1,
     ],
     [
@@ -66,16 +75,13 @@ describe("FocusElementMatcher.findCurrentFocusIndex", () => {
     ],
     [
       "bounds are the last resort when no identifiers are present",
-      [
-        { bounds: boundsAt(0) },
-        { bounds: boundsAt(1) },
-      ] as Element[],
+      [{ bounds: boundsAt(0) }, { bounds: boundsAt(1) }] as Element[],
       { bounds: boundsAt(1) } as Element,
       1,
     ],
   ])("%s", (_label, elements, currentFocus, expectedIndex) => {
     expect(matcher.findCurrentFocusIndex(currentFocus as Element, elements as Element[])).toBe(
-      expectedIndex as number
+      expectedIndex as number,
     );
   });
 });

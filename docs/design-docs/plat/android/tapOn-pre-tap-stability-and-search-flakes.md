@@ -21,12 +21,12 @@ The flake was **not** primarily “wrong tap coordinates” or “semantic click
    the target's **bounds to match within a small ε** (`boundsNearlyEqual`) — **one**
    stable re-find by default, or **two consecutive** when `sibling: true` (see the
    policy note). **If that never happens, it aborts the tap** with a clear error
-   instead of tapping pre-observe coordinates.  
-   - Code: `resolveAndroidStableTapTargetAfterRefreshes` in `src/features/action/TapOnElement.ts`  
+   instead of tapping pre-observe coordinates.
+   - Code: `resolveAndroidStableTapTargetAfterRefreshes` in `src/features/action/TapOnElement.ts`
    - Utility: `boundsNearlyEqual` in `src/utils/bounds.ts`
 
 2. **Loading-aware patience (so the guard can succeed)**  
-   If the current tree **looks like a blocking loading state** (progress indicators, common loading view classes / resource ids), **extend** the pre-tap refresh budget — a wall-clock budget (default **2500ms → 10000ms**) plus a minimum-productive-poll floor (**8 → 32**) — with a short delay between polls, so the list can **come back** before we give up.  
+   If the current tree **looks like a blocking loading state** (progress indicators, common loading view classes / resource ids), **extend** the pre-tap refresh budget — a wall-clock budget (default **2500ms → 10000ms**) plus a minimum-productive-poll floor (**8 → 32**) — with a short delay between polls, so the list can **come back** before we give up.
    - Code: `androidViewHierarchyIndicatesLikelyBlockingLoading` in `src/utils/androidTransientLoading.ts`
 
 Together: **don’t tap on ghosts**, and **wait long enough through real loading** for the row to reappear in the a11y tree. After this landed, the same plan **passed repeatedly** (e.g. four consecutive runs) where step 28 had previously been flaky.
@@ -69,24 +69,24 @@ Daemon / failure artifacts sometimes showed **`progress_bar_loading`** (or list 
 
 These changes **improved** robustness or diagnostics and are worth keeping in mind, but **they did not alone** eliminate the Dan Corkill flake:
 
-| Area | What we tried | Why it wasn’t sufficient alone |
-|------|----------------|----------------------------------|
+| Area                         | What we tried                                                                                                                            | Why it wasn’t sufficient alone                                                                              |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | **CtrlProxy / semantic tap** | **`ACTION_CLICK`** with bounds disambiguation, multi-window search, hit-test ordering, framework id handling (`android:id/*` vs app ids) | Still need a **real node** matching the row; semantic success doesn’t help if the tree **dropped** the row. |
-| **Coordinates** | Clickable-row resolution: label∩row overlap, clamped centers, ADB-before-gesture for search+IME | Wrong if bounds refer to a **row that no longer exists** in the current tree. |
-| **Snapshot consistency** | Ensure tap target and geometry come from the **same** refreshed hierarchy | Necessary but not enough if the next refresh **still** has no row. |
-| **Diagnostics** | **`tapDebug`**, focus/hit-test around tap, plan **`failureObservation`** on observe timeout | Great for proving **loading / missing row**; doesn’t fix timing. |
-| **Plans** | **`waitFor.container`**, tighter waits | Reduces false positives; doesn’t remove the **gap** between end of observe and start of tap. |
+| **Coordinates**              | Clickable-row resolution: label∩row overlap, clamped centers, ADB-before-gesture for search+IME                                          | Wrong if bounds refer to a **row that no longer exists** in the current tree.                               |
+| **Snapshot consistency**     | Ensure tap target and geometry come from the **same** refreshed hierarchy                                                                | Necessary but not enough if the next refresh **still** has no row.                                          |
+| **Diagnostics**              | **`tapDebug`**, focus/hit-test around tap, plan **`failureObservation`** on observe timeout                                              | Great for proving **loading / missing row**; doesn’t fix timing.                                            |
+| **Plans**                    | **`waitFor.container`**, tighter waits                                                                                                   | Reduces false positives; doesn’t remove the **gap** between end of observe and start of tap.                |
 
 ---
 
 ## Implementation reference (for maintainers)
 
-| Piece | Location |
-|-------|-----------|
+| Piece                                | Location                                                                                                                                                   |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Pre-tap loop + stability requirement | `src/features/action/TapOnElement.ts` — `resolveAndroidStableTapTargetAfterRefreshes`; match count from `src/features/action/androidPreTapStablePolicy.ts` |
-| Bounds ε comparison | `src/utils/bounds.ts` — `boundsNearlyEqual` |
-| Loading heuristic | `src/utils/androidTransientLoading.ts` |
-| Unit tests | `test/utils/bounds.test.ts`, `test/utils/androidTransientLoading.test.ts` |
+| Bounds ε comparison                  | `src/utils/bounds.ts` — `boundsNearlyEqual`                                                                                                                |
+| Loading heuristic                    | `src/utils/androidTransientLoading.ts`                                                                                                                     |
+| Unit tests                           | `test/utils/bounds.test.ts`, `test/utils/androidTransientLoading.test.ts`                                                                                  |
 
 Typical **success** log line:
 
@@ -132,4 +132,4 @@ If logs show repeated **`Android pre-tap refresh attempt N did not re-find tap t
 ## See also
 
 - [Android Control Proxy](control-proxy.md) — accessibility service and CtrlProxy
-- [MCP tools](../../mcp/tools.md) — **`tapOn`** selector overview  
+- [MCP tools](../../mcp/tools.md) — **`tapOn`** selector overview

@@ -1,6 +1,10 @@
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
-import { DatabaseInspector, DatabaseInfo, TableStructureResult } from "../features/database/DatabaseInspector";
+import {
+  DatabaseInspector,
+  DatabaseInfo,
+  TableStructureResult,
+} from "../features/database/DatabaseInspector";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
@@ -11,8 +15,10 @@ import type { TableDataResult } from "../features/database/DatabaseInspector";
 const DATABASE_RESOURCE_TEMPLATES = {
   DATABASES: "automobile:devices/{deviceId}/databases?appId={appId}",
   TABLES: "automobile:devices/{deviceId}/databases/{databasePath}/tables?appId={appId}",
-  TABLE_DATA: "automobile:devices/{deviceId}/databases/{databasePath}/tables/{table}/data?appId={appId}",
-  TABLE_STRUCTURE: "automobile:devices/{deviceId}/databases/{databasePath}/tables/{table}/structure?appId={appId}"
+  TABLE_DATA:
+    "automobile:devices/{deviceId}/databases/{databasePath}/tables/{table}/data?appId={appId}",
+  TABLE_STRUCTURE:
+    "automobile:devices/{deviceId}/databases/{databasePath}/tables/{table}/structure?appId={appId}",
 } as const;
 
 // Cache entries for change detection
@@ -35,7 +41,7 @@ interface DatabaseCache {
 
 const cache: DatabaseCache = {
   byApp: new Map(),
-  tableSchemas: new Map()
+  tableSchemas: new Map(),
 };
 
 /**
@@ -46,7 +52,7 @@ function generateHash(data: unknown): string {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
+    hash = (hash << 5) - hash + char;
     hash = hash & hash;
   }
   return hash.toString(16);
@@ -58,8 +64,18 @@ function generateHash(data: unknown): string {
 interface AppDatabaseClient {
   listDatabases(appId: string): Promise<DatabaseInfo[]>;
   listTables(appId: string, databasePath: string): Promise<string[]>;
-  getTableData(appId: string, databasePath: string, table: string, limit: number, offset: number): Promise<TableDataResult>;
-  getTableStructure(appId: string, databasePath: string, table: string): Promise<TableStructureResult>;
+  getTableData(
+    appId: string,
+    databasePath: string,
+    table: string,
+    limit: number,
+    offset: number,
+  ): Promise<TableDataResult>;
+  getTableStructure(
+    appId: string,
+    databasePath: string,
+    table: string,
+  ): Promise<TableStructureResult>;
 }
 
 /**
@@ -72,12 +88,12 @@ async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> 
     getBootedDevicesSafely("ios", () => manager.getBootedDevices("ios")),
   ]);
   const devices = [...androidDevices, ...iosDevices];
-  return devices.find(d => d.deviceId === deviceId) ?? null;
+  return devices.find((d) => d.deviceId === deviceId) ?? null;
 }
 
 async function getBootedDevicesSafely(
   platform: "android" | "ios",
-  listDevices: () => Promise<BootedDevice[]>
+  listDevices: () => Promise<BootedDevice[]>,
 ): Promise<BootedDevice[]> {
   try {
     return await listDevices();
@@ -96,7 +112,7 @@ function createDatabaseClient(device: BootedDevice): AppDatabaseClient {
   if (device.platform === "ios") {
     const client = IOSCtrlProxyClient.getInstance(device);
     return {
-      listDatabases: async appId => client.listDatabasesForIos(appId),
+      listDatabases: async (appId) => client.listDatabasesForIos(appId),
       listTables: async (appId, databasePath) => client.listTablesForIos(appId, databasePath),
       getTableData: async (_appId, databasePath, table, limit, offset) =>
         client.getTableDataForIos(_appId, databasePath, table, limit, offset),
@@ -118,7 +134,12 @@ function getDatabasesCacheKey(deviceId: string, appId: string): string {
 /**
  * Get cache key for table schema
  */
-function getTableSchemaCacheKey(deviceId: string, appId: string, databasePath: string, table: string): string {
+function getTableSchemaCacheKey(
+  deviceId: string,
+  appId: string,
+  databasePath: string,
+  table: string,
+): string {
   return `${deviceId}:${appId}:${databasePath}:${table}`;
 }
 
@@ -139,14 +160,24 @@ function buildTablesUri(deviceId: string, databasePath: string, appId: string): 
 /**
  * Build resource URI for table data
  */
-function buildTableDataUri(deviceId: string, databasePath: string, table: string, appId: string): string {
+function buildTableDataUri(
+  deviceId: string,
+  databasePath: string,
+  table: string,
+  appId: string,
+): string {
   return `automobile:devices/${deviceId}/databases/${encodeURIComponent(databasePath)}/tables/${encodeURIComponent(table)}/data?appId=${encodeURIComponent(appId)}`;
 }
 
 /**
  * Build resource URI for table structure
  */
-function buildTableStructureUri(deviceId: string, databasePath: string, table: string, appId: string): string {
+function buildTableStructureUri(
+  deviceId: string,
+  databasePath: string,
+  table: string,
+  appId: string,
+): string {
   return `automobile:devices/${deviceId}/databases/${encodeURIComponent(databasePath)}/tables/${encodeURIComponent(table)}/structure?appId=${encodeURIComponent(appId)}`;
 }
 
@@ -163,7 +194,7 @@ async function getDatabasesResource(params: Record<string, string>): Promise<Res
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2)
+        text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2),
       };
     }
 
@@ -186,20 +217,24 @@ async function getDatabasesResource(params: Record<string, string>): Promise<Res
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        deviceId,
-        appId,
-        databases,
-        totalCount: databases.length,
-        lastUpdated
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          deviceId,
+          appId,
+          databases,
+          totalCount: databases.length,
+          lastUpdated,
+        },
+        null,
+        2,
+      ),
     };
   } catch (error) {
     logger.error(`[DatabaseResources] Failed to list databases: ${error}`);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to list databases: ${error}` }, null, 2)
+      text: JSON.stringify({ error: `Failed to list databases: ${error}` }, null, 2),
     };
   }
 }
@@ -218,7 +253,7 @@ async function getTablesResource(params: Record<string, string>): Promise<Resour
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2)
+        text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2),
       };
     }
 
@@ -229,21 +264,25 @@ async function getTablesResource(params: Record<string, string>): Promise<Resour
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        deviceId,
-        appId,
-        databasePath: decodedPath,
-        tables,
-        totalCount: tables.length,
-        lastUpdated
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          deviceId,
+          appId,
+          databasePath: decodedPath,
+          tables,
+          totalCount: tables.length,
+          lastUpdated,
+        },
+        null,
+        2,
+      ),
     };
   } catch (error) {
     logger.error(`[DatabaseResources] Failed to list tables: ${error}`);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to list tables: ${error}` }, null, 2)
+      text: JSON.stringify({ error: `Failed to list tables: ${error}` }, null, 2),
     };
   }
 }
@@ -267,7 +306,7 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2)
+        text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2),
       };
     }
 
@@ -278,25 +317,29 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        deviceId,
-        appId,
-        databasePath: decodedPath,
-        table: decodedTable,
-        columns: data.columns,
-        rows: data.rows,
-        total: data.total,
-        limit,
-        offset,
-        lastUpdated
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          deviceId,
+          appId,
+          databasePath: decodedPath,
+          table: decodedTable,
+          columns: data.columns,
+          rows: data.rows,
+          total: data.total,
+          limit,
+          offset,
+          lastUpdated,
+        },
+        null,
+        2,
+      ),
     };
   } catch (error) {
     logger.error(`[DatabaseResources] Failed to get table data: ${error}`);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to get table data: ${error}` }, null, 2)
+      text: JSON.stringify({ error: `Failed to get table data: ${error}` }, null, 2),
     };
   }
 }
@@ -316,7 +359,7 @@ async function getTableStructureResource(params: Record<string, string>): Promis
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2)
+        text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2),
       };
     }
 
@@ -332,7 +375,9 @@ async function getTableStructureResource(params: Record<string, string>): Promis
       logger.info(`[DatabaseResources] Table schema changed for ${decodedTable} in ${decodedPath}`);
       void ResourceRegistry.notifyResourceUpdated(uri);
       // Also notify table data resource since schema changed
-      void ResourceRegistry.notifyResourceUpdated(buildTableDataUri(deviceId, decodedPath, decodedTable, appId));
+      void ResourceRegistry.notifyResourceUpdated(
+        buildTableDataUri(deviceId, decodedPath, decodedTable, appId),
+      );
     }
 
     // Update cache
@@ -341,21 +386,25 @@ async function getTableStructureResource(params: Record<string, string>): Promis
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        deviceId,
-        appId,
-        databasePath: decodedPath,
-        table: decodedTable,
-        columns: structure.columns,
-        lastUpdated
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          deviceId,
+          appId,
+          databasePath: decodedPath,
+          table: decodedTable,
+          columns: structure.columns,
+          lastUpdated,
+        },
+        null,
+        2,
+      ),
     };
   } catch (error) {
     logger.error(`[DatabaseResources] Failed to get table structure: ${error}`);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to get table structure: ${error}` }, null, 2)
+      text: JSON.stringify({ error: `Failed to get table structure: ${error}` }, null, 2),
     };
   }
 }
@@ -367,7 +416,7 @@ export async function notifyDatabaseChanged(
   deviceId: string,
   appId: string,
   databasePath: string,
-  affectedTables?: string[]
+  affectedTables?: string[],
 ): Promise<void> {
   // Notify database list resource
   await ResourceRegistry.notifyResourceUpdated(buildDatabasesUri(deviceId, appId));
@@ -379,10 +428,10 @@ export async function notifyDatabaseChanged(
   if (affectedTables && affectedTables.length > 0) {
     for (const table of affectedTables) {
       await ResourceRegistry.notifyResourceUpdated(
-        buildTableDataUri(deviceId, databasePath, table, appId)
+        buildTableDataUri(deviceId, databasePath, table, appId),
       );
       await ResourceRegistry.notifyResourceUpdated(
-        buildTableStructureUri(deviceId, databasePath, table, appId)
+        buildTableStructureUri(deviceId, databasePath, table, appId),
       );
     }
   }
@@ -409,7 +458,7 @@ export function registerDatabaseResources(): void {
     "App Databases",
     "List all SQLite databases in an Android or iOS app. Requires app to have AutoMobile SDK with database inspection enabled; iOS support requires a DEBUG SDK server.",
     "application/json",
-    getDatabasesResource
+    getDatabasesResource,
   );
 
   // Register template for listing tables
@@ -418,7 +467,7 @@ export function registerDatabaseResources(): void {
     "Database Tables",
     "List all tables in a database.",
     "application/json",
-    getTablesResource
+    getTablesResource,
   );
 
   // Register template for table data
@@ -427,7 +476,7 @@ export function registerDatabaseResources(): void {
     "Table Data",
     "Get rows from a database table with pagination (default: 50 rows). Add &limit=N&offset=M for pagination.",
     "application/json",
-    getTableDataResource
+    getTableDataResource,
   );
 
   // Also register with limit/offset parameters
@@ -436,7 +485,7 @@ export function registerDatabaseResources(): void {
     "Table Data (Paginated)",
     "Get rows from a database table with explicit pagination.",
     "application/json",
-    getTableDataResource
+    getTableDataResource,
   );
 
   // Register template for table structure
@@ -445,7 +494,7 @@ export function registerDatabaseResources(): void {
     "Table Structure",
     "Get column definitions for a database table.",
     "application/json",
-    getTableStructureResource
+    getTableStructureResource,
   );
 
   logger.info("[DatabaseResources] Registered database resources");

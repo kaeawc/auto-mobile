@@ -38,7 +38,9 @@ export function consumeSetupTiming(deviceId: string): TimingData | null {
     return timing;
   }
   if (availableKeys.length > 0) {
-    logger.warn(`[ToolExecutionContext] No setup timing for deviceId=${deviceId}, available keys: ${availableKeys.join(", ")}`);
+    logger.warn(
+      `[ToolExecutionContext] No setup timing for deviceId=${deviceId}, available keys: ${availableKeys.join(", ")}`,
+    );
   }
   return null;
 }
@@ -96,9 +98,8 @@ export async function createToolExecutionContext(
     throw new ActionableError(`Session ${sessionUuid} was released during setup`);
   }
 
-  await sessionManager.trackSessionSetup(
-    session,
-    () => setupSession(session, existingSession === session, sessionManager, sessionOptions),
+  await sessionManager.trackSessionSetup(session, () =>
+    setupSession(session, existingSession === session, sessionManager, sessionOptions),
   );
 
   return {
@@ -123,7 +124,11 @@ async function setupSession(
 
   ensureSessionIsCurrent(session, sessionManager);
   if (session.platform === "android") {
-    await ensureAccessibilityServiceReady(session.assignedDevice, session.sessionId, session.platform);
+    await ensureAccessibilityServiceReady(
+      session.assignedDevice,
+      session.sessionId,
+      session.platform,
+    );
   }
   ensureSessionIsCurrent(session, sessionManager);
 
@@ -134,7 +139,9 @@ async function setupSession(
     ensureSessionIsCurrent(session, sessionManager);
     await navManager.startTestSession(session.sessionId);
     ensureSessionIsCurrent(session, sessionManager);
-    logger.info(`[ToolExecutionContext] Started test coverage tracking for session ${session.sessionId}`);
+    logger.info(
+      `[ToolExecutionContext] Started test coverage tracking for session ${session.sessionId}`,
+    );
   }
 }
 
@@ -151,21 +158,23 @@ const A11Y_TRANSIENT_ERROR_PATTERNS = [
 ];
 
 function isTransientA11yError(error: string): boolean {
-  return A11Y_TRANSIENT_ERROR_PATTERNS.some(p => error.includes(p));
+  return A11Y_TRANSIENT_ERROR_PATTERNS.some((p) => error.includes(p));
 }
 
 async function ensureAccessibilityServiceReady(
   deviceId: string,
   sessionId: string,
   platform: Platform,
-  timer: Timer = defaultTimer
+  timer: Timer = defaultTimer,
 ): Promise<void> {
   const device: BootedDevice = {
     name: deviceId,
     platform,
-    deviceId
+    deviceId,
   };
-  logger.info(`[ToolExecutionContext] Ensuring accessibility service is ready for session ${sessionId}`);
+  logger.info(
+    `[ToolExecutionContext] Ensuring accessibility service is ready for session ${sessionId}`,
+  );
 
   const MAX_ATTEMPTS = 2;
   const RETRY_DELAY_MS = 3000;
@@ -182,20 +191,22 @@ async function ensureAccessibilityServiceReady(
       perf.end();
       const timings = perf.getTimings();
       if (timings) {
-        logger.info(`[ToolExecutionContext] Accessibility service setup failed`, { perfTiming: JSON.stringify(timings, null, 2) });
+        logger.info(`[ToolExecutionContext] Accessibility service setup failed`, {
+          perfTiming: JSON.stringify(timings, null, 2),
+        });
       }
 
       const errorMsg = setupResult.error || setupResult.message || "";
       if (attempt < MAX_ATTEMPTS && isTransientA11yError(errorMsg)) {
         logger.warn(
-          `[A11yRetry] Transient failure on attempt ${attempt}/${MAX_ATTEMPTS}, retrying in ${RETRY_DELAY_MS}ms: ${errorMsg}`
+          `[A11yRetry] Transient failure on attempt ${attempt}/${MAX_ATTEMPTS}, retrying in ${RETRY_DELAY_MS}ms: ${errorMsg}`,
         );
         await timer.sleep(RETRY_DELAY_MS);
         continue;
       }
 
       throw new ActionableError(
-        `Failed to setup accessibility service for device ${deviceId} (session ${sessionId}): ${errorMsg}`
+        `Failed to setup accessibility service for device ${deviceId} (session ${sessionId}): ${errorMsg}`,
       );
     }
 
@@ -204,15 +215,21 @@ async function ensureAccessibilityServiceReady(
     }
 
     const accessibilityClient = AndroidCtrlProxyClient.getInstance(device);
-    const connected = await perf.track("waitForConnection", () => accessibilityClient.waitForConnection());
+    const connected = await perf.track("waitForConnection", () =>
+      accessibilityClient.waitForConnection(),
+    );
 
     perf.end();
     const timings = perf.getTimings();
     if (timings) {
       storeSetupTiming(deviceId, timings);
-      logger.info(`[ToolExecutionContext] Accessibility service ready for session ${sessionId}`, { connected });
+      logger.info(`[ToolExecutionContext] Accessibility service ready for session ${sessionId}`, {
+        connected,
+      });
     } else {
-      logger.warn(`[ToolExecutionContext] No timing data captured for setup (deviceId=${deviceId})`);
+      logger.warn(
+        `[ToolExecutionContext] No timing data captured for setup (deviceId=${deviceId})`,
+      );
     }
     return;
   }
@@ -221,7 +238,7 @@ async function ensureAccessibilityServiceReady(
 async function ensureKeepScreenAwake(
   session: Session,
   sessionManager: SessionManager,
-  sessionOptions: SessionOptions
+  sessionOptions: SessionOptions,
 ): Promise<void> {
   if (session.platform !== "android") {
     return;
@@ -235,7 +252,7 @@ async function ensureKeepScreenAwake(
   const device: BootedDevice = {
     name: session.assignedDevice,
     platform: session.platform,
-    deviceId: session.assignedDevice
+    deviceId: session.assignedDevice,
   };
   const manager = new KeepScreenAwakeManager(device);
 
@@ -243,7 +260,9 @@ async function ensureKeepScreenAwake(
   try {
     state = await manager.apply(keepScreenAwake);
   } catch (error) {
-    logger.warn(`[ToolExecutionContext] Failed to apply keep-awake for ${device.deviceId}: ${error}`);
+    logger.warn(
+      `[ToolExecutionContext] Failed to apply keep-awake for ${device.deviceId}: ${error}`,
+    );
     state = { applied: false, skipReason: "failed" };
   }
 
@@ -252,7 +271,9 @@ async function ensureKeepScreenAwake(
       try {
         await manager.restore(state);
       } catch (error) {
-        logger.warn(`[ToolExecutionContext] Failed to restore keep-awake after session release for ${device.deviceId}: ${error}`);
+        logger.warn(
+          `[ToolExecutionContext] Failed to restore keep-awake after session release for ${device.deviceId}: ${error}`,
+        );
       }
     }
     throw new ActionableError(`Session ${session.sessionId} was released during setup`);

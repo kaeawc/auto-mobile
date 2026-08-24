@@ -9,7 +9,9 @@ import {
   type PerformanceAuditMetricsRecord,
 } from "../../src/db/performanceAuditRepository";
 
-function makeMetrics(overrides: Partial<PerformanceAuditMetricsRecord> = {}): PerformanceAuditMetricsRecord {
+function makeMetrics(
+  overrides: Partial<PerformanceAuditMetricsRecord> = {},
+): PerformanceAuditMetricsRecord {
   return {
     p50Ms: 8,
     p90Ms: 12,
@@ -91,10 +93,12 @@ describe("PerformanceAuditRepository", () => {
     });
 
     test("stores diagnostics and nodeId", async () => {
-      await repo.recordAudit(makeRecord({
-        diagnostics: '{"warning":"high_jank"}',
-        nodeId: 42,
-      }));
+      await repo.recordAudit(
+        makeRecord({
+          diagnostics: '{"warning":"high_jank"}',
+          nodeId: 42,
+        }),
+      );
 
       const page = await repo.listResults({});
       expect(page.results[0].diagnostics).toBe('{"warning":"high_jank"}');
@@ -102,13 +106,15 @@ describe("PerformanceAuditRepository", () => {
     });
 
     test("stores live metrics extension fields", async () => {
-      await repo.recordAudit(makeRecord({
-        metrics: makeMetrics({
-          timeToFirstFrameMs: 120,
-          timeToInteractiveMs: 350,
-          frameRateFps: 60,
+      await repo.recordAudit(
+        makeRecord({
+          metrics: makeMetrics({
+            timeToFirstFrameMs: 120,
+            timeToInteractiveMs: 350,
+            frameRateFps: 60,
+          }),
         }),
-      }));
+      );
 
       const page = await repo.listResults({});
       const m = page.results[0].metrics;
@@ -118,12 +124,18 @@ describe("PerformanceAuditRepository", () => {
     });
 
     test("returns results ordered by timestamp desc", async () => {
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T10:00:00.000Z", sessionId: "s1" }));
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T12:00:00.000Z", sessionId: "s2" }));
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T11:00:00.000Z", sessionId: "s3" }));
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T10:00:00.000Z", sessionId: "s1" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T12:00:00.000Z", sessionId: "s2" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T11:00:00.000Z", sessionId: "s3" }),
+      );
 
       const page = await repo.listResults({});
-      expect(page.results.map(r => r.sessionId)).toEqual(["s2", "s3", "s1"]);
+      expect(page.results.map((r) => r.sessionId)).toEqual(["s2", "s3", "s1"]);
     });
   });
 
@@ -150,9 +162,15 @@ describe("PerformanceAuditRepository", () => {
     });
 
     test("offset skips initial results", async () => {
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T10:00:00.000Z", sessionId: "s1" }));
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T11:00:00.000Z", sessionId: "s2" }));
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T12:00:00.000Z", sessionId: "s3" }));
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T10:00:00.000Z", sessionId: "s1" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T11:00:00.000Z", sessionId: "s2" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T12:00:00.000Z", sessionId: "s3" }),
+      );
 
       const page = await repo.listResults({ limit: 2, offset: 1 });
       // Ordered desc: s3, s2, s1 -> offset 1 -> s2, s1
@@ -164,10 +182,12 @@ describe("PerformanceAuditRepository", () => {
 
     test("paging through all results", async () => {
       for (let i = 0; i < 5; i++) {
-        await repo.recordAudit(makeRecord({
-          timestamp: `2024-06-01T${String(10 + i).padStart(2, "0")}:00:00.000Z`,
-          sessionId: `s${i}`,
-        }));
+        await repo.recordAudit(
+          makeRecord({
+            timestamp: `2024-06-01T${String(10 + i).padStart(2, "0")}:00:00.000Z`,
+            sessionId: `s${i}`,
+          }),
+        );
       }
 
       const page1 = await repo.listResults({ limit: 2, offset: 0 });
@@ -189,18 +209,28 @@ describe("PerformanceAuditRepository", () => {
 
   describe("filtering", () => {
     test("filters by deviceId", async () => {
-      await repo.recordAudit(makeRecord({ deviceId: "device-a", timestamp: "2024-06-01T10:00:00.000Z" }));
-      await repo.recordAudit(makeRecord({ deviceId: "device-b", timestamp: "2024-06-01T11:00:00.000Z" }));
-      await repo.recordAudit(makeRecord({ deviceId: "device-a", timestamp: "2024-06-01T12:00:00.000Z" }));
+      await repo.recordAudit(
+        makeRecord({ deviceId: "device-a", timestamp: "2024-06-01T10:00:00.000Z" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ deviceId: "device-b", timestamp: "2024-06-01T11:00:00.000Z" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ deviceId: "device-a", timestamp: "2024-06-01T12:00:00.000Z" }),
+      );
 
       const page = await repo.listResults({ deviceId: "device-a" });
       expect(page.results).toHaveLength(2);
-      expect(page.results.every(r => r.deviceId === "device-a")).toBe(true);
+      expect(page.results.every((r) => r.deviceId === "device-a")).toBe(true);
     });
 
     test("filters by startTime", async () => {
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T08:00:00.000Z", sessionId: "early" }));
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T12:00:00.000Z", sessionId: "later" }));
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T08:00:00.000Z", sessionId: "early" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T12:00:00.000Z", sessionId: "later" }),
+      );
 
       const page = await repo.listResults({ startTime: "2024-06-01T10:00:00.000Z" });
       expect(page.results).toHaveLength(1);
@@ -208,8 +238,12 @@ describe("PerformanceAuditRepository", () => {
     });
 
     test("filters by endTime", async () => {
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T08:00:00.000Z", sessionId: "early" }));
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T12:00:00.000Z", sessionId: "later" }));
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T08:00:00.000Z", sessionId: "early" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T12:00:00.000Z", sessionId: "later" }),
+      );
 
       const page = await repo.listResults({ endTime: "2024-06-01T10:00:00.000Z" });
       expect(page.results).toHaveLength(1);
@@ -217,18 +251,34 @@ describe("PerformanceAuditRepository", () => {
     });
 
     test("combines deviceId, startTime, and endTime filters", async () => {
-      await repo.recordAudit(makeRecord({
-        deviceId: "d1", timestamp: "2024-06-01T08:00:00.000Z", sessionId: "s1",
-      }));
-      await repo.recordAudit(makeRecord({
-        deviceId: "d1", timestamp: "2024-06-01T12:00:00.000Z", sessionId: "s2",
-      }));
-      await repo.recordAudit(makeRecord({
-        deviceId: "d2", timestamp: "2024-06-01T12:00:00.000Z", sessionId: "s3",
-      }));
-      await repo.recordAudit(makeRecord({
-        deviceId: "d1", timestamp: "2024-06-01T18:00:00.000Z", sessionId: "s4",
-      }));
+      await repo.recordAudit(
+        makeRecord({
+          deviceId: "d1",
+          timestamp: "2024-06-01T08:00:00.000Z",
+          sessionId: "s1",
+        }),
+      );
+      await repo.recordAudit(
+        makeRecord({
+          deviceId: "d1",
+          timestamp: "2024-06-01T12:00:00.000Z",
+          sessionId: "s2",
+        }),
+      );
+      await repo.recordAudit(
+        makeRecord({
+          deviceId: "d2",
+          timestamp: "2024-06-01T12:00:00.000Z",
+          sessionId: "s3",
+        }),
+      );
+      await repo.recordAudit(
+        makeRecord({
+          deviceId: "d1",
+          timestamp: "2024-06-01T18:00:00.000Z",
+          sessionId: "s4",
+        }),
+      );
 
       const page = await repo.listResults({
         deviceId: "d1",
@@ -242,9 +292,15 @@ describe("PerformanceAuditRepository", () => {
 
   describe("listResultsSince", () => {
     test("returns results since a given timestamp", async () => {
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T08:00:00.000Z", sessionId: "s1" }));
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T10:00:00.000Z", sessionId: "s2" }));
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T12:00:00.000Z", sessionId: "s3" }));
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T08:00:00.000Z", sessionId: "s1" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T10:00:00.000Z", sessionId: "s2" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T12:00:00.000Z", sessionId: "s3" }),
+      );
 
       const results = await repo.listResultsSince({
         sinceTimestamp: "2024-06-01T09:00:00.000Z",
@@ -256,13 +312,19 @@ describe("PerformanceAuditRepository", () => {
     });
 
     test("returns results since a given timestamp and id", async () => {
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T10:00:00.000Z", sessionId: "s1" }));
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T10:00:00.000Z", sessionId: "s2" }));
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T12:00:00.000Z", sessionId: "s3" }));
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T10:00:00.000Z", sessionId: "s1" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T10:00:00.000Z", sessionId: "s2" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T12:00:00.000Z", sessionId: "s3" }),
+      );
 
       // Get all results to find the id of s1
       const all = await repo.listResultsSince({});
-      const s1 = all.find(r => r.sessionId === "s1")!;
+      const s1 = all.find((r) => r.sessionId === "s1")!;
 
       const results = await repo.listResultsSince({
         sinceTimestamp: "2024-06-01T10:00:00.000Z",
@@ -275,12 +337,18 @@ describe("PerformanceAuditRepository", () => {
     });
 
     test("returns results ordered ascending by timestamp", async () => {
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T12:00:00.000Z", sessionId: "s3" }));
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T08:00:00.000Z", sessionId: "s1" }));
-      await repo.recordAudit(makeRecord({ timestamp: "2024-06-01T10:00:00.000Z", sessionId: "s2" }));
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T12:00:00.000Z", sessionId: "s3" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T08:00:00.000Z", sessionId: "s1" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ timestamp: "2024-06-01T10:00:00.000Z", sessionId: "s2" }),
+      );
 
       const results = await repo.listResultsSince({});
-      expect(results.map(r => r.sessionId)).toEqual(["s1", "s2", "s3"]);
+      expect(results.map((r) => r.sessionId)).toEqual(["s1", "s2", "s3"]);
     });
 
     test("filters by deviceId", async () => {
@@ -293,8 +361,12 @@ describe("PerformanceAuditRepository", () => {
     });
 
     test("filters by sessionId", async () => {
-      await repo.recordAudit(makeRecord({ sessionId: "s1", timestamp: "2024-06-01T10:00:00.000Z" }));
-      await repo.recordAudit(makeRecord({ sessionId: "s2", timestamp: "2024-06-01T11:00:00.000Z" }));
+      await repo.recordAudit(
+        makeRecord({ sessionId: "s1", timestamp: "2024-06-01T10:00:00.000Z" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ sessionId: "s2", timestamp: "2024-06-01T11:00:00.000Z" }),
+      );
 
       const results = await repo.listResultsSince({ sessionId: "s1" });
       expect(results).toHaveLength(1);
@@ -302,8 +374,12 @@ describe("PerformanceAuditRepository", () => {
     });
 
     test("filters by packageName", async () => {
-      await repo.recordAudit(makeRecord({ packageName: "com.a", timestamp: "2024-06-01T10:00:00.000Z" }));
-      await repo.recordAudit(makeRecord({ packageName: "com.b", timestamp: "2024-06-01T11:00:00.000Z" }));
+      await repo.recordAudit(
+        makeRecord({ packageName: "com.a", timestamp: "2024-06-01T10:00:00.000Z" }),
+      );
+      await repo.recordAudit(
+        makeRecord({ packageName: "com.b", timestamp: "2024-06-01T11:00:00.000Z" }),
+      );
 
       const results = await repo.listResultsSince({ packageName: "com.b" });
       expect(results).toHaveLength(1);
@@ -312,10 +388,12 @@ describe("PerformanceAuditRepository", () => {
 
     test("respects limit", async () => {
       for (let i = 0; i < 5; i++) {
-        await repo.recordAudit(makeRecord({
-          timestamp: `2024-06-01T${String(10 + i).padStart(2, "0")}:00:00.000Z`,
-          sessionId: `s${i}`,
-        }));
+        await repo.recordAudit(
+          makeRecord({
+            timestamp: `2024-06-01T${String(10 + i).padStart(2, "0")}:00:00.000Z`,
+            sessionId: `s${i}`,
+          }),
+        );
       }
 
       const results = await repo.listResultsSince({ limit: 3 });

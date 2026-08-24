@@ -3,10 +3,6 @@ import { execFile } from "node:child_process";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { registerVideoRecordingTools } from "../../src/server/videoRecordingTools";
-import { ToolRegistry } from "../../src/server/toolRegistry";
-import { resetVideoRecordingManagerDependencies } from "../../src/server/videoRecordingManager";
-import { serverConfig } from "../../src/utils/ServerConfig";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 
 const execFileAsync = promisify(execFile);
@@ -46,7 +42,7 @@ interface FfprobeStream {
 }
 
 function parseToolResult(response: ToolTextResponse): RecordingToolResult {
-  const text = response.content?.find(item => item.type === "text")?.text;
+  const text = response.content?.find((item) => item.type === "text")?.text;
   if (!text) {
     throw new Error(`Tool response did not contain text JSON: ${JSON.stringify(response)}`);
   }
@@ -76,6 +72,17 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
+async function runVideoRecordingCli(args: string[]): Promise<RecordingToolResult> {
+  // The workflow warms CtrlProxy in the daemon process before this test runs.
+  // Calling the public CLI keeps start and stop in that same process; importing
+  // the tool handler here would create a second cold DeviceSessionManager and
+  // reintroduce the runner-readiness timeout this test is meant to exercise.
+  const { stdout } = await execFileAsync("auto-mobile", ["--cli", "videoRecording", ...args], {
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return parseToolResult(JSON.parse(stdout) as ToolTextResponse);
+}
+
 async function assertCommandAvailable(command: string, args: string[]): Promise<void> {
   try {
     await execFileAsync(command, args);
@@ -97,7 +104,7 @@ async function assertPlayableMp4(filePath: string): Promise<FfprobeStream> {
     filePath,
   ]);
   const parsed = JSON.parse(stdout) as { streams?: FfprobeStream[] };
-  const stream = parsed.streams?.find(candidate => candidate.codec_type === "video");
+  const stream = parsed.streams?.find((candidate) => candidate.codec_type === "video");
   if (!stream) {
     throw new Error(`ffprobe did not find a video stream in ${filePath}: ${stdout}`);
   }
@@ -105,102 +112,113 @@ async function assertPlayableMp4(filePath: string): Promise<FfprobeStream> {
 }
 
 describeIntegration("iOS videoRecording start-stop integration", () => {
-  test("finalizes a non-empty playable MP4 from a real simulator recording", async () => {
-    await assertCommandAvailable("xcrun", ["simctl", "help"]);
-    await assertCommandAvailable("ffmpeg", ["-version"]);
-    await assertCommandAvailable("ffprobe", ["-version"]);
+  test(
+    "finalizes a non-empty playable MP4 from a real simulator recording",
+    async () => {
+      await assertCommandAvailable("xcrun", ["simctl", "help"]);
+      await assertCommandAvailable("ffmpeg", ["-version"]);
+      await assertCommandAvailable("ffprobe", ["-version"]);
 
-    if (!ToolRegistry.getTool("videoRecording")) {
-      registerVideoRecordingTools();
-    }
+      let recordingId: string | undefined;
+      let startPayload: RecordingToolResult | undefined;
+      let stopPayload: RecordingToolResult | undefined;
+      let outputPath: string | undefined;
+      let stopped = false;
 
-    serverConfig.setSkipCtrlProxyDownload(true);
-    const tool = ToolRegistry.getTool("videoRecording");
-    expect(tool).toBeDefined();
+      try {
+        const deviceId = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_DEVICE_ID;
+        startPayload = await runVideoRecordingCli([
+          "--action",
+          "start",
+          "--platform",
+          "ios",
+          ...(deviceId ? ["--deviceId", deviceId] : []),
+          "--outputName",
+          "issue-2628-ios-video-recording",
+          "--qualityPreset",
+          "low",
+          "--fps",
+          "15",
+          "--maxDuration",
+          "30",
+        ]);
 
-    let recordingId: string | undefined;
-    let startPayload: RecordingToolResult | undefined;
-    let stopPayload: RecordingToolResult | undefined;
-    let outputPath: string | undefined;
-    let stopped = false;
+        expect(startPayload.action).toBe("start");
+        expect(startPayload.count).toBe(1);
+        expect(startPayload.failures).toBeUndefined();
 
-    try {
-      const deviceId = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_DEVICE_ID;
-      startPayload = parseToolResult(await tool!.handler({
-        action: "start",
-        platform: "ios",
-        ...(deviceId ? { deviceId } : {}),
-        outputName: "issue-2628-ios-video-recording",
-        qualityPreset: "low",
-        fps: 15,
-        maxDuration: 30,
-      }) as ToolTextResponse);
+        const started = startPayload.recordings[0];
+        expect(started).toBeDefined();
+        recordingId = started.recordingId;
+        outputPath = started.outputPath;
+        expect(recordingId).toBeString();
+        expect(outputPath).toBeString();
 
-      expect(startPayload.action).toBe("start");
-      expect(startPayload.count).toBe(1);
-      expect(startPayload.failures).toBeUndefined();
+        await defaultTimer.sleep(getWaitMs());
 
-      const started = startPayload.recordings[0];
-      expect(started).toBeDefined();
-      recordingId = started.recordingId;
-      outputPath = started.outputPath;
-      expect(recordingId).toBeString();
-      expect(outputPath).toBeString();
+        stopPayload = await runVideoRecordingCli([
+          "--action",
+          "stop",
+          "--platform",
+          "ios",
+          "--recordingId",
+          recordingId,
+        ]);
+        stopped = true;
 
-      await defaultTimer.sleep(getWaitMs());
+        expect(stopPayload.action).toBe("stop");
+        expect(stopPayload.count).toBe(1);
+        expect(stopPayload.failures).toBeUndefined();
 
-      stopPayload = parseToolResult(await tool!.handler({
-        action: "stop",
-        platform: "ios",
-        recordingId,
-      }) as ToolTextResponse);
-      stopped = true;
+        const stoppedRecording = stopPayload.recordings[0];
+        const mp4Path = stoppedRecording.filePath ?? stoppedRecording.metadata?.filePath;
+        expect(mp4Path).toBeString();
 
-      expect(stopPayload.action).toBe("stop");
-      expect(stopPayload.count).toBe(1);
-      expect(stopPayload.failures).toBeUndefined();
+        const stats = await fsPromises.stat(mp4Path!);
+        expect(stats.size).toBeGreaterThan(0);
+        expect(stoppedRecording.sizeBytes ?? stoppedRecording.metadata?.sizeBytes).toBeGreaterThan(
+          0,
+        );
 
-      const stoppedRecording = stopPayload.recordings[0];
-      const mp4Path = stoppedRecording.filePath ?? stoppedRecording.metadata?.filePath;
-      expect(mp4Path).toBeString();
-
-      const stats = await fsPromises.stat(mp4Path!);
-      expect(stats.size).toBeGreaterThan(0);
-      expect(stoppedRecording.sizeBytes ?? stoppedRecording.metadata?.sizeBytes).toBeGreaterThan(0);
-
-      const videoStream = await assertPlayableMp4(mp4Path!);
-      expect(videoStream.codec_type).toBe("video");
-    } catch (error) {
-      let cleanupError: string | undefined;
-      if (recordingId && !stopped) {
-        try {
-          await tool!.handler({
-            action: "stop",
-            platform: "ios",
-            recordingId,
-          });
-        } catch (stopError) {
-          cleanupError = formatError(stopError);
+        const videoStream = await assertPlayableMp4(mp4Path!);
+        expect(videoStream.codec_type).toBe("video");
+      } catch (error) {
+        let cleanupError: string | undefined;
+        if (recordingId && !stopped) {
+          try {
+            await runVideoRecordingCli([
+              "--action",
+              "stop",
+              "--platform",
+              "ios",
+              "--recordingId",
+              recordingId,
+            ]);
+          } catch (stopError) {
+            cleanupError = formatError(stopError);
+          }
         }
-      }
 
-      const rawMovPath =
-        recordingId && outputPath
-          ? path.join(path.dirname(outputPath), `${recordingId}-raw.mov`)
-          : undefined;
-      throw new Error([
-        "iOS videoRecording start-stop integration failed.",
-        `error: ${formatError(error)}`,
-        `recordingId: ${recordingId ?? "(none)"}`,
-        `rawMovPath: ${rawMovPath ?? "(unknown)"}`,
-        `finalMp4Path: ${outputPath ?? "(unknown)"}`,
-        `startPayload: ${JSON.stringify(startPayload ?? null, null, 2)}`,
-        `stopPayload: ${JSON.stringify(stopPayload ?? null, null, 2)}`,
-        cleanupError ? `cleanupStopError: ${cleanupError}` : undefined,
-      ].filter((line): line is string => Boolean(line)).join("\n"));
-    } finally {
-      serverConfig.setSkipCtrlProxyDownload(false);
-      resetVideoRecordingManagerDependencies();
-    }
-  }, getTestTimeoutMs());
+        const rawMovPath =
+          recordingId && outputPath
+            ? path.join(path.dirname(outputPath), `${recordingId}-raw.mov`)
+            : undefined;
+        throw new Error(
+          [
+            "iOS videoRecording start-stop integration failed.",
+            `error: ${formatError(error)}`,
+            `recordingId: ${recordingId ?? "(none)"}`,
+            `rawMovPath: ${rawMovPath ?? "(unknown)"}`,
+            `finalMp4Path: ${outputPath ?? "(unknown)"}`,
+            `startPayload: ${JSON.stringify(startPayload ?? null, null, 2)}`,
+            `stopPayload: ${JSON.stringify(stopPayload ?? null, null, 2)}`,
+            cleanupError ? `cleanupStopError: ${cleanupError}` : undefined,
+          ]
+            .filter((line): line is string => Boolean(line))
+            .join("\n"),
+        );
+      }
+    },
+    getTestTimeoutMs(),
+  );
 });

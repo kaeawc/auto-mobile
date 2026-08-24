@@ -19,7 +19,9 @@ describe("SetAndroidNotificationPolicyAccess", () => {
     const result = await action.execute("com.example.app", { allowed: true });
 
     expect(result.success).toBe(true);
-    expect(client.wasCommandExecuted("shell cmd notification allow_dnd 'com.example.app'")).toBe(true);
+    expect(client.wasCommandExecuted("shell cmd notification allow_dnd 'com.example.app'")).toBe(
+      true,
+    );
   });
 
   test("quotes package names before passing them to the device shell", async () => {
@@ -42,7 +44,7 @@ describe("SetAndroidNotificationPolicyAccess", () => {
     client.setCommandResult(
       "shell cmd notification allow_dnd 'com.example.app'",
       "",
-      "java.lang.SecurityException: nope"
+      "java.lang.SecurityException: nope",
     );
 
     const action = new SetAndroidNotificationPolicyAccess(androidDevice, factory);
@@ -58,7 +60,7 @@ describe("SetAndroidNotificationPolicyAccess", () => {
     client.setCommandResult(
       "shell cmd notification disallow_dnd 'com.example.app'",
       "",
-      "java.lang.SecurityException: ignored"
+      "java.lang.SecurityException: ignored",
     );
 
     const action = new SetAndroidNotificationPolicyAccess(androidDevice, factory);

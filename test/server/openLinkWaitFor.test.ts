@@ -51,7 +51,7 @@ describe("openLinkSchema waitFor / settled", () => {
         platform: "android",
         url: "myapp://home",
         settled: { quietPeriodMs: 500 },
-      }).success
+      }).success,
     ).toBe(false);
   });
 });

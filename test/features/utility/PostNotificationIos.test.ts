@@ -10,7 +10,7 @@ describe("PostNotification - iOS Simulator", () => {
   let simctl: FakeSimCtlClient;
 
   const makeDevice = (deviceId: string): BootedDevice =>
-    ({ deviceId, platform: "ios" } as BootedDevice);
+    ({ deviceId, platform: "ios" }) as BootedDevice;
 
   const make = (deviceId: string) =>
     new PostNotification(makeDevice(deviceId), null, null, simctl as any);
@@ -66,7 +66,11 @@ describe("PostNotification - iOS Simulator", () => {
 
   test("bigPicture/imagePath are ignored with a warning (still succeeds)", async () => {
     const result = await make(SIM_UDID).execute({
-      title: "t", body: "b", appId: "com.x", imageType: "bigPicture", imagePath: "/tmp/x.png",
+      title: "t",
+      body: "b",
+      appId: "com.x",
+      imageType: "bigPicture",
+      imagePath: "/tmp/x.png",
     });
     expect(result.success).toBe(true);
     expect(result.warning).toContain("bigPicture");
@@ -75,7 +79,10 @@ describe("PostNotification - iOS Simulator", () => {
 
   test("action buttons are ignored with a warning", async () => {
     const result = await make(SIM_UDID).execute({
-      title: "t", body: "b", appId: "com.x", actions: [{ label: "Open", actionId: "open" }],
+      title: "t",
+      body: "b",
+      appId: "com.x",
+      actions: [{ label: "Open", actionId: "open" }],
     });
     expect(result.success).toBe(true);
     expect(result.warning).toContain("action buttons");
@@ -83,7 +90,9 @@ describe("PostNotification - iOS Simulator", () => {
 
   test("oversized payload is rejected before invoking simctl", async () => {
     const result = await make(SIM_UDID).execute({
-      title: "t", body: "x".repeat(5000), appId: "com.x",
+      title: "t",
+      body: "x".repeat(5000),
+      appId: "com.x",
     });
     expect(result.success).toBe(false);
     expect(result.error).toContain("4096");

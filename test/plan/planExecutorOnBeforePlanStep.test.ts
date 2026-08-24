@@ -18,7 +18,7 @@ describe("PlanExecutor — onBeforePlanStep", () => {
       "hookTestNoop",
       "Mock noop",
       noopSchema,
-      mock(async () => createStructuredToolResponse({ ok: true }))
+      mock(async () => createStructuredToolResponse({ ok: true })),
     );
     (ToolRegistry.getTool("hookTestNoop") as { requiresDevice: boolean }).requiresDevice = true;
   });
@@ -35,9 +35,18 @@ describe("PlanExecutor — onBeforePlanStep", () => {
       ],
     };
 
-    await planExecutor.executePlan(plan, 0, "android", "emulator-5554", undefined, undefined, undefined, {
-      onBeforePlanStep: hook,
-    });
+    await planExecutor.executePlan(
+      plan,
+      0,
+      "android",
+      "emulator-5554",
+      undefined,
+      undefined,
+      undefined,
+      {
+        onBeforePlanStep: hook,
+      },
+    );
 
     expect(hook).toHaveBeenCalledTimes(3);
     expect(hook.mock.calls[0]?.[0]).toEqual({ stepIndex: 0, totalSteps: 3 });
@@ -57,9 +66,18 @@ describe("PlanExecutor — onBeforePlanStep", () => {
       ],
     };
 
-    await planExecutor.executePlan(plan, 1, "android", "emulator-5554", undefined, undefined, undefined, {
-      onBeforePlanStep: hook,
-    });
+    await planExecutor.executePlan(
+      plan,
+      1,
+      "android",
+      "emulator-5554",
+      undefined,
+      undefined,
+      undefined,
+      {
+        onBeforePlanStep: hook,
+      },
+    );
 
     expect(hook).toHaveBeenCalledTimes(2);
     expect(hook.mock.calls[0]?.[0]).toEqual({ stepIndex: 1, totalSteps: 3 });

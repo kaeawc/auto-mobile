@@ -17,7 +17,7 @@ const QUALITY_PRESET_BITRATE_BPS: Record<CaptureQualityPreset, number> = {
 
 /** The preset's default bitrate, or undefined when no preset was requested. */
 export function qualityPresetBitrateBps(
-  quality: CaptureQualityPreset | undefined
+  quality: CaptureQualityPreset | undefined,
 ): number | undefined {
   return quality ? QUALITY_PRESET_BITRATE_BPS[quality] : undefined;
 }

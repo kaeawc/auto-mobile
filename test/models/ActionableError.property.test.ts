@@ -16,7 +16,7 @@ const nonActionable = fc.oneof(
   fc.constant(null),
   fc.constant(undefined),
   fc.object(),
-  fc.string().map(m => new Error(m))
+  fc.string().map((m) => new Error(m)),
 );
 
 describe("toActionableError (property-based)", () => {
@@ -26,7 +26,7 @@ describe("toActionableError (property-based)", () => {
         const result = toActionableError(error, ctx);
         return result instanceof ActionableError && result instanceof Error;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -37,7 +37,7 @@ describe("toActionableError (property-based)", () => {
         const result = toActionableError(original, ctx);
         return result === original && result.message === message;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -46,17 +46,24 @@ describe("toActionableError (property-based)", () => {
       fc.property(fc.string({ maxLength: 40 }), context, (message, ctx) => {
         return toActionableError(new Error(message), ctx).message === `${ctx}: ${message}`;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("wraps a non-Error value as `context: String(value)`", () => {
-    const nonError = fc.oneof(fc.string(), fc.integer(), fc.boolean(), fc.constant(null), fc.constant(undefined), fc.object());
+    const nonError = fc.oneof(
+      fc.string(),
+      fc.integer(),
+      fc.boolean(),
+      fc.constant(null),
+      fc.constant(undefined),
+      fc.object(),
+    );
     fc.assert(
       fc.property(nonError, context, (value, ctx) => {
         return toActionableError(value, ctx).message === `${ctx}: ${String(value)}`;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -66,7 +73,7 @@ describe("toActionableError (property-based)", () => {
         const once = toActionableError(error, c1);
         return toActionableError(once, c2) === once;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -75,7 +82,7 @@ describe("toActionableError (property-based)", () => {
       fc.property(nonActionable, context, (error, ctx) => {
         return toActionableError(error, ctx).message.startsWith(`${ctx}: `);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

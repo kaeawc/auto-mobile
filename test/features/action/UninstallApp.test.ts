@@ -509,7 +509,9 @@ describe("UninstallApp (Android)", () => {
         controller.signal,
       ),
     ).rejects.toThrow(OPERATION_CANCELLED_MESSAGE);
-    expect(adb.getCommandCalls().filter((call) => call.command === "shell pm list packages --user 0")).toHaveLength(1);
+    expect(
+      adb.getCommandCalls().filter((call) => call.command === "shell pm list packages --user 0"),
+    ).toHaveLength(1);
     expect(
       adb
         .getCommandCalls()

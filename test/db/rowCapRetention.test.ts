@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  createRowCapRetentionState,
-  runAmortizedRetention,
-} from "../../src/db/rowCapRetention";
+import { createRowCapRetentionState, runAmortizedRetention } from "../../src/db/rowCapRetention";
 
 /**
  * Unit coverage for the amortized row-cap retention wrapper shared by the
@@ -23,20 +20,44 @@ describe("runAmortizedRetention (#3435/#3436/#3440)", () => {
 
     // interval-1 calls are pure no-ops.
     for (let i = 0; i < interval - 1; i++) {
-      await runAmortizedRetention(state, async () => { runs++; }, interval);
+      await runAmortizedRetention(
+        state,
+        async () => {
+          runs++;
+        },
+        interval,
+      );
     }
     expect(runs).toBe(0);
 
     // The interval-th call fires exactly once and resets the counter.
-    await runAmortizedRetention(state, async () => { runs++; }, interval);
+    await runAmortizedRetention(
+      state,
+      async () => {
+        runs++;
+      },
+      interval,
+    );
     expect(runs).toBe(1);
 
     // The cycle repeats: another interval-1 no-ops, then one fire.
     for (let i = 0; i < interval - 1; i++) {
-      await runAmortizedRetention(state, async () => { runs++; }, interval);
+      await runAmortizedRetention(
+        state,
+        async () => {
+          runs++;
+        },
+        interval,
+      );
     }
     expect(runs).toBe(1);
-    await runAmortizedRetention(state, async () => { runs++; }, interval);
+    await runAmortizedRetention(
+      state,
+      async () => {
+        runs++;
+      },
+      interval,
+    );
     expect(runs).toBe(2);
   });
 
@@ -45,7 +66,9 @@ describe("runAmortizedRetention (#3435/#3436/#3440)", () => {
     let running = 0;
     let maxConcurrent = 0;
     let release: () => void = () => {};
-    const gate = new Promise<void>(resolve => { release = resolve; });
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
 
     const body = async (): Promise<void> => {
       running++;
@@ -69,12 +92,24 @@ describe("runAmortizedRetention (#3435/#3436/#3440)", () => {
     const state = createRowCapRetentionState();
 
     await expect(
-      runAmortizedRetention(state, async () => { throw new Error("boom"); }, 1)
+      runAmortizedRetention(
+        state,
+        async () => {
+          throw new Error("boom");
+        },
+        1,
+      ),
     ).rejects.toThrow("boom");
 
     // The guard is released, so a subsequent gated call can still run.
     let ran = false;
-    await runAmortizedRetention(state, async () => { ran = true; }, 1);
+    await runAmortizedRetention(
+      state,
+      async () => {
+        ran = true;
+      },
+      1,
+    );
     expect(ran).toBe(true);
   });
 });

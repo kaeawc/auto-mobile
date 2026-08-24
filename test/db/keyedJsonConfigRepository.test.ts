@@ -67,9 +67,9 @@ describe("KeyedJsonConfigRepository", () => {
       await expect(
         Promise.all(
           Array.from({ length: 10 }, (_unused, index) =>
-            repo.setConfig(index % 2 === 0 ? firstConfig : secondConfig)
-          )
-        )
+            repo.setConfig(index % 2 === 0 ? firstConfig : secondConfig),
+          ),
+        ),
       ).resolves.toBeDefined();
 
       expect(await db.selectFrom(tableName).selectAll().execute()).toHaveLength(1);
@@ -165,9 +165,12 @@ describe("KeyedJsonConfigRepository", () => {
       .execute();
 
     expect(await repo.getConfig()).toBeNull();
-    expect(log.at("warn")).toContainEqual(expect.objectContaining({
-      message: expect.stringContaining("[DeviceSnapshotConfigRepository] Failed to parse config JSON:"),
-    }));
+    expect(log.at("warn")).toContainEqual(
+      expect.objectContaining({
+        message: expect.stringContaining(
+          "[DeviceSnapshotConfigRepository] Failed to parse config JSON:",
+        ),
+      }),
+    );
   });
-
 });

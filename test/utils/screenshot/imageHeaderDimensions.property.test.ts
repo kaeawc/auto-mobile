@@ -23,13 +23,18 @@ function buildPng(width: number, height: number): Buffer {
  */
 function buildJpeg(width: number, height: number): Buffer {
   return Buffer.from([
-    0xff, 0xd8, // SOI
-    0xff, 0xc0, // SOF0 marker
-    0x00, 0x08, // segment length = 8
+    0xff,
+    0xd8, // SOI
+    0xff,
+    0xc0, // SOF0 marker
+    0x00,
+    0x08, // segment length = 8
     0x08, // precision
-    (height >> 8) & 0xff, height & 0xff,
-    (width >> 8) & 0xff, width & 0xff,
-    0x01 // number of components
+    (height >> 8) & 0xff,
+    height & 0xff,
+    (width >> 8) & 0xff,
+    width & 0xff,
+    0x01, // number of components
   ]);
 }
 
@@ -38,14 +43,14 @@ function buildJpeg(width: number, height: number): Buffer {
 // signature check and then risk an out-of-bounds read on truncated garbage.
 const arbitraryBytes = fc.oneof(
   fc.uint8Array({ minLength: 0, maxLength: 64 }),
-  fc.uint8Array({ minLength: 1, maxLength: 64 }).map(bytes => {
+  fc.uint8Array({ minLength: 1, maxLength: 64 }).map((bytes) => {
     bytes[0] = 0x89;
     return bytes;
   }),
-  fc.uint8Array({ minLength: 1, maxLength: 64 }).map(bytes => {
+  fc.uint8Array({ minLength: 1, maxLength: 64 }).map((bytes) => {
     bytes[0] = 0xff;
     return bytes;
-  })
+  }),
 );
 
 const dimension = fc.integer({ min: 1, max: 65535 });
@@ -53,7 +58,7 @@ const dimension = fc.integer({ min: 1, max: 65535 });
 describe("readImageHeaderDimensions (property-based)", () => {
   test("never throws over arbitrary byte buffers of any length or content", () => {
     fc.assert(
-      fc.property(arbitraryBytes, bytes => {
+      fc.property(arbitraryBytes, (bytes) => {
         const buffer = Buffer.from(bytes);
         try {
           readImageHeaderDimensions(buffer);
@@ -62,7 +67,7 @@ describe("readImageHeaderDimensions (property-based)", () => {
           return false;
         }
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -72,7 +77,7 @@ describe("readImageHeaderDimensions (property-based)", () => {
         const result = readImageHeaderDimensions(buildPng(width, height));
         return result !== null && result.width === width && result.height === height;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -82,7 +87,7 @@ describe("readImageHeaderDimensions (property-based)", () => {
         const truncated = buildPng(width, height).subarray(0, n);
         return readImageHeaderDimensions(truncated) === null;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -92,7 +97,7 @@ describe("readImageHeaderDimensions (property-based)", () => {
         const result = readImageHeaderDimensions(buildJpeg(width, height));
         return result !== null && result.width === width && result.height === height;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -105,7 +110,7 @@ describe("readImageHeaderDimensions (property-based)", () => {
         const truncated = buildJpeg(width, height).subarray(0, n);
         return readImageHeaderDimensions(truncated) === null;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

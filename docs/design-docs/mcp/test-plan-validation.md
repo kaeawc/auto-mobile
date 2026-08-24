@@ -19,6 +19,7 @@ All test plan YAML files are validated against a JSON schema that defines:
 ## Validation Levels
 
 ### 1. Parse Validation
+
 All YAML files must be syntactically valid and parseable by the YAML parser. Parse errors include line and column numbers to help locate issues.
 
 **YAML Features Supported:**
@@ -29,6 +30,7 @@ All YAML files must be syntactically valid and parseable by the YAML parser. Par
 - ✅ Multi-document YAML (though plans should use single documents)
 
 ### 2. Schema Validation
+
 Test plans must conform to the AutoMobile test plan schema:
 
 - `schemas/test-plan.schema.json` - JSON Schema Draft 7 format
@@ -63,6 +65,7 @@ Validation happens automatically in two places:
 ## Running Validation Locally
 
 ### Validate All Test Plans
+
 ```bash
 bun run validate:yaml
 ```
@@ -70,6 +73,7 @@ bun run validate:yaml
 This scans all `**/test-plans/**/*.yaml` files in the repository.
 
 ### Validate Specific File or Pattern
+
 ```bash
 bun scripts/validate-yaml.ts "path/to/your/plan.yaml"
 bun scripts/validate-yaml.ts "test/resources/**/*.yaml"
@@ -78,6 +82,7 @@ bun scripts/validate-yaml.ts "test/resources/**/*.yaml"
 ### Example Output
 
 **Success:**
+
 ```text
 AutoMobile Test Plan YAML Validation
 ====================================
@@ -98,6 +103,7 @@ Invalid files: 0
 ```
 
 **Failure:**
+
 ```text
 ✗ test/resources/test-plans/my-plan.yaml
   root: Missing required property 'name'
@@ -125,11 +131,11 @@ If validation fails, the Fast Validation check fails and blocks merging.
 ### Required Fields
 
 ```yaml
-name: my-test-plan          # Required: unique plan identifier
-steps:                      # Required: at least one step
-  - tool: observe           # Required: tool name
-    label: Wait for app     # Optional: human-readable description
-    optional: true          # Optional: best-effort step (see below)
+name: my-test-plan # Required: unique plan identifier
+steps: # Required: at least one step
+  - tool: observe # Required: tool name
+    label: Wait for app # Optional: human-readable description
+    optional: true # Optional: best-effort step (see below)
 ```
 
 ### Optional (best-effort) steps
@@ -200,7 +206,7 @@ non-empty string (`{ "type": "string", "minLength": 1 }`) and steps use
 schema validation. It is caught later at execution time when the tool is not
 found in the registry.
 
-What the schema *does* enforce is tool-specific **parameter** shapes via
+What the schema _does_ enforce is tool-specific **parameter** shapes via
 `if`/`then` blocks keyed on `tool` (e.g. `dragAndDrop`, `highlight`). Adding a
 new tool does not require a schema change unless it needs such a parameter
 constraint.
@@ -210,6 +216,7 @@ constraint.
 Step parameters can be specified in two ways:
 
 **1. Inside `params` object (recommended for new plans):**
+
 ```yaml
 steps:
   - tool: tapOn
@@ -219,6 +226,7 @@ steps:
 ```
 
 **2. As top-level step properties (also valid):**
+
 ```yaml
 steps:
   - tool: tapOn
@@ -233,6 +241,7 @@ Both formats are valid. The `PlanNormalizer` converts top-level properties into 
 Test plans support YAML anchors and merge keys to reduce repetition and make plans more maintainable:
 
 **Example: Reusing common parameters**
+
 ```yaml
 name: anchor-example
 steps:
@@ -247,8 +256,8 @@ steps:
   # Reuse anchor with merge and override
   - tool: launchApp
     params:
-      <<: *launch-params  # Merge all properties from anchor
-      coldBoot: true       # Override specific property
+      <<: *launch-params # Merge all properties from anchor
+      coldBoot: true # Override specific property
     label: Second launch with cold boot
 
   # Use same params again
@@ -258,6 +267,7 @@ steps:
 ```
 
 **Example: Multi-device plans with anchors**
+
 ```yaml
 name: multi-device-anchor-example
 devices:
@@ -278,7 +288,7 @@ steps:
   - tool: observe
     params:
       <<: *observe-common
-      device: B  # Override device while keeping other params
+      device: B # Override device while keeping other params
 ```
 
 The validation system fully supports YAML anchors and merge keys - they are resolved during YAML parsing before schema validation occurs.
@@ -288,11 +298,13 @@ The validation system fully supports YAML anchors and merge keys - they are reso
 The schema allows legacy fields for backwards compatibility:
 
 **Plan level:**
+
 - `generated` → Use `metadata.createdAt`
 - `appId` → Use `metadata.appId`
 - `parameters` → Deprecated
 
 **Step level:**
+
 - `description` → Use `label`
 
 These fields are marked as deprecated but won't fail validation. The migration system handles conversion at runtime.
@@ -332,7 +344,7 @@ This enables:
 ### In TypeScript/JavaScript
 
 ```typescript
-import { PlanSchemaValidator } from './src/utils/plan/PlanSchemaValidator';
+import { PlanSchemaValidator } from "./src/utils/plan/PlanSchemaValidator";
 
 const validator = new PlanSchemaValidator();
 await validator.loadSchema();
@@ -340,14 +352,14 @@ await validator.loadSchema();
 // Validate YAML content
 const result = validator.validateYaml(yamlContent);
 if (!result.valid) {
-  console.error('Validation errors:');
-  result.errors?.forEach(err => {
+  console.error("Validation errors:");
+  result.errors?.forEach((err) => {
     console.error(`  ${err.field}: ${err.message}`);
   });
 }
 
 // Validate file
-const fileResult = await validator.validateFile('path/to/plan.yaml');
+const fileResult = await validator.validateFile("path/to/plan.yaml");
 ```
 
 ### In Kotlin/Java (JUnit Runner)
@@ -394,6 +406,7 @@ Check the schema at schemas/test-plan.schema.json for details.
 ### "Unknown property" errors for valid parameters
 
 If you see errors like:
+
 ```text
 steps[0]: Unknown property 'auditType'. This might be a legacy field - check the migration guide.
 ```
@@ -408,12 +421,14 @@ constraints](#tool-names-and-per-tool-constraints)). A misspelled or
 nonexistent tool therefore surfaces later, at execution time, as a
 "tool not found in registry" error rather than a schema error. If a plan runs
 but a step fails with a registry error, check:
+
 1. Is the tool name spelled correctly?
 2. Has the tool been deprecated or renamed?
 
 ### YAML parsing errors
 
 If you see:
+
 ```yaml
 root: YAML parsing failed: bad indentation of a mapping entry at line 10, column 3
 ```

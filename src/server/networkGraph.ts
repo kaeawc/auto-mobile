@@ -53,7 +53,7 @@ interface EventGroup {
 
 export function buildNetworkGraph(
   events: NetworkEventWithId[],
-  options: { minRequests?: number } = {}
+  options: { minRequests?: number } = {},
 ): NetworkGraph {
   const minRequests = options.minRequests ?? 1;
 
@@ -91,7 +91,7 @@ export function buildNetworkGraph(
     }
 
     const groups = entry.pathGroups.get(groupKey)!;
-    let group = groups.find(g => g.method === event.method);
+    let group = groups.find((g) => g.method === event.method);
     if (!group) {
       group = {
         method: event.method,
@@ -118,7 +118,7 @@ export function buildNetworkGraph(
 
     for (const [groupKey, groups] of pathGroups) {
       const [path] = groupKey.split("::");
-      const segments = path.split("/").filter(s => s.length > 0);
+      const segments = path.split("/").filter((s) => s.length > 0);
 
       for (const group of groups) {
         const totalRequests = group.success + group.errors;
@@ -152,7 +152,7 @@ export function buildNetworkGraph(
 
 function mergeLeafStats(
   target: GraphLeaf & { _durations?: number[] },
-  source: GraphLeaf & { _durations?: number[] }
+  source: GraphLeaf & { _durations?: number[] },
 ): void {
   target.success = (target.success ?? 0) + source.success;
   target.errors = (target.errors ?? 0) + source.errors;
@@ -190,7 +190,7 @@ function insertIntoTree(
   node: Record<string, GraphNode>,
   segments: string[],
   index: number,
-  leaf: GraphLeaf
+  leaf: GraphLeaf,
 ): void {
   if (index >= segments.length) {
     // Root path "/" case — put stats directly

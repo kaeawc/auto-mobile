@@ -1,11 +1,6 @@
 export type IosInstalledAppRecord = Record<string, unknown>;
 
-const BUNDLE_ID_KEYS = [
-  "bundleId",
-  "bundleIdentifier",
-  "bundleID",
-  "CFBundleIdentifier"
-] as const;
+const BUNDLE_ID_KEYS = ["bundleId", "bundleIdentifier", "bundleID", "CFBundleIdentifier"] as const;
 
 /**
  * Returns the normalized bundle identifier from the simulator and devicectl

@@ -13,6 +13,7 @@ The `explore` tool supports three modes for different use cases:
 **Purpose**: Build the navigation graph from scratch by discovering new screens and transitions.
 
 **Behavior**:
+
 - Heavily favors novel elements and unexplored areas
 - Prioritizes coverage over validation
 - Records new screens and transitions as they're discovered
@@ -23,6 +24,7 @@ The `explore` tool supports three modes for different use cases:
 **Purpose**: Navigate through a known navigation graph to verify it matches current app behavior.
 
 **Behavior**:
+
 - Requires an existing navigation graph
 - Systematically traverses all known edges in the graph
 - Validates that each navigation transition still works as recorded
@@ -31,12 +33,14 @@ The `explore` tool supports three modes for different use cases:
 - Provides graph traversal metrics (edges traversed, nodes visited, coverage %)
 
 **Use Cases**:
+
 - **Regression Testing**: Verify navigation paths still work after code changes
 - **State Verification**: Navigate to specific screens to verify UI/functionality
 - **Performance Testing**: Measure navigation performance across known routes
 - **Graph Quality Assessment**: Validate graph accuracy and identify stale edges
 
 **Validation Results**:
+
 ```typescript
 {
   graphTraversal: {
@@ -52,6 +56,7 @@ The `explore` tool supports three modes for different use cases:
 
 **Edge Validation**:
 Each edge traversal records:
+
 - Success/failure of the navigation
 - Expected vs actual destination
 - Element matching confidence
@@ -62,6 +67,7 @@ Each edge traversal records:
 **Purpose**: Balance between discovery and validation.
 
 **Behavior**:
+
 - Uses known graph when available but allows discovery
 - Balances navigation score, novelty, and coverage equally
 - Suitable for general exploration of partially-known apps

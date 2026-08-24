@@ -143,7 +143,7 @@ function estimateToolTokens(): { total: number; items: ToolEstimate[] } {
     items.push({
       name: tool.name,
       text: toolJson,
-      tokenCount
+      tokenCount,
     });
   }
 
@@ -165,7 +165,7 @@ function estimateResourceTokens(): { total: number; items: ResourceEstimate[] } 
       uri: resource.uri,
       name: resource.name,
       text: resourceJson,
-      tokenCount
+      tokenCount,
     });
   }
 
@@ -187,7 +187,7 @@ function estimateResourceTemplateTokens(): { total: number; items: ResourceEstim
       uri: template.uriTemplate,
       name: template.name,
       text: templateJson,
-      tokenCount
+      tokenCount,
     });
   }
 
@@ -198,7 +198,9 @@ function estimateResourceTemplateTokens(): { total: number; items: ResourceEstim
 /**
  * Load and estimate tokens for operation traces
  */
-function estimateOperationTokens(tracePath: string): { total: number; items: OperationEstimate[] } | null {
+function estimateOperationTokens(
+  tracePath: string,
+): { total: number; items: OperationEstimate[] } | null {
   if (!fs.existsSync(tracePath)) {
     console.error(`Trace file not found: ${tracePath}`);
     return null;
@@ -224,7 +226,7 @@ function estimateOperationTokens(tracePath: string): { total: number; items: Ope
         index: i,
         operation: operation.method || operation.tool || `operation-${i}`,
         text: operationJson,
-        tokenCount
+        tokenCount,
       });
     }
 
@@ -268,7 +270,9 @@ function printReport(report: EstimationReport): void {
   } else {
     const sortedResources = [...report.resources.items].sort((a, b) => b.tokenCount - a.tokenCount);
     for (const resource of sortedResources) {
-      console.log(`  ${resource.name.padEnd(30)} ${formatNumber(resource.tokenCount).padStart(10)} tokens`);
+      console.log(
+        `  ${resource.name.padEnd(30)} ${formatNumber(resource.tokenCount).padStart(10)} tokens`,
+      );
     }
   }
   console.log("");
@@ -279,9 +283,13 @@ function printReport(report: EstimationReport): void {
   if (report.resourceTemplates.items.length === 0) {
     console.log("  (no resource templates registered)");
   } else {
-    const sortedTemplates = [...report.resourceTemplates.items].sort((a, b) => b.tokenCount - a.tokenCount);
+    const sortedTemplates = [...report.resourceTemplates.items].sort(
+      (a, b) => b.tokenCount - a.tokenCount,
+    );
     for (const template of sortedTemplates) {
-      console.log(`  ${template.name.padEnd(30)} ${formatNumber(template.tokenCount).padStart(10)} tokens`);
+      console.log(
+        `  ${template.name.padEnd(30)} ${formatNumber(template.tokenCount).padStart(10)} tokens`,
+      );
     }
   }
   console.log("");
@@ -291,7 +299,8 @@ function printReport(report: EstimationReport): void {
     console.log(`OPERATION TRACES: ${formatNumber(report.operations.total)} tokens`);
     console.log("-".repeat(80));
     const sortedOps = [...report.operations.items].sort((a, b) => b.tokenCount - a.tokenCount);
-    for (const op of sortedOps.slice(0, 20)) { // Show top 20
+    for (const op of sortedOps.slice(0, 20)) {
+      // Show top 20
       const label = `  [${op.index}] ${op.operation || "unknown"}`;
       console.log(`${label.padEnd(40)} ${formatNumber(op.tokenCount).padStart(10)} tokens`);
     }
@@ -305,11 +314,19 @@ function printReport(report: EstimationReport): void {
   console.log("=".repeat(80));
   console.log("SUMMARY");
   console.log("=".repeat(80));
-  console.log(`  Tool definitions:        ${formatNumber(report.tools.total).padStart(10)} tokens (${report.tools.items.length} tools)`);
-  console.log(`  Resource definitions:    ${formatNumber(report.resources.total).padStart(10)} tokens (${report.resources.items.length} resources)`);
-  console.log(`  Resource templates:      ${formatNumber(report.resourceTemplates.total).padStart(10)} tokens (${report.resourceTemplates.items.length} templates)`);
+  console.log(
+    `  Tool definitions:        ${formatNumber(report.tools.total).padStart(10)} tokens (${report.tools.items.length} tools)`,
+  );
+  console.log(
+    `  Resource definitions:    ${formatNumber(report.resources.total).padStart(10)} tokens (${report.resources.items.length} resources)`,
+  );
+  console.log(
+    `  Resource templates:      ${formatNumber(report.resourceTemplates.total).padStart(10)} tokens (${report.resourceTemplates.items.length} templates)`,
+  );
   if (report.operations) {
-    console.log(`  Operation traces:        ${formatNumber(report.operations.total).padStart(10)} tokens (${report.operations.items.length} operations)`);
+    console.log(
+      `  Operation traces:        ${formatNumber(report.operations.total).padStart(10)} tokens (${report.operations.items.length} operations)`,
+    );
   }
   console.log("-".repeat(80));
   console.log(`  TOTAL ESTIMATED TOKENS:  ${formatNumber(report.grandTotal).padStart(10)}`);
@@ -366,14 +383,14 @@ async function main() {
     resources: resourceEstimate,
     resourceTemplates: resourceTemplateEstimate,
     operations: operationEstimate || undefined,
-    grandTotal
+    grandTotal,
   };
 
   // Print report
   printReport(report);
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error("Fatal error:", error);
   process.exit(1);
 });

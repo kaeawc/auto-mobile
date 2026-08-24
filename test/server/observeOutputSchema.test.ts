@@ -12,7 +12,10 @@ import {
 } from "../../src/server/compactBoundsAdvertisement";
 import { flattenTopLevelUnion } from "../../src/server/TopLevelUnionFlattener";
 import { sanitizeObserveResult } from "../../src/features/observe/output/ObserveResultOutput";
-import { loadAndroidHomeObserve, loadIosFractionalObserve } from "../fixtures/observe/observeFixture";
+import {
+  loadAndroidHomeObserve,
+  loadIosFractionalObserve,
+} from "../fixtures/observe/observeFixture";
 import { ToolRegistry, toolHasOutputSchema } from "../../src/server/toolRegistry";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -52,13 +55,17 @@ function collectBoundsUnions(schema: unknown): Array<Record<string, unknown>> {
 
 describe("observeResultSchema: parses real captures (#3025)", () => {
   test("models declarative waitFor outcome metadata", () => {
-    expect(() => observeResultSchema.parse({
-      matched: false,
-      timedOut: true,
-      polls: 3,
-      waitMs: 250,
-      candidates: [{ "resource-id": "submit", "bounds": { left: 0, top: 0, right: 10, bottom: 10 } }],
-    })).not.toThrow();
+    expect(() =>
+      observeResultSchema.parse({
+        matched: false,
+        timedOut: true,
+        polls: 3,
+        waitMs: 250,
+        candidates: [
+          { "resource-id": "submit", bounds: { left: 0, top: 0, right: 10, bottom: 10 } },
+        ],
+      }),
+    ).not.toThrow();
     expect(() => observeResultSchema.parse({ polls: -1 })).toThrow();
     expect(() => observeResultSchema.parse({ waitMs: -1 })).toThrow();
   });
@@ -80,18 +87,20 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
       },
       layoutWarnings: {
         scope: "full",
-        warnings: [{
-          type: "important-content-under-inset",
-          severity: "warning",
-          element: { text: "Title", bounds: { top: 0, right: 100, bottom: 30, left: 0 } },
-          categories: ["text"],
-          insetTypes: ["safeArea"],
-          sides: ["top"],
-          overflowPx: { top: 30 },
-          insetPx: { top: 59.5 },
-          overlapPercent: 100,
-          confidence: "high",
-        }],
+        warnings: [
+          {
+            type: "important-content-under-inset",
+            severity: "warning",
+            element: { text: "Title", bounds: { top: 0, right: 100, bottom: 30, left: 0 } },
+            categories: ["text"],
+            insetTypes: ["safeArea"],
+            sides: ["top"],
+            overflowPx: { top: 30 },
+            insetPx: { top: 59.5 },
+            overlapPercent: 100,
+            confidence: "high",
+          },
+        ],
       },
     });
 
@@ -109,25 +118,30 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
   });
 
   test("accepts nullable Android inset categories", () => {
-    expect(() => observeResultSchema.parse({
-      insets: {
-        available: true,
-        source: "android-window-metrics",
-        units: "physical-pixels",
-        systemBars: { visible: { top: 24, right: 0, bottom: 48, left: 0 }, stable: { top: 24, right: 0, bottom: 48, left: 0 } },
-        displayCutout: null,
-        systemGestures: null,
-        mandatorySystemGestures: null,
-        tappableElement: null,
-        systemChrome: {
-          visibility: "partial",
-          statusBar: "visible",
-          navigationBar: "hidden",
-          homeIndicatorAutoHideRequested: null,
-          source: "android-window-insets",
+    expect(() =>
+      observeResultSchema.parse({
+        insets: {
+          available: true,
+          source: "android-window-metrics",
+          units: "physical-pixels",
+          systemBars: {
+            visible: { top: 24, right: 0, bottom: 48, left: 0 },
+            stable: { top: 24, right: 0, bottom: 48, left: 0 },
+          },
+          displayCutout: null,
+          systemGestures: null,
+          mandatorySystemGestures: null,
+          tappableElement: null,
+          systemChrome: {
+            visibility: "partial",
+            statusBar: "visible",
+            navigationBar: "hidden",
+            homeIndicatorAutoHideRequested: null,
+            source: "android-window-insets",
+          },
         },
-      },
-    })).not.toThrow();
+      }),
+    ).not.toThrow();
   });
 
   test("accepts the Android resource fallback without system-chrome visibility", () => {
@@ -135,16 +149,21 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
       available: true,
       source: "android-resource-fallback",
       units: "physical-pixels",
-      systemBars: { visible: { top: 24, right: 0, bottom: 48, left: 0 }, stable: { top: 24, right: 0, bottom: 48, left: 0 } },
+      systemBars: {
+        visible: { top: 24, right: 0, bottom: 48, left: 0 },
+        stable: { top: 24, right: 0, bottom: 48, left: 0 },
+      },
       systemChrome: null,
     };
 
     expect(fallbackInsets.systemChrome).toBeNull();
-    expect(() => observeResultSchema.parse({
-      insets: {
-        ...fallbackInsets,
-      },
-    })).not.toThrow();
+    expect(() =>
+      observeResultSchema.parse({
+        insets: {
+          ...fallbackInsets,
+        },
+      }),
+    ).not.toThrow();
   });
 
   test("accepts the frozen android-home observe fixture (object bounds)", () => {
@@ -166,21 +185,26 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
       systemInsets: { top: 59.5, right: 0, bottom: 34, left: 0 },
       layoutWarnings: {
         scope: "full",
-        warnings: [{
-          type: "important-content-under-inset",
-          severity: "warning",
-          element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
-          categories: ["text"],
-          insetTypes: ["safeArea"],
-          sides: ["top"],
-          overflowPx: { top: 30 },
-          insetPx: { top: 59.5 },
-          overlapPercent: 100,
-          confidence: "high",
-        }],
+        warnings: [
+          {
+            type: "important-content-under-inset",
+            severity: "warning",
+            element: { text: "Title", bounds: { left: 0, top: 0, right: 100, bottom: 30 } },
+            categories: ["text"],
+            insetTypes: ["safeArea"],
+            sides: ["top"],
+            overflowPx: { top: 30 },
+            insetPx: { top: 59.5 },
+            overlapPercent: 100,
+            confidence: "high",
+          },
+        ],
       },
     };
-    const compacted = sanitizeObserveResult(observe as never, { dropElements: false, compact: true });
+    const compacted = sanitizeObserveResult(observe as never, {
+      dropElements: false,
+      compact: true,
+    });
 
     expect(compacted.layoutWarnings?.warnings[0]?.element.bounds).toEqual([0, 0, 100, 30]);
     expect(() => observeResultSchema.parse(compacted)).not.toThrow();
@@ -188,19 +212,30 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
 
   test("caps layoutWarnings by default and opts out with capLayoutWarnings:false", () => {
     const warning = {
-      type: "important-content-under-inset", severity: "info",
+      type: "important-content-under-inset",
+      severity: "info",
       element: { bounds: { left: 0, top: 0, right: 10, bottom: 10 } },
-      categories: ["text"], insetTypes: ["systemBars"], sides: ["top"],
-      overflowPx: { top: 1 }, insetPx: { top: 1 }, overlapPercent: 10, confidence: "medium",
+      categories: ["text"],
+      insetTypes: ["systemBars"],
+      sides: ["top"],
+      overflowPx: { top: 1 },
+      insetPx: { top: 1 },
+      overlapPercent: 10,
+      confidence: "medium",
     };
-    const observe = { layoutWarnings: { scope: "full", warnings: Array.from({ length: 150 }, () => warning) } };
+    const observe = {
+      layoutWarnings: { scope: "full", warnings: Array.from({ length: 150 }, () => warning) },
+    };
 
     const capped = sanitizeObserveResult(observe as never, { dropElements: false });
     expect(capped.layoutWarnings?.scope).toBe("truncated");
     expect(capped.layoutWarnings?.warnings).toHaveLength(100);
     expect(capped.layoutWarnings?.total).toBe(150);
 
-    const uncapped = sanitizeObserveResult(observe as never, { dropElements: false, capLayoutWarnings: false });
+    const uncapped = sanitizeObserveResult(observe as never, {
+      dropElements: false,
+      capLayoutWarnings: false,
+    });
     expect(uncapped.layoutWarnings?.scope).toBe("full");
     expect(uncapped.layoutWarnings?.warnings).toHaveLength(150);
   });
@@ -228,8 +263,22 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
   });
 
   test("routes elements.media[].bounds through the advertised union (object + tuple)", () => {
-    const objectMedia = { elements: { clickable: [], scrollable: [], text: [], media: [{ mediaType: "image", bounds: { left: 101, top: 2144, right: 227, bottom: 2270 } }] } };
-    const tupleMedia = { elements: { clickable: [], scrollable: [], text: [], media: [{ mediaType: "image", bounds: [101, 2144, 227, 2270] }] } };
+    const objectMedia = {
+      elements: {
+        clickable: [],
+        scrollable: [],
+        text: [],
+        media: [{ mediaType: "image", bounds: { left: 101, top: 2144, right: 227, bottom: 2270 } }],
+      },
+    };
+    const tupleMedia = {
+      elements: {
+        clickable: [],
+        scrollable: [],
+        text: [],
+        media: [{ mediaType: "image", bounds: [101, 2144, 227, 2270] }],
+      },
+    };
     expect(() => observeResultSchema.parse(objectMedia)).not.toThrow();
     expect(() => observeResultSchema.parse(tupleMedia)).not.toThrow();
   });
@@ -263,7 +312,7 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
 
     // A non-boolean lock flag is rejected.
     expect(() =>
-      observeResultSchema.parse({ deviceLock: { locked: "yes", keyguardShowing: true } })
+      observeResultSchema.parse({ deviceLock: { locked: "yes", keyguardShowing: true } }),
     ).toThrow();
   });
 
@@ -281,21 +330,26 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
 
 describe("observeToolResultSchema: artifact metadata (#3480)", () => {
   test("accepts artifact metadata in place of an inline ObserveResult", () => {
-    expect(() => observeToolResultSchema.parse({
-      artifact: {
-        path: "/tmp/auto-mobile/123-observe-id.json",
-        format: "json",
-        payload: "ObserveResult",
-        bytes: 123,
-        tool: "observe",
-      },
-    })).not.toThrow();
+    expect(() =>
+      observeToolResultSchema.parse({
+        artifact: {
+          path: "/tmp/auto-mobile/123-observe-id.json",
+          format: "json",
+          payload: "ObserveResult",
+          bytes: 123,
+          tool: "observe",
+        },
+      }),
+    ).not.toThrow();
   });
 });
 
 describe("viewHierarchyNodeSchema: polymorphic node + bounds union (#3025)", () => {
   test("accepts a node whose `node` child is a single object", () => {
-    const node = { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, node: { bounds: [1, 2, 3, 4] } };
+    const node = {
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      node: { bounds: [1, 2, 3, 4] },
+    };
     expect(() => viewHierarchyNodeSchema.parse(node)).not.toThrow();
   });
 
@@ -309,11 +363,11 @@ describe("viewHierarchyNodeSchema: polymorphic node + bounds union (#3025)", () 
 
   test("keeps the polymorphic `$` attribute bag and per-node metadata", () => {
     const node = {
-      "$": { class: "android.widget.TextView" },
+      $: { class: "android.widget.TextView" },
       "view-id": "id/foo",
-      "occlusionState": "partial",
-      "occludedBy": "unlabeled view",
-      "occludedByViewId": "id/occluder",
+      occlusionState: "partial",
+      occludedBy: "unlabeled view",
+      occludedByViewId: "id/occluder",
     };
     const parsed = viewHierarchyNodeSchema.parse(node) as Record<string, unknown>;
     expect(parsed["$"]).toEqual({ class: "android.widget.TextView" });
@@ -325,14 +379,14 @@ describe("viewHierarchyNodeSchema: polymorphic node + bounds union (#3025)", () 
 
   test("advertises occlusion metadata as typed node properties", () => {
     const schemaJson = JSON.stringify(toJSONSchema(viewHierarchyNodeSchema));
-    expect(schemaJson).toContain("\"occlusionState\"");
-    expect(schemaJson).toContain("\"occludedBy\"");
-    expect(schemaJson).toContain("\"occludedByViewId\"");
+    expect(schemaJson).toContain('"occlusionState"');
+    expect(schemaJson).toContain('"occludedBy"');
+    expect(schemaJson).toContain('"occludedByViewId"');
     expect(() =>
       viewHierarchyNodeSchema.parse({
         bounds: { left: 0, top: 0, right: 10, bottom: 10 },
         occludedByViewId: 123,
-      })
+      }),
     ).toThrow();
   });
 });
@@ -340,20 +394,20 @@ describe("viewHierarchyNodeSchema: polymorphic node + bounds union (#3025)", () 
 describe("elementSchema: occlusion link fields", () => {
   test("advertises both view-id targets and occludedByViewId references", () => {
     const schemaJson = JSON.stringify(toJSONSchema(elementSchema));
-    expect(schemaJson).toContain("\"view-id\"");
-    expect(schemaJson).toContain("\"occludedByViewId\"");
+    expect(schemaJson).toContain('"view-id"');
+    expect(schemaJson).toContain('"occludedByViewId"');
     expect(() =>
       elementSchema.parse({
-        "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
         "view-id": "id/target",
-        "occludedByViewId": "id/occluder",
-      })
+        occludedByViewId: "id/occluder",
+      }),
     ).not.toThrow();
     expect(() =>
       elementSchema.parse({
-        "bounds": { left: 0, top: 0, right: 10, bottom: 10 },
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
         "view-id": 123,
-      })
+      }),
     ).toThrow();
   });
 });
@@ -419,7 +473,7 @@ describe("observe tool registration advertises the schema (#3025)", () => {
     serverConfig.setToolResultsNoStructuredContentEnabled(false);
     try {
       withFreshRegistry(() => {
-        const observe = ToolRegistry.getToolDefinitions().find(t => t.name === "observe");
+        const observe = ToolRegistry.getToolDefinitions().find((t) => t.name === "observe");
         expect(observe).toBeDefined();
         expect((observe as Record<string, unknown>).outputSchema).toBeDefined();
       });
@@ -430,9 +484,13 @@ describe("observe tool registration advertises the schema (#3025)", () => {
 
   test("tools/list advertises observe artifact metadata shape", () => {
     withFreshRegistry(() => {
-      const observe = ToolRegistry.getToolDefinitions().find(t => t.name === "observe");
-      expect(JSON.stringify((observe as Record<string, unknown>).outputSchema)).toContain("\"artifact\"");
-      expect(JSON.stringify((observe as Record<string, unknown>).outputSchema)).toContain("\"payload\"");
+      const observe = ToolRegistry.getToolDefinitions().find((t) => t.name === "observe");
+      expect(JSON.stringify((observe as Record<string, unknown>).outputSchema)).toContain(
+        '"artifact"',
+      );
+      expect(JSON.stringify((observe as Record<string, unknown>).outputSchema)).toContain(
+        '"payload"',
+      );
     });
   });
 
@@ -441,7 +499,7 @@ describe("observe tool registration advertises the schema (#3025)", () => {
     serverConfig.setToolResultsNoStructuredContentEnabled(true);
     try {
       withFreshRegistry(() => {
-        const observe = ToolRegistry.getToolDefinitions().find(t => t.name === "observe");
+        const observe = ToolRegistry.getToolDefinitions().find((t) => t.name === "observe");
         expect(observe).toBeDefined();
         expect((observe as Record<string, unknown>).outputSchema).toBeUndefined();
       });
@@ -452,7 +510,7 @@ describe("observe tool registration advertises the schema (#3025)", () => {
 
   test("advertises the bounds tuple through getToolDefinitions (compaction is a permanent default)", () => {
     const observeSchemaJson = (): string => {
-      const observe = ToolRegistry.getToolDefinitions().find(t => t.name === "observe");
+      const observe = ToolRegistry.getToolDefinitions().find((t) => t.name === "observe");
       return JSON.stringify((observe as Record<string, unknown>).outputSchema);
     };
     // Count JSON-Schema tuple sites (`prefixItems`). Bounds compaction is now
@@ -469,12 +527,12 @@ describe("observe tool registration advertises the schema (#3025)", () => {
 
   test("advertises the skeleton projection field with an always-tuple bounds (#4388)", () => {
     withFreshRegistry(() => {
-      const observe = ToolRegistry.getToolDefinitions().find(t => t.name === "observe");
+      const observe = ToolRegistry.getToolDefinitions().find((t) => t.name === "observe");
       const json = JSON.stringify((observe as Record<string, unknown>).outputSchema);
-      expect(json).toContain("\"skeleton\"");
-      expect(json).toContain("\"affordances\"");
-      expect(json).toContain("\"semanticLinks\"");
-      expect(json).toContain("\"testTag\"");
+      expect(json).toContain('"skeleton"');
+      expect(json).toContain('"affordances"');
+      expect(json).toContain('"semanticLinks"');
+      expect(json).toContain('"testTag"');
     });
   });
 });
@@ -513,14 +571,16 @@ describe("occlusionState/occludedBy/occludedByViewId: --no-occlusion (issue occl
   test("occlusion node properties remain optional in the schema regardless of the flag", () => {
     // Schema shape doesn't change with the flag — a client observing an older daemon or a
     // hierarchy captured before occlusion was disabled must still be able to parse these fields.
-    expect(() => viewHierarchyNodeSchema.parse({ bounds: { left: 0, top: 0, right: 1, bottom: 1 } })).not.toThrow();
+    expect(() =>
+      viewHierarchyNodeSchema.parse({ bounds: { left: 0, top: 0, right: 1, bottom: 1 } }),
+    ).not.toThrow();
     expect(() =>
       viewHierarchyNodeSchema.parse({
         bounds: { left: 0, top: 0, right: 1, bottom: 1 },
         occlusionState: "partial",
         occludedBy: "unlabeled view",
         occludedByViewId: "id/occluder",
-      })
+      }),
     ).not.toThrow();
   });
 });

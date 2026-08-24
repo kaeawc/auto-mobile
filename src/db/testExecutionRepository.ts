@@ -1,12 +1,21 @@
 import type { Kysely } from "kysely";
 import { sql } from "kysely";
 import { getDatabase } from "./database";
-import type { Database, NewTestExecution, NewTestExecutionStep, NewTestExecutionScreen } from "./types";
+import type {
+  Database,
+  NewTestExecution,
+  NewTestExecutionStep,
+  NewTestExecutionScreen,
+} from "./types";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import { appendToBucket, chunkBySqliteParameterLimit } from "./sqliteBatch";
-import { createRowCapRetentionState, pruneTableByRowCap, runAmortizedRetention } from "./rowCapRetention";
+import {
+  createRowCapRetentionState,
+  pruneTableByRowCap,
+  runAmortizedRetention,
+} from "./rowCapRetention";
 
 const TEST_EXECUTION_RETENTION_MAX_ROWS = 10_000;
 export const TEST_EXECUTION_RETENTION_MAX_DAYS = 90;
@@ -133,7 +142,9 @@ function parseStepDetailsJson(detailsJson: string | null, stepId: number): unkno
   try {
     return JSON.parse(detailsJson) as unknown;
   } catch (error) {
-    logger.warn(`[TestExecutionRepository] Failed to parse details_json for step ${stepId}: ${error}`);
+    logger.warn(
+      `[TestExecutionRepository] Failed to parse details_json for step ${stepId}: ${error}`,
+    );
     return undefined;
   }
 }
@@ -159,13 +170,16 @@ export class TestExecutionRepository {
 
     const executionId = db.isTransaction
       ? await this.recordExecutionWithin(db, record)
-      : await db.transaction().execute(trx => this.recordExecutionWithin(trx, record));
+      : await db.transaction().execute((trx) => this.recordExecutionWithin(trx, record));
 
     await this.cleanupRetention();
     return executionId;
   }
 
-  private async recordExecutionWithin(db: Kysely<Database>, record: TestExecutionRecord): Promise<number> {
+  private async recordExecutionWithin(
+    db: Kysely<Database>,
+    record: TestExecutionRecord,
+  ): Promise<number> {
     const entry: NewTestExecution = {
       test_class: record.testClass,
       test_method: record.testMethod,
@@ -194,7 +208,7 @@ export class TestExecutionRepository {
 
     // Record steps if provided
     if (record.steps && record.steps.length > 0) {
-      const stepEntries: NewTestExecutionStep[] = record.steps.map(step => ({
+      const stepEntries: NewTestExecutionStep[] = record.steps.map((step) => ({
         execution_id: executionId,
         step_index: step.stepIndex,
         action: step.action,
@@ -212,12 +226,14 @@ export class TestExecutionRepository {
 
     // Record screens visited if provided
     if (record.screensVisited && record.screensVisited.length > 0) {
-      const screenEntries: NewTestExecutionScreen[] = record.screensVisited.map((screen, index) => ({
-        execution_id: executionId,
-        screen_name: screen.screenName,
-        visit_order: index,
-        timestamp: screen.timestamp,
-      }));
+      const screenEntries: NewTestExecutionScreen[] = record.screensVisited.map(
+        (screen, index) => ({
+          execution_id: executionId,
+          screen_name: screen.screenName,
+          visit_order: index,
+          timestamp: screen.timestamp,
+        }),
+      );
 
       await db.insertInto("test_execution_screens").values(screenEntries).execute();
     }
@@ -271,23 +287,26 @@ export class TestExecutionRepository {
 
     const executions = await query.execute();
 
-    const executionIds = executions.map(exec => exec.id);
+    const executionIds = executions.map((exec) => exec.id);
     if (executionIds.length === 0) {
       return [];
     }
 
-    const stepsByExecutionId = new Map<number, Array<{
-      id: number;
-      stepIndex: number;
-      action: string;
-      target: string | null;
-      status: "completed" | "failed" | "skipped";
-      durationMs: number;
-      screenName: string | null;
-      screenshotPath: string | null;
-      errorMessage: string | null;
-      details: unknown;
-    }>>();
+    const stepsByExecutionId = new Map<
+      number,
+      Array<{
+        id: number;
+        stepIndex: number;
+        action: string;
+        target: string | null;
+        status: "completed" | "failed" | "skipped";
+        durationMs: number;
+        screenName: string | null;
+        screenshotPath: string | null;
+        errorMessage: string | null;
+        details: unknown;
+      }>
+    >();
     const screensByExecutionId = new Map<number, string[]>();
 
     for (const chunk of chunkBySqliteParameterLimit(executionIds)) {
@@ -339,7 +358,7 @@ export class TestExecutionRepository {
       }
     }
 
-    return executions.map(exec => {
+    return executions.map((exec) => {
       const steps = stepsByExecutionId.get(exec.id) ?? [];
       const screensVisited = screensByExecutionId.get(exec.id) ?? [];
       return {
@@ -369,10 +388,7 @@ export class TestExecutionRepository {
       const db = this.getDb();
       const cutoff = this.timer.now() - TEST_EXECUTION_RETENTION_MAX_DAYS * MS_PER_DAY;
 
-      await db
-        .deleteFrom("test_executions")
-        .where("timestamp", "<", cutoff)
-        .execute();
+      await db.deleteFrom("test_executions").where("timestamp", "<", cutoff).execute();
     } catch (error) {
       logger.warn(`[TestExecutionRepository] Age-based retention cleanup failed: ${error}`);
     }
@@ -494,7 +510,7 @@ export class TestExecutionRepository {
 
     const rows = await query.execute();
 
-    return rows.map(row => {
+    return rows.map((row) => {
       const avgDuration = Number(row.avgDurationMs ?? 0);
       const avgSquare = Number(row.avgDurationMsSquared ?? 0);
       const variance = Math.max(0, avgSquare - avgDuration * avgDuration);

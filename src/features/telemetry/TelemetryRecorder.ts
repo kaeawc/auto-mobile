@@ -3,7 +3,10 @@ import { recordNetworkEvent, type RecordNetworkEventInput } from "../../db/netwo
 import { NetworkState } from "../../server/NetworkState";
 import { recordLogEvent, type RecordLogEventInput } from "../../db/logEventRepository";
 import { recordOsEvent, type RecordOsEventInput } from "../../db/osEventRepository";
-import { recordNavigationEvent, type RecordNavigationEventInput } from "../../db/navigationEventRepository";
+import {
+  recordNavigationEvent,
+  type RecordNavigationEventInput,
+} from "../../db/navigationEventRepository";
 import { recordStorageEvent, type RecordStorageEventInput } from "../../db/storageEventRepository";
 import { recordLayoutEvent, type RecordLayoutEventInput } from "../../db/layoutEventRepository";
 import { getTelemetryPushServer } from "../../daemon/telemetryPushSocketServer";
@@ -11,9 +14,17 @@ import { type DbWriteBarrier, getDbWriteBarrier } from "../../db/dbWriteBarrier"
 import type { TelemetryEventBuffer } from "./TelemetryEventBuffer";
 
 export type TelemetryCategory =
-  | "network" | "log" | "os" | "navigation"
-  | "crash" | "anr" | "nonfatal" | "storage" | "layout"
-  | "performance" | "toolcall";
+  | "network"
+  | "log"
+  | "os"
+  | "navigation"
+  | "crash"
+  | "anr"
+  | "nonfatal"
+  | "storage"
+  | "layout"
+  | "performance"
+  | "toolcall";
 
 export interface TelemetryEvent {
   category: TelemetryCategory;
@@ -44,12 +55,12 @@ export interface TelemetryRepository {
 }
 
 const defaultRepository: TelemetryRepository = {
-  recordNetworkEvent: input => recordNetworkEvent(input),
-  recordLogEvent: input => recordLogEvent(input),
-  recordOsEvent: input => recordOsEvent(input),
-  recordNavigationEvent: input => recordNavigationEvent(input),
-  recordStorageEvent: input => recordStorageEvent(input),
-  recordLayoutEvent: input => recordLayoutEvent(input),
+  recordNetworkEvent: (input) => recordNetworkEvent(input),
+  recordLogEvent: (input) => recordLogEvent(input),
+  recordOsEvent: (input) => recordOsEvent(input),
+  recordNavigationEvent: (input) => recordNavigationEvent(input),
+  recordStorageEvent: (input) => recordStorageEvent(input),
+  recordLayoutEvent: (input) => recordLayoutEvent(input),
 };
 
 /**
@@ -97,7 +108,8 @@ export class TelemetryRecorder {
   private readonly buffer: TelemetryEventBuffer | null;
 
   constructor(
-    repository: TelemetryRepository = TelemetryRecorder.defaultRepositoryOverride ?? defaultRepository,
+    repository: TelemetryRepository = TelemetryRecorder.defaultRepositoryOverride ??
+      defaultRepository,
     getPushTarget: () => TelemetryPushTarget | null = () => getTelemetryPushServer(),
     // Resolve the shared barrier per write, not once at construction: a
     // same-process DB reopen swaps in a fresh barrier via resetDbWriteBarrier(),
@@ -179,7 +191,13 @@ export class TelemetryRecorder {
     const { deviceId, sessionId } = this.snapshotContext();
     const input: RecordNetworkEventInput = { deviceId, sessionId, ...event };
 
-    this.pushToSocket({ category: "network", timestamp: event.timestamp, deviceId, sessionId, data: event });
+    this.pushToSocket({
+      category: "network",
+      timestamp: event.timestamp,
+      deviceId,
+      sessionId,
+      data: event,
+    });
 
     // Only persist and notify when capture is enabled
     if (!NetworkState.getInstance().capturing) {
@@ -190,7 +208,8 @@ export class TelemetryRecorder {
     try {
       // Route through the shutdown barrier so an in-flight write is drained
       // before closeDatabase(); returns undefined (skipped) once draining.
-      recordId = (await this.getBarrier().track(() => this.repository.recordNetworkEvent(input))) ?? null;
+      recordId =
+        (await this.getBarrier().track(() => this.repository.recordNetworkEvent(input))) ?? null;
     } catch (e) {
       logger.error(`[TelemetryRecorder] Failed to record network event: ${e}`);
     }
@@ -233,7 +252,13 @@ export class TelemetryRecorder {
       }
     }
 
-    this.pushToSocket({ category: "log", timestamp: event.timestamp, deviceId, sessionId, data: event });
+    this.pushToSocket({
+      category: "log",
+      timestamp: event.timestamp,
+      deviceId,
+      sessionId,
+      data: event,
+    });
   }
 
   async recordOsEvent(event: {
@@ -256,7 +281,13 @@ export class TelemetryRecorder {
       }
     }
 
-    this.pushToSocket({ category: "os", timestamp: event.timestamp, deviceId, sessionId, data: event });
+    this.pushToSocket({
+      category: "os",
+      timestamp: event.timestamp,
+      deviceId,
+      sessionId,
+      data: event,
+    });
   }
 
   async recordNavigationEvent(event: {
@@ -266,7 +297,11 @@ export class TelemetryRecorder {
     source: string | null;
     arguments: Record<string, string> | null;
     metadata: Record<string, string> | null;
-    triggeringInteraction?: { type: string; elementText?: string; elementResourceId?: string } | null;
+    triggeringInteraction?: {
+      type: string;
+      elementText?: string;
+      elementResourceId?: string;
+    } | null;
     screenshotUri?: string | null;
   }): Promise<void> {
     const { deviceId, sessionId } = this.snapshotContext();
@@ -282,7 +317,13 @@ export class TelemetryRecorder {
       }
     }
 
-    this.pushToSocket({ category: "navigation", timestamp: event.timestamp, deviceId, sessionId, data: event });
+    this.pushToSocket({
+      category: "navigation",
+      timestamp: event.timestamp,
+      deviceId,
+      sessionId,
+      data: event,
+    });
   }
 
   /**
@@ -298,7 +339,13 @@ export class TelemetryRecorder {
     exceptionType?: string;
     screen?: string | null;
     timestamp: number;
-    stackTrace?: Array<{ className: string; methodName: string; fileName: string | null; lineNumber: number | null; isAppCode: boolean }> | null;
+    stackTrace?: Array<{
+      className: string;
+      methodName: string;
+      fileName: string | null;
+      lineNumber: number | null;
+      isAppCode: boolean;
+    }> | null;
     deviceId?: string | null;
   }): void {
     // Use explicit deviceId if provided, otherwise fall back to context
@@ -336,7 +383,13 @@ export class TelemetryRecorder {
       logger.error(`[TelemetryRecorder] Failed to record storage event: ${e}`);
     }
 
-    this.pushToSocket({ category: "storage", timestamp: event.timestamp, deviceId, sessionId, data: event });
+    this.pushToSocket({
+      category: "storage",
+      timestamp: event.timestamp,
+      deviceId,
+      sessionId,
+      data: event,
+    });
   }
 
   async recordLayoutEvent(event: {
@@ -364,7 +417,13 @@ export class TelemetryRecorder {
       }
     }
 
-    this.pushToSocket({ category: "layout", timestamp: event.timestamp, deviceId, sessionId, data: event });
+    this.pushToSocket({
+      category: "layout",
+      timestamp: event.timestamp,
+      deviceId,
+      sessionId,
+      data: event,
+    });
   }
 
   /**
@@ -404,9 +463,14 @@ export class TelemetryRecorder {
     args?: Record<string, unknown> | null;
   }): void {
     const { deviceId, sessionId } = this.snapshotContext();
-    this.pushToSocket({ category: "toolcall", timestamp: event.timestamp, deviceId, sessionId, data: event });
+    this.pushToSocket({
+      category: "toolcall",
+      timestamp: event.timestamp,
+      deviceId,
+      sessionId,
+      data: event,
+    });
   }
-
 
   private snapshotContext(): { deviceId: string | null; sessionId: string | null } {
     return { deviceId: this.deviceId, sessionId: this.sessionId };

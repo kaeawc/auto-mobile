@@ -33,7 +33,7 @@ export class FakeFileSystem implements FileSystem {
 
   private enoent(normalizedPath: string): NodeJS.ErrnoException {
     const error = new Error(
-      `ENOENT: no such file or directory, '${normalizedPath}'`
+      `ENOENT: no such file or directory, '${normalizedPath}'`,
     ) as NodeJS.ErrnoException;
     error.code = "ENOENT";
     return error;
@@ -149,7 +149,7 @@ export class FakeFileSystem implements FileSystem {
     };
     this.files.forEach((_, filePath) => collect(filePath));
     this.binaryFiles.forEach((_, filePath) => collect(filePath));
-    this.directories.forEach(directory => collect(directory));
+    this.directories.forEach((directory) => collect(directory));
     return [...names];
   }
 
@@ -161,7 +161,11 @@ export class FakeFileSystem implements FileSystem {
     }
 
     // Otherwise, check if file or directory exists
-    return this.files.has(normalizedPath) || this.binaryFiles.has(normalizedPath) || this.directories.has(normalizedPath);
+    return (
+      this.files.has(normalizedPath) ||
+      this.binaryFiles.has(normalizedPath) ||
+      this.directories.has(normalizedPath)
+    );
   }
 
   async pathExists(filePath: string): Promise<boolean> {

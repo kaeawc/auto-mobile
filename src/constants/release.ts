@@ -399,15 +399,16 @@ export const NIGHTLY_CHECKSUM_ENTRY: ReleaseChecksumEntry = {
 export function resolveChecksum(
   version: string,
   platform: "android" | "ios",
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   if (registry.length === 0) {
     return "";
   }
   const normalized = version.trim().toLowerCase();
-  const entry = normalized === LATEST_RELEASE_VERSION
-    ? registry[0]
-    : registry.find(e => e.version === version);
+  const entry =
+    normalized === LATEST_RELEASE_VERSION
+      ? registry[0]
+      : registry.find((e) => e.version === version);
   if (!entry) {
     return "";
   }
@@ -424,7 +425,7 @@ export function resolveChecksum(
  */
 function entryForPinnedVersion(
   env: EnvLike = process.env,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): ReleaseChecksumEntry | undefined {
   if (registry.length === 0) {
     return undefined;
@@ -432,12 +433,12 @@ function entryForPinnedVersion(
   const pinned = resolvePinnedVersion(env);
   return pinned === LATEST_RELEASE_VERSION
     ? registry[0]
-    : registry.find(e => e.version === pinned);
+    : registry.find((e) => e.version === pinned);
 }
 
 export function resolveRunnerChecksum(
   env: EnvLike = process.env,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return entryForPinnedVersion(env, registry)?.runnerSha256 ?? "";
 }
@@ -449,7 +450,7 @@ export function resolveRunnerChecksum(
  */
 export function resolveRunnerChecksumTarget(
   env: EnvLike = process.env,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): RunnerSha256Target {
   return entryForPinnedVersion(env, registry)?.runnerSha256Target ?? "runner";
 }
@@ -459,7 +460,7 @@ export function resolveRunnerChecksumTarget(
  * Used to construct download URLs for pinned releases.
  */
 export function resolveLatestVersion(
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   if (registry.length === 0) {
     return LATEST_RELEASE_VERSION;
@@ -478,7 +479,7 @@ export const RELEASE_VERSION: string = LATEST_RELEASE_VERSION;
  */
 export function resolveAssetVersion(
   version: string,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   if (version === LATEST_RELEASE_VERSION) {
     return resolveLatestVersion(registry);
@@ -538,7 +539,7 @@ export function assertHttpsAssetUrl(url: string, label: string, env: EnvLike = p
     parsed = new URL(url);
   } catch {
     throw new ActionableError(
-      `${label} must be an absolute URL, for example https://mirror.example/auto-mobile.`
+      `${label} must be an absolute URL, for example https://mirror.example/auto-mobile.`,
     );
   }
   if (parsed.protocol === "https:") {
@@ -549,8 +550,8 @@ export function assertHttpsAssetUrl(url: string, label: string, env: EnvLike = p
   }
   throw new ActionableError(
     `${label} must use https:// (got ${parsed.protocol}//). Plaintext/non-TLS asset downloads are a ` +
-    `confidentiality and downgrade risk. Set ${AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV}=1 to opt out ` +
-    `for a trusted loopback/dev mirror.`
+      `confidentiality and downgrade risk. Set ${AUTOMOBILE_ALLOW_INSECURE_ASSET_URL_ENV}=1 to opt out ` +
+      `for a trusted loopback/dev mirror.`,
   );
 }
 
@@ -588,13 +589,13 @@ export function isExplicitPin(env: EnvLike = process.env): boolean {
  */
 export function isPinnedVersionKnown(
   env: EnvLike = process.env,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): boolean {
   const pinned = resolvePinnedVersion(env);
   if (pinned === LATEST_RELEASE_VERSION) {
     return registry.length > 0;
   }
-  return registry.some(entry => entry.version === pinned);
+  return registry.some((entry) => entry.version === pinned);
 }
 
 /**
@@ -609,13 +610,13 @@ export function resolveAssetBaseUrl(env: EnvLike = process.env): string {
       parsed = new URL(trimmed);
     } catch {
       throw new ActionableError(
-        `${AUTOMOBILE_ASSET_BASE_URL_ENV} must be an absolute URL, for example https://mirror.example/auto-mobile.`
+        `${AUTOMOBILE_ASSET_BASE_URL_ENV} must be an absolute URL, for example https://mirror.example/auto-mobile.`,
       );
     }
     if (trimmed.includes("?") || trimmed.includes("#")) {
       throw new ActionableError(
         `${AUTOMOBILE_ASSET_BASE_URL_ENV} must not include a query string or fragment; ` +
-        `use a path-only base URL such as ${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}.`
+          `use a path-only base URL such as ${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}.`,
       );
     }
     // Require https:// unless the plaintext opt-out is set (issue #4761).
@@ -629,7 +630,7 @@ function buildReleaseAssetUrl(
   filename: string,
   version: string,
   baseUrl: string = DEFAULT_ASSET_BASE_URL,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   const assetVersion = resolveAssetVersion(version, registry);
   if (assetVersion === LATEST_RELEASE_VERSION) {
@@ -647,17 +648,27 @@ function buildReleaseAssetUrl(
 /** APK download URL honoring `AUTOMOBILE_VERSION` + `AUTOMOBILE_ASSET_BASE_URL`. */
 export function resolveApkUrl(
   env: EnvLike = process.env,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
-  return buildReleaseAssetUrl("control-proxy-debug.apk", resolvePinnedVersion(env), resolveAssetBaseUrl(env), registry);
+  return buildReleaseAssetUrl(
+    "control-proxy-debug.apk",
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
 }
 
 /** iOS IPA download URL honoring `AUTOMOBILE_VERSION` + `AUTOMOBILE_ASSET_BASE_URL`. */
 export function resolveIpaUrl(
   env: EnvLike = process.env,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
-  return buildReleaseAssetUrl("control-proxy.ipa", resolvePinnedVersion(env), resolveAssetBaseUrl(env), registry);
+  return buildReleaseAssetUrl(
+    "control-proxy.ipa",
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
 }
 
 /** Expected APK SHA-256 for the pinned version (empty string if unknown). */
@@ -686,9 +697,14 @@ export const SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME = "screen-capture-helper-mac
  */
 export function resolveVideoJarUrl(
   env: EnvLike = process.env,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
-  return buildReleaseAssetUrl(VIDEO_SERVER_JAR_FILENAME, resolvePinnedVersion(env), resolveAssetBaseUrl(env), registry);
+  return buildReleaseAssetUrl(
+    VIDEO_SERVER_JAR_FILENAME,
+    resolvePinnedVersion(env),
+    resolveAssetBaseUrl(env),
+    registry,
+  );
 }
 
 /**
@@ -699,7 +715,7 @@ export function resolveVideoJarUrl(
  */
 export function resolveVideoJarChecksum(
   env: EnvLike = process.env,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return entryForPinnedVersion(env, registry)?.videoJarSha256 ?? "";
 }
@@ -707,20 +723,20 @@ export function resolveVideoJarChecksum(
 /** Download URL for the signed macOS ScreenCaptureKit helper archive. */
 export function resolveScreenCaptureHelperUrl(
   env: EnvLike = process.env,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return buildReleaseAssetUrl(
     SCREEN_CAPTURE_HELPER_ARCHIVE_FILENAME,
     resolvePinnedVersion(env),
     resolveAssetBaseUrl(env),
-    registry
+    registry,
   );
 }
 
 /** Expected archive SHA-256 for the selected screen-capture-helper release. */
 export function resolveScreenCaptureHelperChecksum(
   env: EnvLike = process.env,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
 ): string {
   return entryForPinnedVersion(env, registry)?.screenCaptureHelperSha256 ?? "";
 }

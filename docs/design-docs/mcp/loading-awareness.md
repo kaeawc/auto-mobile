@@ -47,18 +47,17 @@ bounds, because neither alone is correct — this was the key finding from adver
   few seconds later (#1949).
 - The **productive-poll floor** prevents a regression in the opposite regime. On a slow
   device where each hierarchy fetch costs 300–800 ms, real fetch latency counts against a
-  pure wall-clock budget, so 2500 ms would buy only ~3–5 polls — *fewer* than the old fixed
-  8. The floor guarantees we never poll fewer times than the previous implementation, so the
+  pure wall-clock budget, so 2500 ms would buy only ~3–5 polls — _fewer_ than the old fixed 8. The floor guarantees we never poll fewer times than the previous implementation, so the
   change is **never less patient** than before, in any fetch-speed regime.
 
 These are compile-time `private static readonly` fields on `TapOnElement` — they
 are **not** environment-tunable at runtime (there is no `process.env` override
 path; the `ANDROID_PRE_TAP_*` names are constant identifiers, not env vars).
 
-| | base | when loading detected |
-|---|---|---|
-| `ANDROID_PRE_TAP_REFIND_BUDGET_MS` | 2500 ms | 10000 ms |
-| `ANDROID_PRE_TAP_REFIND_MIN_POLLS` | 8 | 32 |
+|                                    | base    | when loading detected |
+| ---------------------------------- | ------- | --------------------- |
+| `ANDROID_PRE_TAP_REFIND_BUDGET_MS` | 2500 ms | 10000 ms              |
+| `ANDROID_PRE_TAP_REFIND_MIN_POLLS` | 8       | 32                    |
 
 Success still returns immediately when the target's bounds are stable within ±3 px for the
 required consecutive re-finds — the common case is unchanged and fast.
@@ -70,7 +69,7 @@ the element's patience — that streak is bounded separately by
 `ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE = 12` with its own 500 ms backoff. v1 excludes
 from the deadline **both** the recovery sleep **and** the wall-clock the failed refresh itself
 burned (up to the 800 ms timeout) — the latter matters because on a real device a null result
-usually *is* a timeout, and counting only the sleep would let a slow proxy silently eat the
+usually _is_ a timeout, and counting only the sleep would let a slow proxy silently eat the
 budget:
 
 ```ts
@@ -90,8 +89,10 @@ iteration; when it fires, it raises the deadline and the floor once (monotonic �
 non-loading hierarchies never shrink them back):
 
 ```ts
-if (androidViewHierarchyIndicatesLikelyBlockingLoading(freshHierarchy, this.elementParser) &&
-    budgetMs < ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING) {
+if (
+  androidViewHierarchyIndicatesLikelyBlockingLoading(freshHierarchy, this.elementParser) &&
+  budgetMs < ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING
+) {
   budgetMs = ANDROID_PRE_TAP_REFIND_BUDGET_MS_WHEN_LOADING;
   minProductivePolls = ANDROID_PRE_TAP_REFIND_MIN_POLLS_WHEN_LOADING;
 }
@@ -151,7 +152,7 @@ flowchart TD
   tested):** `extends budget when loading indicators present…` and its decisive negation
   `without loading indicators, gives up right at the base budget` (asserts elapsed ≈ 2500 ms).
 - **Regression guards from review:** `guarantees the productive-poll floor even when every
-  fetch is slow` (simulates 800 ms fetches — a pure deadline would bail at ~3 polls; the floor
+fetch is slow` (simulates 800 ms fetches — a pure deadline would bail at ~3 polls; the floor
   keeps ≥ 8); `detects a loading indicator that appears mid-stream and extends late`;
   `loading budget is bounded — a target that never appears still fails at the ceiling`
   (~10000 ms, not forever); `extended budget is not reset by a later non-loading hierarchy`.

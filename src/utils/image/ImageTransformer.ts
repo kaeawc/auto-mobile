@@ -23,7 +23,11 @@ class JimpImageTransformer {
   private useCache: boolean = true;
   private timer: Timer;
 
-  constructor(private buffer: Buffer, private backend: ImageBackend, timer: Timer = defaultTimer) {
+  constructor(
+    private buffer: Buffer,
+    private backend: ImageBackend,
+    timer: Timer = defaultTimer,
+  ) {
     this.timer = timer;
   }
 
@@ -73,7 +77,11 @@ class JimpImageTransformer {
    * @param options.lossless Whether to use lossless compression
    * @param options.nearLossless Whether to use near-lossless compression
    */
-  public webp(options?: { quality?: number; lossless?: boolean; nearLossless?: boolean }): JimpImageTransformer {
+  public webp(options?: {
+    quality?: number;
+    lossless?: boolean;
+    nearLossless?: boolean;
+  }): JimpImageTransformer {
     const quality = options?.quality || DEFAULT_WEBP_QUALITY;
 
     if (quality < 1 || quality > 100) {
@@ -104,7 +112,9 @@ class JimpImageTransformer {
 
       if (cachedBuffer) {
         const totalDuration = this.timer.now() - startTime;
-        logger.info(`[IMAGE] Cache hit in ${cacheDuration}ms, total: ${totalDuration}ms (${cachedBuffer.length} bytes)`);
+        logger.info(
+          `[IMAGE] Cache hit in ${cacheDuration}ms, total: ${totalDuration}ms (${cachedBuffer.length} bytes)`,
+        );
         return cachedBuffer;
       }
 
@@ -125,11 +135,15 @@ class JimpImageTransformer {
       }
 
       const totalDuration = this.timer.now() - startTime;
-      logger.info(`[IMAGE] Processing completed in ${processDuration}ms, total: ${totalDuration}ms (${this.buffer.length} -> ${resultBuffer.length} bytes)`);
+      logger.info(
+        `[IMAGE] Processing completed in ${processDuration}ms, total: ${totalDuration}ms (${this.buffer.length} -> ${resultBuffer.length} bytes)`,
+      );
       return resultBuffer;
     } catch (error) {
       const totalDuration = this.timer.now() - startTime;
-      logger.warn(`[IMAGE] Processing failed after ${totalDuration}ms: ${(error as Error).message}`);
+      logger.warn(
+        `[IMAGE] Processing failed after ${totalDuration}ms: ${(error as Error).message}`,
+      );
       throw new Error(`Image processing error: ${(error as Error).message}`);
     }
   }
@@ -139,12 +153,20 @@ export class Image {
   private timer: Timer;
   private backend: ImageBackend;
 
-  constructor(private buffer: Buffer, timer: Timer = defaultTimer, backend: ImageBackend = resolveImageBackend()) {
+  constructor(
+    private buffer: Buffer,
+    timer: Timer = defaultTimer,
+    backend: ImageBackend = resolveImageBackend(),
+  ) {
     this.timer = timer;
     this.backend = backend;
   }
 
-  public static fromBuffer(buffer: Buffer, timer: Timer = defaultTimer, backend: ImageBackend = resolveImageBackend()): Image {
+  public static fromBuffer(
+    buffer: Buffer,
+    timer: Timer = defaultTimer,
+    backend: ImageBackend = resolveImageBackend(),
+  ): Image {
     if (!Buffer.isBuffer(buffer)) {
       throw new Error("Input must be a Buffer");
     }
@@ -156,11 +178,20 @@ export class Image {
   }
 
   public resize(width: number, height?: number, maintainAspectRatio = true): JimpImageTransformer {
-    return new JimpImageTransformer(this.buffer, this.backend, this.timer).resize(width, height, maintainAspectRatio);
+    return new JimpImageTransformer(this.buffer, this.backend, this.timer).resize(
+      width,
+      height,
+      maintainAspectRatio,
+    );
   }
 
   public crop(width: number, height: number, x = 0, y = 0): JimpImageTransformer {
-    return new JimpImageTransformer(this.buffer, this.backend, this.timer).crop(width, height, x, y);
+    return new JimpImageTransformer(this.buffer, this.backend, this.timer).crop(
+      width,
+      height,
+      x,
+      y,
+    );
   }
 
   public png(): JimpImageTransformer {
@@ -170,7 +201,11 @@ export class Image {
   /**
    * Convert the image to WebP format
    */
-  public webp(options?: { quality?: number; lossless?: boolean; nearLossless?: boolean }): JimpImageTransformer {
+  public webp(options?: {
+    quality?: number;
+    lossless?: boolean;
+    nearLossless?: boolean;
+  }): JimpImageTransformer {
     return new JimpImageTransformer(this.buffer, this.backend, this.timer).webp(options);
   }
 

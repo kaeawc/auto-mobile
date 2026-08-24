@@ -35,9 +35,10 @@ needs a deliberate disposition. See `github-cli` for the underlying command mech
    Query thread state even when the flat inline list is empty.
 
    The three REST endpoints return top-level arrays and `--paginate` merges them, so saving
-   and parsing those is safe — do not add `--slurp`, which would yield an array *of pages* and
+   and parsing those is safe — do not add `--slurp`, which would yield an array _of pages_ and
    is rejected alongside `--jq`. GraphQL is the opposite, which is why review threads must use
    `pr-review-threads.sh`; a ledger built from only its first page looks complete and is not.
+
 4. Build the ledger — one row per unresolved thread, review request, inline comment, and
    conversation comment: source URL, head SHA, requested behavior, file/line, disposition
    (`fix`, `wrong reason, right change`, `already addressed`, `not actionable`, `duplicate`,
@@ -64,8 +65,8 @@ exists to prevent.
 
 - Verify each claim against current source and PR intent. Neither an automated reviewer nor a
   stale diff position is proof by itself.
-- **Judge the mechanism and the suggestion separately.** A reviewer can be wrong about *why* and
-  right about *what*; that is what `wrong reason, right change` is for. Collapsing it into
+- **Judge the mechanism and the suggestion separately.** A reviewer can be wrong about _why_ and
+  right about _what_; that is what `wrong reason, right change` is for. Collapsing it into
   `not actionable` is how real fixes get closed — it happened twice in one week here.
 - **Refutation carries the higher burden.** Wrongly rejecting a real finding leaves a live bug;
   wrongly accepting a bad one costs a small unnecessary change. Before calling something refuted,
@@ -87,8 +88,8 @@ exists to prevent.
   - Disposition `already addressed`, `not actionable`, `duplicate`, or `out of scope`:
     resolve too. A finding you verified and declined is handled; leaving it open only makes
     the next reader re-derive your reasoning. Report the reason to the user in-session.
-  In both cases the PR must be open and authored by the authenticated user, and the
-  resolution must answer *that* thread rather than a neighbouring one.
+    In both cases the PR must be open and authored by the authenticated user, and the
+    resolution must answer _that_ thread rather than a neighbouring one.
 - The single exception is `ambiguous`: if you could not determine whether the finding is real,
   leave it open, say so, and ask. Never resolve to make a queue look clean.
 - Resolve via GraphQL, never by guessing from a flat comment id:
@@ -98,7 +99,7 @@ exists to prevent.
     -F id=<PRRT_…>
   ```
   `threadId` is the `PRRT_…` node id from the `reviewThreads` query, and nothing else is needed.
-  Answering instead takes the *comment* id
+  Answering instead takes the _comment_ id
   (`gh api repos/<owner>/<repo>/pulls/<pr>/comments/<comment_id>/replies -f body='…'`) — but a
   reply is a comment, so send one only when the user asked you to answer a reviewer, never as
   your own finding.

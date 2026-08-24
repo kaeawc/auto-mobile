@@ -38,18 +38,18 @@ describe("sharp 0.35.x Bun repro artifact", () => {
     expect(readme).toContain("darwin arm64");
     expect(readme).toContain("Docker daemon was");
 
-    expect(script).toContain("import sharp from \"sharp\"");
+    expect(script).toContain('import sharp from "sharp"');
     expect(script).toContain("sharp.versions");
     expect(script).toContain("nearLossless");
     expect(script).not.toContain("@kaeawc/auto-mobile");
 
-    expect(lockfile).toContain("\"sharp\": \"0.35.3\"");
+    expect(lockfile).toContain('"sharp": "0.35.3"');
     expect(lockfile).not.toContain("@kaeawc/auto-mobile");
 
     expect(validationScript).toContain("bun install --frozen-lockfile");
     expect(validationScript).toContain("bun run repro");
-    expect(validationScript).toContain("\"format\": \"webp\"");
-    expect(validationScript).toContain("\"nearLossless\": [1-9][0-9]*");
+    expect(validationScript).toContain('"format": "webp"');
+    expect(validationScript).toContain('"nearLossless": [1-9][0-9]*');
 
     expect(designDoc).toContain("Issue #3014 upstream repro record");
     expect(designDoc).toContain("docs/reproductions/sharp-bun-035");

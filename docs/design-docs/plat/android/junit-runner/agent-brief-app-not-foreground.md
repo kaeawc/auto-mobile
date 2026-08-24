@@ -18,7 +18,7 @@
 
 Some pipelines only archive logcat filtered to **activity / task** lines (e.g. `ActivityTaskManager`). That is enough to see **intents and transitions**, and often enough to see **CtrlProxy** working.
 
-It is **usually not enough** to answer: *why did my process disappear or never hold focus?*
+It is **usually not enough** to answer: _why did my process disappear or never hold focus?_
 
 If the saved logcat has **no** lines like:
 
@@ -102,21 +102,23 @@ If `pidof` is empty, skip this and rely on step **4** (wide logcat).
 
 There is **no single canonical filename** CI must produce. What matters is that you saved **plain text** for each command (upload as job artifacts, or paste into a ticket). Treat that bundle as one “evidence package.”
 
-**1. `pidof` output (step 1)**  
-- **Good for debugging:** a **numeric PID** (process still alive a moment after launch).  
+**1. `pidof` output (step 1)**
+
+- **Good for debugging:** a **numeric PID** (process still alive a moment after launch).
 - **Smoking gun:** **empty** → app is not running; pair with logcat for crash vs silent exit.
 
-**2. `mCurrentFocus` / `mFocusedApp` lines (step 2)**  
-- **Good:** your **`PACKAGE`** appears on the focus line.  
+**2. `mCurrentFocus` / `mFocusedApp` lines (step 2)**
+
+- **Good:** your **`PACKAGE`** appears on the focus line.
 - **Problem:** **launcher** or another package → explains why AutoMobile still “sees” launcher UI even after `launchApp`.
 
 **3. Wide logcat (step 4, and step 5 if you had a PID)**  
 Scan top-to-bottom for the **first** occurrence of any of:
 
-- `FATAL EXCEPTION` (especially with your package or `AndroidRuntime` below it)  
-- `AndroidRuntime: E` stack traces  
-- `Process <your.package> has died` (wording varies by API)  
-- `SecurityException`, `IllegalArgumentException`, `IllegalStateException` mentioning your code  
+- `FATAL EXCEPTION` (especially with your package or `AndroidRuntime` below it)
+- `AndroidRuntime: E` stack traces
+- `Process <your.package> has died` (wording varies by API)
+- `SecurityException`, `IllegalArgumentException`, `IllegalStateException` mentioning your code
 
 That block (a few dozen lines around the first hit) is usually **the** artifact you hand to the app team.
 
@@ -132,19 +134,19 @@ Keep **`daemon.log`** + **JUnit/Gradle** failure snippet from the **same** run s
 
 ## How this maps to fixes
 
-| Finding | Likely area |
-|--------|-------------|
-| `FATAL EXCEPTION` / `AndroidRuntime` for **your** package | App bug (startup crash, missing dep, migration, etc.) |
-| `SecurityException` / permission denial | Manifest, runtime permissions, or device policy |
-| `pidof` empty, no crash in logcat | Immediate `finish()`, wrong launcher activity, or process name / user profile mismatch |
-| Focus stays on launcher, app process alive | Overlay, dialog, or another activity on top—investigate stack (step **3**) |
-| Focus wrong, tests still “observe” | **Harden the YAML** (next section) |
+| Finding                                                   | Likely area                                                                            |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `FATAL EXCEPTION` / `AndroidRuntime` for **your** package | App bug (startup crash, missing dep, migration, etc.)                                  |
+| `SecurityException` / permission denial                   | Manifest, runtime permissions, or device policy                                        |
+| `pidof` empty, no crash in logcat                         | Immediate `finish()`, wrong launcher activity, or process name / user profile mismatch |
+| Focus stays on launcher, app process alive                | Overlay, dialog, or another activity on top—investigate stack (step **3**)             |
+| Focus wrong, tests still “observe”                        | **Harden the YAML** (next section)                                                     |
 
 ---
 
 ## Harden AutoMobile YAML (parallel track)
 
-Treat **`launchApp` success** as *start was attempted*, not *your UI is visible*.
+Treat **`launchApp` success** as _start was attempted_, not _your UI is visible_.
 
 Immediately after `launchApp`, wait for something **only your app** can show (resource id including your package):
 

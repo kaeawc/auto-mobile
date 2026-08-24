@@ -188,7 +188,14 @@ jobs:
 
   finalize-release:
     runs-on: ubuntu-latest
-    needs: [prepare-version, build-candidate-ctrl-proxy-ios-ipa, build-candidate-control-proxy-apk, build-candidate-video-server-jar, build-candidate-screen-capture-helper]
+    needs:
+      [
+        prepare-version,
+        build-candidate-ctrl-proxy-ios-ipa,
+        build-candidate-control-proxy-apk,
+        build-candidate-video-server-jar,
+        build-candidate-screen-capture-helper,
+      ]
     outputs:
       release_commit: ${{ steps.commit.outputs.release_commit }}
     # Restates the workflow-level grant because a job-level block replaces it
@@ -211,10 +218,8 @@ jobs:
         env:
           RELEASE_VERSION: ${{ inputs.version }}
           APK_SHA256_CHECKSUM: ${{ needs.build-candidate-control-proxy-apk.outputs.sha256 }}
-          IOS_CTRL_PROXY_SHA256_CHECKSUM:
-            ${{ needs.build-candidate-ctrl-proxy-ios-ipa.outputs.sha256 }}
-          IOS_CTRL_PROXY_RUNNER_SHA256:
-            ${{ needs.build-candidate-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
+          IOS_CTRL_PROXY_SHA256_CHECKSUM: ${{ needs.build-candidate-ctrl-proxy-ios-ipa.outputs.sha256 }}
+          IOS_CTRL_PROXY_RUNNER_SHA256: ${{ needs.build-candidate-ctrl-proxy-ios-ipa.outputs.runner_sha256 }}
           VIDEO_JAR_SHA256: ${{ needs.build-candidate-video-server-jar.outputs.sha256 }}
           SCREEN_CAPTURE_HELPER_SHA256: ${{ needs.build-candidate-screen-capture-helper.outputs.sha256 }}
         run: bash scripts/generate-release-constants.sh
@@ -281,7 +286,16 @@ jobs:
 
   verify-prepared-release:
     runs-on: ubuntu-latest
-    needs: [prepare-version, finalize-release, build-candidate-ctrl-proxy-ios-ipa, build-candidate-control-proxy-apk, build-candidate-video-server-jar, build-candidate-screen-capture-helper, build-candidate-desktop-app-installers]
+    needs:
+      [
+        prepare-version,
+        finalize-release,
+        build-candidate-ctrl-proxy-ios-ipa,
+        build-candidate-control-proxy-apk,
+        build-candidate-video-server-jar,
+        build-candidate-screen-capture-helper,
+        build-candidate-desktop-app-installers,
+      ]
     permissions:
       contents: write
       actions: write

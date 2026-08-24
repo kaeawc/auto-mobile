@@ -11,16 +11,21 @@ function lintSnippet(code: string, filename?: string): string[] {
 
 describe("error-handling convention lint backstop", () => {
   test("rejects a fallback return at a formerly allowlisted path and line", async () => {
-    const messages = await lintSnippet(`${"\n".repeat(145)}export function probe(): boolean {
+    const messages = await lintSnippet(
+      `${"\n".repeat(145)}export function probe(): boolean {
   try {
     return true;
   } catch {
     return false;
   }
 }
-`, "src/daemon/client.ts");
+`,
+      "src/daemon/client.ts",
+    );
 
-    expect(messages).toContain("Catch blocks that return a fallback must log the caught error before returning.");
+    expect(messages).toContain(
+      "Catch blocks that return a fallback must log the caught error before returning.",
+    );
   });
 
   test("rejects empty catch bodies", async () => {
@@ -37,7 +42,9 @@ export function cleanup(): void {
     // catch-convention flags it as a traceless swallow. (oxlint's built-in
     // `no-empty` with allowEmptyCatch:false also fires at the config level; this
     // rule-unit test asserts the convention rule's own diagnostic.)
-    expect(messages.some(m => m.startsWith("Catch block swallows the error with no trace"))).toBe(true);
+    expect(messages.some((m) => m.startsWith("Catch block swallows the error with no trace"))).toBe(
+      true,
+    );
   });
 
   test("rejects return-only catch bodies without logging", async () => {
@@ -51,7 +58,9 @@ export function parse(): string | null {
 }
 `);
 
-    expect(messages).toContain("Catch blocks that return a fallback must log the caught error before returning.");
+    expect(messages).toContain(
+      "Catch blocks that return a fallback must log the caught error before returning.",
+    );
   });
 
   test("rejects bare and undefined return-only catch bodies without logging", async () => {
@@ -73,7 +82,13 @@ export function maybe(): string | undefined {
 }
 `);
 
-    expect(messages.filter(message => message === "Catch blocks that return a fallback must log the caught error before returning.")).toHaveLength(2);
+    expect(
+      messages.filter(
+        (message) =>
+          message ===
+          "Catch blocks that return a fallback must log the caught error before returning.",
+      ),
+    ).toHaveLength(2);
   });
 
   test("rejects boolean fallback returns without logging", async () => {
@@ -87,7 +102,9 @@ export function probe(): boolean {
 }
 `);
 
-    expect(messages).toContain("Catch blocks that return a fallback must log the caught error before returning.");
+    expect(messages).toContain(
+      "Catch blocks that return a fallback must log the caught error before returning.",
+    );
   });
 
   test("rejects comment-only catch bodies that core no-empty ignores (#3594)", async () => {
@@ -103,7 +120,9 @@ export function poll(): void {
 }
 `);
 
-    expect(messages).toContain("Catch block swallows the error with no trace: it does not log, does not throw, and never references the caught error. Per the error-handling convention, log it (logger.debug/warn/error) or throw a structured error (see CLAUDE.md).");
+    expect(messages).toContain(
+      "Catch block swallows the error with no trace: it does not log, does not throw, and never references the caught error. Per the error-handling convention, log it (logger.debug/warn/error) or throw a structured error (see CLAUDE.md).",
+    );
   });
 
   test("rejects an unused-error catch returning a non-fallback object (#3594 Idle case)", async () => {
@@ -117,7 +136,9 @@ export function status(): { done: boolean; value: number | null } {
 }
 `);
 
-    expect(messages).toContain("Catch block swallows the error with no trace: it does not log, does not throw, and never references the caught error. Per the error-handling convention, log it (logger.debug/warn/error) or throw a structured error (see CLAUDE.md).");
+    expect(messages).toContain(
+      "Catch block swallows the error with no trace: it does not log, does not throw, and never references the caught error. Per the error-handling convention, log it (logger.debug/warn/error) or throw a structured error (see CLAUDE.md).",
+    );
   });
 
   test("allows catches that forward the error without logging", async () => {
@@ -133,7 +154,9 @@ export function run(reject: (error: unknown) => void): void {
 }
 `);
 
-    expect(messages).not.toContain("Catch block swallows the error with no trace: it does not log, does not throw, and never references the caught error. Per the error-handling convention, log it (logger.debug/warn/error) or throw a structured error (see CLAUDE.md).");
+    expect(messages).not.toContain(
+      "Catch block swallows the error with no trace: it does not log, does not throw, and never references the caught error. Per the error-handling convention, log it (logger.debug/warn/error) or throw a structured error (see CLAUDE.md).",
+    );
   });
 
   test("allows non-fallback recovery returns", async () => {
@@ -151,7 +174,9 @@ export function parse(): string {
 }
 `);
 
-    expect(messages).not.toContain("Catch blocks that return a fallback must log the caught error before returning.");
+    expect(messages).not.toContain(
+      "Catch blocks that return a fallback must log the caught error before returning.",
+    );
   });
 
   test("rejects unlogged status-object returns", async () => {
@@ -165,7 +190,9 @@ export function check(): { status: "pass" | "skip"; message?: string } {
 }
 `);
 
-    expect(messages).toContain("Catch blocks that return a typed failure/status object must log at warn, not debug.");
+    expect(messages).toContain(
+      "Catch blocks that return a typed failure/status object must log at warn, not debug.",
+    );
   });
 
   test("rejects debug logging before returning a typed status failure", async () => {
@@ -182,7 +209,9 @@ export function check(): { status: "pass" | "skip"; message?: string } {
 }
 `);
 
-    expect(messages).toContain("Catch blocks that return a typed failure/status object must log at warn, not debug.");
+    expect(messages).toContain(
+      "Catch blocks that return a typed failure/status object must log at warn, not debug.",
+    );
   });
 
   test("rejects injected debug loggers before returning a typed status failure", async () => {
@@ -204,7 +233,9 @@ export function check(dependencies: Dependencies): { status: "pass" | "skip"; me
 }
 `);
 
-    expect(messages).toContain("Catch blocks that return a typed failure/status object must log at warn, not debug.");
+    expect(messages).toContain(
+      "Catch blocks that return a typed failure/status object must log at warn, not debug.",
+    );
   });
 
   test("rejects status returns that happen before a later logger warning", async () => {
@@ -224,7 +255,9 @@ export function check(error: unknown): { status: "fail" | "skip"; message?: stri
 }
 `);
 
-    expect(messages).toContain("Catch blocks that return a typed failure/status object must log at warn, not debug.");
+    expect(messages).toContain(
+      "Catch blocks that return a typed failure/status object must log at warn, not debug.",
+    );
   });
 
   test("rejects branch status returns that are not preceded by a warning on that branch", async () => {
@@ -244,7 +277,9 @@ export function check(caught: unknown): { status: "fail" | "skip"; message?: str
 }
 `);
 
-    expect(messages).toContain("Catch blocks that return a typed failure/status object must log at warn, not debug.");
+    expect(messages).toContain(
+      "Catch blocks that return a typed failure/status object must log at warn, not debug.",
+    );
   });
 
   test("rejects non-logger warn calls before typed status returns", async () => {
@@ -259,7 +294,9 @@ export function check(): { status: "fail"; message?: string } {
 }
 `);
 
-    expect(messages).toContain("Catch blocks that return a typed failure/status object must log at warn, not debug.");
+    expect(messages).toContain(
+      "Catch blocks that return a typed failure/status object must log at warn, not debug.",
+    );
   });
 
   test("allows logged fallback returns and warn-logged typed failures", async () => {
@@ -285,8 +322,12 @@ export function check(): { status: "pass" | "skip"; message?: string } {
 }
 `);
 
-    expect(messages).not.toContain("Catch blocks that return a fallback must log the caught error before returning.");
-    expect(messages).not.toContain("Catch blocks that return a typed failure/status object must log at warn, not debug.");
+    expect(messages).not.toContain(
+      "Catch blocks that return a fallback must log the caught error before returning.",
+    );
+    expect(messages).not.toContain(
+      "Catch blocks that return a typed failure/status object must log at warn, not debug.",
+    );
   });
 
   test("applies through later source overrides and issue-touched files", async () => {
@@ -310,7 +351,9 @@ export function parse(): string | null {
 
     for (const filePath of sourcePaths) {
       const messages = await lintSnippet(code, filePath);
-      expect(messages).toContain("Catch blocks that return a fallback must log the caught error before returning.");
+      expect(messages).toContain(
+        "Catch blocks that return a fallback must log the caught error before returning.",
+      );
     }
   });
 });

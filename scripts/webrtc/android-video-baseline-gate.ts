@@ -33,7 +33,7 @@ const DEFAULT_BASELINE_PATH = path.join(
   "..",
   "benchmark",
   "webrtc",
-  "android-video-baseline.json"
+  "android-video-baseline.json",
 );
 
 /** Read and structurally validate the committed baseline JSON. */
@@ -43,11 +43,13 @@ export async function readAndroidVideoBaseline(file: string): Promise<AndroidVid
     parsed = JSON.parse(await readFile(file, "utf8"));
   } catch (error) {
     throw new Error(
-      `Failed to read Android video baseline at ${file}: ${error instanceof Error ? error.message : String(error)}`
+      `Failed to read Android video baseline at ${file}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
   if (!isAndroidVideoBaseline(parsed)) {
-    throw new Error(`Malformed Android video baseline at ${file}: missing required version/fpsTarget/metrics fields`);
+    throw new Error(
+      `Malformed Android video baseline at ${file}: missing required version/fpsTarget/metrics fields`,
+    );
   }
   return parsed;
 }
@@ -55,7 +57,9 @@ export async function readAndroidVideoBaseline(file: string): Promise<AndroidVid
 async function main(): Promise<void> {
   const [dir, baselinePath] = process.argv.slice(2);
   if (!dir) {
-    throw new Error("Usage: bun scripts/webrtc/android-video-baseline-gate.ts <artifacts-dir> [baseline.json]");
+    throw new Error(
+      "Usage: bun scripts/webrtc/android-video-baseline-gate.ts <artifacts-dir> [baseline.json]",
+    );
   }
   const baseline = await readAndroidVideoBaseline(baselinePath ?? DEFAULT_BASELINE_PATH);
   const records = await readCaptureStageRecords(dir);

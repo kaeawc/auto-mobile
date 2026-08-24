@@ -41,7 +41,7 @@ export function adjustWeight(currentWeight: number, passed: boolean): number {
 export function calculateWeightedAverage<T>(
   items: T[],
   getValue: (item: T) => number,
-  getWeight: (item: T) => number
+  getWeight: (item: T) => number,
 ): number | null {
   if (items.length === 0) {
     return null;
@@ -53,10 +53,7 @@ export function calculateWeightedAverage<T>(
     return null;
   }
 
-  const weightedSum = items.reduce(
-    (sum, item) => sum + getValue(item) * getWeight(item),
-    0
-  );
+  const weightedSum = items.reduce((sum, item) => sum + getValue(item) * getWeight(item), 0);
 
   return weightedSum / totalWeight;
 }
@@ -72,7 +69,7 @@ export function calculateWeightedAverage<T>(
 export function calculateWeightedAverages<T, K extends string>(
   items: T[],
   fields: Array<{ key: K; getValue: (item: T) => number; round?: boolean }>,
-  getWeight: (item: T) => number
+  getWeight: (item: T) => number,
 ): Record<K, number> | null {
   if (items.length === 0) {
     return null;
@@ -87,10 +84,7 @@ export function calculateWeightedAverages<T, K extends string>(
   const result = {} as Record<K, number>;
 
   for (const { key, getValue, round } of fields) {
-    const weightedSum = items.reduce(
-      (sum, item) => sum + getValue(item) * getWeight(item),
-      0
-    );
+    const weightedSum = items.reduce((sum, item) => sum + getValue(item) * getWeight(item), 0);
     const average = weightedSum / totalWeight;
     result[key] = round ? Math.round(average) : average;
   }
@@ -111,7 +105,7 @@ export function calculateWeightedAverages<T, K extends string>(
 export function exponentialMovingAverage(
   oldValue: number,
   newValue: number,
-  alpha: number = 0.3
+  alpha: number = 0.3,
 ): number {
   return alpha * newValue + (1 - alpha) * oldValue;
 }

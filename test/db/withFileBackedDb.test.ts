@@ -303,6 +303,6 @@ describe("openLifecycleTestDb against a real file-backed DB (issue #3046)", () =
       // remove it a second time.
       await expect(harness.cleanup()).resolves.toBeUndefined();
     },
-    WINDOWS_FILE_DB_TEST_TIMEOUT_MS
+    WINDOWS_FILE_DB_TEST_TIMEOUT_MS,
   );
 });

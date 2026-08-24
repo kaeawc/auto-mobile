@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { optionalBoolean, optionalEnum, optionalInteger, optionalString, queryParamsToRecord } from "../../src/server/queryParamValidation";
+import {
+  optionalBoolean,
+  optionalEnum,
+  optionalInteger,
+  optionalString,
+  queryParamsToRecord,
+} from "../../src/server/queryParamValidation";
 
 describe("queryParamValidation", () => {
   test("normalizes optional scalar parameters", () => {
@@ -13,11 +19,15 @@ describe("queryParamValidation", () => {
   test("rejects invalid values instead of silently dropping filters", () => {
     expect(() => optionalInteger("1.5", "limit")).toThrow("Invalid limit");
     expect(() => optionalBoolean("sometimes", "latestOnly")).toThrow("Invalid latestOnly");
-    expect(() => optionalEnum("sideways", "order", ["asc", "desc"] as const)).toThrow("Invalid order");
+    expect(() => optionalEnum("sideways", "order", ["asc", "desc"] as const)).toThrow(
+      "Invalid order",
+    );
   });
 
   test("rejects duplicate query keys", () => {
-    expect(() => queryParamsToRecord("limit=1&limit=2")).toThrow("Duplicate query parameter: limit");
+    expect(() => queryParamsToRecord("limit=1&limit=2")).toThrow(
+      "Duplicate query parameter: limit",
+    );
     expect(queryParamsToRecord("limit=1&testClass=A")).toEqual({ limit: "1", testClass: "A" });
   });
 
@@ -28,7 +38,7 @@ describe("queryParamValidation", () => {
     const PROTOTYPE_KEYS = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"];
 
     test.each([
-      ...PROTOTYPE_KEYS.map(key => [key, `${key}=x`, { [key]: "x" }] as const),
+      ...PROTOTYPE_KEYS.map((key) => [key, `${key}=x`, { [key]: "x" }] as const),
       // Control row: a normal key must still round-trip.
       ["normal control key", "limit=1", { limit: "1" }] as const,
     ])("accepts a single %s parameter", (_label, query, expected) => {
@@ -37,7 +47,7 @@ describe("queryParamValidation", () => {
     });
 
     test.each([
-      ...PROTOTYPE_KEYS.map(key => [key, `${key}=x&${key}=y`] as const),
+      ...PROTOTYPE_KEYS.map((key) => [key, `${key}=x&${key}=y`] as const),
       // Control row: the duplicate check itself must not have been disabled.
       ["limit", "limit=1&limit=2"] as const,
     ])("still rejects a genuine duplicate %s", (key, query) => {

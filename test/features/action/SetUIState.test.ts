@@ -8,14 +8,14 @@ import {
   FakeClearText,
   FakeSwipeOn,
   FakeObserveScreenForSetUIState,
-  FakeFieldTypeDetector
+  FakeFieldTypeDetector,
 } from "../../fakes/FakeSetUIStateDependencies";
 
 describe("SetUIState", () => {
   const device: BootedDevice = {
     name: "test-device",
     platform: "android",
-    deviceId: "device-1"
+    deviceId: "device-1",
   };
 
   let fakeTap: FakeTapOnElement;
@@ -28,20 +28,22 @@ describe("SetUIState", () => {
 
   const createHierarchyWithElement = (element: Partial<Element>): ViewHierarchyResult => ({
     hierarchy: {
-      node: [{
-        $: {
-          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
-          ...element
-        }
-      }]
-    }
+      node: [
+        {
+          $: {
+            bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+            ...element,
+          },
+        },
+      ],
+    },
   });
 
   const createObserveResult = (hierarchy?: ViewHierarchyResult): ObserveResult => ({
     updatedAt: Date.now(),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: hierarchy
+    viewHierarchy: hierarchy,
   });
 
   const createSetUIState = () => {
@@ -52,7 +54,7 @@ describe("SetUIState", () => {
       swipeOn: fakeSwipe,
       observeScreen: fakeObserve,
       fieldTypeDetector: fakeFieldTypeDetector,
-      timer: fakeTimer
+      timer: fakeTimer,
     });
   };
 
@@ -71,13 +73,13 @@ describe("SetUIState", () => {
     test("sets text field value with tap, clear, and input", async () => {
       const initialHierarchy = createHierarchyWithElement({
         "resource-id": "username",
-        "text": "",
-        "class": "android.widget.EditText"
+        text: "",
+        class: "android.widget.EditText",
       });
       const updatedHierarchy = createHierarchyWithElement({
         "resource-id": "username",
-        "text": "john@example.com",
-        "class": "android.widget.EditText"
+        text: "john@example.com",
+        class: "android.widget.EditText",
       });
 
       let observeCallCount = 0;
@@ -92,7 +94,7 @@ describe("SetUIState", () => {
 
       const setUIState = createSetUIState();
       const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "username" }, value: "john@example.com" }]
+        fields: [{ selector: { elementId: "username" }, value: "john@example.com" }],
       });
 
       expect(result.success).toBe(true);
@@ -115,8 +117,8 @@ describe("SetUIState", () => {
     test("skips text field when already has correct value", async () => {
       const hierarchy = createHierarchyWithElement({
         "resource-id": "username",
-        "text": "john@example.com",
-        "class": "android.widget.EditText"
+        text: "john@example.com",
+        class: "android.widget.EditText",
       });
       fakeObserve.setResult(createObserveResult(hierarchy));
       fakeFieldTypeDetector.setFieldType("username", "text");
@@ -124,7 +126,7 @@ describe("SetUIState", () => {
 
       const setUIState = createSetUIState();
       const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "username" }, value: "john@example.com" }]
+        fields: [{ selector: { elementId: "username" }, value: "john@example.com" }],
       });
 
       expect(result.success).toBe(true);
@@ -142,15 +144,15 @@ describe("SetUIState", () => {
     test("taps checkbox when state needs to change", async () => {
       const initialHierarchy = createHierarchyWithElement({
         "resource-id": "remember_me",
-        "class": "android.widget.CheckBox",
-        "checkable": "true" as any,
-        "checked": "false" as any
+        class: "android.widget.CheckBox",
+        checkable: "true" as any,
+        checked: "false" as any,
       });
       const updatedHierarchy = createHierarchyWithElement({
         "resource-id": "remember_me",
-        "class": "android.widget.CheckBox",
-        "checkable": "true" as any,
-        "checked": "true" as any
+        class: "android.widget.CheckBox",
+        checkable: "true" as any,
+        checked: "true" as any,
       });
 
       let observeCallCount = 0;
@@ -165,7 +167,7 @@ describe("SetUIState", () => {
 
       const setUIState = createSetUIState();
       const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "remember_me" }, selected: true }]
+        fields: [{ selector: { elementId: "remember_me" }, selected: true }],
       });
 
       expect(result.success).toBe(true);
@@ -179,9 +181,9 @@ describe("SetUIState", () => {
     test("skips checkbox when already has correct state", async () => {
       const hierarchy = createHierarchyWithElement({
         "resource-id": "remember_me",
-        "class": "android.widget.CheckBox",
-        "checkable": "true" as any,
-        "checked": "true" as any
+        class: "android.widget.CheckBox",
+        checkable: "true" as any,
+        checked: "true" as any,
       });
       fakeObserve.setResult(createObserveResult(hierarchy));
       fakeFieldTypeDetector.setFieldType("remember_me", "checkbox");
@@ -189,7 +191,7 @@ describe("SetUIState", () => {
 
       const setUIState = createSetUIState();
       const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "remember_me" }, selected: true }]
+        fields: [{ selector: { elementId: "remember_me" }, selected: true }],
       });
 
       expect(result.success).toBe(true);
@@ -205,15 +207,15 @@ describe("SetUIState", () => {
     test("taps toggle when state needs to change", async () => {
       const initialHierarchy = createHierarchyWithElement({
         "resource-id": "dark_mode",
-        "class": "android.widget.Switch",
-        "checkable": "true" as any,
-        "checked": "true" as any
+        class: "android.widget.Switch",
+        checkable: "true" as any,
+        checked: "true" as any,
       });
       const updatedHierarchy = createHierarchyWithElement({
         "resource-id": "dark_mode",
-        "class": "android.widget.Switch",
-        "checkable": "true" as any,
-        "checked": "false" as any
+        class: "android.widget.Switch",
+        checkable: "true" as any,
+        checked: "false" as any,
       });
 
       let observeCallCount = 0;
@@ -228,7 +230,7 @@ describe("SetUIState", () => {
 
       const setUIState = createSetUIState();
       const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "dark_mode" }, selected: false }]
+        fields: [{ selector: { elementId: "dark_mode" }, selected: false }],
       });
 
       expect(result.success).toBe(true);
@@ -244,13 +246,13 @@ describe("SetUIState", () => {
     test("opens dropdown and selects value", async () => {
       const initialHierarchy = createHierarchyWithElement({
         "resource-id": "country",
-        "text": "Select Country",
-        "class": "android.widget.Spinner"
+        text: "Select Country",
+        class: "android.widget.Spinner",
       });
       const updatedHierarchy = createHierarchyWithElement({
         "resource-id": "country",
-        "text": "United States",
-        "class": "android.widget.Spinner"
+        text: "United States",
+        class: "android.widget.Spinner",
       });
 
       let observeCallCount = 0;
@@ -265,7 +267,7 @@ describe("SetUIState", () => {
 
       const setUIState = createSetUIState();
       const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "country" }, value: "United States" }]
+        fields: [{ selector: { elementId: "country" }, value: "United States" }],
       });
 
       expect(result.success).toBe(true);
@@ -289,11 +291,13 @@ describe("SetUIState", () => {
         if (callCount <= 1) {
           return createObserveResult({ hierarchy: { node: [] } });
         }
-        return createObserveResult(createHierarchyWithElement({
-          "resource-id": "hidden_field",
-          "text": "found!",
-          "class": "android.widget.EditText"
-        }));
+        return createObserveResult(
+          createHierarchyWithElement({
+            "resource-id": "hidden_field",
+            text: "found!",
+            class: "android.widget.EditText",
+          }),
+        );
       });
 
       fakeFieldTypeDetector.setFieldType("hidden_field", "text");
@@ -301,7 +305,7 @@ describe("SetUIState", () => {
 
       const setUIState = createSetUIState();
       const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "hidden_field" }, value: "found!" }]
+        fields: [{ selector: { elementId: "hidden_field" }, value: "found!" }],
       });
 
       expect(result.success).toBe(true);
@@ -316,11 +320,13 @@ describe("SetUIState", () => {
         if (callCount <= 1) {
           return createObserveResult({ hierarchy: { node: [] } });
         }
-        return createObserveResult(createHierarchyWithElement({
-          "resource-id": "field",
-          "text": "test",
-          "class": "android.widget.EditText"
-        }));
+        return createObserveResult(
+          createHierarchyWithElement({
+            "resource-id": "field",
+            text: "test",
+            class: "android.widget.EditText",
+          }),
+        );
       });
 
       fakeFieldTypeDetector.setFieldType("field", "text");
@@ -329,7 +335,7 @@ describe("SetUIState", () => {
       const setUIState = createSetUIState();
       await setUIState.execute({
         fields: [{ selector: { elementId: "field" }, value: "test" }],
-        scrollDirection: "up"
+        scrollDirection: "up",
       });
 
       // First scroll should be in the specified direction
@@ -341,8 +347,8 @@ describe("SetUIState", () => {
     test("retries up to maxRetries on failure", async () => {
       const hierarchy = createHierarchyWithElement({
         "resource-id": "field",
-        "text": "",
-        "class": "android.widget.EditText"
+        text: "",
+        class: "android.widget.EditText",
       });
       fakeObserve.setResult(createObserveResult(hierarchy));
       fakeFieldTypeDetector.setFieldType("field", "text");
@@ -352,12 +358,12 @@ describe("SetUIState", () => {
         success: false,
         action: "tap",
         element: { bounds: { left: 0, top: 0, right: 100, bottom: 50 } },
-        error: "Element not clickable"
+        error: "Element not clickable",
       });
 
       const setUIState = createSetUIState();
       const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "field" }, value: "test" }]
+        fields: [{ selector: { elementId: "field" }, value: "test" }],
       });
 
       expect(result.success).toBe(false);
@@ -375,11 +381,13 @@ describe("SetUIState", () => {
           return createObserveResult({ hierarchy: { node: [] } });
         }
         // Subsequent calls: element appears
-        return createObserveResult(createHierarchyWithElement({
-          "resource-id": "async_field",
-          "text": "loaded!",
-          "class": "android.widget.EditText"
-        }));
+        return createObserveResult(
+          createHierarchyWithElement({
+            "resource-id": "async_field",
+            text: "loaded!",
+            class: "android.widget.EditText",
+          }),
+        );
       });
 
       fakeFieldTypeDetector.setFieldType("async_field", "text");
@@ -387,7 +395,7 @@ describe("SetUIState", () => {
 
       const setUIState = createSetUIState();
       const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "async_field" }, value: "loaded!" }]
+        fields: [{ selector: { elementId: "async_field" }, value: "loaded!" }],
       });
 
       expect(result.success).toBe(true);
@@ -401,8 +409,8 @@ describe("SetUIState", () => {
     test("stops processing fields on first failure", async () => {
       const hierarchy = createHierarchyWithElement({
         "resource-id": "field1",
-        "text": "",
-        "class": "android.widget.EditText"
+        text: "",
+        class: "android.widget.EditText",
       });
       fakeObserve.setResult(createObserveResult(hierarchy));
       fakeFieldTypeDetector.setFieldType("field1", "text");
@@ -412,15 +420,15 @@ describe("SetUIState", () => {
         success: false,
         action: "tap",
         element: { bounds: { left: 0, top: 0, right: 100, bottom: 50 } },
-        error: "Element not clickable"
+        error: "Element not clickable",
       });
 
       const setUIState = createSetUIState();
       const result = await setUIState.execute({
         fields: [
           { selector: { elementId: "field1" }, value: "test1" },
-          { selector: { elementId: "field2" }, value: "test2" }
-        ]
+          { selector: { elementId: "field2" }, value: "test2" },
+        ],
       });
 
       expect(result.success).toBe(false);
@@ -433,19 +441,23 @@ describe("SetUIState", () => {
 
   describe("password fields", () => {
     test("auto-detects password fields and skips verification", async () => {
-      fakeObserve.setResult(createObserveResult(createHierarchyWithElement({
-        "resource-id": "password",
-        "text": "",
-        "class": "android.widget.EditText",
-        "password": "true"
-      })));
+      fakeObserve.setResult(
+        createObserveResult(
+          createHierarchyWithElement({
+            "resource-id": "password",
+            text: "",
+            class: "android.widget.EditText",
+            password: "true",
+          }),
+        ),
+      );
 
       fakeFieldTypeDetector.setFieldType("password", "text");
       fakeFieldTypeDetector.setIsPasswordField("password", true);
 
       const setUIState = createSetUIState();
       const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "password" }, value: "secret123" }]
+        fields: [{ selector: { elementId: "password" }, value: "secret123" }],
       });
 
       expect(result.success).toBe(true);
@@ -459,20 +471,66 @@ describe("SetUIState", () => {
       const initialHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": { left: 0, top: 0, right: 100, bottom: 50 }, "resource-id": "username", "text": "", "class": "android.widget.EditText" } },
-            { $: { "bounds": { left: 0, top: 60, right: 100, bottom: 110 }, "resource-id": "password", "text": "", "class": "android.widget.EditText", "password": "true" } },
-            { $: { "bounds": { left: 0, top: 120, right: 100, bottom: 170 }, "resource-id": "remember", "class": "android.widget.CheckBox", "checkable": "true", "checked": "false" } }
-          ]
-        }
+            {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                "resource-id": "username",
+                text: "",
+                class: "android.widget.EditText",
+              },
+            },
+            {
+              $: {
+                bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+                "resource-id": "password",
+                text: "",
+                class: "android.widget.EditText",
+                password: "true",
+              },
+            },
+            {
+              $: {
+                bounds: { left: 0, top: 120, right: 100, bottom: 170 },
+                "resource-id": "remember",
+                class: "android.widget.CheckBox",
+                checkable: "true",
+                checked: "false",
+              },
+            },
+          ],
+        },
       };
       const updatedHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": { left: 0, top: 0, right: 100, bottom: 50 }, "resource-id": "username", "text": "user@test.com", "class": "android.widget.EditText" } },
-            { $: { "bounds": { left: 0, top: 60, right: 100, bottom: 110 }, "resource-id": "password", "text": "", "class": "android.widget.EditText", "password": "true" } },
-            { $: { "bounds": { left: 0, top: 120, right: 100, bottom: 170 }, "resource-id": "remember", "class": "android.widget.CheckBox", "checkable": "true", "checked": "true" } }
-          ]
-        }
+            {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                "resource-id": "username",
+                text: "user@test.com",
+                class: "android.widget.EditText",
+              },
+            },
+            {
+              $: {
+                bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+                "resource-id": "password",
+                text: "",
+                class: "android.widget.EditText",
+                password: "true",
+              },
+            },
+            {
+              $: {
+                bounds: { left: 0, top: 120, right: 100, bottom: 170 },
+                "resource-id": "remember",
+                class: "android.widget.CheckBox",
+                checkable: "true",
+                checked: "true",
+              },
+            },
+          ],
+        },
       };
 
       let observeCallCount = 0;
@@ -494,13 +552,13 @@ describe("SetUIState", () => {
         fields: [
           { selector: { elementId: "username" }, value: "user@test.com" },
           { selector: { elementId: "password" }, value: "pass123" },
-          { selector: { elementId: "remember" }, selected: true }
-        ]
+          { selector: { elementId: "remember" }, selected: true },
+        ],
       });
 
       expect(result.success).toBe(true);
       expect(result.fields).toHaveLength(3);
-      expect(result.fields.every(f => f.success)).toBe(true);
+      expect(result.fields.every((f) => f.success)).toBe(true);
 
       // Verify input texts were in order
       const inputCalls = fakeInput.getCalls();
@@ -512,26 +570,68 @@ describe("SetUIState", () => {
       const initialHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": { left: 0, top: 0, right: 100, bottom: 50 }, "resource-id": "top_field", "text": "", "class": "android.widget.EditText" } },
-            { $: { "bounds": { left: 0, top: 200, right: 100, bottom: 250 }, "resource-id": "bottom_field", "text": "", "class": "android.widget.EditText" } }
-          ]
-        }
+            {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                "resource-id": "top_field",
+                text: "",
+                class: "android.widget.EditText",
+              },
+            },
+            {
+              $: {
+                bounds: { left: 0, top: 200, right: 100, bottom: 250 },
+                "resource-id": "bottom_field",
+                text: "",
+                class: "android.widget.EditText",
+              },
+            },
+          ],
+        },
       };
       const afterTopFieldEdit: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": { left: 0, top: 0, right: 100, bottom: 50 }, "resource-id": "top_field", "text": "first", "class": "android.widget.EditText" } },
-            { $: { "bounds": { left: 0, top: 200, right: 100, bottom: 250 }, "resource-id": "bottom_field", "text": "", "class": "android.widget.EditText" } }
-          ]
-        }
+            {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                "resource-id": "top_field",
+                text: "first",
+                class: "android.widget.EditText",
+              },
+            },
+            {
+              $: {
+                bounds: { left: 0, top: 200, right: 100, bottom: 250 },
+                "resource-id": "bottom_field",
+                text: "",
+                class: "android.widget.EditText",
+              },
+            },
+          ],
+        },
       };
       const afterBothEdits: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": { left: 0, top: 0, right: 100, bottom: 50 }, "resource-id": "top_field", "text": "first", "class": "android.widget.EditText" } },
-            { $: { "bounds": { left: 0, top: 200, right: 100, bottom: 250 }, "resource-id": "bottom_field", "text": "second", "class": "android.widget.EditText" } }
-          ]
-        }
+            {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+                "resource-id": "top_field",
+                text: "first",
+                class: "android.widget.EditText",
+              },
+            },
+            {
+              $: {
+                bounds: { left: 0, top: 200, right: 100, bottom: 250 },
+                "resource-id": "bottom_field",
+                text: "second",
+                class: "android.widget.EditText",
+              },
+            },
+          ],
+        },
       };
 
       let observeCallCount = 0;
@@ -556,8 +656,8 @@ describe("SetUIState", () => {
         fields: [
           // Provided in reverse screen order
           { selector: { elementId: "bottom_field" }, value: "second" },
-          { selector: { elementId: "top_field" }, value: "first" }
-        ]
+          { selector: { elementId: "top_field" }, value: "first" },
+        ],
       });
 
       expect(result.success).toBe(true);
@@ -565,8 +665,8 @@ describe("SetUIState", () => {
 
       // Even though bottom_field was listed first, top_field (bounds.top=0) should be filled first
       const inputCalls = fakeInput.getCalls();
-      expect(inputCalls[0].text).toBe("first");   // top_field processed first
-      expect(inputCalls[1].text).toBe("second");   // bottom_field processed second
+      expect(inputCalls[0].text).toBe("first"); // top_field processed first
+      expect(inputCalls[1].text).toBe("second"); // bottom_field processed second
     });
   });
 
@@ -575,15 +675,15 @@ describe("SetUIState", () => {
       // Text-only selectors on mutable fields skip verification because
       // typing replaces the label text used as the selector
       const hierarchy = createHierarchyWithElement({
-        "text": "Username",
-        "class": "android.widget.EditText"
+        text: "Username",
+        class: "android.widget.EditText",
       });
       fakeObserve.setResult(createObserveResult(hierarchy));
       fakeFieldTypeDetector.setFieldType("Username", "text");
 
       const setUIState = createSetUIState();
       const result = await setUIState.execute({
-        fields: [{ selector: { text: "Username" }, value: "john" }]
+        fields: [{ selector: { text: "Username" }, value: "john" }],
       });
 
       expect(result.success).toBe(true);
@@ -600,27 +700,69 @@ describe("SetUIState", () => {
       const initialHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": { left: 0, top: 100, right: 100, bottom: 150 }, "resource-id": "field_a", "text": "", "class": "android.widget.EditText" } },
-            { $: { "bounds": { left: 0, top: 200, right: 100, bottom: 250 }, "resource-id": "field_b", "text": "", "class": "android.widget.EditText" } }
-          ]
-        }
+            {
+              $: {
+                bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+                "resource-id": "field_a",
+                text: "",
+                class: "android.widget.EditText",
+              },
+            },
+            {
+              $: {
+                bounds: { left: 0, top: 200, right: 100, bottom: 250 },
+                "resource-id": "field_b",
+                text: "",
+                class: "android.widget.EditText",
+              },
+            },
+          ],
+        },
       };
       // After editing field_a, field_b shifts up (keyboard pushes layout)
       const afterFirstEdit: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": { left: 0, top: 100, right: 100, bottom: 150 }, "resource-id": "field_a", "text": "aaa", "class": "android.widget.EditText" } },
-            { $: { "bounds": { left: 0, top: 160, right: 100, bottom: 210 }, "resource-id": "field_b", "text": "", "class": "android.widget.EditText" } }
-          ]
-        }
+            {
+              $: {
+                bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+                "resource-id": "field_a",
+                text: "aaa",
+                class: "android.widget.EditText",
+              },
+            },
+            {
+              $: {
+                bounds: { left: 0, top: 160, right: 100, bottom: 210 },
+                "resource-id": "field_b",
+                text: "",
+                class: "android.widget.EditText",
+              },
+            },
+          ],
+        },
       };
       const afterSecondEdit: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": { left: 0, top: 100, right: 100, bottom: 150 }, "resource-id": "field_a", "text": "aaa", "class": "android.widget.EditText" } },
-            { $: { "bounds": { left: 0, top: 160, right: 100, bottom: 210 }, "resource-id": "field_b", "text": "bbb", "class": "android.widget.EditText" } }
-          ]
-        }
+            {
+              $: {
+                bounds: { left: 0, top: 100, right: 100, bottom: 150 },
+                "resource-id": "field_a",
+                text: "aaa",
+                class: "android.widget.EditText",
+              },
+            },
+            {
+              $: {
+                bounds: { left: 0, top: 160, right: 100, bottom: 210 },
+                "resource-id": "field_b",
+                text: "bbb",
+                class: "android.widget.EditText",
+              },
+            },
+          ],
+        },
       };
 
       let observeCallCount = 0;
@@ -642,13 +784,13 @@ describe("SetUIState", () => {
       const result = await setUIState.execute({
         fields: [
           { selector: { elementId: "field_a" }, value: "aaa" },
-          { selector: { elementId: "field_b" }, value: "bbb" }
-        ]
+          { selector: { elementId: "field_b" }, value: "bbb" },
+        ],
       });
 
       expect(result.success).toBe(true);
       expect(result.fields).toHaveLength(2);
-      expect(result.fields.every(f => f.success)).toBe(true);
+      expect(result.fields.every((f) => f.success)).toBe(true);
 
       // Both fields should have been filled
       const inputCalls = fakeInput.getCalls();
@@ -667,7 +809,7 @@ describe("SetUIState", () => {
 
       const setUIState = createSetUIState();
       const result = await setUIState.execute({
-        fields: [{ selector: { elementId: "nonexistent" }, value: "test" }]
+        fields: [{ selector: { elementId: "nonexistent" }, value: "test" }],
       });
 
       expect(result.success).toBe(false);
@@ -698,21 +840,22 @@ describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
     fakeTimer = new FakeTimer();
   });
 
-  const build = () => new SetUIState(device, null, {
-    tapOnElement: fakeTap,
-    inputText: fakeInput,
-    clearText: fakeClear,
-    swipeOn: fakeSwipe,
-    observeScreen: fakeObserve,
-    fieldTypeDetector: fakeFieldTypeDetector,
-    timer: fakeTimer
-  });
+  const build = () =>
+    new SetUIState(device, null, {
+      tapOnElement: fakeTap,
+      inputText: fakeInput,
+      clearText: fakeClear,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
 
   test("an unmatched selector returns the tool's own error rather than searching forever", async () => {
     // The screen never contains the field, so the scroll search exhausts both
     // directions. The caller must get "Fields not found", not a transport timeout.
     const result = await build().execute({
-      fields: [{ selector: { text: "NeverPresent" }, value: "x" }]
+      fields: [{ selector: { text: "NeverPresent" }, value: "x" }],
     });
 
     expect(result.success).toBe(false);
@@ -722,7 +865,7 @@ describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
 
   test("the search is bounded — it does not scroll indefinitely", async () => {
     await build().execute({
-      fields: [{ selector: { text: "NeverPresent" }, value: "x" }]
+      fields: [{ selector: { text: "NeverPresent" }, value: "x" }],
     });
 
     // Both directions tried, then it stops. Without a bound this would not settle.
@@ -742,12 +885,12 @@ describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
       return {
         updatedAt: fakeTimer.now(),
         screenSize: { width: 1080, height: 1920 },
-        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
       };
     });
 
     const result = await build().execute({
-      fields: [{ selector: { text: "NeverPresent" }, value: "x" }]
+      fields: [{ selector: { text: "NeverPresent" }, value: "x" }],
     });
 
     expect(result.success).toBe(false);
@@ -759,21 +902,23 @@ describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
   test("a matched but unclassifiable node reports what it matched, not 'unknown'", async () => {
     const hierarchy: ViewHierarchyResult = {
       hierarchy: {
-        node: [{
-          $: { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Email" }
-        }]
-      }
+        node: [
+          {
+            $: { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Email" },
+          },
+        ],
+      },
     } as ViewHierarchyResult;
     fakeObserve.setResult({
       updatedAt: Date.now(),
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: hierarchy
+      viewHierarchy: hierarchy,
     });
     fakeFieldTypeDetector.setFieldType("Email", "unknown" as any);
 
     const result = await build().execute({
-      fields: [{ selector: { text: "Email" }, value: "a@b.c" }]
+      fields: [{ selector: { text: "Email" }, value: "a@b.c" }],
     });
 
     expect(result.success).toBe(false);
@@ -784,21 +929,23 @@ describe("SetUIState search budget and unclassifiable fields (#4242)", () => {
   test("an unclassifiable node is not retried", async () => {
     const hierarchy: ViewHierarchyResult = {
       hierarchy: {
-        node: [{
-          $: { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Email" }
-        }]
-      }
+        node: [
+          {
+            $: { bounds: { left: 0, top: 0, right: 100, bottom: 50 }, text: "Email" },
+          },
+        ],
+      },
     } as ViewHierarchyResult;
     fakeObserve.setResult({
       updatedAt: Date.now(),
       screenSize: { width: 1080, height: 1920 },
       systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-      viewHierarchy: hierarchy
+      viewHierarchy: hierarchy,
     });
     fakeFieldTypeDetector.setFieldType("Email", "unknown" as any);
 
     const result = await build().execute({
-      fields: [{ selector: { text: "Email" }, value: "a@b.c" }]
+      fields: [{ selector: { text: "Email" }, value: "a@b.c" }],
     });
 
     expect(result.totalAttempts).toBeLessThanOrEqual(1);
@@ -826,11 +973,16 @@ describe("SetUIState budget bounds searching, not successful work (#4252 review)
     fakeTimer = new FakeTimer();
   });
 
-  const build = () => new SetUIState(device, null, {
-    tapOnElement: fakeTap, inputText: fakeInput, clearText: fakeClear,
-    swipeOn: fakeSwipe, observeScreen: fakeObserve,
-    fieldTypeDetector: fakeFieldTypeDetector, timer: fakeTimer
-  });
+  const build = () =>
+    new SetUIState(device, null, {
+      tapOnElement: fakeTap,
+      inputText: fakeInput,
+      clearText: fakeClear,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
 
   test("a visible field is still set even after earlier fields consumed the budget", async () => {
     // Both fields are on screen the whole time. Setting the first is slow, which
@@ -838,10 +990,22 @@ describe("SetUIState budget bounds searching, not successful work (#4252 review)
     const twoFields = {
       hierarchy: {
         node: [
-          { $: { "bounds": { left: 0, top: 0, right: 100, bottom: 50 }, "resource-id": "first", "class": "android.widget.EditText" } },
-          { $: { "bounds": { left: 0, top: 60, right: 100, bottom: 110 }, "resource-id": "second", "class": "android.widget.EditText" } }
-        ]
-      }
+          {
+            $: {
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              "resource-id": "first",
+              class: "android.widget.EditText",
+            },
+          },
+          {
+            $: {
+              bounds: { left: 0, top: 60, right: 100, bottom: 110 },
+              "resource-id": "second",
+              class: "android.widget.EditText",
+            },
+          },
+        ],
+      },
     } as unknown as ViewHierarchyResult;
 
     // Verification would need the fake hierarchy to echo the typed value; that is
@@ -855,15 +1019,15 @@ describe("SetUIState budget bounds searching, not successful work (#4252 review)
         updatedAt: fakeTimer.now(),
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-        viewHierarchy: twoFields
+        viewHierarchy: twoFields,
       };
     });
 
     const result = await build().execute({
       fields: [
         { selector: { elementId: "first" }, value: "a" },
-        { selector: { elementId: "second" }, value: "b" }
-      ]
+        { selector: { elementId: "second" }, value: "b" },
+      ],
     });
 
     expect(result.error ?? "").not.toContain("not found");
@@ -891,11 +1055,16 @@ describe("SetUIState budget is unaffected by slow work before the search (#4252 
     fakeTimer = new FakeTimer();
   });
 
-  const build = () => new SetUIState(device, null, {
-    tapOnElement: fakeTap, inputText: fakeInput, clearText: fakeClear,
-    swipeOn: fakeSwipe, observeScreen: fakeObserve,
-    fieldTypeDetector: fakeFieldTypeDetector, timer: fakeTimer
-  });
+  const build = () =>
+    new SetUIState(device, null, {
+      tapOnElement: fakeTap,
+      inputText: fakeInput,
+      clearText: fakeClear,
+      swipeOn: fakeSwipe,
+      observeScreen: fakeObserve,
+      fieldTypeDetector: fakeFieldTypeDetector,
+      timer: fakeTimer,
+    });
 
   test("an off-screen field still gets scroll attempts after a slow post-success observe", async () => {
     // First field is visible and succeeds; the refresh observe that follows is
@@ -903,8 +1072,16 @@ describe("SetUIState budget is unaffected by slow work before the search (#4252 
     // full budget rather than inheriting time already spent.
     const onlyFirst = {
       hierarchy: {
-        node: [{ $: { "bounds": { left: 0, top: 0, right: 100, bottom: 50 }, "resource-id": "first", "class": "android.widget.EditText" } }]
-      }
+        node: [
+          {
+            $: {
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+              "resource-id": "first",
+              class: "android.widget.EditText",
+            },
+          },
+        ],
+      },
     } as unknown as ViewHierarchyResult;
 
     fakeFieldTypeDetector.setSkipVerification("first", true);
@@ -918,15 +1095,15 @@ describe("SetUIState budget is unaffected by slow work before the search (#4252 
         updatedAt: fakeTimer.now(),
         screenSize: { width: 1080, height: 1920 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-        viewHierarchy: onlyFirst
+        viewHierarchy: onlyFirst,
       };
     });
 
     await build().execute({
       fields: [
         { selector: { elementId: "first" }, value: "a" },
-        { selector: { elementId: "offscreen" }, value: "b" }
-      ]
+        { selector: { elementId: "offscreen" }, value: "b" },
+      ],
     });
 
     // The off-screen field must have been searched for, not skipped because

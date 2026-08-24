@@ -55,7 +55,8 @@ export function findSystemUiAnrDialog(
   }
 
   const signals: SystemUiAnrSignals = {
-    systemUi: hierarchyPackageIsSystemUi(viewHierarchy) || topmostWindowPackageIsSystemUi(viewHierarchy),
+    systemUi:
+      hierarchyPackageIsSystemUi(viewHierarchy) || topmostWindowPackageIsSystemUi(viewHierarchy),
     systemWindow: topmostWindowIsSystemWindow(viewHierarchy),
     titleFound: false,
     alertTitleFound: false,
@@ -85,11 +86,7 @@ export function findSystemUiAnrDialog(
 }
 
 function matchesEnglishSystemUiAnr(signals: SystemUiAnrSignals): boolean {
-  return (
-    signals.titleFound &&
-    signals.waitBounds !== undefined &&
-    signals.systemUi
-  );
+  return signals.titleFound && signals.waitBounds !== undefined && signals.systemUi;
 }
 
 function matchesLocalizedSystemUiAnr(signals: SystemUiAnrSignals): boolean {

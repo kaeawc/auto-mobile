@@ -50,8 +50,8 @@ function makeStub(config: {
   return stub as unknown as NavigationGraphManager;
 }
 
-describe("DefaultPathOptimizer", function() {
-  describe("shouldUseBackButton", function() {
+describe("DefaultPathOptimizer", function () {
+  describe("shouldUseBackButton", function () {
     interface Row {
       name: string;
       currentScreen: string;
@@ -163,18 +163,18 @@ describe("DefaultPathOptimizer", function() {
       },
     ];
 
-    test.each(rows)("$name", async function(row) {
+    test.each(rows)("$name", async function (row) {
       const optimizer = new DefaultPathOptimizer(
         makeStub({
           nodes: { [row.targetScreen]: row.node },
           paths: row.path ? { [row.targetScreen]: row.path } : {},
-        })
+        }),
       );
 
       const result = await optimizer.shouldUseBackButton(
         row.currentScreen,
         row.targetScreen,
-        row.currentDepth
+        row.currentDepth,
       );
 
       expect(result.shouldUseBack).toBe(row.expectedUseBack);
@@ -183,7 +183,7 @@ describe("DefaultPathOptimizer", function() {
     });
   });
 
-  describe("areInSameTask", function() {
+  describe("areInSameTask", function () {
     interface Row {
       name: string;
       node1?: NavigationNode;
@@ -224,21 +224,21 @@ describe("DefaultPathOptimizer", function() {
       },
     ];
 
-    test.each(rows)("$name", async function(row) {
+    test.each(rows)("$name", async function (row) {
       const optimizer = new DefaultPathOptimizer(
-        makeStub({ nodes: { A: row.node1, B: row.node2 } })
+        makeStub({ nodes: { A: row.node1, B: row.node2 } }),
       );
       expect(await optimizer.areInSameTask("A", "B")).toBe(row.expected);
     });
   });
 
-  describe("getNavigationRecommendation", function() {
-    test("recommends back navigation when the back heuristic applies", async function() {
+  describe("getNavigationRecommendation", function () {
+    test("recommends back navigation when the back heuristic applies", async function () {
       const optimizer = new DefaultPathOptimizer(
         makeStub({
           nodes: { A: makeNode({ screenName: "A", backStackDepth: 1 }) },
           paths: { A: { found: false, path: [], startScreen: "", targetScreen: "A" } },
-        })
+        }),
       );
 
       const result = await optimizer.getNavigationRecommendation("A", "B", 2);
@@ -247,7 +247,7 @@ describe("DefaultPathOptimizer", function() {
       expect(result.backPresses).toBe(1);
     });
 
-    test("recommends forward navigation when a known path exists but back is unsafe", async function() {
+    test("recommends forward navigation when a known path exists but back is unsafe", async function () {
       const optimizer = new DefaultPathOptimizer(
         makeStub({
           nodes: { A: makeNode({ screenName: "A" }) },
@@ -259,7 +259,7 @@ describe("DefaultPathOptimizer", function() {
               targetScreen: "A",
             },
           },
-        })
+        }),
       );
 
       const result = await optimizer.getNavigationRecommendation("A", "B", 0);
@@ -268,7 +268,7 @@ describe("DefaultPathOptimizer", function() {
       expect(result.reason).toMatch(/1 steps/);
     });
 
-    test("returns unknown when no path to the target screen is known", async function() {
+    test("returns unknown when no path to the target screen is known", async function () {
       const optimizer = new DefaultPathOptimizer(makeStub({}));
 
       const result = await optimizer.getNavigationRecommendation("Nowhere", "Here", 2);

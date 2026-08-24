@@ -138,7 +138,11 @@ export class DefaultFileSystem implements FileSystem {
     return { size: stats.size, mtimeMs: stats.mtimeMs };
   }
 
-  async writeFile(filePath: string, content: string, encoding: BufferEncoding = "utf8"): Promise<void> {
+  async writeFile(
+    filePath: string,
+    content: string,
+    encoding: BufferEncoding = "utf8",
+  ): Promise<void> {
     await fsPromises.writeFile(filePath, content, { encoding });
   }
 

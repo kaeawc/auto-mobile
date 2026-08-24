@@ -41,9 +41,15 @@ function buildDaemon(overrides: {
   timer: FakeTimer;
   deviceSessionRepository?: SpyDeviceSessionRepository;
   installedAppsRepository?: FakeInstalledAppsRepository;
-}): { daemon: Daemon; deviceSessionRepository: SpyDeviceSessionRepository; installedAppsRepository: FakeInstalledAppsRepository } {
-  const deviceSessionRepository = overrides.deviceSessionRepository ?? new SpyDeviceSessionRepository();
-  const installedAppsRepository = overrides.installedAppsRepository ?? new FakeInstalledAppsRepository();
+}): {
+  daemon: Daemon;
+  deviceSessionRepository: SpyDeviceSessionRepository;
+  installedAppsRepository: FakeInstalledAppsRepository;
+} {
+  const deviceSessionRepository =
+    overrides.deviceSessionRepository ?? new SpyDeviceSessionRepository();
+  const installedAppsRepository =
+    overrides.installedAppsRepository ?? new FakeInstalledAppsRepository();
   const daemon = new Daemon(
     {},
     installedAppsRepository,
@@ -51,7 +57,7 @@ function buildDaemon(overrides: {
     deviceSessionRepository,
     new CountingIdGenerator("daemon-session"),
     overrides.initializer,
-    overrides.tracker
+    overrides.tracker,
   );
   return { daemon, deviceSessionRepository, installedAppsRepository };
 }
@@ -67,13 +73,17 @@ describe("Daemon.initializeDatabase fatality", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const initializer = new FakeDatabaseInitializer(
-      new Error("Database startup migrations failed; refusing to run queries until the daemon restarts.")
+      new Error(
+        "Database startup migrations failed; refusing to run queries until the daemon restarts.",
+      ),
     );
     const tracker = new FakeStartupFailureTracker();
     tracker.setCounts([1]);
     const { daemon } = buildDaemon({ initializer, tracker, timer });
 
-    await expect((daemon as unknown as DaemonInternals).initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
+    await expect(
+      (daemon as unknown as DaemonInternals).initializeDatabase(),
+    ).rejects.toBeInstanceOf(ActionableError);
     expect(initializer.initializeCalls).toBe(1);
     expect(tracker.recorded).toHaveLength(1);
     expect(tracker.recorded[0]!.kind).toBe("permanent");
@@ -108,13 +118,19 @@ describe("Daemon.initializeDatabase fatality", () => {
     tracker.setCounts([1, 2, 3]);
     const { daemon } = buildDaemon({ initializer, tracker, timer });
 
-    await expect((daemon as unknown as DaemonInternals).initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
+    await expect(
+      (daemon as unknown as DaemonInternals).initializeDatabase(),
+    ).rejects.toBeInstanceOf(ActionableError);
     const afterFirst = [...timer.getSleepHistory()];
 
-    await expect((daemon as unknown as DaemonInternals).initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
+    await expect(
+      (daemon as unknown as DaemonInternals).initializeDatabase(),
+    ).rejects.toBeInstanceOf(ActionableError);
     const afterSecond = [...timer.getSleepHistory()];
 
-    await expect((daemon as unknown as DaemonInternals).initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
+    await expect(
+      (daemon as unknown as DaemonInternals).initializeDatabase(),
+    ).rejects.toBeInstanceOf(ActionableError);
     const afterThird = [...timer.getSleepHistory()];
 
     // First failure did not park; subsequent failures park with the concrete
@@ -132,7 +148,9 @@ describe("Daemon.initializeDatabase fatality", () => {
     tracker.setCounts([5]); // even at a high count, transient does not back off
     const { daemon } = buildDaemon({ initializer, tracker, timer });
 
-    await expect((daemon as unknown as DaemonInternals).initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
+    await expect(
+      (daemon as unknown as DaemonInternals).initializeDatabase(),
+    ).rejects.toBeInstanceOf(ActionableError);
 
     expect(timer.getSleepHistory()).toEqual([]);
     expect(tracker.recorded[0]!.kind).toBe("transient");
@@ -147,7 +165,9 @@ describe("Daemon.initializeDatabase fatality", () => {
     const tracker = new FakeStartupFailureTracker();
     const { daemon } = buildDaemon({ initializer, tracker, timer, deviceSessionRepository });
 
-    await expect((daemon as unknown as DaemonInternals).initializeDatabase()).rejects.toBeInstanceOf(ActionableError);
+    await expect(
+      (daemon as unknown as DaemonInternals).initializeDatabase(),
+    ).rejects.toBeInstanceOf(ActionableError);
     expect(tracker.recorded).toHaveLength(1);
     expect(tracker.resetCalls).toBe(0);
   });

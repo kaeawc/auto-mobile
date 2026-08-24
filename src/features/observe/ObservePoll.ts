@@ -82,8 +82,8 @@ export async function pollObserveUntil(
   onObservation: (
     observation: ObserveResult,
     previous: ObserveResult | undefined,
-    pollIndex: number
-  ) => boolean
+    pollIndex: number,
+  ) => boolean,
 ): Promise<ObservePollOutcome> {
   const start = timer.now();
   let previous: ObserveResult | undefined;

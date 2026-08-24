@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -43,13 +52,15 @@ const pinnedXcodegenVersion = (() => {
 
 function expectExitStatus(result: ReturnType<typeof spawnSync>, expectedStatus: number): void {
   if (result.status !== expectedStatus) {
-    throw new Error(`Expected exit ${expectedStatus}, got ${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+    throw new Error(
+      `Expected exit ${expectedStatus}, got ${result.status}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+    );
   }
 }
 
 function fakeToolEnvironment(
   repoDir: string,
-  overrides: Record<string, string | undefined> = {}
+  overrides: Record<string, string | undefined> = {},
 ): Record<string, string | undefined> {
   return {
     ...process.env,
@@ -82,7 +93,7 @@ function createTempRepo(): string {
   writeFileSync(join(tempDir, "ios/control-proxy/project.yml"), "name: CtrlProxy\n");
   writeFileSync(
     join(tempDir, "ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"),
-    "committed project\n"
+    "committed project\n",
   );
   writeFileSync(join(tempDir, "baseline/project.pbxproj"), "committed project\n");
   cpSync(driftCheckScript, join(tempDir, "scripts/ios/xcodegen-drift-check.sh"));
@@ -111,7 +122,7 @@ case "\${FAKE_REPO_WIDE_GENERATOR_BEHAVIOR:-fail}" in
         exit 2
         ;;
 esac
-`
+`,
   );
   chmodSync(join(tempDir, "scripts/ios/xcodegen-generate.sh"), 0o755);
   writeFileSync(
@@ -155,7 +166,7 @@ case "\${FAKE_XCODEGEN_BEHAVIOR:-unchanged}" in
         exit 2
         ;;
 esac
-`
+`,
   );
   chmodSync(join(tempDir, "bin/xcodegen"), 0o755);
   writeFileSync(
@@ -215,7 +226,7 @@ fi
 
 echo "unexpected git invocation: $*" >&2
 exit 2
-`
+`,
   );
   chmodSync(join(tempDir, "bin/git"), 0o755);
 
@@ -256,7 +267,9 @@ describe("xcodegen drift check", () => {
 
     expectExitStatus(result, 1);
     expect(result.stdout + result.stderr).toContain("XcodeGen project files are out of date");
-    expect(result.stdout + result.stderr).toContain("?? ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj");
+    expect(result.stdout + result.stderr).toContain(
+      "?? ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj",
+    );
   }, 15_000);
 
   test("ctrl-proxy scope refuses to generate with a skewed XcodeGen version", () => {
@@ -280,8 +293,9 @@ describe("xcodegen drift check", () => {
     expect(output).toContain("2.45.4");
     expect(output).toContain(pinnedXcodegenVersion);
     // It must not have run the generator, so the project stays untouched.
-    expect(readFileSync(join(repoDir, "ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"), "utf8"))
-      .toBe("committed project\n");
+    expect(
+      readFileSync(join(repoDir, "ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj"), "utf8"),
+    ).toBe("committed project\n");
   });
 
   test("ctrl-proxy scope passes when xcodegen generation leaves the committed CtrlProxy project unchanged", () => {
@@ -347,19 +361,33 @@ describe("xcodegen drift check", () => {
     });
 
     expectExitStatus(result, 2);
-    expect(result.stdout + result.stderr).toContain("repo-wide xcodegen-generate.sh should not be called");
+    expect(result.stdout + result.stderr).toContain(
+      "repo-wide xcodegen-generate.sh should not be called",
+    );
   });
 
   test("pull request workflow gates both Xcode project jobs on the drift check", () => {
     const xcodeBuildSteps = loadJobSteps(".github/workflows/pull_request.yml", "ios-xcode-build");
-    const xctestRunnerSteps = loadJobSteps(".github/workflows/pull_request.yml", "ios-xctest-runner-simulator-tests");
+    const xctestRunnerSteps = loadJobSteps(
+      ".github/workflows/pull_request.yml",
+      "ios-xctest-runner-simulator-tests",
+    );
     const indexOfRun = (steps: typeof xcodeBuildSteps, command: string) =>
-      steps.findIndex(step => step.run?.includes(command));
+      steps.findIndex((step) => step.run?.includes(command));
 
-    const xcodeBuildDriftCheck = indexOfRun(xcodeBuildSteps, "./scripts/ios/xcodegen-drift-check.sh --all");
+    const xcodeBuildDriftCheck = indexOfRun(
+      xcodeBuildSteps,
+      "./scripts/ios/xcodegen-drift-check.sh --all",
+    );
     const xcodeBuild = indexOfRun(xcodeBuildSteps, "./scripts/ios/xcode-build.sh");
-    const xctestRunnerDriftCheck = indexOfRun(xctestRunnerSteps, "./scripts/ios/xcodegen-drift-check.sh --ctrl-proxy");
-    const xctestRunnerBuild = indexOfRun(xctestRunnerSteps, "./scripts/ios/ctrl-proxy-build-for-testing.sh");
+    const xctestRunnerDriftCheck = indexOfRun(
+      xctestRunnerSteps,
+      "./scripts/ios/xcodegen-drift-check.sh --ctrl-proxy",
+    );
+    const xctestRunnerBuild = indexOfRun(
+      xctestRunnerSteps,
+      "./scripts/ios/ctrl-proxy-build-for-testing.sh",
+    );
 
     expect(xcodeBuildSteps.length).toBeGreaterThan(0);
     expect(xctestRunnerSteps.length).toBeGreaterThan(0);

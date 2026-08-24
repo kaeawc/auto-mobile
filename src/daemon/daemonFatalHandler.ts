@@ -27,13 +27,13 @@ export function createDaemonFatalProcessHandler(logger: FatalHandlerLogger): Fat
     if (event.type === "uncaughtException") {
       logger.error(
         `[daemon] uncaughtException in background task; keeping daemon alive: ${describeUnknownError(event.error)}`,
-        event.error
+        event.error,
       );
       return;
     }
     logger.error(
       `[daemon] unhandledRejection in background task; keeping daemon alive: ${describeUnknownError(event.reason)}`,
-      event.reason
+      event.reason,
     );
   };
 }

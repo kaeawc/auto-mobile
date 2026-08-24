@@ -36,7 +36,7 @@ export interface IosSettingsSnapshot {
  */
 async function captureUiState(
   simctl: SimctlArgvRunner,
-  deviceId: string
+  deviceId: string,
 ): Promise<IosSettingsSnapshot["ui"]> {
   const ui: NonNullable<IosSettingsSnapshot["ui"]> = {};
   try {
@@ -65,13 +65,18 @@ async function captureUiState(
 /** Capture the curated iOS settings allowlist + device-level UI state. */
 export async function captureIosSettings(
   simctl: SimctlArgvRunner,
-  deviceId: string
+  deviceId: string,
 ): Promise<IosSettingsSnapshot> {
   const values: Record<string, string> = {};
   for (const { domain, key } of IOS_SETTINGS_KEYS) {
     try {
       const result = await simctl.executeCommandArgs([
-        "spawn", deviceId, "defaults", "read", domain, key
+        "spawn",
+        deviceId,
+        "defaults",
+        "read",
+        domain,
+        key,
       ]);
       const value = result.stdout.trim();
       if (value) {
@@ -94,7 +99,7 @@ export async function captureIosSettings(
 export async function restoreIosSettings(
   simctl: SimctlArgvRunner,
   deviceId: string,
-  settings: IosSettingsSnapshot
+  settings: IosSettingsSnapshot,
 ): Promise<void> {
   for (const [compoundKey, value] of Object.entries(settings.values)) {
     const slash = compoundKey.indexOf("/");
@@ -104,9 +109,7 @@ export async function restoreIosSettings(
     const domain = compoundKey.slice(0, slash);
     const key = compoundKey.slice(slash + 1);
     try {
-      await simctl.executeCommandArgs([
-        "spawn", deviceId, "defaults", "write", domain, key, value
-      ]);
+      await simctl.executeCommandArgs(["spawn", deviceId, "defaults", "write", domain, key, value]);
     } catch (error) {
       logger.warn(`[iOS] Failed to write ${domain}/${key}: ${error}`);
     }

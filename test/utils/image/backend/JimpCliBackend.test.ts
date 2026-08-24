@@ -9,7 +9,7 @@ class FakeWebpCodec implements WebpCodec {
 
   constructor(
     private readonly decodedPng: Buffer,
-    private readonly encodedWebp: Buffer = Buffer.from("RIFFxxxxWEBPencoded")
+    private readonly encodedWebp: Buffer = Buffer.from("RIFFxxxxWEBPencoded"),
   ) {}
 
   async encode(input: Buffer, options: CliWebpEncodeOptions = {}): Promise<Buffer> {
@@ -43,7 +43,7 @@ describe("JimpCliBackend", () => {
     const backend = new JimpCliBackend({ webpCodec: codec });
     const pipeline: ImagePipeline = {
       operations: [{ type: "resize", width: 4, height: 2, maintainAspectRatio: false }],
-      encoding: { mime: "image/webp", options: { quality: 60 } }
+      encoding: { mime: "image/webp", options: { quality: 60 } },
     };
 
     const out = await backend.execute(source, pipeline);
@@ -77,7 +77,7 @@ describe("JimpCliBackend", () => {
     const backend = new JimpCliBackend({ webpCodec: codec });
     const pipeline: ImagePipeline = {
       operations: [{ type: "resize", width: 3, maintainAspectRatio: true }],
-      encoding: null
+      encoding: null,
     };
 
     const out = await backend.execute(WEBP_SOURCE, pipeline);
@@ -96,16 +96,16 @@ describe("JimpCliBackend", () => {
 
     await backend.execute(source, {
       operations: [],
-      encoding: { mime: "image/webp", options: { lossless: true, quality: 90 } }
+      encoding: { mime: "image/webp", options: { lossless: true, quality: 90 } },
     });
     await backend.execute(source, {
       operations: [],
-      encoding: { mime: "image/webp", options: { nearLossless: true, quality: 40 } }
+      encoding: { mime: "image/webp", options: { nearLossless: true, quality: 40 } },
     });
 
-    expect(codec.encodeCalls.map(call => call.options)).toEqual([
+    expect(codec.encodeCalls.map((call) => call.options)).toEqual([
       { lossless: true, quality: 90 },
-      { nearLossless: true, quality: 40 }
+      { nearLossless: true, quality: 40 },
     ]);
   });
 });

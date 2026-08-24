@@ -44,7 +44,7 @@ describe("DaemonClient in-flight request on connection reset (#2737)", () => {
 
   afterEach(async () => {
     if (server) {
-      await new Promise<void>(resolve => server!.close(() => resolve()));
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
       server = null;
     }
     for (const dir of tempDirs) {
@@ -71,7 +71,7 @@ describe("DaemonClient in-flight request on connection reset (#2737)", () => {
           connection.destroy();
         });
       });
-      await new Promise<void>(resolve => server!.listen(socketPath, resolve));
+      await new Promise<void>((resolve) => server!.listen(socketPath, resolve));
 
       const client = new DaemonClient(socketPath, 2000);
       await client.connect();
@@ -79,11 +79,11 @@ describe("DaemonClient in-flight request on connection reset (#2737)", () => {
       // Must reject promptly with a recoverable DaemonUnavailableError — not hang
       // until the request timeout, and not a raw transport error.
       await expect(client.callDaemonMethod("tools/list", {})).rejects.toBeInstanceOf(
-        DaemonUnavailableError
+        DaemonUnavailableError,
       );
 
       await client.close();
-    }
+    },
   );
 });
 
@@ -93,7 +93,7 @@ describe("DaemonClient device-control transport response", () => {
 
   afterEach(async () => {
     if (server) {
-      await new Promise<void>(resolve => server!.close(() => resolve()));
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
       server = null;
     }
     for (const dir of tempDirs) {
@@ -129,18 +129,20 @@ describe("DaemonClient device-control transport response", () => {
       };
 
       server = createServer((connection: Socket) => {
-        connection.once("data", data => {
+        connection.once("data", (data) => {
           const request = JSON.parse(data.toString().trim()) as { id: string };
-          connection.write(`${JSON.stringify({
-            id: request.id,
-            type: "mcp_response",
-            success: false,
-            error: "Device-control transport closed while handling launchApp",
-            transportFailure: wireFailure,
-          })}\n`);
+          connection.write(
+            `${JSON.stringify({
+              id: request.id,
+              type: "mcp_response",
+              success: false,
+              error: "Device-control transport closed while handling launchApp",
+              transportFailure: wireFailure,
+            })}\n`,
+          );
         });
       });
-      await new Promise<void>(resolve => server!.listen(socketPath, resolve));
+      await new Promise<void>((resolve) => server!.listen(socketPath, resolve));
 
       const client = new DaemonClient(socketPath, 2000);
       await client.connect();

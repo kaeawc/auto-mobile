@@ -13,6 +13,7 @@ issue/PR by era and bug class.
 ## Input
 
 `$ARGUMENTS` is one of:
+
 - **An issue number** — read it with `gh issue view`, classify the symptom
   against the skill's bug classes, check the history catalog for a prior
   instance, then hunt per the skill's procedure (§4).

@@ -18,8 +18,5 @@ export interface GlobalActionSource {
    * @param timeoutMs - Timeout for the request in milliseconds
    * @returns Result of the action
    */
-  executeGlobalAction(
-    action: string,
-    timeoutMs?: number
-  ): Promise<GlobalActionResult>;
+  executeGlobalAction(action: string, timeoutMs?: number): Promise<GlobalActionResult>;
 }

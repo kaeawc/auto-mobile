@@ -1,4 +1,7 @@
-import { SelectionDetectionContext, SelectionStateDetectorLike } from "../../src/features/navigation/SelectionStateDetector";
+import {
+  SelectionDetectionContext,
+  SelectionStateDetectorLike,
+} from "../../src/features/navigation/SelectionStateDetector";
 import { SelectedElement } from "../../src/utils/interfaces/NavigationGraph";
 
 export class FakeSelectionStateDetector implements SelectionStateDetectorLike {

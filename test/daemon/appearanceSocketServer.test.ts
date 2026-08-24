@@ -123,11 +123,11 @@ describe("AppearanceSocketServer", () => {
 
       await server.simulateLine(
         topLevel,
-        JSON.stringify({ id: "eq-top", command: "set_appearance", mode: "zzz" })
+        JSON.stringify({ id: "eq-top", command: "set_appearance", mode: "zzz" }),
       );
       await server.simulateLine(
         params,
-        JSON.stringify({ id: "eq-params", command: "set_appearance", params: { mode: "zzz" } })
+        JSON.stringify({ id: "eq-params", command: "set_appearance", params: { mode: "zzz" } }),
       );
 
       const topMsg = topLevel.getWrittenMessages<AppearanceSocketResponse>()[0];

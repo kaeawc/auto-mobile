@@ -53,18 +53,18 @@ const TOOL_CATEGORIES: ToolCategory[] = [
   {
     name: "Fast Operations",
     expectedLatency: "<100ms",
-    tools: ["listDevices", "getForegroundApp", "pressButton"]
+    tools: ["listDevices", "getForegroundApp", "pressButton"],
   },
   {
     name: "Medium Operations",
     expectedLatency: "100ms-1s",
-    tools: ["observe", "tapOn", "inputText", "swipe"]
+    tools: ["observe", "tapOn", "inputText", "swipe"],
   },
   {
     name: "Slow Operations",
     expectedLatency: "1s+",
-    tools: ["launchApp", "installApp"]
-  }
+    tools: ["launchApp", "installApp"],
+  },
 ];
 
 // Benchmark configuration
@@ -140,7 +140,7 @@ function percentile(sorted: number[], p: number): number {
  * Calculate standard deviation
  */
 function stdDev(values: number[], mean: number): number {
-  const squareDiffs = values.map(value => Math.pow(value - mean, 2));
+  const squareDiffs = values.map((value) => Math.pow(value - mean, 2));
   const avgSquareDiff = squareDiffs.reduce((a, b) => a + b, 0) / values.length;
   return Math.sqrt(avgSquareDiff);
 }
@@ -148,7 +148,11 @@ function stdDev(values: number[], mean: number): number {
 /**
  * Calculate statistics from measurements
  */
-function calculateMetrics(toolName: string, measurements: number[], successes: number): ToolMetrics {
+function calculateMetrics(
+  toolName: string,
+  measurements: number[],
+  successes: number,
+): ToolMetrics {
   const sorted = [...measurements].sort((a, b) => a - b);
   const mean = measurements.reduce((a, b) => a + b, 0) / measurements.length;
 
@@ -162,7 +166,7 @@ function calculateMetrics(toolName: string, measurements: number[], successes: n
     max: sorted[sorted.length - 1],
     successRate: (successes / measurements.length) * 100,
     sampleSize: measurements.length,
-    measurements
+    measurements,
   };
 }
 
@@ -174,7 +178,7 @@ function createMockDevice(): BootedDevice {
     name: "benchmark-mock-device",
     platform: "android",
     deviceId: "benchmark-001",
-    source: "local"
+    source: "local",
   };
 }
 
@@ -184,7 +188,7 @@ function createMockDevice(): BootedDevice {
 async function benchmarkTool(
   toolName: string,
   sampleSize: number,
-  mockDevice: BootedDevice
+  mockDevice: BootedDevice,
 ): Promise<ToolMetrics> {
   const tool = ToolRegistry.getTool(toolName);
 
@@ -271,11 +275,11 @@ function registerAllTools(): void {
  * Get all tools to benchmark (excludes snapshot operations)
  */
 function getToolsToBenchmark(): string[] {
-  const allCategories = TOOL_CATEGORIES.flatMap(cat => cat.tools);
-  const registeredTools = ToolRegistry.getAllTools().map(t => t.name);
+  const allCategories = TOOL_CATEGORIES.flatMap((cat) => cat.tools);
+  const registeredTools = ToolRegistry.getAllTools().map((t) => t.name);
 
   // Only benchmark tools that are both in categories and registered
-  return allCategories.filter(tool => registeredTools.includes(tool));
+  return allCategories.filter((tool) => registeredTools.includes(tool));
 }
 
 /**
@@ -319,7 +323,7 @@ function loadBaseline(baselinePath: string): BenchmarkReport | null {
  */
 function compareAgainstThreshold(
   metrics: ToolMetrics,
-  threshold: ThresholdConfig["thresholds"][string]
+  threshold: ThresholdConfig["thresholds"][string],
 ): ThresholdResult[] {
   const checks: ThresholdResult[] = [];
 
@@ -336,7 +340,7 @@ function compareAgainstThreshold(
       metric,
       actual,
       threshold: expected,
-      regression
+      regression,
     });
   }
 
@@ -346,7 +350,10 @@ function compareAgainstThreshold(
 /**
  * Run all benchmarks
  */
-async function runBenchmarks(sampleSize: number, config: ThresholdConfig | null): Promise<BenchmarkReport> {
+async function runBenchmarks(
+  sampleSize: number,
+  config: ThresholdConfig | null,
+): Promise<BenchmarkReport> {
   console.log("Initializing MCP server components...");
 
   // Register all tools
@@ -355,7 +362,9 @@ async function runBenchmarks(sampleSize: number, config: ThresholdConfig | null)
   const mockDevice = createMockDevice();
   const toolsToBenchmark = getToolsToBenchmark();
 
-  console.log(`\nBenchmarking ${toolsToBenchmark.length} tools with ${sampleSize} samples each...\n`);
+  console.log(
+    `\nBenchmarking ${toolsToBenchmark.length} tools with ${sampleSize} samples each...\n`,
+  );
 
   const results: ToolBenchmarkResult[] = [];
   const violations: string[] = [];
@@ -372,13 +381,13 @@ async function runBenchmarks(sampleSize: number, config: ThresholdConfig | null)
       if (config?.thresholds[toolName]) {
         const checks = compareAgainstThreshold(metrics, config.thresholds[toolName]);
         result.thresholdChecks = checks;
-        result.overallPassed = checks.every(c => c.passed);
+        result.overallPassed = checks.every((c) => c.passed);
 
         if (!result.overallPassed) {
-          const failedChecks = checks.filter(c => !c.passed);
+          const failedChecks = checks.filter((c) => !c.passed);
           for (const check of failedChecks) {
             violations.push(
-              `${toolName}.${check.metric}: ${check.actual.toFixed(2)}ms exceeds threshold ${check.threshold.toFixed(2)}ms (${check.regression.toFixed(1)}% regression)`
+              `${toolName}.${check.metric}: ${check.actual.toFixed(2)}ms exceeds threshold ${check.threshold.toFixed(2)}ms (${check.regression.toFixed(1)}% regression)`,
             );
           }
         }
@@ -395,7 +404,7 @@ async function runBenchmarks(sampleSize: number, config: ThresholdConfig | null)
   const endTime = performance.now();
   const totalDuration = endTime - startTime;
 
-  const passedTools = results.filter(r => r.overallPassed !== false).length;
+  const passedTools = results.filter((r) => r.overallPassed !== false).length;
   const failedTools = results.length - passedTools;
   const totalOperations = results.reduce((sum, r) => sum + r.sampleSize, 0);
   const averageThroughput = (totalOperations / totalDuration) * 1000; // ops/second
@@ -410,9 +419,9 @@ async function runBenchmarks(sampleSize: number, config: ThresholdConfig | null)
       totalTools: results.length,
       passedTools,
       failedTools,
-      averageThroughput
+      averageThroughput,
     },
-    violations
+    violations,
   };
 }
 
@@ -430,9 +439,11 @@ function printReport(report: BenchmarkReport): void {
 
   // Group results by category
   for (const category of TOOL_CATEGORIES) {
-    const categoryResults = report.results.filter(r => category.tools.includes(r.toolName));
+    const categoryResults = report.results.filter((r) => category.tools.includes(r.toolName));
 
-    if (categoryResults.length === 0) {continue;}
+    if (categoryResults.length === 0) {
+      continue;
+    }
 
     console.log(`\n${category.name} (${category.expectedLatency}):`);
     console.log("-".repeat(100));
@@ -446,20 +457,20 @@ function printReport(report: BenchmarkReport): void {
 
       console.log(
         `${result.toolName.padEnd(25)} ` +
-        `${result.p50.toFixed(1).padStart(7)}ms ` +
-        `${result.p95.toFixed(1).padStart(7)}ms ` +
-        `${result.mean.toFixed(1).padStart(7)}ms ` +
-        `${result.stdDev.toFixed(1).padStart(7)}ms ` +
-        `${result.successRate.toFixed(0).padStart(6)}%  ` +
-        `${statusColor}${status}${resetColor}`
+          `${result.p50.toFixed(1).padStart(7)}ms ` +
+          `${result.p95.toFixed(1).padStart(7)}ms ` +
+          `${result.mean.toFixed(1).padStart(7)}ms ` +
+          `${result.stdDev.toFixed(1).padStart(7)}ms ` +
+          `${result.successRate.toFixed(0).padStart(6)}%  ` +
+          `${statusColor}${status}${resetColor}`,
       );
 
       // Print failed threshold checks
       if (result.thresholdChecks && result.overallPassed === false) {
-        for (const check of result.thresholdChecks.filter(c => !c.passed)) {
+        for (const check of result.thresholdChecks.filter((c) => !c.passed)) {
           console.log(
             `  └─ ${check.metric.toUpperCase()}: ${check.actual.toFixed(2)}ms > ${check.threshold.toFixed(2)}ms ` +
-            `(+${check.regression.toFixed(1)}%)`
+              `(+${check.regression.toFixed(1)}%)`,
           );
         }
       }
@@ -563,7 +574,7 @@ async function main() {
   process.exit(report.passed ? 0 : 1);
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error("Fatal error:", error);
   process.exit(1);
 });

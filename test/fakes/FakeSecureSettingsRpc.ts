@@ -1,7 +1,7 @@
 import type {
   SecureSettingsRpc,
   SecureSettingsGetResult,
-  SecureSettingsPutResult
+  SecureSettingsPutResult,
 } from "../../src/features/accessibility/SecureSettingsRpc";
 import type { SettingsValueType } from "../../src/features/observe/android/types";
 
@@ -19,7 +19,11 @@ export class FakeSecureSettingsRpc implements SecureSettingsRpc {
   private putResult: SecureSettingsPutResult = { success: false };
   private getResult: SecureSettingsGetResult = { success: false, found: false };
 
-  public readonly putCalls: Array<{ key: string; value: string | null; valueType?: SettingsValueType }> = [];
+  public readonly putCalls: Array<{
+    key: string;
+    value: string | null;
+    valueType?: SettingsValueType;
+  }> = [];
   public readonly getCalls: string[] = [];
 
   setPutResult(result: SecureSettingsPutResult): void {
@@ -30,7 +34,11 @@ export class FakeSecureSettingsRpc implements SecureSettingsRpc {
     this.getResult = result;
   }
 
-  async put(key: string, value: string | null, valueType?: SettingsValueType): Promise<SecureSettingsPutResult> {
+  async put(
+    key: string,
+    value: string | null,
+    valueType?: SettingsValueType,
+  ): Promise<SecureSettingsPutResult> {
     this.putCalls.push({ key, value, valueType });
     return this.putResult;
   }

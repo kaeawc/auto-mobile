@@ -41,8 +41,16 @@ describe("DeviceSessionRegistry", () => {
   it("is idempotent for a repeated connect of the same incarnation (no new uuid)", () => {
     const { registry, idGenerator } = makeRegistry(["uuid-a", "uuid-b"]);
 
-    const first = registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 1 });
-    const second = registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 1 });
+    const first = registry.onDeviceConnected({
+      deviceId: "emulator-5554",
+      platform: "android",
+      incarnation: 1,
+    });
+    const second = registry.onDeviceConnected({
+      deviceId: "emulator-5554",
+      platform: "android",
+      incarnation: 1,
+    });
 
     expect(second.deviceSessionUuid).toBe(first.deviceSessionUuid);
     // Only one uuid was consumed; the second scripted id is still pending.
@@ -51,7 +59,11 @@ describe("DeviceSessionRegistry", () => {
 
   it("retires the record on disconnect (lookups return undefined)", () => {
     const { registry } = makeRegistry(["uuid-a"]);
-    const record = registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 1 });
+    const record = registry.onDeviceConnected({
+      deviceId: "emulator-5554",
+      platform: "android",
+      incarnation: 1,
+    });
 
     registry.onDeviceDisconnected("emulator-5554");
 
@@ -62,9 +74,17 @@ describe("DeviceSessionRegistry", () => {
   it("mints a NEW uuid on reconnect of the same serial (disconnect then connect)", () => {
     const { registry } = makeRegistry(["uuid-a", "uuid-b"]);
 
-    const first = registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 1 });
+    const first = registry.onDeviceConnected({
+      deviceId: "emulator-5554",
+      platform: "android",
+      incarnation: 1,
+    });
     registry.onDeviceDisconnected("emulator-5554");
-    const second = registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 2 });
+    const second = registry.onDeviceConnected({
+      deviceId: "emulator-5554",
+      platform: "android",
+      incarnation: 2,
+    });
 
     expect(second.deviceSessionUuid).toBe("uuid-b");
     expect(second.deviceSessionUuid).not.toBe(first.deviceSessionUuid);
@@ -73,19 +93,33 @@ describe("DeviceSessionRegistry", () => {
   it("mints a NEW uuid on a fast same-serial restart (new incarnation without an intervening disconnect)", () => {
     const { registry } = makeRegistry(["uuid-a", "uuid-b"]);
 
-    const first = registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 1 });
+    const first = registry.onDeviceConnected({
+      deviceId: "emulator-5554",
+      platform: "android",
+      incarnation: 1,
+    });
     // Fast restart: the disconnect monitor never confirmed, but the pool bumped incarnation.
-    const second = registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 2 });
+    const second = registry.onDeviceConnected({
+      deviceId: "emulator-5554",
+      platform: "android",
+      incarnation: 2,
+    });
 
     expect(second.deviceSessionUuid).not.toBe(first.deviceSessionUuid);
     // The superseded epoch's uuid no longer resolves.
     expect(registry.getByUuid(first.deviceSessionUuid)).toBeUndefined();
-    expect(registry.getByDeviceId("emulator-5554")?.deviceSessionUuid).toBe(second.deviceSessionUuid);
+    expect(registry.getByDeviceId("emulator-5554")?.deviceSessionUuid).toBe(
+      second.deviceSessionUuid,
+    );
   });
 
   it("supports bidirectional lookup", () => {
     const { registry } = makeRegistry(["uuid-a"]);
-    const record = registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 1 });
+    const record = registry.onDeviceConnected({
+      deviceId: "emulator-5554",
+      platform: "android",
+      incarnation: 1,
+    });
 
     expect(registry.getByDeviceId("emulator-5554")).toEqual(record);
     expect(registry.getByUuid("uuid-a")).toEqual(record);
@@ -101,8 +135,8 @@ describe("DeviceSessionRegistry", () => {
     const list = registry.list();
 
     expect(list).toHaveLength(2);
-    expect(list.map(r => r.deviceId).sort()).toEqual(["00008030-001", "emulator-5554"]);
-    expect(list.find(r => r.deviceId === "00008030-001")?.platform).toBe("ios");
+    expect(list.map((r) => r.deviceId).sort()).toEqual(["00008030-001", "emulator-5554"]);
+    expect(list.find((r) => r.deviceId === "00008030-001")?.platform).toBe("ios");
   });
 
   describe("lifecycle listener", () => {
@@ -112,10 +146,20 @@ describe("DeviceSessionRegistry", () => {
       const { registry, timer, idGenerator } = makeRegistry(scripted);
       const events: Event[] = [];
       registry.setLifecycleListener({
-        onSessionStarted: record =>
-          events.push({ kind: "started", uuid: record.deviceSessionUuid, deviceId: record.deviceId, platform: record.platform }),
-        onSessionEnded: record =>
-          events.push({ kind: "ended", uuid: record.deviceSessionUuid, deviceId: record.deviceId, platform: record.platform }),
+        onSessionStarted: (record) =>
+          events.push({
+            kind: "started",
+            uuid: record.deviceSessionUuid,
+            deviceId: record.deviceId,
+            platform: record.platform,
+          }),
+        onSessionEnded: (record) =>
+          events.push({
+            kind: "ended",
+            uuid: record.deviceSessionUuid,
+            deviceId: record.deviceId,
+            platform: record.platform,
+          }),
       });
       return { registry, timer, idGenerator, events };
     }
@@ -123,7 +167,11 @@ describe("DeviceSessionRegistry", () => {
     it("emits session_started with correct identity on a fresh connect", () => {
       const { events } = (() => {
         const ctx = withListener(["uuid-a"]);
-        ctx.registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 1 });
+        ctx.registry.onDeviceConnected({
+          deviceId: "emulator-5554",
+          platform: "android",
+          incarnation: 1,
+        });
         return ctx;
       })();
 
@@ -134,8 +182,16 @@ describe("DeviceSessionRegistry", () => {
 
     it("does NOT emit for an idempotent repeat connect (same incarnation)", () => {
       const { registry, events } = withListener(["uuid-a", "uuid-b"]);
-      registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 1 });
-      registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 1 });
+      registry.onDeviceConnected({
+        deviceId: "emulator-5554",
+        platform: "android",
+        incarnation: 1,
+      });
+      registry.onDeviceConnected({
+        deviceId: "emulator-5554",
+        platform: "android",
+        incarnation: 1,
+      });
 
       expect(events).toEqual([
         { kind: "started", uuid: "uuid-a", deviceId: "emulator-5554", platform: "android" },
@@ -144,7 +200,11 @@ describe("DeviceSessionRegistry", () => {
 
     it("emits session_ended on disconnect with the retired identity", () => {
       const { registry, events } = withListener(["uuid-a"]);
-      registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 1 });
+      registry.onDeviceConnected({
+        deviceId: "emulator-5554",
+        platform: "android",
+        incarnation: 1,
+      });
       registry.onDeviceDisconnected("emulator-5554");
 
       expect(events).toEqual([
@@ -161,8 +221,16 @@ describe("DeviceSessionRegistry", () => {
 
     it("emits ended(old) then started(new) on a same-serial reincarnation", () => {
       const { registry, events } = withListener(["uuid-a", "uuid-b"]);
-      registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 1 });
-      registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 2 });
+      registry.onDeviceConnected({
+        deviceId: "emulator-5554",
+        platform: "android",
+        incarnation: 1,
+      });
+      registry.onDeviceConnected({
+        deviceId: "emulator-5554",
+        platform: "android",
+        incarnation: 2,
+      });
 
       expect(events).toEqual([
         { kind: "started", uuid: "uuid-a", deviceId: "emulator-5554", platform: "android" },

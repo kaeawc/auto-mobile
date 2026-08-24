@@ -31,13 +31,17 @@ class FakeFfmpegProcess extends EventEmitter implements FfmpegProcess {
 
 describe("FfmpegClient", () => {
   test("resolves an explicit binary before configured environment variables and the default", () => {
-    expect(resolveFfmpegBinary({
-      explicitPath: "/tools/ffmpeg",
-      env: { AUTOMOBILE_FFMPEG: "/env/ffmpeg" },
-    })).toBe("/tools/ffmpeg");
-    expect(resolveFfmpegBinary({
-      env: { AUTOMOBILE_FFMPEG: "/env/ffmpeg" },
-    })).toBe("/env/ffmpeg");
+    expect(
+      resolveFfmpegBinary({
+        explicitPath: "/tools/ffmpeg",
+        env: { AUTOMOBILE_FFMPEG: "/env/ffmpeg" },
+      }),
+    ).toBe("/tools/ffmpeg");
+    expect(
+      resolveFfmpegBinary({
+        env: { AUTOMOBILE_FFMPEG: "/env/ffmpeg" },
+      }),
+    ).toBe("/env/ffmpeg");
     expect(resolveFfmpegBinary({ env: {} })).toBe("ffmpeg");
   });
 
@@ -59,11 +63,13 @@ describe("FfmpegClient", () => {
     });
 
     expect(started.process).toBe(process);
-    expect(calls).toEqual([{
-      binary: "/tools/ffmpeg",
-      args: ["-i", "/tmp/a file;still-safe.mov", "-y", "/tmp/output.mp4"],
-      stdio: ["ignore", "pipe", "pipe"],
-    }]);
+    expect(calls).toEqual([
+      {
+        binary: "/tools/ffmpeg",
+        args: ["-i", "/tmp/a file;still-safe.mov", "-y", "/tmp/output.mp4"],
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    ]);
   });
 
   test("probes version and encoder capabilities with actionable failures", async () => {
@@ -75,7 +81,9 @@ describe("FfmpegClient", () => {
           throw new Error("unexpected spawn");
         }
         queueMicrotask(() => {
-          process.stdout.write(processes.length === 1 ? "ffmpeg version 7.1\n" : " V..... h264_videotoolbox\n");
+          process.stdout.write(
+            processes.length === 1 ? "ffmpeg version 7.1\n" : " V..... h264_videotoolbox\n",
+          );
           process.exit();
         });
         return process;
@@ -100,8 +108,9 @@ describe("FfmpegClient", () => {
       },
     });
 
-    await expect(client.run({ args: ["-encoders"], context: "encoder probe" }))
-      .rejects.toThrow(/encoder probe.*unknown encoder/s);
+    await expect(client.run({ args: ["-encoders"], context: "encoder probe" })).rejects.toThrow(
+      /encoder probe.*unknown encoder/s,
+    );
   });
 
   test("tears down both sides when a streaming pipe fails", () => {

@@ -21,20 +21,29 @@ function encodeFrame(
   height: number,
   bytesPerRow: number,
   timestampMs: number,
-  fill: number
+  fill: number,
 ): Buffer {
   const header = encodeFrameHeader({ width, height, bytesPerRow, timestampMs });
   return Buffer.concat([header, Buffer.alloc(height * bytesPerRow, fill)]);
 }
 
 function encodeAudio(pcm16le: Buffer): Buffer {
-  const header = encodeFrameHeader({ width: 0, height: 8_000, bytesPerRow: 1, timestampMs: pcm16le.length });
+  const header = encodeFrameHeader({
+    width: 0,
+    height: 8_000,
+    bytesPerRow: 1,
+    timestampMs: pcm16le.length,
+  });
   return Buffer.concat([header, pcm16le]);
 }
 
 function withFakeSpawner(
-  target: CaptureTarget = { kind: "device", deviceId: "00008140-001A2B3C0AE2401E" }
-): { fake: FakeChildProcess; spawnArgs: { command: string; args: string[] }; helper: IOSScreenCaptureHelper } {
+  target: CaptureTarget = { kind: "device", deviceId: "00008140-001A2B3C0AE2401E" },
+): {
+  fake: FakeChildProcess;
+  spawnArgs: { command: string; args: string[] };
+  helper: IOSScreenCaptureHelper;
+} {
   const fake = new FakeChildProcess();
   const spawnArgs = { command: "", args: [] as string[] };
   const helper = new IOSScreenCaptureHelper({
@@ -50,7 +59,7 @@ function withFakeSpawner(
 }
 
 function flush(): Promise<void> {
-  return new Promise(resolve => setImmediate(resolve));
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 async function flushFrameDelivery(): Promise<void> {
@@ -79,10 +88,7 @@ describe("IOSScreenCaptureHelper", () => {
     const { spawnArgs, helper } = withFakeSpawner();
     helper.start();
     expect(spawnArgs.command).toBe("/fake/screen-capture-helper");
-    expect(spawnArgs.args).toEqual([
-      "--device-id",
-      "00008140-001A2B3C0AE2401E",
-    ]);
+    expect(spawnArgs.args).toEqual(["--device-id", "00008140-001A2B3C0AE2401E"]);
   });
 
   test("omits --device-id when device target has no deviceId", () => {
@@ -99,7 +105,7 @@ describe("IOSScreenCaptureHelper", () => {
 
   // The fps guard runs on start() (in buildArgs), not the constructor. Accepted
   // values are integers in the inclusive [5, 60] range, including both bounds.
-  test.each([5, 30, 60])("accepts a valid simulator fps %p and forwards it", fps => {
+  test.each([5, 30, 60])("accepts a valid simulator fps %p and forwards it", (fps) => {
     const { spawnArgs, helper } = withFakeSpawner({ kind: "simulator", windowID: 1, fps });
     helper.start();
     expect(spawnArgs.args).toEqual(["--simulator-window", "1", "--simulator-fps", String(fps)]);
@@ -108,7 +114,7 @@ describe("IOSScreenCaptureHelper", () => {
   // Below-min, negative, above-max, and non-integer all fail the same guard.
   test.each([4, 0, -30, 61, 30.5, Number.NaN])(
     "rejects an out-of-range or non-integer simulator fps %p on start()",
-    fps => {
+    (fps) => {
       const fake = new FakeChildProcess();
       const helper = new IOSScreenCaptureHelper({
         binaryPath: "/fake/screen-capture-helper",
@@ -116,19 +122,16 @@ describe("IOSScreenCaptureHelper", () => {
         spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
       });
       expect(() => helper.start()).toThrow(/simulator fps must be an integer in \[5, 60\]/);
-    }
+    },
   );
 
   test("coalesces a burst into the newest decoded frame", async () => {
     const { fake, helper } = withFakeSpawner();
     const frames: DecodedFrame[] = [];
-    helper.on("frame", f => frames.push(f));
+    helper.on("frame", (f) => frames.push(f));
     helper.start();
 
-    const buf = Buffer.concat([
-      encodeFrame(1, 1, 4, 10, 0x11),
-      encodeFrame(1, 1, 4, 20, 0x22),
-    ]);
+    const buf = Buffer.concat([encodeFrame(1, 1, 4, 10, 0x11), encodeFrame(1, 1, 4, 20, 0x22)]);
     fake.stdout.push(buf);
     await flushFrameDelivery();
 
@@ -149,14 +152,16 @@ describe("IOSScreenCaptureHelper", () => {
       spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
     });
     const frames: DecodedFrame[] = [];
-    helper.on("frame", frame => frames.push(frame));
+    helper.on("frame", (frame) => frames.push(frame));
     helper.start();
 
-    fake.stdout.push(Buffer.concat([
-      encodeFrame(1, 1, 4, 10, 0x10),
-      encodeFrame(1, 1, 4, 20, 0x20),
-      encodeFrame(1, 1, 4, 30, 0x30),
-    ]));
+    fake.stdout.push(
+      Buffer.concat([
+        encodeFrame(1, 1, 4, 10, 0x10),
+        encodeFrame(1, 1, 4, 20, 0x20),
+        encodeFrame(1, 1, 4, 30, 0x30),
+      ]),
+    );
 
     await flush();
     now += 25;
@@ -182,7 +187,7 @@ describe("IOSScreenCaptureHelper", () => {
   test("simulator target also emits frame events", async () => {
     const { fake, helper } = withFakeSpawner({ kind: "simulator", windowID: 1 });
     const frames: DecodedFrame[] = [];
-    helper.on("frame", f => frames.push(f));
+    helper.on("frame", (f) => frames.push(f));
     helper.start();
     fake.stdout.push(encodeFrame(2, 2, 8, 33, 0xfa));
     await flushFrameDelivery();
@@ -266,8 +271,8 @@ describe("IOSScreenCaptureHelper", () => {
     const { fake, helper } = withFakeSpawner({ kind: "simulator", windowID: 1, audio: true });
     const audio: Buffer[] = [];
     const malformed: MalformedFrameError[] = [];
-    helper.on("audio", chunk => audio.push(chunk.pcm16le));
-    helper.on("malformed", error => malformed.push(error));
+    helper.on("audio", (chunk) => audio.push(chunk.pcm16le));
+    helper.on("malformed", (error) => malformed.push(error));
     helper.start();
     fake.stdout.push(encodeAudio(Buffer.from([0x34, 0x12, 0xcc, 0xed])));
     await flush();
@@ -280,12 +285,27 @@ describe("IOSScreenCaptureHelper", () => {
     const { fake, helper } = withFakeSpawner();
     const metrics = [];
     const stderr: string[] = [];
-    helper.on("captureMetrics", value => metrics.push(value));
-    helper.on("stderr", line => stderr.push(line));
+    helper.on("captureMetrics", (value) => metrics.push(value));
+    helper.on("stderr", (line) => stderr.push(line));
     helper.start();
 
-    fake.stderr.push(Buffer.from(
-      `${NATIVE_FRAME_METRICS_PREFIX}${JSON.stringify({
+    fake.stderr.push(
+      Buffer.from(
+        `${NATIVE_FRAME_METRICS_PREFIX}${JSON.stringify({
+          captureTimestampMs: 42,
+          frameQueueAgeMs: 7.5,
+          frameQueueDepth: 1,
+          droppedFrames: 3,
+          bytesQueued: 8,
+          highWaterMarkBytes: 16,
+          lastOutputWriteDurationMs: 2,
+        })}\n`,
+      ),
+    );
+    await flush();
+
+    expect(metrics).toEqual([
+      {
         captureTimestampMs: 42,
         frameQueueAgeMs: 7.5,
         frameQueueDepth: 1,
@@ -293,26 +313,15 @@ describe("IOSScreenCaptureHelper", () => {
         bytesQueued: 8,
         highWaterMarkBytes: 16,
         lastOutputWriteDurationMs: 2,
-      })}\n`
-    ));
-    await flush();
-
-    expect(metrics).toEqual([{
-      captureTimestampMs: 42,
-      frameQueueAgeMs: 7.5,
-      frameQueueDepth: 1,
-      droppedFrames: 3,
-      bytesQueued: 8,
-      highWaterMarkBytes: 16,
-      lastOutputWriteDurationMs: 2,
-    }]);
+      },
+    ]);
     expect(stderr).toEqual([]);
   });
 
   test("emits malformed events for invalid headers", async () => {
     const { fake, helper } = withFakeSpawner();
     const malformed: MalformedFrameError[] = [];
-    helper.on("malformed", e => malformed.push(e));
+    helper.on("malformed", (e) => malformed.push(e));
     helper.start();
 
     // Valid marker + checksum, but a zero-width frame is implausible.
@@ -327,7 +336,7 @@ describe("IOSScreenCaptureHelper", () => {
   test("emits stderr lines and flushes a trailing partial line on exit", async () => {
     const { fake, helper } = withFakeSpawner();
     const lines: string[] = [];
-    helper.on("stderr", l => lines.push(l));
+    helper.on("stderr", (l) => lines.push(l));
     helper.start();
 
     fake.stderr.push(Buffer.from("warn: device warming up\nerror: incomplete"));
@@ -337,24 +346,25 @@ describe("IOSScreenCaptureHelper", () => {
     fake.emit("exit", 0, null);
     await flush();
 
-    expect(lines).toEqual([
-      "warn: device warming up",
-      "error: incomplete",
-    ]);
+    expect(lines).toEqual(["warn: device warming up", "error: incomplete"]);
   });
 
   test("maps Swift startup markers into readiness events", async () => {
     const { fake, helper } = withFakeSpawner({ kind: "simulator", windowID: 42 });
     const phases: string[] = [];
-    helper.on("readiness", status => phases.push(status.phase));
+    helper.on("readiness", (status) => phases.push(status.phase));
 
     helper.start();
-    fake.stderr.push(Buffer.from([
-      "capture-phase: permission-ready\n",
-      "capture-phase: resolved-window id=42 size=402x874\n",
-      "capture-phase: capture-started id=42\n",
-      "capture-phase: first-frame id=42 size=804x1748\n",
-    ].join("")));
+    fake.stderr.push(
+      Buffer.from(
+        [
+          "capture-phase: permission-ready\n",
+          "capture-phase: resolved-window id=42 size=402x874\n",
+          "capture-phase: capture-started id=42\n",
+          "capture-phase: first-frame id=42 size=804x1748\n",
+        ].join(""),
+      ),
+    );
     await flush();
 
     expect(phases).toEqual([
@@ -371,8 +381,8 @@ describe("IOSScreenCaptureHelper", () => {
     const { fake, helper } = withFakeSpawner({ kind: "simulator", windowID: 42 });
     const permissions: string[] = [];
     const stderr: string[] = [];
-    helper.on("permission", permission => permissions.push(permission));
-    helper.on("stderr", line => stderr.push(line));
+    helper.on("permission", (permission) => permissions.push(permission));
+    helper.on("stderr", (line) => stderr.push(line));
     helper.start();
 
     fake.stderr.push(Buffer.from(`${CAPTURE_PERMISSION_PREFIX} screen-recording\n`));
@@ -386,8 +396,8 @@ describe("IOSScreenCaptureHelper", () => {
     const { fake, helper } = withFakeSpawner({ kind: "simulator", windowID: 42 });
     const targets: string[] = [];
     const stderr: string[] = [];
-    helper.on("permissionTarget", target => targets.push(target));
-    helper.on("stderr", line => stderr.push(line));
+    helper.on("permissionTarget", (target) => targets.push(target));
+    helper.on("stderr", (line) => stderr.push(line));
     helper.start();
 
     fake.stderr.push(Buffer.from(`${CAPTURE_PERMISSION_TARGET_PREFIX} AutoMobile\n`));
@@ -435,7 +445,7 @@ describe("IOSScreenCaptureHelper", () => {
     const fake = new FakeChildProcess();
     const signals: NodeJS.Signals[] = [];
     const processGroupSignals: Array<{ pid: number; signal: NodeJS.Signals }> = [];
-    fake.kill = signal => {
+    fake.kill = (signal) => {
       signals.push((signal ?? "SIGTERM") as NodeJS.Signals);
       fake.killed = true;
       return true;
@@ -466,7 +476,7 @@ describe("IOSScreenCaptureHelper", () => {
     async () => {
       const timer = new FakeTimer();
       const fake = new FakeChildProcess();
-      fake.kill = signal => {
+      fake.kill = (signal) => {
         // Ignore SIGTERM so stop() escalates to SIGKILL + process-group kill.
         void signal;
         fake.killed = true;
@@ -490,12 +500,12 @@ describe("IOSScreenCaptureHelper", () => {
         await stopped;
 
         expect(warning).toHaveBeenCalledWith(
-          expect.stringContaining(`process-group cleanup failed for pid=${fake.pid}`)
+          expect.stringContaining(`process-group cleanup failed for pid=${fake.pid}`),
         );
       } finally {
         warning.mockRestore();
       }
-    }
+    },
   );
 
   test("bounds a concurrent stop after SIGTERM instead of awaiting exit forever", async () => {
@@ -525,7 +535,7 @@ describe("IOSScreenCaptureHelper", () => {
   test("emits error event when underlying process emits error", async () => {
     const { fake, helper } = withFakeSpawner();
     const errors: Error[] = [];
-    helper.on("error", e => errors.push(e));
+    helper.on("error", (e) => errors.push(e));
     helper.start();
     fake.emit("error", new Error("spawn failed"));
     await flush();
@@ -536,7 +546,7 @@ describe("IOSScreenCaptureHelper", () => {
   test("flushes stderr buffer when it grows past the cap without a newline", async () => {
     const { fake, helper } = withFakeSpawner();
     const lines: string[] = [];
-    helper.on("stderr", l => lines.push(l));
+    helper.on("stderr", (l) => lines.push(l));
     helper.start();
 
     const giant = "x".repeat(64 * 1024 + 10);

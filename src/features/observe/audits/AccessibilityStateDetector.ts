@@ -39,18 +39,18 @@ export class AccessibilityStateDetector {
           const enabled = await accessibilityDetector.isAccessibilityEnabled(
             this.device.deviceId,
             this.adb,
-            featureFlags
+            featureFlags,
           );
 
           const service = await accessibilityDetector.detectMethod(
             this.device.deviceId,
             this.adb,
-            featureFlags
+            featureFlags,
           );
 
           result.accessibilityState = { enabled, service };
           logger.debug(
-            `[AccessibilityDetector] Android accessibility state: enabled=${enabled}, service=${service}`
+            `[AccessibilityDetector] Android accessibility state: enabled=${enabled}, service=${service}`,
           );
         } else if (this.device.platform === "ios") {
           // Detect VoiceOver state via CtrlProxy WebSocket
@@ -58,7 +58,7 @@ export class AccessibilityStateDetector {
           const enabled = await iosVoiceOverDetector.isVoiceOverEnabled(
             this.device.deviceId,
             client,
-            featureFlags
+            featureFlags,
           );
 
           result.accessibilityState = {

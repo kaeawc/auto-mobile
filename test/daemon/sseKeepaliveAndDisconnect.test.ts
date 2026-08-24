@@ -6,11 +6,9 @@ import {
 } from "../../src/daemon/disconnectMonitor";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-
 const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
-
 
 class FakeResponse {
   headersSent = true;
@@ -37,9 +35,7 @@ class FakeResponse {
   }
 }
 
-
 describe("SSE keepalive timer", () => {
-
   test("writes keepalive comment every interval while response is writable", () => {
     const timer = new FakeTimer();
     const res = new FakeResponse();
@@ -130,9 +126,7 @@ describe("SSE keepalive timer", () => {
   });
 });
 
-
 describe("disconnect monitor miss counting", () => {
-
   const runDisconnectPoll = (
     deviceDisconnectMisses: Map<string, number>,
     bootedDeviceIds: Set<string>,
@@ -370,9 +364,7 @@ describe("disconnect monitor miss counting", () => {
     const replacementIncarnations = recordingCandidateIncarnations([
       { deviceId: "sim-1", recordingId: "recording-new" },
     ]);
-    const deviceDisconnectMissIncarnations = new Map([
-      ["sim-1", priorIncarnations.get("sim-1")!],
-    ]);
+    const deviceDisconnectMissIncarnations = new Map([["sim-1", priorIncarnations.get("sim-1")!]]);
 
     const result = runDisconnectPoll(
       misses,
@@ -386,7 +378,9 @@ describe("disconnect monitor miss counting", () => {
 
     expect(result.disconnected).toEqual([]);
     expect(misses.get("sim-1")).toBe(1);
-    expect(deviceDisconnectMissIncarnations.get("sim-1")).toBe(replacementIncarnations.get("sim-1"));
+    expect(deviceDisconnectMissIncarnations.get("sim-1")).toBe(
+      replacementIncarnations.get("sim-1"),
+    );
   });
 
   test("clears miss state after a candidate stops being tracked", () => {
@@ -511,9 +505,7 @@ describe("disconnect monitor miss counting", () => {
       }
     ).shouldSkipStaleDisconnectCleanup;
 
-    await expect(
-      shouldSkipStaleDisconnectCleanup.call(daemon, null, "sim-1"),
-    ).resolves.toBe(true);
+    await expect(shouldSkipStaleDisconnectCleanup.call(daemon, null, "sim-1")).resolves.toBe(true);
     expect(misses.has("sim-1")).toBe(false);
     expect(missIncarnations.has("sim-1")).toBe(false);
     expect(confirmed.has("sim-1")).toBe(false);
@@ -543,9 +535,9 @@ describe("disconnect monitor miss counting", () => {
       }
     ).shouldSkipStaleDisconnectCleanup;
 
-    await expect(
-      shouldSkipStaleDisconnectCleanup.call(daemon, null, "sim-1", 1),
-    ).resolves.toBe(true);
+    await expect(shouldSkipStaleDisconnectCleanup.call(daemon, null, "sim-1", 1)).resolves.toBe(
+      true,
+    );
     expect(forced.has("sim-1")).toBe(true);
     expect(forceGenerations.get("sim-1")).toBe(2);
   });
@@ -572,9 +564,9 @@ describe("disconnect monitor miss counting", () => {
       }
     ).shouldSkipStaleDisconnectCleanup;
 
-    await expect(
-      shouldSkipStaleDisconnectCleanup.call(daemon, {}, "emulator-5554"),
-    ).resolves.toBe(true);
+    await expect(shouldSkipStaleDisconnectCleanup.call(daemon, {}, "emulator-5554")).resolves.toBe(
+      true,
+    );
     expect(misses.has("emulator-5554")).toBe(false);
     expect(missIncarnations.has("emulator-5554")).toBe(false);
     expect(daemon.confirmedDisconnectedDeviceIds.has("emulator-5554")).toBe(false);
@@ -583,7 +575,7 @@ describe("disconnect monitor miss counting", () => {
 
   test("preserves a force signal raised during recovery verification", async () => {
     let resolveVerification: (() => void) | undefined;
-    const verification = new Promise<void>(resolve => {
+    const verification = new Promise<void>((resolve) => {
       resolveVerification = resolve;
     });
     const forced = new Set<string>();
@@ -641,9 +633,9 @@ describe("disconnect monitor miss counting", () => {
       }
     ).isCapturedDisconnectTargetCurrent;
 
-    expect(
-      isCapturedDisconnectTargetCurrent.call(daemon, "emulator-5554", capturedDevice, 4),
-    ).toBe(false);
+    expect(isCapturedDisconnectTargetCurrent.call(daemon, "emulator-5554", capturedDevice, 4)).toBe(
+      false,
+    );
   });
 
   test("retains disconnect state when cleanup verification is inconclusive", async () => {
@@ -668,9 +660,9 @@ describe("disconnect monitor miss counting", () => {
       }
     ).shouldSkipStaleDisconnectCleanup;
 
-    await expect(
-      shouldSkipStaleDisconnectCleanup.call(daemon, {}, "emulator-5554"),
-    ).resolves.toBe(true);
+    await expect(shouldSkipStaleDisconnectCleanup.call(daemon, {}, "emulator-5554")).resolves.toBe(
+      true,
+    );
     expect(misses.get("emulator-5554")).toBe(DEVICE_DISCONNECT_MISS_THRESHOLD);
     expect(missIncarnations.get("emulator-5554")).toBe(4);
     expect(daemon.confirmedDisconnectedDeviceIds.has("emulator-5554")).toBe(true);

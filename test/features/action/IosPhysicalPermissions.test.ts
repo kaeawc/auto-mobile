@@ -26,12 +26,11 @@ class FakePhysicalPrivacyClient implements IosPhysicalPrivacyClient {
 
   async resetAuthorizations(
     appId: string,
-    permissions: string[]
+    permissions: string[],
   ): Promise<IosSimulatorPermissionCommandResult[]> {
     this.calls.push({ appId, permissions });
     return permissions.map(
-      permission =>
-        this.resultByPermission.get(permission) ?? { permission, success: true }
+      (permission) => this.resultByPermission.get(permission) ?? { permission, success: true },
     );
   }
 }
@@ -63,7 +62,7 @@ describe("IosPhysicalPermissions", () => {
     expect(result.success).toBe(true);
     expect(result.changedCount).toBe(expanded.length);
     expect(result.failedCount).toBe(0);
-    expect(result.results.map(r => r.permission)).toEqual(expanded);
+    expect(result.results.map((r) => r.permission)).toEqual(expanded);
     expect(client.calls).toEqual([{ appId: "com.example.app", permissions: expanded }]);
   });
 
@@ -99,7 +98,7 @@ describe("IosPhysicalPermissions", () => {
     ];
     expect(result.success).toBe(true);
     expect(result.changedCount).toBe(expanded.length);
-    expect(result.results.map(r => r.permission)).toEqual(expanded);
+    expect(result.results.map((r) => r.permission)).toEqual(expanded);
     expect(client.calls).toEqual([
       {
         appId: "com.example.app",
@@ -112,11 +111,14 @@ describe("IosPhysicalPermissions", () => {
     const client = new FakePhysicalPrivacyClient();
     const permissions = new IosPhysicalPermissions(physicalDevice, client);
 
-    const result = await permissions.setPermissions("reset", "com.example.app", ["photos-add", "photos"]);
+    const result = await permissions.setPermissions("reset", "com.example.app", [
+      "photos-add",
+      "photos",
+    ]);
 
     expect(result.success).toBe(true);
     expect(result.changedCount).toBe(1);
-    expect(result.results.map(r => r.permission)).toEqual(["photos-add"]);
+    expect(result.results.map((r) => r.permission)).toEqual(["photos-add"]);
     expect(client.calls).toEqual([{ appId: "com.example.app", permissions: ["photos-add"] }]);
   });
 
@@ -124,7 +126,10 @@ describe("IosPhysicalPermissions", () => {
     const client = new FakePhysicalPrivacyClient();
     const permissions = new IosPhysicalPermissions(physicalDevice, client);
 
-    const result = await permissions.setPermissions("reset", "com.example.app", ["camera", "photos"]);
+    const result = await permissions.setPermissions("reset", "com.example.app", [
+      "camera",
+      "photos",
+    ]);
 
     expect(result.success).toBe(true);
     expect(result.action).toBe("reset");
@@ -133,7 +138,7 @@ describe("IosPhysicalPermissions", () => {
     expect(result.platform).toBe("ios");
     expect(result.changedCount).toBe(2);
     expect(result.failedCount).toBe(0);
-    expect(result.results.map(r => r.permission)).toEqual(["camera", "photos"]);
+    expect(result.results.map((r) => r.permission)).toEqual(["camera", "photos"]);
     expect(client.calls).toEqual([{ appId: "com.example.app", permissions: ["camera", "photos"] }]);
   });
 
@@ -154,7 +159,7 @@ describe("IosPhysicalPermissions", () => {
 
     expect(result.success).toBe(true);
     expect(result.changedCount).toBe(newlySupported.length);
-    expect(result.results.map(r => r.permission)).toEqual(newlySupported);
+    expect(result.results.map((r) => r.permission)).toEqual(newlySupported);
     expect(client.calls).toEqual([{ appId: "com.example.app", permissions: newlySupported }]);
   });
 
@@ -173,7 +178,7 @@ describe("IosPhysicalPermissions", () => {
     expect(result.changedCount).toBe(1);
     expect(result.failedCount).toBe(1);
     expect(result.error).toContain("reset");
-    const failed = result.results.find(r => r.permission === "siri");
+    const failed = result.results.find((r) => r.permission === "siri");
     expect(failed?.success).toBe(false);
     expect(failed?.error).toContain("siri");
   });

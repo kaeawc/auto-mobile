@@ -22,9 +22,7 @@ import { IN_MEMORY_DB_OPT_IN_ENV } from "../../src/db/migrationLock";
  * `:memory:` override actually takes effect) and after (so the transient
  * `:memory:` singleton never leaks into a sibling test).
  */
-export async function withInMemorySingletonDatabase(
-  fn: () => void | Promise<void>
-): Promise<void> {
+export async function withInMemorySingletonDatabase(fn: () => void | Promise<void>): Promise<void> {
   const savedDbPath = process.env.AUTOMOBILE_DB_PATH;
   const savedOptIn = process.env[IN_MEMORY_DB_OPT_IN_ENV];
   process.env.AUTOMOBILE_DB_PATH = ":memory:";

@@ -45,7 +45,7 @@ function makeRecordingSharpFactory(events: string[]): SharpFactory {
     async toBuffer() {
       events.push("toBuffer");
       return Buffer.from("encoded");
-    }
+    },
   };
 
   return ((source: Buffer) => {
@@ -63,77 +63,77 @@ describe("SharpBackend", () => {
     test("chains multi-operation pipelines without intermediate materialization", async () => {
       const events: string[] = [];
       const backend = new SharpBackend({
-        loadSharp: async () => makeRecordingSharpFactory(events)
+        loadSharp: async () => makeRecordingSharpFactory(events),
       });
 
       await backend.execute(Buffer.from("source"), {
         operations: [
           { type: "resize", width: 5, height: 5, maintainAspectRatio: false },
-          { type: "crop", x: 1, y: 2, width: 3, height: 4 }
+          { type: "crop", x: 1, y: 2, width: 3, height: 4 },
         ],
-        encoding: { mime: "image/png" }
+        encoding: { mime: "image/png" },
       });
 
       expect(events).toEqual([
         "sharp:source",
-        "resize:{\"width\":5,\"height\":5,\"fit\":\"fill\"}",
-        "extract:{\"left\":1,\"top\":2,\"width\":3,\"height\":4}",
+        'resize:{"width":5,"height":5,"fit":"fill"}',
+        'extract:{"left":1,"top":2,"width":3,"height":4}',
         "png",
-        "toBuffer"
+        "toBuffer",
       ]);
     });
 
     test("materializes before a second crop after resize for sharp compatibility", async () => {
       const events: string[] = [];
       const backend = new SharpBackend({
-        loadSharp: async () => makeRecordingSharpFactory(events)
+        loadSharp: async () => makeRecordingSharpFactory(events),
       });
 
       await backend.execute(Buffer.from("source"), {
         operations: [
           { type: "resize", width: 6, height: 6, maintainAspectRatio: false },
           { type: "crop", x: 1, y: 1, width: 4, height: 4 },
-          { type: "crop", x: 1, y: 1, width: 2, height: 2 }
+          { type: "crop", x: 1, y: 1, width: 2, height: 2 },
         ],
-        encoding: { mime: "image/png" }
+        encoding: { mime: "image/png" },
       });
 
       expect(events).toEqual([
         "sharp:source",
-        "resize:{\"width\":6,\"height\":6,\"fit\":\"fill\"}",
-        "extract:{\"left\":1,\"top\":1,\"width\":4,\"height\":4}",
+        'resize:{"width":6,"height":6,"fit":"fill"}',
+        'extract:{"left":1,"top":1,"width":4,"height":4}',
         "toBuffer",
         "sharp:encoded",
-        "extract:{\"left\":1,\"top\":1,\"width\":2,\"height\":2}",
+        'extract:{"left":1,"top":1,"width":2,"height":2}',
         "png",
-        "toBuffer"
+        "toBuffer",
       ]);
     });
 
     test("materializes before a second crop before resize for sharp compatibility", async () => {
       const events: string[] = [];
       const backend = new SharpBackend({
-        loadSharp: async () => makeRecordingSharpFactory(events)
+        loadSharp: async () => makeRecordingSharpFactory(events),
       });
 
       await backend.execute(Buffer.from("source"), {
         operations: [
           { type: "crop", x: 1, y: 1, width: 6, height: 6 },
           { type: "crop", x: 1, y: 1, width: 4, height: 4 },
-          { type: "resize", width: 2, height: 2, maintainAspectRatio: false }
+          { type: "resize", width: 2, height: 2, maintainAspectRatio: false },
         ],
-        encoding: { mime: "image/png" }
+        encoding: { mime: "image/png" },
       });
 
       expect(events).toEqual([
         "sharp:source",
-        "extract:{\"left\":1,\"top\":1,\"width\":6,\"height\":6}",
+        'extract:{"left":1,"top":1,"width":6,"height":6}',
         "toBuffer",
         "sharp:encoded",
-        "extract:{\"left\":1,\"top\":1,\"width\":4,\"height\":4}",
-        "resize:{\"width\":2,\"height\":2,\"fit\":\"fill\"}",
+        'extract:{"left":1,"top":1,"width":4,"height":4}',
+        'resize:{"width":2,"height":2,"fit":"fill"}',
         "png",
-        "toBuffer"
+        "toBuffer",
       ]);
     });
   });
@@ -146,7 +146,7 @@ describeSharp("SharpBackend native", () => {
       const source = await makeSourcePng(8, 8);
       const pipeline: ImagePipeline = {
         operations: [{ type: "resize", width: 4, height: 2, maintainAspectRatio: false }],
-        encoding: { mime: "image/png" }
+        encoding: { mime: "image/png" },
       };
 
       const out = await backend.execute(source, pipeline);
@@ -160,10 +160,12 @@ describeSharp("SharpBackend native", () => {
     test("resize with maintainAspectRatio covers to exact WxH", async () => {
       const backend = new SharpBackend();
       const source = await makeSourcePng(8, 4);
-      const meta = await backend.metadata(await backend.execute(source, {
-        operations: [{ type: "resize", width: 6, height: 6, maintainAspectRatio: true }],
-        encoding: { mime: "image/png" }
-      }));
+      const meta = await backend.metadata(
+        await backend.execute(source, {
+          operations: [{ type: "resize", width: 6, height: 6, maintainAspectRatio: true }],
+          encoding: { mime: "image/png" },
+        }),
+      );
 
       expect(meta.width).toBe(6);
       expect(meta.height).toBe(6);
@@ -172,10 +174,12 @@ describeSharp("SharpBackend native", () => {
     test("width-only resize preserves aspect ratio", async () => {
       const backend = new SharpBackend();
       const source = await makeSourcePng(8, 4);
-      const meta = await backend.metadata(await backend.execute(source, {
-        operations: [{ type: "resize", width: 4, maintainAspectRatio: true }],
-        encoding: { mime: "image/png" }
-      }));
+      const meta = await backend.metadata(
+        await backend.execute(source, {
+          operations: [{ type: "resize", width: 4, maintainAspectRatio: true }],
+          encoding: { mime: "image/png" },
+        }),
+      );
 
       expect(meta.width).toBe(4);
       expect(meta.height).toBe(2);
@@ -185,19 +189,23 @@ describeSharp("SharpBackend native", () => {
       const backend = new SharpBackend();
       const source = await makeSourcePng(8, 8);
       const sharp = (await import("sharp")).default;
-      const expected = await backend.rawPixels(await sharp(source)
-        .resize({ width: 4, height: 4, fit: "fill" })
-        .extract({ left: 1, top: 1, width: 2, height: 2 })
-        .png()
-        .toBuffer());
+      const expected = await backend.rawPixels(
+        await sharp(source)
+          .resize({ width: 4, height: 4, fit: "fill" })
+          .extract({ left: 1, top: 1, width: 2, height: 2 })
+          .png()
+          .toBuffer(),
+      );
 
-      const actual = await backend.rawPixels(await backend.execute(source, {
-        operations: [
-          { type: "resize", width: 4, height: 4, maintainAspectRatio: false },
-          { type: "crop", x: 1, y: 1, width: 2, height: 2 }
-        ],
-        encoding: { mime: "image/png" }
-      }));
+      const actual = await backend.rawPixels(
+        await backend.execute(source, {
+          operations: [
+            { type: "resize", width: 4, height: 4, maintainAspectRatio: false },
+            { type: "crop", x: 1, y: 1, width: 2, height: 2 },
+          ],
+          encoding: { mime: "image/png" },
+        }),
+      );
 
       expect(actual.width).toBe(2);
       expect(actual.height).toBe(2);
@@ -214,19 +222,20 @@ describeSharp("SharpBackend native", () => {
       const firstCrop = await sharp(firstResize)
         .extract({ left: 1, top: 1, width: 4, height: 4 })
         .toBuffer();
-      const expected = await backend.rawPixels(await sharp(firstCrop)
-        .extract({ left: 1, top: 1, width: 2, height: 2 })
-        .png()
-        .toBuffer());
+      const expected = await backend.rawPixels(
+        await sharp(firstCrop).extract({ left: 1, top: 1, width: 2, height: 2 }).png().toBuffer(),
+      );
 
-      const actual = await backend.rawPixels(await backend.execute(source, {
-        operations: [
-          { type: "resize", width: 6, height: 6, maintainAspectRatio: false },
-          { type: "crop", x: 1, y: 1, width: 4, height: 4 },
-          { type: "crop", x: 1, y: 1, width: 2, height: 2 }
-        ],
-        encoding: { mime: "image/png" }
-      }));
+      const actual = await backend.rawPixels(
+        await backend.execute(source, {
+          operations: [
+            { type: "resize", width: 6, height: 6, maintainAspectRatio: false },
+            { type: "crop", x: 1, y: 1, width: 4, height: 4 },
+            { type: "crop", x: 1, y: 1, width: 2, height: 2 },
+          ],
+          encoding: { mime: "image/png" },
+        }),
+      );
 
       expect(actual.width).toBe(2);
       expect(actual.height).toBe(2);
@@ -243,19 +252,20 @@ describeSharp("SharpBackend native", () => {
       const secondCrop = await sharp(firstCrop)
         .extract({ left: 1, top: 1, width: 4, height: 4 })
         .toBuffer();
-      const expected = await backend.rawPixels(await sharp(secondCrop)
-        .resize({ width: 2, height: 2, fit: "fill" })
-        .png()
-        .toBuffer());
+      const expected = await backend.rawPixels(
+        await sharp(secondCrop).resize({ width: 2, height: 2, fit: "fill" }).png().toBuffer(),
+      );
 
-      const actual = await backend.rawPixels(await backend.execute(source, {
-        operations: [
-          { type: "crop", x: 1, y: 1, width: 6, height: 6 },
-          { type: "crop", x: 1, y: 1, width: 4, height: 4 },
-          { type: "resize", width: 2, height: 2, maintainAspectRatio: false }
-        ],
-        encoding: { mime: "image/png" }
-      }));
+      const actual = await backend.rawPixels(
+        await backend.execute(source, {
+          operations: [
+            { type: "crop", x: 1, y: 1, width: 6, height: 6 },
+            { type: "crop", x: 1, y: 1, width: 4, height: 4 },
+            { type: "resize", width: 2, height: 2, maintainAspectRatio: false },
+          ],
+          encoding: { mime: "image/png" },
+        }),
+      );
 
       expect(actual.width).toBe(2);
       expect(actual.height).toBe(2);
@@ -269,18 +279,19 @@ describeSharp("SharpBackend native", () => {
       const firstResize = await sharp(source)
         .resize({ width: 5, height: 5, fit: "fill" })
         .toBuffer();
-      const expected = await backend.rawPixels(await sharp(firstResize)
-        .resize({ width: 3, height: 7, fit: "fill" })
-        .png()
-        .toBuffer());
+      const expected = await backend.rawPixels(
+        await sharp(firstResize).resize({ width: 3, height: 7, fit: "fill" }).png().toBuffer(),
+      );
 
-      const actual = await backend.rawPixels(await backend.execute(source, {
-        operations: [
-          { type: "resize", width: 5, height: 5, maintainAspectRatio: false },
-          { type: "resize", width: 3, height: 7, maintainAspectRatio: false }
-        ],
-        encoding: { mime: "image/png" }
-      }));
+      const actual = await backend.rawPixels(
+        await backend.execute(source, {
+          operations: [
+            { type: "resize", width: 5, height: 5, maintainAspectRatio: false },
+            { type: "resize", width: 3, height: 7, maintainAspectRatio: false },
+          ],
+          encoding: { mime: "image/png" },
+        }),
+      );
 
       expect(actual.width).toBe(3);
       expect(actual.height).toBe(7);
@@ -291,10 +302,12 @@ describeSharp("SharpBackend native", () => {
       const backend = new SharpBackend();
       const source = await makeSourcePng(8, 8);
 
-      const raw = await backend.rawPixels(await backend.execute(source, {
-        operations: [{ type: "crop", x: 1, y: 1, width: 3, height: 2 }],
-        encoding: { mime: "image/png" }
-      }));
+      const raw = await backend.rawPixels(
+        await backend.execute(source, {
+          operations: [{ type: "crop", x: 1, y: 1, width: 3, height: 2 }],
+          encoding: { mime: "image/png" },
+        }),
+      );
 
       expect(raw.width).toBe(3);
       expect(raw.height).toBe(2);
@@ -308,11 +321,11 @@ describeSharp("SharpBackend native", () => {
       for (const options of [
         { quality: 60 },
         { lossless: true, quality: 75 },
-        { nearLossless: true, quality: 40 }
+        { nearLossless: true, quality: 40 },
       ]) {
         const out = await backend.execute(source, {
           operations: [],
-          encoding: { mime: "image/webp", options }
+          encoding: { mime: "image/webp", options },
         });
         expect(out.subarray(0, 4).toString()).toBe("RIFF");
         expect(out.subarray(8, 12).toString()).toBe("WEBP");

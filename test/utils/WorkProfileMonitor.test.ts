@@ -20,7 +20,7 @@ describe("WorkProfileMonitor", () => {
       adb,
       installedAppsStore: repo,
       timer,
-      pollIntervalMs: 5000
+      pollIntervalMs: 5000,
     });
 
     // Set up default package list response
@@ -29,7 +29,7 @@ describe("WorkProfileMonitor", () => {
       stderr: "",
       toString: () => "package:com.example.app1\npackage:com.example.app2\n",
       trim: () => "package:com.example.app1\npackage:com.example.app2",
-      includes: (s: string) => "package:com.example.app1\npackage:com.example.app2\n".includes(s)
+      includes: (s: string) => "package:com.example.app1\npackage:com.example.app2\n".includes(s),
     });
   });
 
@@ -64,7 +64,7 @@ describe("WorkProfileMonitor", () => {
     expect(monitor.getProfileStates()[0]).toEqual({
       userId: 10,
       hasAccessibilityService: false,
-      lastRefreshMs: 0
+      lastRefreshMs: 0,
     });
 
     monitor.setProfileHasAccessibilityService(10, true);
@@ -80,7 +80,10 @@ describe("WorkProfileMonitor", () => {
     // Check that packages were added to repository
     const apps = await repo.listInstalledApps("emulator-5554");
     expect(apps).toHaveLength(2);
-    expect(apps.map(a => a.package_name).sort()).toEqual(["com.example.app1", "com.example.app2"]);
+    expect(apps.map((a) => a.package_name).sort()).toEqual([
+      "com.example.app1",
+      "com.example.app2",
+    ]);
     expect(apps[0].user_id).toBe(10);
 
     // Check lastRefreshMs was updated
@@ -90,7 +93,7 @@ describe("WorkProfileMonitor", () => {
 
   test("polls only stale profiles (without accessibility service)", async () => {
     monitor.setProfileHasAccessibilityService(10, false); // Should poll
-    monitor.setProfileHasAccessibilityService(11, true);  // Should NOT poll
+    monitor.setProfileHasAccessibilityService(11, true); // Should NOT poll
 
     monitor.start();
 
@@ -143,7 +146,7 @@ describe("WorkProfileMonitor", () => {
       adb: freshAdb,
       installedAppsStore: repo,
       timer,
-      pollIntervalMs: 5000
+      pollIntervalMs: 5000,
     });
 
     // Set empty response
@@ -152,7 +155,7 @@ describe("WorkProfileMonitor", () => {
       stderr: "",
       toString: () => "",
       trim: () => "",
-      includes: () => false
+      includes: () => false,
     });
 
     freshMonitor.setProfileHasAccessibilityService(10, false);

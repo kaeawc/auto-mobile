@@ -42,12 +42,12 @@ function normalizeConfiguredPath(value: string | undefined, launchCwd: string): 
 export function parseToolOutputsDirConfig(
   args: string[],
   env: NodeJS.ProcessEnv,
-  launchCwd: string
+  launchCwd: string,
 ): string | undefined {
   const cliValue = firstFlagValue(args, [TOOL_OUTPUTS_DIR_FLAG, TOOL_OUTPUT_DIR_FLAG_ALIAS]);
   return normalizeConfiguredPath(
     cliValue ?? env[TOOL_OUTPUTS_DIR_ENV] ?? env[TOOL_OUTPUTS_DIR_ENV_ALIAS],
-    launchCwd
+    launchCwd,
   );
 }
 
@@ -57,13 +57,13 @@ export function getDefaultToolOutputsDir(): string {
 
 export async function validateToolOutputsDirForWrite(
   dirPath: string,
-  fileSystem: ToolOutputsDirValidationDeps = nodeToolOutputsDirValidationDeps
+  fileSystem: ToolOutputsDirValidationDeps = nodeToolOutputsDirValidationDeps,
 ): Promise<string> {
   try {
     await fileSystem.ensureDir(dirPath);
   } catch (error) {
     throw new ActionableError(
-      `Failed to create tool outputs directory "${dirPath}": ${errorMessage(error)}`
+      `Failed to create tool outputs directory "${dirPath}": ${errorMessage(error)}`,
     );
   }
 
@@ -72,7 +72,7 @@ export async function validateToolOutputsDirForWrite(
     stats = await fileSystem.stat(dirPath);
   } catch (error) {
     throw new ActionableError(
-      `Failed to inspect tool outputs directory "${dirPath}": ${errorMessage(error)}`
+      `Failed to inspect tool outputs directory "${dirPath}": ${errorMessage(error)}`,
     );
   }
 
@@ -84,7 +84,7 @@ export async function validateToolOutputsDirForWrite(
     await fileSystem.access(dirPath);
   } catch (error) {
     throw new ActionableError(
-      `Configured tool outputs directory "${dirPath}" is not writable: ${errorMessage(error)}`
+      `Configured tool outputs directory "${dirPath}" is not writable: ${errorMessage(error)}`,
     );
   }
 
@@ -92,7 +92,7 @@ export async function validateToolOutputsDirForWrite(
 }
 
 export async function getValidatedToolOutputsDirForWrite(
-  fileSystem: ToolOutputsDirValidationDeps = nodeToolOutputsDirValidationDeps
+  fileSystem: ToolOutputsDirValidationDeps = nodeToolOutputsDirValidationDeps,
 ): Promise<string | undefined> {
   const configuredDir = serverConfig.getToolOutputsDir();
   if (!configuredDir) {

@@ -12,17 +12,28 @@ import { FakeChildProcess } from "./FakeChildProcess";
  */
 export class FakeProcessExecutor implements HostProcessExecutor {
   private commandResponses: Map<string, ExecResult> = new Map();
-  private commandHandlers: Array<{ pattern: string; handler: (command: string) => ExecResult | Promise<ExecResult> }> = [];
+  private commandHandlers: Array<{
+    pattern: string;
+    handler: (command: string) => ExecResult | Promise<ExecResult>;
+  }> = [];
   private defaultResponse: ExecResult = this.createExecResult("", "");
   private executedCommands: string[] = [];
-  private spawnResponses: Array<{ command: string; args: string[]; options?: SpawnOptions; process: ChildProcess }> = [];
+  private spawnResponses: Array<{
+    command: string;
+    args: string[];
+    options?: SpawnOptions;
+    process: ChildProcess;
+  }> = [];
   private nextSpawnProcess: ChildProcess | null = null;
 
   setCommandResponse(commandPattern: string, response: ExecResult): void {
     this.commandResponses.set(commandPattern, this.ensureExecResultMethods(response));
   }
 
-  setCommandHandler(commandPattern: string, handler: (command: string) => ExecResult | Promise<ExecResult>): void {
+  setCommandHandler(
+    commandPattern: string,
+    handler: (command: string) => ExecResult | Promise<ExecResult>,
+  ): void {
     this.commandHandlers.push({ pattern: commandPattern, handler });
   }
 
@@ -35,14 +46,19 @@ export class FakeProcessExecutor implements HostProcessExecutor {
   }
 
   wasCommandExecuted(pattern: string): boolean {
-    return this.executedCommands.some(command => command.includes(pattern));
+    return this.executedCommands.some((command) => command.includes(pattern));
   }
 
   setNextSpawnProcess(process: ChildProcess): void {
     this.nextSpawnProcess = process;
   }
 
-  getSpawnedProcesses(): Array<{ command: string; args: string[]; options?: SpawnOptions; process: ChildProcess }> {
+  getSpawnedProcesses(): Array<{
+    command: string;
+    args: string[];
+    options?: SpawnOptions;
+    process: ChildProcess;
+  }> {
     return [...this.spawnResponses];
   }
 
@@ -61,9 +77,17 @@ export class FakeProcessExecutor implements HostProcessExecutor {
     return this.defaultResponse;
   }
 
-  async executeCommand(command: string, args: string[] = [], _options?: HostCommandOptions): Promise<ExecResult> {
+  async executeCommand(
+    command: string,
+    args: string[] = [],
+    _options?: HostCommandOptions,
+  ): Promise<ExecResult> {
     const renderedArgs = args.map((arg, index) =>
-      command === "pgrep" && args[index - 1] === "-f" ? `'${arg}'` : arg.includes(" ") ? `'${arg}'` : arg
+      command === "pgrep" && args[index - 1] === "-f"
+        ? `'${arg}'`
+        : arg.includes(" ")
+          ? `'${arg}'`
+          : arg,
     );
     return this.exec([command, ...renderedArgs].join(" "));
   }
@@ -78,7 +102,7 @@ export class FakeProcessExecutor implements HostProcessExecutor {
   executeCommandWithChild(
     command: string,
     args: string[] = [],
-    options?: HostCommandOptions
+    options?: HostCommandOptions,
   ): StartedHostCommand {
     return {
       child: this.spawn(command, args),
@@ -92,7 +116,7 @@ export class FakeProcessExecutor implements HostProcessExecutor {
       stderr,
       toString: () => stdout,
       trim: () => stdout.trim(),
-      includes: (searchString: string) => stdout.includes(searchString)
+      includes: (searchString: string) => stdout.includes(searchString),
     };
   }
 
@@ -103,9 +127,14 @@ export class FakeProcessExecutor implements HostProcessExecutor {
     return {
       stdout,
       stderr,
-      toString: typeof response.toString === "function" ? response.toString.bind(response) : () => stdout,
-      trim: typeof response.trim === "function" ? response.trim.bind(response) : () => stdout.trim(),
-      includes: typeof response.includes === "function" ? response.includes.bind(response) : (searchString: string) => stdout.includes(searchString)
+      toString:
+        typeof response.toString === "function" ? response.toString.bind(response) : () => stdout,
+      trim:
+        typeof response.trim === "function" ? response.trim.bind(response) : () => stdout.trim(),
+      includes:
+        typeof response.includes === "function"
+          ? response.includes.bind(response)
+          : (searchString: string) => stdout.includes(searchString),
     };
   }
 }

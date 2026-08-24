@@ -16,7 +16,7 @@ function execResult(stdout: string): ExecResult {
     stderr: "",
     toString: () => stdout,
     trim: () => stdout.trim(),
-    includes: (s: string) => stdout.includes(s)
+    includes: (s: string) => stdout.includes(s),
   } as unknown as ExecResult;
 }
 
@@ -34,7 +34,7 @@ function policyDump(opts: { showing?: string; occluded?: string; secure?: string
     "      deviceHasKeyguard=true",
     "      KeyguardStateMonitor",
     "        mIsShowing=true",
-    "        mSimSecure=false"
+    "        mSimSecure=false",
   ].join("\n");
 }
 

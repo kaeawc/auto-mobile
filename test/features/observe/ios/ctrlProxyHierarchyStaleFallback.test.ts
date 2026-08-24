@@ -43,33 +43,40 @@ interface Harness {
  * @param onSend runs when the sync request hits the socket, standing in for
  *   whatever the runner does while the caller is parked on the await.
  */
-function createHarness(onSend: (requestManager: RequestManager, requestId: string) => void): Harness {
+function createHarness(
+  onSend: (requestManager: RequestManager, requestId: string) => void,
+): Harness {
   const timer = new FakeTimer();
   const requestManager = new RequestManager(timer);
   let cached: CtrlProxyCachedHierarchy | null = null;
 
   const context: HierarchyDelegateContext = {
-    getWebSocket: () => ({
-      readyState: 1,
-      send: (data: string) => {
-        const message = JSON.parse(data) as { requestId: string };
-        onSend(requestManager, message.requestId);
-      },
-    } as never),
+    getWebSocket: () =>
+      ({
+        readyState: 1,
+        send: (data: string) => {
+          const message = JSON.parse(data) as { requestId: string };
+          onSend(requestManager, message.requestId);
+        },
+      }) as never,
     requestManager,
     timer,
     ensureConnected: async () => true,
     cancelScreenshotBackoff: () => {},
     cacheFreshTtlMs: CACHE_TTL_MS,
     getCachedHierarchy: () => cached,
-    setCachedHierarchy: h => { cached = h; },
+    setCachedHierarchy: (h) => {
+      cached = h;
+    },
   };
 
   return {
     hierarchy: new CtrlProxyHierarchy(context),
     timer,
     getCached: () => cached,
-    setCached: entry => { cached = entry; },
+    setCached: (entry) => {
+      cached = entry;
+    },
   };
 }
 

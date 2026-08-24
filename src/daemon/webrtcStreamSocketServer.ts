@@ -3,10 +3,7 @@ import { logger } from "../utils/logger";
 import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import { WEBRTC_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 import { ActionableError, type BootedDevice } from "../models";
-import {
-  MultiPlatformDeviceManager,
-  type PlatformDeviceManager,
-} from "../utils/deviceUtils";
+import { MultiPlatformDeviceManager, type PlatformDeviceManager } from "../utils/deviceUtils";
 import type {
   getWebRtcStreamDescriptor,
   listWebRtcStreams,
@@ -46,14 +43,14 @@ function loadManager() {
 export async function resolveWebRtcStreamDevice(
   deviceManager: Pick<PlatformDeviceManager, "getBootedDevices">,
   deviceId?: string,
-  platform: "android" | "ios" = "android"
+  platform: "android" | "ios" = "android",
 ): Promise<BootedDevice> {
   // The request already names its platform. Querying both platforms makes an
   // iOS stream wait for ADB (and vice versa), so keep discovery platform-scoped.
   const candidates = await deviceManager.getBootedDevices(platform);
 
   if (deviceId) {
-    const match = candidates.find(device => device.deviceId === deviceId);
+    const match = candidates.find((device) => device.deviceId === deviceId);
     if (!match) {
       throw new ActionableError(`No connected ${platform} device with id ${deviceId}.`);
     }
@@ -66,8 +63,8 @@ export async function resolveWebRtcStreamDevice(
   if (candidates.length > 1) {
     throw new ActionableError(
       `Multiple connected ${platform} devices; specify deviceId. Found: ${candidates
-        .map(device => device.deviceId)
-        .join(", ")}`
+        .map((device) => device.deviceId)
+        .join(", ")}`,
     );
   }
   return candidates[0];
@@ -77,7 +74,7 @@ const defaultDeviceManager = new MultiPlatformDeviceManager();
 
 async function defaultResolveDevice(
   deviceId?: string,
-  platform: "android" | "ios" = "android"
+  platform: "android" | "ios" = "android",
 ): Promise<BootedDevice> {
   return resolveWebRtcStreamDevice(defaultDeviceManager, deviceId, platform);
 }
@@ -135,7 +132,9 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
     socketPath: string = getSocketPath(WEBRTC_STREAM_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
     deps?: WebRtcStreamSocketServerDependencies,
-    authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator("webrtcStream")
+    authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
+      "webrtcStream",
+    ),
   ) {
     super(socketPath, timer, "WebRtcStream");
     this.injectedDeps = deps;
@@ -162,7 +161,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
   }
 
   protected async handleRequest(
-    request: WebRtcStreamSocketRequest
+    request: WebRtcStreamSocketRequest,
   ): Promise<WebRtcStreamSocketResponse> {
     // Authenticate before touching device state or the WebRTC stack (issue
     // #4751). An unauthenticated or cross-session request is rejected here.
@@ -173,7 +172,13 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
         return this.handleStart(deps, request);
       case "stop": {
         const stream = await deps.stopStream(request.streamId, request.leaseId);
-        return { id: request.id, success: true, type: "webrtc_stream_response", action: "stop", stream };
+        return {
+          id: request.id,
+          success: true,
+          type: "webrtc_stream_response",
+          action: "stop",
+          stream,
+        };
       }
       case "status":
         return this.handleStatus(deps, request);
@@ -194,7 +199,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
 
   private async handleStart(
     deps: WebRtcStreamSocketServerDependencies,
-    request: WebRtcStreamSocketRequest
+    request: WebRtcStreamSocketRequest,
   ): Promise<WebRtcStreamSocketResponse> {
     // A WHIP endpoint supplied over the wire may only target a trusted origin
     // (issue #4751); the protocol (https-or-loopback) is enforced downstream in
@@ -223,7 +228,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
 
   private async handleAwait(
     deps: WebRtcStreamSocketServerDependencies,
-    request: WebRtcStreamSocketRequest
+    request: WebRtcStreamSocketRequest,
   ): Promise<WebRtcStreamSocketResponse> {
     if (!request.streamId) {
       throw new ActionableError("The WebRTC await action requires streamId.");
@@ -235,7 +240,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
       request.streamId,
       request.readiness ?? "publishing",
       request.timeoutMs,
-      request.leaseId
+      request.leaseId,
     );
     return {
       id: request.id,
@@ -250,7 +255,7 @@ export class WebRtcStreamSocketServer extends RequestResponseSocketServer<
 
   private handleStatus(
     deps: WebRtcStreamSocketServerDependencies,
-    request: WebRtcStreamSocketRequest
+    request: WebRtcStreamSocketRequest,
   ): WebRtcStreamSocketResponse {
     if (request.streamId) {
       const stream = deps.getStream(request.streamId, request.leaseId);

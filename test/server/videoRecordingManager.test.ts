@@ -137,12 +137,16 @@ describe("videoRecordingManager", () => {
     let resolveUpdate: (() => void) | undefined;
     let completeUpdates = 0;
     let signalUpdateStarted: (() => void) | undefined;
-    const updateStarted = new Promise<void>(resolve => { signalUpdateStarted = resolve; });
+    const updateStarted = new Promise<void>((resolve) => {
+      signalUpdateStarted = resolve;
+    });
     fakeRepository.updateRecording = async (recordingId, update) => {
       if (update.status === "completed") {
         completeUpdates++;
         signalUpdateStarted?.();
-        await new Promise<void>(resolve => { resolveUpdate = resolve; });
+        await new Promise<void>((resolve) => {
+          resolveUpdate = resolve;
+        });
       }
       await originalUpdate(recordingId, update);
     };
@@ -181,23 +185,25 @@ describe("videoRecordingManager", () => {
     await stopAcceptingVideoRecordingStarts();
 
     await expect(startVideoRecording({ device: testDevice })).rejects.toThrow(
-      "unavailable while the daemon shuts down"
+      "unavailable while the daemon shuts down",
     );
   });
 
   test("drains every concurrent shutdown waiter after an in-flight start aborts", async () => {
     let signalStart: (() => void) | undefined;
-    const started = new Promise<void>(resolve => { signalStart = resolve; });
-    fakeBackend.start = async config => {
+    const started = new Promise<void>((resolve) => {
+      signalStart = resolve;
+    });
+    fakeBackend.start = async (config) => {
       signalStart?.();
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve) => {
         config.abortSignal?.addEventListener("abort", resolve, { once: true });
       });
       throw new Error("start aborted");
     };
 
     const starting = startVideoRecording({ device: testDevice });
-    const startResult = starting.catch(error => error);
+    const startResult = starting.catch((error) => error);
     await started;
     const firstDrain = stopAcceptingVideoRecordingStarts();
     const secondDrain = stopAcceptingVideoRecordingStarts();
@@ -234,11 +240,11 @@ describe("videoRecordingManager", () => {
     });
 
     fakeTimer.advanceTime(1000);
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     fakeTimer.advanceTime(1000);
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     fakeTimer.advanceTime(1000);
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
 
     fakeBackend.setStopResultOverrides({
       endedAt: new Date(fakeTimer.now()).toISOString(),
@@ -279,7 +285,7 @@ describe("videoRecordingManager", () => {
     });
 
     fakeTimer.advanceTime(1000);
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     fakeBackend.setStopResultOverrides({
       endedAt: new Date(fakeTimer.now()).toISOString(),
     });
@@ -315,7 +321,7 @@ describe("videoRecordingManager", () => {
     });
 
     fakeTimer.advanceTime(5000);
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     fakeBackend.setStopResultOverrides({
       endedAt: new Date(fakeTimer.now()).toISOString(),
     });
@@ -376,7 +382,7 @@ describe("videoRecordingManager", () => {
 
     const seedCompletedRecording = async (
       recordingId: string,
-      createdAtMs: number
+      createdAtMs: number,
     ): Promise<void> => {
       const iso = new Date(createdAtMs).toISOString();
       const record: VideoRecordingRecord = {
@@ -399,7 +405,7 @@ describe("videoRecordingManager", () => {
 
     const reconfigureRetention = async (
       policy: VideoRetentionPolicy,
-      statFileSize?: (filePath: string) => Promise<number>
+      statFileSize?: (filePath: string) => Promise<number>,
     ): Promise<void> => {
       await setVideoRecordingManagerDependencies({
         retentionPolicy: policy,
@@ -409,7 +415,7 @@ describe("videoRecordingManager", () => {
 
     const drainAsyncUntil = async (
       predicate: () => Promise<boolean>,
-      attempts = 100
+      attempts = 100,
     ): Promise<void> => {
       for (let attempt = 0; attempt < attempts; attempt++) {
         if (await predicate()) {
@@ -443,7 +449,7 @@ describe("videoRecordingManager", () => {
       // 0 days disables the sweep; garbage falls back to the default.
       expect(resolveVideoRetentionPolicy({ AUTOMOBILE_VIDEO_RETENTION_DAYS: "0" }).ttlMs).toBe(0);
       expect(
-        resolveVideoRetentionPolicy({ AUTOMOBILE_VIDEO_RETENTION_DAYS: "nonsense" }).ttlMs
+        resolveVideoRetentionPolicy({ AUTOMOBILE_VIDEO_RETENTION_DAYS: "nonsense" }).ttlMs,
       ).toBe(7 * MS_PER_DAY);
     });
 
@@ -462,7 +468,7 @@ describe("videoRecordingManager", () => {
 
       expect(pruned).toEqual(["old-recording"]);
       const remaining = await listVideoRecordings();
-      expect(remaining.map(r => r.recordingId)).toEqual(["fresh-recording"]);
+      expect(remaining.map((r) => r.recordingId)).toEqual(["fresh-recording"]);
     });
 
     test("TTL sweep prunes an expired recording on the injected FakeTimer", async () => {
@@ -476,12 +482,12 @@ describe("videoRecordingManager", () => {
       await seedCompletedRecording("expired", fakeTimer.now() - 10 * MS_PER_DAY);
 
       // Arm the sweep by resolving dependencies (init), then confirm it is present.
-      expect((await listVideoRecordings()).map(r => r.recordingId)).toEqual(["expired"]);
+      expect((await listVideoRecordings()).map((r) => r.recordingId)).toEqual(["expired"]);
       expect(fakeTimer.getPendingIntervalCount()).toBeGreaterThanOrEqual(1);
 
       // Nothing prunes before the sweep interval elapses.
       fakeTimer.advanceTime(999);
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
       expect((await listVideoRecordings()).length).toBe(1);
 
       // Crossing the interval fires the timer-driven sweep.
@@ -495,7 +501,7 @@ describe("videoRecordingManager", () => {
       // Live capture already twice the archive cap; the monitor must stop it.
       await reconfigureRetention(
         { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 1000 },
-        async () => capBytes * 2
+        async () => capBytes * 2,
       );
 
       const active = await startVideoRecording({
@@ -517,12 +523,12 @@ describe("videoRecordingManager", () => {
       // stopCalls-only predicate reads the recording mid-stop (still "recording",
       // filtered out of the listing) under CI event-loop pressure (#4762 macOS flake).
       await drainAsyncUntil(async () =>
-        (await listVideoRecordings()).some(record => record.recordingId === active.recordingId)
+        (await listVideoRecordings()).some((record) => record.recordingId === active.recordingId),
       );
 
       expect(fakeBackend.stopCalls.length).toBe(1);
       const recordings = await listVideoRecordings();
-      expect(recordings.map(r => r.recordingId)).toEqual([active.recordingId]);
+      expect(recordings.map((r) => r.recordingId)).toEqual([active.recordingId]);
       // Monitor is cleared once the capture stops.
       expect(fakeTimer.getPendingIntervalCount()).toBe(0);
     });
@@ -530,13 +536,13 @@ describe("videoRecordingManager", () => {
     test("in-progress recording under the cap keeps running", async () => {
       await reconfigureRetention(
         { ttlMs: 0, sweepIntervalMs: 60_000, inProgressCheckIntervalMs: 1000 },
-        async () => 1024
+        async () => 1024,
       );
 
       await startVideoRecording({ device: testDevice, maxDurationSeconds: 300 });
 
       fakeTimer.advanceTime(5000);
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
 
       expect(fakeBackend.stopCalls.length).toBe(0);
       // Monitor remains armed while under the cap.
@@ -567,14 +573,14 @@ describe("videoRecordingManager", () => {
 
     test("iOS recording above the iOS cap (3600s) is rejected", async () => {
       await expect(
-        startVideoRecording({ device: iosDevice, maxDurationSeconds: 3601 })
+        startVideoRecording({ device: iosDevice, maxDurationSeconds: 3601 }),
       ).rejects.toThrow("maxDuration must be <= 3600 seconds.");
       expect(fakeBackend.startCalls.length).toBe(0);
     });
 
     test("non-iOS recording above the 300s cap is still rejected (Android segments before the manager)", async () => {
       await expect(
-        startVideoRecording({ device: testDevice, maxDurationSeconds: 301 })
+        startVideoRecording({ device: testDevice, maxDurationSeconds: 301 }),
       ).rejects.toThrow("maxDuration must be <= 300 seconds.");
       expect(fakeBackend.startCalls.length).toBe(0);
     });

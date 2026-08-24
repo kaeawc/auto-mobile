@@ -1,4 +1,7 @@
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger, LogLevel } from "../../utils/logger";
 import { BootedDevice } from "../../models";
 import { Element } from "../../models";
@@ -53,14 +56,15 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     this.parser = new DefaultElementParser();
     this.geometry = new DefaultElementGeometry();
 
-    this.accessibilityServiceClient = accessibilityServiceClient || AndroidCtrlProxyClient.getInstance(device, adbFactory);
+    this.accessibilityServiceClient =
+      accessibilityServiceClient || AndroidCtrlProxyClient.getInstance(device, adbFactory);
     this.adbFactory = adbFactory;
     this.timer = timer;
   }
 
   async configureRecompositionTracking(
     enabled: boolean,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<void> {
     if (this.device.platform !== "android") {
       return;
@@ -73,8 +77,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     if (this.device.platform !== "ios") {
       return undefined;
     }
-    return IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)
-      ?.refreshSdkScreenIdentity(applicationId);
+    return IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.refreshSdkScreenIdentity(
+      applicationId,
+    );
   }
 
   /**
@@ -91,13 +96,20 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
     signal?: AbortSignal,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<ViewHierarchyResult> {
     switch (this.device.platform) {
       case "ios":
         return this.getiOSViewHierarchy(perf, skipWaitForFresh, minTimestamp, timeoutMs);
       case "android":
-        return this.getAndroidViewHierarchy(queryOptions, perf, skipWaitForFresh, minTimestamp, signal, timeoutMs);
+        return this.getAndroidViewHierarchy(
+          queryOptions,
+          perf,
+          skipWaitForFresh,
+          minTimestamp,
+          signal,
+          timeoutMs,
+        );
       default:
         throw new Error("Unsupported platform");
     }
@@ -114,10 +126,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<ViewHierarchyResult> {
     const startTime = this.timer.now();
-    logger.info(`[VIEW_HIERARCHY] Starting getViewHierarchy for iOS (skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp})`);
+    logger.info(
+      `[VIEW_HIERARCHY] Starting getViewHierarchy for iOS (skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp})`,
+    );
 
     perf.serial("ios_viewHierarchy");
 
@@ -125,29 +139,31 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     const viewHierarchy = await perf.track("ctrlProxyGetHierarchy", async () => {
       // Use getLatestHierarchy which properly handles skipWaitForFresh and minTimestamp
       const result = await xcTestClient.getLatestHierarchy(
-        !skipWaitForFresh,        // waitForFresh = opposite of skipWaitForFresh
-        timeoutMs ?? 15000,       // timeout: caller budget when supplied
+        !skipWaitForFresh, // waitForFresh = opposite of skipWaitForFresh
+        timeoutMs ?? 15000, // timeout: caller budget when supplied
         perf,
         skipWaitForFresh,
-        minTimestamp
+        minTimestamp,
       );
 
       if (!result || !result.hierarchy) {
         if (result?.reconnectStatus) {
           return {
             hierarchy: {
-              error: result.reconnectMessage ?? `CtrlProxy reconnecting, retry in ${result.reconnectStatus.retryAfterSeconds}s`
+              error:
+                result.reconnectMessage ??
+                `CtrlProxy reconnecting, retry in ${result.reconnectStatus.retryAfterSeconds}s`,
             },
             ctrlProxyReconnect: result.reconnectStatus,
-            updatedAt: this.timer.now()
+            updatedAt: this.timer.now(),
           } as ViewHierarchyResult;
         }
 
         return {
           hierarchy: {
-            error: "Failed to retrieve iOS view hierarchy from CtrlProxy iOS"
+            error: "Failed to retrieve iOS view hierarchy from CtrlProxy iOS",
           },
-          updatedAt: this.timer.now()
+          updatedAt: this.timer.now(),
         };
       }
 
@@ -160,14 +176,16 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         result.updatedAt,
         result.reconnectStatus,
         result.frameContext,
-        result.fresh
+        result.fresh,
       );
     });
 
     perf.end();
 
     const duration = this.timer.now() - startTime;
-    logger.info(`[VIEW_HIERARCHY] Successfully retrieved hierarchy from CtrlProxy iOS in ${duration}ms`);
+    logger.info(
+      `[VIEW_HIERARCHY] Successfully retrieved hierarchy from CtrlProxy iOS in ${duration}ms`,
+    );
     return viewHierarchy;
   }
 
@@ -179,12 +197,12 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     updatedAt?: number,
     ctrlProxyReconnect?: ViewHierarchyResult["ctrlProxyReconnect"],
     frameContext?: string,
-    fresh?: boolean
+    fresh?: boolean,
   ): ViewHierarchyResult {
     const cleanedHierarchy = cleanupIosXCTestHierarchy(hierarchy);
     const result = {
       ...cleanedHierarchy,
-      updatedAt: updatedAt ?? hierarchy.updatedAt ?? this.timer.now()
+      updatedAt: updatedAt ?? hierarchy.updatedAt ?? this.timer.now(),
     };
     if (ctrlProxyReconnect) {
       result.ctrlProxyReconnect = ctrlProxyReconnect;
@@ -212,29 +230,34 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
     signal?: AbortSignal,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<ViewHierarchyResult> {
     const startTime = this.timer.now();
-    logger.debug(`[VIEW_HIERARCHY] Starting Android getViewHierarchy (skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp})`);
+    logger.debug(
+      `[VIEW_HIERARCHY] Starting Android getViewHierarchy (skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp})`,
+    );
 
     perf.serial("android_viewHierarchy");
     const useRawElementSearch = serverConfig.isRawElementSearchEnabled();
 
     try {
-      const accessibilityHierarchy = await this.accessibilityServiceClient.getAccessibilityHierarchy(
-        queryOptions,
-        perf,
-        skipWaitForFresh,
-        minTimestamp,
-        useRawElementSearch,
-        signal,
-        timeoutMs
-      );
+      const accessibilityHierarchy =
+        await this.accessibilityServiceClient.getAccessibilityHierarchy(
+          queryOptions,
+          perf,
+          skipWaitForFresh,
+          minTimestamp,
+          useRawElementSearch,
+          signal,
+          timeoutMs,
+        );
 
       if (accessibilityHierarchy) {
         perf.end();
         const duration = this.timer.now() - startTime;
-        logger.debug(`[VIEW_HIERARCHY] Successfully retrieved hierarchy from accessibility service in ${duration}ms`);
+        logger.debug(
+          `[VIEW_HIERARCHY] Successfully retrieved hierarchy from accessibility service in ${duration}ms`,
+        );
         return this.prepareHierarchyForResponse(accessibilityHierarchy);
       }
 
@@ -243,19 +266,30 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       logger.warn("[VIEW_HIERARCHY] Accessibility service returned null hierarchy");
       return {
         hierarchy: {
-          error: await this.describeHierarchyFailure("Failed to retrieve view hierarchy from accessibility service", signal, timeoutMs)
+          error: await this.describeHierarchyFailure(
+            "Failed to retrieve view hierarchy from accessibility service",
+            signal,
+            timeoutMs,
+          ),
         },
-        updatedAt: this.timer.now()
+        updatedAt: this.timer.now(),
       };
     } catch (err) {
       perf.end();
       const duration = this.timer.now() - startTime;
-      logger.warn(`[VIEW_HIERARCHY] Failed to get hierarchy from accessibility service after ${duration}ms:`, err);
+      logger.warn(
+        `[VIEW_HIERARCHY] Failed to get hierarchy from accessibility service after ${duration}ms:`,
+        err,
+      );
       return {
         hierarchy: {
-          error: await this.describeHierarchyFailure("Failed to retrieve view hierarchy", signal, timeoutMs)
+          error: await this.describeHierarchyFailure(
+            "Failed to retrieve view hierarchy",
+            signal,
+            timeoutMs,
+          ),
         },
-        updatedAt: this.timer.now()
+        updatedAt: this.timer.now(),
       };
     }
   }
@@ -277,7 +311,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   private async describeHierarchyFailure(
     fallback: string,
     signal?: AbortSignal,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<string> {
     if (this.device.platform !== "android") {
       return fallback;
@@ -300,8 +334,8 @@ export class ViewHierarchy implements ViewHierarchyInterface {
         return fallback;
       }
       const preamble =
-        "Device is locked; a locked device blocks the accessibility service from binding, "
-        + "so no view hierarchy is available.";
+        "Device is locked; a locked device blocks the accessibility service from binding, " +
+        "so no view hierarchy is available.";
       if (lock.secure === true) {
         return `${preamble} Unlock the device (PIN/pattern/password) — you may need to ask the user — before observing.`;
       }
@@ -343,7 +377,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       if (node.node) {
         // Always overwrite: when every child is filtered out the root must report an
         // empty child list rather than falling back to the raw cloned children.
-        const processedChildren = this.processNodeChildren(node, child => this.filterSingleNode(child));
+        const processedChildren = this.processNodeChildren(node, (child) =>
+          this.filterSingleNode(child),
+        );
         rootCopy.node = this.normalizeNodeStructure(processedChildren);
       }
 
@@ -352,7 +388,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
 
     const props = node.$ || node;
     const meetsFilterCriteria = this.meetsFilterCriteria(props);
-    const relevantChildren = this.processNodeChildren(node, child => this.filterSingleNode(child));
+    const relevantChildren = this.processNodeChildren(node, (child) =>
+      this.filterSingleNode(child),
+    );
 
     if (meetsFilterCriteria) {
       const cleanedNode = this.cleanNodeProperties(node);
@@ -426,14 +464,14 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     bounds: ElementBounds,
     screenWidth: number,
     screenHeight: number,
-    margin: number = 100
+    margin: number = 100,
   ): boolean {
     // Element is offscreen if it's completely outside the screen + margin
     return (
-      bounds.right < -margin ||           // Completely left of screen
-      bounds.left > screenWidth + margin ||  // Completely right of screen
-      bounds.bottom < -margin ||          // Completely above screen
-      bounds.top > screenHeight + margin     // Completely below screen
+      bounds.right < -margin || // Completely left of screen
+      bounds.left > screenWidth + margin || // Completely right of screen
+      bounds.bottom < -margin || // Completely above screen
+      bounds.top > screenHeight + margin // Completely below screen
     );
   }
 
@@ -449,7 +487,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     node: any,
     screenWidth: number,
     screenHeight: number,
-    margin: number = 100
+    margin: number = 100,
   ): any | null {
     if (!node) {
       return null;
@@ -458,7 +496,8 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     const bounds = parseBounds(node.bounds ?? node.$?.bounds);
 
     // Check if this node is completely offscreen
-    const isOffscreen = bounds && this.isCompletelyOffscreen(bounds, screenWidth, screenHeight, margin);
+    const isOffscreen =
+      bounds && this.isCompletelyOffscreen(bounds, screenWidth, screenHeight, margin);
 
     // Process children
     const children = node.node;
@@ -512,14 +551,19 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     viewHierarchy: any,
     screenWidth: number,
     screenHeight: number,
-    margin: number = 100
+    margin: number = 100,
   ): any {
     if (!viewHierarchy || !viewHierarchy.hierarchy || screenWidth <= 0 || screenHeight <= 0) {
       return viewHierarchy;
     }
 
     const result = { ...viewHierarchy };
-    result.hierarchy = this.filterOffscreenNode(viewHierarchy.hierarchy, screenWidth, screenHeight, margin);
+    result.hierarchy = this.filterOffscreenNode(
+      viewHierarchy.hierarchy,
+      screenWidth,
+      screenHeight,
+      margin,
+    );
 
     if (logger.getLogLevel() <= LogLevel.DEBUG) {
       const originalSize = JSON.stringify(viewHierarchy.hierarchy).length;
@@ -527,7 +571,9 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       const reduction = Math.round((1 - filteredSize / originalSize) * 100);
 
       if (reduction > 10) {
-        logger.debug(`Offscreen filtering reduced hierarchy by ${reduction}% (${originalSize} -> ${filteredSize} bytes)`);
+        logger.debug(
+          `Offscreen filtering reduced hierarchy by ${reduction}% (${originalSize} -> ${filteredSize} bytes)`,
+        );
       }
     }
 
@@ -561,7 +607,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       (props["range-info"] && props["range-info"] !== "") ||
       (props["input-type"] && props["input-type"] !== "") ||
       props.recomposition ||
-      props.recompositionMetrics
+      props.recompositionMetrics,
     );
   }
 
@@ -572,18 +618,18 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    */
   meetsBooleanFilterCriteria(props: any): boolean {
     return Boolean(
-      (props.clickable === "true") ||
-      (props.focusable === "true") ||
-      (props.scrollable === "true") ||
-      (props.focused === "true") ||
-      (props["accessibility-focused"] === "true") ||
-      (props.checkable === "true") ||
-      (props.checked === "true") ||
-      (props.selected === "true") ||
-      (props.selected === true) ||
-      (props["long-clickable"] === "true") ||
+      props.clickable === "true" ||
+      props.focusable === "true" ||
+      props.scrollable === "true" ||
+      props.focused === "true" ||
+      props["accessibility-focused"] === "true" ||
+      props.checkable === "true" ||
+      props.checked === "true" ||
+      props.selected === "true" ||
+      props.selected === true ||
+      props["long-clickable"] === "true" ||
       (Array.isArray(props.actions) && props.actions.length > 0) ||
-      (props.extras && Object.keys(props.extras).length > 0)
+      (props.extras && Object.keys(props.extras).length > 0),
     );
   }
 
@@ -698,7 +744,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
    * @param element - The element to calculate center for
    * @returns The center coordinates
    */
-  getElementCenter(element: Element): { x: number, y: number } {
+  getElementCenter(element: Element): { x: number; y: number } {
     return this.geometry.getElementCenter(element);
   }
 
@@ -765,17 +811,24 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       "occludedBy",
       "occludedByViewId",
       "recomposition",
-      "recompositionMetrics"
+      "recompositionMetrics",
     ];
 
     if (node["$"]) {
       const cleanedProps: any = {};
       for (const key in node.$) {
         if (allowedProperties.includes(key)) {
-          const normalizedKey = key === "resourceId" ? "resource-id" : key === "contentDesc" ? "content-desc" : key;
-          if (node.$[key] === "") {continue;}
-          if (key === "enabled" && (node.$[key] === true || node.$[key] === "true")) {continue;}
-          if (key !== "enabled" && (node.$[key] === false || node.$[key] === "false")) {continue;}
+          const normalizedKey =
+            key === "resourceId" ? "resource-id" : key === "contentDesc" ? "content-desc" : key;
+          if (node.$[key] === "") {
+            continue;
+          }
+          if (key === "enabled" && (node.$[key] === true || node.$[key] === "true")) {
+            continue;
+          }
+          if (key !== "enabled" && (node.$[key] === false || node.$[key] === "false")) {
+            continue;
+          }
           cleanedProps[normalizedKey] = node.$[key];
         }
       }
@@ -793,11 +846,21 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       }
     } else {
       for (const key in node) {
-        if (key === "node") {continue;}
-        if (!allowedProperties.includes(key)) {continue;}
-        if (node[key] === "") {continue;}
-        if (key === "enabled" && (node[key] === true || node[key] === "true")) {continue;}
-        if (key !== "enabled" && (node[key] === false || node[key] === "false")) {continue;}
+        if (key === "node") {
+          continue;
+        }
+        if (!allowedProperties.includes(key)) {
+          continue;
+        }
+        if (node[key] === "") {
+          continue;
+        }
+        if (key === "enabled" && (node[key] === true || node[key] === "true")) {
+          continue;
+        }
+        if (key !== "enabled" && (node[key] === false || node[key] === "false")) {
+          continue;
+        }
         result[key] = node[key];
       }
     }

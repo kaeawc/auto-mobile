@@ -5,7 +5,7 @@ import { logger } from "./logger";
 
 export async function applyAppearanceToDevice(
   device: BootedDevice,
-  mode: AppearanceMode
+  mode: AppearanceMode,
 ): Promise<void> {
   if (device.platform === "android") {
     const adb = defaultAdbClientFactory.create(device);

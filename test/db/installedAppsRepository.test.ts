@@ -149,8 +149,8 @@ describe("InstalledAppsRepository", () => {
     await repo.markProfileStale("device-1", 0);
 
     const apps = await repo.listInstalledApps("device-1");
-    const user0App = apps.find(a => a.user_id === 0);
-    const user10App = apps.find(a => a.user_id === 10);
+    const user0App = apps.find((a) => a.user_id === 0);
+    const user10App = apps.find((a) => a.user_id === 10);
     expect(user0App!.last_verified_at).toBe(0);
     expect(user10App!.last_verified_at).toBe(2000);
   });
@@ -211,24 +211,33 @@ describe("InstalledAppsRepository", () => {
     await db
       .insertInto("installed_apps")
       .values({
-        device_id: "device-1", user_id: 0, package_name: "com.owned",
-        is_system: 0, installed_at: 1000, last_verified_at: 1000,
-        daemon_session_id: "daemon-A", device_session_start: 500,
+        device_id: "device-1",
+        user_id: 0,
+        package_name: "com.owned",
+        is_system: 0,
+        installed_at: 1000,
+        last_verified_at: 1000,
+        daemon_session_id: "daemon-A",
+        device_session_start: 500,
       })
       .execute();
     await db
       .insertInto("installed_apps")
       .values({
-        device_id: "device-1", user_id: 0, package_name: "com.unowned",
-        is_system: 0, installed_at: 1000, last_verified_at: 1000,
+        device_id: "device-1",
+        user_id: 0,
+        package_name: "com.unowned",
+        is_system: 0,
+        installed_at: 1000,
+        last_verified_at: 1000,
       })
       .execute();
 
     await repo.setSessionTracking("daemon-B", "device-1", 999);
 
     const rows = await repo.listInstalledApps("device-1");
-    const owned = rows.find(r => r.package_name === "com.owned");
-    const unowned = rows.find(r => r.package_name === "com.unowned");
+    const owned = rows.find((r) => r.package_name === "com.owned");
+    const unowned = rows.find((r) => r.package_name === "com.unowned");
 
     // daemon-A's row must be left untouched; only the unowned row is claimed.
     expect(owned!.daemon_session_id).toBe("daemon-A");

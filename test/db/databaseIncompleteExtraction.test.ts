@@ -41,7 +41,7 @@ describe("startup migration failure does not mislabel a genuine bad import", () 
       path.join(migrationsDir, "2099_01_01_000_am2833_bad_import.ts"),
       "import 'nonexistent-package-am2833';\n" +
         "export async function up(): Promise<void> {}\n" +
-        "export async function down(): Promise<void> {}\n"
+        "export async function down(): Promise<void> {}\n",
     );
 
     process.env.AUTOMOBILE_DB_PATH = path.join(tempDir, "auto-mobile.db");

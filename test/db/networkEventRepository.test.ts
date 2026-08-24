@@ -47,20 +47,20 @@ describe("networkEventRepository extended queries", () => {
   test("getNetworkEventById returns full event with id", async () => {
     const id = await recordNetworkEvent(
       makeInput({
-        requestHeaders: { "Authorization": "Bearer tok" },
+        requestHeaders: { Authorization: "Bearer tok" },
         responseHeaders: { "Content-Type": "application/json" },
         requestBody: '{"q":"test"}',
         responseBody: '{"results":[]}',
         contentType: "application/json",
       }),
-      db
+      db,
     );
 
     const event = await getNetworkEventById(id, db);
     expect(event).not.toBeNull();
     expect(event!.id).toBe(id);
     expect(event!.url).toBe("https://api.example.com/data");
-    expect(event!.requestHeaders).toEqual({ "Authorization": "Bearer tok" });
+    expect(event!.requestHeaders).toEqual({ Authorization: "Bearer tok" });
     expect(event!.requestBody).toBe('{"q":"test"}');
     expect(event!.responseBody).toBe('{"results":[]}');
   });
@@ -74,7 +74,7 @@ describe("networkEventRepository extended queries", () => {
     const largeBody = "x".repeat(20_000);
     const id = await recordNetworkEvent(
       makeInput({ responseBody: largeBody, responseBodySize: 20_000 }),
-      db
+      db,
     );
 
     const event = await getNetworkEventById(id, db);
@@ -91,7 +91,7 @@ describe("networkEventRepository extended queries", () => {
         requestBodySize: 15_000,
         responseBodySize: 20_000,
       }),
-      db
+      db,
     );
 
     const events = await getNetworkEvents({}, db);
@@ -102,10 +102,7 @@ describe("networkEventRepository extended queries", () => {
 
   test("getNetworkEvents leaves sub-10KB bodies unchanged and null bodies null", async () => {
     const small = '{"ok":true}';
-    await recordNetworkEvent(
-      makeInput({ requestBody: small, responseBody: null }),
-      db
-    );
+    await recordNetworkEvent(makeInput({ requestBody: small, responseBody: null }), db);
 
     const events = await getNetworkEvents({}, db);
     expect(events[0].requestBody).toBe(small);
@@ -116,11 +113,11 @@ describe("networkEventRepository extended queries", () => {
     const largeBody = "z".repeat(50_000);
     const id = await recordNetworkEvent(
       makeInput({ responseBody: largeBody, responseBodySize: 50_000 }),
-      db
+      db,
     );
 
     const single = await getNetworkEventById(id, db);
-    const listed = (await getNetworkEvents({}, db)).find(e => e.id === id);
+    const listed = (await getNetworkEvents({}, db)).find((e) => e.id === id);
     expect(listed).toBeDefined();
     expect(listed!.responseBody).toBe(single!.responseBody!);
     expect(listed!.responseBody!.length).toBe(10_240);
@@ -132,10 +129,10 @@ describe("networkEventRepository extended queries", () => {
     const body = "x".repeat(10_239) + "😀" + "y".repeat(5_000);
     const id = await recordNetworkEvent(
       makeInput({ responseBody: body, responseBodySize: body.length }),
-      db
+      db,
     );
 
-    const listed = (await getNetworkEvents({}, db)).find(e => e.id === id);
+    const listed = (await getNetworkEvents({}, db)).find((e) => e.id === id);
     expect(listed!.responseBody!.length).toBe(10_239);
     expect(listed!.responseBody!.isWellFormed()).toBe(true);
   });
@@ -147,7 +144,7 @@ describe("networkEventRepository extended queries", () => {
     for (let i = 0; i < 100; i++) {
       await recordNetworkEvent(
         makeInput({ timestamp: 1000 + i, responseBody: bigBody, responseBodySize: 100_000 }),
-        db
+        db,
       );
     }
     const events = await getNetworkEvents({ limit: 100 }, db);
@@ -157,7 +154,7 @@ describe("networkEventRepository extended queries", () => {
     // Capped payload is ~1MB (100 x 10KB) vs ~10MB raw — assert the ~10x win
     // with margin for the non-body JSON scaffolding per row.
     expect(serializedBytes).toBeLessThan(rawBytes / 8);
-    expect(events.every(e => e.responseBody!.length === 10_240)).toBe(true);
+    expect(events.every((e) => e.responseBody!.length === 10_240)).toBe(true);
   });
 
   test("getNetworkEvents returns id on each event", async () => {
@@ -207,7 +204,7 @@ describe("networkEventRepository extended queries", () => {
 
     const events = await getNetworkEvents({ statusCode: "4xx" }, db);
     expect(events).toHaveLength(2);
-    expect(events.every(e => e.statusCode >= 400 && e.statusCode < 500)).toBe(true);
+    expect(events.every((e) => e.statusCode >= 400 && e.statusCode < 500)).toBe(true);
   });
 
   test("getNetworkEvents filters by status code class (5xx)", async () => {
@@ -217,13 +214,22 @@ describe("networkEventRepository extended queries", () => {
 
     const events = await getNetworkEvents({ statusCode: "5xx" }, db);
     expect(events).toHaveLength(2);
-    expect(events.every(e => e.statusCode >= 500 && e.statusCode < 600)).toBe(true);
+    expect(events.every((e) => e.statusCode >= 500 && e.statusCode < 600)).toBe(true);
   });
 
   test("getNetworkEvents combines multiple filters", async () => {
-    await recordNetworkEvent(makeInput({ host: "api.com", method: "GET", statusCode: 200, timestamp: 100 }), db);
-    await recordNetworkEvent(makeInput({ host: "api.com", method: "POST", statusCode: 500, timestamp: 200 }), db);
-    await recordNetworkEvent(makeInput({ host: "cdn.com", method: "GET", statusCode: 500, timestamp: 300 }), db);
+    await recordNetworkEvent(
+      makeInput({ host: "api.com", method: "GET", statusCode: 200, timestamp: 100 }),
+      db,
+    );
+    await recordNetworkEvent(
+      makeInput({ host: "api.com", method: "POST", statusCode: 500, timestamp: 200 }),
+      db,
+    );
+    await recordNetworkEvent(
+      makeInput({ host: "cdn.com", method: "GET", statusCode: 500, timestamp: 300 }),
+      db,
+    );
 
     const events = await getNetworkEvents({ host: "api.com", statusCode: "5xx" }, db);
     expect(events).toHaveLength(1);

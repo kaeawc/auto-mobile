@@ -6,7 +6,10 @@ import {
 } from "../../../../src/features/observe/android/AndroidSdkEventIngestor";
 import type { FailureRecorderService } from "../../../../src/features/failures/interfaces/FailureRecorderService";
 import type { StackTraceElement } from "../../../../src/server/failuresResources";
-import type { SdkAnrPayload, SdkCrashPayload } from "../../../../src/features/observe/crash/sdkCrashIngestion";
+import type {
+  SdkAnrPayload,
+  SdkCrashPayload,
+} from "../../../../src/features/observe/crash/sdkCrashIngestion";
 
 /** Records every telemetry call for assertion. */
 class FakeTelemetryRecorder implements AndroidTelemetryRecorder {
@@ -21,27 +24,52 @@ class FakeTelemetryRecorder implements AndroidTelemetryRecorder {
     this.contexts.push({ deviceId, sessionId });
   }
   async recordNetworkEvent(input: any): Promise<number> {
-    if (this.throwOn === "network") { throw new Error("boom"); }
+    if (this.throwOn === "network") {
+      throw new Error("boom");
+    }
     this.network.push(input);
     return 1;
   }
-  async recordLogEvent(input: any): Promise<void> { this.logs.push(input); }
-  async recordOsEvent(input: any): Promise<void> { this.os.push(input); }
-  async recordStorageEvent(input: any): Promise<void> { this.storage.push(input); }
+  async recordLogEvent(input: any): Promise<void> {
+    this.logs.push(input);
+  }
+  async recordOsEvent(input: any): Promise<void> {
+    this.os.push(input);
+  }
+  async recordStorageEvent(input: any): Promise<void> {
+    this.storage.push(input);
+  }
 }
 
 class FakeFailureRecorder implements FailureRecorderService {
   crashes: any[] = [];
   anrs: any[] = [];
   nonFatals: any[] = [];
-  async recordToolFailure(): Promise<string> { return "tool"; }
-  async recordCrash(input: any): Promise<string> { this.crashes.push(input); return "crash-1"; }
-  async recordAnr(input: any): Promise<string> { this.anrs.push(input); return "anr-1"; }
-  async recordNonFatal(input: any): Promise<string> { this.nonFatals.push(input); return "nf-1"; }
+  async recordToolFailure(): Promise<string> {
+    return "tool";
+  }
+  async recordCrash(input: any): Promise<string> {
+    this.crashes.push(input);
+    return "crash-1";
+  }
+  async recordAnr(input: any): Promise<string> {
+    this.anrs.push(input);
+    return "anr-1";
+  }
+  async recordNonFatal(input: any): Promise<string> {
+    this.nonFatals.push(input);
+    return "nf-1";
+  }
 }
 
 const STACK: StackTraceElement[] = [
-  { className: "com.x.Foo", methodName: "bar", fileName: "Foo.kt", lineNumber: 12, isAppCode: true },
+  {
+    className: "com.x.Foo",
+    methodName: "bar",
+    fileName: "Foo.kt",
+    lineNumber: 12,
+    isAppCode: true,
+  },
 ];
 
 function makeIngestor(overrides?: {
@@ -79,49 +107,75 @@ describe("AndroidSdkEventIngestor.recordSdkEvent", () => {
 
   it("sets device context before recording", async () => {
     await ingestor.recordSdkEvent(
-      { type: "log_event", timestamp: 5, payload: { event: { applicationId: "com.x", message: "hi" } } },
-      "com.x"
+      {
+        type: "log_event",
+        timestamp: 5,
+        payload: { event: { applicationId: "com.x", message: "hi" } },
+      },
+      "com.x",
     );
     expect(telemetry.contexts[0]).toEqual({ deviceId: "emulator-5554", sessionId: null });
   });
 
   it("routes network_event with wire defaults", async () => {
     await ingestor.recordSdkEvent(
-      { type: "network_event", timestamp: 5, payload: { event: { url: "http://x", method: "GET" } } },
-      null
+      {
+        type: "network_event",
+        timestamp: 5,
+        payload: { event: { url: "http://x", method: "GET" } },
+      },
+      null,
     );
     expect(telemetry.network).toHaveLength(1);
     expect(telemetry.network[0]).toMatchObject({
-      timestamp: 5, url: "http://x", method: "GET", statusCode: 0,
-      requestBodySize: -1, responseBodySize: -1, applicationId: null,
+      timestamp: 5,
+      url: "http://x",
+      method: "GET",
+      statusCode: 0,
+      requestBodySize: -1,
+      responseBodySize: -1,
+      applicationId: null,
     });
   });
 
   it("routes websocket_frame_event to an os event", async () => {
     await ingestor.recordSdkEvent(
-      { type: "websocket_frame_event", timestamp: 7, payload: { event: { frameType: "text", payloadSize: 3 } } },
-      null
+      {
+        type: "websocket_frame_event",
+        timestamp: 7,
+        payload: { event: { frameType: "text", payloadSize: 3 } },
+      },
+      null,
     );
     expect(telemetry.os[0]).toMatchObject({
-      category: "websocket_frame", kind: "text",
+      category: "websocket_frame",
+      kind: "text",
       details: { payloadSize: "3", connectionId: "", url: "", direction: "" },
     });
   });
 
   it("routes broadcast_event and lifecycle_event to os events", async () => {
     await ingestor.recordSdkEvent(
-      { type: "broadcast_event", timestamp: 1, payload: { event: { action: "BOOT" } } }, null);
+      { type: "broadcast_event", timestamp: 1, payload: { event: { action: "BOOT" } } },
+      null,
+    );
     await ingestor.recordSdkEvent(
-      { type: "lifecycle_event", timestamp: 2, payload: { event: { kind: "resumed" } } }, null);
-    expect(telemetry.os.map(e => e.category)).toEqual(["broadcast", "lifecycle"]);
+      { type: "lifecycle_event", timestamp: 2, payload: { event: { kind: "resumed" } } },
+      null,
+    );
+    expect(telemetry.os.map((e) => e.category)).toEqual(["broadcast", "lifecycle"]);
     expect(telemetry.os[0].kind).toBe("BOOT");
     expect(telemetry.os[1].kind).toBe("resumed");
   });
 
   it("merges custom_event into a log event with serialized properties", async () => {
     await ingestor.recordSdkEvent(
-      { type: "custom_event", timestamp: 9, payload: { event: { name: "checkout", properties: { step: "1" } } } },
-      "com.x"
+      {
+        type: "custom_event",
+        timestamp: 9,
+        payload: { event: { name: "checkout", properties: { step: "1" } } },
+      },
+      "com.x",
     );
     expect(telemetry.logs[0]).toMatchObject({ tag: "CustomEvent", filterName: "custom", level: 4 });
     expect(telemetry.logs[0].message).toBe(`checkout ${JSON.stringify({ step: "1" })}`);
@@ -132,7 +186,7 @@ describe("AndroidSdkEventIngestor.recordSdkEvent", () => {
     t.throwOn = "network";
     const { ingestor: ing } = makeIngestor({ telemetry: t });
     await expect(
-      ing.recordSdkEvent({ type: "network_event", timestamp: 1, payload: { event: {} } }, null)
+      ing.recordSdkEvent({ type: "network_event", timestamp: 1, payload: { event: {} } }, null),
     ).resolves.toBeUndefined();
   });
 
@@ -148,8 +202,13 @@ describe("AndroidSdkEventIngestor.recordStorageEvent", () => {
   it("sets context and forwards the prebuilt input", () => {
     const { ingestor, telemetry } = makeIngestor();
     ingestor.recordStorageEvent({
-      timestamp: 5, applicationId: "com.x", fileName: "prefs",
-      key: "k", value: "v", valueType: "STRING", changeType: "modify",
+      timestamp: 5,
+      applicationId: "com.x",
+      fileName: "prefs",
+      key: "k",
+      value: "v",
+      valueType: "STRING",
+      changeType: "modify",
     });
     expect(telemetry.contexts[0].deviceId).toBe("emulator-5554");
     expect(telemetry.storage[0]).toMatchObject({ fileName: "prefs", key: "k" });
@@ -158,24 +217,39 @@ describe("AndroidSdkEventIngestor.recordStorageEvent", () => {
 
 describe("AndroidSdkEventIngestor failure analytics", () => {
   const handled: AndroidHandledExceptionEvent = {
-    timestamp: 1, exceptionClass: "NPE", stackTrace: "at x", packageName: "com.x",
+    timestamp: 1,
+    exceptionClass: "NPE",
+    stackTrace: "at x",
+    packageName: "com.x",
     deviceInfo,
   };
   const crash: SdkCrashPayload = {
-    timestamp: 1, exceptionClass: "RTE", stackTrace: "at x", threadName: "main",
-    packageName: "com.x", deviceInfo,
+    timestamp: 1,
+    exceptionClass: "RTE",
+    stackTrace: "at x",
+    threadName: "main",
+    packageName: "com.x",
+    deviceInfo,
   };
   const anr: SdkAnrPayload = {
-    timestamp: 1, pid: 9, processName: "com.x", importance: "fg", reason: "input",
-    packageName: "com.x", deviceInfo,
+    timestamp: 1,
+    pid: 9,
+    processName: "com.x",
+    importance: "fg",
+    reason: "input",
+    packageName: "com.x",
+    deviceInfo,
   };
 
   it("records a handled exception with parsed stack and default message", async () => {
     const { ingestor, failure } = makeIngestor();
     await ingestor.recordHandledException(handled);
     expect(failure.nonFatals[0]).toMatchObject({
-      exceptionType: "NPE", exceptionMessage: "Handled exception",
-      stackTrace: STACK, sessionId: "handled-com.x-1000", deviceModel: "Pixel",
+      exceptionType: "NPE",
+      exceptionMessage: "Handled exception",
+      stackTrace: STACK,
+      sessionId: "handled-com.x-1000",
+      deviceModel: "Pixel",
       os: "Android 14 (API 34)",
     });
   });
@@ -196,7 +270,9 @@ describe("AndroidSdkEventIngestor failure analytics", () => {
     const { ingestor, failure } = makeIngestor();
     await ingestor.recordCrashAnalytics(crash);
     expect(failure.crashes[0]).toMatchObject({
-      exceptionType: "RTE", threadName: "main", sessionId: "crash-com.x-1000",
+      exceptionType: "RTE",
+      threadName: "main",
+      sessionId: "crash-com.x-1000",
       exceptionMessage: "Application crashed",
     });
   });
@@ -210,7 +286,9 @@ describe("AndroidSdkEventIngestor failure analytics", () => {
 
   it("swallows failure-recorder errors", async () => {
     const failure = new FakeFailureRecorder();
-    failure.recordCrash = async () => { throw new Error("db down"); };
+    failure.recordCrash = async () => {
+      throw new Error("db down");
+    };
     const { ingestor } = makeIngestor({ failure });
     await expect(ingestor.recordCrashAnalytics(crash)).resolves.toBeUndefined();
   });

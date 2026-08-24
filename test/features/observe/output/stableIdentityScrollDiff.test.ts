@@ -42,7 +42,7 @@ function withStableIds(obs: ObserveResult): ObserveResult {
 /** Opaque = no `resource-id` and no `text` — the #3107 residual class. */
 function opaqueResiduals(diff: ObserveDiff): ObserveDiffNode[] {
   return [...diff.added, ...diff.removed].filter(
-    n => !n.attributes["resource-id"] && !n.attributes["text"]
+    (n) => !n.attributes["resource-id"] && !n.attributes["text"],
   );
 }
 
@@ -65,7 +65,9 @@ describe("capture-layer stable identity on the real scroll pair (#3228)", () => 
     const findCard = (obs: ObserveResult): Record<string, unknown> | undefined => {
       let found: Record<string, unknown> | undefined;
       const walk = (node: unknown): void => {
-        if (!node || typeof node !== "object") {return;}
+        if (!node || typeof node !== "object") {
+          return;
+        }
         if (Array.isArray(node)) {
           node.forEach(walk);
           return;
@@ -75,7 +77,9 @@ describe("capture-layer stable identity on the real scroll pair (#3228)", () => 
           found = found ?? rec;
         }
         const kids = rec["node"];
-        for (const child of Array.isArray(kids) ? kids : kids ? [kids] : []) {walk(child);}
+        for (const child of Array.isArray(kids) ? kids : kids ? [kids] : []) {
+          walk(child);
+        }
       };
       walk(obs.viewHierarchy?.hierarchy?.node);
       return found;
@@ -116,7 +120,7 @@ describe("capture-layer stable identity on the real scroll pair (#3228)", () => 
     // A re-pair (fromKey present) joins nodes with identical stable content by
     // construction, so a text/content-desc/className delta on one would mean
     // two *distinct* rows collapsed. None may exist.
-    const rePaired = stableDiff.changed.filter(c => c.fromKey !== undefined);
+    const rePaired = stableDiff.changed.filter((c) => c.fromKey !== undefined);
     expect(rePaired.length).toBeGreaterThan(0);
     for (const c of rePaired) {
       expect("text" in c.changes).toBe(false);
@@ -128,8 +132,8 @@ describe("capture-layer stable identity on the real scroll pair (#3228)", () => 
   test("view-id churn is never reported as a `changed` delta (DIFF_IGNORED_ATTRS)", () => {
     // The synthetic id exists to pair nodes; its own movement between hash
     // values is not an actionable UI delta (mirrors the `extras` exclusion).
-    expect(stableDiff.changed.some(c => "view-id" in c.changes)).toBe(false);
-    expect(legacyDiff.changed.some(c => "view-id" in c.changes)).toBe(false);
+    expect(stableDiff.changed.some((c) => "view-id" in c.changes)).toBe(false);
+    expect(legacyDiff.changed.some((c) => "view-id" in c.changes)).toBe(false);
   });
 
   test("localized (text-entry) pair is not regressed by the rewrite", () => {

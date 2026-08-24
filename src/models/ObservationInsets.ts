@@ -32,7 +32,11 @@ export interface ObservationSystemChrome {
  */
 export interface ObservationInsets {
   available: boolean;
-  source: "android-window-metrics" | "android-resource-fallback" | "ios-sdk-safe-area" | "unavailable";
+  source:
+    | "android-window-metrics"
+    | "android-resource-fallback"
+    | "ios-sdk-safe-area"
+    | "unavailable";
   units: "physical-pixels" | "points" | "unknown";
   systemBars?: ObservationSystemBarsInsets;
   displayCutout?: ObservationEdgeInsets;
@@ -55,7 +59,9 @@ export interface LayoutWarning {
     bounds: ObservationEdgeInsets;
   };
   categories: Array<"text" | "interaction">;
-  insetTypes: Array<"systemBars" | "displayCutout" | "safeArea" | "systemGestures" | "mandatorySystemGestures">;
+  insetTypes: Array<
+    "systemBars" | "displayCutout" | "safeArea" | "systemGestures" | "mandatorySystemGestures"
+  >;
   sides: Array<"top" | "right" | "bottom" | "left">;
   /** Distance the element extends into each reported inset, in observation coordinate units. */
   overflowPx: Partial<Record<"top" | "right" | "bottom" | "left", number>>;

@@ -19,7 +19,11 @@ export interface TalkBackNavigationDriver extends FocusNavigationDriver {
    * @param y - Y coordinate
    * @param durationMs - Duration of the tap in milliseconds
    */
-  requestTapCoordinates(x: number, y: number, durationMs: number): Promise<A11yTapCoordinatesResult>;
+  requestTapCoordinates(
+    x: number,
+    y: number,
+    durationMs: number,
+  ): Promise<A11yTapCoordinatesResult>;
 
   /**
    * Request an accessibility action on an element.
@@ -29,10 +33,7 @@ export interface TalkBackNavigationDriver extends FocusNavigationDriver {
   requestAction(action: string, resourceId?: string): Promise<A11yActionResult>;
 
   /** Request an accessibility action using stable fields observed from a node. */
-  requestNodeAction(
-    action: string,
-    selector: AccessibilityNodeSelector
-  ): Promise<A11yActionResult>;
+  requestNodeAction(action: string, selector: AccessibilityNodeSelector): Promise<A11yActionResult>;
 
   /** Whether the connected runner can resolve stable node selectors. */
   supportsNodeActionSelectors(): Promise<boolean>;
@@ -60,14 +61,22 @@ class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
   }
 
   async getScreenSize() {
-    const hierarchy = await this.accessibilityService.getAccessibilityHierarchy(undefined, undefined, true);
+    const hierarchy = await this.accessibilityService.getAccessibilityHierarchy(
+      undefined,
+      undefined,
+      true,
+    );
     if (!hierarchy?.screenWidth || !hierarchy.screenHeight) {
       throw new Error("CtrlProxy did not provide screen dimensions for TalkBack navigation");
     }
     return { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
   }
 
-  async requestTapCoordinates(x: number, y: number, durationMs: number): Promise<A11yTapCoordinatesResult> {
+  async requestTapCoordinates(
+    x: number,
+    y: number,
+    durationMs: number,
+  ): Promise<A11yTapCoordinatesResult> {
     return this.accessibilityService.requestTapCoordinates(x, y, durationMs);
   }
 
@@ -77,7 +86,7 @@ class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
 
   async requestNodeAction(
     action: string,
-    selector: AccessibilityNodeSelector
+    selector: AccessibilityNodeSelector,
   ): Promise<A11yActionResult> {
     return this.accessibilityService.requestNodeAction(action, selector);
   }
@@ -101,6 +110,8 @@ export class DefaultTalkBackNavigationDriverFactory implements TalkBackNavigatio
   constructor(private readonly adbFactory: AdbClientFactory) {}
 
   createDriver(device: BootedDevice): TalkBackNavigationDriver {
-    return new DefaultTalkBackNavigationDriver(AndroidCtrlProxyClient.getInstance(device, this.adbFactory));
+    return new DefaultTalkBackNavigationDriver(
+      AndroidCtrlProxyClient.getInstance(device, this.adbFactory),
+    );
   }
 }

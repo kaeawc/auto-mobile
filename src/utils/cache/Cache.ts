@@ -132,7 +132,7 @@ export class TTLCache<K, V> implements Cache<K, V> {
 
   constructor(
     private readonly timer: Timer = defaultTimer,
-    options?: CacheOptions
+    options?: CacheOptions,
   ) {
     this.ttlMs = options?.ttlMs ?? DEFAULT_CACHE_OPTIONS.ttlMs;
     this.maxEntries = options?.maxEntries ?? DEFAULT_CACHE_OPTIONS.maxEntries;
@@ -177,10 +177,7 @@ export class TTLCache<K, V> implements Cache<K, V> {
     // Check size constraints
     if (sizeBytes !== undefined && this.maxSizeBytes !== Infinity) {
       // Evict entries if needed to make room
-      while (
-        this.currentSizeBytes + sizeBytes > this.maxSizeBytes &&
-        this.entries.size > 0
-      ) {
+      while (this.currentSizeBytes + sizeBytes > this.maxSizeBytes && this.entries.size > 0) {
         this.evictOldest();
         this.stats.sizeEvictions++;
       }

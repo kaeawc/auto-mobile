@@ -60,7 +60,7 @@ describe("closeDatabase fences stale in-flight migration completions (issue #289
    */
   async function makeSlowMigrationsDir(
     mode: "fail" | "succeed",
-    markers: { started: string; release: string }
+    markers: { started: string; release: string },
   ): Promise<string> {
     const dir = await makeTempDir(`auto-mobile-gen-fence-mig-${mode}-`);
     const throwLine =
@@ -228,7 +228,7 @@ export async function down(db) {
 
       db.getDatabase();
       await expect(db.ensureMigrations()).rejects.toThrow(
-        /refusing to run queries until the daemon restarts/i
+        /refusing to run queries until the daemon restarts/i,
       );
       expect(db.getMigrationsError()).not.toBeNull();
 
@@ -244,7 +244,7 @@ export async function down(db) {
       expect(db.getMigrationsError()).not.toBeNull();
       // The new generation is still query-dead — a stale success did not revive it.
       await expect(db.ensureMigrations()).rejects.toThrow(
-        /refusing to run queries until the daemon restarts/i
+        /refusing to run queries until the daemon restarts/i,
       );
 
       await db.closeDatabase();

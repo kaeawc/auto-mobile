@@ -36,7 +36,7 @@ describe("pruneTableByRowCap trim (#3137)", () => {
       .select("id")
       .orderBy("id", "asc")
       .execute();
-    return rows.map(r => Number(r.id));
+    return rows.map((r) => Number(r.id));
   };
 
   beforeEach(async () => {

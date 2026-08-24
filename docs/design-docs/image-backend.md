@@ -28,9 +28,9 @@ on. Using the standalone repro (`docs/reproductions/sharp-bun-035`, pinning
   closes the Linux gap the record previously left unverified.
 
 The two "open crash" issues the freeze cited do not apply: [bun#20372](https://github.com/oven-sh/bun/issues/20372)
-is a resource-starved fly.io *inpainting* segfault (512 MB shared vCPU), not a
+is a resource-starved fly.io _inpainting_ segfault (512 MB shared vCPU), not a
 load/startup abort; [bun#29352](https://github.com/oven-sh/bun/issues/29352) is
-**closed** and was a Bun *Windows path-handling* bug unrelated to libvips — and
+**closed** and was a Bun _Windows path-handling_ bug unrelated to libvips — and
 Windows never uses sharp (it routes to jimp + bundled cwebp). Staying on 0.34.5
 also carried unpatched libvips CVEs (GHSA-f88m-g3jw-g9cj) fixed in 8.18.3.
 
@@ -52,8 +52,8 @@ premise carried in #2424/#2920:
   the crashing 0.35.x are compiled with `-Dopenjpeg=disabled` (verified in
   `lovell/sharp-libvips` `build/lin.sh` + `build/mac.sh`, `libvips/meson_options.txt`).
   jp2k is not in the binary; no upstream issue attributes a Bun abort to it.
-- sharp deliberately ships libvips as a *separate dynamically-linked shared
-  library* (kept separate for Apache-vs-LGPL licensing,
+- sharp deliberately ships libvips as a _separate dynamically-linked shared
+  library_ (kept separate for Apache-vs-LGPL licensing,
   [sharp#4023](https://github.com/lovell/sharp/issues/4023)). At the time this
   record was written we attributed the abort to a Bun N-API interop crash class
   against that separately-loaded lib and believed no released sharp/Bun version
@@ -61,7 +61,7 @@ premise carried in #2424/#2920:
   cleanly under Bun on macOS and Linux, so whatever the original 0.35.0/0.35.1
   abort was, it does not affect the platforms AutoMobile runs sharp on.
   [bun#20372](https://github.com/oven-sh/bun/issues/20372) turned out to be a
-  resource-starved fly.io *inpaint* segfault, not a load-time abort.
+  resource-starved fly.io _inpaint_ segfault, not a load-time abort.
 - **sharp 0.34.5** (libvips 8.17.3 / `@img` 1.2.4) ran under Bun; **0.35.3**
   (libvips 8.18.3 / `@img` 1.3.2) now does too (see the update above). The
   original "0.35.x reintroduces the crash" claim is retracted.
@@ -69,7 +69,7 @@ premise carried in #2424/#2920:
   global-libvips build-from-source is unsupported on Windows — not because of a
   Bun+sharp crash. ([bun#29352](https://github.com/oven-sh/bun/issues/29352),
   once cited here as a Windows Bun+sharp crash, was in fact a Bun Windows
-  *path-handling* bug unrelated to libvips, since closed.)
+  _path-handling_ bug unrelated to libvips, since closed.)
 - `sharp-wasm32` is **not** a Windows option — it is a WASM build and would hit
   the same JSC-WASM-JIT crash class as `@jimp/wasm-webp`.
 
@@ -100,14 +100,27 @@ the active backend executes.
 ```ts
 // src/utils/image/backend/ImageBackend.ts
 export type ImageOperation =
-  | { type: "resize"; width: number; height?: number; maintainAspectRatio: boolean; mode?: "nearest" }
+  | {
+      type: "resize";
+      width: number;
+      height?: number;
+      maintainAspectRatio: boolean;
+      mode?: "nearest";
+    }
   | { type: "crop"; x: number; y: number; width: number; height: number };
-export interface ImageEncoding { mime: "image/png" | "image/webp"; options?: Record<string, unknown>; }
+export interface ImageEncoding {
+  mime: "image/png" | "image/webp";
+  options?: Record<string, unknown>;
+}
 export interface ImagePipeline {
   operations: ImageOperation[];
   encoding: ImageEncoding | null; // null = re-encode in the decoded input format
 }
-export interface RawImage { width: number; height: number; data: Buffer; } // RGBA, length === w*h*4
+export interface RawImage {
+  width: number;
+  height: number;
+  data: Buffer;
+} // RGBA, length === w*h*4
 
 export interface ImageBackend {
   execute(source: Buffer, pipeline: ImagePipeline): Promise<Buffer>;
@@ -125,7 +138,7 @@ Implementations:
   `CliWebpCodec` for the WebP leg (encode: jimp→PNG buffer→`cwebp`; decode:
   `dwebp`→PNG→jimp; magic-byte sniff to detect webp input).
 - **`JimpBackend`** — pure jimp, no WebP — catchable-failure fallback on
-  macOS/Linux if `import("sharp")` throws (module-discovery failure, which *is*
+  macOS/Linux if `import("sharp")` throws (module-discovery failure, which _is_
   catchable, unlike the native abort).
 
 Selection (one injectable resolver, fake-able):

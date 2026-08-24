@@ -1,39 +1,51 @@
 import { describe, expect, test } from "bun:test";
 import { resolveContainerSwipeCoordinates } from "../../../../src/features/action/swipeon/resolveContainerSwipeCoordinates";
 import { DefaultElementGeometry } from "../../../../src/features/utility/ElementGeometry";
-import type { OverlayAnalyzer, SwipeOnResolvedOptions } from "../../../../src/features/action/swipeon/types";
-import type { Element, ElementBounds, ObserveResult, ViewHierarchyResult } from "../../../../src/models";
+import type {
+  OverlayAnalyzer,
+  SwipeOnResolvedOptions,
+} from "../../../../src/features/action/swipeon/types";
+import type {
+  Element,
+  ElementBounds,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../../../src/models";
 
 // No-overlay analyzer so resolveContainerSwipeCoordinates returns the default
 // (inset-clamped) swipe straight from getSwipeWithinBounds — this is the path
 // that carries the system-inset math under test.
 const noOverlayAnalyzer: OverlayAnalyzer = {
   collectOverlayCandidates: () => [],
-  computeSafeSwipeCoordinates: () => null
+  computeSafeSwipeCoordinates: () => null,
 };
 
 const geometry = new DefaultElementGeometry();
 
 const bounds = (left: number, top: number, right: number, bottom: number): ElementBounds => ({
-  left, top, right, bottom
+  left,
+  top,
+  right,
+  bottom,
 });
 
-const containerElement = (b: ElementBounds): Element => ({ bounds: b } as Element);
+const containerElement = (b: ElementBounds): Element => ({ bounds: b }) as Element;
 
 const observe = (
   screenSize: { width: number; height: number },
-  insets: { top: number; right: number; bottom: number; left: number }
-): ObserveResult => ({
-  timestamp: 0,
-  screenSize,
-  systemInsets: insets,
-  viewHierarchy: { hierarchy: {} } as unknown as ViewHierarchyResult
-} as ObserveResult);
+  insets: { top: number; right: number; bottom: number; left: number },
+): ObserveResult =>
+  ({
+    timestamp: 0,
+    screenSize,
+    systemInsets: insets,
+    viewHierarchy: { hierarchy: {} } as unknown as ViewHierarchyResult,
+  }) as ObserveResult;
 
 const emptyHierarchy = { hierarchy: {} } as unknown as ViewHierarchyResult;
 
 const options = (direction: SwipeOnResolvedOptions["direction"]): SwipeOnResolvedOptions =>
-  ({ direction } as SwipeOnResolvedOptions);
+  ({ direction }) as SwipeOnResolvedOptions;
 
 describe("resolveContainerSwipeCoordinates system-inset math", () => {
   test("clamps bottom to the safe region, not container.bottom minus the inset", () => {
@@ -47,7 +59,7 @@ describe("resolveContainerSwipeCoordinates system-inset math", () => {
       options("up"),
       emptyHierarchy,
       containerElement(bounds(100, 100, 900, 400)),
-      observe({ width: 1000, height: 2000 }, { top: 0, right: 0, bottom: 126, left: 0 })
+      observe({ width: 1000, height: 2000 }, { top: 0, right: 0, bottom: 126, left: 0 }),
     );
 
     // With effective bounds == container bounds, an "up" swipe stays within [100, 400].
@@ -69,7 +81,7 @@ describe("resolveContainerSwipeCoordinates system-inset math", () => {
       options("right"),
       emptyHierarchy,
       containerElement(bounds(300, 100, 350, 400)),
-      observe({ width: 1000, height: 2000 }, { top: 0, right: 200, bottom: 0, left: 0 })
+      observe({ width: 1000, height: 2000 }, { top: 0, right: 200, bottom: 0, left: 0 }),
     );
 
     // A "right" swipe must go left -> right with non-negative extent.
@@ -88,7 +100,7 @@ describe("resolveContainerSwipeCoordinates system-inset math", () => {
       options("down"),
       emptyHierarchy,
       containerElement(bounds(100, 100, 900, 1950)),
-      observe({ width: 1000, height: 2000 }, { top: 0, right: 0, bottom: 126, left: 0 })
+      observe({ width: 1000, height: 2000 }, { top: 0, right: 0, bottom: 126, left: 0 }),
     );
 
     // "down" ends at bottom - 10% of height; with bottom clamped to 1874 the end

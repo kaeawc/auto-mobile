@@ -38,7 +38,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     duration: number = 300,
     offset: number = 100,
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<A11ySwipeResult> {
     // Coordinates go through the shared `coord()` policy (roundCoordinates: true for Android) so
     // TalkBack two-finger swipes land on whole pixels, exactly like the sibling swipe/tap/drag/
@@ -74,7 +74,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     x: number,
     y: number,
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<A11ySwipeResult> {
     return sendCommand<A11ySwipeResult>(this.context, {
       idPrefix: "gesture_start",
@@ -93,7 +93,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     x: number,
     y: number,
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<A11ySwipeResult> {
     return sendCommand<A11ySwipeResult>(this.context, {
       idPrefix: "gesture_move",
@@ -116,7 +116,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     y: number,
     cancel: boolean = false,
     timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<A11ySwipeResult> {
     return sendCommand<A11ySwipeResult>(this.context, {
       idPrefix: "gesture_end",

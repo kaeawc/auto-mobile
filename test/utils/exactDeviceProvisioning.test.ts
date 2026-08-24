@@ -38,10 +38,12 @@ describe("DefaultExactDeviceProvisioner", () => {
 
     await writer.setMemoryMb("phone-api-36-a", 4096);
 
-    expect(writes).toEqual([{
-      path: join("/avds", "phone-api-36-a.avd", "config.ini"),
-      content: "avd.ini.displayname=phone-api-36-a\nhw.ramSize=4096\n",
-    }]);
+    expect(writes).toEqual([
+      {
+        path: join("/avds", "phone-api-36-a.avd", "config.ini"),
+        content: "avd.ini.displayname=phone-api-36-a\nhw.ramSize=4096\n",
+      },
+    ]);
   });
 
   test("uses the same non-empty Android AVD home fallback as the config reader", async () => {
@@ -62,10 +64,12 @@ describe("DefaultExactDeviceProvisioner", () => {
 
     await writer.setMemoryMb("phone-api-36-a", 4096);
 
-    expect(writes).toEqual([{
-      path: join("/sdk-home", ".android", "avd", "phone-api-36-a.avd", "config.ini"),
-      content: "hw.ramSize=4096\n",
-    }]);
+    expect(writes).toEqual([
+      {
+        path: join("/sdk-home", ".android", "avd", "phone-api-36-a.avd", "config.ini"),
+        content: "hw.ramSize=4096\n",
+      },
+    ]);
   });
 
   test("creates the requested Android AVD without selecting a substitute", async () => {
@@ -125,14 +129,16 @@ describe("DefaultExactDeviceProvisioner", () => {
       },
     };
     const provisioner = new DefaultExactDeviceProvisioner({
-      listDeviceImages: async () => [{
-        name: "phone-api-36-a",
-        platform: "ios",
-        deviceId: "existing-udid",
-        isRunning: false,
-        runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
-        deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-      }],
+      listDeviceImages: async () => [
+        {
+          name: "phone-api-36-a",
+          platform: "ios",
+          deviceId: "existing-udid",
+          isRunning: false,
+          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        },
+      ],
       isCreationAllowed: () => true,
       avdManager: {} as ExactAndroidAvdClient,
       androidConfigReader: { readConfig: async () => null },
@@ -215,16 +221,18 @@ describe("DefaultExactDeviceProvisioner", () => {
 
   test("rejects an unavailable exact iOS simulator instead of adopting it", async () => {
     const provisioner = new DefaultExactDeviceProvisioner({
-      listDeviceImages: async () => [{
-        name: "phone-api-36-a",
-        platform: "ios",
-        deviceId: "unavailable-udid",
-        isRunning: false,
-        isAvailable: false,
-        availabilityError: "runtime is unavailable",
-        runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
-        deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-      }],
+      listDeviceImages: async () => [
+        {
+          name: "phone-api-36-a",
+          platform: "ios",
+          deviceId: "unavailable-udid",
+          isRunning: false,
+          isAvailable: false,
+          availabilityError: "runtime is unavailable",
+          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        },
+      ],
       isCreationAllowed: () => true,
       avdManager: {} as ExactAndroidAvdClient,
       androidConfigReader: { readConfig: async () => null },
@@ -236,14 +244,16 @@ describe("DefaultExactDeviceProvisioner", () => {
       },
     });
 
-    await expect(provisioner.provision({
-      platform: "ios",
-      name: "phone-api-36-a",
-      spec: {
-        runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
-        deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
-      },
-    })).rejects.toMatchObject({
+    await expect(
+      provisioner.provision({
+        platform: "ios",
+        name: "phone-api-36-a",
+        spec: {
+          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
+          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        },
+      }),
+    ).rejects.toMatchObject({
       code: "identity_conflict",
       message: expect.stringContaining("unavailable"),
     });
@@ -493,12 +503,14 @@ describe("DefaultExactDeviceProvisioner", () => {
       iosSimulator: {} as ExactIosSimulatorClient,
     });
 
-    await expect(provisioner.provision({
-      platform: "android",
-      name: "phone-api-36-a",
-      spec: ANDROID_SPEC,
-      reconcileExistingConfiguration: false,
-    })).rejects.toMatchObject({
+    await expect(
+      provisioner.provision({
+        platform: "android",
+        name: "phone-api-36-a",
+        spec: ANDROID_SPEC,
+        reconcileExistingConfiguration: false,
+      }),
+    ).rejects.toMatchObject({
       code: "identity_conflict",
     });
 

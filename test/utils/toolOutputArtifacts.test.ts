@@ -51,67 +51,69 @@ describe("parseToolOutputsDirConfig", () => {
 
   test("resolves CLI paths to absolute paths from the launch working directory", () => {
     const launchCwd = path.resolve("launch-root");
-    expect(parseToolOutputsDirConfig(
-      ["--tool-outputs-dir", "artifacts"],
-      {},
-      launchCwd
-    )).toBe(path.resolve(launchCwd, "artifacts"));
+    expect(parseToolOutputsDirConfig(["--tool-outputs-dir", "artifacts"], {}, launchCwd)).toBe(
+      path.resolve(launchCwd, "artifacts"),
+    );
   });
 
   test("supports the singular CLI alias", () => {
     const launchCwd = path.resolve("launch-root");
-    expect(parseToolOutputsDirConfig(
-      ["--tool-output-dir", "artifacts"],
-      {},
-      launchCwd
-    )).toBe(path.resolve(launchCwd, "artifacts"));
+    expect(parseToolOutputsDirConfig(["--tool-output-dir", "artifacts"], {}, launchCwd)).toBe(
+      path.resolve(launchCwd, "artifacts"),
+    );
   });
 
   test("CLI flag wins over environment variable", () => {
     const launchCwd = path.resolve("launch-root");
-    expect(parseToolOutputsDirConfig(
-      ["--tool-outputs-dir", "cli-artifacts"],
-      { AUTOMOBILE_TOOL_OUTPUTS_DIR: "env-artifacts" },
-      launchCwd
-    )).toBe(path.resolve(launchCwd, "cli-artifacts"));
+    expect(
+      parseToolOutputsDirConfig(
+        ["--tool-outputs-dir", "cli-artifacts"],
+        { AUTOMOBILE_TOOL_OUTPUTS_DIR: "env-artifacts" },
+        launchCwd,
+      ),
+    ).toBe(path.resolve(launchCwd, "cli-artifacts"));
   });
 
   test("resolves environment variable paths to absolute paths from the launch working directory", () => {
     const launchCwd = path.resolve("launch-root");
-    expect(parseToolOutputsDirConfig(
-      [],
-      { AUTOMOBILE_TOOL_OUTPUTS_DIR: "env-artifacts" },
-      launchCwd
-    )).toBe(path.resolve(launchCwd, "env-artifacts"));
+    expect(
+      parseToolOutputsDirConfig([], { AUTOMOBILE_TOOL_OUTPUTS_DIR: "env-artifacts" }, launchCwd),
+    ).toBe(path.resolve(launchCwd, "env-artifacts"));
   });
 
   test("supports the legacy AUTO_MOBILE environment variable alias", () => {
     const launchCwd = path.resolve("launch-root");
-    expect(parseToolOutputsDirConfig(
-      [],
-      { AUTO_MOBILE_TOOL_OUTPUTS_DIR: "legacy-artifacts" },
-      launchCwd
-    )).toBe(path.resolve(launchCwd, "legacy-artifacts"));
+    expect(
+      parseToolOutputsDirConfig(
+        [],
+        { AUTO_MOBILE_TOOL_OUTPUTS_DIR: "legacy-artifacts" },
+        launchCwd,
+      ),
+    ).toBe(path.resolve(launchCwd, "legacy-artifacts"));
   });
 
   test("primary environment variable wins over the legacy alias", () => {
     const launchCwd = path.resolve("launch-root");
-    expect(parseToolOutputsDirConfig(
-      [],
-      {
-        AUTOMOBILE_TOOL_OUTPUTS_DIR: "primary-artifacts",
-        AUTO_MOBILE_TOOL_OUTPUTS_DIR: "legacy-artifacts",
-      },
-      launchCwd
-    )).toBe(path.resolve(launchCwd, "primary-artifacts"));
+    expect(
+      parseToolOutputsDirConfig(
+        [],
+        {
+          AUTOMOBILE_TOOL_OUTPUTS_DIR: "primary-artifacts",
+          AUTO_MOBILE_TOOL_OUTPUTS_DIR: "legacy-artifacts",
+        },
+        launchCwd,
+      ),
+    ).toBe(path.resolve(launchCwd, "primary-artifacts"));
   });
 
   test("ignores blank configured values", () => {
-    expect(parseToolOutputsDirConfig(
-      ["--tool-outputs-dir", "   "],
-      { AUTOMOBILE_TOOL_OUTPUTS_DIR: "   " },
-      path.resolve("launch-root")
-    )).toBeUndefined();
+    expect(
+      parseToolOutputsDirConfig(
+        ["--tool-outputs-dir", "   "],
+        { AUTOMOBILE_TOOL_OUTPUTS_DIR: "   " },
+        path.resolve("launch-root"),
+      ),
+    ).toBeUndefined();
   });
 });
 
@@ -174,30 +176,30 @@ describe("validateToolOutputsDirForWrite", () => {
     const fs = new FakeToolOutputsDirFileSystem();
     fs.isDirectory = false;
 
-    await expect(validateToolOutputsDirForWrite("/artifact-file", fs))
-      .rejects.toThrow(ActionableError);
-    await expect(validateToolOutputsDirForWrite("/artifact-file", fs))
-      .rejects.toThrow("not a directory");
+    await expect(validateToolOutputsDirForWrite("/artifact-file", fs)).rejects.toThrow(
+      ActionableError,
+    );
+    await expect(validateToolOutputsDirForWrite("/artifact-file", fs)).rejects.toThrow(
+      "not a directory",
+    );
   });
 
   test("throws an actionable error when the directory cannot be created", async () => {
     const fs = new FakeToolOutputsDirFileSystem();
     fs.ensureDirError = new Error("permission denied");
 
-    await expect(validateToolOutputsDirForWrite("/locked", fs))
-      .rejects.toThrow(ActionableError);
-    await expect(validateToolOutputsDirForWrite("/locked", fs))
-      .rejects.toThrow("Failed to create tool outputs directory");
+    await expect(validateToolOutputsDirForWrite("/locked", fs)).rejects.toThrow(ActionableError);
+    await expect(validateToolOutputsDirForWrite("/locked", fs)).rejects.toThrow(
+      "Failed to create tool outputs directory",
+    );
   });
 
   test("throws an actionable error when the directory is not writable", async () => {
     const fs = new FakeToolOutputsDirFileSystem();
     fs.accessError = new Error("EACCES");
 
-    await expect(validateToolOutputsDirForWrite("/readonly", fs))
-      .rejects.toThrow(ActionableError);
-    await expect(validateToolOutputsDirForWrite("/readonly", fs))
-      .rejects.toThrow("not writable");
+    await expect(validateToolOutputsDirForWrite("/readonly", fs)).rejects.toThrow(ActionableError);
+    await expect(validateToolOutputsDirForWrite("/readonly", fs)).rejects.toThrow("not writable");
   });
 
   test("revalidates on every write attempt", async () => {

@@ -7,7 +7,9 @@ This directory contains Unix domain socket servers that communicate with IDE plu
 All socket servers MUST extend one of the base classes in `socketServer/`:
 
 ### Request-Response Pattern
+
 For servers that handle discrete requests with responses:
+
 ```typescript
 import { RequestResponseSocketServer } from "./socketServer/index";
 
@@ -21,7 +23,9 @@ class MySocketServer extends RequestResponseSocketServer<MyRequest, MyResponse> 
 **Examples:** `videoRecordingSocketServer`, `deviceSnapshotSocketServer`, `testRecordingSocketServer`, `appearanceSocketServer`, `performanceStreamSocketServer`, `failuresStreamSocketServer`
 
 ### Push Subscription Pattern
+
 For servers that maintain subscribers and push updates:
+
 ```typescript
 import { PushSubscriptionSocketServer } from "./socketServer/index";
 
@@ -64,6 +68,7 @@ class MySocketServer extends PushSubscriptionSocketServer<MyFilter, MyPushData> 
 ## Testing
 
 Use `FakeTimer` from `test/fakes/FakeTimer.ts` to control time in tests:
+
 ```typescript
 const fakeTimer = new FakeTimer();
 const server = new MySocketServer(socketPath, fakeTimer);

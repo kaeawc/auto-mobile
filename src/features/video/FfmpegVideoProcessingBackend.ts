@@ -10,10 +10,7 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient, type SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../../utils/logger";
-import {
-  defaultRecordingCodecProbe,
-  type RecordingCodecProbe,
-} from "./recordingCodec";
+import { defaultRecordingCodecProbe, type RecordingCodecProbe } from "./recordingCodec";
 import {
   DefaultFfmpegClient,
   type FfmpegClient,

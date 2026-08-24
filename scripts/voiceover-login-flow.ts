@@ -55,39 +55,39 @@ interface MockClient {
 
 function makeLoginScreenObserve(): ObserveResult {
   const usernameField: Element = {
-    "bounds": { left: 32, top: 280, right: 688, bottom: 340 },
-    "text": "",
+    bounds: { left: 32, top: 280, right: 688, bottom: 340 },
+    text: "",
     "content-desc": "Username",
     "resource-id": "usernameInput",
-    "class": "UITextField",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "enabled": true,
+    class: "UITextField",
+    clickable: true,
+    focusable: true,
+    focused: false,
+    enabled: true,
   };
 
   const passwordField: Element = {
-    "bounds": { left: 32, top: 380, right: 688, bottom: 440 },
-    "text": "",
+    bounds: { left: 32, top: 380, right: 688, bottom: 440 },
+    text: "",
     "content-desc": "Password",
     "resource-id": "passwordInput",
-    "class": "UITextField",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "enabled": true,
+    class: "UITextField",
+    clickable: true,
+    focusable: true,
+    focused: false,
+    enabled: true,
   };
 
   const loginButton: Element = {
-    "bounds": { left: 32, top: 500, right: 688, bottom: 560 },
-    "text": "Log in",
+    bounds: { left: 32, top: 500, right: 688, bottom: 560 },
+    text: "Log in",
     "content-desc": "Log in",
     "resource-id": "loginButton",
-    "class": "UIButton",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "enabled": true,
+    class: "UIButton",
+    clickable: true,
+    focusable: true,
+    focused: false,
+    enabled: true,
   };
 
   return {
@@ -124,15 +124,15 @@ function makeUsernameFieldFocusedObserve(): ObserveResult {
   // tap (double-tap in VoiceOver) activates it. AutoMobile handles this
   // automatically with the activation action.
   const usernameField: Element = {
-    "bounds": { left: 32, top: 280, right: 688, bottom: 340 },
-    "text": "",
+    bounds: { left: 32, top: 280, right: 688, bottom: 340 },
+    text: "",
     "content-desc": "Username",
     "resource-id": "usernameInput",
-    "class": "UITextField",
-    "clickable": true,
-    "focusable": true,
-    "focused": true,
-    "enabled": true,
+    class: "UITextField",
+    clickable: true,
+    focusable: true,
+    focused: true,
+    enabled: true,
   };
 
   return {
@@ -159,15 +159,15 @@ function makeUsernameFieldFocusedObserve(): ObserveResult {
 
 function makePostLoginObserve(): ObserveResult {
   const welcomeText: Element = {
-    "bounds": { left: 32, top: 120, right: 358, bottom: 160 },
-    "text": "Welcome, user@example.com",
+    bounds: { left: 32, top: 120, right: 358, bottom: 160 },
+    text: "Welcome, user@example.com",
     "content-desc": "Welcome, user@example.com",
     "resource-id": "welcomeLabel",
-    "class": "UILabel",
-    "clickable": false,
-    "focusable": true,
-    "focused": false,
-    "enabled": true,
+    class: "UILabel",
+    clickable: false,
+    focusable: true,
+    focused: false,
+    enabled: true,
   };
 
   return {
@@ -284,16 +284,16 @@ async function main(): Promise<void> {
   console.log("\nClickable elements on screen:");
   for (const el of initialObserve.elements?.clickable ?? []) {
     console.log(
-      `  [${el["resource-id"]}]  text="${el.text ?? ""}"  content-desc="${el["content-desc"] ?? ""}"`
+      `  [${el["resource-id"]}]  text="${el.text ?? ""}"  content-desc="${el["content-desc"] ?? ""}"`,
     );
   }
 
   if (initialObserve.accessibilityState?.enabled) {
     console.log(
-      `\nNote: VoiceOver is ACTIVE (service: ${initialObserve.accessibilityState.service}).`
+      `\nNote: VoiceOver is ACTIVE (service: ${initialObserve.accessibilityState.service}).`,
     );
     console.log(
-      "      tapOn will use accessibility activation internally. No change needed to this script."
+      "      tapOn will use accessibility activation internally. No change needed to this script.",
     );
   }
 
@@ -319,13 +319,9 @@ async function main(): Promise<void> {
   printStep(3, "Observe after tapping username (verify input focus)");
 
   const afterTapObserve = await client.observe();
-  printResult(
-    "focusedElement (should be username UITextField)",
-    afterTapObserve.focusedElement
-  );
+  printResult("focusedElement (should be username UITextField)", afterTapObserve.focusedElement);
 
-  const usernameFocused =
-    afterTapObserve.focusedElement?.["resource-id"] === "usernameInput";
+  const usernameFocused = afterTapObserve.focusedElement?.["resource-id"] === "usernameInput";
   console.log(`\nUsername field has input focus: ${usernameFocused}`);
 
   // -------------------------------------------------------------------------
@@ -376,8 +372,7 @@ async function main(): Promise<void> {
   const postLoginObserve = await client.observe();
   printResult("activeWindow after login", postLoginObserve.activeWindow);
 
-  const loginSucceeded =
-    postLoginObserve.activeWindow?.activityName === "HomeViewController";
+  const loginSucceeded = postLoginObserve.activeWindow?.activityName === "HomeViewController";
   console.log(`\nLogin succeeded (navigated to HomeViewController): ${loginSucceeded}`);
 
   // -------------------------------------------------------------------------
@@ -395,12 +390,10 @@ async function main(): Promise<void> {
   console.log("  - tapOn uses accessibility activation internally (transparent).");
   console.log("  - inputText is unchanged in VoiceOver mode.");
   console.log("  - Use focusedElement (input focus) to verify field activation.");
-  console.log(
-    "  - For grouped nodes, use contentDesc: instead of text: in tapOn args."
-  );
+  console.log("  - For grouped nodes, use contentDesc: instead of text: in tapOn args.");
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error("Fatal error:", error);
   process.exit(1);
 });

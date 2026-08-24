@@ -4,15 +4,11 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 
 describe("observeSchema raw flag", () => {
   test("accepts raw: true", () => {
-    expect(() =>
-      observeSchema.parse({ platform: "android", raw: true })
-    ).not.toThrow();
+    expect(() => observeSchema.parse({ platform: "android", raw: true })).not.toThrow();
   });
 
   test("accepts raw: false", () => {
-    expect(() =>
-      observeSchema.parse({ platform: "android", raw: false })
-    ).not.toThrow();
+    expect(() => observeSchema.parse({ platform: "android", raw: false })).not.toThrow();
   });
 
   test("accepts missing raw (defaults to undefined)", () => {
@@ -28,9 +24,7 @@ describe("observeSchema raw flag", () => {
     expect(tool).toBeDefined();
 
     // Parse the schema shape to confirm raw is a valid optional boolean
-    expect(() =>
-      tool!.schema.parse({ platform: "ios", raw: true })
-    ).not.toThrow();
+    expect(() => tool!.schema.parse({ platform: "ios", raw: true })).not.toThrow();
   });
 });
 
@@ -41,14 +35,13 @@ describe("observe tool registration", () => {
 
   test("registers observe tool", () => {
     registerObserveTools();
-    const toolNames = ToolRegistry.getToolDefinitions().map(t => t.name);
+    const toolNames = ToolRegistry.getToolDefinitions().map((t) => t.name);
     expect(toolNames).toContain("observe");
   });
 
   test("does not register rawViewHierarchy tool", () => {
     registerObserveTools();
-    const toolNames = ToolRegistry.getToolDefinitions().map(t => t.name);
+    const toolNames = ToolRegistry.getToolDefinitions().map((t) => t.name);
     expect(toolNames).not.toContain("rawViewHierarchy");
   });
-
 });

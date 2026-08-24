@@ -45,14 +45,14 @@ export class FakeWindow implements Window {
    * Check if a method was called
    */
   wasMethodCalled(methodName: string): boolean {
-    return this.executedOperations.some(op => op.includes(methodName));
+    return this.executedOperations.some((op) => op.includes(methodName));
   }
 
   /**
    * Get call count for a specific method
    */
   getCallCount(methodName: string): number {
-    return this.executedOperations.filter(op => op.includes(methodName)).length;
+    return this.executedOperations.filter((op) => op.includes(methodName)).length;
   }
 
   /**

@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
-import { FailureAnalyticsRepository, type RecordFailureInput } from "../../src/db/failureAnalyticsRepository";
+import {
+  FailureAnalyticsRepository,
+  type RecordFailureInput,
+} from "../../src/db/failureAnalyticsRepository";
 import { NavigationRepository } from "../../src/db/navigationRepository";
-import { PredictionHistoryRepository, type TransitionKey } from "../../src/db/predictionHistoryRepository";
+import {
+  PredictionHistoryRepository,
+  type TransitionKey,
+} from "../../src/db/predictionHistoryRepository";
 import { TestCoverageRepository } from "../../src/db/testCoverageRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { runConcurrentSameKeyStress } from "./concurrencyStressHelper";
@@ -14,7 +20,7 @@ describe("DB concurrency RMW audit", () => {
   const openDbs: Kysely<Database>[] = [];
 
   afterEach(async () => {
-    await Promise.all(openDbs.splice(0).map(db => db.destroy()));
+    await Promise.all(openDbs.splice(0).map((db) => db.destroy()));
   });
 
   async function openDb(): Promise<Kysely<Database>> {
@@ -52,15 +58,15 @@ describe("DB concurrency RMW audit", () => {
     const nodes = await navigation.getNodes("com.example.audit");
     expect(nodes).toHaveLength(1);
     expect(nodes[0].visit_count).toBe(N);
-    expect(new Set(nodeResults.map(node => node.id)).size).toBe(1);
+    expect(new Set(nodeResults.map((node) => node.id)).size).toBe(1);
 
     const uiResults = await runConcurrentSameKeyStress({
       count: N,
-      act: index =>
+      act: (index) =>
         navigation.getOrCreateUIElement(
           "com.example.audit",
           { text: "Login", resourceId: "login_button" },
-          2000 + index
+          2000 + index,
         ),
     });
     const uiElements = await db
@@ -69,14 +75,14 @@ describe("DB concurrency RMW audit", () => {
       .where("app_id", "=", "com.example.audit")
       .execute();
     expect(uiElements).toHaveLength(1);
-    expect(new Set(uiResults.map(element => element.id)).size).toBe(1);
+    expect(new Set(uiResults.map((element) => element.id)).size).toBe(1);
 
     const timer = new FakeTimer();
     timer.setCurrentTime(3000);
     const failures = new FailureAnalyticsRepository(timer, db);
     await runConcurrentSameKeyStress({
       count: N,
-      act: index =>
+      act: (index) =>
         failures.recordFailure(
           makeFailureInput({
             occurrence: {
@@ -85,7 +91,7 @@ describe("DB concurrency RMW audit", () => {
               appVersion: "1.0.0",
               sessionId: `session-${index}`,
             },
-          })
+          }),
         ),
     });
     const failureGroups = await db.selectFrom("failure_groups").selectAll().execute();
@@ -100,7 +106,7 @@ describe("DB concurrency RMW audit", () => {
       count: N,
       act: () => coverage.getOrCreateSession("coverage-session", "com.example.audit"),
     });
-    expect(new Set(sessions.map(session => session.id)).size).toBe(1);
+    expect(new Set(sessions.map((session) => session.id)).size).toBe(1);
     await runConcurrentSameKeyStress({
       count: N,
       act: () => coverage.recordNodeVisit(sessions[0].id, nodes[0].id, 4000),

@@ -45,7 +45,7 @@ export class DaemonState implements DaemonStateLike {
     // callers that don't exercise device sessions need not construct one; a
     // production caller relying on it would get an empty registry that no device
     // lifecycle ever populates.
-    deviceSessionRegistry: DeviceSessionRegistry = new DeviceSessionRegistry()
+    deviceSessionRegistry: DeviceSessionRegistry = new DeviceSessionRegistry(),
   ): void {
     this.sessionManager = sessionManager;
     this.devicePool = devicePool;

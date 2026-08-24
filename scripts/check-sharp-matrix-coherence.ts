@@ -35,9 +35,11 @@ if (!sharpVersion) {
 }
 
 const platformPins = Object.entries(optional).filter(
-  ([name]) => name.startsWith("@img/sharp-") && !name.startsWith("@img/sharp-libvips-")
+  ([name]) => name.startsWith("@img/sharp-") && !name.startsWith("@img/sharp-libvips-"),
 );
-const libvipsPins = Object.entries(optional).filter(([name]) => name.startsWith("@img/sharp-libvips-"));
+const libvipsPins = Object.entries(optional).filter(([name]) =>
+  name.startsWith("@img/sharp-libvips-"),
+);
 
 if (platformPins.length === 0) {
   errors.push("no `@img/sharp-<platform>` binaries are pinned in optionalDependencies.");
@@ -50,7 +52,9 @@ if (libvipsPins.length === 0) {
 if (sharpVersion) {
   for (const [name, version] of platformPins) {
     if (version !== sharpVersion) {
-      errors.push(`${name} is ${version} but sharp is ${sharpVersion} — the platform binary matrix must move with sharp.`);
+      errors.push(
+        `${name} is ${version} but sharp is ${sharpVersion} — the platform binary matrix must move with sharp.`,
+      );
     }
   }
 }
@@ -59,20 +63,26 @@ if (sharpVersion) {
 const libvipsVersions = new Set(libvipsPins.map(([, version]) => version));
 if (libvipsVersions.size > 1) {
   const detail = libvipsPins.map(([name, version]) => `${name}@${version}`).join(", ");
-  errors.push(`@img/sharp-libvips-* pins are not uniform (${[...libvipsVersions].join(", ")}): ${detail}`);
+  errors.push(
+    `@img/sharp-libvips-* pins are not uniform (${[...libvipsVersions].join(", ")}): ${detail}`,
+  );
 }
 
 if (errors.length > 0) {
-  console.error("error: sharp native matrix is incoherent — a partial bump would break `sharp` at runtime:");
+  console.error(
+    "error: sharp native matrix is incoherent — a partial bump would break `sharp` at runtime:",
+  );
   for (const message of errors) {
     console.error(`  - ${message}`);
   }
-  console.error("Bump `sharp` + every `@img/sharp-*` (and `@img/sharp-libvips-*`) together. See docs/design-docs/image-backend.md.");
+  console.error(
+    "Bump `sharp` + every `@img/sharp-*` (and `@img/sharp-libvips-*`) together. See docs/design-docs/image-backend.md.",
+  );
   process.exit(1);
 }
 
 const libvipsVersion = [...libvipsVersions][0];
 console.log(
   `sharp-matrix: coherent — sharp ${sharpVersion}, ${platformPins.length} platform binaries @ ${sharpVersion}, ` +
-    `${libvipsPins.length} libvips libraries @ ${libvipsVersion}.`
+    `${libvipsPins.length} libvips libraries @ ${libvipsVersion}.`,
 );

@@ -38,14 +38,14 @@ export class FakeAwaitIdle implements AwaitIdle {
    * Check if a method was called
    */
   wasMethodCalled(methodName: string): boolean {
-    return this.executedOperations.some(op => op.includes(methodName));
+    return this.executedOperations.some((op) => op.includes(methodName));
   }
 
   /**
    * Get call count for a specific method
    */
   getCallCount(methodName: string): number {
-    return this.executedOperations.filter(op => op.includes(methodName)).length;
+    return this.executedOperations.filter((op) => op.includes(methodName)).length;
   }
 
   /**
@@ -81,7 +81,10 @@ export class FakeAwaitIdle implements AwaitIdle {
 
   // Implementation of AwaitIdle interface
 
-  async initializeUiStabilityTracking(packageName: string, timeoutMs: number): Promise<UiStabilityState> {
+  async initializeUiStabilityTracking(
+    packageName: string,
+    timeoutMs: number,
+  ): Promise<UiStabilityState> {
     this.executedOperations.push(`initializeUiStabilityTracking(${packageName}, ${timeoutMs})`);
     this.initializeCallCount++;
 
@@ -97,7 +100,7 @@ export class FakeAwaitIdle implements AwaitIdle {
       prevSlowUiThread: null,
       prevFrameDeadlineMissed: null,
       prevTotalFrames: null,
-      firstGfxInfoLog: true
+      firstGfxInfoLog: true,
     };
   }
 
@@ -105,7 +108,7 @@ export class FakeAwaitIdle implements AwaitIdle {
     packageName: string,
     timeoutMs: number,
     _perf?: any,
-    _signal?: AbortSignal
+    _signal?: AbortSignal,
   ): Promise<GfxMetrics | null> {
     this.executedOperations.push(`waitForUiStability(${packageName}, ${timeoutMs})`);
     this.waitForUiStabilityCallCount++;
@@ -117,7 +120,7 @@ export class FakeAwaitIdle implements AwaitIdle {
     timeoutMs: number,
     _initState: UiStabilityState,
     _perf?: any,
-    _signal?: AbortSignal
+    _signal?: AbortSignal,
   ): Promise<GfxMetrics | null> {
     this.executedOperations.push(`waitForUiStabilityWithState(${packageName}, ${timeoutMs})`);
     this.waitForUiStabilityWithStateCallCount++;

@@ -11,7 +11,7 @@ function stringValue(value: unknown): string | undefined {
 }
 
 function stringMap(value: unknown): StringMap {
-  return value && typeof value === "object" ? value as StringMap : {};
+  return value && typeof value === "object" ? (value as StringMap) : {};
 }
 
 function firstNonEmpty(...values: unknown[]): string | undefined {
@@ -24,8 +24,16 @@ function firstNonEmpty(...values: unknown[]): string | undefined {
   return undefined;
 }
 
-function selectedTab(arguments_: StringMap, metadata: StringMap, route: string): string | undefined {
-  return firstNonEmpty(arguments_.tab, metadata.tab, metadata.type === "tab_switch" ? route : undefined);
+function selectedTab(
+  arguments_: StringMap,
+  metadata: StringMap,
+  route: string,
+): string | undefined {
+  return firstNonEmpty(
+    arguments_.tab,
+    metadata.tab,
+    metadata.type === "tab_switch" ? route : undefined,
+  );
 }
 
 function presentation(metadata: StringMap): string | undefined {
@@ -39,7 +47,10 @@ function makeKey(
   tab?: string,
   presentationRoute?: string,
 ): string {
-  const parts: string[][] = [["bundle", bundleId], ["route", route]];
+  const parts: string[][] = [
+    ["bundle", bundleId],
+    ["route", route],
+  ];
   if (tab) {
     parts.push(["tab", tab]);
   }
@@ -48,8 +59,11 @@ function makeKey(
   }
   for (const [name, value] of Object.entries(arguments_)
     .map(([name, value]) => [stringValue(name), stringValue(value)] as const)
-    .filter((entry): entry is readonly [string, string] => entry[0] !== undefined && entry[1] !== undefined && entry[0] !== "tab")
-    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)) {
+    .filter(
+      (entry): entry is readonly [string, string] =>
+        entry[0] !== undefined && entry[1] !== undefined && entry[0] !== "tab",
+    )
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))) {
     parts.push(["argument", name, value]);
   }
   return JSON.stringify(parts);

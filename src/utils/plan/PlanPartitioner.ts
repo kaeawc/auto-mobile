@@ -77,14 +77,14 @@ export class PlanPartitioner {
       if (!device) {
         // This should have been caught by validation, but handle gracefully
         throw new Error(
-          `Step ${planIndex} (${step.tool}) missing device parameter. This should have been caught during validation.`
+          `Step ${planIndex} (${step.tool}) missing device parameter. This should have been caught during validation.`,
         );
       }
 
       const track = deviceTracks.get(device);
       if (!track) {
         throw new Error(
-          `Step ${planIndex} references unknown device "${device}". Declared devices: [${devices.join(", ")}]`
+          `Step ${planIndex} references unknown device "${device}". Declared devices: [${devices.join(", ")}]`,
         );
       }
 

@@ -42,7 +42,7 @@ describe("criticalSection / barrier registration + plan-only discovery gate", ()
     expect(ToolRegistry.getTool("barrier")).toBeUndefined();
 
     // ...and therefore absent from the advertised tools/list.
-    const advertised = ToolRegistry.getToolDefinitions().map(t => t.name);
+    const advertised = ToolRegistry.getToolDefinitions().map((t) => t.name);
     expect(advertised).not.toContain("criticalSection");
     expect(advertised).not.toContain("barrier");
 

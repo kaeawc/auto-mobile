@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import {
-  DevicePoolStats,
-  handleDaemonRequest,
-} from "../../src/daemon/daemonRequestHandlers";
+import { DevicePoolStats, handleDaemonRequest } from "../../src/daemon/daemonRequestHandlers";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { DaemonRequest } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "../../src/daemon/devicePool";
+import type {
+  DeviceRecoveryEligibility,
+  DeviceRecoveryPolicy,
+  PooledDevice,
+} from "../../src/daemon/devicePool";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 
@@ -58,7 +59,7 @@ class FakeDaemonState {
   constructor(
     sessionManager: SessionManager | null,
     devicePool: FakeDevicePool | null,
-    deviceSessionRegistry: DeviceSessionRegistry = new DeviceSessionRegistry()
+    deviceSessionRegistry: DeviceSessionRegistry = new DeviceSessionRegistry(),
   ) {
     this.sessionManager = sessionManager;
     this.devicePool = devicePool;
@@ -88,10 +89,7 @@ class FakeDaemonState {
   }
 }
 
-const buildRequest = (
-  method: string,
-  params: Record<string, unknown> = {}
-): DaemonRequest => ({
+const buildRequest = (method: string, params: Record<string, unknown> = {}): DaemonRequest => ({
   id: "request-1",
   type: "daemon_request",
   method,
@@ -114,10 +112,7 @@ describe("handleDaemonRequest", () => {
 
   test("returns error when daemon is not initialized", async () => {
     const state = new FakeDaemonState(null, null);
-    const response = await handleDaemonRequest(
-      buildRequest("daemon/availableDevices"),
-      state
-    );
+    const response = await handleDaemonRequest(buildRequest("daemon/availableDevices"), state);
 
     expect(response.success).toBe(false);
     expect(response.error).toBe("Daemon not initialized");
@@ -151,7 +146,7 @@ describe("handleDaemonRequest", () => {
 
     const response = await handleDaemonRequest(
       buildRequest("daemon/sessionInfo", { sessionId }),
-      state
+      state,
     );
 
     expect(response.success).toBe(true);
@@ -181,7 +176,7 @@ describe("handleDaemonRequest", () => {
 
     const response = await handleDaemonRequest(
       buildRequest("daemon/heartbeat", { sessionId }),
-      state
+      state,
     );
 
     expect(response).toEqual({
@@ -201,10 +196,7 @@ describe("handleDaemonRequest", () => {
     });
     const state = new FakeDaemonState(sessionManager, devicePool);
 
-    const response = await handleDaemonRequest(
-      buildRequest("daemon/sessionInfo"),
-      state
-    );
+    const response = await handleDaemonRequest(buildRequest("daemon/sessionInfo"), state);
 
     expect(response.success).toBe(false);
     expect(response.error).toBe("sessionId parameter required");
@@ -225,7 +217,7 @@ describe("handleDaemonRequest", () => {
 
     const response = await handleDaemonRequest(
       buildRequest("daemon/releaseSession", { sessionId }),
-      state
+      state,
     );
 
     expect(response.success).toBe(true);
@@ -247,14 +239,11 @@ describe("handleDaemonRequest", () => {
         error: 0,
         avgAssignments: 0,
       },
-      1
+      1,
     );
     const state = new FakeDaemonState(sessionManager, devicePool);
 
-    const response = await handleDaemonRequest(
-      buildRequest("daemon/refreshDevices"),
-      state
-    );
+    const response = await handleDaemonRequest(buildRequest("daemon/refreshDevices"), state);
 
     expect(response.success).toBe(true);
     expect(response.result).toEqual({
@@ -276,10 +265,7 @@ describe("handleDaemonRequest", () => {
     });
     const state = new FakeDaemonState(sessionManager, devicePool);
 
-    const response = await handleDaemonRequest(
-      buildRequest("daemon/availableDevices"),
-      state
-    );
+    const response = await handleDaemonRequest(buildRequest("daemon/availableDevices"), state);
 
     expect(response.success).toBe(true);
     expect(response.result).toEqual({
@@ -295,22 +281,32 @@ describe("handleDaemonRequest", () => {
 
   test("lists live device sessions with their epoch identity", async () => {
     const devicePool = new FakeDevicePool({ total: 2, idle: 0, assigned: 2, error: 0 });
-    const registry = new DeviceSessionRegistry(fakeTimer, new FakeIdGenerator(["uuid-a", "uuid-b"]));
+    const registry = new DeviceSessionRegistry(
+      fakeTimer,
+      new FakeIdGenerator(["uuid-a", "uuid-b"]),
+    );
     fakeTimer.setCurrentTime(5000);
     registry.onDeviceConnected({ deviceId: "emulator-5554", platform: "android", incarnation: 1 });
     registry.onDeviceConnected({ deviceId: "00008030-001", platform: "ios", incarnation: 1 });
     const state = new FakeDaemonState(sessionManager, devicePool, registry);
 
-    const response = await handleDaemonRequest(
-      buildRequest("daemon/listDeviceSessions"),
-      state
-    );
+    const response = await handleDaemonRequest(buildRequest("daemon/listDeviceSessions"), state);
 
     expect(response.success).toBe(true);
     expect(response.result?.totalDeviceSessions).toBe(2);
     expect(response.result?.deviceSessions).toEqual([
-      { deviceSessionUuid: "uuid-a", deviceId: "emulator-5554", platform: "android", epochStartedAt: 5000 },
-      { deviceSessionUuid: "uuid-b", deviceId: "00008030-001", platform: "ios", epochStartedAt: 5000 },
+      {
+        deviceSessionUuid: "uuid-a",
+        deviceId: "emulator-5554",
+        platform: "android",
+        epochStartedAt: 5000,
+      },
+      {
+        deviceSessionUuid: "uuid-b",
+        deviceId: "00008030-001",
+        platform: "ios",
+        epochStartedAt: 5000,
+      },
     ]);
   });
 
@@ -318,10 +314,7 @@ describe("handleDaemonRequest", () => {
     const devicePool = new FakeDevicePool({ total: 0, idle: 0, assigned: 0, error: 0 });
     const state = new FakeDaemonState(sessionManager, devicePool);
 
-    const response = await handleDaemonRequest(
-      buildRequest("daemon/listDeviceSessions"),
-      state
-    );
+    const response = await handleDaemonRequest(buildRequest("daemon/listDeviceSessions"), state);
 
     expect(response.success).toBe(true);
     expect(response.result).toEqual({ deviceSessions: [], totalDeviceSessions: 0 });

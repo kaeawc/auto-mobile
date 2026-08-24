@@ -44,10 +44,12 @@ describe("disableStylusHandwriting", () => {
 
   it("does not throw when ADB command fails", async () => {
     const factory = new FakeAdbClientFactory();
-    factory.getFakeClient().setCommandError(
-      "shell settings put secure stylus_handwriting_enabled 0",
-      new Error("device offline")
-    );
+    factory
+      .getFakeClient()
+      .setCommandError(
+        "shell settings put secure stylus_handwriting_enabled 0",
+        new Error("device offline"),
+      );
     const device = makeDevice();
 
     await expect(disableStylusHandwriting(device, factory)).resolves.toBeUndefined();

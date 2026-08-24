@@ -14,7 +14,10 @@ import type { PerformanceAuditor } from "../../../src/features/observe/audits/Pe
 import type { AccessibilityAuditor } from "../../../src/features/observe/audits/AccessibilityAuditor";
 import type { AccessibilityStateDetector } from "../../../src/features/observe/audits/AccessibilityStateDetector";
 import { getPerfWindowBuffer } from "../../../src/features/performance/PerfWindowBuffer";
-import { _resetPerformanceMonitor, getPerformanceMonitor } from "../../../src/features/performance/PerformanceMonitor";
+import {
+  _resetPerformanceMonitor,
+  getPerformanceMonitor,
+} from "../../../src/features/performance/PerformanceMonitor";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
 
@@ -26,7 +29,10 @@ class FakeScreenshotRecorder implements ObserveScreenshotRecorder {
   async capture(_perf?: PerformanceTracker, _signal?: AbortSignal): Promise<void> {}
 }
 
-class FakeHierarchyCollector implements Pick<HierarchyCollector, "collect" | "collectRaw" | "extractScreenSize"> {
+class FakeHierarchyCollector implements Pick<
+  HierarchyCollector,
+  "collect" | "collectRaw" | "extractScreenSize"
+> {
   async collect(result: ObserveResult): Promise<void> {
     result.viewHierarchy = {
       hierarchy: {},
@@ -42,7 +48,10 @@ class FakeHierarchyCollector implements Pick<HierarchyCollector, "collect" | "co
   }
 }
 
-class FakeDeviceStateCollector implements Pick<DeviceStateCollector, "collectBackStack" | "collectWakefulness" | "collectDeviceLock" | "collectActiveWindow"> {
+class FakeDeviceStateCollector implements Pick<
+  DeviceStateCollector,
+  "collectBackStack" | "collectWakefulness" | "collectDeviceLock" | "collectActiveWindow"
+> {
   async collectBackStack(result: ObserveResult): Promise<void> {
     result.backStack = [{ activity: "com.example/.MainActivity", taskId: 1 }] as any;
   }
@@ -57,7 +66,10 @@ class FakeDeviceStateCollector implements Pick<DeviceStateCollector, "collectBac
   }
 }
 
-class NoOpAuditor implements Pick<PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector, "run"> {
+class NoOpAuditor implements Pick<
+  PerformanceAuditor & AccessibilityAuditor & AccessibilityStateDetector,
+  "run"
+> {
   async run(): Promise<void> {}
 }
 
@@ -69,16 +81,21 @@ const device: BootedDevice = {
 
 function createObserveScreen(): RealObserveScreen {
   const fakeTimer = new FakeTimer();
-  return new RealObserveScreen(device, new FakeAdbClientFactory(new FakeAdbExecutor()), {
-    cacheStore: new FakeObserveCacheStore(fakeTimer),
-    screenshotStateStore: new FakeScreenshotStateStore(),
-    screenshotRecorder: new FakeScreenshotRecorder(),
-    hierarchyCollector: new FakeHierarchyCollector() as unknown as HierarchyCollector,
-    deviceStateCollector: new FakeDeviceStateCollector() as unknown as DeviceStateCollector,
-    performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
-    accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
-    accessibilityStateDetector: new NoOpAuditor() as unknown as AccessibilityStateDetector,
-  }, fakeTimer);
+  return new RealObserveScreen(
+    device,
+    new FakeAdbClientFactory(new FakeAdbExecutor()),
+    {
+      cacheStore: new FakeObserveCacheStore(fakeTimer),
+      screenshotStateStore: new FakeScreenshotStateStore(),
+      screenshotRecorder: new FakeScreenshotRecorder(),
+      hierarchyCollector: new FakeHierarchyCollector() as unknown as HierarchyCollector,
+      deviceStateCollector: new FakeDeviceStateCollector() as unknown as DeviceStateCollector,
+      performanceAuditor: new NoOpAuditor() as unknown as PerformanceAuditor,
+      accessibilityAuditor: new NoOpAuditor() as unknown as AccessibilityAuditor,
+      accessibilityStateDetector: new NoOpAuditor() as unknown as AccessibilityStateDetector,
+    },
+    fakeTimer,
+  );
 }
 
 describe("ObserveScreen perf snapshot", () => {
@@ -108,11 +125,22 @@ describe("ObserveScreen perf snapshot", () => {
     // Pre-seed the shared buffer at t=0 (the fake clock's start) so the window
     // covers it regardless of any timer advance during execute().
     getPerfWindowBuffer().record(DEVICE_ID, {
-      t: 0, fps: 60, frameTimeMs: 16, jankFrames: 2, touchLatencyMs: 16, cpuUsagePercent: 25, memoryUsageMb: 150,
+      t: 0,
+      fps: 60,
+      frameTimeMs: 16,
+      jankFrames: 2,
+      touchLatencyMs: 16,
+      cpuUsagePercent: 25,
+      memoryUsageMb: 150,
       frameTimePercentilesMs: { p50: 16, p90: 20, p95: 24, p99: 40 },
       memoryBreakdownMb: {
-        javaHeap: 40, nativeHeap: 30, code: 20, stack: 2,
-        graphics: 10, privateOther: 5, system: 3,
+        javaHeap: 40,
+        nativeHeap: 30,
+        code: 20,
+        stack: 2,
+        graphics: 10,
+        privateOther: 5,
+        system: 3,
       },
     });
 
@@ -133,8 +161,15 @@ describe("ObserveScreen perf snapshot", () => {
   test("omits the snapshot when the opt-in is disabled", async () => {
     // env var intentionally left unset
     getPerfWindowBuffer().record(DEVICE_ID, {
-      t: 0, fps: 60, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: 16, cpuUsagePercent: 25, memoryUsageMb: 150,
-      frameTimePercentilesMs: null, memoryBreakdownMb: null,
+      t: 0,
+      fps: 60,
+      frameTimeMs: 16,
+      jankFrames: 0,
+      touchLatencyMs: 16,
+      cpuUsagePercent: 25,
+      memoryUsageMb: 150,
+      frameTimePercentilesMs: null,
+      memoryBreakdownMb: null,
     });
 
     const result = await createObserveScreen().execute();

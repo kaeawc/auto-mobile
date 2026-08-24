@@ -2643,7 +2643,7 @@ describe("killDevice handler", () => {
       notifyResourcesChanged: async () => {},
       ensureCtrlProxyReady: async () => {},
       clearInstalledAppsForDevice: async () => {},
-      stopAndroidObservers: async target => {
+      stopAndroidObservers: async (target) => {
         stoppedObserverDeviceIds.push(target.deviceId);
         observationManager.markObserversStopped();
       },
@@ -2655,7 +2655,7 @@ describe("killDevice handler", () => {
     }
 
     const result = tool.handler({ device });
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
     // Advancing the full deadline makes the pre-fix hang deterministic: without
     // observer teardown the device never disappears and this reaches the timeout.
     timer.advanceTime(30_000);
@@ -2668,426 +2668,467 @@ describe("killDevice handler", () => {
     expect(JSON.stringify(response)).not.toContain("Timed out waiting for");
   });
 
-  test.skipIf(process.platform === "win32")("restores an active Android observer when an ordinary kill failure leaves its incarnation booted", async () => {
-    const timer = new FakeTimer();
-    const device: BootedDevice = {
-      name: "Pixel 8",
-      platform: "android",
-      deviceId: "emulator-5554",
-      transportId: "1",
-    };
-    manager.setBootedDevices("android", [device]);
-    const deviceSessionRepository = new FakeDeviceSessionRepository();
-    sessionManager = new SessionManager(timer, deviceSessionRepository);
-    const image: DeviceInfo = {
-      name: device.name,
-      platform: device.platform,
-      deviceId: device.deviceId,
-      isRunning: false,
-      source: "local",
-    };
-    manager.setDeviceImages("android", [image]);
-    const pool = new DevicePool(
-      sessionManager,
-      "daemon-session",
-      timer,
-      new FakeInstalledAppsRepository(),
-      manager,
-      new DefaultRetryExecutor(timer),
-      deviceSessionRepository,
-    );
-    DaemonState.getInstance().initialize(sessionManager, pool);
-    await pool.assignMultipleDevices(["session-5503"], 1_000, "android");
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => manager,
-      notifyResourcesChanged: async () => {},
-      ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
-      timer,
-    });
-    // An active observation-stream subscriber has already caused this singleton
-    // to exist. Its cadence callback later resolves only an existing instance.
-    const activeObserver = AndroidCtrlProxyClient.getInstance(
-      { ...device, transportId: undefined },
-      new FakeAdbClientFactory(),
-    );
-    activeObserver.bindSession("session-5503");
-    const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
-    const originalGetInstance = AndroidCtrlProxyClient.getInstance;
-    let restoredObserver: AndroidCtrlProxyClient | undefined;
-    let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(target => {
-      restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
-      ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected")
-        .mockResolvedValueOnce(false)
-        .mockResolvedValue(true);
-      return restoredObserver;
-    });
-    try {
-      const tool = ToolRegistry.getTool("killDevice");
-      if (!tool) {
-        throw new Error("killDevice not registered");
-      }
-
-      await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
-
-      expect(closeSpy).toHaveBeenCalledTimes(1);
-      expect(getInstanceSpy).toHaveBeenCalledWith(device);
-      expect(ensureConnectedSpy).toHaveBeenCalledTimes(2);
-      const registeredObserver = AndroidCtrlProxyClient.getExistingInstance(device.deviceId);
-      expect(registeredObserver).toBe(restoredObserver);
-      expect(registeredObserver).not.toBe(activeObserver);
-      expect(registeredObserver?.getBoundSessionId()).toBe("session-5503");
-    } finally {
-      ensureConnectedSpy?.mockRestore();
-      getInstanceSpy.mockRestore();
-      closeSpy.mockRestore();
-    }
-  });
-
-  test.skipIf(process.platform === "win32")("keeps the original kill failure bounded when observer reconnection stalls", async () => {
-    const timer = new FakeTimer();
-    const device: BootedDevice = {
-      name: "Pixel 8",
-      platform: "android",
-      deviceId: "emulator-5554",
-      transportId: "1",
-    };
-    manager.setBootedDevices("android", [device]);
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => manager,
-      notifyResourcesChanged: async () => {},
-      ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
-      timer,
-    });
-    const activeObserver = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
-    const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
-    const originalGetInstance = AndroidCtrlProxyClient.getInstance;
-    let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
-    let restoredCloseSpy: ReturnType<typeof spyOn> | undefined;
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(target => {
-      const restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
-      ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockImplementation(
-        async () => await new Promise<boolean>(() => {}),
+  test.skipIf(process.platform === "win32")(
+    "restores an active Android observer when an ordinary kill failure leaves its incarnation booted",
+    async () => {
+      const timer = new FakeTimer();
+      const device: BootedDevice = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+        transportId: "1",
+      };
+      manager.setBootedDevices("android", [device]);
+      const deviceSessionRepository = new FakeDeviceSessionRepository();
+      sessionManager = new SessionManager(timer, deviceSessionRepository);
+      const image: DeviceInfo = {
+        name: device.name,
+        platform: device.platform,
+        deviceId: device.deviceId,
+        isRunning: false,
+        source: "local",
+      };
+      manager.setDeviceImages("android", [image]);
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-session",
+        timer,
+        new FakeInstalledAppsRepository(),
+        manager,
+        new DefaultRetryExecutor(timer),
+        deviceSessionRepository,
       );
-      restoredCloseSpy = spyOn(restoredObserver, "close").mockImplementation(
-        async () => await new Promise<void>(() => {}),
+      DaemonState.getInstance().initialize(sessionManager, pool);
+      await pool.assignMultipleDevices(["session-5503"], 1_000, "android");
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      // An active observation-stream subscriber has already caused this singleton
+      // to exist. Its cadence callback later resolves only an existing instance.
+      const activeObserver = AndroidCtrlProxyClient.getInstance(
+        { ...device, transportId: undefined },
+        new FakeAdbClientFactory(),
       );
-      return restoredObserver;
-    });
-    try {
-      const tool = ToolRegistry.getTool("killDevice");
-      if (!tool) {
-        throw new Error("killDevice not registered");
+      activeObserver.bindSession("session-5503");
+      const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
+      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+      let restoredObserver: AndroidCtrlProxyClient | undefined;
+      let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
+      const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
+        (target) => {
+          restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+          ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected")
+            .mockResolvedValueOnce(false)
+            .mockResolvedValue(true);
+          return restoredObserver;
+        },
+      );
+      try {
+        const tool = ToolRegistry.getTool("killDevice");
+        if (!tool) {
+          throw new Error("killDevice not registered");
+        }
+
+        await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
+
+        expect(closeSpy).toHaveBeenCalledTimes(1);
+        expect(getInstanceSpy).toHaveBeenCalledWith(device);
+        expect(ensureConnectedSpy).toHaveBeenCalledTimes(2);
+        const registeredObserver = AndroidCtrlProxyClient.getExistingInstance(device.deviceId);
+        expect(registeredObserver).toBe(restoredObserver);
+        expect(registeredObserver).not.toBe(activeObserver);
+        expect(registeredObserver?.getBoundSessionId()).toBe("session-5503");
+      } finally {
+        ensureConnectedSpy?.mockRestore();
+        getInstanceSpy.mockRestore();
+        closeSpy.mockRestore();
       }
+    },
+  );
 
-      const result = tool.handler({ device });
-      await new Promise(resolve => setImmediate(resolve));
-      timer.advanceTime(30_000);
+  test.skipIf(process.platform === "win32")(
+    "keeps the original kill failure bounded when observer reconnection stalls",
+    async () => {
+      const timer = new FakeTimer();
+      const device: BootedDevice = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+        transportId: "1",
+      };
+      manager.setBootedDevices("android", [device]);
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      const activeObserver = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+      const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
+      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+      let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
+      let restoredCloseSpy: ReturnType<typeof spyOn> | undefined;
+      const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
+        (target) => {
+          const restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+          ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockImplementation(
+            async () => await new Promise<boolean>(() => {}),
+          );
+          restoredCloseSpy = spyOn(restoredObserver, "close").mockImplementation(
+            async () => await new Promise<void>(() => {}),
+          );
+          return restoredObserver;
+        },
+      );
+      try {
+        const tool = ToolRegistry.getTool("killDevice");
+        if (!tool) {
+          throw new Error("killDevice not registered");
+        }
 
-      await expect(result).rejects.toThrow("adb emu kill failed");
-      expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);
-      expect(restoredCloseSpy).toHaveBeenCalledTimes(1);
-      expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
-    } finally {
-      restoredCloseSpy?.mockRestore();
-      ensureConnectedSpy?.mockRestore();
-      getInstanceSpy.mockRestore();
-      closeSpy.mockRestore();
-    }
-  });
+        const result = tool.handler({ device });
+        await new Promise((resolve) => setImmediate(resolve));
+        timer.advanceTime(30_000);
 
-  test.skipIf(process.platform === "win32")("evicts an observer when its device is replaced during reconnection", async () => {
-    const timer = new FakeTimer();
-    const device: BootedDevice = {
-      name: "Pixel 8",
-      platform: "android",
-      deviceId: "emulator-5554",
-      transportId: "1",
-    };
-    const replacement: BootedDevice = { ...device, transportId: "2" };
-    const replacementManager = new ReplacementAfterObserverReconnectDeviceManager(
-      device,
-      replacement,
-    );
-    manager = replacementManager;
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => replacementManager,
-      notifyResourcesChanged: async () => {},
-      ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
-      timer,
-    });
-    const activeObserver = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
-    const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
-    const originalGetInstance = AndroidCtrlProxyClient.getInstance;
-    let restoredObserver: AndroidCtrlProxyClient | undefined;
-    let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
-    let restoredCloseSpy: ReturnType<typeof spyOn> | undefined;
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(target => {
-      restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
-      ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
-      restoredCloseSpy = spyOn(restoredObserver, "close").mockResolvedValue(undefined);
-      return restoredObserver;
-    });
-    try {
-      const tool = ToolRegistry.getTool("killDevice");
-      if (!tool) {
-        throw new Error("killDevice not registered");
+        await expect(result).rejects.toThrow("adb emu kill failed");
+        expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);
+        expect(restoredCloseSpy).toHaveBeenCalledTimes(1);
+        expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
+      } finally {
+        restoredCloseSpy?.mockRestore();
+        ensureConnectedSpy?.mockRestore();
+        getInstanceSpy.mockRestore();
+        closeSpy.mockRestore();
       }
+    },
+  );
 
-      await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
+  test.skipIf(process.platform === "win32")(
+    "evicts an observer when its device is replaced during reconnection",
+    async () => {
+      const timer = new FakeTimer();
+      const device: BootedDevice = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+        transportId: "1",
+      };
+      const replacement: BootedDevice = { ...device, transportId: "2" };
+      const replacementManager = new ReplacementAfterObserverReconnectDeviceManager(
+        device,
+        replacement,
+      );
+      manager = replacementManager;
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => replacementManager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      const activeObserver = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+      const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
+      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+      let restoredObserver: AndroidCtrlProxyClient | undefined;
+      let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
+      let restoredCloseSpy: ReturnType<typeof spyOn> | undefined;
+      const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
+        (target) => {
+          restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+          ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
+          restoredCloseSpy = spyOn(restoredObserver, "close").mockResolvedValue(undefined);
+          return restoredObserver;
+        },
+      );
+      try {
+        const tool = ToolRegistry.getTool("killDevice");
+        if (!tool) {
+          throw new Error("killDevice not registered");
+        }
 
-      expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);
-      expect(restoredCloseSpy).toHaveBeenCalledTimes(1);
-      expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
-    } finally {
-      restoredCloseSpy?.mockRestore();
-      ensureConnectedSpy?.mockRestore();
-      getInstanceSpy.mockRestore();
-      closeSpy.mockRestore();
-    }
-  });
+        await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
 
-  test.skipIf(process.platform === "win32")("retries incomplete Android discovery before restoring an observer", async () => {
-    const timer = new FakeTimer();
-    const device: BootedDevice = {
-      name: "Pixel 8",
-      platform: "android",
-      deviceId: "emulator-5554",
-      transportId: "1",
-    };
-    const incompleteManager = new IncompleteThenBootedDiscoveryKillDeviceManager(device);
-    manager = incompleteManager;
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => incompleteManager,
-      notifyResourcesChanged: async () => {},
-      ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
-      timer,
-    });
-    const activeObserver = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
-    const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
-    const originalGetInstance = AndroidCtrlProxyClient.getInstance;
-    let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(target => {
-      const restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
-      ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
-      return restoredObserver;
-    });
-    try {
-      const tool = ToolRegistry.getTool("killDevice");
-      if (!tool) {
-        throw new Error("killDevice not registered");
+        expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);
+        expect(restoredCloseSpy).toHaveBeenCalledTimes(1);
+        expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
+      } finally {
+        restoredCloseSpy?.mockRestore();
+        ensureConnectedSpy?.mockRestore();
+        getInstanceSpy.mockRestore();
+        closeSpy.mockRestore();
       }
+    },
+  );
 
-      const result = tool.handler({ device });
-      await new Promise(resolve => setImmediate(resolve));
-      timer.advanceTime(1_000);
+  test.skipIf(process.platform === "win32")(
+    "retries incomplete Android discovery before restoring an observer",
+    async () => {
+      const timer = new FakeTimer();
+      const device: BootedDevice = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+        transportId: "1",
+      };
+      const incompleteManager = new IncompleteThenBootedDiscoveryKillDeviceManager(device);
+      manager = incompleteManager;
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => incompleteManager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      const activeObserver = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+      const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
+      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+      let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
+      const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
+        (target) => {
+          const restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+          ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
+          return restoredObserver;
+        },
+      );
+      try {
+        const tool = ToolRegistry.getTool("killDevice");
+        if (!tool) {
+          throw new Error("killDevice not registered");
+        }
 
-      await expect(result).rejects.toThrow("adb emu kill failed");
-      expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);
-    } finally {
-      ensureConnectedSpy?.mockRestore();
-      getInstanceSpy.mockRestore();
-      closeSpy.mockRestore();
-    }
-  });
+        const result = tool.handler({ device });
+        await new Promise((resolve) => setImmediate(resolve));
+        timer.advanceTime(1_000);
 
-  test.skipIf(process.platform === "win32")("does not rebind an observer to a session released during failed shutdown", async () => {
-    const timer = new FakeTimer();
-    const device: BootedDevice = {
-      name: "Pixel 8",
-      platform: "android",
-      deviceId: "emulator-5554",
-      transportId: "1",
-    };
-    manager.setBootedDevices("android", [device]);
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => manager,
-      notifyResourcesChanged: async () => {},
-      ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
-      timer,
-    });
-    const activeObserver = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
-    activeObserver.bindSession("released-session");
-    const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
-    const originalGetInstance = AndroidCtrlProxyClient.getInstance;
-    let restoredObserver: AndroidCtrlProxyClient | undefined;
-    let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(target => {
-      restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
-      ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
-      return restoredObserver;
-    });
-    try {
-      const tool = ToolRegistry.getTool("killDevice");
-      if (!tool) {
-        throw new Error("killDevice not registered");
+        await expect(result).rejects.toThrow("adb emu kill failed");
+        expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        ensureConnectedSpy?.mockRestore();
+        getInstanceSpy.mockRestore();
+        closeSpy.mockRestore();
       }
+    },
+  );
 
-      await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
+  test.skipIf(process.platform === "win32")(
+    "does not rebind an observer to a session released during failed shutdown",
+    async () => {
+      const timer = new FakeTimer();
+      const device: BootedDevice = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+        transportId: "1",
+      };
+      manager.setBootedDevices("android", [device]);
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      const activeObserver = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+      activeObserver.bindSession("released-session");
+      const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
+      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+      let restoredObserver: AndroidCtrlProxyClient | undefined;
+      let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
+      const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
+        (target) => {
+          restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+          ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
+          return restoredObserver;
+        },
+      );
+      try {
+        const tool = ToolRegistry.getTool("killDevice");
+        if (!tool) {
+          throw new Error("killDevice not registered");
+        }
 
-      expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);
-      expect(restoredObserver?.getBoundSessionId()).toBeNull();
-    } finally {
-      ensureConnectedSpy?.mockRestore();
-      getInstanceSpy.mockRestore();
-      closeSpy.mockRestore();
-    }
-  });
+        await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
 
-  test.skipIf(process.platform === "win32")("keeps an Android observer detached when a failed kill leaves no booted device", async () => {
-    const timer = new FakeTimer();
-    const device: BootedDevice = {
-      name: "Pixel 8",
-      platform: "android",
-      deviceId: "emulator-5554",
-    };
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => manager,
-      notifyResourcesChanged: async () => {},
-      ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
-      timer,
-    });
-    const observer = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
-    const closeSpy = spyOn(observer, "close").mockResolvedValue(undefined);
-    try {
-      const tool = ToolRegistry.getTool("killDevice");
-      if (!tool) {
-        throw new Error("killDevice not registered");
+        expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);
+        expect(restoredObserver?.getBoundSessionId()).toBeNull();
+      } finally {
+        ensureConnectedSpy?.mockRestore();
+        getInstanceSpy.mockRestore();
+        closeSpy.mockRestore();
       }
+    },
+  );
 
-      await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
+  test.skipIf(process.platform === "win32")(
+    "keeps an Android observer detached when a failed kill leaves no booted device",
+    async () => {
+      const timer = new FakeTimer();
+      const device: BootedDevice = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+      };
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      const observer = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+      const closeSpy = spyOn(observer, "close").mockResolvedValue(undefined);
+      try {
+        const tool = ToolRegistry.getTool("killDevice");
+        if (!tool) {
+          throw new Error("killDevice not registered");
+        }
 
-      expect(closeSpy).toHaveBeenCalledTimes(1);
-      expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
-    } finally {
-      closeSpy.mockRestore();
-    }
-  });
+        await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
 
-  test.skipIf(process.platform === "win32")("does not create an Android observer when no active observer was detached", async () => {
-    const timer = new FakeTimer();
-    const device: BootedDevice = {
-      name: "Pixel 8",
-      platform: "android",
-      deviceId: "emulator-5554",
-      transportId: "1",
-    };
-    manager.setBootedDevices("android", [device]);
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => manager,
-      notifyResourcesChanged: async () => {},
-      ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
-      timer,
-    });
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
-    try {
-      const tool = ToolRegistry.getTool("killDevice");
-      if (!tool) {
-        throw new Error("killDevice not registered");
+        expect(closeSpy).toHaveBeenCalledTimes(1);
+        expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
+      } finally {
+        closeSpy.mockRestore();
       }
+    },
+  );
 
-      await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
+  test.skipIf(process.platform === "win32")(
+    "does not create an Android observer when no active observer was detached",
+    async () => {
+      const timer = new FakeTimer();
+      const device: BootedDevice = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+        transportId: "1",
+      };
+      manager.setBootedDevices("android", [device]);
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+      try {
+        const tool = ToolRegistry.getTool("killDevice");
+        if (!tool) {
+          throw new Error("killDevice not registered");
+        }
 
-      expect(getInstanceSpy).not.toHaveBeenCalled();
-      expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
-    } finally {
-      getInstanceSpy.mockRestore();
-    }
-  });
+        await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
 
-  test.skipIf(process.platform === "win32")("restores an observer when the kill request omits its known transport", async () => {
-    const timer = new FakeTimer();
-    const requestedDevice: BootedDevice = {
-      name: "Pixel 8",
-      platform: "android",
-      deviceId: "emulator-5554",
-    };
-    const observedDevice: BootedDevice = {
-      ...requestedDevice,
-      transportId: "1",
-    };
-    manager.setBootedDevices("android", [observedDevice]);
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => manager,
-      notifyResourcesChanged: async () => {},
-      ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
-      timer,
-    });
-    const activeObserver = AndroidCtrlProxyClient.getInstance(
-      observedDevice,
-      new FakeAdbClientFactory(),
-    );
-    const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
-    const originalGetInstance = AndroidCtrlProxyClient.getInstance;
-    let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(target => {
-      const restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
-      ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
-      return restoredObserver;
-    });
-    try {
-      const tool = ToolRegistry.getTool("killDevice");
-      if (!tool) {
-        throw new Error("killDevice not registered");
+        expect(getInstanceSpy).not.toHaveBeenCalled();
+        expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
+      } finally {
+        getInstanceSpy.mockRestore();
       }
+    },
+  );
 
-      await expect(tool.handler({ device: requestedDevice })).rejects.toThrow("adb emu kill failed");
+  test.skipIf(process.platform === "win32")(
+    "restores an observer when the kill request omits its known transport",
+    async () => {
+      const timer = new FakeTimer();
+      const requestedDevice: BootedDevice = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+      };
+      const observedDevice: BootedDevice = {
+        ...requestedDevice,
+        transportId: "1",
+      };
+      manager.setBootedDevices("android", [observedDevice]);
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      const activeObserver = AndroidCtrlProxyClient.getInstance(
+        observedDevice,
+        new FakeAdbClientFactory(),
+      );
+      const closeSpy = spyOn(activeObserver, "close").mockResolvedValue(undefined);
+      const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+      let ensureConnectedSpy: ReturnType<typeof spyOn> | undefined;
+      const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockImplementation(
+        (target) => {
+          const restoredObserver = originalGetInstance(target, new FakeAdbClientFactory());
+          ensureConnectedSpy = spyOn(restoredObserver, "ensureConnected").mockResolvedValue(true);
+          return restoredObserver;
+        },
+      );
+      try {
+        const tool = ToolRegistry.getTool("killDevice");
+        if (!tool) {
+          throw new Error("killDevice not registered");
+        }
 
-      expect(getInstanceSpy).toHaveBeenCalledWith(observedDevice);
-      expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);
-    } finally {
-      ensureConnectedSpy?.mockRestore();
-      getInstanceSpy.mockRestore();
-      closeSpy.mockRestore();
-    }
-  });
+        await expect(tool.handler({ device: requestedDevice })).rejects.toThrow(
+          "adb emu kill failed",
+        );
 
-  test.skipIf(process.platform === "win32")("does not restore an observer onto a same-ID Android replacement when the original transport is unknown", async () => {
-    const timer = new FakeTimer();
-    const device: BootedDevice = {
-      name: "Pixel 8",
-      platform: "android",
-      deviceId: "emulator-5554",
-    };
-    const replacement: BootedDevice = {
-      ...device,
-      transportId: "2",
-    };
-    manager.setBootedDevices("android", [replacement]);
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => manager,
-      notifyResourcesChanged: async () => {},
-      ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
-      timer,
-    });
-    const observer = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
-    const closeSpy = spyOn(observer, "close").mockResolvedValue(undefined);
-    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
-    try {
-      const tool = ToolRegistry.getTool("killDevice");
-      if (!tool) {
-        throw new Error("killDevice not registered");
+        expect(getInstanceSpy).toHaveBeenCalledWith(observedDevice);
+        expect(ensureConnectedSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        ensureConnectedSpy?.mockRestore();
+        getInstanceSpy.mockRestore();
+        closeSpy.mockRestore();
       }
+    },
+  );
 
-      await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
+  test.skipIf(process.platform === "win32")(
+    "does not restore an observer onto a same-ID Android replacement when the original transport is unknown",
+    async () => {
+      const timer = new FakeTimer();
+      const device: BootedDevice = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+      };
+      const replacement: BootedDevice = {
+        ...device,
+        transportId: "2",
+      };
+      manager.setBootedDevices("android", [replacement]);
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => manager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      const observer = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+      const closeSpy = spyOn(observer, "close").mockResolvedValue(undefined);
+      const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance");
+      try {
+        const tool = ToolRegistry.getTool("killDevice");
+        if (!tool) {
+          throw new Error("killDevice not registered");
+        }
 
-      expect(closeSpy).toHaveBeenCalledTimes(1);
-      expect(getInstanceSpy).not.toHaveBeenCalled();
-      expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
-    } finally {
-      getInstanceSpy.mockRestore();
-      closeSpy.mockRestore();
-    }
-  });
+        await expect(tool.handler({ device })).rejects.toThrow("adb emu kill failed");
+
+        expect(closeSpy).toHaveBeenCalledTimes(1);
+        expect(getInstanceSpy).not.toHaveBeenCalled();
+        expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
+      } finally {
+        getInstanceSpy.mockRestore();
+        closeSpy.mockRestore();
+      }
+    },
+  );
 
   // Skipped on Windows: bun evaluates `AndroidCtrlProxyClient` as more than one
   // module record there (the singleton creators import it via the
@@ -3101,41 +3142,44 @@ describe("killDevice handler", () => {
   // (issue #5452) still holds on Windows — the observer detach simply degrades to
   // a no-op and shutdown proceeds — and this close/evict behavior is verified on
   // macOS/Linux, where module identity is stable.
-  test.skipIf(process.platform === "win32")("closes the registered Android CtrlProxy observer during teardown", async () => {
-    const timer = new FakeTimer();
-    const device: BootedDevice = {
-      name: "Pixel 8",
-      platform: "android",
-      deviceId: "emulator-5554",
-    };
-    const successfulManager = new SuccessfulKillDeviceManager();
-    manager = successfulManager;
-    setDeviceToolsDependencies({
-      deviceManagerFactory: () => successfulManager,
-      notifyResourcesChanged: async () => {},
-      ensureCtrlProxyReady: async () => {},
-      clearInstalledAppsForDevice: async () => {},
-      timer,
-    });
-    // A real per-device observer singleton, backed by a fake ADB factory so no
-    // real device I/O runs. The default stopAndroidObservers dependency must
-    // find and close it during teardown.
-    const observer = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
-    const closeSpy = spyOn(observer, "close").mockResolvedValue(undefined);
-    try {
-      const tool = ToolRegistry.getTool("killDevice");
-      if (!tool) {
-        throw new Error("killDevice not registered");
+  test.skipIf(process.platform === "win32")(
+    "closes the registered Android CtrlProxy observer during teardown",
+    async () => {
+      const timer = new FakeTimer();
+      const device: BootedDevice = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+      };
+      const successfulManager = new SuccessfulKillDeviceManager();
+      manager = successfulManager;
+      setDeviceToolsDependencies({
+        deviceManagerFactory: () => successfulManager,
+        notifyResourcesChanged: async () => {},
+        ensureCtrlProxyReady: async () => {},
+        clearInstalledAppsForDevice: async () => {},
+        timer,
+      });
+      // A real per-device observer singleton, backed by a fake ADB factory so no
+      // real device I/O runs. The default stopAndroidObservers dependency must
+      // find and close it during teardown.
+      const observer = AndroidCtrlProxyClient.getInstance(device, new FakeAdbClientFactory());
+      const closeSpy = spyOn(observer, "close").mockResolvedValue(undefined);
+      try {
+        const tool = ToolRegistry.getTool("killDevice");
+        if (!tool) {
+          throw new Error("killDevice not registered");
+        }
+
+        await tool.handler({ device });
+
+        expect(closeSpy).toHaveBeenCalledTimes(1);
+        // The detached observer is evicted so a re-booted same-serial emulator
+        // does not reuse a closed, reconnect-disabled client.
+        expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
+      } finally {
+        closeSpy.mockRestore();
       }
-
-      await tool.handler({ device });
-
-      expect(closeSpy).toHaveBeenCalledTimes(1);
-      // The detached observer is evicted so a re-booted same-serial emulator
-      // does not reuse a closed, reconnect-disabled client.
-      expect(AndroidCtrlProxyClient.getExistingInstance(device.deviceId)).toBeNull();
-    } finally {
-      closeSpy.mockRestore();
-    }
-  });
+    },
+  );
 });

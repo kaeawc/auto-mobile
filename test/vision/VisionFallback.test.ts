@@ -68,16 +68,22 @@ describe("VisionFallback orchestrator", () => {
 
   test("throws when vision fallback is disabled", async () => {
     const fb = new VisionFallback(config({ enabled: false }), timer, undefined, checksums);
-    await expect(
-      fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login"))
-    ).rejects.toThrow(/not enabled/);
+    await expect(fb.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login"))).rejects.toThrow(
+      /not enabled/,
+    );
   });
 
   test("rejects an unsupported provider before attempting a paid analysis", async () => {
-    const fallback = new VisionFallback(config({ provider: "unsupported" as any }), timer, undefined, checksums);
+    const fallback = new VisionFallback(
+      config({ provider: "unsupported" as any }),
+      timer,
+      undefined,
+      checksums,
+    );
 
-    await expect(fallback.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login")))
-      .rejects.toThrow("Unsupported vision provider: unsupported");
+    await expect(
+      fallback.analyzeAndSuggest("/s.png", HIERARCHY, criteria("Login")),
+    ).rejects.toThrow("Unsupported vision provider: unsupported");
   });
 
   test("caches a result: an identical query hits the analyzer only once", async () => {
@@ -201,8 +207,8 @@ describe("VisionFallback orchestrator", () => {
 
     expect(fb.getCacheStats().size).toBe(MAX_VISION_CACHE_ENTRIES);
     // Oldest-write-first eviction: the earliest screenshots are gone.
-    expect(fb.getCacheStats().keys.some(k => k.startsWith("sha256(/s-0.png):"))).toBe(false);
-    expect(fb.getCacheStats().keys.some(k => k.startsWith("sha256(/s-73.png):"))).toBe(true);
+    expect(fb.getCacheStats().keys.some((k) => k.startsWith("sha256(/s-0.png):"))).toBe(false);
+    expect(fb.getCacheStats().keys.some((k) => k.startsWith("sha256(/s-73.png):"))).toBe(true);
   });
 
   test("sweeps entries past their TTL on write, not only on read", async () => {
@@ -216,9 +222,9 @@ describe("VisionFallback orchestrator", () => {
     // A write for a *different* key must still retire the expired entry.
     await fb.analyzeAndSuggest("/fresh.png", HIERARCHY, criteria("Login"));
 
-    expect(fb.getCacheStats().keys).toEqual(expect.arrayContaining([
-      expect.stringContaining("sha256(/fresh.png)"),
-    ]));
+    expect(fb.getCacheStats().keys).toEqual(
+      expect.arrayContaining([expect.stringContaining("sha256(/fresh.png)")]),
+    );
     expect(fb.getCacheStats().size).toBe(1);
   });
 });

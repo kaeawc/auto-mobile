@@ -28,7 +28,7 @@ function toOsRow(input: RecordOsEventInput) {
 
 export async function recordOsEvent(
   input: RecordOsEventInput,
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): Promise<void> {
   await getDb(db).insertInto("os_events").values(toOsRow(input)).execute();
 
@@ -41,7 +41,7 @@ export async function recordOsEvent(
  */
 export async function recordOsEvents(
   inputs: RecordOsEventInput[],
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): Promise<void> {
   if (inputs.length === 0) {
     return;
@@ -52,8 +52,14 @@ export async function recordOsEvents(
 }
 
 export async function getOsEvents(
-  query: { deviceId?: string; sessionId?: string; sinceTimestamp?: number; category?: string; limit?: number },
-  db?: Kysely<Database>
+  query: {
+    deviceId?: string;
+    sessionId?: string;
+    sinceTimestamp?: number;
+    category?: string;
+    limit?: number;
+  },
+  db?: Kysely<Database>,
 ): Promise<RecordOsEventInput[]> {
   let q = getDb(db).selectFrom("os_events").selectAll();
 
@@ -73,7 +79,7 @@ export async function getOsEvents(
   q = q.orderBy("timestamp", "desc").limit(query.limit ?? 100);
 
   const rows = await q.execute();
-  return rows.map(r => ({
+  return rows.map((r) => ({
     deviceId: r.device_id,
     timestamp: r.timestamp,
     applicationId: r.application_id,
@@ -88,7 +94,7 @@ export async function cleanupIfNeeded(
   db?: Kysely<Database>,
   maxRows?: number,
   checkInterval?: number,
-  inserted?: number
+  inserted?: number,
 ): Promise<void> {
   await cleanupEventTable("os_events", retentionState, db, maxRows, checkInterval, inserted);
 }

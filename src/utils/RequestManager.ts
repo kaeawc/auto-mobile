@@ -67,7 +67,7 @@ export class RequestManager {
     type: string,
     timeoutMs: number,
     timeoutErrorFactory: TimeoutErrorFactory<T>,
-    responseErrorFactory?: ResponseErrorFactory<T>
+    responseErrorFactory?: ResponseErrorFactory<T>,
   ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       // Set up timeout
@@ -75,7 +75,9 @@ export class RequestManager {
         const request = this.pending.get(id);
         if (request) {
           this.pending.delete(id);
-          logger.warn(`[RequestManager] Request timed out: ${type} (id: ${id}, timeout: ${timeoutMs}ms)`);
+          logger.warn(
+            `[RequestManager] Request timed out: ${type} (id: ${id}, timeout: ${timeoutMs}ms)`,
+          );
           resolve(timeoutErrorFactory(id, type, timeoutMs));
         }
       }, timeoutMs);
@@ -91,7 +93,9 @@ export class RequestManager {
         responseErrorFactory: responseErrorFactory as ResponseErrorFactory<unknown> | undefined,
       });
 
-      logger.debug(`[RequestManager] Registered request: ${type} (id: ${id}, timeout: ${timeoutMs}ms)`);
+      logger.debug(
+        `[RequestManager] Registered request: ${type} (id: ${id}, timeout: ${timeoutMs}ms)`,
+      );
     });
   }
 
@@ -116,7 +120,9 @@ export class RequestManager {
 
     // Resolve the promise
     const duration = this.timer.now() - request.createdAt;
-    logger.debug(`[RequestManager] Resolved request: ${request.type} (id: ${id}, duration: ${duration}ms)`);
+    logger.debug(
+      `[RequestManager] Resolved request: ${request.type} (id: ${id}, duration: ${duration}ms)`,
+    );
     request.resolve(result);
 
     return true;
@@ -140,7 +146,9 @@ export class RequestManager {
       ? request.responseErrorFactory(error, totalTimeMs)
       : { success: false, totalTimeMs, error };
     const duration = this.timer.now() - request.createdAt;
-    logger.debug(`[RequestManager] Resolved errored request: ${request.type} (id: ${id}, duration: ${duration}ms)`);
+    logger.debug(
+      `[RequestManager] Resolved errored request: ${request.type} (id: ${id}, duration: ${duration}ms)`,
+    );
     request.resolve(result);
 
     return true;
@@ -165,7 +173,9 @@ export class RequestManager {
     this.pending.delete(id);
 
     // Reject the promise
-    logger.debug(`[RequestManager] Rejected request: ${request.type} (id: ${id}, error: ${error.message})`);
+    logger.debug(
+      `[RequestManager] Rejected request: ${request.type} (id: ${id}, error: ${error.message})`,
+    );
     request.reject(error);
 
     return true;

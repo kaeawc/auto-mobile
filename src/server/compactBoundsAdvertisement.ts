@@ -57,7 +57,7 @@ function collapseBoundsUnions(node: unknown): unknown {
   ) {
     const objectArm = anyOf.find(
       (arm): arm is Record<string, unknown> =>
-        !!arm && typeof arm === "object" && (arm as Record<string, unknown>).type === "object"
+        !!arm && typeof arm === "object" && (arm as Record<string, unknown>).type === "object",
     );
     if (objectArm) {
       // Keep the union's description (it names the tuple order + enabling flag) so

@@ -16,7 +16,7 @@ export interface TestDatabaseOptions {
 }
 
 export async function createTestDatabase(
-  options: TestDatabaseOptions = {}
+  options: TestDatabaseOptions = {},
 ): Promise<Kysely<Database>> {
   const bunDb = new BunDatabase(":memory:");
   if (options.foreignKeys) {

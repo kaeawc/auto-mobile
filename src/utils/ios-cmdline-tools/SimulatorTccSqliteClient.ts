@@ -58,23 +58,28 @@ const nodeFileSystem: TccDatabaseFileSystem = { stat };
 export function tccServiceForPermission(permission: string): string {
   return permission.startsWith("kTCCService")
     ? permission
-    : TCC_SERVICE_BY_PERMISSION.get(permission) ?? permission;
+    : (TCC_SERVICE_BY_PERMISSION.get(permission) ?? permission);
 }
 
 function sqliteParameterValue(value: string): string {
-  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 function parseJsonArray(output: string, context: string): Array<Record<string, unknown>> {
   try {
     const parsed: unknown = JSON.parse(output.trim() || "[]");
-    if (!Array.isArray(parsed) || parsed.some(row => row === null || typeof row !== "object" || Array.isArray(row))) {
+    if (
+      !Array.isArray(parsed) ||
+      parsed.some((row) => row === null || typeof row !== "object" || Array.isArray(row))
+    ) {
       throw new Error("expected an array of JSON objects");
     }
     return parsed as Array<Record<string, unknown>>;
   } catch (error) {
     const detail = errorMessage(error);
-    throw new ActionableError(`sqlite3 returned malformed JSON while reading ${context}: ${detail}`);
+    throw new ActionableError(
+      `sqlite3 returned malformed JSON while reading ${context}: ${detail}`,
+    );
   }
 }
 
@@ -83,18 +88,28 @@ function sqliteErrorDetail(error: unknown): string {
 }
 
 function hasErrorCode(error: unknown, code: string): boolean {
-  return typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === code;
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === code
+  );
 }
 
-function optionalNumberField(row: Record<string, unknown>, field: "auth_value" | "allowed" | "prompt_count"): Pick<TccPermissionRow, typeof field> {
+function optionalNumberField(
+  row: Record<string, unknown>,
+  field: "auth_value" | "allowed" | "prompt_count",
+): Pick<TccPermissionRow, typeof field> {
   const value = row[field];
   return typeof value === "number" || value === null ? { [field]: value } : {};
 }
 
 function parsePermissionRows(output: string, deviceId: string): TccPermissionRow[] {
-  return parseJsonArray(output, `simulator TCC database for ${deviceId}`).map(row => {
+  return parseJsonArray(output, `simulator TCC database for ${deviceId}`).map((row) => {
     if (typeof row.service !== "string" || typeof row.client !== "string") {
-      throw new ActionableError(`sqlite3 returned a TCC permission row without service and client for ${deviceId}`);
+      throw new ActionableError(
+        `sqlite3 returned a TCC permission row without service and client for ${deviceId}`,
+      );
     }
     return {
       service: row.service,
@@ -134,14 +149,16 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
   ): Promise<TccPermissionRow[]> {
     const databasePath = await this.resolveDatabasePath(deviceId);
     const columns = await this.readAccessColumns(databasePath, deviceId, signal);
-    const requiredColumns = ["service", "client"].filter(column => !columns.has(column));
+    const requiredColumns = ["service", "client"].filter((column) => !columns.has(column));
     if (requiredColumns.length > 0) {
       throw new ActionableError(
         `Simulator TCC database for ${deviceId} is incompatible: missing required access columns: ${requiredColumns.join(", ")}`,
       );
     }
 
-    const optionalColumns = ["auth_value", "allowed", "prompt_count"].filter(column => columns.has(column));
+    const optionalColumns = ["auth_value", "allowed", "prompt_count"].filter((column) =>
+      columns.has(column),
+    );
     const services = (permissions ?? []).map(tccServiceForPermission);
     const parameterArgs = [
       "-cmd",
@@ -153,9 +170,10 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
         `.parameter set :service${index} ${sqliteParameterValue(service)}`,
       ]),
     ];
-    const serviceFilter = services.length > 0
-      ? ` and service in (${services.map((_service, index) => `:service${index}`).join(", ")})`
-      : "";
+    const serviceFilter =
+      services.length > 0
+        ? ` and service in (${services.map((_service, index) => `:service${index}`).join(", ")})`
+        : "";
     const query = [
       `select ${["service", "client", ...optionalColumns].join(", ")}`,
       "from access",
@@ -176,7 +194,9 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
       throw new ActionableError("Simulator TCC database lookup requires a non-empty device UDID");
     }
     if (!isIosSimulatorUdid(normalizedDeviceId)) {
-      throw new ActionableError(`Simulator TCC database lookup requires a simulator UDID, received ${normalizedDeviceId}`);
+      throw new ActionableError(
+        `Simulator TCC database lookup requires a simulator UDID, received ${normalizedDeviceId}`,
+      );
     }
     const databasePath = join(
       this.homeDirectory,
@@ -193,7 +213,9 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
     try {
       const details = await this.fileSystem.stat(databasePath);
       if (!details.isFile()) {
-        throw new ActionableError(`Simulator TCC database is unavailable for ${normalizedDeviceId}: ${databasePath} is not a file`);
+        throw new ActionableError(
+          `Simulator TCC database is unavailable for ${normalizedDeviceId}: ${databasePath} is not a file`,
+        );
       }
       return databasePath;
     } catch (error) {
@@ -206,10 +228,19 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
     }
   }
 
-  private async readAccessColumns(databasePath: string, deviceId: string, signal?: AbortSignal): Promise<Set<string>> {
-    const result = await this.execute(["-json", databasePath, "pragma table_info(access);"], databasePath, deviceId, signal);
+  private async readAccessColumns(
+    databasePath: string,
+    deviceId: string,
+    signal?: AbortSignal,
+  ): Promise<Set<string>> {
+    const result = await this.execute(
+      ["-json", databasePath, "pragma table_info(access);"],
+      databasePath,
+      deviceId,
+      signal,
+    );
     const rows = parseJsonArray(result.stdout, `simulator TCC database for ${deviceId}`);
-    return new Set(rows.flatMap(row => typeof row.name === "string" ? [row.name] : []));
+    return new Set(rows.flatMap((row) => (typeof row.name === "string" ? [row.name] : [])));
   }
 
   private async execute(
@@ -235,17 +266,23 @@ export class SimulatorTccSqliteClient implements TccPermissionReader {
       return await this.executor.executeCommand("sqlite3", args, { signal: controller.signal });
     } catch (error) {
       if (timedOut) {
-        throw new ActionableError(`Timed out after ${this.timeoutMs}ms while reading simulator TCC database for ${deviceId}`);
+        throw new ActionableError(
+          `Timed out after ${this.timeoutMs}ms while reading simulator TCC database for ${deviceId}`,
+        );
       }
       if (parentSignal?.aborted) {
         throw new ActionableError(`Reading simulator TCC database for ${deviceId} was cancelled`);
       }
       const detail = sqliteErrorDetail(error);
       if (hasErrorCode(error, "ENOENT") || /\bENOENT\b|spawn sqlite3/i.test(detail)) {
-        throw new ActionableError("sqlite3 is unavailable; install the macOS SQLite command-line tool and retry");
+        throw new ActionableError(
+          "sqlite3 is unavailable; install the macOS SQLite command-line tool and retry",
+        );
       }
       if (/file is not a database|malformed database/i.test(detail)) {
-        throw new ActionableError(`Simulator TCC database is malformed for ${deviceId}: ${databasePath}`);
+        throw new ActionableError(
+          `Simulator TCC database is malformed for ${deviceId}: ${databasePath}`,
+        );
       }
       throw new ActionableError(`Failed to read simulator TCC database for ${deviceId}: ${detail}`);
     } finally {

@@ -21,7 +21,11 @@ import type { ObserveResult } from "../../src/models/ObserveResult";
  * the observe response while the cache keeps the full untrimmed hierarchy.
  */
 describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
-  const androidA: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
+  const androidA: BootedDevice = {
+    name: "Pixel A",
+    deviceId: "emulator-5554",
+    platform: "android",
+  };
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
@@ -37,7 +41,7 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
           node: {
             "resource-id": "com.example:id/root",
             "view-id": "com.example:id/root", // redundant duplicate
-            "clickable": "false", // default-false boolean
+            clickable: "false", // default-false boolean
             "content-desc": "root",
           } as any,
         },
@@ -57,7 +61,13 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA]);
-    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
     await pool.initializeWithDevices([androidA]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     const sessionId = (await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1"))!;
@@ -98,11 +108,8 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     // Inject a rogue `screenshot` field: the dead lastScreenshot cache chain was
     // removed (#3221), so even a payload that carries one must NOT be cached.
     (observeResult as any).screenshot = "base64-screenshot-data";
-    ToolRegistry.registerDeviceAware(
-      "observe",
-      "observe",
-      toolSchema,
-      async () => createStructuredToolResponse(observeResult)
+    ToolRegistry.registerDeviceAware("observe", "observe", toolSchema, async () =>
+      createStructuredToolResponse(observeResult),
     );
     const tool = ToolRegistry.getTool("observe")!;
 
@@ -131,7 +138,8 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     expect((cacheData as Record<string, unknown>).customData).toBeUndefined();
 
     // Returned wire response is sanitized at the chokepoint.
-    const returnedRoot = (response.structuredContent as ObserveResult).viewHierarchy!.hierarchy.node as any;
+    const returnedRoot = (response.structuredContent as ObserveResult).viewHierarchy!.hierarchy
+      .node as any;
     expect(returnedRoot["view-id"]).toBeUndefined();
     expect(returnedRoot.clickable).toBeUndefined();
     expect(returnedRoot["content-desc"]).toBe("root");
@@ -141,15 +149,12 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
     const sessionId = await setupAutolockedSession();
 
     const observation = makeObserveResult();
-    ToolRegistry.registerDeviceAware(
-      "tapOn",
-      "tapOn",
-      toolSchema,
-      async () => createStructuredToolResponse({
+    ToolRegistry.registerDeviceAware("tapOn", "tapOn", toolSchema, async () =>
+      createStructuredToolResponse({
         success: true,
         message: "Tapped on element",
         observation,
-      })
+      }),
     );
     const tool = ToolRegistry.getTool("tapOn")!;
 

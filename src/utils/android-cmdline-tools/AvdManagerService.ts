@@ -12,7 +12,7 @@ import {
   CreateAvdParams,
   AvdInfo,
   DeviceProfile,
-  AvdManagerDependencies
+  AvdManagerDependencies,
 } from "./avdmanager";
 import type { AvdManager } from "./interfaces/AvdManager";
 
@@ -29,7 +29,7 @@ export class AvdManagerService implements AvdManager {
 
   async acceptLicenses(): Promise<{
     success: boolean;
-    message: string
+    message: string;
   }> {
     if (this.dependencies) {
       return acceptLicenses(this.dependencies);
@@ -51,7 +51,10 @@ export class AvdManagerService implements AvdManager {
     return listInstalledSystemImages(filter);
   }
 
-  async installSystemImage(packageName: string, acceptLicense = true): Promise<{
+  async installSystemImage(
+    packageName: string,
+    acceptLicense = true,
+  ): Promise<{
     success: boolean;
     message: string;
   }> {

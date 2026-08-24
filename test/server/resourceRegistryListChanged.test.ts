@@ -5,10 +5,7 @@ import {
   SubscribeRequestSchema,
   UnsubscribeRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import {
-  getRequestedResourceUri,
-  ResourceRegistry,
-} from "../../src/server/resourceRegistry";
+import { getRequestedResourceUri, ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ListChangedBroadcaster } from "../../src/server/listChangedBroadcast";
 
 // Minimal MCP-server stand-in for ResourceRegistry: registerWithServer installs
@@ -38,7 +35,7 @@ class FakeMcpServer {
 }
 
 function methodsSent(server: FakeMcpServer): string[] {
-  return server.server.notifications.map(n => n.method);
+  return server.server.notifications.map((n) => n.method);
 }
 
 describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
@@ -87,7 +84,7 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
 
   test("emits on the ListChangedBroadcaster even with zero servers", async () => {
     const kinds: string[] = [];
-    const unsubscribe = ListChangedBroadcaster.subscribe(kind => {
+    const unsubscribe = ListChangedBroadcaster.subscribe((kind) => {
       kinds.push(kind);
     });
     try {
@@ -108,7 +105,7 @@ describe("ResourceRegistry list-changed fan-out (issue #3223)", () => {
       "test",
       "test resource",
       "text/plain",
-      async () => ({ uri: "automobile:test/updated-resource", text: "x" })
+      async () => ({ uri: "automobile:test/updated-resource", text: "x" }),
     );
     // Subscribe the same way a client would: through the registered handler.
     const subscribeHandler = first.server.handlersBySchema.get(SubscribeRequestSchema);
@@ -140,11 +137,11 @@ describe("ResourceRegistry URI-template matching", () => {
       "Test",
       "Test raw query template",
       "application/json",
-      async () => ({ uri: "automobile:test", text: "{}" })
+      async () => ({ uri: "automobile:test", text: "{}" }),
     );
 
     expect(ResourceRegistry.matchTemplate("automobile:test?first=one&second=two")).toMatchObject({
-      params: { params: "first=one&second=two" }
+      params: { params: "first=one&second=two" },
     });
   });
 
@@ -164,17 +161,17 @@ describe("ResourceRegistry URI-template matching", () => {
       }),
     );
     const controller = new AbortController();
-    ResourceRegistry.registerWithServer(
-      server as unknown as McpServer,
-      signal => ({ sessionUuid: "session-bound", signal }),
-    );
+    ResourceRegistry.registerWithServer(server as unknown as McpServer, (signal) => ({
+      sessionUuid: "session-bound",
+      signal,
+    }));
 
     const readHandler = server.server.handlersBySchema.get(ReadResourceRequestSchema);
     expect(readHandler).toBeDefined();
-    const response = await readHandler!(
+    const response = (await readHandler!(
       { params: { uri: "automobile:test/one" } },
       { signal: controller.signal },
-    ) as {
+    )) as {
       contents: Array<{ text?: string }>;
     };
 
@@ -190,11 +187,11 @@ describe("ResourceRegistry URI-template matching", () => {
       "Test",
       "Test query template",
       "application/json",
-      async () => ({ uri: "automobile:test", text: "{}" })
+      async () => ({ uri: "automobile:test", text: "{}" }),
     );
 
     expect(ResourceRegistry.matchTemplate("automobile:test?second=two&first=one")).toMatchObject({
-      params: { first: "one", second: "two" }
+      params: { first: "one", second: "two" },
     });
   });
 
@@ -206,16 +203,16 @@ describe("ResourceRegistry URI-template matching", () => {
       "Test",
       "Test query template",
       "application/json",
-      async params => {
+      async (params) => {
         handlerUri = getRequestedResourceUri(params) ?? "";
         return { uri: handlerUri, text: "{}" };
-      }
+      },
     );
     ResourceRegistry.registerWithServer(server as unknown as McpServer);
 
     const readHandler = server.server.handlersBySchema.get(ReadResourceRequestSchema);
     const requestedUri = "automobile:test?second=two&first=one";
-    const response = await readHandler!({ params: { uri: requestedUri } }) as {
+    const response = (await readHandler!({ params: { uri: requestedUri } })) as {
       contents: Array<{ uri: string }>;
     };
 

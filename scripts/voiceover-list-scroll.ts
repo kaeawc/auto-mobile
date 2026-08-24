@@ -52,27 +52,27 @@ interface MockClient {
 function makeInitialListObserve(): ObserveResult {
   // Initial state: list visible, items 1–10 on screen, item 27 off-screen.
   const listContainer: Element = {
-    "bounds": { left: 0, top: 59, right: 390, bottom: 810 },
-    "text": "",
+    bounds: { left: 0, top: 59, right: 390, bottom: 810 },
+    text: "",
     "content-desc": "",
     "resource-id": "itemList",
-    "class": "UITableView",
-    "clickable": false,
-    "focusable": false,
-    "scrollable": true,
-    "enabled": true,
+    class: "UITableView",
+    clickable: false,
+    focusable: false,
+    scrollable: true,
+    enabled: true,
   };
 
   const visibleItems: Element[] = Array.from({ length: 10 }, (_, i) => ({
-    "bounds": { left: 0, top: 59 + i * 75, right: 390, bottom: 59 + (i + 1) * 75 },
-    "text": `Item ${i + 1}`,
+    bounds: { left: 0, top: 59 + i * 75, right: 390, bottom: 59 + (i + 1) * 75 },
+    text: `Item ${i + 1}`,
     "content-desc": `Item ${i + 1}`,
     "resource-id": `item_${i + 1}`,
-    "class": "UITableViewCell",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "enabled": true,
+    class: "UITableViewCell",
+    clickable: true,
+    focusable: true,
+    focused: false,
+    enabled: true,
   }));
 
   return {
@@ -159,12 +159,11 @@ async function main(): Promise<void> {
   const initialObserve = await client.observe();
   printResult("accessibilityState", initialObserve.accessibilityState);
 
-  const visibleTexts = initialObserve.elements?.text?.map(el => el.text) ?? [];
+  const visibleTexts = initialObserve.elements?.text?.map((el) => el.text) ?? [];
   console.log(`\nVisible items: ${visibleTexts.join(", ")}`);
 
-  const item27Visible = initialObserve.elements?.clickable?.some(
-    el => el.text === "Item 27"
-  ) ?? false;
+  const item27Visible =
+    initialObserve.elements?.clickable?.some((el) => el.text === "Item 27") ?? false;
   console.log(`Item 27 already visible: ${item27Visible}`);
 
   // -------------------------------------------------------------------------
@@ -198,7 +197,7 @@ async function main(): Promise<void> {
   console.log("  - tapOn still uses accessibility activation (transparent to agent).");
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error("Fatal error:", error);
   process.exit(1);
 });

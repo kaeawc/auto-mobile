@@ -331,8 +331,16 @@ describe("FailureEventRepository", () => {
     });
 
     test("getToolCallFailures filters by sessionUuid", async () => {
-      await repo.saveToolCall("tapOn", { status: "failure", sessionUuid: "s-1", errorMessage: "err" });
-      await repo.saveToolCall("tapOn", { status: "failure", sessionUuid: "s-2", errorMessage: "err" });
+      await repo.saveToolCall("tapOn", {
+        status: "failure",
+        sessionUuid: "s-1",
+        errorMessage: "err",
+      });
+      await repo.saveToolCall("tapOn", {
+        status: "failure",
+        sessionUuid: "s-2",
+        errorMessage: "err",
+      });
 
       const failures = await repo.getToolCallFailures({ sessionUuid: "s-1" });
       expect(failures).toHaveLength(1);
@@ -349,7 +357,7 @@ describe("FailureEventRepository", () => {
       const all = await repo.getAllFailures();
       expect(all).toHaveLength(3);
 
-      const types = all.map(f => f.type);
+      const types = all.map((f) => f.type);
       expect(types).toContain("crash");
       expect(types).toContain("anr");
       expect(types).toContain("tool_call_failure");
@@ -392,11 +400,11 @@ describe("FailureEventRepository", () => {
         makeCrashEvent({
           crashType: "java",
           exceptionClass: "java.lang.OutOfMemoryError",
-        })
+        }),
       );
 
       const all = await repo.getAllFailures();
-      const crash = all.find(f => f.type === "crash")!;
+      const crash = all.find((f) => f.type === "crash")!;
       expect(crash.crashType).toBe("java");
       expect(crash.exceptionClass).toBe("java.lang.OutOfMemoryError");
     });
@@ -407,11 +415,11 @@ describe("FailureEventRepository", () => {
           reason: "Broadcast timeout",
           activity: "com.test.Activity",
           waitDurationMs: 10000,
-        })
+        }),
       );
 
       const all = await repo.getAllFailures();
-      const anr = all.find(f => f.type === "anr")!;
+      const anr = all.find((f) => f.type === "anr")!;
       expect(anr.reason).toBe("Broadcast timeout");
       expect(anr.activity).toBe("com.test.Activity");
       expect(anr.waitDurationMs).toBe(10000);
@@ -426,7 +434,7 @@ describe("FailureEventRepository", () => {
       });
 
       const all = await repo.getAllFailures();
-      const tcf = all.find(f => f.type === "tool_call_failure")!;
+      const tcf = all.find((f) => f.type === "tool_call_failure")!;
       expect(tcf.toolName).toBe("swipeOn");
       expect(tcf.message).toBe("scroll failed");
       expect(tcf.errorType).toBe("SwipeError");
@@ -594,12 +602,26 @@ describe("FailureEventRepository", () => {
     // must agree under the same options (guards against filter drift between the
     // COUNT(*) queries and getCrashes/getAnrs/getToolCallFailures).
     test("counts match the filtered row getters under the same options", async () => {
-      await repo.saveCrash(makeCrashEvent({ deviceId: "d-1", packageName: "com.a", timestamp: 1000 }));
-      await repo.saveCrash(makeCrashEvent({ deviceId: "d-1", packageName: "com.b", timestamp: 2000 }));
-      await repo.saveCrash(makeCrashEvent({ deviceId: "d-2", packageName: "com.a", timestamp: 3000 }));
+      await repo.saveCrash(
+        makeCrashEvent({ deviceId: "d-1", packageName: "com.a", timestamp: 1000 }),
+      );
+      await repo.saveCrash(
+        makeCrashEvent({ deviceId: "d-1", packageName: "com.b", timestamp: 2000 }),
+      );
+      await repo.saveCrash(
+        makeCrashEvent({ deviceId: "d-2", packageName: "com.a", timestamp: 3000 }),
+      );
       await repo.saveAnr(makeAnrEvent({ deviceId: "d-1", timestamp: 1500 }));
-      await repo.saveToolCall("tapOn", { status: "failure", deviceId: "d-1", packageName: "com.a" });
-      await repo.saveToolCall("observe", { status: "failure", deviceId: "d-2", packageName: "com.a" });
+      await repo.saveToolCall("tapOn", {
+        status: "failure",
+        deviceId: "d-1",
+        packageName: "com.a",
+      });
+      await repo.saveToolCall("observe", {
+        status: "failure",
+        deviceId: "d-2",
+        packageName: "com.a",
+      });
 
       const opts = { deviceId: "d-1", packageName: "com.a" };
       const counts = await repo.getFailureCounts(opts);

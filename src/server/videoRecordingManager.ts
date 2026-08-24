@@ -76,18 +76,14 @@ export interface VideoRetentionPolicy {
   inProgressCheckIntervalMs: number;
 }
 
-function parseEnvNumber(
-  raw: string | undefined,
-  fallback: number,
-  allowZero: boolean
-): number {
+function parseEnvNumber(raw: string | undefined, fallback: number, allowZero: boolean): number {
   if (raw === undefined || raw.trim() === "") {
     return fallback;
   }
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0 || (!allowZero && parsed === 0)) {
     logger.warn(
-      `[VideoRecording] Ignoring invalid retention env value "${raw}"; using ${fallback}`
+      `[VideoRecording] Ignoring invalid retention env value "${raw}"; using ${fallback}`,
     );
     return fallback;
   }
@@ -100,24 +96,22 @@ function parseEnvNumber(
  * policy is injected.
  */
 export function resolveVideoRetentionPolicy(
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
 ): VideoRetentionPolicy {
   const days = parseEnvNumber(
     env.AUTOMOBILE_VIDEO_RETENTION_DAYS ?? env.AUTO_MOBILE_VIDEO_RETENTION_DAYS,
     DEFAULT_RETENTION_DAYS,
-    true
+    true,
   );
   const sweepMinutes = parseEnvNumber(
-    env.AUTOMOBILE_VIDEO_RETENTION_SWEEP_MINUTES ??
-      env.AUTO_MOBILE_VIDEO_RETENTION_SWEEP_MINUTES,
+    env.AUTOMOBILE_VIDEO_RETENTION_SWEEP_MINUTES ?? env.AUTO_MOBILE_VIDEO_RETENTION_SWEEP_MINUTES,
     DEFAULT_RETENTION_SWEEP_INTERVAL_MINUTES,
-    false
+    false,
   );
   const checkSeconds = parseEnvNumber(
-    env.AUTOMOBILE_VIDEO_INPROGRESS_CHECK_SECONDS ??
-      env.AUTO_MOBILE_VIDEO_INPROGRESS_CHECK_SECONDS,
+    env.AUTOMOBILE_VIDEO_INPROGRESS_CHECK_SECONDS ?? env.AUTO_MOBILE_VIDEO_INPROGRESS_CHECK_SECONDS,
     DEFAULT_IN_PROGRESS_SIZE_CHECK_SECONDS,
-    false
+    false,
   );
   return {
     ttlMs: Math.max(0, Math.floor(days * MS_PER_DAY)),
@@ -224,7 +218,7 @@ async function createRecorderService(): Promise<VideoRecorderService> {
 }
 
 async function initializeVideoRecordingState(
-  deps: VideoRecordingManagerDependencies
+  deps: VideoRecordingManagerDependencies,
 ): Promise<void> {
   if (managerInitialized) {
     return;
@@ -252,9 +246,7 @@ async function initializeVideoRecordingState(
     });
   }
 
-  logger.info(
-    `[VideoRecording] Marked ${active.length} recording(s) as interrupted after restart`
-  );
+  logger.info(`[VideoRecording] Marked ${active.length} recording(s) as interrupted after restart`);
 }
 
 async function getVideoRecordingDependencies(): Promise<VideoRecordingManagerDependencies> {
@@ -276,10 +268,10 @@ async function getVideoRecordingDependencies(): Promise<VideoRecordingManagerDep
 }
 
 export async function setVideoRecordingManagerDependencies(
-  deps: Partial<VideoRecordingManagerDependencies>
+  deps: Partial<VideoRecordingManagerDependencies>,
 ): Promise<void> {
   const current = moduleDependencies ?? {
-    videoRecorderService: deps.videoRecorderService ?? await createRecorderService(),
+    videoRecorderService: deps.videoRecorderService ?? (await createRecorderService()),
     recordingRepository: deps.recordingRepository ?? new VideoRecordingRepository(),
     configRepository: deps.configRepository ?? createVideoRecordingConfigRepository(),
     highlightClient: deps.highlightClient ?? new VisualHighlightClient(),
@@ -343,12 +335,12 @@ function beginVideoRecordingStart(): { abortSignal: AbortSignal; complete(): voi
   return {
     abortSignal: controller.signal,
     complete: () => {
-    inFlightVideoRecordingStarts--;
-    inFlightVideoRecordingStartControllers.delete(controller);
-    if (inFlightVideoRecordingStarts === 0) {
-      videoRecordingStartDrain?.resolve();
-      videoRecordingStartDrain = null;
-    }
+      inFlightVideoRecordingStarts--;
+      inFlightVideoRecordingStartControllers.delete(controller);
+      if (inFlightVideoRecordingStarts === 0) {
+        videoRecordingStartDrain?.resolve();
+        videoRecordingStartDrain = null;
+      }
     },
   };
 }
@@ -363,7 +355,9 @@ export async function stopAcceptingVideoRecordingStarts(): Promise<void> {
   }
   if (!videoRecordingStartDrain) {
     let resolve: (() => void) | undefined;
-    const promise = new Promise<void>(settle => { resolve = settle; });
+    const promise = new Promise<void>((settle) => {
+      resolve = settle;
+    });
     videoRecordingStartDrain = { promise, resolve: resolve! };
   }
   await videoRecordingStartDrain.promise;
@@ -376,7 +370,7 @@ export function resetVideoRecordingManagerDependencies(): void {
 
 function mergeConfigInput(
   defaults: VideoRecordingConfigInput,
-  overrides: VideoRecordingConfigInput
+  overrides: VideoRecordingConfigInput,
 ): VideoRecordingConfigInput {
   return {
     qualityPreset: overrides.qualityPreset ?? defaults.qualityPreset,
@@ -403,7 +397,7 @@ function configToInput(config: VideoRecordingConfig): VideoRecordingConfigInput 
 
 function resolveMaxDurationSeconds(
   value: number | undefined,
-  platform: BootedDevice["platform"]
+  platform: BootedDevice["platform"],
 ): number {
   if (value === undefined) {
     return DEFAULT_MAX_DURATION_SECONDS;
@@ -431,9 +425,7 @@ async function resolveActiveRecordingId(recordingId?: string): Promise<string> {
   }
 
   if (active.length > 1) {
-    throw new ActionableError(
-      "Multiple active video recordings found. Provide recordingId."
-    );
+    throw new ActionableError("Multiple active video recordings found. Provide recordingId.");
   }
 
   return active[0].recordingId;
@@ -447,7 +439,7 @@ async function scheduleAutoStop(recordingId: string, maxDurationSeconds: number)
   const { timer } = await getVideoRecordingDependencies();
   const timeoutMs = Math.max(1, Math.round(maxDurationSeconds * 1000));
   const handle = timer.setTimeout(() => {
-    void stopVideoRecording(recordingId).catch(error => {
+    void stopVideoRecording(recordingId).catch((error) => {
       logger.warn(`[VideoRecording] Failed to auto-stop recording ${recordingId}: ${error}`);
     });
   }, timeoutMs);
@@ -477,7 +469,7 @@ function ensureRetentionSweep(deps: VideoRecordingManagerDependencies): void {
     return;
   }
   const handle = timer.setInterval(() => {
-    void runRetentionSweep().catch(error => {
+    void runRetentionSweep().catch((error) => {
       logger.warn(`[VideoRecording] TTL retention sweep failed: ${error}`);
     });
   }, retentionPolicy.sweepIntervalMs);
@@ -514,7 +506,7 @@ export async function runRetentionSweep(): Promise<string[]> {
       }
     } catch (error) {
       logger.warn(
-        `[VideoRecording] Failed to prune expired recording ${recording.recordingId}: ${error}`
+        `[VideoRecording] Failed to prune expired recording ${recording.recordingId}: ${error}`,
       );
     }
   }
@@ -522,7 +514,7 @@ export async function runRetentionSweep(): Promise<string[]> {
   if (prunedRecordingIds.length > 0) {
     logger.info(
       `[VideoRecording] TTL sweep pruned ${prunedRecordingIds.length} recording(s) older than ` +
-        `${retentionPolicy.ttlMs} ms`
+        `${retentionPolicy.ttlMs} ms`,
     );
   }
 
@@ -540,17 +532,15 @@ function scheduleInProgressSizeCap(
   recordingId: string,
   filePath: string,
   capBytes: number,
-  deps: VideoRecordingManagerDependencies
+  deps: VideoRecordingManagerDependencies,
 ): void {
   if (!Number.isFinite(capBytes) || capBytes <= 0) {
     return;
   }
   const { timer, retentionPolicy } = deps;
   const handle = timer.setInterval(() => {
-    void enforceInProgressSizeCap(recordingId, filePath, capBytes).catch(error => {
-      logger.warn(
-        `[VideoRecording] In-progress size check failed for ${recordingId}: ${error}`
-      );
+    void enforceInProgressSizeCap(recordingId, filePath, capBytes).catch((error) => {
+      logger.warn(`[VideoRecording] In-progress size check failed for ${recordingId}: ${error}`);
     });
   }, retentionPolicy.inProgressCheckIntervalMs);
   inProgressSizeMonitors.set(recordingId, { timer, handle });
@@ -567,7 +557,7 @@ function clearInProgressSizeCap(recordingId: string): void {
 async function enforceInProgressSizeCap(
   recordingId: string,
   filePath: string,
-  capBytes: number
+  capBytes: number,
 ): Promise<void> {
   // A tick may fire after the recording already stopped (cleared monitor); skip.
   if (!inProgressSizeMonitors.has(recordingId)) {
@@ -581,7 +571,7 @@ async function enforceInProgressSizeCap(
 
   logger.warn(
     `[VideoRecording] In-progress recording ${recordingId} reached size cap ` +
-      `(${sizeBytes} >= ${capBytes} bytes); stopping to protect disk.`
+      `(${sizeBytes} >= ${capBytes} bytes); stopping to protect disk.`,
   );
   clearInProgressSizeCap(recordingId);
   await stopVideoRecording(recordingId);
@@ -610,7 +600,7 @@ function toSeconds(valueMs: number): number {
 function recordHighlightAdded(
   session: VideoRecordingHighlightSession,
   highlight: VideoRecordingHighlightInput,
-  timestampMs: number
+  timestampMs: number,
 ): void {
   const appearedAtMs = getElapsedMs(session, timestampMs);
   session.highlights.push({
@@ -638,7 +628,7 @@ export function generateHighlightId(timer: Timer = defaultTimer): string {
 
 function finalizeHighlightSession(
   session: VideoRecordingHighlightSession,
-  endedAt: string
+  endedAt: string,
 ): VideoRecordingHighlightEntry[] | undefined {
   if (session.highlights.length === 0) {
     return undefined;
@@ -648,7 +638,7 @@ function finalizeHighlightSession(
   const elapsedMs = getElapsedMs(session, endedAtMs);
 
   return session.highlights
-    .map(highlight => {
+    .map((highlight) => {
       const disappearedAtMs = Math.min(highlight.disappearedAtMs, elapsedMs);
       return {
         description: highlight.description,
@@ -666,7 +656,7 @@ function createHighlightSession(
   recordingId: string,
   device: BootedDevice,
   startedAt: string,
-  timer: Timer
+  timer: Timer,
 ): VideoRecordingHighlightSession {
   const startedAtMs = Date.parse(startedAt);
   return {
@@ -694,9 +684,7 @@ function disposeHighlightSession(recordingId: string): VideoRecordingHighlightSe
   return session;
 }
 
-function normalizeHighlightTiming(
-  highlight: VideoRecordingHighlightInput
-): { startMs: number } {
+function normalizeHighlightTiming(highlight: VideoRecordingHighlightInput): { startMs: number } {
   const startMs = highlight.timing?.startTimeMs ?? 0;
   if (!Number.isFinite(startMs) || startMs < 0) {
     throw new ActionableError("highlight.timing.startTimeMs must be >= 0.");
@@ -708,7 +696,7 @@ async function scheduleRecordingHighlights(
   session: VideoRecordingHighlightSession,
   device: BootedDevice,
   highlights: VideoRecordingHighlightInput[],
-  deps: VideoRecordingManagerDependencies
+  deps: VideoRecordingManagerDependencies,
 ): Promise<void> {
   const options = {
     device,
@@ -751,13 +739,11 @@ async function scheduleRecordingHighlights(
 }
 
 async function resolveConfigInput(
-  overrides: VideoRecordingConfigInput
+  overrides: VideoRecordingConfigInput,
 ): Promise<VideoRecordingConfigInput> {
   const { configRepository } = await getVideoRecordingDependencies();
   const stored = await configRepository.getConfig();
-  const baseInput = stored
-    ? configToInput(stored)
-    : serverConfig.getVideoRecordingDefaults();
+  const baseInput = stored ? configToInput(stored) : serverConfig.getVideoRecordingDefaults();
   return mergeConfigInput(baseInput, overrides);
 }
 
@@ -801,10 +787,7 @@ function toMetadata(record: VideoRecordingRecord): VideoRecordingMetadata {
 }
 
 async function notifyVideoRecordingResources(recordingIds: string[]): Promise<void> {
-  const uris = new Set<string>([
-    VIDEO_RESOURCE_URIS.LATEST,
-    VIDEO_RESOURCE_URIS.ARCHIVE,
-  ]);
+  const uris = new Set<string>([VIDEO_RESOURCE_URIS.LATEST, VIDEO_RESOURCE_URIS.ARCHIVE]);
 
   for (const recordingId of recordingIds) {
     uris.add(buildVideoArchiveItemUri(recordingId));
@@ -823,7 +806,7 @@ export async function getVideoRecordingConfig(): Promise<VideoRecordingConfig> {
 }
 
 export async function updateVideoRecordingConfig(
-  update: VideoRecordingConfigInput | null
+  update: VideoRecordingConfigInput | null,
 ): Promise<VideoRecordingConfigUpdateResult> {
   const { configRepository } = await getVideoRecordingDependencies();
   if (update === null) {
@@ -843,88 +826,86 @@ export async function updateVideoRecordingConfig(
 }
 
 export async function startVideoRecording(
-  request: StartVideoRecordingRequest
+  request: StartVideoRecordingRequest,
 ): Promise<ActiveVideoRecording> {
   const start = beginVideoRecordingStart();
   try {
-  const deps = await getVideoRecordingDependencies();
-  const { videoRecorderService, recordingRepository, timer } = deps;
-  const existing = await recordingRepository.listRecordings({
-    status: "recording",
-    deviceId: request.device.deviceId,
-  });
-  if (existing.length > 0) {
-    throw new ActionableError(
-      `Video recording already active for device ${request.device.deviceId}.`
+    const deps = await getVideoRecordingDependencies();
+    const { videoRecorderService, recordingRepository, timer } = deps;
+    const existing = await recordingRepository.listRecordings({
+      status: "recording",
+      deviceId: request.device.deviceId,
+    });
+    if (existing.length > 0) {
+      throw new ActionableError(
+        `Video recording already active for device ${request.device.deviceId}.`,
+      );
+    }
+    const overrides = request.configOverrides ?? {};
+    const configInput = await resolveConfigInput(overrides);
+    const maxDurationSeconds = resolveMaxDurationSeconds(
+      request.maxDurationSeconds,
+      request.device.platform,
     );
-  }
-  const overrides = request.configOverrides ?? {};
-  const configInput = await resolveConfigInput(overrides);
-  const maxDurationSeconds = resolveMaxDurationSeconds(
-    request.maxDurationSeconds,
-    request.device.platform
-  );
-  const highlightInputs = request.highlights ?? [];
+    const highlightInputs = request.highlights ?? [];
 
-  for (const highlight of highlightInputs) {
-    normalizeHighlightTiming(highlight);
-  }
+    for (const highlight of highlightInputs) {
+      normalizeHighlightTiming(highlight);
+    }
 
-  const active = await videoRecorderService.startRecording({
-    outputName: request.outputName,
-    config: configInput,
-    device: request.device,
-    maxDurationSeconds,
-    abortSignal: start.abortSignal,
-  });
+    const active = await videoRecorderService.startRecording({
+      outputName: request.outputName,
+      config: configInput,
+      device: request.device,
+      maxDurationSeconds,
+      abortSignal: start.abortSignal,
+    });
 
-  await recordingRepository.insertRecording({
-    recordingId: active.recordingId,
-    deviceId: request.device.deviceId,
-    platform: request.device.platform,
-    status: "recording",
-    outputName: active.outputName,
-    fileName: active.fileName,
-    filePath: active.outputPath,
-    format: active.config.format,
-    sizeBytes: 0,
-    durationMs: undefined,
-    codec: undefined,
-    createdAt: active.startedAt,
-    startedAt: active.startedAt,
-    endedAt: undefined,
-    lastAccessedAt: active.startedAt,
-    config: active.config,
-    ownerSessionUuid: request.ownerSessionUuid,
-  });
+    await recordingRepository.insertRecording({
+      recordingId: active.recordingId,
+      deviceId: request.device.deviceId,
+      platform: request.device.platform,
+      status: "recording",
+      outputName: active.outputName,
+      fileName: active.fileName,
+      filePath: active.outputPath,
+      format: active.config.format,
+      sizeBytes: 0,
+      durationMs: undefined,
+      codec: undefined,
+      createdAt: active.startedAt,
+      startedAt: active.startedAt,
+      endedAt: undefined,
+      lastAccessedAt: active.startedAt,
+      config: active.config,
+      ownerSessionUuid: request.ownerSessionUuid,
+    });
 
-  const highlightSession = createHighlightSession(
-    active.recordingId,
-    request.device,
-    active.startedAt,
-    timer
-  );
-  highlightSessions.set(active.recordingId, highlightSession);
-  highlightSessionsByDeviceId.set(request.device.deviceId, active.recordingId);
+    const highlightSession = createHighlightSession(
+      active.recordingId,
+      request.device,
+      active.startedAt,
+      timer,
+    );
+    highlightSessions.set(active.recordingId, highlightSession);
+    highlightSessionsByDeviceId.set(request.device.deviceId, active.recordingId);
 
-  if (highlightInputs.length > 0) {
-    await scheduleRecordingHighlights(highlightSession, request.device, highlightInputs, deps);
-  }
+    if (highlightInputs.length > 0) {
+      await scheduleRecordingHighlights(highlightSession, request.device, highlightInputs, deps);
+    }
 
-  await scheduleAutoStop(active.recordingId, maxDurationSeconds);
+    await scheduleAutoStop(active.recordingId, maxDurationSeconds);
 
-  const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
-  scheduleInProgressSizeCap(active.recordingId, active.outputPath, capBytes, deps);
+    const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
+    scheduleInProgressSizeCap(active.recordingId, active.outputPath, capBytes, deps);
 
-  return active;
+    return active;
   } finally {
     start.complete();
   }
 }
 
-export async function stopVideoRecording(
-  recordingId?: string
-): Promise<StopVideoRecordingResult> {
+export async function stopVideoRecording(recordingId?: string): Promise<StopVideoRecordingResult> {
   const resolvedId = await resolveActiveRecordingId(recordingId);
   const stopping = stoppingVideoRecordings.get(resolvedId);
   if (stopping) {
@@ -940,11 +921,8 @@ export async function stopVideoRecording(
   }
 }
 
-async function stopActiveVideoRecording(
-  resolvedId: string
-): Promise<StopVideoRecordingResult> {
-  const { videoRecorderService, recordingRepository, now } =
-    await getVideoRecordingDependencies();
+async function stopActiveVideoRecording(resolvedId: string): Promise<StopVideoRecordingResult> {
+  const { videoRecorderService, recordingRepository, now } = await getVideoRecordingDependencies();
 
   clearAutoStop(resolvedId);
   clearInProgressSizeCap(resolvedId);
@@ -954,7 +932,7 @@ async function stopActiveVideoRecording(
   if (highlightSession) {
     const finalizedHighlights = finalizeHighlightSession(
       highlightSession,
-      metadata.endedAt ?? now().toISOString()
+      metadata.endedAt ?? now().toISOString(),
     );
     if (finalizedHighlights) {
       metadata.highlights = finalizedHighlights;
@@ -1019,7 +997,7 @@ export async function forceStopVideoRecording(recordingId: string): Promise<void
 
 export async function recordVideoRecordingHighlightAdded(
   device: BootedDevice,
-  highlight: VideoRecordingHighlightInput
+  highlight: VideoRecordingHighlightInput,
 ): Promise<void> {
   const session = getHighlightSessionByDevice(device.deviceId);
   if (!session) {
@@ -1030,7 +1008,7 @@ export async function recordVideoRecordingHighlightAdded(
 }
 
 export async function listActiveVideoRecordings(
-  filter: { deviceId?: string; platform?: "android" | "ios" } = {}
+  filter: { deviceId?: string; platform?: "android" | "ios" } = {},
 ): Promise<VideoRecordingRecord[]> {
   const { recordingRepository } = await getVideoRecordingDependencies();
   return recordingRepository.listRecordings({
@@ -1050,7 +1028,7 @@ export function listOwnedActiveVideoRecordingIds(): string[] {
 }
 
 export async function listVideoRecordings(
-  scope: { ownerSessionUuid?: string } = {}
+  scope: { ownerSessionUuid?: string } = {},
 ): Promise<VideoRecordingMetadata[]> {
   const { recordingRepository } = await getVideoRecordingDependencies();
   const recordings = await recordingRepository.listRecordings({
@@ -1063,7 +1041,7 @@ export async function listVideoRecordings(
 
 export async function getVideoRecordingMetadata(
   recordingId: string,
-  options?: { touch?: boolean; ownerSessionUuid?: string }
+  options?: { touch?: boolean; ownerSessionUuid?: string },
 ): Promise<VideoRecordingMetadata | null> {
   const { recordingRepository, now } = await getVideoRecordingDependencies();
   const record = await recordingRepository.getRecording(recordingId, {
@@ -1085,7 +1063,7 @@ export async function getVideoRecordingMetadata(
 }
 
 export async function getLatestVideoRecordingMetadata(
-  scope: { ownerSessionUuid?: string } = {}
+  scope: { ownerSessionUuid?: string } = {},
 ): Promise<VideoRecordingMetadata | null> {
   const { recordingRepository } = await getVideoRecordingDependencies();
   const recordings = await recordingRepository.listRecordings({
@@ -1128,9 +1106,7 @@ async function deleteVideoRecording(recordingId: string): Promise<boolean> {
   return deleted;
 }
 
-async function enforceArchiveLimit(
-  maxArchiveSizeMb: number
-): Promise<VideoArchiveEvictionResult> {
+async function enforceArchiveLimit(maxArchiveSizeMb: number): Promise<VideoArchiveEvictionResult> {
   const maxSizeBytes = Math.max(0, Math.floor(maxArchiveSizeMb * 1024 * 1024));
   const { recordingRepository } = await getVideoRecordingDependencies();
   const recordings = await recordingRepository.listRecordings({
@@ -1138,10 +1114,7 @@ async function enforceArchiveLimit(
     orderByLastAccessed: "asc",
   });
 
-  let currentSizeBytes = recordings.reduce(
-    (sum, recording) => sum + (recording.sizeBytes ?? 0),
-    0
-  );
+  let currentSizeBytes = recordings.reduce((sum, recording) => sum + (recording.sizeBytes ?? 0), 0);
 
   if (maxSizeBytes === 0 || currentSizeBytes <= maxSizeBytes) {
     return {
@@ -1165,15 +1138,13 @@ async function enforceArchiveLimit(
         currentSizeBytes -= recording.sizeBytes ?? 0;
       }
     } catch (error) {
-      logger.warn(
-        `[VideoRecording] Failed to evict recording ${recording.recordingId}: ${error}`
-      );
+      logger.warn(`[VideoRecording] Failed to evict recording ${recording.recordingId}: ${error}`);
     }
   }
 
   if (currentSizeBytes > maxSizeBytes) {
     logger.warn(
-      `[VideoRecording] Archive size ${currentSizeBytes} bytes still exceeds limit ${maxSizeBytes} bytes after eviction`
+      `[VideoRecording] Archive size ${currentSizeBytes} bytes still exceeds limit ${maxSizeBytes} bytes after eviction`,
     );
   }
 

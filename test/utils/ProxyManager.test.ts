@@ -64,18 +64,24 @@ describe("ProxyManager interface", () => {
   // must still satisfy ProxyManager. Assigning them to the abstract
   // type proves it at compile-time; the assertions cover behavior.
   const platformFakes: ReadonlyArray<[string, () => ProxyManager]> = [
-    ["Android FakeCtrlProxyManager", () => {
-      const fake = new FakeCtrlProxyManager();
-      fake.setInstalled(true);
-      fake.setAvailable(true);
-      return fake;
-    }],
-    ["iOS FakeIOSCtrlProxyManager", () => {
-      const fake = new FakeIOSCtrlProxyManager();
-      fake.setInstalled(true);
-      fake.setAvailable(true);
-      return fake;
-    }]
+    [
+      "Android FakeCtrlProxyManager",
+      () => {
+        const fake = new FakeCtrlProxyManager();
+        fake.setInstalled(true);
+        fake.setAvailable(true);
+        return fake;
+      },
+    ],
+    [
+      "iOS FakeIOSCtrlProxyManager",
+      () => {
+        const fake = new FakeIOSCtrlProxyManager();
+        fake.setInstalled(true);
+        fake.setAvailable(true);
+        return fake;
+      },
+    ],
   ];
 
   for (const [name, build] of platformFakes) {

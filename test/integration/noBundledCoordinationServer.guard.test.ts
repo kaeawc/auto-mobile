@@ -28,9 +28,12 @@ describe("bundled coordination server is retired (issue #4291)", () => {
 
   test("no tracked file references the removed directory", () => {
     const offenders = versionedFiles()
-      .filter(file => file !== THIS_TEST_PATH)
-      .filter(file => readFileSync(file, "utf8").includes("webrtc-coordination-server"));
-    expect(offenders, `these tracked files still reference ${REMOVED_DIR}:\n${offenders.join("\n")}`).toEqual([]);
+      .filter((file) => file !== THIS_TEST_PATH)
+      .filter((file) => readFileSync(file, "utf8").includes("webrtc-coordination-server"));
+    expect(
+      offenders,
+      `these tracked files still reference ${REMOVED_DIR}:\n${offenders.join("\n")}`,
+    ).toEqual([]);
   });
 });
 
@@ -39,10 +42,16 @@ function versionedFiles(): string[] {
   const result = usesJj
     ? spawnSync("jj", ["file", "list", "-r", "@"], { cwd: process.cwd(), encoding: "utf8" })
     : spawnSync(
-      "git",
-      ["grep", "-l", "--", "webrtc-coordination-server", ":!test/integration/noBundledCoordinationServer.guard.test.ts"],
-      { cwd: process.cwd(), encoding: "utf8" }
-    );
+        "git",
+        [
+          "grep",
+          "-l",
+          "--",
+          "webrtc-coordination-server",
+          ":!test/integration/noBundledCoordinationServer.guard.test.ts",
+        ],
+        { cwd: process.cwd(), encoding: "utf8" },
+      );
 
   if (result.error) {
     throw result.error;
@@ -54,5 +63,5 @@ function versionedFiles(): string[] {
   if (!usesJj && result.status !== 0 && result.status !== 1) {
     throw new Error(`git grep failed (exit ${result.status}): ${result.stderr}`);
   }
-  return result.stdout.split("\n").filter(line => line.length > 0);
+  return result.stdout.split("\n").filter((line) => line.length > 0);
 }

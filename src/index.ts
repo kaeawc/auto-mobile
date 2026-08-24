@@ -302,9 +302,7 @@ async function main() {
       void ScreenCaptureHelperProvider.getInstance()
         .ensure()
         .catch((error) => {
-          logger.warn(
-            `[SCREEN_CAPTURE_HELPER] Background prefetch failed: ${errorMessage(error)}`,
-          );
+          logger.warn(`[SCREEN_CAPTURE_HELPER] Background prefetch failed: ${errorMessage(error)}`);
         });
     }
 

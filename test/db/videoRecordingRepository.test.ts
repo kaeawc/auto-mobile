@@ -2,7 +2,10 @@ import { beforeEach, afterEach, describe, expect, test } from "bun:test";
 import type { Kysely } from "kysely";
 import type { Database } from "../../src/db/types";
 import { VideoRecordingRepository } from "../../src/db/videoRecordingRepository";
-import type { VideoRecordingRecord, VideoRecordingQuery } from "../../src/db/videoRecordingRepository";
+import type {
+  VideoRecordingRecord,
+  VideoRecordingQuery,
+} from "../../src/db/videoRecordingRepository";
 import { createTestDatabase } from "./testDbHelper";
 import type { VideoRecordingConfig } from "../../src/models";
 
@@ -70,14 +73,12 @@ describe("VideoRecordingRepository", () => {
   describe("owner-session scoping (issue #4752)", () => {
     beforeEach(async () => {
       await repo.insertRecording(
-        makeRecord({ recordingId: "owned-a", status: "completed", ownerSessionUuid: "session-a" })
+        makeRecord({ recordingId: "owned-a", status: "completed", ownerSessionUuid: "session-a" }),
       );
       await repo.insertRecording(
-        makeRecord({ recordingId: "owned-b", status: "completed", ownerSessionUuid: "session-b" })
+        makeRecord({ recordingId: "owned-b", status: "completed", ownerSessionUuid: "session-b" }),
       );
-      await repo.insertRecording(
-        makeRecord({ recordingId: "legacy", status: "completed" })
-      );
+      await repo.insertRecording(makeRecord({ recordingId: "legacy", status: "completed" }));
     });
 
     test("insertRecording round-trips the owning session", async () => {
@@ -89,13 +90,13 @@ describe("VideoRecordingRepository", () => {
 
     test("getRecording rejects a cross-session read but allows the owner and legacy rows", async () => {
       expect(await repo.getRecording("owned-b", { ownerSessionUuid: "session-a" })).toBeNull();
-      expect((await repo.getRecording("owned-a", { ownerSessionUuid: "session-a" }))!.recordingId).toBe(
-        "owned-a"
-      );
+      expect(
+        (await repo.getRecording("owned-a", { ownerSessionUuid: "session-a" }))!.recordingId,
+      ).toBe("owned-a");
       // Legacy (null-owner) rows stay readable by any session for back-compat.
-      expect((await repo.getRecording("legacy", { ownerSessionUuid: "session-a" }))!.recordingId).toBe(
-        "legacy"
-      );
+      expect(
+        (await repo.getRecording("legacy", { ownerSessionUuid: "session-a" }))!.recordingId,
+      ).toBe("legacy");
     });
 
     test("listRecordings owner filter returns only the caller's rows plus legacy rows", async () => {
@@ -103,13 +104,13 @@ describe("VideoRecordingRepository", () => {
         status: "completed",
         ownerSessionUuid: "session-a",
       });
-      const ids = rows.map(row => row.recordingId).sort();
+      const ids = rows.map((row) => row.recordingId).sort();
       expect(ids).toEqual(["legacy", "owned-a"]);
     });
 
     test("listRecordings without an owner scope returns every row (internal maintenance path)", async () => {
       const rows = await repo.listRecordings({ status: "completed" });
-      expect(rows.map(row => row.recordingId).sort()).toEqual(["legacy", "owned-a", "owned-b"]);
+      expect(rows.map((row) => row.recordingId).sort()).toEqual(["legacy", "owned-a", "owned-b"]);
     });
   });
 
@@ -141,7 +142,7 @@ describe("VideoRecordingRepository", () => {
             timeline: { appearedAtSeconds: 1.5 },
           },
         ],
-      })
+      }),
     );
 
     const result = await repo.getRecording("rec-1");
@@ -174,7 +175,7 @@ describe("VideoRecordingRepository", () => {
         createdAt: "2025-05-05T00:00:00.000Z",
         sizeBytes: 8192,
         lastAccessedAt: "2025-05-05T00:00:00.000Z",
-      })
+      }),
     );
 
     const result = await repo.getRecording("rec-1");
@@ -199,14 +200,14 @@ describe("VideoRecordingRepository", () => {
             timeline: { appearedAtSeconds: 1.0 },
           },
         ],
-      })
+      }),
     );
 
     await repo.insertRecording(
       makeRecord({
         recordingId: "rec-1",
         status: "recording",
-      })
+      }),
     );
 
     const result = await repo.getRecording("rec-1");
@@ -295,10 +296,10 @@ describe("VideoRecordingRepository", () => {
 
   test("listRecordings orders by lastAccessedAt", async () => {
     await repo.insertRecording(
-      makeRecord({ recordingId: "rec-old", lastAccessedAt: "2024-01-01T00:00:00.000Z" })
+      makeRecord({ recordingId: "rec-old", lastAccessedAt: "2024-01-01T00:00:00.000Z" }),
     );
     await repo.insertRecording(
-      makeRecord({ recordingId: "rec-new", lastAccessedAt: "2024-06-01T00:00:00.000Z" })
+      makeRecord({ recordingId: "rec-new", lastAccessedAt: "2024-06-01T00:00:00.000Z" }),
     );
 
     const descResults = await repo.listRecordings({ orderByLastAccessed: "desc" });
@@ -365,21 +366,21 @@ describe("VideoRecordingRepository", () => {
         recordingId: "rec-1",
         status: "completed",
         lastAccessedAt: "2024-01-01T00:00:00.000Z",
-      })
+      }),
     );
     await repo.insertRecording(
       makeRecord({
         recordingId: "rec-2",
         status: "interrupted",
         lastAccessedAt: "2024-06-01T00:00:00.000Z",
-      })
+      }),
     );
     await repo.insertRecording(
       makeRecord({
         recordingId: "rec-3",
         status: "recording",
         lastAccessedAt: "2024-12-01T00:00:00.000Z",
-      })
+      }),
     );
 
     const latest = await repo.getLatestRecording();

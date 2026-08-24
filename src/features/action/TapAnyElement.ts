@@ -7,7 +7,7 @@ import {
   ObserveResult,
   TapAnyElementOptions,
   TapOnElementResult,
-  ViewHierarchyResult
+  ViewHierarchyResult,
 } from "../../models";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
@@ -48,7 +48,7 @@ export class TapAnyElement extends BaseVisualChange {
   constructor(
     device: BootedDevice,
     adb: AdbClient | null = null,
-    options: TapAnyElementDependencies = {}
+    options: TapAnyElementDependencies = {},
   ) {
     super(device, adb, options.timer);
     this.geometry = new DefaultElementGeometry();
@@ -64,14 +64,16 @@ export class TapAnyElement extends BaseVisualChange {
       action,
       error,
       element: {
-        bounds: { left: 0, top: 0, right: 0, bottom: 0 }
-      } as Element
+        bounds: { left: 0, top: 0, right: 0, bottom: 0 },
+      } as Element,
     };
   }
 
   private validateOptions(options: TapAnyElementOptions): string | null {
     if (options.container) {
-      const containerSelectorCount = [options.container.elementId, options.container.text].filter(Boolean).length;
+      const containerSelectorCount = [options.container.elementId, options.container.text].filter(
+        Boolean,
+      ).length;
       if (containerSelectorCount !== 1) {
         return "tapAny container must specify exactly one of elementId or text";
       }
@@ -85,45 +87,50 @@ export class TapAnyElement extends BaseVisualChange {
       throw new ActionableError("searchUntil.duration must be a number");
     }
     if (duration < TapAnyElement.SEARCH_UNTIL_MIN_MS) {
-      throw new ActionableError(`searchUntil.duration must be at least ${TapAnyElement.SEARCH_UNTIL_MIN_MS}ms`);
+      throw new ActionableError(
+        `searchUntil.duration must be at least ${TapAnyElement.SEARCH_UNTIL_MIN_MS}ms`,
+      );
     }
     if (duration > TapAnyElement.SEARCH_UNTIL_MAX_MS) {
-      throw new ActionableError(`searchUntil.duration must be at most ${TapAnyElement.SEARCH_UNTIL_MAX_MS}ms`);
+      throw new ActionableError(
+        `searchUntil.duration must be at most ${TapAnyElement.SEARCH_UNTIL_MAX_MS}ms`,
+      );
     }
     return Math.round(duration);
   }
 
   private isContainerAvailable(
     viewHierarchy: ViewHierarchyResult,
-    container?: { elementId?: string; text?: string }
+    container?: { elementId?: string; text?: string },
   ): boolean {
-    if (!container) {return true;}
+    if (!container) {
+      return true;
+    }
     return this.finder.hasContainerElement(viewHierarchy, container);
   }
 
   private isElementCenterOffScreen(
     element: Element,
-    screenSize?: ObserveResult["screenSize"]
+    screenSize?: ObserveResult["screenSize"],
   ): boolean {
     if (!screenSize?.width || !screenSize?.height || !element.bounds) {
       return false;
     }
     const centerX = (element.bounds.left + element.bounds.right) / 2;
     const centerY = (element.bounds.top + element.bounds.bottom) / 2;
-    return centerX < 0 || centerX > screenSize.width ||
-           centerY < 0 || centerY > screenSize.height;
+    return centerX < 0 || centerX > screenSize.width || centerY < 0 || centerY > screenSize.height;
   }
 
   private findClickableElement(
     options: TapAnyElementOptions,
     viewHierarchy: ViewHierarchyResult,
-    screenSize?: ObserveResult["screenSize"]
+    screenSize?: ObserveResult["screenSize"],
   ): { element: Element | null; containerFound: boolean } {
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
     const selection = this.elementSelector.selectClickable(viewHierarchy, {
       container: options.container,
       strategy: options.selectionStrategy,
-      scrollableContainer: options.scrollableContainer
+      scrollableContainer: options.scrollableContainer,
     });
     if (selection.element && this.isElementCenterOffScreen(selection.element, screenSize)) {
       return { element: null, containerFound };
@@ -132,7 +139,9 @@ export class TapAnyElement extends BaseVisualChange {
   }
 
   private hashViewHierarchy(viewHierarchy: ViewHierarchyResult | null): string | null {
-    if (!viewHierarchy) {return null;}
+    if (!viewHierarchy) {
+      return null;
+    }
     try {
       return NodeCryptoService.generateCacheKey(JSON.stringify(viewHierarchy.hierarchy));
     } catch (error) {
@@ -145,7 +154,7 @@ export class TapAnyElement extends BaseVisualChange {
 
   private prepareViewHierarchyForResponse(
     rawHierarchy: ViewHierarchyResult,
-    screenSize?: ObserveResult["screenSize"]
+    screenSize?: ObserveResult["screenSize"],
   ): ViewHierarchyResult {
     if (!serverConfig.isRawElementSearchEnabled()) {
       return rawHierarchy;
@@ -167,7 +176,7 @@ export class TapAnyElement extends BaseVisualChange {
       const filtered = this.viewHierarchy.filterOffscreenNodes(
         rawHierarchy,
         screenSize.width,
-        screenSize.height
+        screenSize.height,
       );
       attachRawViewHierarchy(filtered, rawHierarchy);
       return filtered;
@@ -178,7 +187,7 @@ export class TapAnyElement extends BaseVisualChange {
   private async refreshViewHierarchy(
     timeoutMs: number,
     screenSize?: ObserveResult["screenSize"],
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<ViewHierarchyResult | null> {
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
     switch (this.device.platform) {
@@ -187,18 +196,14 @@ export class TapAnyElement extends BaseVisualChange {
           this.accessibilityService,
           this.viewHierarchy,
           effectiveTimeoutMs,
-          signal
+          signal,
         );
-        return rawHierarchy
-          ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize)
-          : null;
+        return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
       }
       case "ios": {
         const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
         const rawHierarchy = await xcTestClient.getAccessibilityHierarchy();
-        return rawHierarchy
-          ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize)
-          : null;
+        return rawHierarchy ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize) : null;
       }
       default:
         throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
@@ -206,15 +211,19 @@ export class TapAnyElement extends BaseVisualChange {
   }
 
   private getLongPressDuration(options: TapAnyElementOptions): number {
-    if (options.action !== "longPress") {return 0;}
-    if (options.duration && options.duration > 0) {return options.duration;}
+    if (options.action !== "longPress") {
+      return 0;
+    }
+    if (options.duration && options.duration > 0) {
+      return options.duration;
+    }
     return this.device.platform === "ios" ? 1500 : 1000;
   }
 
   async execute(
     options: TapAnyElementOptions,
     progress?: ProgressCallback,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<TapOnElementResult> {
     if (!options.action) {
       return this.createErrorResult(options.action, "tap action is required");
@@ -257,14 +266,18 @@ export class TapAnyElement extends BaseVisualChange {
               throwIfAborted(signal);
               await this.timer.sleep(TapAnyElement.SEARCH_POLL_INTERVAL_MS);
               const remainingTimeMs = Math.max(0, deadline - this.timer.now());
-              if (remainingTimeMs <= 0) {break;}
+              if (remainingTimeMs <= 0) {
+                break;
+              }
               const refreshed = await this.refreshViewHierarchy(
                 remainingTimeMs,
                 observeResult.screenSize,
-                signal
+                signal,
               );
               requestCount += 1;
-              if (!refreshed) {continue;}
+              if (!refreshed) {
+                continue;
+              }
 
               const hash = this.hashViewHierarchy(refreshed);
               if (hash && hash !== lastHash) {
@@ -275,7 +288,9 @@ export class TapAnyElement extends BaseVisualChange {
               found = this.findClickableElement(options, refreshed, observeResult.screenSize);
               element = found.element;
               containerFoundEver = containerFoundEver || found.containerFound;
-              if (element) {break;}
+              if (element) {
+                break;
+              }
             }
           }
 
@@ -284,7 +299,9 @@ export class TapAnyElement extends BaseVisualChange {
               const containerLabel = options.container.elementId
                 ? `elementId '${options.container.elementId}'`
                 : `text '${options.container.text}'`;
-              throw new ActionableError(`Container element not found with provided ${containerLabel}`);
+              throw new ActionableError(
+                `Container element not found with provided ${containerLabel}`,
+              );
             }
             const containerHint = options.container
               ? ` within container ${options.container.elementId ? `elementId '${options.container.elementId}'` : `text '${options.container.text}'`}`
@@ -298,14 +315,16 @@ export class TapAnyElement extends BaseVisualChange {
 
           logger.info(
             `[TapAnyElement] Tapping (${tapPoint.x}, ${tapPoint.y}) on clickable element: ` +
-            `text=${JSON.stringify(element.text)}, ` +
-            `bounds=${JSON.stringify(element.bounds)}`
+              `text=${JSON.stringify(element.text)}, ` +
+              `bounds=${JSON.stringify(element.bounds)}`,
           );
 
           switch (this.device.platform) {
             case "android":
               if (action === "longPress") {
-                await this.adb.executeCommand(`shell input swipe ${tapPoint.x} ${tapPoint.y} ${tapPoint.x} ${tapPoint.y} ${longPressDuration}`);
+                await this.adb.executeCommand(
+                  `shell input swipe ${tapPoint.x} ${tapPoint.y} ${tapPoint.x} ${tapPoint.y} ${longPressDuration}`,
+                );
               } else if (action === "doubleTap") {
                 await this.adb.executeCommand(`shell input tap ${tapPoint.x} ${tapPoint.y}`);
                 await this.timer.sleep(50);
@@ -337,8 +356,8 @@ export class TapAnyElement extends BaseVisualChange {
             searchUntil: {
               durationMs: Math.max(0, Math.round(this.timer.now() - startTime)),
               requestCount,
-              changeCount
-            }
+              changeCount,
+            },
           };
         },
         {
@@ -355,10 +374,10 @@ export class TapAnyElement extends BaseVisualChange {
               container: options.container,
               selectionStrategy: options.selectionStrategy,
               scrollableContainer: options.scrollableContainer,
-              platform: this.device.platform
-            }
-          }
-        }
+              platform: this.device.platform,
+            },
+          },
+        },
       );
 
       return result;
@@ -370,8 +389,8 @@ export class TapAnyElement extends BaseVisualChange {
         action: options.action,
         error: `Failed to tap clickable element: ${errorMsg}`,
         element: {
-          bounds: { left: 0, top: 0, right: 0, bottom: 0 }
-        } as Element
+          bounds: { left: 0, top: 0, right: 0, bottom: 0 },
+        } as Element,
       };
     }
   }

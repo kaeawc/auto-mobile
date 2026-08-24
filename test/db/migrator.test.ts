@@ -13,7 +13,7 @@ function createTableMigration(table: string): Migration {
     async up(db: Kysely<any>): Promise<void> {
       await db.schema
         .createTable(table)
-        .addColumn("id", "integer", col => col.primaryKey())
+        .addColumn("id", "integer", (col) => col.primaryKey())
         .addColumn("label", "text")
         .execute();
     },
@@ -58,7 +58,7 @@ async function migrationNames(db: Kysely<unknown>): Promise<string[]> {
     .selectFrom("kysely_migration" as any)
     .select("name")
     .execute();
-  return rows.map(row => String(row.name)).sort();
+  return rows.map((row) => String(row.name)).sort();
 }
 
 describe("runMigrations recovery", () => {
@@ -84,7 +84,7 @@ describe("runMigrations recovery", () => {
 
     const missingName = "2099_01_01_000_missing_migration";
     await sql`insert into kysely_migration (name, timestamp) values (${missingName}, ${new Date().toISOString()})`.execute(
-      db
+      db,
     );
 
     await runMigrations(db);
@@ -93,7 +93,7 @@ describe("runMigrations recovery", () => {
       .selectFrom("kysely_migration" as any)
       .select("name")
       .execute();
-    const names = rows.map(row => String(row.name));
+    const names = rows.map((row) => String(row.name));
 
     expect(names).not.toContain(missingName);
   });
@@ -349,7 +349,7 @@ describe("runMigrations recovery", () => {
     await runMigrations(db, { provider: providerFor(baseMigrations()), env: {} });
 
     const lock = await sql<{ c: number }>`select count(*) as c from kysely_migration_lock`.execute(
-      db
+      db,
     );
     expect(Number(lock.rows[0].c)).toBeGreaterThan(0);
 
@@ -390,15 +390,18 @@ describe("runMigrations recovery", () => {
 
     const parent: Migration = {
       async up(d: Kysely<any>) {
-        await d.schema.createTable("parents").addColumn("id", "integer", c => c.primaryKey()).execute();
+        await d.schema
+          .createTable("parents")
+          .addColumn("id", "integer", (c) => c.primaryKey())
+          .execute();
       },
     };
     const child: Migration = {
       async up(d: Kysely<any>) {
         await d.schema
           .createTable("children")
-          .addColumn("id", "integer", c => c.primaryKey())
-          .addColumn("parent_id", "integer", c => c.references("parents.id"))
+          .addColumn("id", "integer", (c) => c.primaryKey())
+          .addColumn("parent_id", "integer", (c) => c.references("parents.id"))
           .execute();
       },
     };
@@ -415,7 +418,10 @@ describe("runMigrations recovery", () => {
       ...base,
       "2026_01_03_000_backport": {
         async up(d: Kysely<any>) {
-          await d.schema.createTable("sprockets").addColumn("id", "integer", c => c.primaryKey()).execute();
+          await d.schema
+            .createTable("sprockets")
+            .addColumn("id", "integer", (c) => c.primaryKey())
+            .execute();
         },
       } as Migration,
     };
@@ -431,7 +437,7 @@ describe("runMigrations recovery", () => {
     // Replay recreated everything.
     const names = await migrationNames(fkDb);
     expect(names).toEqual(
-      ["2026_01_02_000_parents", "2026_01_03_000_backport", "2026_01_05_000_children"].sort()
+      ["2026_01_02_000_parents", "2026_01_03_000_backport", "2026_01_05_000_children"].sort(),
     );
     // FK enforcement is still active afterwards (the reset only deferred it inside
     // its own transaction): a violating insert must be rejected.

@@ -49,7 +49,11 @@ if (existsSync(sourcemapPath)) {
     const map = JSON.parse(rawMap);
     let trimmedCount = 0;
 
-    if (!includeDependencySources && Array.isArray(map.sources) && Array.isArray(map.sourcesContent)) {
+    if (
+      !includeDependencySources &&
+      Array.isArray(map.sources) &&
+      Array.isArray(map.sourcesContent)
+    ) {
       map.sourcesContent = map.sourcesContent.map((content: string | null, index: number) => {
         const source = String(map.sources[index] ?? "");
         if (source.includes("node_modules") || source.includes("__bun")) {

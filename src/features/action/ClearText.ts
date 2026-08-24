@@ -13,7 +13,7 @@ import { ANDROID_INPUT_CLASSES } from "../../utils/elementProperties";
 
 export function getFocusedTextLength(
   viewHierarchy: ViewHierarchyResult,
-  parser: ElementParser = new DefaultElementParser()
+  parser: ElementParser = new DefaultElementParser(),
 ): number {
   let textLength = 0;
   const rootNodes = parser.extractRootNodes(viewHierarchy);
@@ -21,8 +21,11 @@ export function getFocusedTextLength(
   for (const rootNode of rootNodes) {
     parser.traverseNode(rootNode, (node: any) => {
       const nodeProperties = parser.extractNodeProperties(node);
-      if ((nodeProperties.focused === "true" || nodeProperties.focused === true) &&
-        nodeProperties.text && typeof nodeProperties.text === "string") {
+      if (
+        (nodeProperties.focused === "true" || nodeProperties.focused === true) &&
+        nodeProperties.text &&
+        typeof nodeProperties.text === "string"
+      ) {
         textLength = Math.max(textLength, nodeProperties.text.length);
       }
     });
@@ -33,7 +36,7 @@ export function getFocusedTextLength(
 
 export function hasFocusedTextInput(
   viewHierarchy: ViewHierarchyResult,
-  parser: ElementParser = new DefaultElementParser()
+  parser: ElementParser = new DefaultElementParser(),
 ): boolean {
   const rootNodes = parser.extractRootNodes(viewHierarchy);
 
@@ -46,9 +49,11 @@ export function hasFocusedTextInput(
 
       const nodeProperties = parser.extractNodeProperties(node);
       const nodeClass = nodeProperties.class ?? nodeProperties.className;
-      if ((nodeProperties.focused === "true" || nodeProperties.focused === true) &&
+      if (
+        (nodeProperties.focused === "true" || nodeProperties.focused === true) &&
         typeof nodeClass === "string" &&
-        ANDROID_INPUT_CLASSES.some(inputClass => nodeClass.includes(inputClass))) {
+        ANDROID_INPUT_CLASSES.some((inputClass) => nodeClass.includes(inputClass))
+      ) {
         found = true;
       }
     });
@@ -79,7 +84,11 @@ export async function clearTextWithKeyEvents(
 export class ClearText extends BaseVisualChange {
   private parser: ElementParser;
 
-  constructor(device: BootedDevice, adb: AdbClient | null = null, parser: ElementParser = new DefaultElementParser()) {
+  constructor(
+    device: BootedDevice,
+    adb: AdbClient | null = null,
+    parser: ElementParser = new DefaultElementParser(),
+  ) {
     super(device, adb);
     this.parser = parser;
   }
@@ -95,11 +104,11 @@ export class ClearText extends BaseVisualChange {
           switch (this.device.platform) {
             case "android":
               return await perf.track("androidClearText", () =>
-                this.executeAndroidClearText(observeResult)
+                this.executeAndroidClearText(observeResult),
               );
             case "ios":
               return await perf.track("iOSClearText", () =>
-                this.executeiOSClearText(observeResult)
+                this.executeiOSClearText(observeResult),
               );
             default:
               perf.end();
@@ -109,18 +118,18 @@ export class ClearText extends BaseVisualChange {
           perf.end();
           return {
             success: false,
-            error: "Failed to clear text"
+            error: "Failed to clear text",
           };
         }
       },
       {
         changeExpected: false, // TODO: can only make this true once we know for sure there was text in the text field
-        tolerancePercent: 0.00,
+        tolerancePercent: 0.0,
         timeoutMs: 100,
         progress,
         perf,
-        skipUiStability: true // Skip UI stability wait - a11y service already waits 100ms for tree update
-      }
+        skipUiStability: true, // Skip UI stability wait - a11y service already waits 100ms for tree update
+      },
     );
   }
 
@@ -134,12 +143,16 @@ export class ClearText extends BaseVisualChange {
     const a11yResult = await a11yClient.requestClearText();
 
     if (a11yResult.success) {
-      logger.info(`[ClearText] Cleared text via accessibility service: ${a11yResult.totalTimeMs}ms`);
+      logger.info(
+        `[ClearText] Cleared text via accessibility service: ${a11yResult.totalTimeMs}ms`,
+      );
       return { success: true };
     }
 
     // Fall back to ADB delete key events
-    logger.warn(`[ClearText] Accessibility service clear failed: ${a11yResult.error}, falling back to ADB`);
+    logger.warn(
+      `[ClearText] Accessibility service clear failed: ${a11yResult.error}, falling back to ADB`,
+    );
     return this.executeAdbClearText(observeResult);
   }
 
@@ -180,7 +193,9 @@ export class ClearText extends BaseVisualChange {
         return { success: true };
       }
 
-      logger.warn(`[ClearText] CtrlProxy iOS clear failed: ${result.error} totalMs=${Date.now() - startMs}`);
+      logger.warn(
+        `[ClearText] CtrlProxy iOS clear failed: ${result.error} totalMs=${Date.now() - startMs}`,
+      );
       return { success: false, error: result.error };
     } catch (error) {
       logger.error(`[ClearText] CtrlProxy iOS exception: ${error} totalMs=${Date.now() - startMs}`);
@@ -195,9 +210,12 @@ export class ClearText extends BaseVisualChange {
     for (const rootNode of rootNodes) {
       this.parser.traverseNode(rootNode, (node: any) => {
         const nodeProperties = this.parser.extractNodeProperties(node);
-        if (nodeProperties.class &&
-          ANDROID_INPUT_CLASSES.some(cls => nodeProperties.class.includes(cls)) &&
-          nodeProperties.text && typeof nodeProperties.text === "string") {
+        if (
+          nodeProperties.class &&
+          ANDROID_INPUT_CLASSES.some((cls) => nodeProperties.class.includes(cls)) &&
+          nodeProperties.text &&
+          typeof nodeProperties.text === "string"
+        ) {
           textLength = Math.max(textLength, nodeProperties.text.length);
         }
       });

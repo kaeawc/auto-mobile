@@ -4,7 +4,7 @@ import {
   SystemImage,
   CreateAvdParams,
   AvdInfo,
-  DeviceProfile
+  DeviceProfile,
 } from "../../src/utils/android-cmdline-tools/avdmanager";
 
 /**
@@ -14,22 +14,22 @@ import {
 export class FakeAvdManager implements AvdManager {
   private acceptLicensesResponse: { success: boolean; message: string } = {
     success: true,
-    message: "Android SDK licenses accepted"
+    message: "Android SDK licenses accepted",
   };
   private listSystemImagesResponse: SystemImage[] = [];
   private listInstalledSystemImagesResponse: SystemImage[] = [];
   private installSystemImageResponse: { success: boolean; message: string } = {
     success: true,
-    message: "System image installed successfully"
+    message: "System image installed successfully",
   };
   private listDeviceImagesResponse: AvdInfo[] = [];
   private createAvdResponse: { success: boolean; message: string; avdName?: string } = {
     success: true,
-    message: "AVD created successfully"
+    message: "AVD created successfully",
   };
   private deleteAvdResponse: { success: boolean; message: string } = {
     success: true,
-    message: "AVD deleted successfully"
+    message: "AVD deleted successfully",
   };
   private listDevicesResponse: DeviceProfile[] = [];
 
@@ -127,7 +127,7 @@ export class FakeAvdManager implements AvdManager {
 
   async acceptLicenses(): Promise<{
     success: boolean;
-    message: string
+    message: string;
   }> {
     this.acceptLicensesCalls++;
     return this.acceptLicensesResponse;
@@ -143,7 +143,10 @@ export class FakeAvdManager implements AvdManager {
     return this.listInstalledSystemImagesResponse;
   }
 
-  async installSystemImage(packageName: string, acceptLicense = true): Promise<{
+  async installSystemImage(
+    packageName: string,
+    acceptLicense = true,
+  ): Promise<{
     success: boolean;
     message: string;
   }> {

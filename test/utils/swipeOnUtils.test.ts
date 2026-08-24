@@ -32,7 +32,10 @@ describe("resolveSwipeDirection", () => {
     it("returns direction unchanged for explicit swipeFingerTowardsDirection", () => {
       const directions: SwipeDirection[] = ["up", "down", "left", "right"];
       for (const direction of directions) {
-        const result = resolveSwipeDirection({ direction, gestureType: "swipeFingerTowardsDirection" });
+        const result = resolveSwipeDirection({
+          direction,
+          gestureType: "swipeFingerTowardsDirection",
+        });
         expect(result.direction).toBe(direction);
         expect(result.error).toBeUndefined();
       }
@@ -41,35 +44,50 @@ describe("resolveSwipeDirection", () => {
 
   describe("scrollTowardsDirection", () => {
     it("inverts 'up' to 'down' (scroll content up → finger moves down)", () => {
-      const result = resolveSwipeDirection({ direction: "up", gestureType: "scrollTowardsDirection" });
+      const result = resolveSwipeDirection({
+        direction: "up",
+        gestureType: "scrollTowardsDirection",
+      });
       expect(result.direction).toBe("down");
       expect(result.error).toBeUndefined();
       expect(result.message).toContain("above");
     });
 
     it("inverts 'down' to 'up' (scroll content down → finger moves up)", () => {
-      const result = resolveSwipeDirection({ direction: "down", gestureType: "scrollTowardsDirection" });
+      const result = resolveSwipeDirection({
+        direction: "down",
+        gestureType: "scrollTowardsDirection",
+      });
       expect(result.direction).toBe("up");
       expect(result.error).toBeUndefined();
       expect(result.message).toContain("below");
     });
 
     it("inverts 'left' to 'right' (scroll content left → finger moves right)", () => {
-      const result = resolveSwipeDirection({ direction: "left", gestureType: "scrollTowardsDirection" });
+      const result = resolveSwipeDirection({
+        direction: "left",
+        gestureType: "scrollTowardsDirection",
+      });
       expect(result.direction).toBe("right");
       expect(result.error).toBeUndefined();
       expect(result.message).toContain("from left");
     });
 
     it("inverts 'right' to 'left' (scroll content right → finger moves left)", () => {
-      const result = resolveSwipeDirection({ direction: "right", gestureType: "scrollTowardsDirection" });
+      const result = resolveSwipeDirection({
+        direction: "right",
+        gestureType: "scrollTowardsDirection",
+      });
       expect(result.direction).toBe("left");
       expect(result.error).toBeUndefined();
       expect(result.message).toContain("from right");
     });
 
     it("includes the original scroll direction in the message", () => {
-      const result = resolveSwipeDirection({ direction: "up", gestureType: "scrollTowardsDirection" });
+      const result = resolveSwipeDirection({
+        direction: "up",
+        gestureType: "scrollTowardsDirection",
+      });
       expect(result.message).toContain("up");
     });
   });
@@ -81,7 +99,10 @@ describe("resolveSwipeDirection", () => {
     });
 
     it("emits the exact scroll message with the revealed-content phrase", () => {
-      const result = resolveSwipeDirection({ direction: "up", gestureType: "scrollTowardsDirection" });
+      const result = resolveSwipeDirection({
+        direction: "up",
+        gestureType: "scrollTowardsDirection",
+      });
       expect(result.message).toBe("Scrolling up to reveal content above");
     });
 
@@ -96,7 +117,7 @@ describe("resolveSwipeDirection", () => {
       // the scroll branch and inverts the finger direction.
       const result = resolveSwipeDirection({
         direction: "up",
-        gestureType: "totally-unknown" as unknown as "scrollTowardsDirection"
+        gestureType: "totally-unknown" as unknown as "scrollTowardsDirection",
       });
       expect(result.direction).toBe("down");
     });

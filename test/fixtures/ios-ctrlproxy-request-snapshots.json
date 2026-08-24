@@ -288,10 +288,7 @@
           "style": {
             "strokeColor": "#FF0000",
             "strokeWidth": 3.5,
-            "dashPattern": [
-              4,
-              2
-            ],
+            "dashPattern": [4, 2],
             "smoothing": "bezier",
             "tension": 0.5,
             "capStyle": "round",
@@ -335,10 +332,7 @@
         "type": "request_reset_permissions",
         "requestId": "fixture-request-id",
         "bundleId": "com.example.app",
-        "permissions": [
-          "camera",
-          "photos"
-        ]
+        "permissions": ["camera", "photos"]
       }
     },
     {

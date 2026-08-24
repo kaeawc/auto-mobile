@@ -15,24 +15,33 @@ const DEFAULTS_COMMAND = /(?:^|[;&|])\s*(?:[^\s;&|]*[/\\])?defaults(?:\s|$)/;
  * argument leaves those SimCtlClient paths untouched.
  */
 export function directlyExecutesHostDefaults(source: string): boolean {
-  if (!source.includes("defaults") || !/(?:spawn|exec|execute|Bun)/i.test(source)) {return false;}
+  if (!source.includes("defaults") || !/(?:spawn|exec|execute|Bun)/i.test(source)) {
+    return false;
+  }
   const ast = executionBoundaryAst(source);
-  return ast.calls.some(call => {
-    if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {return false;}
+  return ast.calls.some((call) => {
+    if (!ast.isLauncher(call) && !ast.isExecutionSeam(call)) {
+      return false;
+    }
     if (ast.isRunExecSeam(call)) {
-      return ast.objectPropertyValues(call.arguments[2], "command")
-        .some(value => ast.strings(value).some(text => DEFAULTS_COMMAND.test(text)));
+      return ast
+        .objectPropertyValues(call.arguments[2], "command")
+        .some((value) => ast.strings(value).some((text) => DEFAULTS_COMMAND.test(text)));
     }
     const first = call.arguments[0];
     const alternatives = ast.arrayAlternatives(first) ?? [[first]];
-    return alternatives.some(([command]) => ast.strings(command).some(value => DEFAULTS_COMMAND.test(value)));
+    return alternatives.some(([command]) =>
+      ast.strings(command).some((value) => DEFAULTS_COMMAND.test(value)),
+    );
   });
 }
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) {return sourceFiles(path);}
+    if (entry.isDirectory()) {
+      return sourceFiles(path);
+    }
     return entry.name.endsWith(".ts") ? [path] : [];
   });
 }
@@ -46,9 +55,11 @@ describe("host defaults execution boundary (issue #4062)", () => {
     // A silently-empty scan yields zero offenders and passes green while checking nothing.
     expect(files.length).toBeGreaterThan(100);
 
-    const offenders = files.flatMap(file => {
+    const offenders = files.flatMap((file) => {
       const repoPath = relative(ROOT, file).split("\\").join("/");
-      if (repoPath === OWNER || exceptions.has(repoPath)) {return [];}
+      if (repoPath === OWNER || exceptions.has(repoPath)) {
+        return [];
+      }
       const source = readFileSync(file, "utf8");
       return directlyExecutesHostDefaults(source)
         ? [`${repoPath} directly executes host defaults; route it through ${OWNER} instead.`]
@@ -60,66 +71,112 @@ describe("host defaults execution boundary (issue #4062)", () => {
 
   test("flags direct launcher invocations of defaults", () => {
     expect(directlyExecutesHostDefaults('execFile("defaults", ["read", "-g", key]);')).toBe(true);
-    expect(directlyExecutesHostDefaults('spawn("defaults", ["read", "-g", "AppleInterfaceStyle"]);')).toBe(true);
-    expect(directlyExecutesHostDefaults('await executor.executeCommand("defaults", ["read", "-g", key]);')).toBe(true);
-    expect(directlyExecutesHostDefaults('exec("defaults read -g AppleInterfaceStyle");')).toBe(true);
+    expect(
+      directlyExecutesHostDefaults('spawn("defaults", ["read", "-g", "AppleInterfaceStyle"]);'),
+    ).toBe(true);
+    expect(
+      directlyExecutesHostDefaults(
+        'await executor.executeCommand("defaults", ["read", "-g", key]);',
+      ),
+    ).toBe(true);
+    expect(directlyExecutesHostDefaults('exec("defaults read -g AppleInterfaceStyle");')).toBe(
+      true,
+    );
     expect(directlyExecutesHostDefaults('exec("echo /tmp/defaults read");')).toBe(false);
-    expect(directlyExecutesHostDefaults('exec("defaults\\tread -g AppleInterfaceStyle");')).toBe(true);
-    expect(directlyExecutesHostDefaults('spawn("/usr/bin/defaults", ["read", "-g", key]);')).toBe(true);
+    expect(directlyExecutesHostDefaults('exec("defaults\\tread -g AppleInterfaceStyle");')).toBe(
+      true,
+    );
+    expect(directlyExecutesHostDefaults('spawn("/usr/bin/defaults", ["read", "-g", key]);')).toBe(
+      true,
+    );
     expect(directlyExecutesHostDefaults('Bun.spawn(["defaults", "read", "-g", key]);')).toBe(true);
-    expect(directlyExecutesHostDefaults('spawn("defaults" as const, ["read", "-g", key]);')).toBe(true);
+    expect(directlyExecutesHostDefaults('spawn("defaults" as const, ["read", "-g", key]);')).toBe(
+      true,
+    );
     expect(directlyExecutesHostDefaults('Bun.spawn(["defaults", "read"] as const);')).toBe(true);
-    expect(directlyExecutesHostDefaults(
-      'runExecSeam(cb, opts, { command: "defaults", args: ["read", "-g", key] });'
-    )).toBe(true);
-    expect(directlyExecutesHostDefaults(
-      'runExecSeam(cb, opts, enabled ? { command: "defaults", args: ["read"] } : { command: "echo", args: [] });'
-    )).toBe(true);
-    expect(directlyExecutesHostDefaults('const tool = "defaults"; exec(`${tool} read -g key`);')).toBe(true);
-    expect(directlyExecutesHostDefaults(
-      'function safe(){ const argv = ["echo"]; Bun.spawn(argv); } function bad(){ const argv = ["defaults", "read"]; Bun.spawn(argv); }'
-    )).toBe(true);
+    expect(
+      directlyExecutesHostDefaults(
+        'runExecSeam(cb, opts, { command: "defaults", args: ["read", "-g", key] });',
+      ),
+    ).toBe(true);
+    expect(
+      directlyExecutesHostDefaults(
+        'runExecSeam(cb, opts, enabled ? { command: "defaults", args: ["read"] } : { command: "echo", args: [] });',
+      ),
+    ).toBe(true);
+    expect(
+      directlyExecutesHostDefaults('const tool = "defaults"; exec(`${tool} read -g key`);'),
+    ).toBe(true);
+    expect(
+      directlyExecutesHostDefaults(
+        'function safe(){ const argv = ["echo"]; Bun.spawn(argv); } function bad(){ const argv = ["defaults", "read"]; Bun.spawn(argv); }',
+      ),
+    ).toBe(true);
   });
 
   test("flags a promisified or aliased launcher invoked with defaults", () => {
     // The original hostAppearance.ts evasion: promisify(execFile) then call the wrapper.
-    expect(directlyExecutesHostDefaults(
-      'const execFileAsync = promisify(execFile); await execFileAsync("defaults", ["read", "-g", key]);'
-    )).toBe(true);
-    expect(directlyExecutesHostDefaults(
-      'const run = util.promisify(exec); await run("defaults read -g AppleInterfaceStyle");'
-    )).toBe(true);
-    expect(directlyExecutesHostDefaults(
-      'const launch = execFile; launch("defaults", ["read", "-g", key]);'
-    )).toBe(true);
+    expect(
+      directlyExecutesHostDefaults(
+        'const execFileAsync = promisify(execFile); await execFileAsync("defaults", ["read", "-g", key]);',
+      ),
+    ).toBe(true);
+    expect(
+      directlyExecutesHostDefaults(
+        'const run = util.promisify(exec); await run("defaults read -g AppleInterfaceStyle");',
+      ),
+    ).toBe(true);
+    expect(
+      directlyExecutesHostDefaults(
+        'const launch = execFile; launch("defaults", ["read", "-g", key]);',
+      ),
+    ).toBe(true);
     // The command may be assembled through ordinary constants before the alias call.
-    expect(directlyExecutesHostDefaults(
-      'const command = "defaults"; const run = promisify(execFile); run(command, ["read", "-g", key]);'
-    )).toBe(true);
-    expect(directlyExecutesHostDefaults(
-      'import { execFile as run } from "node:child_process"; run("defaults", ["read"]);'
-    )).toBe(true);
-    expect(directlyExecutesHostDefaults(
-      'const cp = require("node:child_process"); const { execFile: run } = cp; run("defaults", ["read"]);'
-    )).toBe(true);
-    expect(directlyExecutesHostDefaults(
-      'const { execFile: run } = fakeApi; run("defaults", ["read"]);'
-    )).toBe(false);
-    expect(directlyExecutesHostDefaults(
-      'let run; run = execFile; run("defaults", ["read"]);'
-    )).toBe(true);
-    expect(directlyExecutesHostDefaults(
-      'const cp = require("node:child_process"); cp.execFile("defaults", ["read"]);'
-    )).toBe(true);
+    expect(
+      directlyExecutesHostDefaults(
+        'const command = "defaults"; const run = promisify(execFile); run(command, ["read", "-g", key]);',
+      ),
+    ).toBe(true);
+    expect(
+      directlyExecutesHostDefaults(
+        'import { execFile as run } from "node:child_process"; run("defaults", ["read"]);',
+      ),
+    ).toBe(true);
+    expect(
+      directlyExecutesHostDefaults(
+        'const cp = require("node:child_process"); const { execFile: run } = cp; run("defaults", ["read"]);',
+      ),
+    ).toBe(true);
+    expect(
+      directlyExecutesHostDefaults('const { execFile: run } = fakeApi; run("defaults", ["read"]);'),
+    ).toBe(false);
+    expect(
+      directlyExecutesHostDefaults('let run; run = execFile; run("defaults", ["read"]);'),
+    ).toBe(true);
+    expect(
+      directlyExecutesHostDefaults(
+        'const cp = require("node:child_process"); cp.execFile("defaults", ["read"]);',
+      ),
+    ).toBe(true);
   });
 
   test("does not flag simulator defaults routed through a simctl argv", () => {
-    expect(directlyExecutesHostDefaults('simctl.executeCommandArgs(["spawn", udid, "defaults", "read", domain, key]);')).toBe(false);
-    expect(directlyExecutesHostDefaults('spawn("xcrun", ["simctl", "spawn", udid, "defaults", "read"]);')).toBe(false);
+    expect(
+      directlyExecutesHostDefaults(
+        'simctl.executeCommandArgs(["spawn", udid, "defaults", "read", domain, key]);',
+      ),
+    ).toBe(false);
+    expect(
+      directlyExecutesHostDefaults(
+        'spawn("xcrun", ["simctl", "spawn", udid, "defaults", "read"]);',
+      ),
+    ).toBe(false);
   });
 
   test("does not mistake unrelated methods named exec for process launchers", () => {
-    expect(directlyExecutesHostDefaults('const matcher = /defaults/; matcher.exec("defaults");')).toBe(false);
+    expect(
+      directlyExecutesHostDefaults('const matcher = /defaults/; matcher.exec("defaults");'),
+    ).toBe(false);
   });
 
   test("detects a static shell prefix without joining across dynamic values", () => {
@@ -132,6 +189,10 @@ describe("host defaults execution boundary (issue #4062)", () => {
       // Keep this list empty unless a production diagnostic cannot use the client.
     ]);
     const files = sourceFiles(join(ROOT, "src"));
-    expect([...exceptions.keys()].filter(path => !files.some(file => relative(ROOT, file).split("\\").join("/") === path))).toEqual([]);
+    expect(
+      [...exceptions.keys()].filter(
+        (path) => !files.some((file) => relative(ROOT, file).split("\\").join("/") === path),
+      ),
+    ).toEqual([]);
   });
 });

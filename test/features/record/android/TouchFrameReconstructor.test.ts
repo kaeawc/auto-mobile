@@ -5,13 +5,15 @@ import type { RawTouchFrame, GestureEvent } from "../../../../src/features/recor
 // Helper: feed multiple lines and collect all non-null results
 function feedLines(
   r: TouchFrameReconstructor,
-  lines: string[]
+  lines: string[],
 ): Array<RawTouchFrame | GestureEvent> {
   const results: Array<RawTouchFrame | GestureEvent> = [];
   let t = 1000;
   for (const line of lines) {
     const result = r.feedLine(line, t++);
-    if (result) {results.push(result);}
+    if (result) {
+      results.push(result);
+    }
   }
   return results;
 }
@@ -95,8 +97,8 @@ describe("TouchFrameReconstructor", () => {
     const frame = frames[0];
     expect(frame.activeSlots).toHaveLength(2);
 
-    const slot0 = frame.activeSlots.find(s => s.slotId === 0);
-    const slot1 = frame.activeSlots.find(s => s.slotId === 1);
+    const slot0 = frame.activeSlots.find((s) => s.slotId === 0);
+    const slot1 = frame.activeSlots.find((s) => s.slotId === 1);
     expect(slot0?.x).toBe(0x100);
     expect(slot0?.y).toBe(0x200);
     expect(slot1?.x).toBe(0x300);
@@ -104,9 +106,7 @@ describe("TouchFrameReconstructor", () => {
   });
 
   test("EV_KEY KEY_BACK DOWN emits pressButton gesture event", () => {
-    const results = feedLines(r, [
-      "[  5.000000] EV_KEY    KEY_BACK             DOWN",
-    ]);
+    const results = feedLines(r, ["[  5.000000] EV_KEY    KEY_BACK             DOWN"]);
     expect(results).toHaveLength(1);
     const event = results[0];
     expect(isFrame(event)).toBe(false);

@@ -26,32 +26,27 @@ export class HandleIntentChooser extends BaseVisualChange {
    */
   async execute(
     preference: "always" | "just_once" | "custom" = "just_once",
-    customAppPackage?: string
+    customAppPackage?: string,
   ): Promise<IntentChooserResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("handleIntentChooser");
 
     return this.observedInteraction(
       async (observeResult: ObserveResult) => {
-
         const viewHierarchy = observeResult.viewHierarchy;
         if (!viewHierarchy) {
           return { success: false, error: "View hierarchy not found" };
         }
 
         return await perf.track("handleChooser", () =>
-          this.deepLinkManager.handleIntentChooser(
-            viewHierarchy,
-            preference,
-            customAppPackage
-          )
+          this.deepLinkManager.handleIntentChooser(viewHierarchy, preference, customAppPackage),
         );
       },
       {
         changeExpected: false,
         timeoutMs: 500,
-        perf
-      }
+        perf,
+      },
     );
   }
 }

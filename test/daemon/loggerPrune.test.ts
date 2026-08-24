@@ -25,7 +25,9 @@ describe("pruneLogFiles", () => {
       try {
         const { rmSync } = require("node:fs");
         rmSync(dir, { recursive: true, force: true });
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     tempDirs.length = 0;
   });
@@ -37,9 +39,15 @@ describe("pruneLogFiles", () => {
     }
     writeFileSync(join(logsDir, "stdio-111.log"), "active");
 
-    await pruneLogFiles({ dir: logsDir, ownPrefix: "stdio-111", maxOwnFiles: 10, abandonedMaxAgeMs: 1e12, isProcessAlive: dead });
+    await pruneLogFiles({
+      dir: logsDir,
+      ownPrefix: "stdio-111",
+      maxOwnFiles: 10,
+      abandonedMaxAgeMs: 1e12,
+      isProcessAlive: dead,
+    });
 
-    const remaining = readdirSync(logsDir).filter(f => f.endsWith(".log"));
+    const remaining = readdirSync(logsDir).filter((f) => f.endsWith(".log"));
     expect(remaining.length).toBe(10);
     // "stdio-111.log" sorts after "stdio-111-..." so the active file survives.
     expect(remaining).toContain("stdio-111.log");
@@ -63,14 +71,14 @@ describe("pruneLogFiles", () => {
       maxOwnFiles: 10,
       abandonedMaxAgeMs: 1_000,
       now: Date.now() + 1e9,
-      isProcessAlive: pid => pid === 123,
+      isProcessAlive: (pid) => pid === 123,
     });
 
     const remaining = readdirSync(logsDir);
-    const peerFiles = remaining.filter(f => f.startsWith("stdio-123"));
-    const ownFiles = remaining.filter(f => /^stdio-12(\.log|-)/.test(f));
-    expect(peerFiles.length).toBe(5);   // peer's files never claimed/deleted
-    expect(ownFiles.length).toBe(10);   // only own pid-12 files capped
+    const peerFiles = remaining.filter((f) => f.startsWith("stdio-123"));
+    const ownFiles = remaining.filter((f) => /^stdio-12(\.log|-)/.test(f));
+    expect(peerFiles.length).toBe(5); // peer's files never claimed/deleted
+    expect(ownFiles.length).toBe(10); // only own pid-12 files capped
   });
 
   test("never deletes a LIVE peer's log even when its mtime is stale", async () => {
@@ -83,7 +91,7 @@ describe("pruneLogFiles", () => {
       maxOwnFiles: 10,
       abandonedMaxAgeMs: 1_000,
       now: Date.now() + 1e9, // far future → mtime looks ancient
-      isProcessAlive: pid => pid === 222, // owner still running
+      isProcessAlive: (pid) => pid === 222, // owner still running
     });
 
     expect(readdirSync(logsDir)).toContain("stdio-222.log");
@@ -104,7 +112,7 @@ describe("pruneLogFiles", () => {
       isProcessAlive: dead,
     });
 
-    expect(readdirSync(logsDir).filter(f => f.startsWith("stdio-222")).length).toBe(0);
+    expect(readdirSync(logsDir).filter((f) => f.startsWith("stdio-222")).length).toBe(0);
   });
 
   test("keeps an exited process's RECENT log (mtime grace before sweeping)", async () => {
@@ -123,7 +131,7 @@ describe("pruneLogFiles", () => {
       isProcessAlive: dead,
     });
 
-    expect(readdirSync(logsDir).filter(f => f.startsWith("stdio-222")).length).toBe(5);
+    expect(readdirSync(logsDir).filter((f) => f.startsWith("stdio-222")).length).toBe(5);
   });
 
   test("preserves daemon logs when pruning from a stdio process", async () => {
@@ -152,9 +160,15 @@ describe("pruneLogFiles", () => {
     }
     writeFileSync(join(logsDir, "daemon.log"), "active");
 
-    await pruneLogFiles({ dir: logsDir, ownPrefix: "daemon", maxOwnFiles: 10, abandonedMaxAgeMs: 1e12, isProcessAlive: dead });
+    await pruneLogFiles({
+      dir: logsDir,
+      ownPrefix: "daemon",
+      maxOwnFiles: 10,
+      abandonedMaxAgeMs: 1e12,
+      isProcessAlive: dead,
+    });
 
-    const remaining = readdirSync(logsDir).filter(f => f.endsWith(".log"));
+    const remaining = readdirSync(logsDir).filter((f) => f.endsWith(".log"));
     expect(remaining.length).toBe(10);
     expect(remaining).toContain("daemon.log");
   });
@@ -186,7 +200,7 @@ describe("pruneLogFiles", () => {
       maxOwnFiles: 10,
       abandonedMaxAgeMs: 1_000,
       now: Date.now() + 1e9,
-      isProcessAlive: pid => pid === 222, // spawning manager still running
+      isProcessAlive: (pid) => pid === 222, // spawning manager still running
     });
 
     expect(readdirSync(logsDir)).toContain("daemon-launch-222.log");
@@ -198,17 +212,35 @@ describe("pruneLogFiles", () => {
       writeFileSync(join(logsDir, `stdio-111-${i}.log`), "x");
     }
 
-    await pruneLogFiles({ dir: logsDir, ownPrefix: "stdio-111", maxOwnFiles: 10, abandonedMaxAgeMs: 1e12, isProcessAlive: dead });
+    await pruneLogFiles({
+      dir: logsDir,
+      ownPrefix: "stdio-111",
+      maxOwnFiles: 10,
+      abandonedMaxAgeMs: 1e12,
+      isProcessAlive: dead,
+    });
 
-    expect(readdirSync(logsDir).filter(f => f.endsWith(".log")).length).toBe(10);
+    expect(readdirSync(logsDir).filter((f) => f.endsWith(".log")).length).toBe(10);
   });
 
   test("no-op (no throw) when directory is empty or missing", async () => {
     const logsDir = createTempLogsDir();
-    await pruneLogFiles({ dir: logsDir, ownPrefix: "stdio-111", maxOwnFiles: 10, abandonedMaxAgeMs: 1000, isProcessAlive: dead });
+    await pruneLogFiles({
+      dir: logsDir,
+      ownPrefix: "stdio-111",
+      maxOwnFiles: 10,
+      abandonedMaxAgeMs: 1000,
+      isProcessAlive: dead,
+    });
     expect(readdirSync(logsDir).length).toBe(0);
 
-    await pruneLogFiles({ dir: join(logsDir, "does-not-exist"), ownPrefix: "stdio-111", maxOwnFiles: 10, abandonedMaxAgeMs: 1000, isProcessAlive: dead });
+    await pruneLogFiles({
+      dir: join(logsDir, "does-not-exist"),
+      ownPrefix: "stdio-111",
+      maxOwnFiles: 10,
+      abandonedMaxAgeMs: 1000,
+      isProcessAlive: dead,
+    });
   });
 
   test("ignores non-log files", async () => {
@@ -219,10 +251,16 @@ describe("pruneLogFiles", () => {
     writeFileSync(join(logsDir, "config.json"), "not a log");
     writeFileSync(join(logsDir, "notes.txt"), "not a log");
 
-    await pruneLogFiles({ dir: logsDir, ownPrefix: "stdio-111", maxOwnFiles: 10, abandonedMaxAgeMs: 1e12, isProcessAlive: dead });
+    await pruneLogFiles({
+      dir: logsDir,
+      ownPrefix: "stdio-111",
+      maxOwnFiles: 10,
+      abandonedMaxAgeMs: 1e12,
+      isProcessAlive: dead,
+    });
 
     const allFiles = readdirSync(logsDir);
-    expect(allFiles.filter(f => f.endsWith(".log")).length).toBe(10);
+    expect(allFiles.filter((f) => f.endsWith(".log")).length).toBe(10);
     expect(allFiles).toContain("config.json");
     expect(allFiles).toContain("notes.txt");
   });

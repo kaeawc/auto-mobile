@@ -23,14 +23,14 @@ describe("SwipeOn boomerang", () => {
     timestamp: Date.now(),
     screenSize: { width: 1000, height: 2000 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: null
+    viewHierarchy: null,
   });
 
   const createSwipeOn = () => {
     const swipeOn = new SwipeOn(device, {} as any, {
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
-      accessibilityDetector: fakeAccessibilityDetector
+      accessibilityDetector: fakeAccessibilityDetector,
     });
     (swipeOn as any).awaitIdle = fakeAwaitIdle;
     (swipeOn as any).window = fakeWindow;
@@ -41,7 +41,9 @@ describe("SwipeOn boomerang", () => {
   beforeEach(() => {
     fakeAccessibilityDetector = new FakeAccessibilityDetector();
     fakeAccessibilityDetector.setTalkBackEnabled(false);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({} as AndroidCtrlProxyClient);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      {} as AndroidCtrlProxyClient,
+    );
     fakeObserveScreen = new FakeObserveScreen();
     fakeGesture = new FakeGestureExecutor();
     fakeAwaitIdle = new FakeAwaitIdle();
@@ -65,7 +67,7 @@ describe("SwipeOn boomerang", () => {
       duration: 400,
       boomerang: true,
       apexPause: 0,
-      returnSpeed: 2
+      returnSpeed: 2,
     });
 
     expect(result.success).toBe(true);
@@ -96,7 +98,7 @@ describe("SwipeOn lookFor validation", () => {
     const swipeOn = new SwipeOn(device, {} as any, {
       executeGesture: fakeGesture,
       observeScreen: fakeObserveScreen,
-      accessibilityDetector: fakeAccessibilityDetector
+      accessibilityDetector: fakeAccessibilityDetector,
     });
     (swipeOn as any).awaitIdle = fakeAwaitIdle;
     (swipeOn as any).window = fakeWindow;
@@ -107,7 +109,9 @@ describe("SwipeOn lookFor validation", () => {
   beforeEach(() => {
     fakeAccessibilityDetector = new FakeAccessibilityDetector();
     fakeAccessibilityDetector.setTalkBackEnabled(false);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({} as AndroidCtrlProxyClient);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      {} as AndroidCtrlProxyClient,
+    );
     fakeObserveScreen = new FakeObserveScreen();
     fakeGesture = new FakeGestureExecutor();
     fakeAwaitIdle = new FakeAwaitIdle();
@@ -125,7 +129,7 @@ describe("SwipeOn lookFor validation", () => {
     const swipeOn = createSwipeOn();
     const result = await swipeOn.execute({
       direction: "up",
-      lookFor: {}
+      lookFor: {},
     });
 
     expect(result.success).toBe(false);
@@ -138,8 +142,8 @@ describe("SwipeOn lookFor validation", () => {
       direction: "up",
       lookFor: {
         text: "Settings",
-        elementId: "com.app:id/settings"
-      }
+        elementId: "com.app:id/settings",
+      },
     });
 
     expect(result.success).toBe(false);

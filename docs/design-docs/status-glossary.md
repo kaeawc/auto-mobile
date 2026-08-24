@@ -8,18 +8,18 @@ Each design document may include one or more status chips in the header or inlin
 
 ## Status Definitions
 
-| Chip | Meaning |
-|------|---------|
-| <kbd>✅ Implemented</kbd> | Code exists and is actively used in production builds. |
-| <kbd>🧪 Tested</kbd> | Automated unit or integration tests cover the feature. |
-| <kbd>⚠️ Partial</kbd> | Feature is partially implemented — some sub-features work, others do not. |
-| <kbd>🔒 Internal</kbd> | Exists in code but is not exposed via MCP or CLI by default; requires custom configuration. |
-| <kbd>🚧 Design Only</kbd> | Document describes a proposed design; no corresponding implementation exists yet. |
-| <kbd>❌ Not Implemented</kbd> | A specific sub-feature or proposed MCP tool is documented but has not been built. |
-| <kbd>🤖 Emulator Only</kbd> | Only functional on Android emulators; physical Android devices are not supported. |
-| <kbd>📱 Simulator Only</kbd> | Only functional on iOS simulators; physical iOS devices are not supported. |
-| <kbd>🤖 Android Only</kbd> | Feature exists on Android but has no iOS equivalent. |
-| <kbd>🍎 iOS Only</kbd> | Feature exists on iOS but has no Android equivalent. |
+| Chip                          | Meaning                                                                                     |
+| ----------------------------- | ------------------------------------------------------------------------------------------- |
+| <kbd>✅ Implemented</kbd>     | Code exists and is actively used in production builds.                                      |
+| <kbd>🧪 Tested</kbd>          | Automated unit or integration tests cover the feature.                                      |
+| <kbd>⚠️ Partial</kbd>         | Feature is partially implemented — some sub-features work, others do not.                   |
+| <kbd>🔒 Internal</kbd>        | Exists in code but is not exposed via MCP or CLI by default; requires custom configuration. |
+| <kbd>🚧 Design Only</kbd>     | Document describes a proposed design; no corresponding implementation exists yet.           |
+| <kbd>❌ Not Implemented</kbd> | A specific sub-feature or proposed MCP tool is documented but has not been built.           |
+| <kbd>🤖 Emulator Only</kbd>   | Only functional on Android emulators; physical Android devices are not supported.           |
+| <kbd>📱 Simulator Only</kbd>  | Only functional on iOS simulators; physical iOS devices are not supported.                  |
+| <kbd>🤖 Android Only</kbd>    | Feature exists on Android but has no iOS equivalent.                                        |
+| <kbd>🍎 iOS Only</kbd>        | Feature exists on iOS but has no Android equivalent.                                        |
 
 ## Master Status List
 

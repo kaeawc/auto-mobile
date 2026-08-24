@@ -16,7 +16,7 @@ const enabledVisionConfig: VisionFallbackConfig = {
   confidenceThreshold: "high",
   maxCostUsd: 1.0,
   cacheResults: false,
-  cacheTtlMinutes: 60
+  cacheTtlMinutes: 60,
 };
 
 const device = { name: "test-device", platform: "android", id: "emulator-5554" } as any;
@@ -25,7 +25,7 @@ const createObserveResult = (): ObserveResult => ({
   timestamp: Date.now(),
   screenSize: { width: 1080, height: 1920 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  viewHierarchy: { hierarchy: { node: [] } } as any
+  viewHierarchy: { hierarchy: { node: [] } } as any,
 });
 
 describe("TapOnElement vision fallback (handleElementNotFound)", () => {
@@ -34,7 +34,9 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
 
   beforeEach(() => {
     fakeCtrlProxy = new FakeCtrlProxy();
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy as any);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeCtrlProxy as any,
+    );
   });
 
   afterEach(() => {
@@ -44,14 +46,14 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
   const createTapOnElement = (
     capturer: FakeScreenshotCapturer,
     analyzer: FakeVisionAnalyzer,
-    visionConfig = enabledVisionConfig
+    visionConfig = enabledVisionConfig,
   ) => {
     return new TapOnElement(device, null, {
       visionConfig,
       screenshotCapturer: capturer,
       visionAnalyzer: analyzer,
       timer: new FakeTimer(),
-      selectionStateTracker: new SelectionStateTracker({ screenshotCapturer: capturer })
+      selectionStateTracker: new SelectionStateTracker({ screenshotCapturer: capturer }),
     });
   };
 
@@ -63,12 +65,12 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
       found: false,
       confidence: "high",
       navigationSteps: [
-        { action: "scroll", direction: "down", description: "Scroll down to see Login button" }
+        { action: "scroll", direction: "down", description: "Scroll down to see Login button" },
       ],
       costUsd: 0.002,
       durationMs: 50,
       screenshotPath: "/screenshot.png",
-      provider: "claude"
+      provider: "claude",
     });
 
     const tapOn = createTapOnElement(capturer, analyzer);
@@ -96,12 +98,17 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
       found: false,
       confidence: "medium",
       alternativeSelectors: [
-        { type: "resourceId", value: "com.app:id/login_btn", confidence: 0.85, reasoning: "Visible login button" }
+        {
+          type: "resourceId",
+          value: "com.app:id/login_btn",
+          confidence: 0.85,
+          reasoning: "Visible login button",
+        },
       ],
       costUsd: 0.001,
       durationMs: 30,
       screenshotPath: "/screenshot.png",
-      provider: "claude"
+      provider: "claude",
     });
 
     const tapOn = createTapOnElement(capturer, analyzer);
@@ -125,7 +132,10 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
     capturer.setPaths(["/screenshot.png"]);
     const analyzer = new FakeVisionAnalyzer();
 
-    const tapOn = createTapOnElement(capturer, analyzer, { ...enabledVisionConfig, enabled: false });
+    const tapOn = createTapOnElement(capturer, analyzer, {
+      ...enabledVisionConfig,
+      enabled: false,
+    });
     const options: TapOnElementOptions = { action: "tap", text: "Login" };
     const observeResult = createObserveResult();
 
@@ -171,7 +181,7 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
     const options: TapOnElementOptions = {
       action: "tap",
       text: "Login",
-      container: { elementId: "com.app:id/container" }
+      container: { elementId: "com.app:id/container" },
     };
     const observeResult = createObserveResult();
 
@@ -199,7 +209,9 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
 
     try {
       await (tapOn as any).handleElementNotFound(options, observeResult, true, undefined);
-    } catch { /* expected */ }
+    } catch {
+      /* expected */
+    }
 
     const calls = analyzer.getCalls();
     expect(calls).toHaveLength(1);

@@ -41,9 +41,7 @@ export function buildScaler(ranges: AxisRanges): CoordScaler {
  * Parse the physical display size from `adb shell wm size` output.
  * Returns { width, height } in physical pixels (before rotation).
  */
-async function queryDisplaySize(
-  adb: AdbExecutor
-): Promise<{ width: number; height: number }> {
+async function queryDisplaySize(adb: AdbExecutor): Promise<{ width: number; height: number }> {
   const { stdout } = await adb.executeCommand("shell wm size");
   const match = stdout.match(/Physical size:\s*(\d+)x(\d+)/);
   if (!match) {
@@ -64,7 +62,9 @@ export async function queryRotation(adb: AdbExecutor): Promise<number> {
   try {
     const { stdout } = await adb.executeCommand("shell dumpsys window displays");
     const match = stdout.match(/mCurrentRotation=ROTATION_(\d+)/);
-    if (match) {return normalizeDumpsysRotation(parseInt(match[1], 10));}
+    if (match) {
+      return normalizeDumpsysRotation(parseInt(match[1], 10));
+    }
   } catch {
     // fall through to default
   }
@@ -77,10 +77,14 @@ export async function queryRotation(adb: AdbExecutor): Promise<number> {
  */
 function normalizeDumpsysRotation(value: number): number {
   switch (value) {
-    case 90: return 1;
-    case 180: return 2;
-    case 270: return 3;
-    default: return value <= 3 ? value : 0;
+    case 90:
+      return 1;
+    case 180:
+      return 2;
+    case 270:
+      return 3;
+    default:
+      return value <= 3 ? value : 0;
   }
 }
 
@@ -108,7 +112,7 @@ export async function queryDensity(adb: AdbExecutor): Promise<number> {
 export async function buildAxisRanges(
   adb: AdbExecutor,
   node: TouchInputNode,
-  rotation: number
+  rotation: number,
 ): Promise<AxisRanges> {
   const { width, height } = await queryDisplaySize(adb);
   return {

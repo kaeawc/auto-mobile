@@ -73,7 +73,9 @@ describe("PlanMigrator", () => {
         expect(plan.planName).toBeUndefined();
         expect(report.migrated).toBe(true);
         expect(report.appliedMigrations).toContain("plan-fields");
-        expect(report.warnings.some(w => w.message.includes("Renamed planName to name"))).toBe(true);
+        expect(report.warnings.some((w) => w.message.includes("Renamed planName to name"))).toBe(
+          true,
+        );
       });
 
       test("moves metadata.name to plan name", () => {
@@ -109,7 +111,7 @@ describe("PlanMigrator", () => {
         expect(plan.metadata.createdAt).toBe("2024-06-15T12:00:00.000Z");
         expect(plan.generated).toBeUndefined();
         expect(report.migrated).toBe(true);
-        expect(report.warnings.some(w => w.message.includes("generated timestamp"))).toBe(true);
+        expect(report.warnings.some((w) => w.message.includes("generated timestamp"))).toBe(true);
       });
 
       test("moves top-level appId to metadata.appId", () => {
@@ -144,7 +146,9 @@ describe("PlanMigrator", () => {
 
         expect(plan.mcpVersion).toBe("unknown");
         expect(report.migrated).toBe(true);
-        expect(report.warnings.some(w => w.message.includes("Defaulted missing mcpVersion"))).toBe(true);
+        expect(
+          report.warnings.some((w) => w.message.includes("Defaulted missing mcpVersion")),
+        ).toBe(true);
       });
 
       test("defaults missing metadata.createdAt", () => {
@@ -156,9 +160,7 @@ describe("PlanMigrator", () => {
 
         // The default createdAt is stamped as an ISO-8601 UTC timestamp; assert
         // the exact shape rather than merely that some string is present.
-        expect(plan.metadata.createdAt).toMatch(
-          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
-        );
+        expect(plan.metadata.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
         expect(report.migrated).toBe(true);
       });
 
@@ -181,7 +183,9 @@ describe("PlanMigrator", () => {
         });
 
         expect(typeof plan.metadata).toBe("object");
-        expect(report.warnings.some(w => w.message.includes("metadata was not an object"))).toBe(true);
+        expect(report.warnings.some((w) => w.message.includes("metadata was not an object"))).toBe(
+          true,
+        );
       });
     });
 
@@ -208,7 +212,9 @@ describe("PlanMigrator", () => {
         });
 
         expect(plan.steps[0].tool).toBe("tapOn");
-        expect(report.warnings.some(w => w.message.includes("Renamed tapOnText to tapOn"))).toBe(true);
+        expect(report.warnings.some((w) => w.message.includes("Renamed tapOnText to tapOn"))).toBe(
+          true,
+        );
       });
 
       test("renames swipeOnScreen to swipeOn and defaults autoTarget", () => {
@@ -221,7 +227,9 @@ describe("PlanMigrator", () => {
 
         expect(plan.steps[0].tool).toBe("swipeOn");
         expect(plan.steps[0].params.autoTarget).toBe(false);
-        expect(report.warnings.some(w => w.message.includes("Renamed swipeOnScreen to swipeOn"))).toBe(true);
+        expect(
+          report.warnings.some((w) => w.message.includes("Renamed swipeOnScreen to swipeOn")),
+        ).toBe(true);
       });
 
       test("renames scroll to swipeOn and defaults gestureType", () => {
@@ -296,9 +304,7 @@ describe("PlanMigrator", () => {
         const selector = plan.steps[0].params.selector as { text?: string };
         expect(selector.text).toBe("Schedule Appointment");
         expect(plan.steps[0].params.text).toBeUndefined();
-        expect(
-          report.warnings.some(w => w.message.includes("Wrapped legacy tapOn"))
-        ).toBe(true);
+        expect(report.warnings.some((w) => w.message.includes("Wrapped legacy tapOn"))).toBe(true);
       });
 
       test("wraps legacy tapOn { textAny } under { selector: { textAny } }", () => {
@@ -312,9 +318,7 @@ describe("PlanMigrator", () => {
         const selector = plan.steps[0].params.selector as { textAny?: string[] };
         expect(selector.textAny).toEqual(["Done", "Add"]);
         expect(plan.steps[0].params.textAny).toBeUndefined();
-        expect(
-          report.warnings.some(w => w.message.includes("Wrapped legacy tapOn"))
-        ).toBe(true);
+        expect(report.warnings.some((w) => w.message.includes("Wrapped legacy tapOn"))).toBe(true);
       });
 
       test("does not double-wrap tapOn that already has selector", () => {
@@ -322,10 +326,12 @@ describe("PlanMigrator", () => {
           name: "Plan",
           mcpVersion: "1.0.0",
           metadata: { createdAt: "2024-01-01", version: "1.0.0" },
-          steps: [{
-            tool: "tapOn",
-            params: { selector: { text: "Already wrapped" } }
-          }],
+          steps: [
+            {
+              tool: "tapOn",
+              params: { selector: { text: "Already wrapped" } },
+            },
+          ],
         });
 
         const selector = plan.steps[0].params.selector as { text?: string };
@@ -337,10 +343,12 @@ describe("PlanMigrator", () => {
           name: "Plan",
           mcpVersion: "1.0.0",
           metadata: { createdAt: "2024-01-01", version: "1.0.0" },
-          steps: [{
-            tool: "tapOn",
-            params: { elementId: "submit_btn", text: "Submit" },
-          }],
+          steps: [
+            {
+              tool: "tapOn",
+              params: { elementId: "submit_btn", text: "Submit" },
+            },
+          ],
         });
 
         const selector = plan.steps[0].params.selector as { elementId?: string; text?: string };
@@ -349,7 +357,6 @@ describe("PlanMigrator", () => {
         expect(plan.steps[0].params.elementId).toBeUndefined();
         expect(plan.steps[0].params.text).toBeUndefined();
       });
-
 
       test("renames inputText.value to text", () => {
         const { plan } = migratePlan({
@@ -445,7 +452,9 @@ describe("PlanMigrator", () => {
         });
 
         expect(plan.steps[0].params.scrollMode).toBeUndefined();
-        expect(report.warnings.some(w => w.message.includes("Removed deprecated scrollMode"))).toBe(true);
+        expect(
+          report.warnings.some((w) => w.message.includes("Removed deprecated scrollMode")),
+        ).toBe(true);
       });
 
       test("moves systemTray notification.timeout to awaitTimeout", () => {
@@ -453,17 +462,21 @@ describe("PlanMigrator", () => {
           name: "Plan",
           mcpVersion: "1.0.0",
           metadata: { createdAt: "2024-01-01", version: "1.0.0" },
-          steps: [{
-            tool: "systemTray",
-            action: "tap",
-            notification: { title: "Test notification", timeout: 15000 },
-          }],
+          steps: [
+            {
+              tool: "systemTray",
+              action: "tap",
+              notification: { title: "Test notification", timeout: 15000 },
+            },
+          ],
         });
 
         expect(plan.steps[0].params.awaitTimeout).toBe(15000);
         expect(plan.steps[0].params.notification.timeout).toBeUndefined();
         expect(plan.steps[0].params.notification.title).toBe("Test notification");
-        expect(report.warnings.some(w => w.message.includes("notification.timeout to awaitTimeout"))).toBe(true);
+        expect(
+          report.warnings.some((w) => w.message.includes("notification.timeout to awaitTimeout")),
+        ).toBe(true);
       });
 
       test("does not overwrite explicit awaitTimeout with notification.timeout", () => {
@@ -471,12 +484,14 @@ describe("PlanMigrator", () => {
           name: "Plan",
           mcpVersion: "1.0.0",
           metadata: { createdAt: "2024-01-01", version: "1.0.0" },
-          steps: [{
-            tool: "systemTray",
-            action: "tap",
-            notification: { title: "Test", timeout: 15000 },
-            awaitTimeout: 10000,
-          }],
+          steps: [
+            {
+              tool: "systemTray",
+              action: "tap",
+              notification: { title: "Test", timeout: 15000 },
+              awaitTimeout: 10000,
+            },
+          ],
         });
 
         expect(plan.steps[0].params.awaitTimeout).toBe(10000);
@@ -491,7 +506,11 @@ describe("PlanMigrator", () => {
         });
 
         expect(plan.steps[0].params.withViewHierarchy).toBeUndefined();
-        expect(report.warnings.some(w => w.message.includes("Removed deprecated observe.withViewHierarchy"))).toBe(true);
+        expect(
+          report.warnings.some((w) =>
+            w.message.includes("Removed deprecated observe.withViewHierarchy"),
+          ),
+        ).toBe(true);
       });
 
       test("maps step description to label", () => {
@@ -504,7 +523,9 @@ describe("PlanMigrator", () => {
 
         expect(plan.steps[0].label).toBe("Click the button");
         expect(plan.steps[0].description).toBeUndefined();
-        expect(report.warnings.some(w => w.message.includes("Mapped step description to label"))).toBe(true);
+        expect(
+          report.warnings.some((w) => w.message.includes("Mapped step description to label")),
+        ).toBe(true);
       });
 
       test("merges inline step fields into params (tapOn text wrapped under selector)", () => {
@@ -605,10 +626,10 @@ describe("PlanMigrator", () => {
           ],
         });
 
-        const stepWarnings = report.warnings.filter(w => w.stepIndex !== undefined);
+        const stepWarnings = report.warnings.filter((w) => w.stepIndex !== undefined);
         expect(stepWarnings.length).toBeGreaterThan(0);
         // The second step (index 1) should have had command -> tool migration
-        expect(stepWarnings.some(w => w.stepIndex === 1)).toBe(true);
+        expect(stepWarnings.some((w) => w.stepIndex === 1)).toBe(true);
       });
     });
   });

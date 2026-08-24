@@ -35,7 +35,7 @@ class FakeLogStream extends EventEmitter {
 // restored once the import (and thus the seed read) has completed.
 let freshImportCounter = 0;
 async function loggerWithEnvLevel(
-  value: string | undefined
+  value: string | undefined,
 ): Promise<typeof import("../../src/utils/logger")> {
   const previous = process.env.AUTOMOBILE_LOG_LEVEL;
   if (value === undefined) {
@@ -56,7 +56,7 @@ async function loggerWithEnvLevel(
 
 async function loggerWithLogDirectory(
   logDir: string,
-  dataDir: string
+  dataDir: string,
 ): Promise<typeof import("../../src/utils/logger")> {
   const previousLogDir = process.env.AUTOMOBILE_LOG_DIR;
   const previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
@@ -125,7 +125,10 @@ describe("AUTOMOBILE_LOG_LEVEL is applied at process start (issue #3845)", () =>
   // logger actually emits (the file stream buffers, so flush() can't guarantee
   // on-disk bytes). If the env-seeded level gates emission correctly here, it
   // gates the file write the same way.
-  async function captureEmit(value: string, emit: (l: typeof import("../../src/utils/logger").logger) => void): Promise<string> {
+  async function captureEmit(
+    value: string,
+    emit: (l: typeof import("../../src/utils/logger").logger) => void,
+  ): Promise<string> {
     const mod = await loggerWithEnvLevel(value);
     const writes: string[] = [];
     const spy = spyOn(process.stdout, "write").mockImplementation(((chunk: unknown) => {
@@ -146,17 +149,17 @@ describe("AUTOMOBILE_LOG_LEVEL is applied at process start (issue #3845)", () =>
   // Each captureEmit call has its own isolated capture buffer, so a static
   // marker per test is sufficient to assert presence/absence.
   test("actually emits a DEBUG line when seeded to debug", async () => {
-    const emitted = await captureEmit("debug", l => l.debug("loglevel-3845-debug"));
+    const emitted = await captureEmit("debug", (l) => l.debug("loglevel-3845-debug"));
     expect(emitted).toContain("loglevel-3845-debug");
   });
 
   test("suppresses a DEBUG line when seeded to error", async () => {
-    const emitted = await captureEmit("error", l => l.debug("loglevel-3845-suppressed"));
+    const emitted = await captureEmit("error", (l) => l.debug("loglevel-3845-suppressed"));
     expect(emitted).not.toContain("loglevel-3845-suppressed");
   });
 
   test("still emits an ERROR line when seeded to error", async () => {
-    const emitted = await captureEmit("error", l => l.error("loglevel-3845-error"));
+    const emitted = await captureEmit("error", (l) => l.error("loglevel-3845-error"));
     expect(emitted).toContain("loglevel-3845-error");
   });
 

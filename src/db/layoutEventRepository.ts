@@ -38,7 +38,7 @@ function toLayoutRow(input: RecordLayoutEventInput) {
 
 export async function recordLayoutEvent(
   input: RecordLayoutEventInput,
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): Promise<void> {
   await getDb(db).insertInto("layout_events").values(toLayoutRow(input)).execute();
 
@@ -51,7 +51,7 @@ export async function recordLayoutEvent(
  */
 export async function recordLayoutEvents(
   inputs: RecordLayoutEventInput[],
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): Promise<void> {
   if (inputs.length === 0) {
     return;
@@ -63,7 +63,7 @@ export async function recordLayoutEvents(
 
 export async function getLayoutEvents(
   query: { deviceId?: string; sessionId?: string; sinceTimestamp?: number; limit?: number },
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): Promise<RecordLayoutEventInput[]> {
   let q = getDb(db).selectFrom("layout_events").selectAll();
 
@@ -80,7 +80,7 @@ export async function getLayoutEvents(
   q = q.orderBy("timestamp", "desc").limit(query.limit ?? 100);
 
   const rows = await q.execute();
-  return rows.map(r => ({
+  return rows.map((r) => ({
     deviceId: r.device_id,
     timestamp: r.timestamp,
     applicationId: r.application_id,
@@ -100,7 +100,7 @@ export async function cleanupIfNeeded(
   db?: Kysely<Database>,
   maxRows?: number,
   checkInterval?: number,
-  inserted?: number
+  inserted?: number,
 ): Promise<void> {
   await cleanupEventTable("layout_events", retentionState, db, maxRows, checkInterval, inserted);
 }

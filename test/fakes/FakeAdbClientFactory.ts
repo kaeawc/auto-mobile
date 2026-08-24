@@ -99,7 +99,7 @@ export class FakeAdbClientFactory implements AdbClientFactory {
    * Check if create() was called for a specific device.
    */
   wasCalledForDevice(deviceId: string): boolean {
-    return this.calls.some(call => call.device?.deviceId === deviceId);
+    return this.calls.some((call) => call.device?.deviceId === deviceId);
   }
 
   /**

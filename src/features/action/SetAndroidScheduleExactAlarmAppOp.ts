@@ -1,5 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidDeviceShellToolResult, BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
@@ -8,17 +11,13 @@ import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/rea
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { shellQuote } from "../../utils/shellQuote";
 
-
 const API_LEVEL_SCHEDULE_EXACT_ALARM = 31;
 
-
 export type ScheduleExactAlarmAppOpMode = "allow" | "deny";
-
 
 export interface SetAndroidScheduleExactAlarmAppOpInput {
   mode: ScheduleExactAlarmAppOpMode;
 }
-
 
 /**
  * Sets UID-level `SCHEDULE_EXACT_ALARM` appop (`adb shell appops set --uid &lt;package&gt; …`).
@@ -36,7 +35,7 @@ export class SetAndroidScheduleExactAlarmAppOp {
 
   async execute(
     packageName: string,
-    input: SetAndroidScheduleExactAlarmAppOpInput
+    input: SetAndroidScheduleExactAlarmAppOpInput,
   ): Promise<AndroidDeviceShellToolResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("setAndroidScheduleExactAlarmAppOp");
@@ -51,7 +50,9 @@ export class SetAndroidScheduleExactAlarmAppOp {
     }
 
     if (input.mode === "deny") {
-      const apiLevel = await perf.track("readDeviceApiLevel", async () => readAndroidDeviceApiLevel(this.adb));
+      const apiLevel = await perf.track("readDeviceApiLevel", async () =>
+        readAndroidDeviceApiLevel(this.adb),
+      );
       if (apiLevel === null || apiLevel < API_LEVEL_SCHEDULE_EXACT_ALARM) {
         perf.end();
         return {
@@ -80,16 +81,20 @@ export class SetAndroidScheduleExactAlarmAppOp {
             const message = `${stdout}\n${stderr}`.trim() || "appops allow reported an error";
             throw new Error(message);
           }
-          logger.info(`[SetAndroidScheduleExactAlarmAppOp] SCHEDULE_EXACT_ALARM allow ok for ${packageName}`);
+          logger.info(
+            `[SetAndroidScheduleExactAlarmAppOp] SCHEDULE_EXACT_ALARM allow ok for ${packageName}`,
+          );
           return;
         }
 
         if (bad) {
           logger.warn(
-            `[SetAndroidScheduleExactAlarmAppOp] SCHEDULE_EXACT_ALARM deny non-fatal output for ${packageName}: ${stdout}\n${stderr}`
+            `[SetAndroidScheduleExactAlarmAppOp] SCHEDULE_EXACT_ALARM deny non-fatal output for ${packageName}: ${stdout}\n${stderr}`,
           );
         } else {
-          logger.info(`[SetAndroidScheduleExactAlarmAppOp] SCHEDULE_EXACT_ALARM deny ok for ${packageName}`);
+          logger.info(
+            `[SetAndroidScheduleExactAlarmAppOp] SCHEDULE_EXACT_ALARM deny ok for ${packageName}`,
+          );
         }
       });
       perf.end();
@@ -98,7 +103,9 @@ export class SetAndroidScheduleExactAlarmAppOp {
       perf.end();
       const message = errorMessage(cause);
       if (input.mode === "allow") {
-        logger.warn(`[SetAndroidScheduleExactAlarmAppOp] allow failed for ${packageName}: ${message}`);
+        logger.warn(
+          `[SetAndroidScheduleExactAlarmAppOp] allow failed for ${packageName}: ${message}`,
+        );
         return { success: false, appId: packageName, error: message };
       }
       logger.warn(`[SetAndroidScheduleExactAlarmAppOp] deny threw for ${packageName}: ${message}`);

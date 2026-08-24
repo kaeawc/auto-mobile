@@ -154,7 +154,7 @@ export class FrameDecoder {
     onMalformed?: (error: MalformedFrameError) => void,
     onAudio?: (audio: DecodedAudio) => void,
     onFrame?: (frame: DecodedFrame) => void,
-    onEncodedVideo?: (video: DecodedEncodedVideo) => void
+    onEncodedVideo?: (video: DecodedEncodedVideo) => void,
   ): DecodedFrame[] {
     const frames: DecodedFrame[] = [];
     let offset = 0;
@@ -169,7 +169,9 @@ export class FrameDecoder {
         // no validating marker — so every full-buffer state drains, leaving this
         // throw an infinite-loop guard rather than a real teardown path (#4772).
         if (!this.decodeAvailable(frames, onMalformed, onAudio, onFrame, onEncodedVideo)) {
-          throw new Error("FrameDecoder reached its raw-frame buffer limit without a complete frame");
+          throw new Error(
+            "FrameDecoder reached its raw-frame buffer limit without a complete frame",
+          );
         }
         continue;
       }
@@ -195,15 +197,19 @@ export class FrameDecoder {
     onMalformed?: (error: MalformedFrameError) => void,
     onAudio?: (audio: DecodedAudio) => void,
     onFrame?: (frame: DecodedFrame) => void,
-    onEncodedVideo?: (video: DecodedEncodedVideo) => void
+    onEncodedVideo?: (video: DecodedEncodedVideo) => void,
   ): boolean {
     let madeProgress = false;
     while (true) {
-      if (this.resynchronizing && !this.resynchronize()) {return madeProgress;}
+      if (this.resynchronizing && !this.resynchronize()) {
+        return madeProgress;
+      }
 
       if (this.pendingHeader === null) {
         const outcome = this.takeHeader(onMalformed);
-        if (outcome === "starved") {return madeProgress;}
+        if (outcome === "starved") {
+          return madeProgress;
+        }
         if (outcome === "malformed") {
           madeProgress = true;
           continue;
@@ -214,7 +220,9 @@ export class FrameDecoder {
 
       const pending = this.pendingHeader;
       const expected = payloadSize(pending);
-      if (this.buffer.length < expected) {return madeProgress;}
+      if (this.buffer.length < expected) {
+        return madeProgress;
+      }
 
       // A single copy detaches the emitted frame from stdout chunks. The queue
       // avoids the former concatenate-on-every-chunk behavior while retaining
@@ -233,7 +241,7 @@ export class FrameDecoder {
     frames: DecodedFrame[],
     onAudio?: (audio: DecodedAudio) => void,
     onFrame?: (frame: DecodedFrame) => void,
-    onEncodedVideo?: (video: DecodedEncodedVideo) => void
+    onEncodedVideo?: (video: DecodedEncodedVideo) => void,
   ): void {
     if (isAudioHeader(header)) {
       onAudio?.({ pcm16le: payload });
@@ -262,9 +270,11 @@ export class FrameDecoder {
    * corruption is reported once as the decoder switches to resynchronizing.
    */
   private takeHeader(
-    onMalformed?: (error: MalformedFrameError) => void
+    onMalformed?: (error: MalformedFrameError) => void,
   ): FrameHeader | "starved" | "malformed" {
-    if (this.buffer.length < FRAME_HEADER_SIZE) {return "starved";}
+    if (this.buffer.length < FRAME_HEADER_SIZE) {
+      return "starved";
+    }
     const bytes = this.buffer.peek(FRAME_HEADER_SIZE);
     const reason = headerErrorAt(bytes, 0);
     if (reason) {
@@ -294,7 +304,9 @@ export class FrameDecoder {
     let searchFrom = 0;
     while (searchFrom <= buffer.length - FRAME_MAGIC_BYTES.length) {
       const index = buffer.indexOf(FRAME_MAGIC_BYTES, searchFrom);
-      if (index < 0) {break;}
+      if (index < 0) {
+        break;
+      }
       if (index + FRAME_HEADER_SIZE > buffer.length) {
         // Marker present but the full header has not arrived yet: keep from here
         // and wait for more bytes before validating.
@@ -311,7 +323,9 @@ export class FrameDecoder {
     // No validating marker in what has arrived. Keep only a possible marker
     // prefix straddling the chunk boundary; discard the rest so the retained
     // buffer never grows without bound during sustained garbage.
-    this.replaceBuffer(buffer.subarray(Math.max(0, buffer.length - (FRAME_MAGIC_BYTES.length - 1))));
+    this.replaceBuffer(
+      buffer.subarray(Math.max(0, buffer.length - (FRAME_MAGIC_BYTES.length - 1))),
+    );
     return false;
   }
 
@@ -340,12 +354,19 @@ function isAudioHeader(header: FrameHeader): boolean {
 function isEncodedVideoHeader(header: FrameHeader): boolean {
   // `& ` yields a signed int32 in JS; `>>> 0` coerces back to the unsigned value
   // so the high-bit sentinel base (0xE2640000) compares equal.
-  return header.width === 0 && ((header.height & ENCODED_VIDEO_HEIGHT_MASK) >>> 0) === ENCODED_VIDEO_HEIGHT_BASE;
+  return (
+    header.width === 0 &&
+    (header.height & ENCODED_VIDEO_HEIGHT_MASK) >>> 0 === ENCODED_VIDEO_HEIGHT_BASE
+  );
 }
 
 function payloadSize(header: FrameHeader): number {
-  if (isAudioHeader(header)) {return header.timestampMs;}
-  if (isEncodedVideoHeader(header)) {return header.bytesPerRow;}
+  if (isAudioHeader(header)) {
+    return header.timestampMs;
+  }
+  if (isEncodedVideoHeader(header)) {
+    return header.bytesPerRow;
+  }
   return header.height * header.bytesPerRow;
 }
 
@@ -365,9 +386,13 @@ function parseFields(buffer: Buffer, offset: number): FrameHeader {
  * header at all), then the field bounds.
  */
 function headerErrorAt(buffer: Buffer, offset: number): MalformedFrameReason | null {
-  if (buffer.readUInt32LE(offset) !== FRAME_MAGIC) {return "header_magic_mismatch";}
+  if (buffer.readUInt32LE(offset) !== FRAME_MAGIC) {
+    return "header_magic_mismatch";
+  }
   const stored = buffer.readUInt32LE(offset + 4);
-  if (stored !== crc32(buffer.subarray(offset + HEADER_FIELDS_OFFSET, offset + FRAME_HEADER_SIZE))) {
+  if (
+    stored !== crc32(buffer.subarray(offset + HEADER_FIELDS_OFFSET, offset + FRAME_HEADER_SIZE))
+  ) {
     return "header_checksum_mismatch";
   }
   return fieldBoundsError(parseFields(buffer, offset));
@@ -381,13 +406,21 @@ function fieldBoundsError(header: FrameHeader): MalformedFrameReason | null {
   // Encoded video is checked before the `width===0` raw rejection: it too
   // reserves `width===0`, so it must be classified before that guard fires.
   if (isEncodedVideoHeader(header)) {
-    return header.bytesPerRow > MAX_ENCODED_VIDEO_PAYLOAD_BYTES ? "encoded_video_payload_too_large" : null;
+    return header.bytesPerRow > MAX_ENCODED_VIDEO_PAYLOAD_BYTES
+      ? "encoded_video_payload_too_large"
+      : null;
   }
-  if (header.width === 0) {return "header_width_zero";}
-  if (header.height === 0) {return "header_height_zero";}
+  if (header.width === 0) {
+    return "header_width_zero";
+  }
+  if (header.height === 0) {
+    return "header_height_zero";
+  }
   // BGRA is 4 bytes per pixel; bytesPerRow may include padding but must fit
   // at least the visible pixels.
-  if (header.bytesPerRow < header.width * 4) {return "header_bytes_per_row_too_small";}
+  if (header.bytesPerRow < header.width * 4) {
+    return "header_bytes_per_row_too_small";
+  }
   if (header.width > MAX_FRAME_DIMENSION || header.height > MAX_FRAME_DIMENSION) {
     return "header_dimensions_out_of_range";
   }

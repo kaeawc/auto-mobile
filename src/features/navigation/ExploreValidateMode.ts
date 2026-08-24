@@ -4,16 +4,13 @@ import type { NavigationEdge, NavigationGraphManager } from "./NavigationGraphMa
 import type { Timer } from "../../utils/SystemTimer";
 import type { EdgeValidationResult, GraphTraversalState } from "./ExploreTypes";
 import { logger } from "../../utils/logger";
-import {
-  scoreScrollPositionMatch,
-  scoreSelectedElementMatch
-} from "./ExploreElementScoring";
+import { scoreScrollPositionMatch, scoreSelectedElementMatch } from "./ExploreElementScoring";
 
 /**
  * Initialize graph traversal state for validate mode
  */
 export async function initializeGraphTraversal(
-  navigationManager: NavigationGraphManager
+  navigationManager: NavigationGraphManager,
 ): Promise<GraphTraversalState> {
   const graph = await navigationManager.exportGraph();
   const allEdges: NavigationEdge[] = [];
@@ -30,7 +27,7 @@ export async function initializeGraphTraversal(
     pendingEdgesByFrom: new Map<string, NavigationEdge[]>(),
     edgeValidationResults: new Map<string, EdgeValidationResult>(),
     totalNodesInGraph: graph.nodes.length,
-    totalEdgesInGraph: allEdges.length
+    totalEdgesInGraph: allEdges.length,
   };
 
   // Hash each edge key exactly once here; markEdgeTraversed then removes by key
@@ -40,7 +37,7 @@ export async function initializeGraphTraversal(
   }
 
   logger.info(
-    `[Explore] Initialized graph traversal: ${graph.nodes.length} nodes, ${allEdges.length} edges`
+    `[Explore] Initialized graph traversal: ${graph.nodes.length} nodes, ${allEdges.length} edges`,
   );
 
   return state;
@@ -50,10 +47,7 @@ export async function initializeGraphTraversal(
  * Add an edge to the pending set, keeping the key map and the `from` index in
  * sync. The edge key is computed once here; deduplicates by key.
  */
-export function addPendingEdge(
-  state: GraphTraversalState,
-  edge: NavigationEdge
-): void {
+export function addPendingEdge(state: GraphTraversalState, edge: NavigationEdge): void {
   const edgeKey = getEdgeKey(edge);
   if (state.pendingEdges.has(edgeKey)) {
     return;
@@ -108,10 +102,7 @@ export function getEdgeKey(edge: NavigationEdge): string {
 export function hashEdgeAction(edge: NavigationEdge): string {
   // For edges without interactions (back button, unknown), use edge type
   if (!edge.interaction) {
-    return createHash("sha256")
-      .update(`${edge.edgeType}`)
-      .digest("hex")
-      .substring(0, 8);
+    return createHash("sha256").update(`${edge.edgeType}`).digest("hex").substring(0, 8);
   }
 
   // Create a stable representation of the interaction, excluding timestamps
@@ -120,27 +111,21 @@ export function hashEdgeAction(edge: NavigationEdge): string {
     // Sort args keys for stability, exclude any timestamp-like fields
     args: Object.fromEntries(
       Object.keys(edge.interaction.args)
-        .filter(k => !k.toLowerCase().includes("timestamp"))
+        .filter((k) => !k.toLowerCase().includes("timestamp"))
         .sort()
-        .map(key => [key, edge.interaction!.args[key]])
+        .map((key) => [key, edge.interaction!.args[key]]),
     ),
     // Include edge type for additional uniqueness
-    edgeType: edge.edgeType
+    edgeType: edge.edgeType,
   };
 
-  return createHash("sha256")
-    .update(JSON.stringify(stableData))
-    .digest("hex")
-    .substring(0, 8); // Use first 8 chars for readability
+  return createHash("sha256").update(JSON.stringify(stableData)).digest("hex").substring(0, 8); // Use first 8 chars for readability
 }
 
 /**
  * Mark current node as visited
  */
-export function markNodeVisited(
-  state: GraphTraversalState,
-  screenName: string
-): void {
+export function markNodeVisited(state: GraphTraversalState, screenName: string): void {
   state.visitedNodes.add(screenName);
 }
 
@@ -154,7 +139,7 @@ export function markEdgeTraversed(
   success: boolean,
   timer: Timer,
   error?: string,
-  matchConfidence?: number
+  matchConfidence?: number,
 ): void {
   const edgeKey = getEdgeKey(edge);
   state.traversedEdges.add(edgeKey);
@@ -167,7 +152,7 @@ export function markEdgeTraversed(
     success,
     timestamp: timer.now(),
     error,
-    matchConfidence
+    matchConfidence,
   };
 
   state.edgeValidationResults.set(edgeKey, validationResult);
@@ -177,7 +162,7 @@ export function markEdgeTraversed(
 
   logger.info(
     `[Explore] Edge ${edgeKey} validation: ${success ? "SUCCESS" : "FAILED"}` +
-      (actualTo && actualTo !== edge.to ? ` (went to ${actualTo})` : "")
+      (actualTo && actualTo !== edge.to ? ` (went to ${actualTo})` : ""),
   );
 }
 
@@ -187,7 +172,7 @@ export function markEdgeTraversed(
  */
 export function selectNextEdgeToTraverse(
   state: GraphTraversalState,
-  currentScreen: string
+  currentScreen: string,
 ): NavigationEdge | null {
   // Only select untraversed edges from current screen
   // Do not attempt to navigate to other screens, as this causes false divergence.
@@ -201,13 +186,11 @@ export function selectNextEdgeToTraverse(
  */
 export function findElementMatchingEdge(
   elements: Element[],
-  edge: NavigationEdge
+  edge: NavigationEdge,
 ): { element: Element; confidence: number } | null {
   const uiState = edge.uiState || edge.interaction?.uiState;
   if (!uiState) {
-    logger.warn(
-      `[Explore] Edge ${edge.from}->${edge.to} has no UI state, cannot match`
-    );
+    logger.warn(`[Explore] Edge ${edge.from}->${edge.to} has no UI state, cannot match`);
     return null;
   }
 
@@ -240,14 +223,14 @@ export function findElementMatchingEdge(
   const MIN_CONFIDENCE = 0.6;
   if (bestMatch && bestMatch.confidence >= MIN_CONFIDENCE) {
     logger.debug(
-      `[Explore] Matched element for edge ${edge.from}->${edge.to} with confidence ${bestMatch.confidence.toFixed(2)}`
+      `[Explore] Matched element for edge ${edge.from}->${edge.to} with confidence ${bestMatch.confidence.toFixed(2)}`,
     );
     return bestMatch;
   }
 
   logger.warn(
     `[Explore] No confident match for edge ${edge.from}->${edge.to} ` +
-      `(best score: ${bestScore.toFixed(2)}, threshold: ${MIN_CONFIDENCE})`
+      `(best score: ${bestScore.toFixed(2)}, threshold: ${MIN_CONFIDENCE})`,
   );
   return null;
 }
@@ -262,7 +245,7 @@ export async function validateNavigation(
   navigationManager: NavigationGraphManager,
   timer: Timer,
   elementConfidence: number,
-  setStopReason: (reason: string) => void
+  setStopReason: (reason: string) => void,
 ): Promise<boolean> {
   // Wait a bit for navigation to complete
   await timer.sleep(500);
@@ -278,7 +261,7 @@ export async function validateNavigation(
     success,
     timer,
     success ? undefined : `Expected ${expectedEdge.to}, got ${actualScreen}`,
-    elementConfidence
+    elementConfidence,
   );
 
   if (!success) {

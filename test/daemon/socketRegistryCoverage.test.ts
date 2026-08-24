@@ -12,10 +12,9 @@ import type { SocketServerConfig } from "../../src/daemon/socketServer/index";
  * socket config declared in `daemonFiles.ts` but never wired into the registry.
  */
 describe("daemon socket registry coverage", () => {
-  const declaredConfigs = Object.entries(daemonFiles)
-    .filter((entry): entry is [string, SocketServerConfig] =>
-      entry[0].endsWith("_SOCKET_CONFIG")
-    );
+  const declaredConfigs = Object.entries(daemonFiles).filter(
+    (entry): entry is [string, SocketServerConfig] => entry[0].endsWith("_SOCKET_CONFIG"),
+  );
 
   test("every declared socket config is reachable from daemonFiles exports", () => {
     expect(declaredConfigs.length).toBeGreaterThan(0);
@@ -23,7 +22,7 @@ describe("daemon socket registry coverage", () => {
 
   test("every declared socket config is registered for publication and cleanup", () => {
     const registered = new Set<SocketServerConfig>(
-      Object.values(daemonFiles.AUXILIARY_SOCKET_CONFIGS_BY_NAME)
+      Object.values(daemonFiles.AUXILIARY_SOCKET_CONFIGS_BY_NAME),
     );
 
     const unregistered = declaredConfigs

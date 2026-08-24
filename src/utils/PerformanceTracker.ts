@@ -123,7 +123,7 @@ export class DefaultPerformanceTracker implements PerformanceTracker {
       type: "serial",
       startMs,
       entries: [],
-      parent: null
+      parent: null,
     };
     this.current = this.root;
   }
@@ -134,7 +134,7 @@ export class DefaultPerformanceTracker implements PerformanceTracker {
       type: "serial",
       startMs: this.timer.now(),
       entries: [],
-      parent: this.current
+      parent: this.current,
     };
     this.current = block;
     return this;
@@ -146,7 +146,7 @@ export class DefaultPerformanceTracker implements PerformanceTracker {
       type: "parallel",
       startMs: this.timer.now(),
       entries: {},
-      parent: this.current
+      parent: this.current,
     };
     this.current = block;
     return this;
@@ -194,7 +194,7 @@ export class DefaultPerformanceTracker implements PerformanceTracker {
       const entry: TimingEntry = {
         name: this.current.name,
         durationMs,
-        children: this.current.entries as TimingData
+        children: this.current.entries as TimingData,
       };
 
       const parent = this.current.parent;
@@ -229,7 +229,7 @@ export class DefaultPerformanceTracker implements PerformanceTracker {
     const wrapperEntry: TimingEntry = {
       name,
       durationMs: entries.reduce((sum, e) => sum + e.durationMs, 0),
-      children: entries
+      children: entries,
     };
 
     if (Array.isArray(this.current.entries)) {
@@ -273,7 +273,7 @@ export class NoOpPerformanceTracker implements PerformanceTracker {
     type: "serial",
     startMs: 0,
     entries: [],
-    parent: null
+    parent: null,
   };
   private current: TimingBlock = this.root;
   private operationStarts: Map<string, number> = new Map();
@@ -322,7 +322,10 @@ export class NoOpPerformanceTracker implements PerformanceTracker {
 /**
  * Factory function to create appropriate tracker based on enabled flag
  */
-export function createPerformanceTracker(enabled: boolean, timer: Timer = defaultTimer): PerformanceTracker {
+export function createPerformanceTracker(
+  enabled: boolean,
+  timer: Timer = defaultTimer,
+): PerformanceTracker {
   return enabled ? new DefaultPerformanceTracker(timer) : new NoOpPerformanceTracker();
 }
 
@@ -388,12 +391,12 @@ function filterZeroTimings(timings: TimingData): TimingData {
   if (Array.isArray(timings)) {
     // Filter array entries
     return timings
-      .filter(entry => entry.durationMs > 0)
-      .map(entry => ({
+      .filter((entry) => entry.durationMs > 0)
+      .map((entry) => ({
         ...entry,
-        children: entry.children ? filterZeroTimings(entry.children) : undefined
+        children: entry.children ? filterZeroTimings(entry.children) : undefined,
       }))
-      .filter(entry => {
+      .filter((entry) => {
         // Also remove entries that have no children after filtering
         if (entry.children) {
           const hasChildren = Array.isArray(entry.children)
@@ -410,7 +413,7 @@ function filterZeroTimings(timings: TimingData): TimingData {
       if (entry.durationMs > 0) {
         const filteredEntry: TimingEntry = {
           ...entry,
-          children: entry.children ? filterZeroTimings(entry.children) : undefined
+          children: entry.children ? filterZeroTimings(entry.children) : undefined,
         };
 
         // Only include if has children after filtering or has no children
@@ -456,7 +459,7 @@ function collectTimingPaths(timings: TimingData, parentPath: string[] = []): Tim
         path: [...parentPath, entry.name],
         entry,
         parent: timings,
-        key: index
+        key: index,
       });
       if (entry.children) {
         paths.push(...collectTimingPaths(entry.children, [...parentPath, entry.name]));
@@ -468,7 +471,7 @@ function collectTimingPaths(timings: TimingData, parentPath: string[] = []): Tim
         path: [...parentPath, key],
         entry,
         parent: timings,
-        key
+        key,
       });
       if (entry.children) {
         paths.push(...collectTimingPaths(entry.children, [...parentPath, key]));
@@ -528,7 +531,7 @@ function truncateTimingData(timings: TimingData, maxSizeBytes: number): Processe
 
   return {
     data: workingCopy,
-    truncated: truncated ? true : undefined
+    truncated: truncated ? true : undefined,
   };
 }
 

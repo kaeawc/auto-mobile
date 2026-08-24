@@ -18,7 +18,7 @@ interface TerminateAppAction {
     options?: {
       skipObservation?: boolean;
       skipUiStability?: boolean;
-    }
+    },
   ): Promise<TerminateAppResult>;
 }
 
@@ -56,10 +56,12 @@ export class DefaultAppCleanupService implements AppCleanupService {
         const result = await clearAppData.execute(config.appId);
         if (!result.success) {
           this.log.warn(
-            `[AppCleanupService] Failed to clear app data for ${config.appId} on ${device.deviceId}: ${result.error || "unknown error"}`
+            `[AppCleanupService] Failed to clear app data for ${config.appId} on ${device.deviceId}: ${result.error || "unknown error"}`,
           );
         } else {
-          this.log.info(`[AppCleanupService] Cleared app data for ${config.appId} on ${device.deviceId}`);
+          this.log.info(
+            `[AppCleanupService] Cleared app data for ${config.appId} on ${device.deviceId}`,
+          );
         }
       } catch (error) {
         this.log.warn(`[AppCleanupService] Cleanup failed for ${config.appId}: ${error}`);
@@ -75,7 +77,7 @@ export class DefaultAppCleanupService implements AppCleanupService {
       });
       if (!result.success) {
         this.log.warn(
-          `[AppCleanupService] Failed to terminate app ${config.appId} on ${device.deviceId}: ${result.error || "unknown error"}`
+          `[AppCleanupService] Failed to terminate app ${config.appId} on ${device.deviceId}: ${result.error || "unknown error"}`,
         );
       } else {
         this.log.info(`[AppCleanupService] Terminated app ${config.appId} on ${device.deviceId}`);

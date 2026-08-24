@@ -21,22 +21,22 @@
 It can do all this by being an MCP server that uses standard platform tools like adb & simctl paired with additional Kotlin & Swift libraries and apps. All components are open source. The point is to provide mobile engineers with AI workflow tools to perform UX deep dives, reproduce bugs, and run automated tests.
 
 ![Setting an alarm in the Clock app](docs/img/clock-app.gif)
-*An AI agent navigating to the Clock app, creating a new alarm*
+_An AI agent navigating to the Clock app, creating a new alarm_
 
 ![Searching YouTube for a video](docs/img/youtube-search.gif)
-*An AI agent searching YouTube and browsing results*
+_An AI agent searching YouTube and browsing results_
 
 ### Explore and Test
 
-| Task | What it does |
-|------|-------------|
-| **[Explore app UX](docs/using/ux-exploration.md)** | Navigate your app, discover screens, map user flows, identify confusing interactions |
-| **[Reproduce bugs](docs/using/reproducing-bugs.md)** | Paste a bug report and get exact reproduction steps with screenshots |
-| **[Create UI tests](docs/using/ui-tests.md)** | Describe test scenarios in plain English, get executable test plans |
-| **[Measure startup time](docs/using/perf-analysis/startup.md)** | Profile cold and warm launch performance |
-| **[Check scroll performance](docs/using/perf-analysis/scroll-framerate.md)** | Detect jank and dropped frames |
-| **[Audit contrast](docs/using/a11y.md#contrast)** | Find accessibility issues with color contrast |
-| **[Check tap targets](docs/using/a11y.md#tap-targets)** | Ensure touch targets meet size guidelines |
+| Task                                                                         | What it does                                                                         |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| **[Explore app UX](docs/using/ux-exploration.md)**                           | Navigate your app, discover screens, map user flows, identify confusing interactions |
+| **[Reproduce bugs](docs/using/reproducing-bugs.md)**                         | Paste a bug report and get exact reproduction steps with screenshots                 |
+| **[Create UI tests](docs/using/ui-tests.md)**                                | Describe test scenarios in plain English, get executable test plans                  |
+| **[Measure startup time](docs/using/perf-analysis/startup.md)**              | Profile cold and warm launch performance                                             |
+| **[Check scroll performance](docs/using/perf-analysis/scroll-framerate.md)** | Detect jank and dropped frames                                                       |
+| **[Audit contrast](docs/using/a11y.md#contrast)**                            | Find accessibility issues with color contrast                                        |
+| **[Check tap targets](docs/using/a11y.md#tap-targets)**                      | Ensure touch targets meet size guidelines                                            |
 
 ## How it works
 
@@ -49,7 +49,7 @@ It can do all this by being an MCP server that uses standard platform tools like
 
 You can use our interactive installer to step through all host platform requirements and configuration options. It checks host dependencies, optionally downloads Android or iOS developer tools, and configured the MCP daemon.
 
-``` bash title="One-line install (click to copy)"
+```bash title="One-line install (click to copy)"
 curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/refs/heads/main/scripts/install.sh | bash
 ```
 

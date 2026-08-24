@@ -1,12 +1,24 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import path from "path";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BootedDevice } from "../../models";
-import { createGlobalPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
-import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../../utils/HostCommandExecutor";
-import { DefaultAndroidBuildToolsLocator, type AndroidBuildToolsLocator } from "../../utils/android-cmdline-tools/AndroidBuildToolsLocator";
+import {
+  createGlobalPerformanceTracker,
+  type PerformanceTracker,
+} from "../../utils/PerformanceTracker";
+import {
+  DefaultHostCommandExecutor,
+  type HostCommandExecutor,
+} from "../../utils/HostCommandExecutor";
+import {
+  DefaultAndroidBuildToolsLocator,
+  type AndroidBuildToolsLocator,
+} from "../../utils/android-cmdline-tools/AndroidBuildToolsLocator";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
@@ -44,7 +56,7 @@ export class InstallApp {
     simctl: SimCtlClient | null = null,
     deviceAppInstaller: DeviceAppInstaller | null = null,
     plist: PlistReader = new PlistClient(),
-    installedAppsRepository?: InstalledAppsStore
+    installedAppsRepository?: InstalledAppsStore,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -64,8 +76,14 @@ export class InstallApp {
   async execute(
     artifactPath: string,
     userId?: number,
-    signal?: AbortSignal
-  ): Promise<{ success: boolean; upgrade: boolean; userId: number; packageName?: string; warning?: string }> {
+    signal?: AbortSignal,
+  ): Promise<{
+    success: boolean;
+    upgrade: boolean;
+    userId: number;
+    packageName?: string;
+    warning?: string;
+  }> {
     const perf = this.createPerformanceTracker();
     perf.serial("installApp");
 
@@ -78,23 +96,31 @@ export class InstallApp {
     if (this.device.platform === "ios") {
       this.validateiOSArtifact(ext);
       if (ext === ".ipa") {
-        const result = await perf.track("iOSPhysicalInstall", () => this.executeiOSPhysical(artifactPath, perf, signal));
+        const result = await perf.track("iOSPhysicalInstall", () =>
+          this.executeiOSPhysical(artifactPath, perf, signal),
+        );
         if (result.success) {
           IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity();
         }
         perf.end();
         return { ...result, userId: 0 };
       }
-      const result = await perf.track("iOSInstall", () => this.executeiOSSimulator(artifactPath, perf, signal));
+      const result = await perf.track("iOSInstall", () =>
+        this.executeiOSSimulator(artifactPath, perf, signal),
+      );
       if (result.success) {
-        IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(result.packageName);
+        IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(
+          result.packageName,
+        );
       }
       perf.end();
       return { ...result, userId: 0 };
     }
 
     if (ext !== ".apk") {
-      throw new Error(`Android devices only support .apk files, but got "${ext}" file. Use an .apk file for Android installation.`);
+      throw new Error(
+        `Android devices only support .apk files, but got "${ext}" file. Use an .apk file for Android installation.`,
+      );
     }
 
     const warnings: string[] = [];
@@ -110,11 +136,13 @@ export class InstallApp {
 
     // Auto-detect target user if not specified
     const targetUserId = await perf.track("detectTargetUser", async () => {
-      return (await new AndroidUserTargetResolver(this.adb).resolve({
-        packageName,
-        explicitUserId: userId,
-        signal,
-      })).userId;
+      return (
+        await new AndroidUserTargetResolver(this.adb).resolve({
+          packageName,
+          explicitUserId: userId,
+          signal,
+        })
+      ).userId;
     });
 
     let isInstalled = false;
@@ -125,14 +153,20 @@ export class InstallApp {
           const a11y = AndroidCtrlProxyClient.getInstance(this.device);
           const result = await a11y.requestInstalledPackages(true, undefined, 3000);
           if (result.success && result.userId === targetUserId) {
-            return result.packages.some(p => p.packageName === packageName);
+            return result.packages.some((p) => p.packageName === packageName);
           }
         } catch {
           // fall through to ADB
         }
         try {
           const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${packageName} | grep -c ${packageName}`;
-          const isInstalledOutput = await this.adb.executeCommand(isInstalledCmd, undefined, undefined, true, signal);
+          const isInstalledOutput = await this.adb.executeCommand(
+            isInstalledCmd,
+            undefined,
+            undefined,
+            true,
+            signal,
+          );
           return parseInt(isInstalledOutput.trim(), 10) > 0;
         } catch (error) {
           // Both the a11y check and this pm/grep fallback failed; treat the package as
@@ -151,7 +185,9 @@ export class InstallApp {
     }
 
     const installArgs = `install --user ${targetUserId} -r "${artifactPath}"`;
-    let installAttempt = await perf.track("adbInstall", () => this.runAndroidInstall(installArgs, signal));
+    let installAttempt = await perf.track("adbInstall", () =>
+      this.runAndroidInstall(installArgs, signal),
+    );
 
     if (installAttempt.success) {
       await this.markInstalledAppsCacheStale(true);
@@ -164,17 +200,23 @@ export class InstallApp {
       if (!packageName) {
         throw new Error(
           "Install failed because the installed version is newer (INSTALL_FAILED_VERSION_DOWNGRADE), " +
-          "but the package name could not be determined in order to uninstall it first."
+            "but the package name could not be determined in order to uninstall it first.",
         );
       }
-      logger.warn(`[InstallApp] Version downgrade detected for ${packageName}; uninstalling existing version and reinstalling.`);
-      await perf.track("downgradeUninstall", () => this.uninstallAndroidForDowngrade(packageName!, targetUserId, signal));
+      logger.warn(
+        `[InstallApp] Version downgrade detected for ${packageName}; uninstalling existing version and reinstalling.`,
+      );
+      await perf.track("downgradeUninstall", () =>
+        this.uninstallAndroidForDowngrade(packageName!, targetUserId, signal),
+      );
       await this.markInstalledAppsCacheStale(true);
-      installAttempt = await perf.track("adbReinstall", () => this.runAndroidInstall(installArgs, signal));
+      installAttempt = await perf.track("adbReinstall", () =>
+        this.runAndroidInstall(installArgs, signal),
+      );
       if (installAttempt.success) {
         await this.markInstalledAppsCacheStale(true);
         warnings.push(
-          `Installed version of ${packageName} was newer than the artifact; uninstalled it and reinstalled the provided version.`
+          `Installed version of ${packageName} was newer than the artifact; uninstalled it and reinstalled the provided version.`,
         );
         isInstalled = false; // The app was removed, so this is effectively a fresh install.
       }
@@ -188,17 +230,23 @@ export class InstallApp {
     const success = installAttempt.success;
 
     if (!packageName && beforePackages) {
-      const afterPackages = success ? await perf.track("listPackagesAfter", async () => {
-        return this.listPackagesForUser(targetUserId, signal);
-      }) : beforePackages;
+      const afterPackages = success
+        ? await perf.track("listPackagesAfter", async () => {
+            return this.listPackagesForUser(targetUserId, signal);
+          })
+        : beforePackages;
       const newPackages = this.diffSets(beforePackages, afterPackages);
 
       if (newPackages.length === 1) {
         packageName = newPackages[0];
       } else if (newPackages.length > 1) {
-        warnings.push("Installed APK but multiple new packages were detected; unable to determine the package name reliably.");
+        warnings.push(
+          "Installed APK but multiple new packages were detected; unable to determine the package name reliably.",
+        );
       } else if (success) {
-        warnings.push("Installed APK but package name could not be determined from the device package list.");
+        warnings.push(
+          "Installed APK but package name could not be determined from the device package list.",
+        );
         isInstalled = true;
       }
     }
@@ -210,7 +258,7 @@ export class InstallApp {
       upgrade: isInstalled && success,
       userId: targetUserId,
       packageName: packageName,
-      warning: warning
+      warning: warning,
     };
   }
 
@@ -228,9 +276,9 @@ export class InstallApp {
     }
     try {
       await getInstalledAppsCacheWriteCoordinator().invalidate(this.device.deviceId, () =>
-        getDbWriteBarrier().track(() =>
-          this.installedAppsRepository.markDeviceStale(this.device.deviceId)
-        ).then(() => undefined)
+        getDbWriteBarrier()
+          .track(() => this.installedAppsRepository.markDeviceStale(this.device.deviceId))
+          .then(() => undefined),
       );
     } catch (error) {
       logger.warn(`[InstallApp] Failed to invalidate installed apps cache: ${error}`);
@@ -244,10 +292,16 @@ export class InstallApp {
    */
   private async runAndroidInstall(
     installArgs: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; output: string; threw: boolean; error?: unknown }> {
     try {
-      const result = await this.adb.executeCommand(installArgs, undefined, undefined, undefined, signal);
+      const result = await this.adb.executeCommand(
+        installArgs,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      );
       const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
       return { success: output.includes("Success"), output, threw: false };
     } catch (error) {
@@ -267,20 +321,36 @@ export class InstallApp {
    * installed over a newer one. The uninstall is package-wide (not per-user)
    * because the installed APK version is shared across users.
    */
-  private async uninstallAndroidForDowngrade(packageName: string, userId: number, signal?: AbortSignal): Promise<void> {
+  private async uninstallAndroidForDowngrade(
+    packageName: string,
+    userId: number,
+    signal?: AbortSignal,
+  ): Promise<void> {
     try {
-      await this.adb.executeCommand(`shell am force-stop --user ${userId} ${packageName}`, undefined, undefined, true, signal);
+      await this.adb.executeCommand(
+        `shell am force-stop --user ${userId} ${packageName}`,
+        undefined,
+        undefined,
+        true,
+        signal,
+      );
     } catch {
       // Best-effort stop; proceed with uninstall regardless.
     }
-    await this.adb.executeCommand(`uninstall ${packageName}`, undefined, undefined, undefined, signal);
+    await this.adb.executeCommand(
+      `uninstall ${packageName}`,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 
   private extractErrorText(error: unknown): string {
     if (error instanceof Error) {
       const details = error as Error & { stderr?: unknown; stdout?: unknown };
       return [error.message, details.stderr, details.stdout]
-        .filter(value => typeof value === "string" && value.length > 0)
+        .filter((value) => typeof value === "string" && value.length > 0)
         .join("\n");
     }
     return String(error);
@@ -304,10 +374,14 @@ export class InstallApp {
    */
   private async resolveAppBundleId(appPath: string): Promise<string | undefined> {
     try {
-      const bundleId = (await this.plist.extractRawFile("CFBundleIdentifier", path.join(appPath, "Info.plist"))).trim();
+      const bundleId = (
+        await this.plist.extractRawFile("CFBundleIdentifier", path.join(appPath, "Info.plist"))
+      ).trim();
       return bundleId || undefined;
     } catch (error) {
-      logger.warn(`[InstallApp] Failed to read bundle identifier from ${appPath}: ${errorMessage(error)}`);
+      logger.warn(
+        `[InstallApp] Failed to read bundle identifier from ${appPath}: ${errorMessage(error)}`,
+      );
       return undefined;
     }
   }
@@ -315,29 +389,39 @@ export class InstallApp {
   private validateiOSArtifact(ext: string): void {
     const isSimulator = this.isSimulator();
     if (isSimulator && ext === ".ipa") {
-      throw new Error("iOS simulators do not support .ipa files. Use a .app bundle built for the simulator instead.");
+      throw new Error(
+        "iOS simulators do not support .ipa files. Use a .app bundle built for the simulator instead.",
+      );
     }
     if (!isSimulator && ext === ".app") {
-      throw new Error("iOS physical devices do not support .app bundles. Use a signed .ipa file instead.");
+      throw new Error(
+        "iOS physical devices do not support .app bundles. Use a signed .ipa file instead.",
+      );
     }
     if (ext !== ".app" && ext !== ".ipa") {
-      throw new Error(`iOS devices only support .app bundles (simulator) and .ipa files (physical device), but got "${ext}" file.`);
+      throw new Error(
+        `iOS devices only support .app bundles (simulator) and .ipa files (physical device), but got "${ext}" file.`,
+      );
     }
   }
 
   private async executeiOSSimulator(
     appPath: string,
     perf: PerformanceTracker,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; upgrade: boolean; packageName?: string; warning?: string }> {
     if (signal?.aborted) {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
     }
 
-    const beforeApps = await perf.track("listAppsBefore", () => this.simctl.listApps(this.device.deviceId));
+    const beforeApps = await perf.track("listAppsBefore", () =>
+      this.simctl.listApps(this.device.deviceId),
+    );
     const beforeBundleIds = this.extractBundleIds(beforeApps);
 
-    const downgraded = await perf.track("simctlInstall", () => this.installiOSSimulatorWithDowngradeRecovery(appPath, signal));
+    const downgraded = await perf.track("simctlInstall", () =>
+      this.installiOSSimulatorWithDowngradeRecovery(appPath, signal),
+    );
 
     await this.markInstalledAppsCacheStale(true);
 
@@ -345,7 +429,9 @@ export class InstallApp {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
     }
 
-    const afterApps = await perf.track("listAppsAfter", () => this.simctl.listApps(this.device.deviceId));
+    const afterApps = await perf.track("listAppsAfter", () =>
+      this.simctl.listApps(this.device.deviceId),
+    );
     const afterBundleIds = this.extractBundleIds(afterApps);
 
     const newBundles = this.diffSets(beforeBundleIds, afterBundleIds);
@@ -355,12 +441,14 @@ export class InstallApp {
     }
 
     if (!packageName) {
-      const expectedBundleId = await perf.track("resolveBundleId", () => this.resolveAppBundleId(appPath));
+      const expectedBundleId = await perf.track("resolveBundleId", () =>
+        this.resolveAppBundleId(appPath),
+      );
       if (expectedBundleId) {
         if (!afterBundleIds.has(expectedBundleId)) {
           throw new Error(
             `Install reported success, but bundle ${expectedBundleId} was not present on iOS simulator ` +
-            `${this.device.deviceId} after installation.`
+              `${this.device.deviceId} after installation.`,
           );
         }
         packageName = expectedBundleId;
@@ -370,24 +458,30 @@ export class InstallApp {
     const warnings: string[] = [];
 
     if (downgraded) {
-      warnings.push("Installed version was newer than the artifact; uninstalled it and reinstalled the provided version.");
+      warnings.push(
+        "Installed version was newer than the artifact; uninstalled it and reinstalled the provided version.",
+      );
     }
 
     if (!packageName) {
       if (newBundles.length > 1) {
-        warnings.push("Installed app but multiple new bundle IDs were detected; unable to determine the bundle ID reliably.");
+        warnings.push(
+          "Installed app but multiple new bundle IDs were detected; unable to determine the bundle ID reliably.",
+        );
       } else {
-        warnings.push("Installed app but bundle ID could not be determined from simctl listapps output.");
+        warnings.push(
+          "Installed app but bundle ID could not be determined from simctl listapps output.",
+        );
       }
     }
 
-    const upgrade = downgraded ? false : (packageName ? beforeBundleIds.has(packageName) : false);
+    const upgrade = downgraded ? false : packageName ? beforeBundleIds.has(packageName) : false;
 
     return {
       success: true,
       upgrade,
       packageName,
-      warning: warnings.length > 0 ? warnings.join(" ") : undefined
+      warning: warnings.length > 0 ? warnings.join(" ") : undefined,
     };
   }
 
@@ -396,7 +490,10 @@ export class InstallApp {
    * by uninstalling the existing (newer) app and reinstalling the artifact.
    * Returns true if a downgrade recovery was performed.
    */
-  private async installiOSSimulatorWithDowngradeRecovery(appPath: string, signal?: AbortSignal): Promise<boolean> {
+  private async installiOSSimulatorWithDowngradeRecovery(
+    appPath: string,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     try {
       await this.simctl.installApp(appPath, this.device.deviceId);
       return false;
@@ -409,10 +506,12 @@ export class InstallApp {
       if (!bundleId) {
         throw new Error(
           `Install failed because the installed version is newer than the artifact, and the bundle ` +
-          `identifier could not be read from ${appPath} in order to uninstall it first. Original error: ${text}`
+            `identifier could not be read from ${appPath} in order to uninstall it first. Original error: ${text}`,
         );
       }
-      logger.warn(`[InstallApp] Version downgrade detected for ${bundleId}; uninstalling existing version and reinstalling.`);
+      logger.warn(
+        `[InstallApp] Version downgrade detected for ${bundleId}; uninstalling existing version and reinstalling.`,
+      );
       try {
         await this.simctl.terminateApp(bundleId, this.device.deviceId);
       } catch {
@@ -431,14 +530,16 @@ export class InstallApp {
   private async executeiOSPhysical(
     ipaPath: string,
     perf: PerformanceTracker,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<{ success: boolean; upgrade: boolean; packageName?: string; warning?: string }> {
     if (signal?.aborted) {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
     }
 
     try {
-      await perf.track("devicectlInstall", () => this.deviceAppInstaller.installApp(this.device.deviceId, ipaPath));
+      await perf.track("devicectlInstall", () =>
+        this.deviceAppInstaller.installApp(this.device.deviceId, ipaPath),
+      );
       await this.markInstalledAppsCacheStale(true);
     } catch (error) {
       const text = this.extractErrorText(error);
@@ -447,7 +548,7 @@ export class InstallApp {
         // reliably derived from the .ipa, so guide the user to uninstall first.
         throw new Error(
           `Install failed because a newer version is already installed on the device. ` +
-          `Uninstall the app first with uninstallApp, then reinstall. Original error: ${text}`
+            `Uninstall the app first with uninstallApp, then reinstall. Original error: ${text}`,
         );
       }
       throw error;
@@ -456,13 +557,14 @@ export class InstallApp {
     return {
       success: true,
       upgrade: false,
-      warning: "Bundle ID detection is not available for physical device installations via devicectl."
+      warning:
+        "Bundle ID detection is not available for physical device installations via devicectl.",
     };
   }
 
   private async extractPackageName(
     apkPath: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<{ packageName?: string; warning?: string }> {
     if (signal?.aborted) {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
@@ -471,7 +573,8 @@ export class InstallApp {
     const tool = await this.buildToolsLocator.findAaptTool();
     if (!tool) {
       return {
-        warning: "aapt2 was not found. Install Android SDK build-tools (aapt2) for reliable package detection."
+        warning:
+          "aapt2 was not found. Install Android SDK build-tools (aapt2) for reliable package detection.",
       };
     }
 
@@ -495,7 +598,7 @@ export class InstallApp {
       undefined,
       undefined,
       true,
-      signal
+      signal,
     );
     const packages = new Set<string>();
     for (const line of result.stdout.split("\n")) {
@@ -559,9 +662,12 @@ export class InstallApp {
       if (!bundleId) {
         continue;
       }
-      const bundlePath = typeof app.bundlePath === "string"
-        ? app.bundlePath
-        : (typeof app.path === "string" ? app.path : undefined);
+      const bundlePath =
+        typeof app.bundlePath === "string"
+          ? app.bundlePath
+          : typeof app.path === "string"
+            ? app.path
+            : undefined;
       if (!bundlePath) {
         continue;
       }

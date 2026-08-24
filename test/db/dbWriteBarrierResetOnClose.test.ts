@@ -169,10 +169,10 @@ describe("closeDatabase cold-starts the dbWriteBarrier drain latch (issue #2896)
 
   test("getDatabase() fails fast when `:memory:` is set without the opt-in (issue #3065)", () =>
     runExclusiveResetTest(async () => {
-    // A real daemon that set AUTOMOBILE_DB_PATH=:memory: without the test opt-in
-    // must fail legibly at open time, not silently run against a
-    // migrated-but-empty app connection. The guard lives at the single path-
-    // resolution choke point, so getDatabase() surfaces it.
+      // A real daemon that set AUTOMOBILE_DB_PATH=:memory: without the test opt-in
+      // must fail legibly at open time, not silently run against a
+      // migrated-but-empty app connection. The guard lives at the single path-
+      // resolution choke point, so getDatabase() surfaces it.
       process.env.AUTOMOBILE_DB_PATH = IN_MEMORY_DATABASE_PATH;
       delete process.env[IN_MEMORY_DB_OPT_IN_ENV];
       delete process.env.AUTOMOBILE_DB_DIR;

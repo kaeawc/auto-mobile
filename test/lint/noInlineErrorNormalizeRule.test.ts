@@ -24,11 +24,15 @@ describe("auto-mobile/no-inline-error-normalize", () => {
   });
 
   test("does not flag the richer .stack variant", () => {
-    expect(fires("const m = error instanceof Error ? error.stack || error.message : String(error);")).toBe(false);
+    expect(
+      fires("const m = error instanceof Error ? error.stack || error.message : String(error);"),
+    ).toBe(false);
   });
 
   test("does not flag the `: new Error(String(x))` fallback variant", () => {
-    expect(fires("const m = error instanceof Error ? error : new Error(String(error));")).toBe(false);
+    expect(fires("const m = error instanceof Error ? error : new Error(String(error));")).toBe(
+      false,
+    );
   });
 
   test("does not flag a call to the errorMessage helper", () => {
@@ -41,7 +45,9 @@ describe("auto-mobile/no-inline-error-normalize", () => {
 
   test("flags a member-expression subject (`result.error`)", () => {
     expect(
-      fires("const m = result.error instanceof Error ? result.error.message : String(result.error);"),
+      fires(
+        "const m = result.error instanceof Error ? result.error.message : String(result.error);",
+      ),
     ).toBe(true);
   });
 
@@ -52,9 +58,9 @@ describe("auto-mobile/no-inline-error-normalize", () => {
   });
 
   test("does not flag when member subjects differ across positions", () => {
-    expect(
-      fires("const m = a.error instanceof Error ? b.error.message : String(a.error);"),
-    ).toBe(false);
+    expect(fires("const m = a.error instanceof Error ? b.error.message : String(a.error);")).toBe(
+      false,
+    );
   });
 
   test("flags a numeric index-access subject (`errors[0]`)", () => {
@@ -63,10 +69,10 @@ describe("auto-mobile/no-inline-error-normalize", () => {
     ).toBe(true);
   });
 
-  test("flags the bracket-notation `[\"message\"]` spelling", () => {
-    expect(
-      fires('const m = error instanceof Error ? error["message"] : String(error);'),
-    ).toBe(true);
+  test('flags the bracket-notation `["message"]` spelling', () => {
+    expect(fires('const m = error instanceof Error ? error["message"] : String(error);')).toBe(
+      true,
+    );
   });
 
   test("does not conflate a string-literal index with an identifier index", () => {
@@ -77,9 +83,7 @@ describe("auto-mobile/no-inline-error-normalize", () => {
   });
 
   test("does not flag a computed identifier key `[message]` (a different variable)", () => {
-    expect(
-      fires("const m = error instanceof Error ? error[message] : String(error);"),
-    ).toBe(false);
+    expect(fires("const m = error instanceof Error ? error[message] : String(error);")).toBe(false);
   });
 
   test("flags mixed numeric/string index spellings of the same property", () => {
@@ -91,7 +95,9 @@ describe("auto-mobile/no-inline-error-normalize", () => {
 
   test("flags mixed dot/bracket spellings of the same property", () => {
     expect(
-      fires('const m = result.error instanceof Error ? result["error"].message : String(result.error);'),
+      fires(
+        'const m = result.error instanceof Error ? result["error"].message : String(result.error);',
+      ),
     ).toBe(true);
   });
 
@@ -107,39 +113,37 @@ describe("auto-mobile/no-inline-error-normalize", () => {
   // false negatives that evade the recurrence guard.
 
   test("flags a non-null-asserted subject across all three positions", () => {
-    expect(
-      fires("const m = error! instanceof Error ? error!.message : String(error!);"),
-    ).toBe(true);
+    expect(fires("const m = error! instanceof Error ? error!.message : String(error!);")).toBe(
+      true,
+    );
   });
 
   test("flags a non-null assertion appearing in only one position", () => {
     // `error!` erases to `error` at runtime, so the reference is the same.
-    expect(
-      fires("const m = error instanceof Error ? error!.message : String(error);"),
-    ).toBe(true);
+    expect(fires("const m = error instanceof Error ? error!.message : String(error);")).toBe(true);
   });
 
   test("flags an optional-chained `.message` consequent", () => {
-    expect(
-      fires("const m = error instanceof Error ? error?.message : String(error);"),
-    ).toBe(true);
+    expect(fires("const m = error instanceof Error ? error?.message : String(error);")).toBe(true);
   });
 
   test("flags a non-null-asserted member subject (`result.error!`)", () => {
     expect(
-      fires("const m = result.error! instanceof Error ? result.error!.message : String(result.error!);"),
+      fires(
+        "const m = result.error! instanceof Error ? result.error!.message : String(result.error!);",
+      ),
     ).toBe(true);
   });
 
   test("flags an optional-chained member subject (`result?.error`)", () => {
     expect(
-      fires("const m = result?.error instanceof Error ? result?.error.message : String(result?.error);"),
+      fires(
+        "const m = result?.error instanceof Error ? result?.error.message : String(result?.error);",
+      ),
     ).toBe(true);
   });
 
   test("still does not flag a wrapped subject when branches reference a different var", () => {
-    expect(
-      fires("const m = a! instanceof Error ? b!.message : String(c!);"),
-    ).toBe(false);
+    expect(fires("const m = a! instanceof Error ? b!.message : String(c!);")).toBe(false);
   });
 });

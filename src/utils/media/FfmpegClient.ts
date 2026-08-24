@@ -94,7 +94,6 @@ export interface DefaultFfmpegClientOptions extends ResolveFfmpegBinaryOptions {
   readonly timer?: Timer;
 }
 
-
 const defaultSpawn: FfmpegSpawner = (binaryPath, args, options) =>
   // eslint-disable-next-line auto-mobile/no-unknown-cast -- Node's ChildProcess supplies the restricted FFmpeg process contract exposed by this client.
   nodeSpawn(binaryPath, args, options) as unknown as FfmpegProcess;
@@ -134,7 +133,7 @@ export class DefaultFfmpegClient implements FfmpegClient {
   async run(request: FfmpegRunRequest): Promise<FfmpegCommandResult> {
     const started = this.start(request);
     const stdout: string[] = [];
-    started.process.stdout?.on("data", chunk => {
+    started.process.stdout?.on("data", (chunk) => {
       stdout.push(chunk.toString());
     });
 
@@ -176,10 +175,12 @@ export class DefaultFfmpegClient implements FfmpegClient {
     });
     const encoders = encodersResult.stdout
       .split("\n")
-      .filter(line => line.trim().startsWith("V"))
-      .map(line => line.trim().split(/\s+/)[1])
+      .filter((line) => line.trim().startsWith("V"))
+      .map((line) => line.trim().split(/\s+/)[1])
       .filter((encoder): encoder is string => Boolean(encoder));
-    const missing = (request.requiredEncoders ?? []).filter(encoder => !encoders.includes(encoder));
+    const missing = (request.requiredEncoders ?? []).filter(
+      (encoder) => !encoders.includes(encoder),
+    );
     if (missing.length > 0) {
       throw new ActionableError(`FFmpeg is missing required encoder(s): ${missing.join(", ")}.`);
     }
@@ -188,7 +189,9 @@ export class DefaultFfmpegClient implements FfmpegClient {
 
   pipe(request: FfmpegPipeRequest): void {
     if (!request.source || !request.destination) {
-      throw new ActionableError(`Cannot pipe ${request.context}: source or destination stream is unavailable.`);
+      throw new ActionableError(
+        `Cannot pipe ${request.context}: source or destination stream is unavailable.`,
+      );
     }
 
     let cleanedUp = false;
@@ -197,7 +200,9 @@ export class DefaultFfmpegClient implements FfmpegClient {
         return;
       }
       cleanedUp = true;
-      logger.warn(`[FfmpegClient] ${request.context} pipe failed: ${error.message}; stopping both processes.`);
+      logger.warn(
+        `[FfmpegClient] ${request.context} pipe failed: ${error.message}; stopping both processes.`,
+      );
       for (const process of request.processes) {
         process.kill("SIGKILL");
       }

@@ -33,7 +33,9 @@ describe("PlanExecutor — optional steps", () => {
       "optionalStepFail",
       "always fails",
       deviceSchema,
-      mock(async () => createStructuredToolResponse({ success: false, error: "element not found" }))
+      mock(async () =>
+        createStructuredToolResponse({ success: false, error: "element not found" }),
+      ),
     );
     markDevice("optionalStepFail");
 
@@ -43,7 +45,7 @@ describe("PlanExecutor — optional steps", () => {
       deviceSchema,
       mock(async () => {
         throw new Error("boom");
-      })
+      }),
     );
     markDevice("optionalStepThrow");
 
@@ -57,8 +59,8 @@ describe("PlanExecutor — optional steps", () => {
           updatedAt: 0,
           awaitTimeout: true,
           awaitDuration: 5000,
-        })
-      )
+        }),
+      ),
     );
     markDevice("observe");
 
@@ -66,7 +68,7 @@ describe("PlanExecutor — optional steps", () => {
       "optionalStepOk",
       "succeeds",
       deviceSchema,
-      mock(async () => createStructuredToolResponse({ success: true }))
+      mock(async () => createStructuredToolResponse({ success: true })),
     );
     markDevice("optionalStepOk");
 
@@ -81,7 +83,7 @@ describe("PlanExecutor — optional steps", () => {
       "optionalStepStrict",
       "requires a field",
       strictSchema,
-      mock(async () => createStructuredToolResponse({ success: true }))
+      mock(async () => createStructuredToolResponse({ success: true })),
     );
     markDevice("optionalStepStrict");
   });
@@ -105,7 +107,7 @@ describe("PlanExecutor — optional steps", () => {
     expect(result.failedStep).toBeUndefined();
     // Only the mandatory step counts as executed; the optional one is skipped.
     expect(result.executedSteps).toBe(1);
-    const statuses = result.debug?.steps.map(s => s.status);
+    const statuses = result.debug?.steps.map((s) => s.status);
     expect(statuses).toEqual(["skipped", "completed"]);
   });
 
@@ -218,16 +220,15 @@ describe("PlanExecutor — optional steps", () => {
       mock(async () => {
         fakeTimer.advanceTime(250);
         return createStructuredToolResponse({ success: false, error: "timed out" });
-      })
+      }),
     );
-    (ToolRegistry.getTool("optionalStepTimedFail") as { requiresDevice: boolean }).requiresDevice = true;
+    (ToolRegistry.getTool("optionalStepTimedFail") as { requiresDevice: boolean }).requiresDevice =
+      true;
 
     const plan: Plan = {
       name: "parallel-optional-timed-fail",
       devices: ["device-a"],
-      steps: [
-        { tool: "optionalStepTimedFail", params: { device: "device-a" }, optional: true },
-      ],
+      steps: [{ tool: "optionalStepTimedFail", params: { device: "device-a" }, optional: true }],
     };
 
     const result = await timedExecutor.executePlan(plan, 0, "ios", "sim-1", "session-1");

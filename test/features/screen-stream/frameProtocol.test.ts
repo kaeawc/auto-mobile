@@ -12,7 +12,7 @@ function encodeHeader(
   width: number,
   height: number,
   bytesPerRow: number,
-  timestampMs: number
+  timestampMs: number,
 ): Buffer {
   return encodeFrameHeader({ width, height, bytesPerRow, timestampMs });
 }
@@ -22,7 +22,7 @@ function makeFrameBytes(
   height: number,
   bytesPerRow: number,
   timestampMs: number,
-  fill: number
+  fill: number,
 ): Buffer {
   const pixels = Buffer.alloc(height * bytesPerRow, fill);
   return Buffer.concat([encodeHeader(width, height, bytesPerRow, timestampMs), pixels]);
@@ -76,7 +76,7 @@ describe("FrameDecoder", () => {
     const b = makeFrameBytes(1, 1, 4, 20, 0x02);
     const out = decoder.push(Buffer.concat([a, b]));
     expect(out).toHaveLength(2);
-    expect(out.map(f => f.header.timestampMs)).toEqual([10, 20]);
+    expect(out.map((f) => f.header.timestampMs)).toEqual([10, 20]);
     expect(out[0].pixels[0]).toBe(0x01);
     expect(out[1].pixels[0]).toBe(0x02);
   });
@@ -84,7 +84,7 @@ describe("FrameDecoder", () => {
   test("rejects a header whose checksum does not match its fields", () => {
     const decoder = new FrameDecoder();
     const errors: MalformedFrameError[] = [];
-    const out = decoder.push(corruptHeader(), err => errors.push(err));
+    const out = decoder.push(corruptHeader(), (err) => errors.push(err));
     expect(out).toHaveLength(0);
     expect(errors).toHaveLength(1);
     expect(errors[0].reason).toBe("header_checksum_mismatch");
@@ -93,7 +93,7 @@ describe("FrameDecoder", () => {
   test("rejects bytes with no marker as a magic mismatch", () => {
     const decoder = new FrameDecoder();
     const errors: MalformedFrameError[] = [];
-    decoder.push(Buffer.alloc(FRAME_HEADER_SIZE, 0x5a), err => errors.push(err));
+    decoder.push(Buffer.alloc(FRAME_HEADER_SIZE, 0x5a), (err) => errors.push(err));
     expect(errors[0].reason).toBe("header_magic_mismatch");
   });
 
@@ -101,7 +101,7 @@ describe("FrameDecoder", () => {
     const decoder = new FrameDecoder();
     const errors: MalformedFrameError[] = [];
     // Valid marker + checksum, but width 0 is not a real video frame.
-    decoder.push(encodeHeader(0, 1, 4, 0), err => errors.push(err));
+    decoder.push(encodeHeader(0, 1, 4, 0), (err) => errors.push(err));
     expect(errors[0].reason).toBe("header_width_zero");
   });
 
@@ -124,7 +124,7 @@ describe("FrameDecoder", () => {
     frame.fill(0x00);
 
     expect(out[0].pixels[0]).toBe(0xab);
-    expect(out[0].pixels.every(byte => byte === 0xab)).toBe(true);
+    expect(out[0].pixels.every((byte) => byte === 0xab)).toBe(true);
   });
 });
 
@@ -135,9 +135,9 @@ describe("FrameDecoder marker-based resynchronization", () => {
     const errors: MalformedFrameError[] = [];
     // The checksum validates the recovered frame on its own, so unlike the old
     // marker-less decoder there is no need for a following frame to confirm it.
-    const out = decoder.push(Buffer.concat([corruptHeader(), good]), err => errors.push(err));
+    const out = decoder.push(Buffer.concat([corruptHeader(), good]), (err) => errors.push(err));
     expect(errors).toHaveLength(1);
-    expect(out.map(f => f.header.timestampMs)).toEqual([99]);
+    expect(out.map((f) => f.header.timestampMs)).toEqual([99]);
     expect(out[0].pixels[0]).toBe(0xcd);
   });
 
@@ -147,9 +147,9 @@ describe("FrameDecoder marker-based resynchronization", () => {
     const corrupt = Buffer.concat([corruptHeader(), pseudoRandomPayload(4_000)]);
     const good = makeFrameBytes(2, 2, 8, 777, 0x5a);
     const errors: MalformedFrameError[] = [];
-    const out = decoder.push(Buffer.concat([corrupt, good]), err => errors.push(err));
+    const out = decoder.push(Buffer.concat([corrupt, good]), (err) => errors.push(err));
     expect(errors).toHaveLength(1);
-    expect(out.map(f => f.header.timestampMs)).toEqual([777]);
+    expect(out.map((f) => f.header.timestampMs)).toEqual([777]);
     expect(out[0].pixels[0]).toBe(0x5a);
   });
 
@@ -159,32 +159,36 @@ describe("FrameDecoder marker-based resynchronization", () => {
     const corrupt = Buffer.concat([corruptHeader(), pseudoRandomPayload(8_000)]);
     const after = makeFrameBytes(1, 1, 4, 22, 0x22);
     const errors: MalformedFrameError[] = [];
-    const out = decoder.push(Buffer.concat([before, corrupt, after]), err => errors.push(err));
+    const out = decoder.push(Buffer.concat([before, corrupt, after]), (err) => errors.push(err));
     expect(errors).toHaveLength(1);
-    expect(out.map(f => f.header.timestampMs)).toEqual([11, 22]);
+    expect(out.map((f) => f.header.timestampMs)).toEqual([11, 22]);
   });
 
   test("a corrupt header at the tail emits one callback and resyncs on a later push", () => {
     const decoder = new FrameDecoder();
     const errors: MalformedFrameError[] = [];
     const tail = Buffer.concat([corruptHeader(), pseudoRandomPayload(2_048)]);
-    expect(decoder.push(tail, err => errors.push(err))).toHaveLength(0);
+    expect(decoder.push(tail, (err) => errors.push(err))).toHaveLength(0);
     expect(errors).toHaveLength(1);
 
-    const out = decoder.push(makeFrameBytes(1, 1, 4, 33, 0x33), err => errors.push(err));
+    const out = decoder.push(makeFrameBytes(1, 1, 4, 33, 0x33), (err) => errors.push(err));
     expect(errors).toHaveLength(1);
-    expect(out.map(f => f.header.timestampMs)).toEqual([33]);
+    expect(out.map((f) => f.header.timestampMs)).toEqual([33]);
   });
 
   test("a large corrupt frame does not amplify into a flood of callbacks", () => {
     const decoder = new FrameDecoder();
     const errors: MalformedFrameError[] = [];
     const out = decoder.push(
-      Buffer.concat([corruptHeader(), pseudoRandomPayload(16_000), makeFrameBytes(1, 1, 4, 88, 0x88)]),
-      err => errors.push(err)
+      Buffer.concat([
+        corruptHeader(),
+        pseudoRandomPayload(16_000),
+        makeFrameBytes(1, 1, 4, 88, 0x88),
+      ]),
+      (err) => errors.push(err),
     );
     expect(errors).toHaveLength(1);
-    expect(out.map(f => f.header.timestampMs)).toEqual([88]);
+    expect(out.map((f) => f.header.timestampMs)).toEqual([88]);
   });
 
   test("a sustained garbage stream stays quiet and then comes back in sync", () => {
@@ -200,8 +204,8 @@ describe("FrameDecoder marker-based resynchronization", () => {
       makeFrameBytes(4, 4, 16, 909, 0x0f),
     ]);
     for (let offset = 0; offset < stream.length; offset += 65_536) {
-      const out = decoder.push(stream.subarray(offset, offset + 65_536), err => errors.push(err));
-      frames.push(...out.map(f => f.header.timestampMs));
+      const out = decoder.push(stream.subarray(offset, offset + 65_536), (err) => errors.push(err));
+      frames.push(...out.map((f) => f.header.timestampMs));
     }
     expect(errors).toHaveLength(1);
     expect(frames).toEqual([909]);
@@ -221,9 +225,9 @@ describe("FrameDecoder marker-based resynchronization", () => {
     ]);
     const good = makeFrameBytes(1, 1, 4, 444, 0x44);
     const errors: MalformedFrameError[] = [];
-    const out = decoder.push(Buffer.concat([corrupt, good]), err => errors.push(err));
+    const out = decoder.push(Buffer.concat([corrupt, good]), (err) => errors.push(err));
     expect(errors).toHaveLength(1);
-    expect(out.map(f => f.header.timestampMs)).toEqual([444]);
+    expect(out.map((f) => f.header.timestampMs)).toEqual([444]);
   });
 
   test("a recovered frame is kept even when a second corrupt header follows it", () => {
@@ -241,10 +245,10 @@ describe("FrameDecoder marker-based resynchronization", () => {
         pseudoRandomPayload(200),
         makeFrameBytes(1, 1, 4, 888, 0xcc),
       ]),
-      err => errors.push(err)
+      (err) => errors.push(err),
     );
     // Both genuine frames survive; each corruption episode reports once.
-    expect(out.map(f => f.header.timestampMs)).toEqual([777, 888]);
+    expect(out.map((f) => f.header.timestampMs)).toEqual([777, 888]);
     expect(errors).toHaveLength(2);
   });
 
@@ -256,16 +260,16 @@ describe("FrameDecoder marker-based resynchronization", () => {
     const all = Buffer.concat([corrupt, good]);
     const split = corrupt.length + 10; // mid-way through the recovery header
 
-    expect(decoder.push(all.subarray(0, split), err => errors.push(err))).toHaveLength(0);
-    const out = decoder.push(all.subarray(split), err => errors.push(err));
+    expect(decoder.push(all.subarray(0, split), (err) => errors.push(err))).toHaveLength(0);
+    const out = decoder.push(all.subarray(split), (err) => errors.push(err));
     expect(errors).toHaveLength(1);
-    expect(out.map(f => f.header.timestampMs)).toEqual([66]);
+    expect(out.map((f) => f.header.timestampMs)).toEqual([66]);
   });
 
   test("audio records with an implausible payload length are rejected", () => {
     const decoder = new FrameDecoder();
     const errors: MalformedFrameError[] = [];
-    decoder.push(encodeHeader(0, 8_000, 1, 0xffffffff), err => errors.push(err));
+    decoder.push(encodeHeader(0, 8_000, 1, 0xffffffff), (err) => errors.push(err));
     expect(errors).toHaveLength(1);
     expect(errors[0].reason).toBe("audio_payload_too_large");
   });
@@ -278,8 +282,8 @@ describe("FrameDecoder marker-based resynchronization", () => {
     const record = Buffer.concat([encodeHeader(0, 8_000, 1, 32), Buffer.alloc(32, 0x09)]);
     const out = decoder.push(
       Buffer.concat([corrupt, record]),
-      err => errors.push(err),
-      a => audio.push(a.pcm16le)
+      (err) => errors.push(err),
+      (a) => audio.push(a.pcm16le),
     );
     expect(errors).toHaveLength(1);
     expect(audio).toHaveLength(1);
@@ -297,7 +301,9 @@ describe("FrameDecoder marker-based resynchronization", () => {
     const chunks = 12;
     const chunk = Buffer.alloc(8 * 1024, 0);
     const parses = countMarkerScans(() => {
-      for (let i = 0; i < chunks; i++) {decoder.push(chunk);}
+      for (let i = 0; i < chunks; i++) {
+        decoder.push(chunk);
+      }
     });
     // A retained buffer rescanned from zero each chunk would be ~chunks/2 times this.
     expect(parses).toBeLessThan(chunks * chunk.length * 1.2);
@@ -308,11 +314,11 @@ describe("FrameDecoder marker-based resynchronization", () => {
 function countMarkerScans(body: () => void): number {
   let visited = 0;
   const original = Buffer.prototype.indexOf;
-  Buffer.prototype.indexOf = function(
+  Buffer.prototype.indexOf = function (
     this: Buffer,
     value: string | number | Uint8Array,
     byteOffset?: number,
-    encoding?: BufferEncoding
+    encoding?: BufferEncoding,
   ): number {
     visited += this.length - (typeof byteOffset === "number" ? byteOffset : 0);
     return original.call(this, value as Uint8Array, byteOffset, encoding);

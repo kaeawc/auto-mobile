@@ -2,7 +2,10 @@ import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
-import { DeviceSessionRepository, type DeviceSessionPersistence } from "../db/deviceSessionRepository";
+import {
+  DeviceSessionRepository,
+  type DeviceSessionPersistence,
+} from "../db/deviceSessionRepository";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { toActionableError } from "../models/ActionableError";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
@@ -44,7 +47,7 @@ export interface KeepScreenAwakeRestorer {
  */
 export interface SessionCacheData {
   lastHierarchy?: ViewHierarchyResult; // Last observed view hierarchy (full, untrimmed)
-  lastObserveTime?: number;    // Timestamp of last hierarchy observation
+  lastObserveTime?: number; // Timestamp of last hierarchy observation
   lastRenderedObservation?: ObserveResult; // Last observation emitted to the agent (sanitized), the #2761 diff baseline
   keepScreenAwake?: KeepScreenAwakeState; // Keep-awake state applied at session setup, restored on release
   deviceLabels?: DeviceLabelMap; // Device-label → session map for multi-device (`device:`-labelled) sessions
@@ -57,16 +60,16 @@ export interface SessionCacheData {
  * Each JUnitRunner test process gets a unique session UUID.
  */
 export interface Session {
-  sessionId: string;           // UUID provided by JUnitRunner
-  assignedDevice: string;      // Device ID this session is using
-  platform: Platform;          // Device platform
-  createdAt: number;           // Timestamp when session was created
-  lastUsedAt: number;          // Last activity timestamp
-  expiresAt: number;           // When session will expire (for cleanup)
+  sessionId: string; // UUID provided by JUnitRunner
+  assignedDevice: string; // Device ID this session is using
+  platform: Platform; // Device platform
+  createdAt: number; // Timestamp when session was created
+  lastUsedAt: number; // Last activity timestamp
+  expiresAt: number; // When session will expire (for cleanup)
   cacheData: SessionCacheData; // Cached data for this session
-  lastHeartbeat: number;       // Timestamp of last heartbeat
-  sessionTimeoutMs: number;    // Idle timeout used when extending this session
-  heartbeatTimeoutMs: number;  // Heartbeat timeout for this session
+  lastHeartbeat: number; // Timestamp of last heartbeat
+  sessionTimeoutMs: number; // Idle timeout used when extending this session
+  heartbeatTimeoutMs: number; // Heartbeat timeout for this session
   heartbeatTimeoutSource: "default" | "custom"; // Whether the heartbeat timeout was defaulted or explicitly provided
   hasReceivedHeartbeat: boolean; // Whether any heartbeat has been received
 }
@@ -126,7 +129,10 @@ export interface ActiveSessionExecutionQuery {
   excludeExecutionId?: string;
 }
 
-export type ActiveSessionExecutionChecker = (sessionId: string, query?: ActiveSessionExecutionQuery) => boolean;
+export type ActiveSessionExecutionChecker = (
+  sessionId: string,
+  query?: ActiveSessionExecutionQuery,
+) => boolean;
 
 export type SessionDeviceUnboundCallback = (sessionId: string, deviceId: string) => void;
 
@@ -196,16 +202,20 @@ export class SessionManager {
     { session: Session; promise: Promise<string | null> }
   > = new Map();
   /** Every release still running, including an older session that reused a UUID. */
-  private readonly activeReleasePromises: Set<{ session: Session; promise: Promise<string | null> }> = new Set();
+  private readonly activeReleasePromises: Set<{
+    session: Session;
+    promise: Promise<string | null>;
+  }> = new Set();
   /** Setup work that can modify device state after a session has been assigned. */
-  private readonly sessionSetupPromises: Set<{ session: Session; promise: Promise<void> }> = new Set();
+  private readonly sessionSetupPromises: Set<{ session: Session; promise: Promise<void> }> =
+    new Set();
   /** Sessions whose teardown has closed admission for further device-state setup. */
   private readonly releasingSessions: WeakSet<Session> = new WeakSet();
   /**
-    * Device work that outlived its bounded release phase. The pool keeps the
-    * device assigned until this settles, so no replacement session can race a
+   * Device work that outlived its bounded release phase. The pool keeps the
+   * device assigned until this settles, so no replacement session can race a
    * late setup or keep-awake restore.
-  */
+   */
   private readonly pendingDeviceCleanups: Map<string, Promise<void>> = new Map();
   /** Creation writes that must finish before a session becomes visible to callers. */
   private readonly pendingSessionCreations: Map<string, PendingSessionCreation> = new Map();
@@ -245,8 +255,8 @@ export class SessionManager {
     getBarrier: () => DbWriteBarrier = getDbWriteBarrier,
     // Seam for keep-awake restore (issue #2973): defaults to the real manager;
     // tests inject a fake to assert the typed slot's payload reaches `restore`.
-    keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer =
-    device => new KeepScreenAwakeManager(device),
+    keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer = (device) =>
+      new KeepScreenAwakeManager(device),
   ) {
     this.timer = timer;
     this.deviceSessionRepository = deviceSessionRepository;
@@ -286,9 +296,9 @@ export class SessionManager {
   }
 
   /**
-    * Register cleanup for a device a session stopped using without ending that
-    * session. This intentionally excludes session-wide cleanup and transport
-    * unbinding, which must remain attached to a real session release.
+   * Register cleanup for a device a session stopped using without ending that
+   * session. This intentionally excludes session-wide cleanup and transport
+   * unbinding, which must remain attached to a real session release.
    */
   onSessionDeviceUnbound(callback: SessionDeviceUnboundCallback): void {
     this.deviceUnboundCallbacks.push(callback);
@@ -404,7 +414,10 @@ export class SessionManager {
    * defer expiry cleanup, but it must not let a request that arrived after the
    * deadline revive an expired session.
    */
-  getSessionForNewExecution(sessionId: string, execution?: SessionExecutionMetadata): Session | null {
+  getSessionForNewExecution(
+    sessionId: string,
+    execution?: SessionExecutionMetadata,
+  ): Session | null {
     return this.getSessionInternal(sessionId, true, execution);
   }
 
@@ -420,7 +433,10 @@ export class SessionManager {
     if (!session) {
       return null;
     }
-    if (expireDespiteActiveExecution && this.isLateExecutionWhileEarlierWorkIsActive(session, execution)) {
+    if (
+      expireDespiteActiveExecution &&
+      this.isLateExecutionWhileEarlierWorkIsActive(session, execution)
+    ) {
       throw new Error(
         `Session ${sessionId} expired before this execution began while earlier work is still active.`,
       );
@@ -437,7 +453,9 @@ export class SessionManager {
       const release = this.releaseSession(sessionId, "lazy-expiry", true);
       void this.getBarrier()
         .trackExisting(release)
-        .catch(error => logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`));
+        .catch((error) =>
+          logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`),
+        );
       return null;
     }
     return session;
@@ -481,7 +499,9 @@ export class SessionManager {
         await inFlightRelease.promise;
         return await this.getOrCreateSession(sessionId, devicePool, platform);
       }
-      logger.info(`[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`);
+      logger.info(
+        `[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`,
+      );
       // Resolving a session for a tool call is activity: extend both the idle
       // timeout (expiresAt) and the heartbeat clock (lastHeartbeat). Without the
       // latter, the daemon heartbeat watchdog would reap an actively-used session
@@ -502,7 +522,10 @@ export class SessionManager {
 
     const inFlightRelease = this.releasePromises.get(sessionId);
     const currentSession = this.sessions.get(sessionId);
-    if (inFlightRelease && (currentSession === undefined || inFlightRelease.session === currentSession)) {
+    if (
+      inFlightRelease &&
+      (currentSession === undefined || inFlightRelease.session === currentSession)
+    ) {
       await inFlightRelease.promise;
       return await this.getOrCreateSession(sessionId, devicePool, platform);
     }
@@ -536,12 +559,14 @@ export class SessionManager {
       this.terminalReleaseSnapshots.set(sessionId, persistedTerminalRelease);
       throw new TerminalSessionError(sessionId, persistedTerminalRelease);
     }
-    logger.info(`[SessionManager] Creating new session ${sessionId}, calling devicePool.assignDeviceToSession()`);
+    logger.info(
+      `[SessionManager] Creating new session ${sessionId}, calling devicePool.assignDeviceToSession()`,
+    );
 
     // Need to create new session - assign device from pool
     if (!devicePool) {
       throw new Error(
-        `Session ${sessionId} not found and no device pool provided for auto-assignment.`
+        `Session ${sessionId} not found and no device pool provided for auto-assignment.`,
       );
     }
 
@@ -551,12 +576,12 @@ export class SessionManager {
     // Session now exists, return it
     const session = this.getSession(sessionId);
     if (!session) {
-      throw new Error(
-        `Session ${sessionId} creation failed after device assignment`
-      );
+      throw new Error(`Session ${sessionId} creation failed after device assignment`);
     }
 
-    logger.info(`[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`);
+    logger.info(
+      `[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`,
+    );
     return session;
   }
 
@@ -609,7 +634,9 @@ export class SessionManager {
     try {
       await this.restoreKeepScreenAwake(existing);
     } catch (error) {
-      logger.warn(`Failed to restore keep-awake state for rebound session ${existing.sessionId}: ${error}`);
+      logger.warn(
+        `Failed to restore keep-awake state for rebound session ${existing.sessionId}: ${error}`,
+      );
     }
 
     const previousDevice = existing.assignedDevice;
@@ -641,9 +668,10 @@ export class SessionManager {
       ...session,
       assignedDevice,
       platform,
-      cacheData: session.cacheData.deviceLabels === undefined
-        ? {}
-        : { deviceLabels: session.cacheData.deviceLabels },
+      cacheData:
+        session.cacheData.deviceLabels === undefined
+          ? {}
+          : { deviceLabels: session.cacheData.deviceLabels },
     };
   }
 
@@ -703,12 +731,13 @@ export class SessionManager {
 
     this.releasingSessions.add(session);
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
-    const promise = pendingRebind?.session === session
-      ? pendingRebind.promise.then(
-        () => this.releaseSessionInternal(sessionId, session, releaseReason),
-        () => this.releaseSessionInternal(sessionId, session, releaseReason),
-      )
-      : this.releaseSessionInternal(sessionId, session, releaseReason);
+    const promise =
+      pendingRebind?.session === session
+        ? pendingRebind.promise.then(
+            () => this.releaseSessionInternal(sessionId, session, releaseReason),
+            () => this.releaseSessionInternal(sessionId, session, releaseReason),
+          )
+        : this.releaseSessionInternal(sessionId, session, releaseReason);
     const release = { session, promise };
     this.releasePromises.set(sessionId, release);
     this.activeReleasePromises.add(release);
@@ -752,7 +781,12 @@ export class SessionManager {
       logger.warn(`Cannot release session ${sessionId}: not found`);
       return null;
     }
-    return await this.releasePendingSessionWork(sessionId, releaseReason, allowExpired, pendingSession);
+    return await this.releasePendingSessionWork(
+      sessionId,
+      releaseReason,
+      allowExpired,
+      pendingSession,
+    );
   }
 
   private async releasePendingSessionWork(
@@ -831,13 +865,13 @@ export class SessionManager {
 
   /** Wait a bounded amount of time for releases already started by monitors. */
   async drainReleasePromises(timeoutMs: number): Promise<boolean> {
-    const releases = Array.from(this.activeReleasePromises, release => release.promise);
+    const releases = Array.from(this.activeReleasePromises, (release) => release.promise);
     if (releases.length === 0) {
       return true;
     }
 
     let timeoutHandle: NodeJS.Timeout | undefined;
-    const timeout = new Promise<boolean>(resolve => {
+    const timeout = new Promise<boolean>((resolve) => {
       timeoutHandle = this.timer.setTimeout(() => resolve(false), timeoutMs);
     });
 
@@ -974,40 +1008,56 @@ export class SessionManager {
   ): Promise<{ pending: Promise<void> | null }> {
     let timeoutHandle: NodeJS.Timeout | undefined;
     const settled = Promise.allSettled(setups);
-    const timeout = new Promise<"timed-out">(resolve => {
-      timeoutHandle = this.timer.setTimeout(() => resolve("timed-out"), SESSION_SETUP_DRAIN_TIMEOUT_MS);
+    const timeout = new Promise<"timed-out">((resolve) => {
+      timeoutHandle = this.timer.setTimeout(
+        () => resolve("timed-out"),
+        SESSION_SETUP_DRAIN_TIMEOUT_MS,
+      );
     });
     try {
       const result = await Promise.race([settled, timeout]);
       if (result === "timed-out") {
-        logger.warn(`Timed out after ${SESSION_SETUP_DRAIN_TIMEOUT_MS}ms waiting for session ${sessionId} setup during release`);
+        logger.warn(
+          `Timed out after ${SESSION_SETUP_DRAIN_TIMEOUT_MS}ms waiting for session ${sessionId} setup during release`,
+        );
         return { pending: settled.then(() => undefined) };
       }
       for (const setup of result) {
-        if (setup.status === "rejected") {logger.warn(`Failed session setup for ${sessionId} before release: ${setup.reason}`);}
+        if (setup.status === "rejected") {
+          logger.warn(`Failed session setup for ${sessionId} before release: ${setup.reason}`);
+        }
       }
       return { pending: null };
     } finally {
-      if (timeoutHandle !== undefined) {this.timer.clearTimeout(timeoutHandle);}
+      if (timeoutHandle !== undefined) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
     }
   }
 
-  private async restoreKeepScreenAwakeBestEffort(session: Session): Promise<{ pending: Promise<void> | null }> {
+  private async restoreKeepScreenAwakeBestEffort(
+    session: Session,
+  ): Promise<{ pending: Promise<void> | null }> {
     if (!session.cacheData.keepScreenAwake?.applied) {
       return { pending: null };
     }
     let timeoutHandle: NodeJS.Timeout | undefined;
     const restoration = this.restoreKeepScreenAwake(session).then(
       () => ({ outcome: "restored" as const }),
-      error => ({ outcome: "failed" as const, error }),
+      (error) => ({ outcome: "failed" as const, error }),
     );
-    const timeout = new Promise<{ outcome: "timed-out" }>(resolve => {
-      timeoutHandle = this.timer.setTimeout(() => resolve({ outcome: "timed-out" }), KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS);
+    const timeout = new Promise<{ outcome: "timed-out" }>((resolve) => {
+      timeoutHandle = this.timer.setTimeout(
+        () => resolve({ outcome: "timed-out" }),
+        KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS,
+      );
     });
     try {
       const result = await Promise.race([restoration, timeout]);
       if (result.outcome === "failed") {
-        logger.warn(`Failed to restore keep-awake state for session ${session.sessionId}: ${result.error}`);
+        logger.warn(
+          `Failed to restore keep-awake state for session ${session.sessionId}: ${result.error}`,
+        );
       } else if (result.outcome === "timed-out") {
         logger.warn(
           `Timed out after ${KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS}ms restoring keep-awake state for session ${session.sessionId}`,
@@ -1016,14 +1066,17 @@ export class SessionManager {
       }
       return { pending: null };
     } finally {
-      if (timeoutHandle !== undefined) {this.timer.clearTimeout(timeoutHandle);}
+      if (timeoutHandle !== undefined) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
     }
   }
 
   private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void {
     const previous = this.pendingDeviceCleanups.get(deviceId);
-    const cleanup = Promise.allSettled(previous ? [previous, ...cleanups] : cleanups)
-      .then(() => undefined);
+    const cleanup = Promise.allSettled(previous ? [previous, ...cleanups] : cleanups).then(
+      () => undefined,
+    );
     this.pendingDeviceCleanups.set(deviceId, cleanup);
     void cleanup.then(() => {
       if (this.pendingDeviceCleanups.get(deviceId) === cleanup) {
@@ -1058,10 +1111,7 @@ export class SessionManager {
    * Allows tools to store data (screenshots, hierarchies) that can be
    * reused by other tools in the same session without re-fetching.
    */
-  updateSessionCache(
-    sessionId: string,
-    updates: Partial<SessionCacheData>
-  ): void {
+  updateSessionCache(sessionId: string, updates: Partial<SessionCacheData>): void {
     const session = this.getSession(sessionId);
     if (!session) {
       logger.warn(`Cannot update cache for session ${sessionId}: not found`);
@@ -1076,7 +1126,9 @@ export class SessionManager {
     session.lastHeartbeat = this.timer.now();
     void this.getBarrier()
       .track(() => this.recordSessionActivity(session))
-      .catch(error => logger.warn(`[SessionManager] Failed to record session activity: ${error}`));
+      .catch((error) =>
+        logger.warn(`[SessionManager] Failed to record session activity: ${error}`),
+      );
 
     logger.debug(`Updated cache for session ${sessionId}`);
   }
@@ -1182,7 +1234,9 @@ export class SessionManager {
     session.lastHeartbeat = this.timer.now();
     void this.getBarrier()
       .track(() => this.recordSessionActivity(session))
-      .catch(error => logger.warn(`[SessionManager] Failed to record session activity: ${error}`));
+      .catch((error) =>
+        logger.warn(`[SessionManager] Failed to record session activity: ${error}`),
+      );
 
     return session.cacheData;
   }
@@ -1203,7 +1257,9 @@ export class SessionManager {
     session.hasReceivedHeartbeat = true;
     void this.getBarrier()
       .track(() => this.recordSessionActivity(session))
-      .catch(error => logger.warn(`[SessionManager] Failed to record session activity: ${error}`));
+      .catch((error) =>
+        logger.warn(`[SessionManager] Failed to record session activity: ${error}`),
+      );
   }
 
   /**
@@ -1221,9 +1277,7 @@ export class SessionManager {
       session.cacheData = {};
     }
 
-    logger.debug(
-      `Cleared cache for session ${sessionId}${key ? ` (key: ${key})` : " (all)"}`
-    );
+    logger.debug(`Cleared cache for session ${sessionId}${key ? ` (key: ${key})` : " (all)"}`);
   }
 
   /**
@@ -1237,9 +1291,7 @@ export class SessionManager {
    * Get all active sessions
    */
   getAllSessions(): Session[] {
-    return Array.from(this.sessions.values()).filter(
-      s => !this.isSessionExpired(s)
-    );
+    return Array.from(this.sessions.values()).filter((s) => !this.isSessionExpired(s));
   }
 
   /** Snapshot every in-memory session, including expired entries awaiting cleanup. */
@@ -1252,14 +1304,16 @@ export class SessionManager {
    * creation, assignment, rebind, or early-release work.
    */
   getAllKnownSessionIds(): string[] {
-    return Array.from(new Set([
-      ...this.sessions.keys(),
-      ...this.pendingSessionCreations.keys(),
-      ...this.pendingSessionAssignments.keys(),
-      ...this.pendingSessionRebinds.keys(),
-      ...this.pendingSessionReleases.keys(),
-      ...this.releasePromises.keys(),
-    ]));
+    return Array.from(
+      new Set([
+        ...this.sessions.keys(),
+        ...this.pendingSessionCreations.keys(),
+        ...this.pendingSessionAssignments.keys(),
+        ...this.pendingSessionRebinds.keys(),
+        ...this.pendingSessionReleases.keys(),
+        ...this.releasePromises.keys(),
+      ]),
+    );
   }
 
   /**
@@ -1268,8 +1322,8 @@ export class SessionManager {
   getAssignedDevices(): Set<string> {
     return new Set(
       Array.from(this.sessions.values())
-        .filter(s => !this.isSessionExpired(s))
-        .map(s => s.assignedDevice)
+        .filter((s) => !this.isSessionExpired(s))
+        .map((s) => s.assignedDevice),
     );
   }
 
@@ -1277,11 +1331,15 @@ export class SessionManager {
    * Check if session is expired
    */
   private isSessionExpired(session: Session): boolean {
-    return !this.activeSessionExecutionChecker(session.sessionId)
-      && this.timer.now() > session.expiresAt;
+    return (
+      !this.activeSessionExecutionChecker(session.sessionId) && this.timer.now() > session.expiresAt
+    );
   }
 
-  private isSessionExpiredForNewExecution(session: Session, execution?: SessionExecutionMetadata): boolean {
+  private isSessionExpiredForNewExecution(
+    session: Session,
+    execution?: SessionExecutionMetadata,
+  ): boolean {
     if (this.timer.now() <= session.expiresAt) {
       return false;
     }
@@ -1292,12 +1350,14 @@ export class SessionManager {
     session: Session,
     execution: SessionExecutionMetadata | undefined,
   ): boolean {
-    return execution !== undefined
-      && this.timer.now() > session.expiresAt
-      && execution.startTime > session.expiresAt
-      && this.activeSessionExecutionChecker(session.sessionId, {
+    return (
+      execution !== undefined &&
+      this.timer.now() > session.expiresAt &&
+      execution.startTime > session.expiresAt &&
+      this.activeSessionExecutionChecker(session.sessionId, {
         excludeExecutionId: execution.executionId,
-      });
+      })
+    );
   }
 
   /**
@@ -1328,7 +1388,7 @@ export class SessionManager {
     const device: BootedDevice = {
       name: session.assignedDevice,
       platform: session.platform,
-      deviceId: session.assignedDevice
+      deviceId: session.assignedDevice,
     };
     const manager = this.keepScreenAwakeRestorerFactory(device);
     await manager.restore(state);
@@ -1356,8 +1416,7 @@ export class SessionManager {
     }
 
     logger.info(
-      `Cleaning up ${expiredSessions.length} expired sessions: ` +
-      expiredSessions.join(", ")
+      `Cleaning up ${expiredSessions.length} expired sessions: ` + expiredSessions.join(", "),
     );
 
     for (const sessionId of expiredSessions) {
@@ -1368,7 +1427,9 @@ export class SessionManager {
       const release = this.releaseSession(sessionId, "cleanup-expired", true);
       void this.getBarrier()
         .trackExisting(release)
-        .catch(error => logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`));
+        .catch((error) =>
+          logger.warn(`[SessionManager] Failed to release expired session ${sessionId}: ${error}`),
+        );
     }
   }
 
@@ -1381,7 +1442,10 @@ export class SessionManager {
     }, this.CLEANUP_INTERVAL_MS);
 
     // Allow process to exit even if timer is running
-    if (this.cleanupTimer && typeof (this.cleanupTimer as { unref?: () => void }).unref === "function") {
+    if (
+      this.cleanupTimer &&
+      typeof (this.cleanupTimer as { unref?: () => void }).unref === "function"
+    ) {
       this.cleanupTimer.unref();
     }
   }
@@ -1437,7 +1501,7 @@ export class SessionManager {
     activeSessions: number;
     expiredSessions: number;
     assignedDevices: number;
-    } {
+  } {
     const activeSessions = this.getAllSessions().length;
     const expiredSessions = this.sessions.size - activeSessions;
 

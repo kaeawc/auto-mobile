@@ -21,11 +21,13 @@ export class FakeNotificationUIDetector implements NotificationUIDetector {
   private readonly executedOperations: string[] = [];
 
   constructor(device?: BootedDevice) {
-    this.device = device ?? {
-      deviceId: "fake-device",
-      name: "Fake",
-      platform: "android",
-    } as BootedDevice;
+    this.device =
+      device ??
+      ({
+        deviceId: "fake-device",
+        name: "Fake",
+        platform: "android",
+      } as BootedDevice);
   }
 
   getExecutedOperations(): string[] {
@@ -33,11 +35,11 @@ export class FakeNotificationUIDetector implements NotificationUIDetector {
   }
 
   wasMethodCalled(operationName: string): boolean {
-    return this.executedOperations.some(op => op.includes(operationName));
+    return this.executedOperations.some((op) => op.includes(operationName));
   }
 
   getCallCount(operationName: string): number {
-    return this.executedOperations.filter(op => op.includes(operationName)).length;
+    return this.executedOperations.filter((op) => op.includes(operationName)).length;
   }
 
   clearHistory(): void {
@@ -63,10 +65,14 @@ export class FakeNotificationUIDetector implements NotificationUIDetector {
   }
 
   async tapElement(element: Element): Promise<void> {
-    this.executedOperations.push(`tapElement:${element.bounds?.left ?? "?"},${element.bounds?.top ?? "?"}`);
+    this.executedOperations.push(
+      `tapElement:${element.bounds?.left ?? "?"},${element.bounds?.top ?? "?"}`,
+    );
   }
 
   async swipeElement(element: Element): Promise<void> {
-    this.executedOperations.push(`swipeElement:${element.bounds?.left ?? "?"},${element.bounds?.top ?? "?"}`);
+    this.executedOperations.push(
+      `swipeElement:${element.bounds?.left ?? "?"},${element.bounds?.top ?? "?"}`,
+    );
   }
 }

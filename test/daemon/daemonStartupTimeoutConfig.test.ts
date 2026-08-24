@@ -6,7 +6,7 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 describe("daemon startup timeout configuration", () => {
   const originalEnvironment = new Map(
-    [STARTUP_TIMEOUT_ENV, LEGACY_STARTUP_TIMEOUT_ENV].map(key => [key, process.env[key]])
+    [STARTUP_TIMEOUT_ENV, LEGACY_STARTUP_TIMEOUT_ENV].map((key) => [key, process.env[key]]),
   );
 
   function restoreEnvironment(): void {

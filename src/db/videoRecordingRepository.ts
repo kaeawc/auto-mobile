@@ -7,7 +7,12 @@ import type {
   VideoRecordingMetadata,
 } from "../models";
 import { parseVideoRecordingConfig } from "../features/video";
-import type { Database, NewVideoRecording, VideoRecordingUpdate, VideoRecording as DbVideoRecording } from "./types";
+import type {
+  Database,
+  NewVideoRecording,
+  VideoRecordingUpdate,
+  VideoRecording as DbVideoRecording,
+} from "./types";
 import { logger } from "../utils/logger";
 
 type VideoRecordingStatus = "recording" | "completed" | "interrupted";
@@ -54,7 +59,7 @@ function parseConfig(configJson: string): VideoRecordingConfig {
 }
 
 function parseHighlights(
-  highlightsJson: string | null
+  highlightsJson: string | null,
 ): VideoRecordingHighlightEntry[] | undefined {
   if (!highlightsJson) {
     return undefined;
@@ -99,16 +104,13 @@ function toRecord(row: DbVideoRecording): VideoRecordingRecord {
  */
 function applyOwnerScope<O>(
   builder: SelectQueryBuilder<Database, "video_recordings", O>,
-  ownerSessionUuid?: string
+  ownerSessionUuid?: string,
 ): SelectQueryBuilder<Database, "video_recordings", O> {
   if (!ownerSessionUuid) {
     return builder;
   }
-  return builder.where(eb =>
-    eb.or([
-      eb("owner_session_uuid", "is", null),
-      eb("owner_session_uuid", "=", ownerSessionUuid),
-    ])
+  return builder.where((eb) =>
+    eb.or([eb("owner_session_uuid", "is", null), eb("owner_session_uuid", "=", ownerSessionUuid)]),
   );
 }
 
@@ -211,7 +213,7 @@ export class VideoRecordingRepository {
     await db
       .insertInto("video_recordings")
       .values(row)
-      .onConflict(oc =>
+      .onConflict((oc) =>
         // created_at is intentionally omitted: on overwrite the original creation
         // time must survive (retention ordering / age display depend on it). The
         // INSERT still sets it for new rows; last_accessed_at carries the "touched"
@@ -233,15 +235,12 @@ export class VideoRecordingRepository {
           config_json: row.config_json,
           highlights_json: row.highlights_json,
           owner_session_uuid: row.owner_session_uuid,
-        })
+        }),
       )
       .execute();
   }
 
-  async updateRecording(
-    recordingId: string,
-    update: Partial<VideoRecordingRecord>
-  ): Promise<void> {
+  async updateRecording(recordingId: string, update: Partial<VideoRecordingRecord>): Promise<void> {
     const db = await this.getDb();
     const payload = buildUpdatePayload(update);
     if (Object.keys(payload).length === 0) {
@@ -256,7 +255,7 @@ export class VideoRecordingRepository {
 
   async getRecording(
     recordingId: string,
-    scope: VideoRecordingOwnerScope = {}
+    scope: VideoRecordingOwnerScope = {},
   ): Promise<VideoRecordingRecord | null> {
     const db = await this.getDb();
     let builder = db
@@ -271,9 +270,7 @@ export class VideoRecordingRepository {
 
   async listRecordings(query: VideoRecordingQuery = {}): Promise<VideoRecordingRecord[]> {
     const db = await this.getDb();
-    let builder = db
-      .selectFrom("video_recordings")
-      .selectAll();
+    let builder = db.selectFrom("video_recordings").selectAll();
 
     builder = applyOwnerScope(builder, query.ownerSessionUuid);
     if (query.status !== undefined) {

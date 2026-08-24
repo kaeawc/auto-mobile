@@ -12,15 +12,15 @@ When **`executePlan`** stops on a failed step, the AutoMobile daemon attaches a 
 
 Typical fields:
 
-| Field | Meaning |
-|-------|--------|
-| **`capturedAtMs`** | Host timestamp when the snapshot was taken |
-| **`activeWindow`** | High-level app id / activity hint from the daemon |
-| **`accessibilityState`** | Whether accessibility is reported enabled |
-| **`viewHierarchy`** | Full hierarchy payload (often under **`hierarchy.node`**, from CtrlProxy) |
-| **`awaitTimeout` / `awaitedElement`** | Present when the observe used **`waitFor`** |
+| Field                                          | Meaning                                                                       |
+| ---------------------------------------------- | ----------------------------------------------------------------------------- |
+| **`capturedAtMs`**                             | Host timestamp when the snapshot was taken                                    |
+| **`activeWindow`**                             | High-level app id / activity hint from the daemon                             |
+| **`accessibilityState`**                       | Whether accessibility is reported enabled                                     |
+| **`viewHierarchy`**                            | Full hierarchy payload (often under **`hierarchy.node`**, from CtrlProxy)     |
+| **`awaitTimeout` / `awaitedElement`**          | Present when the observe used **`waitFor`**                                   |
 | **`visibleTextsSample` / `resourceIdsSample`** | Flat digests from **`elements.*`** when present (may be **empty**; see below) |
-| **`observeError`** | Set if the failure snapshot observe itself errored |
+| **`observeError`**                             | Set if the failure snapshot observe itself errored                            |
 
 You need a **daemon build that includes this feature** (pin a recent AutoMobile commit or release). See [CI Integration](ci-integration.md) for **`AUTOMOBILE_DAEMON_LOCAL_PROJECT_PATH`** and building **`dist/`**.
 
@@ -28,11 +28,11 @@ You need a **daemon build that includes this feature** (pin a recent AutoMobile 
 
 ## Where to find it in CI
 
-| Location | Notes |
-|----------|--------|
-| **JUnit XML** (`build/test-results/.../*.xml`) | Often embedded in the **`<failure message="...">`** / CDATA as escaped JSON inside the **`executePlan` output** |
-| **`structuredContent.failedStep.failureObservation`** | Same payload when parsing the MCP / daemon JSON response |
-| **Gradle `system-out`** | Some runners print the daemon **`Daemon response:`** JSON blob |
+| Location                                              | Notes                                                                                                           |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| **JUnit XML** (`build/test-results/.../*.xml`)        | Often embedded in the **`<failure message="...">`** / CDATA as escaped JSON inside the **`executePlan` output** |
+| **`structuredContent.failedStep.failureObservation`** | Same payload when parsing the MCP / daemon JSON response                                                        |
+| **Gradle `system-out`**                               | Some runners print the daemon **`Daemon response:`** JSON blob                                                  |
 
 Search the artifact for **`failureObservation`** or **`"packageName"`** next to your launcher package if the XML is huge.
 
@@ -108,11 +108,11 @@ The digest fields are filled from top-level **`elements`** (clickable / text / s
 
 ## Related daemon noise (same failures)
 
-| Symptom | Likely cause | Doc |
-|--------|----------------|-----|
-| **`PerformanceAudit` / `J.create is not a function`** then screenshot cancelled | **`--ui-perf-mode`** path | Check CI integration docs |
-| **Tiny MP4 (~40 KB), only launcher in video** | Screen finalize / encoding; pin video fixes or **`AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE`** | [Video recording](../../../mcp/observe/video-recording.md), [CI Integration](ci-integration.md) |
-| **`grep` with `\|` matches nothing** | Use **`grep -E`** for alternation | shell docs / CI snippets |
+| Symptom                                                                         | Likely cause                                                                                  | Doc                                                                                             |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| **`PerformanceAudit` / `J.create is not a function`** then screenshot cancelled | **`--ui-perf-mode`** path                                                                     | Check CI integration docs                                                                       |
+| **Tiny MP4 (~40 KB), only launcher in video**                                   | Screen finalize / encoding; pin video fixes or **`AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE`** | [Video recording](../../../mcp/observe/video-recording.md), [CI Integration](ci-integration.md) |
+| **`grep` with `\|` matches nothing**                                            | Use **`grep -E`** for alternation                                                             | shell docs / CI snippets                                                                        |
 
 ---
 

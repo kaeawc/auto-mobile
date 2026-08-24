@@ -14,7 +14,7 @@ function fakeFetch(
     status: number;
     body?: string;
     location?: string | null;
-  }
+  },
 ): { fetchImpl: FetchLike; calls: Recorded[] } {
   const calls: Recorded[] = [];
   const fetchImpl: FetchLike = async (url, init) => {
@@ -26,7 +26,7 @@ function fakeFetch(
       ok: result.status >= 200 && result.status < 300,
       headers: {
         get: (name: string) =>
-          name.toLowerCase() === "location" ? result.location ?? null : null,
+          name.toLowerCase() === "location" ? (result.location ?? null) : null,
       },
       text: async () => result.body ?? "",
     };
@@ -115,10 +115,10 @@ describe("WhipClient.publish", () => {
     const timer = new FakeTimer();
     let resolveBodyReadStarted!: () => void;
     let resolveStalledBody!: (body: string) => void;
-    const bodyReadStarted = new Promise<void>(resolve => {
+    const bodyReadStarted = new Promise<void>((resolve) => {
       resolveBodyReadStarted = resolve;
     });
-    const stalledBody = new Promise<string>(resolve => {
+    const stalledBody = new Promise<string>((resolve) => {
       resolveStalledBody = resolve;
     });
     const client = new WhipClient({
@@ -128,7 +128,7 @@ describe("WhipClient.publish", () => {
       fetchImpl: async () => ({
         status: 201,
         ok: true,
-        headers: { get: name => (name.toLowerCase() === "location" ? "/r/1" : null) },
+        headers: { get: (name) => (name.toLowerCase() === "location" ? "/r/1" : null) },
         text: async () => {
           resolveBodyReadStarted();
           return await stalledBody;
@@ -150,7 +150,11 @@ describe("WhipClient.publish", () => {
   test("omits the Authorization header entirely when no bearer token is configured", async () => {
     // Without a token the header must be absent — not `Bearer undefined`, which
     // an unauthenticated ingest would reject or, worse, log.
-    const { fetchImpl, calls } = fakeFetch(() => ({ status: 201, body: "answer", location: "/r/1" }));
+    const { fetchImpl, calls } = fakeFetch(() => ({
+      status: 201,
+      body: "answer",
+      location: "/r/1",
+    }));
     const client = new WhipClient({ endpoint: "https://coord.example.com/whip", fetchImpl });
 
     await client.publish("offer");
@@ -209,7 +213,9 @@ describe("WhipClient.delete", () => {
   test("does not throw on 404 (already gone)", async () => {
     const { fetchImpl } = fakeFetch(() => ({ status: 404 }));
     const client = new WhipClient({ endpoint: "https://coord.example.com/whip", fetchImpl });
-    await expect(client.delete("https://coord.example.com/whip/session/x")).resolves.toBeUndefined();
+    await expect(
+      client.delete("https://coord.example.com/whip/session/x"),
+    ).resolves.toBeUndefined();
   });
 });
 
@@ -221,12 +227,16 @@ describe("WhipClient.patchCandidate", () => {
       bearerToken: "tok",
       fetchImpl,
     });
-    await client.patchCandidate("https://coord.example.com/whip/s", "\"etag\"", "a=candidate:1 1 udp ...\r\n");
+    await client.patchCandidate(
+      "https://coord.example.com/whip/s",
+      '"etag"',
+      "a=candidate:1 1 udp ...\r\n",
+    );
     expect(calls[0].method).toBe("PATCH");
     expect(calls[0].url).toBe("https://coord.example.com/whip/s");
     expect(calls[0].headers["Content-Type"]).toBe("application/trickle-ice-sdpfrag");
     expect(calls[0].headers["Authorization"]).toBe("Bearer tok");
-    expect(calls[0].headers["If-Match"]).toBe("\"etag\"");
+    expect(calls[0].headers["If-Match"]).toBe('"etag"');
     expect(calls[0].body).toContain("a=candidate:1 1 udp");
   });
 
@@ -234,15 +244,15 @@ describe("WhipClient.patchCandidate", () => {
     const { fetchImpl } = fakeFetch(() => ({ status: 405 }));
     const client = new WhipClient({ endpoint: "https://coord.example.com/whip", fetchImpl });
     await expect(
-      client.patchCandidate("https://coord.example.com/whip/s", "\"etag\"", "a=candidate:...")
+      client.patchCandidate("https://coord.example.com/whip/s", '"etag"', "a=candidate:..."),
     ).resolves.toBeUndefined();
   });
 });
 
 describe("WhipClient construction", () => {
   test("requires an endpoint", () => {
-    expect(() => new WhipClient({ endpoint: "", fetchImpl: (async () => ({})) as unknown as FetchLike })).toThrow(
-      /endpoint/
-    );
+    expect(
+      () => new WhipClient({ endpoint: "", fetchImpl: (async () => ({})) as unknown as FetchLike }),
+    ).toThrow(/endpoint/);
   });
 });

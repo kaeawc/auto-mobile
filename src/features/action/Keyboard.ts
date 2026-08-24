@@ -1,6 +1,15 @@
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { BootedDevice, Element, ElementBounds, KeyboardResult, ViewHierarchyResult } from "../../models";
+import {
+  BootedDevice,
+  Element,
+  ElementBounds,
+  KeyboardResult,
+  ViewHierarchyResult,
+} from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
@@ -31,7 +40,7 @@ export interface KeyboardHierarchyReadOptions {
 export interface KeyboardHierarchyProvider {
   getViewHierarchy(
     signal?: AbortSignal,
-    options?: KeyboardHierarchyReadOptions
+    options?: KeyboardHierarchyReadOptions,
   ): Promise<ViewHierarchyResult | null>;
 }
 
@@ -51,7 +60,7 @@ class DefaultKeyboardHierarchyProvider implements KeyboardHierarchyProvider {
 
   async getViewHierarchy(
     signal?: AbortSignal,
-    options?: KeyboardHierarchyReadOptions
+    options?: KeyboardHierarchyReadOptions,
   ): Promise<ViewHierarchyResult | null> {
     if (options?.forceFresh) {
       this.cache.invalidateCache();
@@ -62,7 +71,7 @@ class DefaultKeyboardHierarchyProvider implements KeyboardHierarchyProvider {
       false,
       0,
       signal,
-      options?.timeoutMs
+      options?.timeoutMs,
     );
   }
 }
@@ -95,7 +104,7 @@ export class Keyboard {
     timer: Timer = defaultTimer,
     parser: ElementParser = new DefaultElementParser(),
     geometry: ElementGeometry = new DefaultElementGeometry(),
-    finder: ElementFinder = new DefaultElementFinder()
+    finder: ElementFinder = new DefaultElementFinder(),
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -109,7 +118,7 @@ export class Keyboard {
     } else {
       this.hierarchyProvider = new DefaultKeyboardHierarchyProvider(
         new ViewHierarchy(device, adbFactory),
-        AndroidCtrlProxyClient.getInstance(device, adbFactory)
+        AndroidCtrlProxyClient.getInstance(device, adbFactory),
       );
     }
   }
@@ -134,7 +143,7 @@ export class Keyboard {
           success: false,
           open: false,
           message: `Unsupported keyboard action: ${action}`,
-          error: `Unsupported keyboard action: ${action}`
+          error: `Unsupported keyboard action: ${action}`,
         };
     }
   }
@@ -148,19 +157,20 @@ export class Keyboard {
         success: false,
         open: result.open,
         message,
-        error: message
+        error: message,
       };
     }
 
-    const success = action === "detect"
-      || (action === "open" && result.open)
-      || (action === "close" && !result.open);
+    const success =
+      action === "detect" ||
+      (action === "open" && result.open) ||
+      (action === "close" && !result.open);
     const message = this.keyboardMessage(action, result.open);
     return {
       success,
       open: result.open,
       message,
-      ...(success ? {} : { error: message })
+      ...(success ? {} : { error: message }),
     };
   }
 
@@ -182,7 +192,7 @@ export class Keyboard {
         open: state.open,
         bounds: state.bounds,
         message: state.error,
-        error: state.error
+        error: state.error,
       };
     }
 
@@ -190,7 +200,7 @@ export class Keyboard {
       success: true,
       open: state.open,
       bounds: state.bounds,
-      message: state.open ? "Keyboard is open" : "Keyboard is closed"
+      message: state.open ? "Keyboard is open" : "Keyboard is closed",
     };
   }
 
@@ -202,7 +212,7 @@ export class Keyboard {
         open: state.open,
         bounds: state.bounds,
         message: state.error,
-        error: state.error
+        error: state.error,
       };
     }
 
@@ -211,7 +221,7 @@ export class Keyboard {
         success: true,
         open: true,
         bounds: state.bounds,
-        message: "Keyboard already open"
+        message: "Keyboard already open",
       };
     }
 
@@ -221,7 +231,7 @@ export class Keyboard {
         success: false,
         open: false,
         message: "No focused text input to open keyboard",
-        error: "No focused text input to open keyboard"
+        error: "No focused text input to open keyboard",
       };
     }
 
@@ -229,16 +239,14 @@ export class Keyboard {
 
     const afterState = await this.waitForKeyboardState(true, signal);
     const success = afterState.open && !afterState.error;
-    const message = success
-      ? "Keyboard opened"
-      : afterState.error ?? "Failed to open keyboard";
+    const message = success ? "Keyboard opened" : (afterState.error ?? "Failed to open keyboard");
 
     return {
       success,
       open: afterState.open,
       bounds: afterState.bounds,
       message,
-      ...(afterState.error ? { error: afterState.error } : {})
+      ...(afterState.error ? { error: afterState.error } : {}),
     };
   }
 
@@ -250,7 +258,7 @@ export class Keyboard {
         open: state.open,
         bounds: state.bounds,
         message: state.error,
-        error: state.error
+        error: state.error,
       };
     }
 
@@ -258,24 +266,28 @@ export class Keyboard {
       return {
         success: true,
         open: false,
-        message: "Keyboard already closed"
+        message: "Keyboard already closed",
       };
     }
 
-    await this.adb.executeCommand("shell input keyevent KEYCODE_BACK", undefined, undefined, undefined, signal);
+    await this.adb.executeCommand(
+      "shell input keyevent KEYCODE_BACK",
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
 
     const afterState = await this.waitForKeyboardState(false, signal);
     const success = !afterState.open && !afterState.error;
-    const message = success
-      ? "Keyboard closed"
-      : afterState.error ?? "Failed to close keyboard";
+    const message = success ? "Keyboard closed" : (afterState.error ?? "Failed to close keyboard");
 
     return {
       success,
       open: afterState.open,
       bounds: afterState.bounds,
       message,
-      ...(afterState.error ? { error: afterState.error } : {})
+      ...(afterState.error ? { error: afterState.error } : {}),
     };
   }
 
@@ -294,7 +306,7 @@ export class Keyboard {
    */
   private async waitForKeyboardState(
     expectedOpen: boolean,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<KeyboardDetection> {
     const deadline = this.timer.now() + Keyboard.STATE_CONFIRMATION_TIMEOUT_MS;
 
@@ -323,18 +335,18 @@ export class Keyboard {
    */
   private async readKeyboardStateBefore(
     deadline: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<KeyboardDetection> {
     const { state } = await this.getHierarchyWithState(signal, {
       timeoutMs: Math.max(0, deadline - this.timer.now()),
-      forceFresh: true
+      forceFresh: true,
     });
     return state;
   }
 
   private async getHierarchyWithState(
     signal?: AbortSignal,
-    options?: KeyboardHierarchyReadOptions
+    options?: KeyboardHierarchyReadOptions,
   ): Promise<{ hierarchy: ViewHierarchyResult | null; state: KeyboardDetection }> {
     const hierarchy = await this.hierarchyProvider.getViewHierarchy(signal, options);
     return { hierarchy, state: this.resolveKeyboardState(hierarchy) };
@@ -394,11 +406,14 @@ export class Keyboard {
         const resourceValue = resourceId?.toLowerCase();
         const contentValue = contentDesc?.toLowerCase();
 
-        if (resourceValue && (resourceValue.includes("keyboard") || resourceValue.includes("inputmethod"))) {
+        if (
+          resourceValue &&
+          (resourceValue.includes("keyboard") || resourceValue.includes("inputmethod"))
+        ) {
           found = true;
           return;
         }
-        if (contentValue && indicators.some(indicator => contentValue.includes(indicator))) {
+        if (contentValue && indicators.some((indicator) => contentValue.includes(indicator))) {
           found = true;
         }
       });
@@ -410,7 +425,11 @@ export class Keyboard {
     return false;
   }
 
-  private getStringProp(props: Record<string, unknown>, primary: string, fallback: string): string | undefined {
+  private getStringProp(
+    props: Record<string, unknown>,
+    primary: string,
+    fallback: string,
+  ): string | undefined {
     const primaryValue = props[primary];
     if (typeof primaryValue === "string") {
       return primaryValue;
@@ -434,6 +453,12 @@ export class Keyboard {
     const center = this.geometry.getElementCenter(element);
     const x = Math.round(center.x);
     const y = Math.round(center.y);
-    await this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal);
+    await this.adb.executeCommand(
+      `shell input tap ${x} ${y}`,
+      undefined,
+      undefined,
+      undefined,
+      signal,
+    );
   }
 }

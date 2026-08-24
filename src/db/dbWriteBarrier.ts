@@ -143,7 +143,10 @@ export class InMemoryDbWriteBarrier implements DbWriteBarrier {
       // counted toward the drain (Part 1's reject-on-closed covers the race,
       // issue #2792). Resolve `undefined` and never reject — safe to `void`.
       logger.debug("[DbWriteBarrier] Not tracking an in-flight DB write during shutdown drain");
-      return work.then(() => undefined, () => undefined);
+      return work.then(
+        () => undefined,
+        () => undefined,
+      );
     }
 
     this.#enter();
@@ -152,21 +155,21 @@ export class InMemoryDbWriteBarrier implements DbWriteBarrier {
     // swallows rejection to `undefined` so a fire-and-forget `void` of it never
     // surfaces an unhandled rejection — the caller's own await owns `work`'s error.
     return work.then(
-      value => {
+      (value) => {
         this.#leave();
         return value as T | undefined;
       },
       () => {
         this.#leave();
         return undefined;
-      }
+      },
     );
   }
 
   /** Increment the in-flight count, arming the idle promise on the 0→1 edge. */
   #enter(): void {
     if (this.#inFlight++ === 0) {
-      this.#idle = new Promise<void>(resolve => {
+      this.#idle = new Promise<void>((resolve) => {
         this.#resolveIdle = resolve;
       });
     }
@@ -192,7 +195,7 @@ export class InMemoryDbWriteBarrier implements DbWriteBarrier {
     }
 
     let handle: NodeJS.Timeout | undefined;
-    const timeout = new Promise<boolean>(resolve => {
+    const timeout = new Promise<boolean>((resolve) => {
       handle = this.#timer.setTimeout(() => resolve(false), timeoutMs);
     });
 

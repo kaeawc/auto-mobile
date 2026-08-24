@@ -27,7 +27,10 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
       const swipe = await new SwipeOn(this.device).execute({ direction: "up", autoTarget: false });
       return {
         success: swipe.success !== false,
-        error: swipe.success === false ? (swipe.warning ?? "iOS lock-screen swipe did not report success") : undefined
+        error:
+          swipe.success === false
+            ? (swipe.warning ?? "iOS lock-screen swipe did not report success")
+            : undefined,
       };
     } catch (error) {
       const message = errorMessage(error);

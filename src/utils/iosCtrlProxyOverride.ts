@@ -16,8 +16,9 @@ import { logger } from "./logger";
 export function getIosCtrlProxyOverrideRaw(env: NodeJS.ProcessEnv = process.env): string | null {
   const ipaPath = env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim();
   const bundlePath = env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH?.trim();
-  const value = (ipaPath && ipaPath.length > 0 ? ipaPath : undefined)
-    ?? (bundlePath && bundlePath.length > 0 ? bundlePath : undefined);
+  const value =
+    (ipaPath && ipaPath.length > 0 ? ipaPath : undefined) ??
+    (bundlePath && bundlePath.length > 0 ? bundlePath : undefined);
   return value ?? null;
 }
 
@@ -90,7 +91,7 @@ export interface IosCtrlProxyOverrideCheck {
  * actionable message instead of silently running the released runner (#4221).
  */
 export async function checkIosCtrlProxyOverride(
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<IosCtrlProxyOverrideCheck> {
   const path = getIosCtrlProxyOverridePath(env);
   if (path === null) {
@@ -104,8 +105,9 @@ export async function checkIosCtrlProxyOverride(
         present: true,
         usable: false,
         path,
-        reason: `expected an .ipa file but ${path} is a directory. For a local xcodebuild `
-          + `output, set AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA to the derived-data root instead.`
+        reason:
+          `expected an .ipa file but ${path} is a directory. For a local xcodebuild ` +
+          `output, set AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA to the derived-data root instead.`,
       };
     }
     if (!looksLikeRunnerBundle(path, stats.size)) {
@@ -113,9 +115,10 @@ export async function checkIosCtrlProxyOverride(
         present: true,
         usable: false,
         path,
-        reason: `${path} is not a runnable .ipa bundle (a packaged CtrlProxy runner is a `
-          + `zip archive over ${MIN_BUNDLE_SIZE_BYTES} bytes). For a local xcodebuild output, `
-          + `set AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA to the derived-data root instead.`
+        reason:
+          `${path} is not a runnable .ipa bundle (a packaged CtrlProxy runner is a ` +
+          `zip archive over ${MIN_BUNDLE_SIZE_BYTES} bytes). For a local xcodebuild output, ` +
+          `set AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA to the derived-data root instead.`,
       };
     }
     return { present: true, usable: true, path };
@@ -127,7 +130,7 @@ export async function checkIosCtrlProxyOverride(
       present: true,
       usable: false,
       path,
-      reason: `path does not exist: ${path}`
+      reason: `path does not exist: ${path}`,
     };
   }
 }

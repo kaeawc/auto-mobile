@@ -1,5 +1,8 @@
 import { EventEmitter } from "events";
-import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "./android-cmdline-tools/AdbClientFactory";
 import { logger } from "./logger";
 import { BootedDevice } from "../models";
 
@@ -60,16 +63,16 @@ export interface AppLifecycleMonitor {
 }
 
 export interface AppLifecycleEvent {
-    type: "launch" | "terminate" | "background" | "foreground" | "crash";
-    device: BootedDevice;
-    appId: string;
-    timestamp: Date;
-    previousApp?: string;
-    metadata?: Record<string, any>;
+  type: "launch" | "terminate" | "background" | "foreground" | "crash";
+  device: BootedDevice;
+  appId: string;
+  timestamp: Date;
+  previousApp?: string;
+  metadata?: Record<string, any>;
 }
 
 export interface AppLifecycleEventListener {
-    (event: AppLifecycleEvent): Promise<void>;
+  (event: AppLifecycleEvent): Promise<void>;
 }
 
 export class DefaultAppLifecycleMonitor extends EventEmitter implements AppLifecycleMonitor {
@@ -127,7 +130,10 @@ export class DefaultAppLifecycleMonitor extends EventEmitter implements AppLifec
     return (await this.probePackageRunning(device, packageName)) ?? false;
   }
 
-  private async probePackageRunning(device: BootedDevice, packageName: string): Promise<boolean | undefined> {
+  private async probePackageRunning(
+    device: BootedDevice,
+    packageName: string,
+  ): Promise<boolean | undefined> {
     try {
       // Create ADB client for this device
       const adb = this.adbFactory.create(device);
@@ -149,15 +155,15 @@ export class DefaultAppLifecycleMonitor extends EventEmitter implements AppLifec
   }
 
   /**
-     * Add event listener for specific event types
-     */
+   * Add event listener for specific event types
+   */
   public addEventListener(type: string, listener: AppLifecycleEventListener): void {
     this.on(type, listener);
   }
 
   /**
-     * Remove event listener
-     */
+   * Remove event listener
+   */
   public removeEventListener(type: string, listener: AppLifecycleEventListener): void {
     this.off(type, listener);
   }
@@ -166,7 +172,6 @@ export class DefaultAppLifecycleMonitor extends EventEmitter implements AppLifec
    * Poll for app state changes
    */
   public async checkForChanges(device: BootedDevice): Promise<void> {
-
     const previousRunning = new Set(this.runningPackages);
     await this.updateRunningPackages(device);
 
@@ -212,8 +217,8 @@ export class DefaultAppLifecycleMonitor extends EventEmitter implements AppLifec
       appId: packageName,
       timestamp: new Date(),
       metadata: {
-        detectionMethod: "pidof"
-      }
+        detectionMethod: "pidof",
+      },
     };
 
     logger.info(`Package launched: ${packageName}`);
@@ -230,8 +235,8 @@ export class DefaultAppLifecycleMonitor extends EventEmitter implements AppLifec
       appId: packageName,
       timestamp: new Date(),
       metadata: {
-        detectionMethod: "pidof"
-      }
+        detectionMethod: "pidof",
+      },
     };
 
     logger.info(`Package terminated: ${packageName}`);
@@ -239,8 +244,8 @@ export class DefaultAppLifecycleMonitor extends EventEmitter implements AppLifec
   }
 
   /**
-     * Emit an app lifecycle event
-     */
+   * Emit an app lifecycle event
+   */
   private async emitEvent(event: AppLifecycleEvent): Promise<void> {
     try {
       this.emit(event.type, event);

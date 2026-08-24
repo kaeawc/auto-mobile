@@ -9,18 +9,24 @@ import {
   DeviceSessionRepository,
 } from "../../src/db/deviceSessionRepository";
 import type { DeviceSessionStatus } from "../../src/db/types";
-import { KeepScreenAwakeManager, type KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
+import {
+  KeepScreenAwakeManager,
+  type KeepScreenAwakeState,
+} from "../../src/utils/KeepScreenAwakeManager";
 import { logger } from "../../src/utils/logger";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 
 class FakeDeviceSessionRepository {
   readonly events: string[] = [];
-  readonly sessions = new Map<string, {
-    status: DeviceSessionStatus;
-    releasedAtMs: number | null;
-    reason: string | null;
-  }>();
+  readonly sessions = new Map<
+    string,
+    {
+      status: DeviceSessionStatus;
+      releasedAtMs: number | null;
+      reason: string | null;
+    }
+  >();
 
   async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
     this.sessions.set(record.sessionUuid, {
@@ -78,8 +84,9 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       appliedSettings: { stayOnWhilePluggedIn: true, screenOffTimeout: true },
     };
     const releasedCallbacks: Array<{ sessionId: string; deviceId: string }> = [];
-    const restoreSpy = spyOn(KeepScreenAwakeManager.prototype, "restore")
-      .mockResolvedValue(undefined);
+    const restoreSpy = spyOn(KeepScreenAwakeManager.prototype, "restore").mockResolvedValue(
+      undefined,
+    );
     const releaseDeviceSpy = spyOn(devicePool, "releaseDevice");
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
     const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
@@ -87,11 +94,13 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     });
 
     try {
-      await devicePool.initializeWithDevices([{
-        name: "Physical Android",
-        deviceId,
-        platform: "android",
-      }]);
+      await devicePool.initializeWithDevices([
+        {
+          name: "Physical Android",
+          deviceId,
+          platform: "android",
+        },
+      ]);
       await devicePool.assignDeviceToSession(sessionId, "android");
       sessionManager.setKeepScreenAwake(sessionId, keepAwakeState);
       sessionManager.onSessionRelease((releasedSessionId, releasedDeviceId) => {
@@ -148,21 +157,19 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     });
 
     try {
-      await devicePool.initializeWithDevices([{
-        name: "Managed Android",
-        deviceId: "managed-physical-device",
-        platform: "android",
-      }]);
+      await devicePool.initializeWithDevices([
+        {
+          name: "Managed Android",
+          deviceId: "managed-physical-device",
+          platform: "android",
+        },
+      ]);
       await devicePool.assignDeviceToSession("managed-adb-session", "android");
 
       await daemon.stop();
 
       expect(sessionManager.getSession("managed-adb-session")).toBeNull();
-      expect(repository.events).toEqual([
-        "markReleased",
-        "stopManagedAdbServer",
-        "closeDatabase",
-      ]);
+      expect(repository.events).toEqual(["markReleased", "stopManagedAdbServer", "closeDatabase"]);
     } finally {
       loggerCloseSpy.mockRestore();
       closeDatabaseSpy.mockRestore();
@@ -182,13 +189,14 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     const brokenSessionId = "broken-shutdown-session";
     const healthySessionId = "healthy-shutdown-session";
     const originalRelease = sessionManager.releaseSession.bind(sessionManager);
-    const releaseSpy = spyOn(sessionManager, "releaseSession")
-      .mockImplementation(async (sessionId, reason) => {
+    const releaseSpy = spyOn(sessionManager, "releaseSession").mockImplementation(
+      async (sessionId, reason) => {
         if (sessionId === brokenSessionId) {
           throw new Error("simulated release failure");
         }
         return await originalRelease(sessionId, reason);
-      });
+      },
+    );
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
@@ -235,8 +243,16 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       ]);
       await devicePool.assignDeviceToSession(brokenSessionId, "android");
       await devicePool.assignDeviceToSession(healthySessionId, "android");
-      sessionManager.setKeepScreenAwake(brokenSessionId, { applied: true, method: "svc", svcWasEnabled: false });
-      sessionManager.setKeepScreenAwake(healthySessionId, { applied: true, method: "svc", svcWasEnabled: false });
+      sessionManager.setKeepScreenAwake(brokenSessionId, {
+        applied: true,
+        method: "svc",
+        svcWasEnabled: false,
+      });
+      sessionManager.setKeepScreenAwake(healthySessionId, {
+        applied: true,
+        method: "svc",
+        svcWasEnabled: false,
+      });
 
       await expect(daemon.stop()).resolves.toBeUndefined();
 
@@ -268,16 +284,21 @@ describe("Daemon shutdown session release (issue #5303)", () => {
     );
     const sessionManager = daemon.getSessionManager();
     let allowPersistence!: () => void;
-    const persistence = new Promise<void>(resolve => { allowPersistence = resolve; });
+    const persistence = new Promise<void>((resolve) => {
+      allowPersistence = resolve;
+    });
     let persistenceStarted!: () => void;
-    const persistenceStartedPromise = new Promise<void>(resolve => { persistenceStarted = resolve; });
+    const persistenceStartedPromise = new Promise<void>((resolve) => {
+      persistenceStarted = resolve;
+    });
     const originalMarkReleased = repository.markReleased.bind(repository);
-    const markReleasedSpy = spyOn(repository, "markReleased")
-      .mockImplementation(async (...args) => {
+    const markReleasedSpy = spyOn(repository, "markReleased").mockImplementation(
+      async (...args) => {
         persistenceStarted();
         await persistence;
         await originalMarkReleased(...args);
-      });
+      },
+    );
     const closeDatabaseSpy = spyOn(databaseModule, "closeDatabase").mockImplementation(async () => {
       repository.events.push("closeDatabase");
     });
@@ -322,19 +343,24 @@ describe("Daemon shutdown session release (issue #5303)", () => {
       originalStayOnWhilePluggedIn: "0",
     };
     const releasedCallbacks: string[] = [];
-    const restoreSpy = spyOn(KeepScreenAwakeManager.prototype, "restore")
-      .mockResolvedValue(undefined);
+    const restoreSpy = spyOn(KeepScreenAwakeManager.prototype, "restore").mockResolvedValue(
+      undefined,
+    );
     const loggerCloseSpy = spyOn(logger, "closeAfterFlush").mockResolvedValue(undefined);
 
     try {
-      await devicePool.initializeWithDevices([{
-        name: "Expired Android",
-        deviceId,
-        platform: "android",
-      }]);
+      await devicePool.initializeWithDevices([
+        {
+          name: "Expired Android",
+          deviceId,
+          platform: "android",
+        },
+      ]);
       await devicePool.assignDeviceToSession(sessionId, "android");
       sessionManager.setKeepScreenAwake(sessionId, keepAwakeState);
-      sessionManager.onSessionRelease(releasedSessionId => releasedCallbacks.push(releasedSessionId));
+      sessionManager.onSessionRelease((releasedSessionId) =>
+        releasedCallbacks.push(releasedSessionId),
+      );
       sessionManager.stopCleanupTimer();
       timer.advanceTime(31 * 60 * 1000);
 

@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { resetDeviceToolsDependencies, setDeviceToolsDependencies } from "../../../src/server/deviceTools";
+import {
+  resetDeviceToolsDependencies,
+  setDeviceToolsDependencies,
+} from "../../../src/server/deviceTools";
 import { createMcpServer } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { DeviceInfo } from "../../../src/models";
@@ -21,14 +24,14 @@ describe("MCP Tools inputSchema compiles under Ajv 2020 (issue #4181 rank 5)", (
     expect(ADVERTISED_TOOLS.length).toBeGreaterThan(0);
   });
 
-  test.each(ADVERTISED_TOOLS.map(tool => [tool.name, tool.inputSchema] as const))(
+  test.each(ADVERTISED_TOOLS.map((tool) => [tool.name, tool.inputSchema] as const))(
     "%s inputSchema is a valid JSON Schema Ajv 2020 can compile",
     (_name, inputSchema) => {
       // A malformed/invalid schema throws here; the old `typeof`/`hasType ||
       // hasCombinator` loop (with hasCombinator provably always false, #16)
       // could not detect an Ajv-invalid schema.
       expect(() => compileJsonSchema(inputSchema)).not.toThrow();
-    }
+    },
   );
 });
 
@@ -39,11 +42,11 @@ describe("MCP Tools Schema", () => {
   beforeAll(async () => {
     fakeDeviceUtils = new FakeDeviceUtils();
     const androidDevices: DeviceInfo[] = [
-      { name: "Pixel_6_API_34", platform: "android", isRunning: false, source: "local" }
+      { name: "Pixel_6_API_34", platform: "android", isRunning: false, source: "local" },
     ];
     fakeDeviceUtils.setDeviceImages("android", androidDevices);
     setDeviceToolsDependencies({
-      deviceManagerFactory: () => fakeDeviceUtils
+      deviceManagerFactory: () => fakeDeviceUtils,
     });
 
     fixture = new McpTestFixture();
@@ -60,7 +63,7 @@ describe("MCP Tools Schema", () => {
   test("every advertised tool carries the required MCP metadata", () => {
     const toolDefinitions = ToolRegistry.getToolDefinitions();
 
-    toolDefinitions.forEach(tool => {
+    toolDefinitions.forEach((tool) => {
       expect(typeof tool.name).toBe("string");
       expect(typeof tool.description).toBe("string");
       expect(typeof tool.inputSchema).toBe("object");
@@ -90,26 +93,34 @@ describe("MCP Tools Schema", () => {
     }
   });
 
-  test("given a request that matches valid schema, should return a valid response", async function() {
-
+  test("given a request that matches valid schema, should return a valid response", async function () {
     const { client } = fixture.getContext();
 
-    const toolResponseSchema = z.object({
-      content: z.array(z.object({
-        type: z.string(),
-        text: z.string().optional()
-      })).optional()
-    }).passthrough();
+    const toolResponseSchema = z
+      .object({
+        content: z
+          .array(
+            z.object({
+              type: z.string(),
+              text: z.string().optional(),
+            }),
+          )
+          .optional(),
+      })
+      .passthrough();
 
-    const result = await client.request({
-      method: "tools/call",
-      params: {
-        name: "listDeviceImages",
-        arguments: {
-          platform: "android"
-        }
-      }
-    }, toolResponseSchema);
+    const result = await client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "listDeviceImages",
+          arguments: {
+            platform: "android",
+          },
+        },
+      },
+      toolResponseSchema,
+    );
 
     expect(typeof result).toBe("object");
   });
@@ -124,39 +135,44 @@ describe("MCP Tools Schema", () => {
   // ("strict schemas reject it") was REFUTED: listDeviceImages actually
   // ACCEPTS unlisted top-level fields. Pin that real, falsifiable behavior —
   // if listDeviceImages ever became strict this row reds.
-  test("listDeviceImages accepts an unlisted top-level field (its schema is permissive)", async function() {
+  test("listDeviceImages accepts an unlisted top-level field (its schema is permissive)", async function () {
     const { client } = fixture.getContext();
 
-    const result = await client.request({
-      method: "tools/call",
-      params: {
-        name: "listDeviceImages",
-        arguments: {
-          platform: "android",
-          unknownField: "ignored, not rejected"
-        }
-      }
-    }, z.object({ content: z.array(z.any()).optional() }).passthrough());
+    const result = await client.request(
+      {
+        method: "tools/call",
+        params: {
+          name: "listDeviceImages",
+          arguments: {
+            platform: "android",
+            unknownField: "ignored, not rejected",
+          },
+        },
+      },
+      z.object({ content: z.array(z.any()).optional() }).passthrough(),
+    );
 
     expect(typeof result).toBe("object");
   });
 
-  test("tapOn rejects a defined field with the wrong type", async function() {
-
+  test("tapOn rejects a defined field with the wrong type", async function () {
     const { client } = fixture.getContext();
 
     // Test tapOn with string instead of number
     try {
-      await client.request({
-        method: "tools/call",
-        params: {
-          name: "tapOn",
-          arguments: {
-            x: "not a number",
-            y: 200
-          }
-        }
-      }, z.any());
+      await client.request(
+        {
+          method: "tools/call",
+          params: {
+            name: "tapOn",
+            arguments: {
+              x: "not a number",
+              y: 200,
+            },
+          },
+        },
+        z.any(),
+      );
       expect.fail("Should have thrown an error for incorrect type");
     } catch (error: any) {
       expect(error.message).toContain("Invalid parameters");
@@ -167,17 +183,20 @@ describe("MCP Tools Schema", () => {
     const { client } = fixture.getContext();
 
     try {
-      await client.request({
-        method: "tools/call",
-        params: {
-          name: "tapOn",
-          arguments: {
-            platform: "android",
-            selector: { text: "Duluth" },
-            container: "MN"
-          }
-        }
-      }, z.any());
+      await client.request(
+        {
+          method: "tools/call",
+          params: {
+            name: "tapOn",
+            arguments: {
+              platform: "android",
+              selector: { text: "Duluth" },
+              container: "MN",
+            },
+          },
+        },
+        z.any(),
+      );
       expect.fail("Should have thrown an error for invalid container");
     } catch (error: any) {
       expect(error.message).toContain("container expected object");
@@ -190,21 +209,23 @@ describe("MCP Tools Schema", () => {
     expect(result.action).toBe("tap");
   });
 
-  test("an unknown tool name is rejected with an Unknown tool error", async function() {
-
+  test("an unknown tool name is rejected with an Unknown tool error", async function () {
     const { client } = fixture.getContext();
 
     // NAME (issue #4181): the old title claimed "fields ... have incorrect
     // values" but the body calls a nonexistent tool and asserts "Unknown tool".
     try {
       const { z } = await import("zod");
-      await client.request({
-        method: "tools/call",
-        params: {
-          name: "nonExistentTool",
-          arguments: {}
-        }
-      }, z.any());
+      await client.request(
+        {
+          method: "tools/call",
+          params: {
+            name: "nonExistentTool",
+            arguments: {},
+          },
+        },
+        z.any(),
+      );
       expect.fail("Should have thrown an error for unknown tool");
     } catch (error: any) {
       // This should fail because the tool doesn't exist

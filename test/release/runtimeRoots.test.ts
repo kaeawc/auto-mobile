@@ -2,10 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import {
-  deriveRootsFromDist,
-  runtimeRootsInSource,
-} from "../../scripts/release/lib/runtime-roots";
+import { deriveRootsFromDist, runtimeRootsInSource } from "../../scripts/release/lib/runtime-roots";
 
 describe("runtimeRootsInSource", () => {
   test("includes runtime imports but not type imports or comments", () => {
@@ -29,9 +26,7 @@ describe("runtimeRootsInSource", () => {
 
 describe("deriveRootsFromDist", () => {
   test("uses only bundle dynamic imports and all copied-source runtime imports", () => {
-    const dist = mkdtempSync(
-      path.join(os.tmpdir(), "automobile-runtime-roots-"),
-    );
+    const dist = mkdtempSync(path.join(os.tmpdir(), "automobile-runtime-roots-"));
     try {
       mkdirSync(path.join(dist, "src"), { recursive: true });
       mkdirSync(path.join(dist, "db", "migrations"), { recursive: true });

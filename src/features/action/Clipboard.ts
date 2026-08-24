@@ -1,5 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, ClipboardResult } from "../../models";
 import { logger } from "../../utils/logger";
@@ -11,12 +14,12 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 type ClipboardCtrlProxy = {
   requestClipboard(
     action: "copy" | "paste" | "clear" | "get",
-    text?: string
+    text?: string,
   ): Promise<{ success: boolean; error?: string; text?: string; totalTimeMs: number }>;
 };
 type ClipboardCtrlProxyFactory = (
   device: BootedDevice,
-  adbFactory: AdbClientFactory
+  adbFactory: AdbClientFactory,
 ) => ClipboardCtrlProxy;
 
 export class Clipboard {
@@ -28,7 +31,7 @@ export class Clipboard {
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    ctrlProxyFactory?: ClipboardCtrlProxyFactory
+    ctrlProxyFactory?: ClipboardCtrlProxyFactory,
   ) {
     this.device = device;
     this.adbFactory = adbFactory;
@@ -38,7 +41,7 @@ export class Clipboard {
 
   async execute(
     action: "copy" | "paste" | "clear" | "get",
-    text?: string
+    text?: string,
   ): Promise<ClipboardResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("clipboard");
@@ -48,18 +51,16 @@ export class Clipboard {
       switch (this.device.platform) {
         case "android":
           return await perf.track("androidClipboard", () =>
-            this.executeAndroidClipboard(action, text)
+            this.executeAndroidClipboard(action, text),
           );
         case "ios":
-          return await perf.track("iosClipboard", () =>
-            this.executeIOSClipboard(action, text)
-          );
+          return await perf.track("iosClipboard", () => this.executeIOSClipboard(action, text));
         default:
           perf.end();
           return {
             success: false,
             action,
-            error: `Unsupported platform: ${this.device.platform}`
+            error: `Unsupported platform: ${this.device.platform}`,
           };
       }
     } catch (error) {
@@ -67,7 +68,7 @@ export class Clipboard {
       return {
         success: false,
         action,
-        error: `Failed to execute clipboard ${action}: ${errorMessage(error)}`
+        error: `Failed to execute clipboard ${action}: ${errorMessage(error)}`,
       };
     } finally {
       perf.end();
@@ -76,7 +77,7 @@ export class Clipboard {
 
   private async executeIOSClipboard(
     action: "copy" | "paste" | "clear" | "get",
-    text?: string
+    text?: string,
   ): Promise<ClipboardResult> {
     if (action === "copy" && !text) {
       return { success: false, action, error: "Text is required for copy action" };
@@ -94,7 +95,7 @@ export class Clipboard {
       success: true,
       action,
       text: result.text,
-      method: "a11y"
+      method: "a11y",
     };
   }
 
@@ -108,14 +109,14 @@ export class Clipboard {
    */
   private async executeAndroidClipboard(
     action: "copy" | "paste" | "clear" | "get",
-    text?: string
+    text?: string,
   ): Promise<ClipboardResult> {
     // Validate input
     if (action === "copy" && !text) {
       return {
         success: false,
         action,
-        error: "Text is required for copy action"
+        error: "Text is required for copy action",
       };
     }
 
@@ -131,7 +132,7 @@ export class Clipboard {
           success: true,
           action,
           text: a11yResult.text,
-          method: "a11y"
+          method: "a11y",
         };
 
         return a11yClipboardResult;
@@ -147,7 +148,7 @@ export class Clipboard {
           success: false,
           action,
           error: a11yResult.error ?? "Accessibility clipboard get failed",
-          method: "a11y"
+          method: "a11y",
         };
       }
     } catch (error) {
@@ -157,7 +158,7 @@ export class Clipboard {
           success: false,
           action,
           error: `Accessibility clipboard get failed: ${errorMessage(error)}`,
-          method: "a11y"
+          method: "a11y",
         };
       }
     }
@@ -169,7 +170,7 @@ export class Clipboard {
       return {
         success: false,
         action,
-        error: `All clipboard methods failed. Last error: ${errorMessage(error)}`
+        error: `All clipboard methods failed. Last error: ${errorMessage(error)}`,
       };
     }
   }
@@ -196,7 +197,7 @@ export class Clipboard {
    */
   private async executeAdbClipboard(
     action: "copy" | "paste" | "clear" | "get",
-    text?: string
+    text?: string,
   ): Promise<ClipboardResult> {
     try {
       switch (action) {
@@ -205,11 +206,13 @@ export class Clipboard {
             return {
               success: false,
               action,
-              error: "Text is required for copy action"
+              error: "Text is required for copy action",
             };
           }
           // ADB hands the command to the device shell, so preserve user text as one literal word.
-          const result = await this.adb.executeCommand(`shell cmd clipboard set ${shellQuote(text)}`);
+          const result = await this.adb.executeCommand(
+            `shell cmd clipboard set ${shellQuote(text)}`,
+          );
 
           // Check if cmd clipboard is supported
           if (result.includes("No shell command implementation")) {
@@ -217,7 +220,7 @@ export class Clipboard {
               success: false,
               action,
               error: "cmd clipboard is not supported on this device/API level",
-              method: "adb"
+              method: "adb",
             };
           }
 
@@ -225,7 +228,7 @@ export class Clipboard {
           return {
             success: true,
             action,
-            method: "adb"
+            method: "adb",
           };
         }
 
@@ -238,7 +241,7 @@ export class Clipboard {
               success: false,
               action,
               error: "cmd clipboard is not supported on this device/API level",
-              method: "adb"
+              method: "adb",
             };
           }
 
@@ -247,7 +250,7 @@ export class Clipboard {
             success: true,
             action,
             text: result.trim(),
-            method: "adb"
+            method: "adb",
           };
         }
 
@@ -260,7 +263,7 @@ export class Clipboard {
               success: false,
               action,
               error: "cmd clipboard is not supported on this device/API level",
-              method: "adb"
+              method: "adb",
             };
           }
 
@@ -268,7 +271,7 @@ export class Clipboard {
           return {
             success: true,
             action,
-            method: "adb"
+            method: "adb",
           };
         }
 
@@ -282,7 +285,7 @@ export class Clipboard {
               success: false,
               action,
               error: "cmd clipboard is not supported on this device/API level",
-              method: "adb"
+              method: "adb",
             };
           }
 
@@ -293,7 +296,7 @@ export class Clipboard {
           return {
             success: true,
             action,
-            method: "adb"
+            method: "adb",
           };
         }
 
@@ -301,7 +304,7 @@ export class Clipboard {
           return {
             success: false,
             action,
-            error: `Unknown clipboard action: ${action}`
+            error: `Unknown clipboard action: ${action}`,
           };
       }
     } catch (error) {
@@ -309,7 +312,7 @@ export class Clipboard {
         success: false,
         action,
         error: `ADB clipboard operation failed: ${errorMessage(error)}`,
-        method: "adb"
+        method: "adb",
       };
     }
   }

@@ -64,17 +64,14 @@ export class DeviceCriteriaMatcher {
     const normalizedType = this.normalizeValue(criteria?.simulatorType);
     const normalizedVersion = this.normalizeValue(criteria?.iosVersion);
 
-    return devices.filter(device => {
+    return devices.filter((device) => {
       if (criteria?.platform && device.platform !== criteria.platform) {
         return false;
       }
 
       if (normalizedType) {
-        const deviceTypes = [
-          device.name,
-          device.simulatorType,
-        ]
-          .map(value => this.normalizeValue(value))
+        const deviceTypes = [device.name, device.simulatorType]
+          .map((value) => this.normalizeValue(value))
           .filter((value): value is string => value !== undefined);
         if (!deviceTypes.includes(normalizedType)) {
           return false;
@@ -107,7 +104,7 @@ export class DeviceCriteriaMatcher {
         image.deviceType,
         this.displayNameFromIosDeviceType(image.deviceType),
       ]
-        .map(value => this.normalizeValue(value))
+        .map((value) => this.normalizeValue(value))
         .filter((value): value is string => value !== undefined);
       if (!imageTypes.includes(normalizedType)) {
         return false;
@@ -121,7 +118,7 @@ export class DeviceCriteriaMatcher {
         image.osVersion,
         this.iosVersionFromRuntime(image.runtime),
       ]
-        .map(value => this.normalizeValue(value))
+        .map((value) => this.normalizeValue(value))
         .filter((value): value is string => value !== undefined);
       if (!imageVersions.includes(normalizedVersion)) {
         return false;
@@ -136,7 +133,7 @@ export class DeviceCriteriaMatcher {
    */
   someDeviceImageMatchesCriteria(
     images: Iterable<DeviceInfo>,
-    criteria?: DeviceAllocationCriteria
+    criteria?: DeviceAllocationCriteria,
   ): boolean {
     for (const image of images) {
       if (this.deviceImageMatchesCriteria(image, criteria)) {
@@ -153,11 +150,11 @@ export class DeviceCriteriaMatcher {
   androidRediscoveryMatches(
     candidate: BootedDevice,
     expectedDeviceId: string,
-    expectedAvdName: string
+    expectedAvdName: string,
   ): boolean {
-    return candidate.deviceId === expectedDeviceId && (
-      candidate.name === expectedAvdName ||
-      candidate.name === `Unknown (${expectedDeviceId})`
+    return (
+      candidate.deviceId === expectedDeviceId &&
+      (candidate.name === expectedAvdName || candidate.name === `Unknown (${expectedDeviceId})`)
     );
   }
 
@@ -168,11 +165,10 @@ export class DeviceCriteriaMatcher {
     pooledDeviceCount: number,
     requiredCount: number,
     pendingAndroidRecoveryCount: number,
-    platform?: Platform
+    platform?: Platform,
   ): boolean {
-    const eligibleRecoveryCount = platform === undefined || platform === "android"
-      ? pendingAndroidRecoveryCount
-      : 0;
+    const eligibleRecoveryCount =
+      platform === undefined || platform === "android" ? pendingAndroidRecoveryCount : 0;
     return pooledDeviceCount + eligibleRecoveryCount >= requiredCount;
   }
 
@@ -207,7 +203,8 @@ export class DeviceCriteriaMatcher {
    * boot path left unset (iOS version, screen geometry, simulator type).
    */
   withDeviceImageMetadata(ready: BootedDevice, image: DeviceInfo): DevicePoolBootedDevice {
-    const imageIosVersion = image.iosVersion ?? image.osVersion ?? this.iosVersionFromRuntime(image.runtime);
+    const imageIosVersion =
+      image.iosVersion ?? image.osVersion ?? this.iosVersionFromRuntime(image.runtime);
     return {
       ...ready,
       iosVersion: ready.iosVersion ?? imageIosVersion,
@@ -224,7 +221,10 @@ export class DeviceCriteriaMatcher {
    */
   getBootedDeviceSimulatorType(device: BootedDevice): string | undefined {
     const deviceWithPoolMetadata = device as DevicePoolBootedDevice;
-    return deviceWithPoolMetadata.simulatorType ?? this.displayNameFromIosDeviceType(deviceWithPoolMetadata.deviceType);
+    return (
+      deviceWithPoolMetadata.simulatorType ??
+      this.displayNameFromIosDeviceType(deviceWithPoolMetadata.deviceType)
+    );
   }
 
   /**

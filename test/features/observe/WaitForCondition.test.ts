@@ -34,7 +34,11 @@ function obs(node: Record<string, unknown>, extra?: Partial<ObserveResult>): Obs
 
 /** A root node wrapping the given children (each must carry bounds to parse). */
 function root(children: Record<string, unknown>[]): Record<string, unknown> {
-  return { "resource-id": "root", "bounds": { left: 0, top: 0, right: 100, bottom: 100 }, "node": children };
+  return {
+    "resource-id": "root",
+    bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+    node: children,
+  };
 }
 
 describe("RealWaitForCondition", () => {
@@ -43,14 +47,34 @@ describe("RealWaitForCondition", () => {
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
     fake.setObserveSequence([
-      obs({ "resource-id": "screen", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "loading" }, { updatedAt: 10 }),
-      obs({ "resource-id": "screen", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "ready" }, { updatedAt: 20 }),
+      obs(
+        {
+          "resource-id": "screen",
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          text: "loading",
+        },
+        { updatedAt: 10 },
+      ),
+      obs(
+        {
+          "resource-id": "screen",
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          text: "ready",
+        },
+        { updatedAt: 20 },
+      ),
     ]);
 
-    const predicate: ConditionPredicate = observation => {
-      const node = observation.viewHierarchy?.hierarchy?.node as Record<string, unknown> | undefined;
+    const predicate: ConditionPredicate = (observation) => {
+      const node = observation.viewHierarchy?.hierarchy?.node as
+        | Record<string, unknown>
+        | undefined;
       return node?.text === "ready"
-        ? { matched: true, matchedElement: node as unknown as Element, candidates: [node as unknown as Element] }
+        ? {
+            matched: true,
+            matchedElement: node as unknown as Element,
+            candidates: [node as unknown as Element],
+          }
         : { matched: false, candidates: [] };
     };
 
@@ -67,12 +91,19 @@ describe("RealWaitForCondition", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
-    fake.setObserveResult(index =>
-      obs({ "resource-id": "screen", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": `frame-${index}` }, { updatedAt: (index + 1) * 10 })
+    fake.setObserveResult((index) =>
+      obs(
+        {
+          "resource-id": "screen",
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          text: `frame-${index}`,
+        },
+        { updatedAt: (index + 1) * 10 },
+      ),
     );
 
     // Never matches, but always reports the current node as a near-match.
-    const predicate: ConditionPredicate = observation => {
+    const predicate: ConditionPredicate = (observation) => {
       const node = observation.viewHierarchy?.hierarchy?.node as unknown as Element;
       return { matched: false, candidates: [node] };
     };
@@ -93,12 +124,27 @@ describe("RealWaitForCondition", () => {
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
     fake.setObserveSequence([
-      obs({ "resource-id": "screen", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "a" }, { updatedAt: 10 }),
-      obs({ "resource-id": "screen", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "b" }, { updatedAt: 20 }),
-      obs({ "resource-id": "screen", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "match" }, { updatedAt: 30 }),
+      obs(
+        { "resource-id": "screen", bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "a" },
+        { updatedAt: 10 },
+      ),
+      obs(
+        { "resource-id": "screen", bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "b" },
+        { updatedAt: 20 },
+      ),
+      obs(
+        {
+          "resource-id": "screen",
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          text: "match",
+        },
+        { updatedAt: 30 },
+      ),
     ]);
-    const predicate: ConditionPredicate = observation => {
-      const node = observation.viewHierarchy?.hierarchy?.node as Record<string, unknown> | undefined;
+    const predicate: ConditionPredicate = (observation) => {
+      const node = observation.viewHierarchy?.hierarchy?.node as
+        | Record<string, unknown>
+        | undefined;
       return node?.text === "match"
         ? { matched: true, matchedElement: node as unknown as Element }
         : { matched: false, candidates: [] };
@@ -116,12 +162,33 @@ describe("RealWaitForCondition", () => {
     const finder = new DefaultElementFinder();
     const fake = new FakeObserveScreen();
     fake.setObserveSequence([
-      obs(root([{ "resource-id": "spinner", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "…" }]), { updatedAt: 10 }),
-      obs(root([{ "resource-id": "submit", "bounds": { left: 0, top: 20, right: 10, bottom: 30 }, "text": "Submit" }]), { updatedAt: 20 }),
+      obs(
+        root([
+          {
+            "resource-id": "spinner",
+            bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+            text: "…",
+          },
+        ]),
+        { updatedAt: 10 },
+      ),
+      obs(
+        root([
+          {
+            "resource-id": "submit",
+            bounds: { left: 0, top: 20, right: 10, bottom: 30 },
+            text: "Submit",
+          },
+        ]),
+        { updatedAt: 20 },
+      ),
     ]);
 
     const waitFor = new RealWaitForCondition(fake, timer);
-    const result = await waitFor.execute(appear(finder, { elementId: "submit" }), { timeoutMs: 2500, pollMs: 150 });
+    const result = await waitFor.execute(appear(finder, { elementId: "submit" }), {
+      timeoutMs: 2500,
+      pollMs: 150,
+    });
 
     expect(result.matched).toBe(true);
     expect(result.matchedElement!["resource-id"]).toBe("submit");
@@ -134,12 +201,33 @@ describe("RealWaitForCondition", () => {
     const finder = new DefaultElementFinder();
     const fake = new FakeObserveScreen();
     fake.setObserveSequence([
-      obs(root([{ "resource-id": "progress", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "Loading" }]), { updatedAt: 10 }),
-      obs(root([{ "resource-id": "content", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "Done" }]), { updatedAt: 20 }),
+      obs(
+        root([
+          {
+            "resource-id": "progress",
+            bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+            text: "Loading",
+          },
+        ]),
+        { updatedAt: 10 },
+      ),
+      obs(
+        root([
+          {
+            "resource-id": "content",
+            bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+            text: "Done",
+          },
+        ]),
+        { updatedAt: 20 },
+      ),
     ]);
 
     const waitFor = new RealWaitForCondition(fake, timer);
-    const result = await waitFor.execute(disappear(finder, { elementId: "progress" }), { timeoutMs: 2500, pollMs: 150 });
+    const result = await waitFor.execute(disappear(finder, { elementId: "progress" }), {
+      timeoutMs: 2500,
+      pollMs: 150,
+    });
 
     expect(result.matched).toBe(true);
     expect(result.polls).toBe(2);
@@ -161,12 +249,33 @@ describe("RealWaitForCondition", () => {
       },
     };
     fake.setObserveSequence([
-      obs(root([{ "resource-id": "loading", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "…" }]), { updatedAt: 10, ...iosExtra }),
-      obs(root([{ "resource-id": "Done", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": "Done" }]), { updatedAt: 20, ...iosExtra }),
+      obs(
+        root([
+          {
+            "resource-id": "loading",
+            bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+            text: "…",
+          },
+        ]),
+        { updatedAt: 10, ...iosExtra },
+      ),
+      obs(
+        root([
+          {
+            "resource-id": "Done",
+            bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+            text: "Done",
+          },
+        ]),
+        { updatedAt: 20, ...iosExtra },
+      ),
     ]);
 
     const waitFor = new RealWaitForCondition(fake, timer);
-    const result = await waitFor.execute(appear(finder, { text: "Done" }), { timeoutMs: 2500, pollMs: 150 });
+    const result = await waitFor.execute(appear(finder, { text: "Done" }), {
+      timeoutMs: 2500,
+      pollMs: 150,
+    });
 
     expect(result.matched).toBe(true);
     expect(result.matchedElement!.text).toBe("Done");
@@ -177,17 +286,24 @@ describe("RealWaitForCondition", () => {
     timer.enableAutoAdvance();
     const fake = new FakeObserveScreen();
     const controller = new AbortController();
-    fake.setObserveResult(index => {
+    fake.setObserveResult((index) => {
       if (index === 1) {
         controller.abort();
       }
-      return obs({ "resource-id": "screen", "bounds": { left: 0, top: 0, right: 10, bottom: 10 }, "text": `f${index}` }, { updatedAt: (index + 1) * 10 });
+      return obs(
+        {
+          "resource-id": "screen",
+          bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+          text: `f${index}`,
+        },
+        { updatedAt: (index + 1) * 10 },
+      );
     });
     const predicate: ConditionPredicate = () => ({ matched: false, candidates: [] });
 
     const waitFor = new RealWaitForCondition(fake, timer);
     await expect(
-      waitFor.execute(predicate, { timeoutMs: 2500, pollMs: 150, signal: controller.signal })
+      waitFor.execute(predicate, { timeoutMs: 2500, pollMs: 150, signal: controller.signal }),
     ).rejects.toThrow("Operation cancelled");
   });
 });

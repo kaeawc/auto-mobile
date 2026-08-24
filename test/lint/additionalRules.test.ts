@@ -21,16 +21,16 @@ describe("auto-mobile/no-unknown-cast", () => {
 
 describe("auto-mobile/no-extension-import", () => {
   test("flags a .js extension in a relative import", () => {
-    expect(fires("no-extension-import", "import x from \"./foo.js\";")).toBe(true);
+    expect(fires("no-extension-import", 'import x from "./foo.js";')).toBe(true);
   });
   test("flags a .ts extension in a relative import", () => {
-    expect(fires("no-extension-import", "import x from \"./foo.ts\";")).toBe(true);
+    expect(fires("no-extension-import", 'import x from "./foo.ts";')).toBe(true);
   });
   test("does not flag an extensionless relative import", () => {
-    expect(fires("no-extension-import", "import x from \"./foo\";")).toBe(false);
+    expect(fires("no-extension-import", 'import x from "./foo";')).toBe(false);
   });
   test("does not flag a bare package import ending in .js-like text", () => {
-    expect(fires("no-extension-import", "import x from \"pkg/sub\";")).toBe(false);
+    expect(fires("no-extension-import", 'import x from "pkg/sub";')).toBe(false);
   });
 });
 
@@ -48,10 +48,14 @@ describe("auto-mobile/no-raw-timer", () => {
 
 describe("auto-mobile/no-structured-content-read", () => {
   test("flags reading a field off structuredContent", () => {
-    expect(fires("no-structured-content-read", "const m = res.structuredContent.marker;")).toBe(true);
+    expect(fires("no-structured-content-read", "const m = res.structuredContent.marker;")).toBe(
+      true,
+    );
   });
   test("does not flag the typed getStructuredField helper", () => {
-    expect(fires("no-structured-content-read", "const m = getStructuredField(res, \"marker\");")).toBe(false);
+    expect(
+      fires("no-structured-content-read", 'const m = getStructuredField(res, "marker");'),
+    ).toBe(false);
   });
 });
 

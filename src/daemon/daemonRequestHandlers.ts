@@ -1,10 +1,6 @@
 import { DaemonRequest } from "./types";
 import { DeviceLabelMap, Session } from "./sessionManager";
-import type {
-  DeviceRecoveryEligibility,
-  DeviceRecoveryPolicy,
-  PooledDevice,
-} from "./devicePool";
+import type { DeviceRecoveryEligibility, DeviceRecoveryPolicy, PooledDevice } from "./devicePool";
 import type { DeviceSessionRecord } from "./deviceSessionRegistry";
 import { DAEMON_LIST_DEVICE_SESSIONS_METHOD } from "./constants";
 
@@ -40,7 +36,7 @@ export interface DaemonStateAccess {
     assertSessionReadyForAutomation?(sessionId: string): void;
     resolveAutolockSessionForMcpSession?(
       mcpSessionId: string | undefined,
-      platform?: "android" | "ios"
+      platform?: "android" | "ios",
     ): string | undefined;
   };
   getDeviceSessionRegistry(): {
@@ -64,7 +60,7 @@ export type DaemonMethodResult = {
 
 export async function handleDaemonRequest(
   request: DaemonRequest,
-  state: DaemonStateAccess
+  state: DaemonStateAccess,
 ): Promise<DaemonMethodResult> {
   if (!request.method.startsWith("daemon/")) {
     return {
@@ -128,7 +124,7 @@ export async function handleDaemonRequest(
       const pool = state.getDevicePool();
       const stats = pool.getStats();
       const recoveryPolicy = pool.getRecoveryPolicy?.();
-      const devices = pool.getAllDevices?.().map(device => ({
+      const devices = pool.getAllDevices?.().map((device) => ({
         deviceId: device.id,
         platform: device.platform,
         recoveryEligibility: pool.getRecoveryEligibility?.(device.id),
@@ -211,7 +207,7 @@ export async function handleDaemonRequest(
     }
     case DAEMON_LIST_DEVICE_SESSIONS_METHOD: {
       const registry = state.getDeviceSessionRegistry();
-      const deviceSessions = registry.list().map(record => ({
+      const deviceSessions = registry.list().map((record) => ({
         deviceSessionUuid: record.deviceSessionUuid,
         deviceId: record.deviceId,
         platform: record.platform,

@@ -7,7 +7,7 @@
 > - **Android (TalkBack):** detection via ADB secure settings; TalkBack-aware `tapOn` (direct `ACTION_CLICK` activation, capability-gated semantic `ClickableSpan` activation, and opt-in cursor navigation behind the `screen-reader-navigation` feature flag) and `swipeOn` (`ACTION_SCROLL_FORWARD`/`BACKWARD` with a two-finger fallback).
 > - **iOS (VoiceOver):** detection via CtrlProxy and VoiceOver-aware tap (label-based accessibility activation). VoiceOver scrolling is unsupported: CtrlProxy scroll endpoints synthesize XCTest swipes, which do not reach VoiceOver, and there is no functional three-finger gesture fallback. The runner reports the VoiceOver cursor when the foreground app supplies SDK-enriched hierarchy data.
 >
-> **Still open:** iOS focus *control* (set/clear focus, cursor stepping), VoiceOver Rotor, and Magic Tap. See [`voiceover-talkback-parity.md`](./voiceover-talkback-parity.md) — the source of truth for remaining gaps — and the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Still open:** iOS focus _control_ (set/clear focus, cursor stepping), VoiceOver Rotor, and Magic Tap. See [`voiceover-talkback-parity.md`](./voiceover-talkback-parity.md) — the source of truth for remaining gaps — and the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 ## Overview
 
@@ -36,11 +36,11 @@ When TalkBack (Android) or VoiceOver (iOS) is enabled, mobile UX fundamentally c
 
 **Android TalkBack** can be detected via multiple approaches:
 
-| Method | Mechanism | Latency | Notes |
-|--------|-----------|---------|-------|
-| AccessibilityManager (preferred) | `settings get secure enabled_accessibility_services` via ADB | ~20-40ms | Fast, reliable, cacheable |
-| AccessibilityService query | In-process `getEnabledAccessibilityServiceList()` | Instant | Requires AutoMobile AccessibilityService context |
-| `dumpsys accessibility` (fallback) | Full accessibility configuration dump | ~100-200ms | Useful for debugging, not production |
+| Method                             | Mechanism                                                    | Latency    | Notes                                            |
+| ---------------------------------- | ------------------------------------------------------------ | ---------- | ------------------------------------------------ |
+| AccessibilityManager (preferred)   | `settings get secure enabled_accessibility_services` via ADB | ~20-40ms   | Fast, reliable, cacheable                        |
+| AccessibilityService query         | In-process `getEnabledAccessibilityServiceList()`            | Instant    | Requires AutoMobile AccessibilityService context |
+| `dumpsys accessibility` (fallback) | Full accessibility configuration dump                        | ~100-200ms | Useful for debugging, not production             |
 
 **iOS VoiceOver** is detected via `UIAccessibility.isVoiceOverRunning` (native iOS API, requires CtrlProxy iOS integration).
 
@@ -100,11 +100,11 @@ AutoMobile's `ViewHierarchyExtractor.kt` already uses `AccessibilityNodeInfo` AP
 
 Android has two types of focus:
 
-| Aspect | Input Focus | Accessibility Focus |
-|--------|-------------|---------------------|
-| Purpose | Text input target | Screen reader cursor position |
-| Visibility | Cursor/highlight | TalkBack announces, green outline |
-| Movement | Via keyboard (Tab) or touch | Via TalkBack swipe gestures |
+| Aspect     | Input Focus                 | Accessibility Focus               |
+| ---------- | --------------------------- | --------------------------------- |
+| Purpose    | Text input target           | Screen reader cursor position     |
+| Visibility | Cursor/highlight            | TalkBack announces, green outline |
+| Movement   | Via keyboard (Tab) or touch | Via TalkBack swipe gestures       |
 
 **During scrolling**, TalkBack focus may move off-screen, stay on a now-invisible element, or jump to the first visible focusable. The `swipeOn` tool clears accessibility focus before scrolling to avoid focus-follow issues.
 
@@ -116,19 +116,20 @@ Android has two types of focus:
 
 When TalkBack is active, Android reserves certain gestures:
 
-| Standard Gesture | TalkBack Behavior | Impact on Automation |
-|------------------|-------------------|---------------------|
-| Single tap | Announces element | Does NOT activate element |
-| Double tap (anywhere) | Activates focused element | Alternative to direct tap |
-| Single swipe right/left | Next/previous element | Does NOT scroll content |
-| Two-finger swipe | Scroll content | Required for scrolling |
-| Three-finger swipe | System navigation | Reserved gesture |
+| Standard Gesture        | TalkBack Behavior         | Impact on Automation      |
+| ----------------------- | ------------------------- | ------------------------- |
+| Single tap              | Announces element         | Does NOT activate element |
+| Double tap (anywhere)   | Activates focused element | Alternative to direct tap |
+| Single swipe right/left | Next/previous element     | Does NOT scroll content   |
+| Two-finger swipe        | Scroll content            | Required for scrolling    |
+| Three-finger swipe      | System navigation         | Reserved gesture          |
 
 ### Per-Tool Adaptations
 
 **tapOn**: Use `ACTION_CLICK` on the target element instead of a coordinate-based tap. Optionally set accessibility focus first to mimic user behavior and trigger TalkBack announcement. Long press uses `ACTION_LONG_CLICK`. For link text inside a node, `selector.accessibilityLink` or owner-scoped `subtext` invokes the runner's public semantic span API. The request succeeds only after that exact link activates; unsupported, flattened, stale, and ambiguous targets fail without a coordinate or owner-node fallback.
 
 **swipeOn / scroll**: Three approaches in priority order:
+
 1. **Accessibility scroll actions** (preferred for known scrollable containers) - uses `ACTION_SCROLL_FORWARD`/`ACTION_SCROLL_BACKWARD`
 2. **Two-finger swipe** (general-purpose scrolling) - dispatches parallel two-finger gesture via `GestureDescription`
 3. **Temporarily suspend TalkBack** (advanced, avoid) - requires extra permissions
@@ -150,11 +151,11 @@ For scroll-until-visible (`lookFor`), clear accessibility focus before scrolling
 Standard automation script works unchanged with TalkBack enabled:
 
 ```typescript
-await tapOn({ text: "Username" });      // Uses ACTION_CLICK (not coordinate tap)
+await tapOn({ text: "Username" }); // Uses ACTION_CLICK (not coordinate tap)
 await inputText({ text: "user@example.com" }); // Uses ACTION_SET_TEXT (works in both modes)
 await tapOn({ text: "Password" });
 await inputText({ text: "password123" });
-await tapOn({ text: "Log in" });        // ACTION_CLICK on button
+await tapOn({ text: "Log in" }); // ACTION_CLICK on button
 ```
 
 **Edge case**: If "Username" is a label (not the EditText), search logic checks nearby EditText with matching `content-desc` or `hint`.
@@ -168,7 +169,7 @@ await swipeOn({
   lookFor: { text: "Item 50" },
   // Internally uses ACTION_SCROLL_FORWARD or two-finger swipe
 });
-await tapOn({ text: "Item 50" });  // ACTION_CLICK
+await tapOn({ text: "Item 50" }); // ACTION_CLICK
 ```
 
 Scroll-until-visible detects list end by checking if hierarchy changes after scroll. Accessibility focus is cleared before each scroll to prevent focus-follow issues.
@@ -186,12 +187,12 @@ Scroll-until-visible detects list end by checking if hierarchy changes after scr
 
 iOS VoiceOver follows the same phased approach. Key differences:
 
-| Aspect | Android TalkBack | iOS VoiceOver |
-|--------|------------------|---------------|
-| Detection | `AccessibilityManager` / settings query | `UIAccessibility.isVoiceOverRunning` |
-| Scroll Gesture | Two-finger swipe | Three-finger swipe |
-| Focus API | `FOCUS_ACCESSIBILITY` | `UIAccessibilityFocus` |
-| Rotor | No equivalent | Two-finger rotate for navigation modes |
+| Aspect         | Android TalkBack                        | iOS VoiceOver                          |
+| -------------- | --------------------------------------- | -------------------------------------- |
+| Detection      | `AccessibilityManager` / settings query | `UIAccessibility.isVoiceOverRunning`   |
+| Scroll Gesture | Two-finger swipe                        | Three-finger swipe                     |
+| Focus API      | `FOCUS_ACCESSIBILITY`                   | `UIAccessibilityFocus`                 |
+| Rotor          | No equivalent                           | Two-finger rotate for navigation modes |
 
 #### Enabling/disabling VoiceOver
 
@@ -216,7 +217,7 @@ chosen by device type (`VoiceOverToggle`):
     that can't be located returns `supported:false` with a reason (surfaced as an
     `ActionableError`), never a silent success.
   - **Idempotent by necessity**: the runner early-returns when VoiceOver is
-    already in the requested state and does *not* tap. Once VoiceOver is on, every
+    already in the requested state and does _not_ tap. Once VoiceOver is on, every
     tap requires the double-tap idiom, so a blind re-tap would be interpreted as a
     VoiceOver activation rather than a toggle.
 
@@ -239,6 +240,6 @@ source of truth for remaining gaps:
 - **TalkBack context menus**: local/global menu gestures.
 
 Delivered since this document was written, and no longer "future": TalkBack and VoiceOver
- detection, tap adaptation on both platforms, Android scroll-action swipe with a two-finger
- fallback, unsupported iOS VoiceOver scrolling, physical-device VoiceOver enable/disable via
- Settings automation, and WCAG auditing alongside screen-reader support.
+detection, tap adaptation on both platforms, Android scroll-action swipe with a two-finger
+fallback, unsupported iOS VoiceOver scrolling, physical-device VoiceOver enable/disable via
+Settings automation, and WCAG auditing alongside screen-reader support.

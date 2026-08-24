@@ -63,7 +63,7 @@ export interface VisionClient {
   analyzeUIElement(
     screenshotPath: string,
     searchCriteria: ElementSearchCriteria,
-    viewHierarchy?: any
+    viewHierarchy?: any,
   ): Promise<VisionFallbackResult>;
 }
 
@@ -71,7 +71,7 @@ export interface VisionAnalyzer {
   analyzeAndSuggest(
     screenshotPath: string,
     hierarchy: unknown,
-    searchCriteria: ElementSearchCriteria
+    searchCriteria: ElementSearchCriteria,
   ): Promise<VisionFallbackResult>;
 }
 

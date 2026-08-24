@@ -126,7 +126,7 @@ export class SharedGestureDelegate {
     rotationDegrees: number,
     duration: number = 300,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<GestureTimingResult> {
     return sendCommand<GestureTimingResult>(this.context, {
       idPrefix: "pinch",

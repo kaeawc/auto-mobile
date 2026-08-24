@@ -72,7 +72,7 @@ function hasNodeAttrs(value: unknown): boolean {
     record["text"] ||
     record["content-desc"] ||
     record["resource-id"] ||
-    record["view-id"]
+    record["view-id"],
   );
 }
 
@@ -102,7 +102,7 @@ function walk(node: ViewHierarchyNode | undefined, visit: (node: ViewHierarchyNo
 
 function collectText(node: ViewHierarchyNode): string[] {
   const out: string[] = [];
-  walk(node, current => {
+  walk(node, (current) => {
     const text = textOf(attrsOf(current));
     if (text) {
       out.push(text);
@@ -114,7 +114,7 @@ function collectText(node: ViewHierarchyNode): string[] {
 function findNavigationTitle(root: ViewHierarchyNode | undefined): string | undefined {
   let fallback: string | undefined;
   let title: string | undefined;
-  walk(root, node => {
+  walk(root, (node) => {
     if (title) {
       return;
     }
@@ -124,7 +124,7 @@ function findNavigationTitle(root: ViewHierarchyNode | undefined): string | unde
       return;
     }
     fallback = textOf(attrs) ?? fallback;
-    walk(node, descendant => {
+    walk(node, (descendant) => {
       if (title) {
         return;
       }
@@ -154,7 +154,8 @@ function findSelectedTab(root: ViewHierarchyNode | undefined): string | undefine
     const nextInTabBar = inTabBar || cls === "UITabBar" || cls === "XCUIElementTypeTabBar";
     if (isTrue(attrs["selected"])) {
       const selectedByRole = role === "tab";
-      const selectedByTabBarChild = nextInTabBar &&
+      const selectedByTabBarChild =
+        nextInTabBar &&
         (cls === "UITabBarButton" || cls === "UIButton" || cls === "XCUIElementTypeButton");
       if (selectedByRole || selectedByTabBarChild) {
         selectedTab = textOf(attrs) ?? asString(attrs["resource-id"]);
@@ -172,9 +173,11 @@ function findSelectedTab(root: ViewHierarchyNode | undefined): string | undefine
   return selectedTab;
 }
 
-function findModal(root: ViewHierarchyNode | undefined): Pick<CandidateSignals, "modalClass" | "modalTitle"> {
+function findModal(
+  root: ViewHierarchyNode | undefined,
+): Pick<CandidateSignals, "modalClass" | "modalTitle"> {
   let modalNode: ViewHierarchyNode | undefined;
-  walk(root, node => {
+  walk(root, (node) => {
     if (modalNode) {
       return;
     }
@@ -195,27 +198,29 @@ function findModal(root: ViewHierarchyNode | undefined): Pick<CandidateSignals, 
 
 function findFocusedElementId(root: ViewHierarchyNode | undefined): string | undefined {
   let focused: string | undefined;
-  walk(root, node => {
+  walk(root, (node) => {
     const attrs = attrsOf(node);
     if (focused || !isTrue(attrs["focused"])) {
       return;
     }
-    focused = asString(attrs["resource-id"])
-      ?? asString(attrs["view-id"])
-      ?? textOf(attrs)
-      ?? className(attrs);
+    focused =
+      asString(attrs["resource-id"]) ??
+      asString(attrs["view-id"]) ??
+      textOf(attrs) ??
+      className(attrs);
   });
   return focused;
 }
 
 function hasKeyboard(root: ViewHierarchyNode | undefined): boolean {
   let keyboardVisible = false;
-  walk(root, node => {
+  walk(root, (node) => {
     if (keyboardVisible) {
       return;
     }
     const cls = className(attrsOf(node));
-    keyboardVisible = cls === "UIKeyboard" || cls === "UIKeyboardKey" || cls === "XCUIElementTypeKeyboard";
+    keyboardVisible =
+      cls === "UIKeyboard" || cls === "UIKeyboardKey" || cls === "XCUIElementTypeKeyboard";
   });
   return keyboardVisible;
 }
@@ -243,7 +248,9 @@ function confidence(signals: CandidateSignals): ScreenIdentity["confidence"] {
   return "low";
 }
 
-export function deriveIosScreenIdentity(viewHierarchy: ViewHierarchyResult | undefined): ScreenIdentity | undefined {
+export function deriveIosScreenIdentity(
+  viewHierarchy: ViewHierarchyResult | undefined,
+): ScreenIdentity | undefined {
   const root = rootNode(viewHierarchy);
   if (!root) {
     return undefined;
@@ -265,7 +272,7 @@ export function deriveIosScreenIdentity(viewHierarchy: ViewHierarchyResult | und
     signals.modalClass ||
     signals.modalTitle ||
     signals.focusedElementId ||
-    signals.keyboardVisible
+    signals.keyboardVisible,
   );
   if (!hasUsefulSignal) {
     return undefined;
@@ -277,7 +284,7 @@ export function deriveIosScreenIdentity(viewHierarchy: ViewHierarchyResult | und
     confidence: confidence(signals),
     key: makeKey(signals),
     components: Object.fromEntries(
-      Object.entries(signals).filter(([, value]) => value !== undefined)
+      Object.entries(signals).filter(([, value]) => value !== undefined),
     ) as ScreenIdentity["components"],
   };
 }

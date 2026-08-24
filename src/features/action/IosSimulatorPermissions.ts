@@ -106,14 +106,14 @@ export function isIosSimulatorDevice(device: BootedDevice): boolean {
 
 export function normalizePermissions(permissions: string[] | undefined): string[] {
   return (permissions ?? [])
-    .map(permission => permission.trim())
-    .filter(permission => permission.length > 0);
+    .map((permission) => permission.trim())
+    .filter((permission) => permission.length > 0);
 }
 
 function tccServiceForPermission(permission: string): string {
   return permission.startsWith("kTCCService")
     ? permission
-    : TCC_SERVICE_BY_PERMISSION.get(permission) ?? permission;
+    : (TCC_SERVICE_BY_PERMISSION.get(permission) ?? permission);
 }
 
 function permissionForTccService(service: string): string {
@@ -125,7 +125,9 @@ function permissionForTccService(service: string): string {
   return service;
 }
 
-function stateFromAuthValue(value: number | null | undefined): IosSimulatorPermissionState["state"] {
+function stateFromAuthValue(
+  value: number | null | undefined,
+): IosSimulatorPermissionState["state"] {
   if (value === 2) {
     return "granted";
   }
@@ -157,7 +159,7 @@ export class IosSimulatorPermissions {
   constructor(
     device: BootedDevice,
     simctl: IosSimulatorPrivacyClient | null = null,
-    tccReader: TccPermissionReader | null = null
+    tccReader: TccPermissionReader | null = null,
   ) {
     this.device = device;
     this.simctl = simctl || new SimCtlClient(device);
@@ -167,21 +169,33 @@ export class IosSimulatorPermissions {
   async setPermissions(
     action: IosSimulatorPermissionAction,
     appId: string,
-    permissions: string[]
+    permissions: string[],
   ): Promise<IosSimulatorPermissionMutationResult> {
     const normalizedAppId = appId.trim();
     const normalizedPermissions = normalizePermissions(permissions);
 
     if (this.device.platform !== "ios") {
-      return this.mutationFailure(action, normalizedAppId, "iOS simulator permissions are only supported on iOS simulators");
+      return this.mutationFailure(
+        action,
+        normalizedAppId,
+        "iOS simulator permissions are only supported on iOS simulators",
+      );
     }
 
     if (!isIosSimulatorDevice(this.device)) {
-      return this.mutationFailure(action, normalizedAppId, "iOS permission changes via simctl privacy are only supported on simulators");
+      return this.mutationFailure(
+        action,
+        normalizedAppId,
+        "iOS permission changes via simctl privacy are only supported on simulators",
+      );
     }
 
     if (!normalizedAppId) {
-      return this.mutationFailure(action, normalizedAppId, "appId must be a non-empty iOS bundle identifier");
+      return this.mutationFailure(
+        action,
+        normalizedAppId,
+        "appId must be a non-empty iOS bundle identifier",
+      );
     }
 
     if (normalizedPermissions.length === 0) {
@@ -193,32 +207,32 @@ export class IosSimulatorPermissions {
         action,
         changedCount: 0,
         failedCount: 0,
-        results: []
+        results: [],
       };
     }
 
     const results: IosSimulatorPermissionCommandResult[] = await Promise.all(
-      normalizedPermissions.map(async permission => {
+      normalizedPermissions.map(async (permission) => {
         try {
           const result = await this.simctl.executeCommandArgs([
             "privacy",
             this.device.deviceId,
             action,
             permission,
-            normalizedAppId
+            normalizedAppId,
           ]);
           return { permission, success: true, stdout: result.stdout, stderr: result.stderr };
         } catch (error) {
           return {
             permission,
             success: false,
-            error: errorMessage(error)
+            error: errorMessage(error),
           };
         }
-      })
+      }),
     );
 
-    const failedCount = results.filter(result => !result.success).length;
+    const failedCount = results.filter((result) => !result.success).length;
 
     return {
       success: failedCount === 0,
@@ -229,20 +243,31 @@ export class IosSimulatorPermissions {
       changedCount: results.length - failedCount,
       failedCount,
       results,
-      ...(failedCount > 0 ? { error: `One or more iOS simulator permissions failed to ${action}` } : {})
+      ...(failedCount > 0
+        ? { error: `One or more iOS simulator permissions failed to ${action}` }
+        : {}),
     };
   }
 
-  async getPermissions(appId: string, permissions?: string[]): Promise<IosSimulatorPermissionQueryResult> {
+  async getPermissions(
+    appId: string,
+    permissions?: string[],
+  ): Promise<IosSimulatorPermissionQueryResult> {
     const normalizedAppId = appId.trim();
     const normalizedPermissions = permissions ? normalizePermissions(permissions) : undefined;
 
     if (this.device.platform !== "ios") {
-      return this.queryFailure(normalizedAppId, "iOS simulator permission queries are only supported on iOS simulators");
+      return this.queryFailure(
+        normalizedAppId,
+        "iOS simulator permission queries are only supported on iOS simulators",
+      );
     }
 
     if (!isIosSimulatorDevice(this.device)) {
-      return this.queryFailure(normalizedAppId, "iOS permission queries are only supported on simulators");
+      return this.queryFailure(
+        normalizedAppId,
+        "iOS permission queries are only supported on simulators",
+      );
     }
 
     if (!normalizedAppId) {
@@ -250,11 +275,16 @@ export class IosSimulatorPermissions {
     }
 
     try {
-      const rows = await this.tccReader.readPermissions(this.device.deviceId, normalizedAppId, normalizedPermissions);
-      const rowByService = new Map(rows.map(row => [row.service, row]));
-      const queriedServices = normalizedPermissions && normalizedPermissions.length > 0
-        ? normalizedPermissions.map(tccServiceForPermission)
-        : rows.map(row => row.service);
+      const rows = await this.tccReader.readPermissions(
+        this.device.deviceId,
+        normalizedAppId,
+        normalizedPermissions,
+      );
+      const rowByService = new Map(rows.map((row) => [row.service, row]));
+      const queriedServices =
+        normalizedPermissions && normalizedPermissions.length > 0
+          ? normalizedPermissions.map(tccServiceForPermission)
+          : rows.map((row) => row.service);
       const uniqueServices = [...new Set(queriedServices)];
 
       return {
@@ -262,20 +292,21 @@ export class IosSimulatorPermissions {
         appId: normalizedAppId,
         deviceId: this.device.deviceId,
         platform: this.device.platform,
-        permissions: uniqueServices.map(service => {
+        permissions: uniqueServices.map((service) => {
           const row = rowByService.get(service);
           const authValue = row?.auth_value ?? null;
           const allowed = row?.allowed ?? null;
-          const state = authValue !== null ? stateFromAuthValue(authValue) : stateFromAllowed(allowed);
+          const state =
+            authValue !== null ? stateFromAuthValue(authValue) : stateFromAllowed(allowed);
           const authValueForResult = authValue ?? allowed;
           return {
             permission: permissionForTccService(service),
             service,
             state,
             ...(authValueForResult === null ? {} : { authValue: authValueForResult }),
-            ...(row ? { raw: row as Record<string, string | number | null> } : {})
+            ...(row ? { raw: row as Record<string, string | number | null> } : {}),
           };
-        })
+        }),
       };
     } catch (error) {
       return this.queryFailure(normalizedAppId, errorMessage(error));
@@ -285,7 +316,7 @@ export class IosSimulatorPermissions {
   private mutationFailure(
     action: IosSimulatorPermissionAction,
     appId: string,
-    error: string
+    error: string,
   ): IosSimulatorPermissionMutationResult {
     return {
       success: false,
@@ -296,7 +327,7 @@ export class IosSimulatorPermissions {
       changedCount: 0,
       failedCount: 0,
       results: [],
-      error
+      error,
     };
   }
 
@@ -307,7 +338,7 @@ export class IosSimulatorPermissions {
       deviceId: this.device.deviceId,
       platform: this.device.platform,
       permissions: [],
-      error
+      error,
     };
   }
 }

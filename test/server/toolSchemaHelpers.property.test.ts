@@ -10,14 +10,14 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 const keyName = fc.string({
   unit: fc.constantFrom(..."abcdefghijklmnopqrstuvwxyz".split("")),
   minLength: 3,
-  maxLength: 8
+  maxLength: 8,
 });
 const uniqueKeys = fc.uniqueArray(keyName, { minLength: 2, maxLength: 5 });
 
 const branchFor = (key: string): Record<string, unknown> => ({
   type: "object",
   properties: { [key]: { type: "string" } },
-  required: [key]
+  required: [key],
 });
 
 // A jsonSchema whose single `myProp` property is an `anyOf` union of strict
@@ -25,13 +25,13 @@ const branchFor = (key: string): Record<string, unknown> => ({
 // `compactExclusiveSelectorProperties` is designed to collapse. Built fresh on
 // every fast-check run (via `.map`) since the function under test mutates its
 // input in place.
-const matchingCase = uniqueKeys.map(keys => ({
+const matchingCase = uniqueKeys.map((keys) => ({
   keys,
   jsonSchema: {
     properties: {
-      myProp: { anyOf: keys.map(branchFor), description: "pick one" }
-    }
-  } as Record<string, unknown>
+      myProp: { anyOf: keys.map(branchFor), description: "pick one" },
+    },
+  } as Record<string, unknown>,
 }));
 
 describe("compactExclusiveSelectorProperties (property-based)", () => {
@@ -45,7 +45,7 @@ describe("compactExclusiveSelectorProperties (property-based)", () => {
         compactExclusiveSelectorProperties(jsonSchema, ["myProp"]);
         const myProp = (jsonSchema.properties as Record<string, any>).myProp;
         const resultKeys = Object.keys(myProp.properties);
-        const oneOfKeys = (myProp.oneOf as Array<{ required: string[] }>).map(o => o.required[0]);
+        const oneOfKeys = (myProp.oneOf as Array<{ required: string[] }>).map((o) => o.required[0]);
         return (
           myProp.type === "object" &&
           myProp.additionalProperties === false &&
@@ -54,7 +54,7 @@ describe("compactExclusiveSelectorProperties (property-based)", () => {
           JSON.stringify(oneOfKeys) === JSON.stringify(keys)
         );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -70,7 +70,7 @@ describe("compactExclusiveSelectorProperties (property-based)", () => {
         compactExclusiveSelectorProperties(jsonSchema, ["myProp"]);
         return JSON.stringify(jsonSchema) === once;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -78,54 +78,71 @@ describe("compactExclusiveSelectorProperties (property-based)", () => {
   // object" pattern in one specific way. compactExclusiveSelectorProperties
   // must leave these entirely alone rather than throwing or partially
   // rewriting `myProp`.
-  const noAnyOfAtAll = uniqueKeys.map(keys => ({
-    properties: {
-      myProp: {
-        type: "object",
-        properties: Object.fromEntries(keys.map(k => [k, { type: "string" }]))
-      }
-    }
-  } as Record<string, unknown>));
+  const noAnyOfAtAll = uniqueKeys.map(
+    (keys) =>
+      ({
+        properties: {
+          myProp: {
+            type: "object",
+            properties: Object.fromEntries(keys.map((k) => [k, { type: "string" }])),
+          },
+        },
+      }) as Record<string, unknown>,
+  );
 
-  const singleBranchAnyOf = keyName.map(key => ({
-    properties: { myProp: { anyOf: [branchFor(key)] } }
-  } as Record<string, unknown>));
+  const singleBranchAnyOf = keyName.map(
+    (key) =>
+      ({
+        properties: { myProp: { anyOf: [branchFor(key)] } },
+      }) as Record<string, unknown>,
+  );
 
-  const missingRequired = uniqueKeys.map(keys => ({
-    properties: {
-      myProp: {
-        anyOf: keys.map((k, i) =>
-          i === 0 ? { type: "object", properties: { [k]: { type: "string" } } } : branchFor(k)
-        )
-      }
-    }
-  } as Record<string, unknown>));
+  const missingRequired = uniqueKeys.map(
+    (keys) =>
+      ({
+        properties: {
+          myProp: {
+            anyOf: keys.map((k, i) =>
+              i === 0 ? { type: "object", properties: { [k]: { type: "string" } } } : branchFor(k),
+            ),
+          },
+        },
+      }) as Record<string, unknown>,
+  );
 
-  const multiKeyRequired = uniqueKeys.map(keys => ({
-    properties: {
-      myProp: {
-        anyOf: keys.map((k, i) =>
-          i === 0
-            ? {
-              type: "object",
-              properties: Object.fromEntries(keys.map(kk => [kk, { type: "string" }])),
-              required: keys.slice(0, 2)
-            }
-            : branchFor(k)
-        )
-      }
-    }
-  } as Record<string, unknown>));
+  const multiKeyRequired = uniqueKeys.map(
+    (keys) =>
+      ({
+        properties: {
+          myProp: {
+            anyOf: keys.map((k, i) =>
+              i === 0
+                ? {
+                    type: "object",
+                    properties: Object.fromEntries(keys.map((kk) => [kk, { type: "string" }])),
+                    required: keys.slice(0, 2),
+                  }
+                : branchFor(k),
+            ),
+          },
+        },
+      }) as Record<string, unknown>,
+  );
 
-  const nonObjectBranch = uniqueKeys.map(keys => ({
-    properties: {
-      myProp: {
-        anyOf: keys.map((k, i) =>
-          i === 0 ? { type: "string", properties: { [k]: { type: "string" } }, required: [k] } : branchFor(k)
-        )
-      }
-    }
-  } as Record<string, unknown>));
+  const nonObjectBranch = uniqueKeys.map(
+    (keys) =>
+      ({
+        properties: {
+          myProp: {
+            anyOf: keys.map((k, i) =>
+              i === 0
+                ? { type: "string", properties: { [k]: { type: "string" } }, required: [k] }
+                : branchFor(k),
+            ),
+          },
+        },
+      }) as Record<string, unknown>,
+  );
 
   const noPropertiesAtAll = fc.constant({} as Record<string, unknown>);
 
@@ -135,17 +152,17 @@ describe("compactExclusiveSelectorProperties (property-based)", () => {
     missingRequired,
     multiKeyRequired,
     nonObjectBranch,
-    noPropertiesAtAll
+    noPropertiesAtAll,
   );
 
   test("malformed or non-matching shapes are left untouched and never throw", () => {
     fc.assert(
-      fc.property(malformedSchema, s => {
+      fc.property(malformedSchema, (s) => {
         const before = JSON.stringify(s);
         compactExclusiveSelectorProperties(s, ["myProp"]);
         return JSON.stringify(s) === before;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

@@ -68,7 +68,7 @@ describe("narrowInternalToolEnvelope (AC2 runtime-validated narrowing)", () => {
   test("returns undefined when structuredContent is missing or not an object", () => {
     expect(narrowInternalToolEnvelope("swipeOn", { content: [] })).toBeUndefined();
     expect(
-      narrowInternalToolEnvelope("swipeOn", { structuredContent: "not-an-object" })
+      narrowInternalToolEnvelope("swipeOn", { structuredContent: "not-an-object" }),
     ).toBeUndefined();
     expect(narrowInternalToolEnvelope("swipeOn", { structuredContent: null })).toBeUndefined();
   });
@@ -80,42 +80,36 @@ describe("ToolRegistry.callInternalTyped (AC1 typed seam)", () => {
   });
 
   function registerSwipeOn(found: boolean): void {
-    ToolRegistry.register(
-      "swipeOn",
-      "swipeOn",
-      {},
-      async () =>
-        createStructuredToolResponse<SwipeOnToolPayload>({
-          success: true,
-          found,
-          message: found ? "Swiped up and found element" : "Swiped up",
-        } as SwipeOnToolPayload)
+    ToolRegistry.register("swipeOn", "swipeOn", {}, async () =>
+      createStructuredToolResponse<SwipeOnToolPayload>({
+        success: true,
+        found,
+        message: found ? "Swiped up and found element" : "Swiped up",
+      } as SwipeOnToolPayload),
     );
   }
 
   test("resolves to the concrete envelope whose payload reads via getStructuredField", async () => {
     registerSwipeOn(true);
     // `result` is StructuredToolResponse<SwipeOnToolPayload> | undefined — no cast.
-    const result = await ToolRegistry.callInternalTyped("swipeOn", { direction: "up", lookFor: { text: "x" } });
+    const result = await ToolRegistry.callInternalTyped("swipeOn", {
+      direction: "up",
+      lookFor: { text: "x" },
+    });
     expect(getStructuredField(result, "found")).toBe(true);
     expect(getStructuredField(result, "success")).toBe(true);
   });
 
   test("delegates through callInternal so the args are marked internal (#3108)", async () => {
     let seenArgs: Record<string, unknown> | undefined;
-    ToolRegistry.register(
-      "swipeOn",
-      "swipeOn",
-      {},
-      async (args: any) => {
-        seenArgs = args;
-        return createStructuredToolResponse<SwipeOnToolPayload>({
-          success: true,
-          found: true,
-          message: "ok",
-        } as SwipeOnToolPayload);
-      }
-    );
+    ToolRegistry.register("swipeOn", "swipeOn", {}, async (args: any) => {
+      seenArgs = args;
+      return createStructuredToolResponse<SwipeOnToolPayload>({
+        success: true,
+        found: true,
+        message: "ok",
+      } as SwipeOnToolPayload);
+    });
     await ToolRegistry.callInternalTyped("swipeOn", { direction: "up" });
     // callInternal applies markInternalToolCall → the internal-no-diff marker is present.
     expect(seenArgs?.[INTERNAL_NO_DIFF_PARAM]).toBe(true);
@@ -173,8 +167,8 @@ describe("asToolEnvelope is eliminated from src (AC2 source scan)", () => {
 
   test("no src/ file references asToolEnvelope", () => {
     const srcDir = join(import.meta.dir, "..", "..", "src");
-    const offenders = collectTsFiles(srcDir).filter(file =>
-      readFileSync(file, "utf8").includes("asToolEnvelope")
+    const offenders = collectTsFiles(srcDir).filter((file) =>
+      readFileSync(file, "utf8").includes("asToolEnvelope"),
     );
     expect(offenders).toEqual([]);
   });

@@ -7,26 +7,20 @@ import {
   startTestRecording,
   stopTestRecording,
 } from "../server/testRecordingManager";
-import {
-  TestRecordingCommand,
-  TestRecordingResponse,
-} from "./testRecordingSocketTypes";
+import { TestRecordingCommand, TestRecordingResponse } from "./testRecordingSocketTypes";
 import { TEST_RECORDING_SOCKET_CONFIG } from "./daemonFiles";
 import {
   createDefaultStreamSocketAuthenticator,
   type StreamSocketAuthenticator,
 } from "./streamSocketAuth";
 
-const resolveDevice = async (
-  deviceId?: string,
-  platform?: Platform
-): Promise<BootedDevice> => {
+const resolveDevice = async (deviceId?: string, platform?: Platform): Promise<BootedDevice> => {
   const deviceSessionManager = DeviceSessionManager.getInstance();
 
   let resolvedPlatform: SomePlatform = platform ?? "either";
   if (deviceId && !platform) {
     const connectedDevices = await deviceSessionManager.detectConnectedPlatforms();
-    const match = connectedDevices.find(device => device.deviceId === deviceId);
+    const match = connectedDevices.find((device) => device.deviceId === deviceId);
     if (!match) {
       throw new Error(`Device ${deviceId} not found among connected devices.`);
     }
@@ -61,15 +55,15 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
   constructor(
     socketPath: string = getSocketPath(TEST_RECORDING_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
-    authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator("testRecording")
+    authenticator: StreamSocketAuthenticator = createDefaultStreamSocketAuthenticator(
+      "testRecording",
+    ),
   ) {
     super(socketPath, timer, "TestRecording");
     this.authenticator = authenticator;
   }
 
-  protected async handleRequest(
-    request: TestRecordingCommand
-  ): Promise<TestRecordingResponse> {
+  protected async handleRequest(request: TestRecordingCommand): Promise<TestRecordingResponse> {
     const command = request?.command;
     if (!command) {
       throw new Error("Request missing command field.");
@@ -80,7 +74,10 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
         // Authorize before touching device state: an unauthenticated or
         // cross-session caller cannot start a recording on another session's
         // device (issue #4752).
-        this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId: request.deviceId });
+        this.authenticator.authorize({
+          sessionUuid: request.sessionUuid,
+          deviceId: request.deviceId,
+        });
         const platform = ensurePlatform(request.platform);
         const device = await resolveDevice(request.deviceId, platform);
         const result = await startTestRecording(device);
@@ -119,7 +116,10 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
       case "status": {
         // Status reveals the active recording's device/id; require a live
         // session so it is not readable by an unauthenticated caller (issue #4752).
-        this.authenticator.authorize({ sessionUuid: request.sessionUuid, deviceId: request.deviceId });
+        this.authenticator.authorize({
+          sessionUuid: request.sessionUuid,
+          deviceId: request.deviceId,
+        });
         const recording = getTestRecordingStatus();
         if (!recording) {
           return { success: true };

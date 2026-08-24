@@ -28,7 +28,7 @@ export class LongPressMetadataDetector {
 
   detect(
     previousObservation: ObserveResult | null,
-    currentObservation?: ObserveResult
+    currentObservation?: ObserveResult,
   ): LongPressMetadata {
     const previousHierarchy = previousObservation?.viewHierarchy;
     const currentHierarchy = currentObservation?.viewHierarchy;
@@ -39,13 +39,13 @@ export class LongPressMetadataDetector {
     return {
       pressRecognized: contextMenuOpened || selectionStarted || windowChange,
       contextMenuOpened,
-      selectionStarted
+      selectionStarted,
     };
   }
 
   private detectContextMenuOpened(
     previousHierarchy?: ViewHierarchyResult,
-    currentHierarchy?: ViewHierarchyResult
+    currentHierarchy?: ViewHierarchyResult,
   ): boolean {
     if (!currentHierarchy) {
       return false;
@@ -68,7 +68,7 @@ export class LongPressMetadataDetector {
 
   private detectNewWindow(
     previousHierarchy?: ViewHierarchyResult,
-    currentHierarchy?: ViewHierarchyResult
+    currentHierarchy?: ViewHierarchyResult,
   ): boolean {
     if (!currentHierarchy) {
       return false;
@@ -79,7 +79,7 @@ export class LongPressMetadataDetector {
       return false;
     }
 
-    return currentRoots.some(root => !previousRoots.has(this.getRootSignature(root)));
+    return currentRoots.some((root) => !previousRoots.has(this.getRootSignature(root)));
   }
 
   private detectSelectionStarted(currentHierarchy?: ViewHierarchyResult): boolean {
@@ -91,7 +91,7 @@ export class LongPressMetadataDetector {
     let selectionFound = false;
     const selectionKeyPairs: Array<[string, string]> = [
       ["textSelectionStart", "textSelectionEnd"],
-      ["selectionStart", "selectionEnd"]
+      ["selectionStart", "selectionEnd"],
     ];
 
     for (const root of roots) {
@@ -106,9 +106,15 @@ export class LongPressMetadataDetector {
           if (startValue === undefined || endValue === undefined) {
             continue;
           }
-          const startNumeric = typeof startValue === "string" ? parseInt(startValue, 10) : Number(startValue);
-          const endNumeric = typeof endValue === "string" ? parseInt(endValue, 10) : Number(endValue);
-          if (!Number.isNaN(startNumeric) && !Number.isNaN(endNumeric) && endNumeric > startNumeric) {
+          const startNumeric =
+            typeof startValue === "string" ? parseInt(startValue, 10) : Number(startValue);
+          const endNumeric =
+            typeof endValue === "string" ? parseInt(endValue, 10) : Number(endValue);
+          if (
+            !Number.isNaN(startNumeric) &&
+            !Number.isNaN(endNumeric) &&
+            endNumeric > startNumeric
+          ) {
             selectionFound = true;
             return;
           }
@@ -127,7 +133,7 @@ export class LongPressMetadataDetector {
       return new Set();
     }
     const roots = this.elementParser.extractRootNodes(viewHierarchy);
-    return new Set(roots.map(root => this.getRootSignature(root)));
+    return new Set(roots.map((root) => this.getRootSignature(root)));
   }
 
   private getRootSignature(root: any): string {

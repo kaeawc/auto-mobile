@@ -10,13 +10,13 @@ services:
     # ADB USB device access requires the ability to create device nodes (mknod)
     # Docker provides CAP_MKNOD by default, but we explicitly add it for clarity
     cap_add:
-      - MKNOD  # Required for creating device nodes in /dev
+      - MKNOD # Required for creating device nodes in /dev
 
     # Grant access to USB devices without privileged mode
     # Major number 189 is for USB devices
     # 'c' = character device, '*' = all minor numbers, 'rwm' = read/write/mknod
     device_cgroup_rules:
-      - 'c 189:* rwm'
+      - "c 189:* rwm"
 
     # Environment variables
     environment:
@@ -71,13 +71,13 @@ services:
     # ADB USB device access requires the ability to create device nodes (mknod)
     # Docker provides CAP_MKNOD by default, but we explicitly add it for clarity
     cap_add:
-      - MKNOD  # Required for creating device nodes in /dev
+      - MKNOD # Required for creating device nodes in /dev
 
     # Grant access to USB devices without privileged mode
     # Major number 189 is for USB devices
     # 'c' = character device, '*' = all minor numbers, 'rwm' = read/write/mknod
     device_cgroup_rules:
-      - 'c 189:* rwm'
+      - "c 189:* rwm"
 
     environment:
       - ANDROID_HOME=/opt/android-sdk

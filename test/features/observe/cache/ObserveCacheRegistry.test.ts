@@ -6,25 +6,25 @@ import {
 } from "../../../../src/features/observe/cache/ObserveCacheRegistry";
 import { FakeObserveCacheStore } from "../../../fakes/FakeObserveCacheStore";
 
-describe("ObserveCacheRegistry", function() {
-  afterEach(function() {
+describe("ObserveCacheRegistry", function () {
+  afterEach(function () {
     resetObserveCacheStore();
   });
 
-  test("returns a default FileSystemObserveCacheStore initially", function() {
+  test("returns a default FileSystemObserveCacheStore initially", function () {
     const store = getObserveCacheStore();
     expect(store).toBeDefined();
     // Default store implements the same interface; constructor name check is sufficient.
     expect(store.constructor.name).toBe("FileSystemObserveCacheStore");
   });
 
-  test("setObserveCacheStore swaps the singleton instance", function() {
+  test("setObserveCacheStore swaps the singleton instance", function () {
     const fake = new FakeObserveCacheStore();
     setObserveCacheStore(fake);
     expect(getObserveCacheStore()).toBe(fake);
   });
 
-  test("resetObserveCacheStore restores a default file-system store", function() {
+  test("resetObserveCacheStore restores a default file-system store", function () {
     const fake = new FakeObserveCacheStore();
     setObserveCacheStore(fake);
     expect(getObserveCacheStore()).toBe(fake);
@@ -33,7 +33,7 @@ describe("ObserveCacheRegistry", function() {
     expect(getObserveCacheStore().constructor.name).toBe("FileSystemObserveCacheStore");
   });
 
-  test("swapped store is observable via the registry getter", async function() {
+  test("swapped store is observable via the registry getter", async function () {
     const fake = new FakeObserveCacheStore();
     setObserveCacheStore(fake);
     await getObserveCacheStore().put("device-x", {

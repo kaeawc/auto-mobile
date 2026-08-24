@@ -5,30 +5,64 @@ import {
   addDeviceTargetingToSchema,
   appIdFieldAliases,
   platformSchema,
-  withFieldAliases
+  withFieldAliases,
 } from "../../src/server/toolSchemaHelpers";
 import { accessibilitySchema } from "../../src/server/accessibilityTools";
-import { packageNameSchema, launchAppSchema, installAppSchema, uninstallAppSchema, getAppPermissionsSchema } from "../../src/server/appTools";
+import {
+  packageNameSchema,
+  launchAppSchema,
+  installAppSchema,
+  uninstallAppSchema,
+  getAppPermissionsSchema,
+} from "../../src/server/appTools";
 import { biometricAuthSchema } from "../../src/server/biometricTools";
 import { bugReportSchema, debugSearchSchema } from "../../src/server/debugTools";
 import { getDeepLinksSchema } from "../../src/server/deepLinkTools";
 import { highlightSchema } from "../../src/server/highlightTools";
 import {
-  shakeSchema, keyboardSchema, dragAndDropSchema, swipeOnSchema, pinchOnSchema,
-  clearTextSchema, selectAllTextSchema, pressButtonSchema, inputTextSchema,
-  openLinkSchema, imeActionSchema, recentAppsSchema, homeScreenSchema,
-  rotateSchema, clipboardSchema, stopAppSchema, clearStateSchema, systemTraySchema,
+  shakeSchema,
+  keyboardSchema,
+  dragAndDropSchema,
+  swipeOnSchema,
+  pinchOnSchema,
+  clearTextSchema,
+  selectAllTextSchema,
+  pressButtonSchema,
+  inputTextSchema,
+  openLinkSchema,
+  imeActionSchema,
+  recentAppsSchema,
+  homeScreenSchema,
+  rotateSchema,
+  clipboardSchema,
+  stopAppSchema,
+  clearStateSchema,
+  systemTraySchema,
 } from "../../src/server/interactionTools";
-import { navigateToSchema, getNavigationGraphSchema, exploreSchema } from "../../src/server/navigationTools";
-import { postNotificationSchema, getNotificationPolicySchema, setNotificationPolicySchema } from "../../src/server/notificationTools";
+import {
+  navigateToSchema,
+  getNavigationGraphSchema,
+  exploreSchema,
+} from "../../src/server/navigationTools";
+import {
+  postNotificationSchema,
+  getNotificationPolicySchema,
+  setNotificationPolicySchema,
+} from "../../src/server/notificationTools";
 import { observeSchema, identifyInteractionsSchema } from "../../src/server/observeTools";
 import { deviceSnapshotSchema } from "../../src/server/snapshotTools";
-import { changeLocalizationSchema, getDeviceStateSchema, setDeviceStateSchema } from "../../src/server/utilityTools";
+import {
+  changeLocalizationSchema,
+  getDeviceStateSchema,
+  setDeviceStateSchema,
+} from "../../src/server/utilityTools";
 
 describe("addDeviceTargetingToSchema", () => {
-  const baseSchema = z.object({
-    bundleId: z.string(),
-  }).strict();
+  const baseSchema = z
+    .object({
+      bundleId: z.string(),
+    })
+    .strict();
 
   const extended = addDeviceTargetingToSchema(baseSchema);
 
@@ -47,7 +81,13 @@ describe("addDeviceTargetingToSchema", () => {
     ["keepScreenAwake boolean", { keepScreenAwake: true }, true],
     [
       "all targeting fields together",
-      { deviceId: "emulator-5554", device: "A", sessionUuid: "abc-123", keepScreenAwake: true, platform: "android" },
+      {
+        deviceId: "emulator-5554",
+        device: "A",
+        sessionUuid: "abc-123",
+        keepScreenAwake: true,
+        platform: "android",
+      },
       true,
     ],
     ["invalid platform value", { platform: "windows" }, false],
@@ -62,10 +102,12 @@ describe("addDeviceTargetingToSchema", () => {
   });
 
   test("preserves existing platform definition instead of overwriting", () => {
-    const schemaWithRequiredPlatform = z.object({
-      bundleId: z.string(),
-      platform: platformSchema.default("android"),
-    }).strict();
+    const schemaWithRequiredPlatform = z
+      .object({
+        bundleId: z.string(),
+        platform: platformSchema.default("android"),
+      })
+      .strict();
 
     const extendedWithPlatform = addDeviceTargetingToSchema(schemaWithRequiredPlatform);
 
@@ -75,7 +117,10 @@ describe("addDeviceTargetingToSchema", () => {
       expect(withDefault.data.platform).toBe("android");
     }
 
-    const withExplicit = extendedWithPlatform.safeParse({ bundleId: "com.example.app", platform: "ios" });
+    const withExplicit = extendedWithPlatform.safeParse({
+      bundleId: "com.example.app",
+      platform: "ios",
+    });
     expect(withExplicit.success).toBe(true);
     if (withExplicit.success) {
       expect(withExplicit.data.platform).toBe("ios");
@@ -85,15 +130,19 @@ describe("addDeviceTargetingToSchema", () => {
 
 describe("withFieldAliases", () => {
   const schema = withFieldAliases(
-    z.object({
-      appId: z.string(),
-      nested: z.object({
-        appId: z.string().optional(),
-      }).optional(),
-    }).strict(),
+    z
+      .object({
+        appId: z.string(),
+        nested: z
+          .object({
+            appId: z.string().optional(),
+          })
+          .optional(),
+      })
+      .strict(),
     {
       appId: appIdFieldAliases,
-    }
+    },
   );
 
   test("maps common app identifier aliases to appId", () => {
@@ -137,12 +186,15 @@ describe("withFieldAliases", () => {
 
   test("does not recurse into non-plain objects", () => {
     const date = new Date("2026-01-01T00:00:00.000Z");
-    const dateSchema = withFieldAliases(z.object({
-      appId: z.string(),
-      value: z.instanceof(Date),
-    }), {
-      appId: appIdFieldAliases,
-    });
+    const dateSchema = withFieldAliases(
+      z.object({
+        appId: z.string(),
+        value: z.instanceof(Date),
+      }),
+      {
+        appId: appIdFieldAliases,
+      },
+    );
 
     const result = dateSchema.safeParse({
       packageId: "com.example.app",
@@ -171,7 +223,14 @@ describe("appId aliases on tool schemas", () => {
   });
 
   test("launchAppSchema accepts natural app identifier aliases", () => {
-    for (const alias of ["package", "packageName", "bundle", "bundleId", "application", "applicationId"]) {
+    for (const alias of [
+      "package",
+      "packageName",
+      "bundle",
+      "bundleId",
+      "application",
+      "applicationId",
+    ]) {
       const result = launchAppSchema.safeParse({
         [alias]: "com.example.app",
         platform: "ios",
@@ -237,7 +296,11 @@ describe("appId aliases on tool schemas", () => {
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.issues.some(issue => issue.message.includes("appId is only supported for Android"))).toBe(true);
+      expect(
+        result.error.issues.some((issue) =>
+          issue.message.includes("appId is only supported for Android"),
+        ),
+      ).toBe(true);
     }
   });
 
@@ -250,7 +313,11 @@ describe("appId aliases on tool schemas", () => {
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.issues.some(issue => issue.message.includes("appId only applies when locale is provided"))).toBe(true);
+      expect(
+        result.error.issues.some((issue) =>
+          issue.message.includes("appId only applies when locale is provided"),
+        ),
+      ).toBe(true);
     }
   });
 
@@ -262,7 +329,11 @@ describe("appId aliases on tool schemas", () => {
 
     expect(result.success).toBe(false);
     if (!result.success) {
-      expect(result.error.issues.some(issue => issue.message.includes("appId is required for Android locale changes"))).toBe(true);
+      expect(
+        result.error.issues.some((issue) =>
+          issue.message.includes("appId is required for Android locale changes"),
+        ),
+      ).toBe(true);
     }
   });
 });
@@ -278,7 +349,7 @@ describe("generated tool definitions", () => {
         required?: string[];
       };
     }>;
-    const changeLocalization = schemas.find(schema => schema.name === "changeLocalization");
+    const changeLocalization = schemas.find((schema) => schema.name === "changeLocalization");
 
     expect(changeLocalization?.inputSchema?.properties?.appId).toBeDefined();
     expect(changeLocalization?.inputSchema?.if).toEqual({
@@ -310,18 +381,34 @@ describe("platform field accepted by all device-targeting tool schemas", () => {
     ["navigateToSchema", navigateToSchema, { targetScreen: "Home" }],
     ["getNavigationGraphSchema", getNavigationGraphSchema, {}],
     ["exploreSchema", exploreSchema, {}],
-    ["postNotificationSchema", postNotificationSchema, { title: "Hi", body: "Test", appId: "com.example", platform: "ios" }],
+    [
+      "postNotificationSchema",
+      postNotificationSchema,
+      { title: "Hi", body: "Test", appId: "com.example", platform: "ios" },
+    ],
     ["getNotificationPolicySchema", getNotificationPolicySchema, { appId: "com.example" }],
-    ["setNotificationPolicySchema", setNotificationPolicySchema, { appId: "com.example", policyAccess: true }],
+    [
+      "setNotificationPolicySchema",
+      setNotificationPolicySchema,
+      { appId: "com.example", policyAccess: true },
+    ],
     ["observeSchema", observeSchema, { platform: "ios" }],
     ["identifyInteractionsSchema", identifyInteractionsSchema, { platform: "ios" }],
     ["deviceSnapshotSchema", deviceSnapshotSchema, { action: "capture" }],
-    ["changeLocalizationSchema", changeLocalizationSchema, { platform: "ios", timeZone: "Europe/Paris" }],
+    [
+      "changeLocalizationSchema",
+      changeLocalizationSchema,
+      { platform: "ios", timeZone: "Europe/Paris" },
+    ],
     ["getDeviceStateSchema", getDeviceStateSchema, {}],
     ["setDeviceStateSchema", setDeviceStateSchema, { doNotDisturb: { enabled: true } }],
     ["shakeSchema", shakeSchema, { platform: "ios" }],
     ["keyboardSchema", keyboardSchema, { action: "detect", platform: "ios" }],
-    ["dragAndDropSchema", dragAndDropSchema, { source: { elementId: "a" }, target: { elementId: "b" }, platform: "ios" }],
+    [
+      "dragAndDropSchema",
+      dragAndDropSchema,
+      { source: { elementId: "a" }, target: { elementId: "b" }, platform: "ios" },
+    ],
     ["swipeOnSchema", swipeOnSchema, { direction: "up", platform: "ios" }],
     ["pinchOnSchema", pinchOnSchema, { direction: "in", platform: "ios" }],
     ["clearTextSchema", clearTextSchema, { platform: "ios" }],
@@ -379,7 +466,11 @@ describe("inputTextSchema", () => {
   });
 
   test("rejects unsupported input modes", () => {
-    const result = inputTextSchema.safeParse({ text: "hello", mode: "realKeyEvents", platform: "android" });
+    const result = inputTextSchema.safeParse({
+      text: "hello",
+      mode: "realKeyEvents",
+      platform: "android",
+    });
     expect(result.success).toBe(false);
   });
 });

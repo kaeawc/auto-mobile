@@ -1,5 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidDeviceShellToolResult, BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
@@ -27,7 +30,7 @@ export class SetAndroidNotificationsEnabled {
 
   async execute(
     packageName: string,
-    input: SetAndroidNotificationsEnabledInput
+    input: SetAndroidNotificationsEnabledInput,
   ): Promise<AndroidDeviceShellToolResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("setAndroidNotificationsEnabled");
@@ -48,10 +51,14 @@ export class SetAndroidNotificationsEnabled {
         const stdout = result.stdout ?? "";
         const stderr = result.stderr ?? "";
         if (outputLooksLikeShellFailure(stdout, stderr)) {
-          throw new Error(`${stdout}\n${stderr}`.trim() || "cmd notification set_enabled reported an error");
+          throw new Error(
+            `${stdout}\n${stderr}`.trim() || "cmd notification set_enabled reported an error",
+          );
         }
       });
-      logger.info(`[SetAndroidNotificationsEnabled] ${input.enabled ? "enabled" : "disabled"} notifications for ${packageName}`);
+      logger.info(
+        `[SetAndroidNotificationsEnabled] ${input.enabled ? "enabled" : "disabled"} notifications for ${packageName}`,
+      );
       return { success: true, appId: packageName };
     } catch (cause) {
       const message = errorMessage(cause);

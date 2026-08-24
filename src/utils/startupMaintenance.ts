@@ -24,15 +24,10 @@ export function startStartupMaintenance(dependencies: StartupMaintenanceDependen
     "Android CtrlProxy prefetch cleanup",
     dependencies.startAndroidSweep,
     timer,
-    log
+    log,
   );
   if (dependencies.platform === "darwin") {
-    startBackgroundCleanup(
-      "iOS CtrlProxy runner cleanup",
-      dependencies.startIosReap,
-      timer,
-      log
-    );
+    startBackgroundCleanup("iOS CtrlProxy runner cleanup", dependencies.startIosReap, timer, log);
   }
 }
 
@@ -40,7 +35,7 @@ function startBackgroundCleanup(
   label: string,
   cleanup: () => Promise<void>,
   timer: Timer,
-  log: Logger
+  log: Logger,
 ): void {
   let work: Promise<void>;
   try {
@@ -52,13 +47,13 @@ function startBackgroundCleanup(
 
   const timeout = timer.setTimeout(() => {
     log.warn(
-      `[STARTUP_MAINTENANCE] ${label} exceeded ${STARTUP_MAINTENANCE_SLOW_WARNING_MS}ms; continuing startup`
+      `[STARTUP_MAINTENANCE] ${label} exceeded ${STARTUP_MAINTENANCE_SLOW_WARNING_MS}ms; continuing startup`,
     );
   }, STARTUP_MAINTENANCE_SLOW_WARNING_MS);
   (timeout as { unref?: () => void }).unref?.();
 
   void work
-    .catch(error => {
+    .catch((error) => {
       log.warn(`[STARTUP_MAINTENANCE] ${label} failed: ${formatError(error)}`);
     })
     .finally(() => {

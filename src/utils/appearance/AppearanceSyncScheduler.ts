@@ -51,7 +51,7 @@ class AppearanceSyncScheduler {
     // appearance-sync hiccup must not crash an otherwise-healthy daemon into a
     // restart loop (issue #2784).
     this.pending = this.tick()
-      .catch(error => {
+      .catch((error) => {
         logger.warn(`[Appearance] Host sync tick failed: ${error}`);
       })
       .finally(() => {
@@ -95,8 +95,8 @@ class AppearanceSyncScheduler {
       if (pooledDevices.length > 0) {
         // Only return Android devices - appearance sync via ADB only works for Android
         return pooledDevices
-          .filter(device => device.platform === "android")
-          .map(device => ({
+          .filter((device) => device.platform === "android")
+          .map((device) => ({
             deviceId: device.id,
             name: device.id,
             platform: device.platform,

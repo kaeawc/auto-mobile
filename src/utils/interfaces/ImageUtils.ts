@@ -23,7 +23,7 @@ export interface ImageUtils {
     buffer: Buffer,
     width: number,
     height?: number,
-    maintainAspectRatio?: boolean
+    maintainAspectRatio?: boolean,
   ): Promise<Buffer>;
 
   /**
@@ -35,13 +35,7 @@ export interface ImageUtils {
    * @param y Y coordinate to start crop (default 0)
    * @returns Promise with cropped buffer
    */
-  crop(
-    buffer: Buffer,
-    width: number,
-    height: number,
-    x?: number,
-    y?: number
-  ): Promise<Buffer>;
+  crop(buffer: Buffer, width: number, height: number, x?: number, y?: number): Promise<Buffer>;
 
   /**
    * Convert image to PNG format
@@ -62,7 +56,7 @@ export interface ImageUtils {
       quality?: number;
       lossless?: boolean;
       nearLossless?: boolean;
-    }
+    },
   ): Promise<Buffer>;
 
   /**
@@ -70,9 +64,7 @@ export interface ImageUtils {
    * @param buffer Image buffer
    * @returns Promise with image metadata
    */
-  getMetadata(
-    buffer: Buffer
-  ): Promise<{
+  getMetadata(buffer: Buffer): Promise<{
     width: number;
     height: number;
     format: string;
@@ -98,6 +90,6 @@ export interface ImageUtils {
    */
   batchProcess(
     buffers: Buffer[],
-    transform: (buffer: Buffer) => Promise<Buffer>
+    transform: (buffer: Buffer) => Promise<Buffer>,
   ): Promise<Buffer[]>;
 }

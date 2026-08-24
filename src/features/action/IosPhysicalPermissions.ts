@@ -50,9 +50,8 @@ function expandIosPhysicalResetPermissions(permissions: string[]): string[] {
   const seen = new Set<string>();
 
   for (const permission of permissions) {
-    const permissionsToAdd = permission === "all"
-      ? IOS_PHYSICAL_RESET_ALL_PERMISSIONS
-      : [permission];
+    const permissionsToAdd =
+      permission === "all" ? IOS_PHYSICAL_RESET_ALL_PERMISSIONS : [permission];
 
     for (const expandedPermission of permissionsToAdd) {
       const canonicalPermission = canonicalIosPhysicalResetPermission(expandedPermission);
@@ -76,7 +75,7 @@ function expandIosPhysicalResetPermissions(permissions: string[]): string[] {
 export interface IosPhysicalPrivacyClient {
   resetAuthorizations(
     appId: string,
-    permissions: string[]
+    permissions: string[],
   ): Promise<IosSimulatorPermissionCommandResult[]>;
 }
 
@@ -90,13 +89,13 @@ export interface IosPhysicalPrivacyClient {
 export class IosPhysicalPermissions {
   constructor(
     private readonly device: BootedDevice,
-    private readonly client: IosPhysicalPrivacyClient
+    private readonly client: IosPhysicalPrivacyClient,
   ) {}
 
   async setPermissions(
     action: IosSimulatorPermissionAction,
     appId: string,
-    permissions: string[]
+    permissions: string[],
   ): Promise<IosSimulatorPermissionMutationResult> {
     const normalizedAppId = appId.trim();
     const normalizedPermissions = normalizePermissions(permissions);
@@ -106,12 +105,16 @@ export class IosPhysicalPermissions {
         action,
         normalizedAppId,
         `iOS physical devices only support action=reset; '${action}' requires a simulator ` +
-          "(no public TCC mutation API exists for real hardware)"
+          "(no public TCC mutation API exists for real hardware)",
       );
     }
 
     if (!normalizedAppId) {
-      return this.mutationFailure(action, normalizedAppId, "appId must be a non-empty iOS bundle identifier");
+      return this.mutationFailure(
+        action,
+        normalizedAppId,
+        "appId must be a non-empty iOS bundle identifier",
+      );
     }
 
     const permissionsToReset = expandIosPhysicalResetPermissions(normalizedPermissions);
@@ -130,7 +133,7 @@ export class IosPhysicalPermissions {
     }
 
     const results = await this.client.resetAuthorizations(normalizedAppId, permissionsToReset);
-    const failedCount = results.filter(result => !result.success).length;
+    const failedCount = results.filter((result) => !result.success).length;
 
     return {
       success: failedCount === 0,
@@ -141,14 +144,16 @@ export class IosPhysicalPermissions {
       changedCount: results.length - failedCount,
       failedCount,
       results,
-      ...(failedCount > 0 ? { error: `One or more iOS physical permissions failed to ${action}` } : {}),
+      ...(failedCount > 0
+        ? { error: `One or more iOS physical permissions failed to ${action}` }
+        : {}),
     };
   }
 
   private mutationFailure(
     action: IosSimulatorPermissionAction,
     appId: string,
-    error: string
+    error: string,
   ): IosSimulatorPermissionMutationResult {
     return {
       success: false,
@@ -173,16 +178,17 @@ export class IosPhysicalPermissions {
 export class CtrlProxyIosPhysicalPrivacyClient implements IosPhysicalPrivacyClient {
   constructor(
     private readonly device: BootedDevice,
-    private readonly getClient: () => IOSCtrlProxyClient = () => IOSCtrlProxyClient.getInstance(this.device)
+    private readonly getClient: () => IOSCtrlProxyClient = () =>
+      IOSCtrlProxyClient.getInstance(this.device),
   ) {}
 
   async resetAuthorizations(
     appId: string,
-    permissions: string[]
+    permissions: string[],
   ): Promise<IosSimulatorPermissionCommandResult[]> {
     const client = this.getClient();
     return Promise.all(
-      permissions.map(async permission => {
+      permissions.map(async (permission) => {
         try {
           const response = await client.requestResetPermissions(appId, [permission]);
           return response.success
@@ -193,10 +199,13 @@ export class CtrlProxyIosPhysicalPrivacyClient implements IosPhysicalPrivacyClie
           // a trace even though the message is also surfaced in the result) and
           // report it as a typed failure rather than aborting the whole batch.
           const message = errorMessage(error);
-          logger.warn(`[IosPhysicalPermissions] reset of '${permission}' failed: ${message}`, error);
+          logger.warn(
+            `[IosPhysicalPermissions] reset of '${permission}' failed: ${message}`,
+            error,
+          );
           return { permission, success: false, error: message };
         }
-      })
+      }),
     );
   }
 }

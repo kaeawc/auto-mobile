@@ -6,10 +6,7 @@
  */
 
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
-import type {
-  DelegateContext,
-  CtrlProxyClipboardResult,
-} from "./types";
+import type { DelegateContext, CtrlProxyClipboardResult } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
 /**
@@ -29,7 +26,7 @@ export class CtrlProxyClipboard {
     action: "copy" | "paste" | "clear" | "get",
     text?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<CtrlProxyClipboardResult> {
     const params: Record<string, unknown> = { action };
     if (text !== undefined) {
@@ -45,8 +42,13 @@ export class CtrlProxyClipboard {
       perf,
       cancelScreenshotBackoff: false,
       notConnectedError: () => ({ success: false, action, totalTimeMs: 0, error: "Not connected" }),
-      unsupportedCommandError: (_messageType, error) => ({ success: false, action, totalTimeMs: 0, error }),
-      timeoutError: timeout => ({
+      unsupportedCommandError: (_messageType, error) => ({
+        success: false,
+        action,
+        totalTimeMs: 0,
+        error,
+      }),
+      timeoutError: (timeout) => ({
         success: false,
         action,
         totalTimeMs: timeout,

@@ -32,25 +32,29 @@ export class FakeElementSelector implements ElementSelector {
     this.nextElement = element;
   }
 
-  setNextSelection(selection: { element: Element | null; indexInMatches?: number; totalMatches?: number }): void {
+  setNextSelection(selection: {
+    element: Element | null;
+    indexInMatches?: number;
+    totalMatches?: number;
+  }): void {
     this.nextElement = selection.element;
     this.nextIndexInMatches = selection.indexInMatches;
     this.nextTotalMatches = selection.totalMatches;
   }
 
-  private buildSelectionResult(strategy: ElementSelectionStrategy | undefined): ElementSelectionResult {
+  private buildSelectionResult(
+    strategy: ElementSelectionStrategy | undefined,
+  ): ElementSelectionResult {
     const element = this.nextElement;
-    const totalMatches = typeof this.nextTotalMatches === "number"
-      ? this.nextTotalMatches
-      : (element ? 1 : 0);
-    const indexInMatches = typeof this.nextIndexInMatches === "number"
-      ? this.nextIndexInMatches
-      : (element ? 0 : -1);
+    const totalMatches =
+      typeof this.nextTotalMatches === "number" ? this.nextTotalMatches : element ? 1 : 0;
+    const indexInMatches =
+      typeof this.nextIndexInMatches === "number" ? this.nextIndexInMatches : element ? 0 : -1;
     return {
       element,
       indexInMatches,
       totalMatches,
-      strategy: strategy ?? "first"
+      strategy: strategy ?? "first",
     };
   }
 
@@ -63,7 +67,7 @@ export class FakeElementSelector implements ElementSelector {
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
-    }
+    },
   ): ElementSelectionResult {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
@@ -81,7 +85,7 @@ export class FakeElementSelector implements ElementSelector {
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
-    }
+    },
   ): ElementSelectionResult {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
@@ -97,7 +101,7 @@ export class FakeElementSelector implements ElementSelector {
       container?: { elementId?: string; text?: string } | null;
       strategy?: ElementSelectionStrategy;
       index?: number;
-    }
+    },
   ): ElementSelectionResult {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
@@ -114,7 +118,7 @@ export class FakeElementSelector implements ElementSelector {
       fuzzyMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
-    }
+    },
   ): ElementSelectionResult {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
@@ -129,7 +133,7 @@ export class FakeElementSelector implements ElementSelector {
       container?: { elementId?: string; text?: string } | null;
       strategy?: ElementSelectionStrategy;
       scrollableContainer?: boolean;
-    }
+    },
   ): ElementSelectionResult {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
@@ -147,7 +151,7 @@ export class FakeElementSelector implements ElementSelector {
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
-    }
+    },
   ): ElementSelectionResult {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;
@@ -165,7 +169,7 @@ export class FakeElementSelector implements ElementSelector {
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
-    }
+    },
   ): ElementSelectionResult {
     void viewHierarchy;
     this.lastStrategy = options?.strategy;

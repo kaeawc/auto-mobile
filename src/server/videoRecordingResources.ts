@@ -19,11 +19,7 @@ import type { VideoRecordingMetadata } from "../models";
  * defense-in-depth confinement item). Mirrors `VideoRecorderService`'s archive
  * root so a legitimately-stored recording always resolves inside it.
  */
-export const DEFAULT_VIDEO_ARCHIVE_ROOT = path.join(
-  os.homedir(),
-  ".auto-mobile",
-  "video-archive"
-);
+export const DEFAULT_VIDEO_ARCHIVE_ROOT = path.join(os.homedir(), ".auto-mobile", "video-archive");
 
 /**
  * Resolve a stored file path and assert it is contained within `archiveRoot`.
@@ -36,13 +32,9 @@ export function assertWithinArchiveRoot(filePath: string, archiveRoot: string): 
   const resolved = path.resolve(resolvedRoot, filePath);
   const relative = path.relative(resolvedRoot, resolved);
   const escapes =
-    relative === ".." ||
-    relative.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(relative);
+    relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative);
   if (escapes) {
-    throw new Error(
-      `Refusing to read recording file outside the archive root: ${filePath}`
-    );
+    throw new Error(`Refusing to read recording file outside the archive root: ${filePath}`);
   }
   return resolved;
 }
@@ -56,7 +48,7 @@ export interface VideoRecordingResourceStore {
   getLatest(scope?: { ownerSessionUuid?: string }): Promise<VideoRecordingMetadata | null>;
   getById(
     recordingId: string,
-    options?: { touch?: boolean; ownerSessionUuid?: string }
+    options?: { touch?: boolean; ownerSessionUuid?: string },
   ): Promise<VideoRecordingMetadata | null>;
   list(scope?: { ownerSessionUuid?: string }): Promise<VideoRecordingMetadata[]>;
   readFile(filePath: string): Promise<Buffer>;
@@ -82,16 +74,20 @@ function getVideoMimeType(metadata: VideoRecordingMetadata): string {
 export async function buildVideoResourceContent(
   metadata: VideoRecordingMetadata,
   uri: string,
-  store: VideoRecordingResourceStore = defaultVideoRecordingResourceStore
+  store: VideoRecordingResourceStore = defaultVideoRecordingResourceStore,
 ): Promise<ResourceContent> {
   if (!metadata.filePath) {
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Missing file path for recording ${metadata.recordingId}`,
-        metadata,
-      }, null, 2),
+      text: JSON.stringify(
+        {
+          error: `Missing file path for recording ${metadata.recordingId}`,
+          metadata,
+        },
+        null,
+        2,
+      ),
     };
   }
 
@@ -109,20 +105,26 @@ export async function buildVideoResourceContent(
       blob,
     };
   } catch (error) {
-    logger.error(`[VideoRecordingResources] Failed to read video ${metadata.recordingId}: ${error}`);
+    logger.error(
+      `[VideoRecordingResources] Failed to read video ${metadata.recordingId}: ${error}`,
+    );
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to read video data: ${error}`,
-        metadata,
-      }, null, 2),
+      text: JSON.stringify(
+        {
+          error: `Failed to read video data: ${error}`,
+          metadata,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
 
 export async function getLatestVideoRecording(
-  store: VideoRecordingResourceStore = defaultVideoRecordingResourceStore
+  store: VideoRecordingResourceStore = defaultVideoRecordingResourceStore,
 ): Promise<ResourceContent> {
   try {
     const latest = await store.getLatest();
@@ -130,54 +132,70 @@ export async function getLatestVideoRecording(
       return {
         uri: VIDEO_RESOURCE_URIS.LATEST,
         mimeType: "application/json",
-        text: JSON.stringify({
-          error: "No video recordings available. Call videoRecording with action \"start\" first.",
-        }, null, 2),
+        text: JSON.stringify(
+          {
+            error: 'No video recordings available. Call videoRecording with action "start" first.',
+          },
+          null,
+          2,
+        ),
       };
     }
 
-    const metadata = await store.getById(latest.recordingId, { touch: true }) ?? latest;
+    const metadata = (await store.getById(latest.recordingId, { touch: true })) ?? latest;
     return buildVideoResourceContent(metadata, VIDEO_RESOURCE_URIS.LATEST, store);
   } catch (error) {
     logger.error(`[VideoRecordingResources] Failed to get latest recording: ${error}`);
     return {
       uri: VIDEO_RESOURCE_URIS.LATEST,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to retrieve latest recording: ${error}`,
-      }, null, 2),
+      text: JSON.stringify(
+        {
+          error: `Failed to retrieve latest recording: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
 
 export async function getVideoArchiveList(
-  store: VideoRecordingResourceStore = defaultVideoRecordingResourceStore
+  store: VideoRecordingResourceStore = defaultVideoRecordingResourceStore,
 ): Promise<ResourceContent> {
   try {
     const recordings = await store.list();
     return {
       uri: VIDEO_RESOURCE_URIS.ARCHIVE,
       mimeType: "application/json",
-      text: JSON.stringify({
-        recordings,
-        count: recordings.length,
-      }, null, 2),
+      text: JSON.stringify(
+        {
+          recordings,
+          count: recordings.length,
+        },
+        null,
+        2,
+      ),
     };
   } catch (error) {
     logger.error(`[VideoRecordingResources] Failed to list recordings: ${error}`);
     return {
       uri: VIDEO_RESOURCE_URIS.ARCHIVE,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to list recordings: ${error}`,
-      }, null, 2),
+      text: JSON.stringify(
+        {
+          error: `Failed to list recordings: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
 
 export async function getVideoArchiveItem(
   params: Record<string, string>,
-  store: VideoRecordingResourceStore = defaultVideoRecordingResourceStore
+  store: VideoRecordingResourceStore = defaultVideoRecordingResourceStore,
 ): Promise<ResourceContent> {
   try {
     const recordingId = params.recordingId;
@@ -194,9 +212,13 @@ export async function getVideoArchiveItem(
       return {
         uri: buildVideoArchiveItemUri(recordingId),
         mimeType: "application/json",
-        text: JSON.stringify({
-          error: `Recording not found: ${recordingId}`,
-        }, null, 2),
+        text: JSON.stringify(
+          {
+            error: `Recording not found: ${recordingId}`,
+          },
+          null,
+          2,
+        ),
       };
     }
 
@@ -206,9 +228,13 @@ export async function getVideoArchiveItem(
     return {
       uri: VIDEO_RESOURCE_URIS.ARCHIVE_ITEM,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to retrieve recording: ${error}`,
-      }, null, 2),
+      text: JSON.stringify(
+        {
+          error: `Failed to retrieve recording: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -219,7 +245,7 @@ export function registerVideoRecordingResources(): void {
     "Latest Video Recording",
     "The most recent video recording with metadata and base64-encoded video data.",
     "video/mp4",
-    getLatestVideoRecording
+    getLatestVideoRecording,
   );
 
   ResourceRegistry.register(
@@ -227,7 +253,7 @@ export function registerVideoRecordingResources(): void {
     "Video Recording Archive",
     "Metadata list for archived video recordings.",
     "application/json",
-    getVideoArchiveList
+    getVideoArchiveList,
   );
 
   ResourceRegistry.registerTemplate(
@@ -235,7 +261,7 @@ export function registerVideoRecordingResources(): void {
     "Video Recording",
     "Video recording content and metadata for the specified recording ID.",
     "video/mp4",
-    getVideoArchiveItem
+    getVideoArchiveItem,
   );
 
   logger.info("[VideoRecordingResources] Registered video recording resources");

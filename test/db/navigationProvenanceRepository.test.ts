@@ -134,8 +134,8 @@ describe("NavigationRepository provenance observations", () => {
 
     const rows = await repo.getNodeProvenanceForApp("com.example.app");
     expect(rows).toHaveLength(2);
-    expect(rows.every(r => r.node_id === node.id)).toBe(true);
-    expect(rows.every(r => r.package_id === "com.example.app")).toBe(true);
+    expect(rows.every((r) => r.node_id === node.id)).toBe(true);
+    expect(rows.every((r) => r.package_id === "com.example.app")).toBe(true);
     // Ordered by last_seen_at desc.
     expect(rows[0].last_seen_at).toBe(200);
     expect(rows[0].version_code).toBe(2);
@@ -174,8 +174,8 @@ describe("NavigationRepository provenance observations", () => {
     const rows = await repo.getNodeProvenanceForApp("com.example.app");
     expect(rows).toHaveLength(1);
     expect(rows[0].package_id).toBe("com.example.app");
-    expect(rows.every(r => r.package_id === "com.example.app")).toBe(true);
-    expect(rows.some(r => r.content_hash === "hashZ")).toBe(false);
+    expect(rows.every((r) => r.package_id === "com.example.app")).toBe(true);
+    expect(rows.some((r) => r.content_hash === "hashZ")).toBe(false);
   });
 
   test("getEdgeProvenanceForApp excludes observations whose build key belongs to another app", async () => {
@@ -191,7 +191,7 @@ describe("NavigationRepository provenance observations", () => {
     const rows = await repo.getEdgeProvenanceForApp("com.example.app");
     expect(rows).toHaveLength(1);
     expect(rows[0].package_id).toBe("com.example.app");
-    expect(rows.every(r => r.package_id === "com.example.app")).toBe(true);
-    expect(rows.some(r => r.content_hash === "hashZ")).toBe(false);
+    expect(rows.every((r) => r.package_id === "com.example.app")).toBe(true);
+    expect(rows.some((r) => r.content_hash === "hashZ")).toBe(false);
   });
 });

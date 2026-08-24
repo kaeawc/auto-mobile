@@ -34,25 +34,49 @@ describe("2026_08_02_000_navigation_provenance migration", () => {
   });
 
   async function seedLegacyGraph(): Promise<void> {
-    await db.insertInto("navigation_apps").values({ app_id: "com.example.app", updated_at: "2026-01-01T00:00:00.000Z" }).execute();
+    await db
+      .insertInto("navigation_apps")
+      .values({ app_id: "com.example.app", updated_at: "2026-01-01T00:00:00.000Z" })
+      .execute();
     await db
       .insertInto("navigation_nodes")
       .values([
-        { app_id: "com.example.app", screen_name: "Home", first_seen_at: 100, last_seen_at: 200, visit_count: 2 },
-        { app_id: "com.example.app", screen_name: "Details", first_seen_at: 150, last_seen_at: 150, visit_count: 1 },
+        {
+          app_id: "com.example.app",
+          screen_name: "Home",
+          first_seen_at: 100,
+          last_seen_at: 200,
+          visit_count: 2,
+        },
+        {
+          app_id: "com.example.app",
+          screen_name: "Details",
+          first_seen_at: 150,
+          last_seen_at: 150,
+          visit_count: 1,
+        },
       ])
       .execute();
     await db
       .insertInto("navigation_edges")
       .values([
-        { app_id: "com.example.app", from_screen: "Home", to_screen: "Details", tool_name: "tapOn", tool_args: null, timestamp: 150 },
+        {
+          app_id: "com.example.app",
+          from_screen: "Home",
+          to_screen: "Details",
+          tool_name: "tapOn",
+          tool_args: null,
+          timestamp: 150,
+        },
       ])
       .execute();
   }
 
   async function tableNames(): Promise<string[]> {
-    const rows = await sql<{ name: string }>`SELECT name FROM sqlite_master WHERE type = 'table'`.execute(db);
-    return rows.rows.map(r => r.name);
+    const rows = await sql<{
+      name: string;
+    }>`SELECT name FROM sqlite_master WHERE type = 'table'`.execute(db);
+    return rows.rows.map((r) => r.name);
   }
 
   test("AC1: creates build-key + node/edge observation tables", async () => {
@@ -92,8 +116,8 @@ describe("2026_08_02_000_navigation_provenance migration", () => {
       expect(o.device_id).toBe("legacy");
       expect(o.session_uuid).toBe("legacy");
     }
-    const home = nodes.find(n => n.screen_name === "Home")!;
-    const homeObs = nodeObs.find(o => o.node_id === home.id)!;
+    const home = nodes.find((n) => n.screen_name === "Home")!;
+    const homeObs = nodeObs.find((o) => o.node_id === home.id)!;
     expect(homeObs.first_seen_at).toBe(100);
     expect(homeObs.last_seen_at).toBe(200);
 
@@ -109,17 +133,29 @@ describe("2026_08_02_000_navigation_provenance migration", () => {
   });
 
   test("backfill normalizes inverted legacy node bounds (first_seen > last_seen)", async () => {
-    await db.insertInto("navigation_apps").values({ app_id: "com.example.app", updated_at: "2026-01-01T00:00:00.000Z" }).execute();
+    await db
+      .insertInto("navigation_apps")
+      .values({ app_id: "com.example.app", updated_at: "2026-01-01T00:00:00.000Z" })
+      .execute();
     // Legacy getOrCreateNode replaced last_seen_at unconditionally, so an out-of-order
     // commit could leave first_seen_at (200) > last_seen_at (100).
     await db
       .insertInto("navigation_nodes")
-      .values({ app_id: "com.example.app", screen_name: "Home", first_seen_at: 200, last_seen_at: 100, visit_count: 2 })
+      .values({
+        app_id: "com.example.app",
+        screen_name: "Home",
+        first_seen_at: 200,
+        last_seen_at: 100,
+        visit_count: 2,
+      })
       .execute();
 
     await provenanceUp(db as unknown as Kysely<unknown>);
 
-    const obs = await db.selectFrom("navigation_node_observations").selectAll().executeTakeFirstOrThrow();
+    const obs = await db
+      .selectFrom("navigation_node_observations")
+      .selectAll()
+      .executeTakeFirstOrThrow();
     expect(obs.first_seen_at).toBe(100);
     expect(obs.last_seen_at).toBe(200);
   });
@@ -133,8 +169,12 @@ describe("2026_08_02_000_navigation_provenance migration", () => {
     await provenanceUp(db as unknown as Kysely<unknown>); // rerun
 
     expect(await db.selectFrom("navigation_build_keys").selectAll().execute()).toHaveLength(1);
-    expect(await db.selectFrom("navigation_node_observations").selectAll().execute()).toHaveLength(2);
-    expect(await db.selectFrom("navigation_edge_observations").selectAll().execute()).toHaveLength(1);
+    expect(await db.selectFrom("navigation_node_observations").selectAll().execute()).toHaveLength(
+      2,
+    );
+    expect(await db.selectFrom("navigation_edge_observations").selectAll().execute()).toHaveLength(
+      1,
+    );
   });
 
   test("down() drops the provenance tables", async () => {

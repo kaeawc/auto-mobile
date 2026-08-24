@@ -21,15 +21,17 @@ const repoRoot = path.join(import.meta.dir, "..", "..");
  * A device-lane record with the metric-carrying fields set. Stage/phase elapsed
  * values are the source of the two latency metrics and keyframe recovery time.
  */
-function androidRecord(overrides: {
-  platform?: string;
-  configuredFps?: number | null;
-  decodedFps?: number | null;
-  egressKbps?: number | null;
-  firstEncodedFrameMs?: number | null;
-  captureToBrowserMs?: number | null;
-  keyframeRecoveryMs?: number | null;
-} = {}): CaptureStageRecord {
+function androidRecord(
+  overrides: {
+    platform?: string;
+    configuredFps?: number | null;
+    decodedFps?: number | null;
+    egressKbps?: number | null;
+    firstEncodedFrameMs?: number | null;
+    captureToBrowserMs?: number | null;
+    keyframeRecoveryMs?: number | null;
+  } = {},
+): CaptureStageRecord {
   const {
     platform = "android",
     configuredFps = 60,
@@ -61,7 +63,13 @@ function androidRecord(overrides: {
     stages:
       firstEncodedFrameMs === null
         ? []
-        : [{ stage: "firstEncodedFrame", elapsedMs: firstEncodedFrameMs, deltaMs: firstEncodedFrameMs }],
+        : [
+            {
+              stage: "firstEncodedFrame",
+              elapsedMs: firstEncodedFrameMs,
+              deltaMs: firstEncodedFrameMs,
+            },
+          ],
     phases:
       keyframeRecoveryMs === null
         ? []
@@ -78,10 +86,30 @@ function baseline(overrides: Partial<AndroidVideoBaseline> = {}): AndroidVideoBa
     fpsTargetTolerance: 0.5,
     metrics: {
       encodeFps: { baseline: 45, tolerance: 0.2, direction: "higher-is-better", percentile: "p50" },
-      egressKbps: { baseline: 4000, tolerance: 0.3, direction: "higher-is-better", percentile: "p50" },
-      captureToFirstFrameMs: { baseline: 2000, tolerance: 0.3, direction: "lower-is-better", percentile: "p95" },
-      captureToBrowserMs: { baseline: 5000, tolerance: 0.3, direction: "lower-is-better", percentile: "p95" },
-      keyframeRecoveryMs: { baseline: 3000, tolerance: 0.35, direction: "lower-is-better", percentile: "p95" },
+      egressKbps: {
+        baseline: 4000,
+        tolerance: 0.3,
+        direction: "higher-is-better",
+        percentile: "p50",
+      },
+      captureToFirstFrameMs: {
+        baseline: 2000,
+        tolerance: 0.3,
+        direction: "lower-is-better",
+        percentile: "p95",
+      },
+      captureToBrowserMs: {
+        baseline: 5000,
+        tolerance: 0.3,
+        direction: "lower-is-better",
+        percentile: "p95",
+      },
+      keyframeRecoveryMs: {
+        baseline: 3000,
+        tolerance: 0.35,
+        direction: "lower-is-better",
+        percentile: "p95",
+      },
     },
     ...overrides,
   };
@@ -90,8 +118,18 @@ function baseline(overrides: Partial<AndroidVideoBaseline> = {}): AndroidVideoBa
 describe("#4758 extractAndroidVideoMetrics", () => {
   test("reduces every metric to p50/p95 over the Android samples only", () => {
     const metrics = extractAndroidVideoMetrics([
-      androidRecord({ decodedFps: 40, egressKbps: 4000, firstEncodedFrameMs: 1000, keyframeRecoveryMs: 2000 }),
-      androidRecord({ decodedFps: 60, egressKbps: 5000, firstEncodedFrameMs: 2000, keyframeRecoveryMs: 3000 }),
+      androidRecord({
+        decodedFps: 40,
+        egressKbps: 4000,
+        firstEncodedFrameMs: 1000,
+        keyframeRecoveryMs: 2000,
+      }),
+      androidRecord({
+        decodedFps: 60,
+        egressKbps: 5000,
+        firstEncodedFrameMs: 2000,
+        keyframeRecoveryMs: 3000,
+      }),
       androidRecord({ platform: "ios", decodedFps: 5, egressKbps: 1 }),
     ]);
 
@@ -127,7 +165,7 @@ describe("#4758 evaluateAndroidVideoBaseline", () => {
     const metrics = extractAndroidVideoMetrics([androidRecord()]);
     const result = evaluateAndroidVideoBaseline(metrics, baseline());
     expect(result.passed).toBe(true);
-    expect(result.evaluations.every(e => e.status === "ok")).toBe(true);
+    expect(result.evaluations.every((e) => e.status === "ok")).toBe(true);
   });
 
   test("fails when a higher-is-better metric drops past tolerance (fps collapse)", () => {
@@ -135,7 +173,7 @@ describe("#4758 evaluateAndroidVideoBaseline", () => {
     const metrics = extractAndroidVideoMetrics([androidRecord({ decodedFps: 30 })]);
     const result = evaluateAndroidVideoBaseline(metrics, baseline());
     expect(result.passed).toBe(false);
-    const encode = result.evaluations.find(e => e.metric === "encodeFps");
+    const encode = result.evaluations.find((e) => e.metric === "encodeFps");
     expect(encode?.status).toBe("regressed");
     expect(encode?.allowed).toBeCloseTo(36, 5);
   });
@@ -145,7 +183,7 @@ describe("#4758 evaluateAndroidVideoBaseline", () => {
     const metrics = extractAndroidVideoMetrics([androidRecord({ captureToBrowserMs: 8000 })]);
     const result = evaluateAndroidVideoBaseline(metrics, baseline());
     expect(result.passed).toBe(false);
-    const latency = result.evaluations.find(e => e.metric === "captureToBrowserMs");
+    const latency = result.evaluations.find((e) => e.metric === "captureToBrowserMs");
     expect(latency?.status).toBe("regressed");
     expect(latency?.allowed).toBeCloseTo(6500, 5);
   });
@@ -154,7 +192,7 @@ describe("#4758 evaluateAndroidVideoBaseline", () => {
     // keyframeRecovery baseline 3000, 35% -> ceiling 4050; exactly 4050 still passes.
     const metrics = extractAndroidVideoMetrics([androidRecord({ keyframeRecoveryMs: 4050 })]);
     const result = evaluateAndroidVideoBaseline(metrics, baseline());
-    const recovery = result.evaluations.find(e => e.metric === "keyframeRecoveryMs");
+    const recovery = result.evaluations.find((e) => e.metric === "keyframeRecoveryMs");
     expect(recovery?.status).toBe("ok");
   });
 
@@ -162,7 +200,7 @@ describe("#4758 evaluateAndroidVideoBaseline", () => {
     const metrics = extractAndroidVideoMetrics([androidRecord({ keyframeRecoveryMs: null })]);
     const result = evaluateAndroidVideoBaseline(metrics, baseline());
     expect(result.passed).toBe(false);
-    const recovery = result.evaluations.find(e => e.metric === "keyframeRecoveryMs");
+    const recovery = result.evaluations.find((e) => e.metric === "keyframeRecoveryMs");
     expect(recovery?.status).toBe("missing");
     expect(recovery?.observed).toBeNull();
   });
@@ -174,13 +212,18 @@ describe("#4758 evaluateAndroidVideoBaseline", () => {
     const loose = baseline({
       metrics: {
         ...baseline().metrics,
-        encodeFps: { baseline: 20, tolerance: 0.5, direction: "higher-is-better", percentile: "p50" },
+        encodeFps: {
+          baseline: 20,
+          tolerance: 0.5,
+          direction: "higher-is-better",
+          percentile: "p50",
+        },
       },
       fpsTargetTolerance: 0.5,
     });
     // ratchet floor = 20*0.5 = 10 (25 clears); target floor = 60*0.5 = 30 (25 fails).
     const result = evaluateAndroidVideoBaseline(metrics, loose);
-    const encode = result.evaluations.find(e => e.metric === "encodeFps");
+    const encode = result.evaluations.find((e) => e.metric === "encodeFps");
     expect(encode?.status).toBe("regressed");
     expect(encode?.targetCheck?.status).toBe("regressed");
     expect(result.passed).toBe(false);
@@ -200,14 +243,14 @@ describe("#4758 evaluateAndroidVideoBaseline", () => {
 describe("#4758 committed baseline JSON + reader", () => {
   test("the committed benchmark/webrtc/android-video-baseline.json is structurally valid", () => {
     const parsed = JSON.parse(
-      readFileSync(path.join(repoRoot, "benchmark/webrtc/android-video-baseline.json"), "utf8")
+      readFileSync(path.join(repoRoot, "benchmark/webrtc/android-video-baseline.json"), "utf8"),
     );
     expect(isAndroidVideoBaseline(parsed)).toBe(true);
   });
 
   test("readAndroidVideoBaseline loads the committed baseline", async () => {
     const loaded = await readAndroidVideoBaseline(
-      path.join(repoRoot, "benchmark/webrtc/android-video-baseline.json")
+      path.join(repoRoot, "benchmark/webrtc/android-video-baseline.json"),
     );
     expect(loaded.fpsTarget).toBe(60);
     expect(loaded.metrics.encodeFps.direction).toBe("higher-is-better");
@@ -227,7 +270,10 @@ describe("#4758 committed baseline JSON + reader", () => {
   test("isAndroidVideoBaseline rejects a threshold missing its direction", () => {
     const b = baseline();
     // Structurally corrupt one threshold.
-    const corrupt = { ...b, metrics: { ...b.metrics, egressKbps: { baseline: 1, tolerance: 0.1, percentile: "p50" } } };
+    const corrupt = {
+      ...b,
+      metrics: { ...b.metrics, egressKbps: { baseline: 1, tolerance: 0.1, percentile: "p50" } },
+    };
     expect(isAndroidVideoBaseline(corrupt)).toBe(false);
   });
 });
@@ -242,10 +288,16 @@ describe("#4758 gate over a fixture artifacts directory", () => {
   });
 
   test("reads records recursively and evaluates the whole set", async () => {
-    writeFileSync(path.join(dir, "stage-latency.json"), JSON.stringify(androidRecord({ decodedFps: 55 })));
+    writeFileSync(
+      path.join(dir, "stage-latency.json"),
+      JSON.stringify(androidRecord({ decodedFps: 55 })),
+    );
     const nested = path.join(dir, "run-2");
     mkdirSync(nested);
-    writeFileSync(path.join(nested, "stage-latency.json"), JSON.stringify(androidRecord({ decodedFps: 48 })));
+    writeFileSync(
+      path.join(nested, "stage-latency.json"),
+      JSON.stringify(androidRecord({ decodedFps: 48 })),
+    );
     // An unrelated artifact JSON must be ignored, not fail the run.
     writeFileSync(path.join(dir, "unrelated.json"), JSON.stringify({ hello: "world" }));
 

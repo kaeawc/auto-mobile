@@ -126,7 +126,7 @@ const defaultDependencies: WebRtcStreamManagerDependencies = {
   idGenerator: defaultIdGenerator,
   createPublisher: (config, deps) => new WebRtcPublisher(config, deps),
   createSource: (options, jarPath) => createH264CaptureSource(options, jarPath),
-  resolveVideoJar: device =>
+  resolveVideoJar: (device) =>
     device.platform === "android" ? resolveVideoServerJar() : Promise.resolve(null),
   now: () => new Date(),
   timer: defaultTimer,
@@ -145,7 +145,7 @@ export const WEBRTC_STREAM_LEASE_TTL_MS = 60_000;
 
 /** Override manager dependencies (tests). */
 export function setWebRtcStreamManagerDependencies(
-  overrides: Partial<WebRtcStreamManagerDependencies>
+  overrides: Partial<WebRtcStreamManagerDependencies>,
 ): void {
   dependencies = { ...dependencies, ...overrides };
 }
@@ -173,7 +173,7 @@ function activeStreamForDevice(deviceId: string): WebRtcStreamRecord | undefined
 /** Run an action against the current record for a stream id, if it still exists. */
 async function withRecord(
   streamId: string,
-  action: (record: WebRtcStreamRecord) => Promise<void>
+  action: (record: WebRtcStreamRecord) => Promise<void>,
 ): Promise<void> {
   const record = streams.get(streamId);
   if (record) {
@@ -187,7 +187,7 @@ function leaseExpiryAt(record: WebRtcStreamRecord, leaseId: string): string | un
     return undefined;
   }
   return new Date(
-    dependencies.now().getTime() + Math.max(0, expiresAt - dependencies.timer.now())
+    dependencies.now().getTime() + Math.max(0, expiresAt - dependencies.timer.now()),
   ).toISOString();
 }
 
@@ -209,9 +209,10 @@ function describeRecord(record: WebRtcStreamRecord, leaseId?: string): WebRtcStr
     lifecycleState: record.lifecycleState,
     failure: record.failure,
     telemetry: record.telemetry,
-    fallback: record.lifecycleState === "degraded" || record.lifecycleState === "failed"
-      ? { mode: "screenshots", reason: record.failure?.code ?? "capture_unavailable" }
-      : null,
+    fallback:
+      record.lifecycleState === "degraded" || record.lifecycleState === "failed"
+        ? { mode: "screenshots", reason: record.failure?.code ?? "capture_unavailable" }
+        : null,
     lease: leaseId && leaseExpiresAt ? { id: leaseId, expiresAt: leaseExpiresAt } : null,
     consumerCount: record.leases.size,
   };
@@ -226,31 +227,35 @@ function scheduleLeaseExpiry(record: WebRtcStreamRecord): void {
   if (!Number.isFinite(earliestExpiry)) {
     return;
   }
-  record.leaseExpiryHandle = dependencies.timer.setTimeout(() => {
-    if (streams.get(record.streamId) !== record) {
-      return;
-    }
-    const now = dependencies.timer.now();
-    for (const [leaseId, expiresAt] of record.leases) {
-      if (expiresAt <= now) {
-        record.leases.delete(leaseId);
+  record.leaseExpiryHandle = dependencies.timer.setTimeout(
+    () => {
+      if (streams.get(record.streamId) !== record) {
+        return;
       }
-    }
-    if (record.leases.size > 0) {
-      scheduleLeaseExpiry(record);
-      return;
-    }
-    streams.delete(record.streamId);
-    void stopActiveRecord(record).catch(error => {
-      logger.debug(`[WebRtcStream] lease expiry cleanup failed: ${error}`);
-    });
-  }, Math.max(0, earliestExpiry - dependencies.timer.now()));
+      const now = dependencies.timer.now();
+      for (const [leaseId, expiresAt] of record.leases) {
+        if (expiresAt <= now) {
+          record.leases.delete(leaseId);
+        }
+      }
+      if (record.leases.size > 0) {
+        scheduleLeaseExpiry(record);
+        return;
+      }
+      streams.delete(record.streamId);
+      void stopActiveRecord(record).catch((error) => {
+        logger.debug(`[WebRtcStream] lease expiry cleanup failed: ${error}`);
+      });
+    },
+    Math.max(0, earliestExpiry - dependencies.timer.now()),
+  );
 }
 
 function acquireLease(record: WebRtcStreamRecord, requestedLeaseId?: string): string {
-  const leaseId = requestedLeaseId && record.leases.has(requestedLeaseId)
-    ? requestedLeaseId
-    : `lease_${dependencies.idGenerator.next()}`;
+  const leaseId =
+    requestedLeaseId && record.leases.has(requestedLeaseId)
+      ? requestedLeaseId
+      : `lease_${dependencies.idGenerator.next()}`;
   record.leases.set(leaseId, dependencies.timer.now() + WEBRTC_STREAM_LEASE_TTL_MS);
   scheduleLeaseExpiry(record);
   return leaseId;
@@ -281,7 +286,7 @@ function markFailure(
   record: WebRtcStreamRecord,
   code: VideoStreamFailureCode,
   error: unknown,
-  state: "degraded" | "failed" = "failed"
+  state: "degraded" | "failed" = "failed",
 ): void {
   record.failure = {
     code,
@@ -291,7 +296,10 @@ function markFailure(
   setLifecycleState(record, state);
 }
 
-function recordPublisherEvent(record: WebRtcStreamRecord, event: WebRtcPublisherLifecycleEvent): void {
+function recordPublisherEvent(
+  record: WebRtcStreamRecord,
+  event: WebRtcPublisherLifecycleEvent,
+): void {
   const at = dependencies.now().toISOString();
   const timestampField = publisherTimestampField(event);
   if (timestampField) {
@@ -299,7 +307,10 @@ function recordPublisherEvent(record: WebRtcStreamRecord, event: WebRtcPublisher
   }
   if (event === "ice_gathering_complete" || event === "ice_gathering_timeout") {
     const offerTime = Date.parse(record.telemetry.sdpOffer ?? at);
-    record.telemetry.nonTrickleIceGatheringDelayMs ??= Math.max(0, dependencies.now().getTime() - offerTime);
+    record.telemetry.nonTrickleIceGatheringDelayMs ??= Math.max(
+      0,
+      dependencies.now().getTime() - offerTime,
+    );
   }
   if (event === "ice_connected" && !record.sourceFailed) {
     setLifecycleState(record, "publishing");
@@ -307,9 +318,14 @@ function recordPublisherEvent(record: WebRtcStreamRecord, event: WebRtcPublisher
 }
 
 function publisherTimestampField(
-  event: WebRtcPublisherLifecycleEvent
+  event: WebRtcPublisherLifecycleEvent,
 ): "sdpOffer" | "sdpAnswer" | "iceConnected" | "firstRtpSent" | undefined {
-  const fields: Partial<Record<WebRtcPublisherLifecycleEvent, "sdpOffer" | "sdpAnswer" | "iceConnected" | "firstRtpSent">> = {
+  const fields: Partial<
+    Record<
+      WebRtcPublisherLifecycleEvent,
+      "sdpOffer" | "sdpAnswer" | "iceConnected" | "firstRtpSent"
+    >
+  > = {
     sdp_offer_created: "sdpOffer",
     ice_gathering_started: "sdpOffer",
     whip_answer_received: "sdpAnswer",
@@ -325,7 +341,7 @@ function createStreamRecord(
   config: ReturnType<typeof resolveWebRtcStreamingConfig>,
   jarPath: string | null,
   bitrateBps: number | undefined,
-  requestReceived: string
+  requestReceived: string,
 ): WebRtcStreamRecord {
   const publisherRef: { current?: WebRtcPublisher } = {};
   let publisherStarted = false;
@@ -348,7 +364,7 @@ function createStreamRecord(
       onBeforeEstablish: async () => {
         const record = streams.get(streamId);
         if ((publisherStarted && record?.sourceFailed) || !record?.sourceStarted) {
-          await withRecord(streamId, async currentRecord => {
+          await withRecord(streamId, async (currentRecord) => {
             await startSource(currentRecord);
           });
         }
@@ -362,20 +378,20 @@ function createStreamRecord(
           record.source?.requestKeyFrame?.();
         }
       },
-      onSourceFailure: error => {
+      onSourceFailure: (error) => {
         const record = streams.get(streamId);
         if (record && record.publisher === publisherRef.current && !record.sourceFailed) {
           record.sourceFailed = true;
           markFailure(record, "capture_runtime_failed", error, "degraded");
         }
       },
-      onLifecycleEvent: event => {
+      onLifecycleEvent: (event) => {
         const record = streams.get(streamId);
         if (record && record.publisher === publisherRef.current) {
           recordPublisherEvent(record, event);
         }
       },
-    }
+    },
   );
   publisherRef.current = publisher;
   const record: WebRtcStreamRecord = {
@@ -418,7 +434,7 @@ async function stopSource(record: WebRtcStreamRecord): Promise<void> {
   record.frameMetrics = undefined;
   if (record.source) {
     record.sourceTelemetry = record.source.getTelemetry?.() ?? record.sourceTelemetry;
-    await record.source.stop().catch(error => {
+    await record.source.stop().catch((error) => {
       logger.debug(`[WebRtcStream] source stop failed: ${error}`);
     });
     record.source = null;
@@ -448,7 +464,7 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
   source = dependencies.createSource(
     {
       device: record.device,
-      onData: chunk => {
+      onData: (chunk) => {
         if (record.source !== source) {
           return;
         }
@@ -461,7 +477,9 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
         } catch (error) {
           record.sourceFailed = true;
           markFailure(record, "capture_runtime_failed", error, "degraded");
-          record.publisher.notifySourceFailed(error instanceof Error ? error : new Error(String(error)));
+          record.publisher.notifySourceFailed(
+            error instanceof Error ? error : new Error(String(error)),
+          );
           return;
         }
         for (const nal of nals) {
@@ -477,12 +495,12 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
         }
         record.publisher.writeH264Chunk(chunk);
       },
-      onAudioData: chunk => {
+      onAudioData: (chunk) => {
         if (record.source === source) {
           record.publisher.writePcmAudioChunk(chunk);
         }
       },
-      onError: error => {
+      onError: (error) => {
         if (record.source !== source) {
           return;
         }
@@ -497,13 +515,13 @@ async function startSource(record: WebRtcStreamRecord): Promise<boolean> {
       size: record.size,
       fps: record.fps,
       audioEnabled: record.audioEnabled,
-      onFrameMetrics: metrics => {
+      onFrameMetrics: (metrics) => {
         if (record.source === sourceRef.current) {
           record.frameMetrics = metrics;
         }
       },
     },
-    record.jarPath
+    record.jarPath,
   );
   sourceRef.current = source;
   record.source = source;
@@ -547,7 +565,7 @@ function assertNewStreamIdAvailable(streamId: string): void {
 async function stopActiveRecord(record: WebRtcStreamRecord): Promise<void> {
   setLifecycleState(record, "stopping");
   await stopSource(record);
-  await record.publisher.stop().catch(error => {
+  await record.publisher.stop().catch((error) => {
     logger.debug(`[WebRtcStream] publisher stop failed: ${error}`);
   });
 }
@@ -566,9 +584,9 @@ async function prepareAndPublish(record: WebRtcStreamRecord): Promise<void> {
       record,
       record.failure?.code ?? "whip_publish_failed",
       error,
-      record.failure ? "degraded" : "failed"
+      record.failure ? "degraded" : "failed",
     );
-    await record.publisher.stop().catch(stopError => {
+    await record.publisher.stop().catch((stopError) => {
       logger.debug(`[WebRtcStream] publisher cleanup failed: ${stopError}`);
     });
   }
@@ -582,7 +600,7 @@ async function prepareAndPublish(record: WebRtcStreamRecord): Promise<void> {
  * stream.
  */
 export async function startWebRtcStream(
-  request: StartWebRtcStreamRequest
+  request: StartWebRtcStreamRequest,
 ): Promise<WebRtcStreamDescriptor> {
   const requestReceived = dependencies.now().toISOString();
   const existing = activeStreamForDevice(request.device.deviceId);
@@ -600,7 +618,7 @@ export async function startWebRtcStream(
     config,
     null,
     bitrateBps,
-    requestReceived
+    requestReceived,
   );
   streams.set(streamId, record);
   const leaseId = acquireLease(record, request.leaseId);
@@ -620,12 +638,7 @@ export async function startWebRtcStream(
     return describeRecord(record, leaseId);
   } catch (error) {
     if (streams.get(streamId) === record) {
-      markFailure(
-        record,
-        record.failure?.code ?? "capture_start_failed",
-        error,
-        "degraded"
-      );
+      markFailure(record, record.failure?.code ?? "capture_start_failed", error, "degraded");
       await record.source?.stop().catch(() => {});
       await record.publisher.stop().catch(() => {});
     }
@@ -636,7 +649,7 @@ export async function startWebRtcStream(
 /** Release one lease, or stop a stream immediately when no lease is supplied. */
 export async function stopWebRtcStream(
   streamId?: string,
-  leaseId?: string
+  leaseId?: string,
 ): Promise<WebRtcStreamDescriptor> {
   const record = resolveStreamRecord(streamId);
   if (leaseId && !releaseLease(record, leaseId)) {
@@ -656,13 +669,13 @@ export async function stopWebRtcStream(
 
 /** List reconnect descriptors for all active streams. */
 export function listWebRtcStreams(): WebRtcStreamDescriptor[] {
-  return Array.from(streams.values()).map(record => describeRecord(record));
+  return Array.from(streams.values()).map((record) => describeRecord(record));
 }
 
 /** Get the reconnect descriptor for one stream (or null). */
 export function getWebRtcStreamDescriptor(
   streamId: string,
-  leaseId?: string
+  leaseId?: string,
 ): WebRtcStreamDescriptor | null {
   const record = streams.get(streamId);
   if (!record) {
@@ -674,20 +687,22 @@ export function getWebRtcStreamDescriptor(
 
 function isReadinessSatisfied(
   record: WebRtcStreamRecord,
-  readiness: "capture_ready" | "publishing"
+  readiness: "capture_ready" | "publishing",
 ): boolean {
   if (readiness === "publishing") {
     return record.lifecycleState === "publishing";
   }
-  return record.sourceStarted &&
-    (record.lifecycleState === "capture_ready" || record.lifecycleState === "publishing");
+  return (
+    record.sourceStarted &&
+    (record.lifecycleState === "capture_ready" || record.lifecycleState === "publishing")
+  );
 }
 
 function stoppedReadinessDescriptor(
   record: WebRtcStreamRecord,
   streamId: string,
   readiness: "capture_ready" | "publishing",
-  leaseId?: string
+  leaseId?: string,
 ): WebRtcStreamDescriptor {
   return {
     ...describeRecord(record, leaseId),
@@ -706,7 +721,7 @@ function readinessWaitDuration(remainingMs: number, hasLease: boolean): number {
 }
 
 function waitForRecordStateChange(record: WebRtcStreamRecord, waitMs: number): Promise<void> {
-  return new Promise<void>(resolve => {
+  return new Promise<void>((resolve) => {
     const timeout = dependencies.timer.setTimeout(() => {
       record.stateWaiters.delete(wake);
       resolve();
@@ -727,7 +742,7 @@ function resolveReadinessRecord(
   streamId: string,
   readiness: "capture_ready" | "publishing",
   leaseId: string | undefined,
-  lastRecord: WebRtcStreamRecord | undefined
+  lastRecord: WebRtcStreamRecord | undefined,
 ): ReadinessRecordResolution {
   const record = streams.get(streamId);
   if (record) {
@@ -751,10 +766,12 @@ export async function waitForWebRtcStreamReadiness(
   streamId: string,
   readiness: "capture_ready" | "publishing",
   timeoutMs: number = DEFAULT_STREAM_READY_TIMEOUT_MS,
-  leaseId?: string
+  leaseId?: string,
 ): Promise<WebRtcStreamDescriptor> {
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    throw new ActionableError("WebRTC stream readiness timeout must be a positive number of milliseconds.");
+    throw new ActionableError(
+      "WebRTC stream readiness timeout must be a positive number of milliseconds.",
+    );
   }
   const deadline = dependencies.timer.now() + timeoutMs;
   let activeLeaseId = leaseId;
@@ -780,14 +797,17 @@ export async function waitForWebRtcStreamReadiness(
     if (remainingMs <= 0) {
       return readinessTimeoutDescriptor(record, readiness, activeLeaseId);
     }
-    await waitForRecordStateChange(record, readinessWaitDuration(remainingMs, Boolean(activeLeaseId)));
+    await waitForRecordStateChange(
+      record,
+      readinessWaitDuration(remainingMs, Boolean(activeLeaseId)),
+    );
   }
 }
 
 function readinessTimeoutDescriptor(
   record: WebRtcStreamRecord,
   readiness: "capture_ready" | "publishing",
-  leaseId?: string
+  leaseId?: string,
 ): WebRtcStreamDescriptor {
   const code = readiness === "capture_ready" ? "capture_ready_timeout" : "publishing_timeout";
   return {

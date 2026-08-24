@@ -96,8 +96,8 @@ The runner will then start **`bun <path>/dist/src/index.js --daemon …`** inste
 
 ## Implementation reference (for maintainers)
 
-| Piece | Location in repo |
-|-------|------------------|
-| Unix socket → MCP HTTP endpoint | `src/daemon/socketServer.ts` (`StreamableHTTPClientTransport`, `createMcpClient`) |
-| HTTP server listen address / port | `src/daemon/daemon.ts` (`mcpEndpoint`, `startHttpServer`) |
-| JUnit prints **`Daemon error:`** | `android/junit-runner/.../AutoMobilePlanExecutor.kt` |
+| Piece                             | Location in repo                                                                  |
+| --------------------------------- | --------------------------------------------------------------------------------- |
+| Unix socket → MCP HTTP endpoint   | `src/daemon/socketServer.ts` (`StreamableHTTPClientTransport`, `createMcpClient`) |
+| HTTP server listen address / port | `src/daemon/daemon.ts` (`mcpEndpoint`, `startHttpServer`)                         |
+| JUnit prints **`Daemon error:`**  | `android/junit-runner/.../AutoMobilePlanExecutor.kt`                              |

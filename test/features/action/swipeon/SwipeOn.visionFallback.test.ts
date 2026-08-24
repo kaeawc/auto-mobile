@@ -16,7 +16,7 @@ const enabledVisionConfig: VisionFallbackConfig = {
   confidenceThreshold: "high",
   maxCostUsd: 1.0,
   cacheResults: false,
-  cacheTtlMinutes: 60
+  cacheTtlMinutes: 60,
 };
 
 const device = { name: "test-device", platform: "android", deviceId: "device-1" } as const;
@@ -25,7 +25,7 @@ const createObserveResult = (): ObserveResult => ({
   timestamp: Date.now(),
   screenSize: { width: 1080, height: 1920 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  viewHierarchy: { hierarchy: { node: [] } } as any
+  viewHierarchy: { hierarchy: { node: [] } } as any,
 });
 
 describe("SwipeOn vision fallback", () => {
@@ -40,7 +40,7 @@ describe("SwipeOn vision fallback", () => {
     fakeAccessibilityDetector.setTalkBackEnabled(false);
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
       getAccessibilityHierarchy: async () => null,
-      clearAccessibilityFocus: async () => {}
+      clearAccessibilityFocus: async () => {},
     } as any);
     fakeObserveScreen = new FakeObserveScreen();
     fakeObserveScreen.setObserveResult(createObserveResult());
@@ -60,7 +60,7 @@ describe("SwipeOn vision fallback", () => {
       accessibilityDetector: fakeAccessibilityDetector,
       visionConfig: enabledVisionConfig,
       screenshotCapturer: capturer,
-      visionAnalyzer: analyzer
+      visionAnalyzer: analyzer,
     });
     // Patch the inner scrollUntilVisible timer so retries are fast
     (swipeOn as any).scrollUntilVisible.deps.timer = fakeTimer;
@@ -75,18 +75,18 @@ describe("SwipeOn vision fallback", () => {
       found: false,
       confidence: "high",
       navigationSteps: [
-        { action: "scroll", direction: "down", description: "Scroll to find ScrollView container" }
+        { action: "scroll", direction: "down", description: "Scroll to find ScrollView container" },
       ],
       costUsd: 0.002,
       durationMs: 50,
       screenshotPath: "/screenshot.png",
-      provider: "claude"
+      provider: "claude",
     });
 
     const swipeOn = createSwipeOn(capturer, analyzer);
     const result = await swipeOn.execute({
       direction: "up",
-      container: { elementId: "com.app:id/missing_list" }
+      container: { elementId: "com.app:id/missing_list" },
     });
 
     expect(result.success).toBe(false);
@@ -102,18 +102,18 @@ describe("SwipeOn vision fallback", () => {
       found: false,
       confidence: "medium",
       alternativeSelectors: [
-        { type: "text", value: "My List", confidence: 0.7, reasoning: "Closest match visible" }
+        { type: "text", value: "My List", confidence: 0.7, reasoning: "Closest match visible" },
       ],
       costUsd: 0.001,
       durationMs: 30,
       screenshotPath: "/screenshot.png",
-      provider: "claude"
+      provider: "claude",
     });
 
     const swipeOn = createSwipeOn(capturer, analyzer);
     const result = await swipeOn.execute({
       direction: "up",
-      container: { text: "MissingContainer" }
+      container: { text: "MissingContainer" },
     });
 
     expect(result.success).toBe(false);
@@ -132,13 +132,13 @@ describe("SwipeOn vision fallback", () => {
       accessibilityDetector: fakeAccessibilityDetector,
       visionConfig: { ...enabledVisionConfig, enabled: false },
       screenshotCapturer: capturer,
-      visionAnalyzer: analyzer
+      visionAnalyzer: analyzer,
     });
     (swipeOn as any).scrollUntilVisible.deps.timer = fakeTimer;
 
     const result = await swipeOn.execute({
       direction: "up",
-      container: { elementId: "com.app:id/missing" }
+      container: { elementId: "com.app:id/missing" },
     });
 
     expect(result.success).toBe(false);
@@ -153,7 +153,7 @@ describe("SwipeOn vision fallback", () => {
     const swipeOn = createSwipeOn(capturer, analyzer);
     await swipeOn.execute({
       direction: "up",
-      container: { text: "My List" }
+      container: { text: "My List" },
     });
 
     const calls = analyzer.getCalls();

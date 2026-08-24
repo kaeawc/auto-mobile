@@ -23,11 +23,13 @@ describe("ADB server reset session recovery", () => {
 
       override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
         this.startedDevices.push(device);
-        this.bootedDevices = [{
-          name: device.name,
-          platform: "android",
-          deviceId: "emulator-5560",
-        }];
+        this.bootedDevices = [
+          {
+            name: device.name,
+            platform: "android",
+            deviceId: "emulator-5560",
+          },
+        ];
         return { pid: 0 } as ChildProcess;
       }
 
@@ -86,19 +88,13 @@ describe("ADB server reset session recovery", () => {
     try {
       await expect(
         Promise.all([
-          pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
-            original.deviceId,
-            captured,
-          ),
-          pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(
-            original.deviceId,
-            captured,
-          ),
+          pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(original.deviceId, captured),
+          pool.recoverSessionBoundAndroidDeviceAfterAdbServerReset(original.deviceId, captured),
         ]),
       ).resolves.toEqual([true, true]);
 
       expect(manager.killedDeviceIds).toEqual([original.deviceId]);
-      expect(manager.startedDevices.map(device => device.name)).toEqual(["Pixel_8_API_35"]);
+      expect(manager.startedDevices.map((device) => device.name)).toEqual(["Pixel_8_API_35"]);
       expect(pool.getDevice(original.deviceId)).toBeNull();
       expect(pool.getDevice("emulator-5560")).toMatchObject({
         avdName: "Pixel_8_API_35",
@@ -116,11 +112,13 @@ describe("ADB server reset session recovery", () => {
     class ReplacementSerialDeviceManager extends FakeDeviceManager {
       override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
         this.startedDevices.push(device);
-        this.bootedDevices = [{
-          name: device.name,
-          platform: "android",
-          deviceId: "emulator-5560",
-        }];
+        this.bootedDevices = [
+          {
+            name: device.name,
+            platform: "android",
+            deviceId: "emulator-5560",
+          },
+        ];
         return { pid: 0 } as ChildProcess;
       }
 
@@ -200,7 +198,7 @@ describe("ADB server reset session recovery", () => {
         status: "idle",
         sessionId: null,
       });
-      expect(pool.getIdleDevices().map(device => device.id)).not.toContain("emulator-5560");
+      expect(pool.getIdleDevices().map((device) => device.id)).not.toContain("emulator-5560");
       expect(pool.getAvailableDeviceCount()).toBe(0);
 
       apps.releaseWrite.resolve();
@@ -223,11 +221,13 @@ describe("ADB server reset session recovery", () => {
 
       override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
         this.startedDevices.push(device);
-        this.bootedDevices = [{
-          name: device.name,
-          platform: "android",
-          deviceId: "emulator-5560",
-        }];
+        this.bootedDevices = [
+          {
+            name: device.name,
+            platform: "android",
+            deviceId: "emulator-5560",
+          },
+        ];
         return { pid: 0 } as ChildProcess;
       }
 
@@ -345,9 +345,7 @@ describe("ADB server reset session recovery", () => {
     await pool.addDevice(original, image);
     await pool.bindOrReuseDeviceSession("session-1", original.deviceId, "android", image);
     const capturedSession = sessionManager.getSession("session-1")!;
-    const detached = await pool.detachAdbServerResetCohort([
-      pool.getDevice(original.deviceId)!,
-    ]);
+    const detached = await pool.detachAdbServerResetCohort([pool.getDevice(original.deviceId)!]);
 
     try {
       await sessionManager.releaseSession("session-1", "explicit-release");
@@ -435,7 +433,7 @@ describe("ADB server reset session recovery", () => {
         await pool.bindOrReuseDeviceSession(`session-${index}`, device.deviceId, "android", image);
       }
     }
-    const cohort = devices.map(device => pool.getDevice(device.deviceId)!);
+    const cohort = devices.map((device) => pool.getDevice(device.deviceId)!);
 
     try {
       const detached = await pool.detachAdbServerResetCohort(cohort);
@@ -447,11 +445,9 @@ describe("ADB server reset session recovery", () => {
       expect(sessionManager.getSession("session-0")?.assignedDevice).toBe(devices[0].deviceId);
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe(devices[1].deviceId);
       let idleReservationSettled = false;
-      const idleReservation = pool
-        .waitForAdbServerResetRecovery(devices[2].name)
-        .then(() => {
-          idleReservationSettled = true;
-        });
+      const idleReservation = pool.waitForAdbServerResetRecovery(devices[2].name).then(() => {
+        idleReservationSettled = true;
+      });
       await Promise.resolve();
       expect(idleReservationSettled).toBe(false);
       await pool.releaseAdbServerResetCohortReservations(detached.devices);
@@ -505,7 +501,7 @@ describe("ADB server reset session recovery", () => {
 
     try {
       const deferred = await pool.detachAdbServerResetCohort(
-        devices.map(device => pool.getDevice(device.deviceId)!),
+        devices.map((device) => pool.getDevice(device.deviceId)!),
       );
       expect(deferred).toEqual({ devices: [], deferred: true });
       expect(pool.getDevice(devices[0].deviceId)).not.toBeNull();
@@ -513,7 +509,7 @@ describe("ADB server reset session recovery", () => {
 
       await releaseStartupLease();
       const detached = await pool.detachAdbServerResetCohort(
-        devices.map(device => pool.getDevice(device.deviceId)!),
+        devices.map((device) => pool.getDevice(device.deviceId)!),
       );
       expect(detached).toMatchObject({ deferred: false });
       expect(detached.devices).toHaveLength(2);
@@ -555,7 +551,12 @@ describe("ADB server reset session recovery", () => {
     manager.bootedDevices = [active, idle];
     await pool.addDevice(active, image(active));
     await pool.addDevice(idle, image(idle));
-    await pool.bindOrReuseDeviceSession("session-active", active.deviceId, "android", image(active));
+    await pool.bindOrReuseDeviceSession(
+      "session-active",
+      active.deviceId,
+      "android",
+      image(active),
+    );
     const childProcess = {
       pid: 123,
       kill: () => {
@@ -663,9 +664,7 @@ describe("ADB server reset session recovery", () => {
           captured,
         ),
       ).resolves.toBe("deferred");
-      await expect(
-        pool.waitForEmulatorLossIncident(duplicateIncident!),
-      ).resolves.toMatchObject({
+      await expect(pool.waitForEmulatorLossIncident(duplicateIncident!)).resolves.toMatchObject({
         recovery: { outcome: "not-attempted" },
       });
       releaseCancellation.resolve();
@@ -720,12 +719,7 @@ describe("ADB server reset session recovery", () => {
       async (sessionId) => {
         await sessionManager.releaseSession(sessionId);
         await pool.releaseDevice(device.deviceId, sessionId);
-        await pool.bindOrReuseDeviceSession(
-          sessionId,
-          device.deviceId,
-          "android",
-          image,
-        );
+        await pool.bindOrReuseDeviceSession(sessionId, device.deviceId, "android", image);
         replacementSession = sessionManager.getSession(sessionId) ?? undefined;
         return 1;
       },
@@ -823,9 +817,7 @@ describe("ADB server reset session recovery", () => {
       const [incident] = await backingStore.list();
 
       expect(incident).toBeDefined();
-      await expect(
-        pool.waitForEmulatorLossIncident(incident!.id),
-      ).resolves.toMatchObject({
+      await expect(pool.waitForEmulatorLossIncident(incident!.id)).resolves.toMatchObject({
         session: { state: "released" },
         recovery: { outcome: "not-attempted" },
       });
@@ -841,16 +833,20 @@ describe("ADB server reset session recovery", () => {
       override async startDevice(device: DeviceInfo): Promise<ChildProcess> {
         this.startedDevices.push(device);
         const deviceId = device.name === "Pixel_8_API_35" ? "emulator-5556" : "emulator-5558";
-        this.bootedDevices = [{
-          name: device.name,
-          platform: "android",
-          deviceId,
-        }];
+        this.bootedDevices = [
+          {
+            name: device.name,
+            platform: "android",
+            deviceId,
+          },
+        ];
         return { pid: 0 } as ChildProcess;
       }
 
       override async killDevice(device: BootedDevice): Promise<void> {
-        this.bootedDevices = this.bootedDevices.filter(candidate => candidate.deviceId !== device.deviceId);
+        this.bootedDevices = this.bootedDevices.filter(
+          (candidate) => candidate.deviceId !== device.deviceId,
+        );
       }
 
       override async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
@@ -889,7 +885,7 @@ describe("ADB server reset session recovery", () => {
       await pool.bindOrReuseDeviceSession(`session-${index}`, device.deviceId, "android", image);
     }
     const detached = await pool.detachAdbServerResetCohort(
-      originals.map(device => pool.getDevice(device.deviceId)!),
+      originals.map((device) => pool.getDevice(device.deviceId)!),
     );
 
     try {
@@ -908,7 +904,7 @@ describe("ADB server reset session recovery", () => {
         ),
       ).resolves.toBe(true);
 
-      expect(manager.startedDevices.map(device => device.name)).toEqual([
+      expect(manager.startedDevices.map((device) => device.name)).toEqual([
         "Pixel_8_API_35",
         "Pixel_9_API_36",
       ]);
@@ -1397,7 +1393,7 @@ describe("ADB server reset session recovery", () => {
       await pool.bindOrReuseDeviceSession(`session-${index}`, device.deviceId, "android", image);
     }
     const detached = await pool.detachAdbServerResetCohort(
-      originals.map(device => pool.getDevice(device.deviceId)!),
+      originals.map((device) => pool.getDevice(device.deviceId)!),
     );
 
     try {
@@ -1415,7 +1411,7 @@ describe("ADB server reset session recovery", () => {
         ),
       ).resolves.toBe(false);
 
-      expect(manager.startedDevices.map(device => device.name)).toEqual(["Pixel_8_API_35"]);
+      expect(manager.startedDevices.map((device) => device.name)).toEqual(["Pixel_8_API_35"]);
       expect(pool.getDevice("emulator-5556")).toMatchObject({
         avdName: "Pixel_8_API_35",
         sessionId: "session-0",
@@ -1617,11 +1613,7 @@ describe("ADB server reset session recovery", () => {
 
     try {
       await expect(
-        pool.recoverSessionBoundAndroidDeviceAfterLoss(
-          original.deviceId,
-          incidentId,
-          captured,
-        ),
+        pool.recoverSessionBoundAndroidDeviceAfterLoss(original.deviceId, incidentId, captured),
       ).resolves.toBe("released");
       expect(releaseAttempts).toBe(2);
       expect(incidentStore.completeAttempts).toBe(2);

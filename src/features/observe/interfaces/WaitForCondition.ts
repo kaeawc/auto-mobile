@@ -56,6 +56,6 @@ export interface WaitForConditionResult {
 export interface WaitForCondition {
   execute(
     predicate: ConditionPredicate,
-    options?: WaitForConditionOptions
+    options?: WaitForConditionOptions,
   ): Promise<WaitForConditionResult>;
 }

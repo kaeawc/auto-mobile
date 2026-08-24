@@ -11,10 +11,10 @@ export interface ProvisionDeviceOperationStore {
   ): Promise<
     | { started: true; reconcileExistingConfiguration: boolean }
     | {
-      started: false;
-      result: Record<string, unknown>;
-      reconcileExistingConfiguration: boolean;
-    }
+        started: false;
+        result: Record<string, unknown>;
+        reconcileExistingConfiguration: boolean;
+      }
   >;
   markDeviceCreationStarted(operationId: string): Promise<void>;
   complete(operationId: string, result: Record<string, unknown>): Promise<void>;
@@ -60,10 +60,10 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
   ): Promise<
     | { started: true; reconcileExistingConfiguration: boolean }
     | {
-      started: false;
-      result: Record<string, unknown>;
-      reconcileExistingConfiguration: boolean;
-    }
+        started: false;
+        result: Record<string, unknown>;
+        reconcileExistingConfiguration: boolean;
+      }
   > {
     const db = this.getDb();
     const existing = await db
@@ -99,7 +99,7 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
       if (!raced) {
         throw new Error(
           `Could not create provisionDevice operation '${operationId}': ` +
-          `${errorMessage(error)}`,
+            `${errorMessage(error)}`,
         );
       }
       return this.resolveExisting(operationId, requestFingerprint, raced);
@@ -162,10 +162,10 @@ export class ProvisionDeviceOperationRepository implements ProvisionDeviceOperat
   ):
     | { started: true; reconcileExistingConfiguration: boolean }
     | {
-      started: false;
-      result: Record<string, unknown>;
-      reconcileExistingConfiguration: boolean;
-    } {
+        started: false;
+        result: Record<string, unknown>;
+        reconcileExistingConfiguration: boolean;
+      } {
     if (existing.request_fingerprint !== requestFingerprint) {
       throw new ProvisionDeviceOperationConflictError(operationId);
     }

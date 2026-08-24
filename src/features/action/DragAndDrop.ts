@@ -6,7 +6,7 @@ import {
   DragAndDropOptions,
   DragAndDropResult,
   ObserveResult,
-  ViewHierarchyResult
+  ViewHierarchyResult,
 } from "../../models";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
@@ -23,8 +23,16 @@ import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
-import { DEFAULT_VISION_CONFIG, getVisionEnrichedError, type VisionFallbackConfig, type VisionAnalyzer } from "../../vision/index";
-import { TakeScreenshotCapturer, type ScreenshotCapturer } from "../navigation/SelectionStateTracker";
+import {
+  DEFAULT_VISION_CONFIG,
+  getVisionEnrichedError,
+  type VisionFallbackConfig,
+  type VisionAnalyzer,
+} from "../../vision/index";
+import {
+  TakeScreenshotCapturer,
+  type ScreenshotCapturer,
+} from "../navigation/SelectionStateTracker";
 
 const PRESS_DURATION_MIN_MS = 600;
 const PRESS_DURATION_MAX_MS = 3000;
@@ -59,7 +67,7 @@ export class DragAndDrop extends BaseVisualChange {
     device: BootedDevice,
     adb: AdbClient | null = null,
     timer: Timer = defaultTimer,
-    deps: DragAndDropDeps = {}
+    deps: DragAndDropDeps = {},
   ) {
     super(device, adb, timer);
     this.finder = new DefaultElementFinder();
@@ -67,14 +75,15 @@ export class DragAndDrop extends BaseVisualChange {
     this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.viewHierarchy = new ViewHierarchy(device, this.adbFactory);
     this.visionConfig = deps.visionConfig ?? DEFAULT_VISION_CONFIG;
-    this.screenshotCapturer = deps.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
+    this.screenshotCapturer =
+      deps.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
     this.visionAnalyzer = deps.visionAnalyzer;
   }
 
   async execute(
     options: DragAndDropOptions,
     progress?: ProgressCallback,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<DragAndDropResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("dragAndDrop");
@@ -85,7 +94,7 @@ export class DragAndDrop extends BaseVisualChange {
         success: false,
         duration: 0,
         distance: 0,
-        error: `dragAndDrop is not supported on ${this.device.platform}`
+        error: `dragAndDrop is not supported on ${this.device.platform}`,
       };
     }
 
@@ -100,7 +109,8 @@ export class DragAndDrop extends BaseVisualChange {
           success: false,
           duration: 0,
           distance: 0,
-          error: "dragAndDrop requires the Android accessibility service to be installed and enabled."
+          error:
+            "dragAndDrop requires the Android accessibility service to be installed and enabled.",
         };
       }
     }
@@ -112,7 +122,7 @@ export class DragAndDrop extends BaseVisualChange {
         success: false,
         duration: 0,
         distance: 0,
-        error: validationError
+        error: validationError,
       };
     }
 
@@ -142,7 +152,7 @@ export class DragAndDrop extends BaseVisualChange {
             pressDurationMs,
             dragDurationMs,
             holdDurationMs,
-            signal
+            signal,
           );
 
           await this.timer.sleep(DROP_DURATION_MS);
@@ -155,7 +165,7 @@ export class DragAndDrop extends BaseVisualChange {
             distance,
             a11yTotalTimeMs: dragResult.a11yTotalTimeMs,
             a11yGestureTimeMs: dragResult.a11yGestureTimeMs,
-            error: dragResult.error
+            error: dragResult.error,
           };
         },
         {
@@ -171,10 +181,10 @@ export class DragAndDrop extends BaseVisualChange {
               pressDurationMs,
               dragDurationMs,
               holdDurationMs,
-              platform: this.device.platform
-            }
-          }
-        }
+              platform: this.device.platform,
+            },
+          },
+        },
       );
 
       perf.end();
@@ -182,7 +192,7 @@ export class DragAndDrop extends BaseVisualChange {
       return {
         ...result,
         duration: result.duration ?? this.getDragDurationMs(options),
-        distance: result.distance ?? 0
+        distance: result.distance ?? 0,
       } as DragAndDropResult;
     } catch (error) {
       perf.end();
@@ -198,7 +208,7 @@ export class DragAndDrop extends BaseVisualChange {
           const searchCriteria = {
             text: failedTarget.text,
             resourceId: failedTarget.elementId,
-            description: isSourceError ? "Source element for drag" : "Target element for drop"
+            description: isSourceError ? "Source element for drag" : "Target element for drop",
           };
           const cachedObserve = await this.observeScreen.getMostRecentCachedObserveResult();
           const viewHierarchy = cachedObserve?.viewHierarchy ?? null;
@@ -209,7 +219,7 @@ export class DragAndDrop extends BaseVisualChange {
             this.visionConfig,
             finalErrorMessage,
             signal,
-            this.visionAnalyzer
+            this.visionAnalyzer,
           );
         }
       }
@@ -218,7 +228,7 @@ export class DragAndDrop extends BaseVisualChange {
         success: false,
         duration: 0,
         distance: 0,
-        error: finalErrorMessage
+        error: finalErrorMessage,
       };
     }
   }
@@ -227,21 +237,31 @@ export class DragAndDrop extends BaseVisualChange {
     if (!options?.source || !options?.target) {
       return "dragAndDrop requires source and target";
     }
-    const sourceSelectorCount = [options.source.text, options.source.elementId].filter(Boolean).length;
+    const sourceSelectorCount = [options.source.text, options.source.elementId].filter(
+      Boolean,
+    ).length;
     if (sourceSelectorCount !== 1) {
       return "dragAndDrop source must specify exactly one of text or elementId";
     }
-    const targetSelectorCount = [options.target.text, options.target.elementId].filter(Boolean).length;
+    const targetSelectorCount = [options.target.text, options.target.elementId].filter(
+      Boolean,
+    ).length;
     if (targetSelectorCount !== 1) {
       return "dragAndDrop target must specify exactly one of text or elementId";
     }
-    if (!this.isDurationInRange(options.pressDurationMs, PRESS_DURATION_MIN_MS, PRESS_DURATION_MAX_MS)) {
+    if (
+      !this.isDurationInRange(options.pressDurationMs, PRESS_DURATION_MIN_MS, PRESS_DURATION_MAX_MS)
+    ) {
       return `dragAndDrop pressDurationMs must be between ${PRESS_DURATION_MIN_MS}ms and ${PRESS_DURATION_MAX_MS}ms`;
     }
-    if (!this.isDurationInRange(options.dragDurationMs, DRAG_DURATION_MIN_MS, DRAG_DURATION_MAX_MS)) {
+    if (
+      !this.isDurationInRange(options.dragDurationMs, DRAG_DURATION_MIN_MS, DRAG_DURATION_MAX_MS)
+    ) {
       return `dragAndDrop dragDurationMs must be between ${DRAG_DURATION_MIN_MS}ms and ${DRAG_DURATION_MAX_MS}ms`;
     }
-    if (!this.isDurationInRange(options.holdDurationMs, HOLD_DURATION_MIN_MS, HOLD_DURATION_MAX_MS)) {
+    if (
+      !this.isDurationInRange(options.holdDurationMs, HOLD_DURATION_MIN_MS, HOLD_DURATION_MAX_MS)
+    ) {
       return `dragAndDrop holdDurationMs must be between ${HOLD_DURATION_MIN_MS}ms and ${HOLD_DURATION_MAX_MS}ms`;
     }
     return null;
@@ -250,16 +270,20 @@ export class DragAndDrop extends BaseVisualChange {
   private resolveTarget(
     viewHierarchy: ViewHierarchyResult,
     target: { text?: string; elementId?: string },
-    label: "source" | "target"
+    label: "source" | "target",
   ) {
     const selectorCount = [target.elementId, target.text].filter(Boolean).length;
     if (selectorCount !== 1) {
-      throw new ActionableError(`dragAndDrop ${label} must specify exactly one of text or elementId`);
+      throw new ActionableError(
+        `dragAndDrop ${label} must specify exactly one of text or elementId`,
+      );
     }
     if (target.elementId) {
       const element = this.finder.findElementByResourceId(viewHierarchy, target.elementId);
       if (!element) {
-        throw new ActionableError(`dragAndDrop ${label} not found with elementId '${target.elementId}'`);
+        throw new ActionableError(
+          `dragAndDrop ${label} not found with elementId '${target.elementId}'`,
+        );
       }
       return element;
     }
@@ -275,15 +299,16 @@ export class DragAndDrop extends BaseVisualChange {
 
   private async resolveViewHierarchy(
     observeResult: ObserveResult,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<ViewHierarchyResult | null> {
     // Prefer a freshly-captured hierarchy on both platforms so drag endpoints are not
     // resolved against stale coordinates after the UI navigated/scrolled since the last
     // observe. Android refreshes via the accessibility service; iOS via the XCUITest
     // CtrlProxy runner's hierarchy snapshot.
-    const refreshed = this.device.platform === "ios"
-      ? await this.refreshIosViewHierarchy(signal)
-      : await this.refreshViewHierarchy(signal);
+    const refreshed =
+      this.device.platform === "ios"
+        ? await this.refreshIosViewHierarchy(signal)
+        : await this.refreshViewHierarchy(signal);
     if (refreshed && !refreshed.hierarchy?.error) {
       return refreshed;
     }
@@ -304,7 +329,12 @@ export class DragAndDrop extends BaseVisualChange {
     // Use the 15s iOS budget: XCUITest extraction can take 5-15s, and a shorter timeout would
     // fall back to the stale observe cache on slow screens.
     const client = IOSCtrlProxyClient.getInstance(this.device);
-    const synced = await client.requestHierarchySync(undefined, false, signal, IOS_HIERARCHY_REFRESH_TIMEOUT_MS);
+    const synced = await client.requestHierarchySync(
+      undefined,
+      false,
+      signal,
+      IOS_HIERARCHY_REFRESH_TIMEOUT_MS,
+    );
     if (!synced?.hierarchy) {
       return null;
     }
@@ -316,7 +346,7 @@ export class DragAndDrop extends BaseVisualChange {
       this.accessibilityService,
       this.viewHierarchy,
       HIERARCHY_REFRESH_TIMEOUT_MS,
-      signal
+      signal,
     );
 
     if (!rawHierarchy) {
@@ -367,8 +397,14 @@ export class DragAndDrop extends BaseVisualChange {
     return value >= min && value <= max;
   }
 
-  private getDragTimeoutMs(pressDurationMs: number, dragDurationMs: number, holdDurationMs: number): number {
-    return pressDurationMs + dragDurationMs + holdDurationMs + DROP_DURATION_MS + DRAG_TIMEOUT_BUFFER_MS;
+  private getDragTimeoutMs(
+    pressDurationMs: number,
+    dragDurationMs: number,
+    holdDurationMs: number,
+  ): number {
+    return (
+      pressDurationMs + dragDurationMs + holdDurationMs + DROP_DURATION_MS + DRAG_TIMEOUT_BUFFER_MS
+    );
   }
 
   private async executeDrag(
@@ -379,7 +415,7 @@ export class DragAndDrop extends BaseVisualChange {
     pressDurationMs: number,
     dragDurationMs: number,
     holdDurationMs: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<{
     success: boolean;
     error?: string;
@@ -393,25 +429,40 @@ export class DragAndDrop extends BaseVisualChange {
     // Both clients expose requestDrag with an identical signature/return shape. iOS routes
     // through the XCUITest CtrlProxy runner (XCUICoordinate.press/thenDragTo/thenHold);
     // Android through the accessibility service. iOS preserves exact (non-rounded) coordinates.
-    const result = this.device.platform === "ios"
-      ? await IOSCtrlProxyClient.getInstance(this.device).requestDrag(
-        startX, startY, endX, endY, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs
-      )
-      : await this.accessibilityService.requestDrag(
-        startX, startY, endX, endY, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs
-      );
+    const result =
+      this.device.platform === "ios"
+        ? await IOSCtrlProxyClient.getInstance(this.device).requestDrag(
+            startX,
+            startY,
+            endX,
+            endY,
+            pressDurationMs,
+            dragDurationMs,
+            holdDurationMs,
+            timeoutMs,
+          )
+        : await this.accessibilityService.requestDrag(
+            startX,
+            startY,
+            endX,
+            endY,
+            pressDurationMs,
+            dragDurationMs,
+            holdDurationMs,
+            timeoutMs,
+          );
 
     if (result.success) {
       return {
         success: true,
         a11yTotalTimeMs: result.totalTimeMs,
-        a11yGestureTimeMs: result.gestureTimeMs
+        a11yGestureTimeMs: result.gestureTimeMs,
       };
     }
 
     return {
       success: false,
-      error: result.error ?? "Drag failed via CtrlProxy"
+      error: result.error ?? "Drag failed via CtrlProxy",
     };
   }
 }

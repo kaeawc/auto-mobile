@@ -1,11 +1,23 @@
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
-import type { DeviceMatchCriteria, FormFactor, MatchingStrategy } from "../models/DeviceMatchCriteria";
+import type {
+  DeviceMatchCriteria,
+  FormFactor,
+  MatchingStrategy,
+} from "../models/DeviceMatchCriteria";
 import { defaultRandom, type Random } from "./Random";
 
 /** Selects a booted device or device image for one boot request. */
 export interface DeviceMatcher {
-  matchBootedDevice(criteria: DeviceMatchCriteria, devices: BootedDevice[], strategy: MatchingStrategy): BootedDevice | null;
-  matchDeviceImage(criteria: DeviceMatchCriteria, images: DeviceInfo[], strategy: MatchingStrategy): DeviceInfo | null;
+  matchBootedDevice(
+    criteria: DeviceMatchCriteria,
+    devices: BootedDevice[],
+    strategy: MatchingStrategy,
+  ): BootedDevice | null;
+  matchDeviceImage(
+    criteria: DeviceMatchCriteria,
+    images: DeviceInfo[],
+    strategy: MatchingStrategy,
+  ): DeviceInfo | null;
 }
 
 interface ParsedDeviceVersion {
@@ -28,14 +40,18 @@ function compareParsedVersions(partsA: number[], partsB: number[]): number {
   const length = Math.max(partsA.length, partsB.length);
   for (let index = 0; index < length; index++) {
     const delta = (partsA[index] ?? 0) - (partsB[index] ?? 0);
-    if (delta !== 0) { return delta; }
+    if (delta !== 0) {
+      return delta;
+    }
   }
   return 0;
 }
 
 /** Compares strictly numeric dotted version components and returns NaN for other formats. */
 export function compareStrictNumericVersions(a: string, b: string): number {
-  if (![a, b].every(version => version.split(".").every(component => /^\d+$/.test(component)))) {
+  if (
+    ![a, b].every((version) => version.split(".").every((component) => /^\d+$/.test(component)))
+  ) {
     return Number.NaN;
   }
   return compareParsedVersions(a.split(".").map(Number), b.split(".").map(Number));
@@ -54,19 +70,30 @@ export function compareVersions(a: string, b: string): number {
   if (parsedA || parsedB) {
     return Number.NaN;
   }
-  if (a === b) { return 0; }
+  if (a === b) {
+    return 0;
+  }
   return a < b ? -1 : 1;
 }
 
 function matchesCriteria(
-  item: { platform: Platform; name: string; osVersion?: string; formFactor?: FormFactor; screenWidth?: number; screenHeight?: number },
+  item: {
+    platform: Platform;
+    name: string;
+    osVersion?: string;
+    formFactor?: FormFactor;
+    screenWidth?: number;
+    screenHeight?: number;
+  },
   criteria: DeviceMatchCriteria,
 ): boolean {
-  return matchesPlatform(item, criteria) &&
+  return (
+    matchesPlatform(item, criteria) &&
     matchesVersionRange(item, criteria) &&
     matchesName(item, criteria) &&
     matchesFormFactor(item, criteria) &&
-    matchesScreenSize(item, criteria);
+    matchesScreenSize(item, criteria)
+  );
 }
 
 function matchesPlatform(item: { platform: Platform }, criteria: DeviceMatchCriteria): boolean {
@@ -75,8 +102,12 @@ function matchesPlatform(item: { platform: Platform }, criteria: DeviceMatchCrit
 
 function matchesVersionRange(item: { osVersion?: string }, criteria: DeviceMatchCriteria): boolean {
   const version = item.osVersion;
-  const meetsMinimum = !criteria.minOsVersion || Boolean(version && compareVersionToBound(version, criteria.minOsVersion) >= 0);
-  const meetsMaximum = !criteria.maxOsVersion || Boolean(version && compareVersionToBound(version, criteria.maxOsVersion) <= 0);
+  const meetsMinimum =
+    !criteria.minOsVersion ||
+    Boolean(version && compareVersionToBound(version, criteria.minOsVersion) >= 0);
+  const meetsMaximum =
+    !criteria.maxOsVersion ||
+    Boolean(version && compareVersionToBound(version, criteria.maxOsVersion) <= 0);
   return meetsMinimum && meetsMaximum;
 }
 
@@ -85,8 +116,12 @@ function compareVersionToBound(version: string, bound: string): number {
   const parsedBound = parseDeviceVersion(bound);
   if (parsedVersion && parsedBound) {
     const delta = compareParsedVersions(parsedVersion.components, parsedBound.components);
-    if (delta !== 0) { return delta; }
-    if (parsedBound.qpr === undefined) { return 0; }
+    if (delta !== 0) {
+      return delta;
+    }
+    if (parsedBound.qpr === undefined) {
+      return 0;
+    }
     return (parsedVersion.qpr ?? 0) - parsedBound.qpr;
   }
   return compareVersions(version, bound);
@@ -96,27 +131,54 @@ function matchesName(item: { name: string }, criteria: DeviceMatchCriteria): boo
   return !criteria.name || item.name.toLowerCase().includes(criteria.name.toLowerCase());
 }
 
-function matchesFormFactor(item: { formFactor?: FormFactor }, criteria: DeviceMatchCriteria): boolean {
+function matchesFormFactor(
+  item: { formFactor?: FormFactor },
+  criteria: DeviceMatchCriteria,
+): boolean {
   return !criteria.formFactor || item.formFactor === criteria.formFactor;
 }
 
-function matchesScreenSize(item: { screenWidth?: number; screenHeight?: number }, criteria: DeviceMatchCriteria): boolean {
-  if (!criteria.screenSize) { return true; }
-  if (item.screenWidth === undefined || item.screenHeight === undefined) { return false; }
-  const widthRatio = Math.abs(item.screenWidth - criteria.screenSize.width) / criteria.screenSize.width;
-  const heightRatio = Math.abs(item.screenHeight - criteria.screenSize.height) / criteria.screenSize.height;
+function matchesScreenSize(
+  item: { screenWidth?: number; screenHeight?: number },
+  criteria: DeviceMatchCriteria,
+): boolean {
+  if (!criteria.screenSize) {
+    return true;
+  }
+  if (item.screenWidth === undefined || item.screenHeight === undefined) {
+    return false;
+  }
+  const widthRatio =
+    Math.abs(item.screenWidth - criteria.screenSize.width) / criteria.screenSize.width;
+  const heightRatio =
+    Math.abs(item.screenHeight - criteria.screenSize.height) / criteria.screenSize.height;
   return widthRatio <= 0.1 && heightRatio <= 0.1;
 }
 
-function prefersNumericVersion<T extends { osVersion?: string }>(candidate: T, current: T): boolean {
-  return parseDeviceVersion(candidate.osVersion ?? "") !== null &&
-    parseDeviceVersion(current.osVersion ?? "") === null;
+function prefersNumericVersion<T extends { osVersion?: string }>(
+  candidate: T,
+  current: T,
+): boolean {
+  return (
+    parseDeviceVersion(candidate.osVersion ?? "") !== null &&
+    parseDeviceVersion(current.osVersion ?? "") === null
+  );
 }
 
-function applyStrategy<T extends { osVersion?: string }>(candidates: T[], strategy: MatchingStrategy, random: Random): T | null {
-  if (candidates.length === 0) { return null; }
-  if (candidates.length === 1) { return candidates[0]; }
-  if (strategy === "RANDOM") { return random.pick(candidates); }
+function applyStrategy<T extends { osVersion?: string }>(
+  candidates: T[],
+  strategy: MatchingStrategy,
+  random: Random,
+): T | null {
+  if (candidates.length === 0) {
+    return null;
+  }
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+  if (strategy === "RANDOM") {
+    return random.pick(candidates);
+  }
 
   const wantLatest = strategy === "LATEST";
   let best = candidates[0];
@@ -128,7 +190,9 @@ function applyStrategy<T extends { osVersion?: string }>(candidates: T[], strate
       }
       continue;
     }
-    if (wantLatest ? delta > 0 : delta < 0) { best = candidate; }
+    if (wantLatest ? delta > 0 : delta < 0) {
+      best = candidate;
+    }
   }
   return best;
 }
@@ -136,11 +200,27 @@ function applyStrategy<T extends { osVersion?: string }>(candidates: T[], strate
 export class DefaultDeviceMatcher implements DeviceMatcher {
   constructor(private readonly random: Random = defaultRandom) {}
 
-  matchBootedDevice(criteria: DeviceMatchCriteria, devices: BootedDevice[], strategy: MatchingStrategy): BootedDevice | null {
-    return applyStrategy(devices.filter(device => matchesCriteria(device, criteria)), strategy, this.random);
+  matchBootedDevice(
+    criteria: DeviceMatchCriteria,
+    devices: BootedDevice[],
+    strategy: MatchingStrategy,
+  ): BootedDevice | null {
+    return applyStrategy(
+      devices.filter((device) => matchesCriteria(device, criteria)),
+      strategy,
+      this.random,
+    );
   }
 
-  matchDeviceImage(criteria: DeviceMatchCriteria, images: DeviceInfo[], strategy: MatchingStrategy): DeviceInfo | null {
-    return applyStrategy(images.filter(image => matchesCriteria(image, criteria)), strategy, this.random);
+  matchDeviceImage(
+    criteria: DeviceMatchCriteria,
+    images: DeviceInfo[],
+    strategy: MatchingStrategy,
+  ): DeviceInfo | null {
+    return applyStrategy(
+      images.filter((image) => matchesCriteria(image, criteria)),
+      strategy,
+      this.random,
+    );
   }
 }

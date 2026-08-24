@@ -1,8 +1,4 @@
-import type {
-  BootedDevice,
-  ObserveResult,
-  ViewHierarchyResult,
-} from "../../../models";
+import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../models";
 import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
 import type { ViewHierarchy } from "../../observe/ViewHierarchy";
 import type { IosVoiceOverDetector } from "../../../utils/interfaces/IosVoiceOverDetector";
@@ -25,13 +21,13 @@ export class IosTapStrategy implements TapStrategy {
   constructor(
     private readonly device: BootedDevice,
     private readonly iosVoiceOverDetector: IosVoiceOverDetector = defaultIosVoiceOverDetector,
-    private readonly featureFlags?: FeatureFlagService
+    private readonly featureFlags?: FeatureFlagService,
   ) {}
 
   prepareViewHierarchyForResponse(
     rawHierarchy: ViewHierarchyResult,
     viewHierarchy: ViewHierarchy,
-    screenSize?: ObserveResult["screenSize"]
+    screenSize?: ObserveResult["screenSize"],
   ): ViewHierarchyResult | null {
     if (!screenSize?.width || !screenSize?.height) {
       return null;
@@ -39,7 +35,7 @@ export class IosTapStrategy implements TapStrategy {
     const filtered = viewHierarchy.filterOffscreenNodes(
       rawHierarchy,
       screenSize.width,
-      screenSize.height
+      screenSize.height,
     );
     attachRawViewHierarchy(filtered, rawHierarchy);
     return filtered;
@@ -53,7 +49,7 @@ export class IosTapStrategy implements TapStrategy {
     return this.iosVoiceOverDetector.isVoiceOverEnabled(
       this.device.deviceId,
       ctrlProxy,
-      this.featureFlags
+      this.featureFlags,
     );
   }
 

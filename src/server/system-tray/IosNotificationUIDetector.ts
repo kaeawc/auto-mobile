@@ -1,15 +1,27 @@
-import { ActionableError, BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../models";
+import {
+  ActionableError,
+  BootedDevice,
+  Element,
+  ObserveResult,
+  ViewHierarchyResult,
+} from "../../models";
 import { DefaultElementGeometry } from "../../features/utility/ElementGeometry";
 import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
 import {
   getHierarchyRoots,
   nodeHasIosNotificationCenterHint,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
-  traverseForHint
+  traverseForHint,
 } from "./notificationHints";
 
 export interface IosNotificationUIDetectorDeps {
-  requestSwipe(x1: number, y1: number, x2: number, y2: number, duration?: number): Promise<{ success: boolean }>;
+  requestSwipe(
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    duration?: number,
+  ): Promise<{ success: boolean }>;
   requestTapCoordinates(x: number, y: number): Promise<{ success: boolean }>;
   /** Host-side monotonic clock used as the iOS observation timestamp. */
   now(): number;
@@ -47,24 +59,28 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
       return false;
     }
     const rootNodes = getHierarchyRoots(viewHierarchy);
-    return rootNodes.some(root => traverseForHint(root, nodeHasIosNotificationCenterHint));
+    return rootNodes.some((root) => traverseForHint(root, nodeHasIosNotificationCenterHint));
   }
 
   async expandTray(observation?: ObserveResult): Promise<void> {
     const { width, height } = this.requireScreenSize(observation, "open");
     await this.deps.requestSwipe(
-      Math.floor(width * 0.5), 5,
-      Math.floor(width * 0.5), Math.floor(height * 0.7),
-      IOS_OPEN_SWIPE_DURATION_MS
+      Math.floor(width * 0.5),
+      5,
+      Math.floor(width * 0.5),
+      Math.floor(height * 0.7),
+      IOS_OPEN_SWIPE_DURATION_MS,
     );
   }
 
   async collapseTray(observation?: ObserveResult): Promise<void> {
     const { width, height } = this.requireScreenSize(observation, "close");
     await this.deps.requestSwipe(
-      Math.floor(width * 0.5), Math.floor(height * 0.65),
-      Math.floor(width * 0.5), Math.floor(height * 0.08),
-      IOS_CLOSE_SWIPE_DURATION_MS
+      Math.floor(width * 0.5),
+      Math.floor(height * 0.65),
+      Math.floor(width * 0.5),
+      Math.floor(height * 0.08),
+      IOS_CLOSE_SWIPE_DURATION_MS,
     );
   }
 
@@ -82,15 +98,17 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
     const geometry = new DefaultElementGeometry();
     const { startX, startY, endX, endY } = geometry.getSwipeWithinBounds("left", element.bounds);
     await this.deps.requestSwipe(
-      Math.floor(startX), Math.floor(startY),
-      Math.floor(endX), Math.floor(endY),
-      SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS
+      Math.floor(startX),
+      Math.floor(startY),
+      Math.floor(endX),
+      Math.floor(endY),
+      SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
     );
   }
 
   private requireScreenSize(
     observation: ObserveResult | undefined,
-    action: "open" | "close"
+    action: "open" | "close",
   ): { width: number; height: number } {
     const width = observation?.screenSize?.width;
     const height = observation?.screenSize?.height;
@@ -98,7 +116,7 @@ export class IosNotificationUIDetector implements NotificationUIDetector {
       throw new ActionableError(
         action === "open"
           ? "Screen dimensions required to open iOS Notification Center"
-          : "Screen dimensions required to close iOS Notification Center"
+          : "Screen dimensions required to close iOS Notification Center",
       );
     }
     return { width, height };

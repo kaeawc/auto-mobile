@@ -99,8 +99,8 @@ describe("updated_at columns default to a real timestamp (#2913)", () => {
       const columns = await sql<{ name: string; dflt_value: string | null }>`
         SELECT name, dflt_value FROM pragma_table_info(${sql.lit(table as string)})
       `.execute(db);
-      const updatedAt = columns.rows.find(c => c.name === "updated_at");
-      const createdAt = columns.rows.find(c => c.name === "created_at");
+      const updatedAt = columns.rows.find((c) => c.name === "updated_at");
+      const createdAt = columns.rows.find((c) => c.name === "created_at");
 
       expect(updatedAt).toBeDefined();
       // The reconciliation guarantee of #2913: the sibling timestamp columns now

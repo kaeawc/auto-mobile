@@ -48,7 +48,7 @@ class FakeDatabaseHealthProbe {
 function buildDaemon(
   timer: FakeTimer,
   databaseHealthProbe: FakeDatabaseHealthProbe,
-  exitProcess: (code: number) => Promise<void> | void = () => {}
+  exitProcess: (code: number) => Promise<void> | void = () => {},
 ): Daemon {
   const daemon = new Daemon(
     {},
@@ -59,7 +59,7 @@ function buildDaemon(
     new FakeDatabaseInitializer(),
     new FakeStartupFailureTracker(),
     databaseHealthProbe,
-    exitProcess
+    exitProcess,
   );
   (daemon as unknown as DaemonHealthInternals).observationStreamHealth = {
     isHealthy: () => true,
@@ -97,7 +97,7 @@ describe("Daemon database health check", () => {
 
     internals.httpServer = { listening: true };
     internals.socketServer = { isListening: () => true };
-    internals.attemptRecovery = async failureKind => {
+    internals.attemptRecovery = async (failureKind) => {
       recoveryCalls.push({ at: timer.now(), failureKind });
     };
 
@@ -108,10 +108,12 @@ describe("Daemon database health check", () => {
     }
 
     expect(databaseHealthProbe.checkCalls).toBe(MAX_FAILED_CHECKS);
-    expect(recoveryCalls).toEqual([{
-      at: HEALTH_CHECK_INTERVAL_MS * MAX_FAILED_CHECKS,
-      failureKind: "database",
-    }]);
+    expect(recoveryCalls).toEqual([
+      {
+        at: HEALTH_CHECK_INTERVAL_MS * MAX_FAILED_CHECKS,
+        failureKind: "database",
+      },
+    ]);
   });
 
   test("exits the daemon when repeated database probe failures reach recovery", async () => {
@@ -119,7 +121,7 @@ describe("Daemon database health check", () => {
     const databaseHealthProbe = new FakeDatabaseHealthProbe();
     databaseHealthProbe.failWith(new Error("database disk image is malformed"));
     const exitCodes: number[] = [];
-    const daemon = buildDaemon(timer, databaseHealthProbe, code => {
+    const daemon = buildDaemon(timer, databaseHealthProbe, (code) => {
       exitCodes.push(code);
     });
     const internals = daemon as unknown as DaemonHealthInternals;
@@ -141,9 +143,9 @@ describe("Daemon database health check", () => {
     const databaseHealthProbe = new FakeDatabaseHealthProbe();
     const recoveryCodes: number[] = [];
     let finishRecovery!: () => void;
-    const daemon = buildDaemon(timer, databaseHealthProbe, async code => {
+    const daemon = buildDaemon(timer, databaseHealthProbe, async (code) => {
       recoveryCodes.push(code);
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve) => {
         finishRecovery = resolve;
       });
     });
@@ -170,7 +172,7 @@ describe("Daemon database health check", () => {
     const databaseHealthProbe = new FakeDatabaseHealthProbe();
     databaseHealthProbe.failWith(new Error("database disk image is malformed"));
     const exitCodes: number[] = [];
-    const daemon = buildDaemon(timer, databaseHealthProbe, code => {
+    const daemon = buildDaemon(timer, databaseHealthProbe, (code) => {
       exitCodes.push(code);
     });
     const internals = daemon as unknown as DaemonHealthInternals;
@@ -203,7 +205,7 @@ describe("Daemon database health check", () => {
     const databaseHealthProbe = new FakeDatabaseHealthProbe();
     databaseHealthProbe.failWith(new Error("database disk image is malformed"));
     const exitCodes: number[] = [];
-    const daemon = buildDaemon(timer, databaseHealthProbe, code => {
+    const daemon = buildDaemon(timer, databaseHealthProbe, (code) => {
       exitCodes.push(code);
     });
     const internals = daemon as unknown as DaemonHealthInternals;
@@ -251,7 +253,7 @@ describe("Daemon database health check", () => {
       },
       recover: async () => {},
     };
-    internals.attemptRecovery = async failureKind => {
+    internals.attemptRecovery = async (failureKind) => {
       recoveryCalls.push({ at: timer.now(), failureKind });
     };
 
@@ -263,10 +265,12 @@ describe("Daemon database health check", () => {
 
     expect(observationHealthChecks).toBe(0);
     expect(databaseHealthProbe.checkCalls).toBe(0);
-    expect(recoveryCalls).toEqual([{
-      at: HEALTH_CHECK_INTERVAL_MS * MAX_FAILED_CHECKS,
-      failureKind: "http",
-    }]);
+    expect(recoveryCalls).toEqual([
+      {
+        at: HEALTH_CHECK_INTERVAL_MS * MAX_FAILED_CHECKS,
+        failureKind: "http",
+      },
+    ]);
   });
 
   test("counts repeated control socket failures as socket recovery before observation and database checks", async () => {
@@ -287,7 +291,7 @@ describe("Daemon database health check", () => {
       },
       recover: async () => {},
     };
-    internals.attemptRecovery = async failureKind => {
+    internals.attemptRecovery = async (failureKind) => {
       recoveryCalls.push({ at: timer.now(), failureKind });
     };
 
@@ -299,10 +303,12 @@ describe("Daemon database health check", () => {
 
     expect(observationHealthChecks).toBe(0);
     expect(databaseHealthProbe.checkCalls).toBe(0);
-    expect(recoveryCalls).toEqual([{
-      at: HEALTH_CHECK_INTERVAL_MS * MAX_FAILED_CHECKS,
-      failureKind: "socket",
-    }]);
+    expect(recoveryCalls).toEqual([
+      {
+        at: HEALTH_CHECK_INTERVAL_MS * MAX_FAILED_CHECKS,
+        failureKind: "socket",
+      },
+    ]);
   });
 
   test("counts a missing observation stream socket as a socket health failure", async () => {
@@ -319,7 +325,7 @@ describe("Daemon database health check", () => {
       isHealthy: () => false,
       recover: async () => {},
     };
-    internals.attemptRecovery = async failureKind => {
+    internals.attemptRecovery = async (failureKind) => {
       recoveryCalls.push({ at: timer.now(), failureKind });
     };
 
@@ -330,10 +336,12 @@ describe("Daemon database health check", () => {
     }
 
     expect(databaseHealthProbe.checkCalls).toBe(0);
-    expect(recoveryCalls).toEqual([{
-      at: HEALTH_CHECK_INTERVAL_MS * MAX_FAILED_CHECKS,
-      failureKind: "socket",
-    }]);
+    expect(recoveryCalls).toEqual([
+      {
+        at: HEALTH_CHECK_INTERVAL_MS * MAX_FAILED_CHECKS,
+        failureKind: "socket",
+      },
+    ]);
   });
 
   test("recovers the observation stream socket on socket health recovery", async () => {

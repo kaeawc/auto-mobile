@@ -18,10 +18,7 @@ import type {
   VideoCaptureConfig,
 } from "./VideoRecorderService";
 import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
-import {
-  defaultRecordingCodecProbe,
-  type RecordingCodecProbe,
-} from "./recordingCodec";
+import { defaultRecordingCodecProbe, type RecordingCodecProbe } from "./recordingCodec";
 
 interface AndroidBackendHandle {
   kind: "android";
@@ -79,7 +76,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     if (device.platform === "ios") {
       throw new ActionableError(
         "iOS video recording is not handled by PlatformVideoCaptureBackend. " +
-          "Route iOS devices through FfmpegVideoProcessingBackend (HybridVideoCaptureBackend does this automatically)."
+          "Route iOS devices through FfmpegVideoProcessingBackend (HybridVideoCaptureBackend does this automatically).",
       );
     }
 
@@ -103,18 +100,18 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     try {
       const pk = await adbForStop.executeCommand("shell pkill -2 screenrecord", 8000);
       logger.info(
-        `[VideoCapture] Device pkill -2 screenrecord completed (out=${pk.stdout.trim().slice(0, 120)} err=${pk.stderr.trim().slice(0, 160)})`
+        `[VideoCapture] Device pkill -2 screenrecord completed (out=${pk.stdout.trim().slice(0, 120)} err=${pk.stderr.trim().slice(0, 160)})`,
       );
     } catch (error) {
       logger.warn(
-        `[VideoCapture] Device-side pkill -2 screenrecord failed; will rely on host SIGINT: ${errorMessage(error)}`
+        `[VideoCapture] Device-side pkill -2 screenrecord failed; will rely on host SIGINT: ${errorMessage(error)}`,
       );
     }
 
     // Wait for the host adb process to exit now that remote screenrecord should have finalized
     const gracefulExitTimeout = 10000;
     let timeoutId: NodeJS.Timeout | undefined;
-    const timeoutPromise = new Promise<void>(resolve => {
+    const timeoutPromise = new Promise<void>((resolve) => {
       timeoutId = this.timer.setTimeout(() => {
         if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
           logger.info(`[VideoCapture] Sending SIGINT to host adb after pkill wait`);
@@ -142,7 +139,9 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       await backendHandle.exitPromise;
     }
 
-    logger.info(`[VideoCapture] Process exited with code: ${backendHandle.exitState.exitCode}, signal: ${backendHandle.exitState.signal}`);
+    logger.info(
+      `[VideoCapture] Process exited with code: ${backendHandle.exitState.exitCode}, signal: ${backendHandle.exitState.signal}`,
+    );
 
     // Give screenrecord extra time to finalize the file on device
     // Even though the process has exited, file writes may still be in progress
@@ -150,14 +149,16 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     await this.timer.sleep(1000);
 
     // Pull the file from the device
-    logger.info(`[VideoCapture] Pulling file from device: ${backendHandle.deviceTempPath} -> ${handle.outputPath}`);
+    logger.info(
+      `[VideoCapture] Pulling file from device: ${backendHandle.deviceTempPath} -> ${handle.outputPath}`,
+    );
     const adb = this.adbFactory.create(backendHandle.device);
     const pullArgs = ["pull", backendHandle.deviceTempPath, handle.outputPath];
     try {
       const pullProcess = await adb.spawn(pullArgs);
 
       await new Promise<void>((resolve, reject) => {
-        pullProcess.once("exit", code => {
+        pullProcess.once("exit", (code) => {
           if (code === 0) {
             logger.info(`[VideoCapture] File pulled successfully`);
             resolve();
@@ -165,7 +166,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
             reject(new Error(`adb pull failed with exit code ${code}`));
           }
         });
-        pullProcess.once("error", err => reject(err));
+        pullProcess.once("error", (err) => reject(err));
       });
     } finally {
       // Always clean up the /sdcard temp file, even when the pull failed —
@@ -176,12 +177,12 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       try {
         const rmProcess = await adb.spawn(rmArgs);
 
-        await new Promise<void>(resolve => {
+        await new Promise<void>((resolve) => {
           rmProcess.once("exit", () => {
             logger.info(`[VideoCapture] Temp file cleaned up`);
             resolve();
           });
-          rmProcess.once("error", err => {
+          rmProcess.once("error", (err) => {
             logger.warn(`[VideoCapture] Failed to clean up temp file: ${err}`);
             resolve();
           });
@@ -203,7 +204,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
 
     if (backendHandle.exitState.exitCode && backendHandle.exitState.exitCode !== 0) {
       logger.warn(
-        `[VideoCapture] Recording exited with code ${backendHandle.exitState.exitCode}: ${backendHandle.stderr.join("")}`
+        `[VideoCapture] Recording exited with code ${backendHandle.exitState.exitCode}: ${backendHandle.stderr.join("")}`,
       );
     }
 
@@ -243,7 +244,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
 
   private async startAndroid(
     device: BootedDevice,
-    config: VideoCaptureConfig
+    config: VideoCaptureConfig,
   ): Promise<RecordingHandle> {
     const adb = this.adbFactory.create(device);
     const bitrateKbps = clampBitrateKbps(config);
@@ -252,7 +253,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
 
     if (config.maxDurationSeconds && config.maxDurationSeconds > ANDROID_SCREENRECORD_MAX_SECONDS) {
       logger.warn(
-        `[VideoCapture] Android screenrecord caps at ${ANDROID_SCREENRECORD_MAX_SECONDS}s; requested ${config.maxDurationSeconds}s.`
+        `[VideoCapture] Android screenrecord caps at ${ANDROID_SCREENRECORD_MAX_SECONDS}s; requested ${config.maxDurationSeconds}s.`,
       );
     }
 
@@ -281,7 +282,9 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     logger.debug(`[VideoCapture] Screenrecord argv: ${args.join(" ")}`);
     logger.debug(`[VideoCapture] Device temp path: ${deviceTempPath}`);
     logger.debug(`[VideoCapture] Output path: ${config.outputPath}`);
-    logger.info(`[VideoCapture] Bitrate: ${bitrateKbps}kbps (${bitrateBps}bps), Time limit: ${timeLimitSeconds}s`);
+    logger.info(
+      `[VideoCapture] Bitrate: ${bitrateKbps}kbps (${bitrateBps}bps), Time limit: ${timeLimitSeconds}s`,
+    );
 
     const process = await adb.spawn(args);
 

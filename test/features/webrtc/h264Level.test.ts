@@ -65,18 +65,18 @@ describe("H.264 SDP and SPS capability helpers", () => {
       compatible: true,
     });
     expect(
-      evaluateH264SpsForSend(Buffer.from([0x67, 0x42, 0xc0, 0x1f]), "constrained-baseline")
+      evaluateH264SpsForSend(Buffer.from([0x67, 0x42, 0xc0, 0x1f]), "constrained-baseline"),
     ).toEqual({ compatible: true });
     expect(evaluateH264SpsForSend(Buffer.from([0x67, 0x42, 0xc0, 0x1f]))).toEqual({
       compatible: true,
     });
     // A Baseline SPS on a Main session is rejected, and vice versa.
     expect(evaluateH264SpsForSend(Buffer.from([0x67, 0x42, 0xc0, 0x1f]), "main").compatible).toBe(
-      false
+      false,
     );
     expect(
       evaluateH264SpsForSend(Buffer.from([0x67, 0x4d, 0x00, 0x2a]), "constrained-baseline")
-        .compatible
+        .compatible,
     ).toBe(false);
   });
 });

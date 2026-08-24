@@ -50,7 +50,9 @@ export class PlatformDeviceManagerFactory {
       } else if (PlatformDeviceManagerFactory.injectedAdbFactory) {
         const adb = PlatformDeviceManagerFactory.injectedAdbFactory.create();
         PlatformDeviceManagerFactory.instance = new MultiPlatformDeviceManager(adb);
-        logger.debug("PlatformDeviceManagerFactory: Created new instance with injected AdbClientFactory");
+        logger.debug(
+          "PlatformDeviceManagerFactory: Created new instance with injected AdbClientFactory",
+        );
       } else {
         PlatformDeviceManagerFactory.instance = new MultiPlatformDeviceManager();
         logger.debug("PlatformDeviceManagerFactory: Created new instance with defaults");

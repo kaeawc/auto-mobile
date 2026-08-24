@@ -10,7 +10,7 @@ import type {
   ContentHiddenRegion,
   RecompositionNodeInfo,
   SemanticLink,
-  ViewHierarchyWindowInfo
+  ViewHierarchyWindowInfo,
 } from "../../../models";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type {
@@ -38,7 +38,7 @@ export function generateSecureId(): string {
  * Quote a string for use in ADB shell arguments.
  */
 export const quoteForAdbArg = (value: string): string => {
-  const escaped = value.replace(/\\/g, "\\\\").replace(/\"/g, "\\\"");
+  const escaped = value.replace(/\\/g, "\\\\").replace(/\"/g, '\\"');
   return `"${escaped}"`;
 };
 

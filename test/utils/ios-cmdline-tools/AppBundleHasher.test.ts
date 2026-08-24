@@ -68,7 +68,7 @@ const hashOf = (files: Record<string, string>, options?: BundleOptions): Promise
 
 const baseFiles: Record<string, string> = {
   "Info.plist": "info",
-  "CtrlProxyApp": "mach-o-binary",
+  CtrlProxyApp: "mach-o-binary",
   "Frameworks/Lib.framework/Lib": "lib-binary",
 };
 
@@ -83,9 +83,15 @@ describe("hashAppBundle", () => {
     { label: "_CodeSignature contents", extra: { "_CodeSignature/CodeResources": "signature" } },
     { label: "SC_Info supplemental data", extra: { "SC_Info/CtrlProxyApp.sinf": "sc-info" } },
     { label: "embedded.mobileprovision", extra: { "embedded.mobileprovision": "provision" } },
-    { label: "PkgInfo", extra: { "PkgInfo": "APPL????" } },
-    { label: "a top-level .xcent entitlements blob", extra: { "CtrlProxyApp.xcent": "entitlements" } },
-    { label: "a nested .xcent entitlements blob", extra: { "Frameworks/Lib.xcent": "entitlements" } },
+    { label: "PkgInfo", extra: { PkgInfo: "APPL????" } },
+    {
+      label: "a top-level .xcent entitlements blob",
+      extra: { "CtrlProxyApp.xcent": "entitlements" },
+    },
+    {
+      label: "a nested .xcent entitlements blob",
+      extra: { "Frameworks/Lib.xcent": "entitlements" },
+    },
   ];
 
   for (const { label, extra } of skipArtifacts) {
@@ -100,7 +106,7 @@ describe("hashAppBundle", () => {
       "_CodeSignature/CodeResources": "signature",
       "SC_Info/CtrlProxyApp.sinf": "sc-info",
       "embedded.mobileprovision": "provision",
-      "PkgInfo": "APPL????",
+      PkgInfo: "APPL????",
       "CtrlProxyApp.xcent": "entitlements",
     };
     expect(await hashOf(withAll)).toBe(await hashOf(baseFiles));
@@ -112,7 +118,11 @@ describe("hashAppBundle", () => {
   });
 
   test("is sensitive to a rename (the relative path is part of the hash)", async () => {
-    const renamed = { "Info.plist": "info", "Renamed": "mach-o-binary", "Frameworks/Lib.framework/Lib": "lib-binary" };
+    const renamed = {
+      "Info.plist": "info",
+      Renamed: "mach-o-binary",
+      "Frameworks/Lib.framework/Lib": "lib-binary",
+    };
     // Same byte contents, different file name → different hash.
     expect(await hashOf(renamed)).not.toBe(await hashOf(baseFiles));
   });
@@ -122,7 +132,7 @@ describe("hashAppBundle", () => {
   });
 
   test("distinguishes two files with swapped contents (position is not conflated)", async () => {
-    const swapped = { ...baseFiles, "Info.plist": "mach-o-binary", "CtrlProxyApp": "info" };
+    const swapped = { ...baseFiles, "Info.plist": "mach-o-binary", CtrlProxyApp: "info" };
     expect(await hashOf(swapped)).not.toBe(await hashOf(baseFiles));
   });
 });

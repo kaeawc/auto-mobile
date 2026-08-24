@@ -18,7 +18,7 @@ describe("accessibilityFocusTools", () => {
 
   function focusTool() {
     return ToolRegistry.getAllTools({ includeUnavailable: true }).find(
-      t => t.name === "accessibilityFocus"
+      (t) => t.name === "accessibilityFocus",
     );
   }
 
@@ -44,9 +44,9 @@ describe("accessibilityFocusTools", () => {
     // default listing and from getToolDefinitions but present when unavailable
     // tools are included. Removing the debugOnly flag would leak it to every
     // client.
-    const defaultNames = ToolRegistry.getAllTools().map(t => t.name);
-    const allNames = ToolRegistry.getAllTools({ includeUnavailable: true }).map(t => t.name);
-    const advertisedNames = ToolRegistry.getToolDefinitions().map(t => t.name);
+    const defaultNames = ToolRegistry.getAllTools().map((t) => t.name);
+    const allNames = ToolRegistry.getAllTools({ includeUnavailable: true }).map((t) => t.name);
+    const advertisedNames = ToolRegistry.getToolDefinitions().map((t) => t.name);
 
     expect(allNames).toContain("accessibilityFocus");
     expect(defaultNames).not.toContain("accessibilityFocus");

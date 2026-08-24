@@ -12,7 +12,7 @@ const result = (stdout: string): ExecResult => ({
   stderr: "",
   toString: () => stdout,
   trim: () => stdout.trim(),
-  includes: value => stdout.includes(value),
+  includes: (value) => stdout.includes(value),
 });
 
 const associatedDomains = {
@@ -32,18 +32,23 @@ describe("AppBundleMetadataClient", () => {
     const client = new AppBundleMetadataClient(executor, plist);
     const path = "/tmp/My $(unsafe); app.app";
 
-    await expect(client.readEntitlements({
-      appBundlePath: path,
-      deviceId: "SIM-UDID",
-      bundleId: "com.example.app",
-    })).resolves.toEqual(associatedDomains);
+    await expect(
+      client.readEntitlements({
+        appBundlePath: path,
+        deviceId: "SIM-UDID",
+        bundleId: "com.example.app",
+      }),
+    ).resolves.toEqual(associatedDomains);
 
-    expect(calls).toEqual([{ args: ["-d", "--entitlements", ":-", path], signal: expect.any(AbortSignal) }]);
+    expect(calls).toEqual([
+      { args: ["-d", "--entitlements", ":-", path], signal: expect.any(AbortSignal) },
+    ]);
   });
 
   test("parses signed entitlement metadata into typed values", async () => {
     const executor: CodesignExecutor = {
-      execute: async () => result(`<?xml version="1.0" encoding="UTF-8"?>
+      execute: async () =>
+        result(`<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0"><dict>
 <key>com.apple.developer.associated-domains</key>
 <array><string>applinks:example.com</string></array>
@@ -51,9 +56,11 @@ describe("AppBundleMetadataClient", () => {
     };
 
     const plist: EntitlementPlistReader = { readJsonBytes: async () => associatedDomains };
-    await expect(new AppBundleMetadataClient(executor, plist).readEntitlements({
-      appBundlePath: "/tmp/Signed.app",
-    })).resolves.toEqual(associatedDomains);
+    await expect(
+      new AppBundleMetadataClient(executor, plist).readEntitlements({
+        appBundlePath: "/tmp/Signed.app",
+      }),
+    ).resolves.toEqual(associatedDomains);
   });
 
   test("returns null for an unsigned bundle", async () => {
@@ -66,40 +73,59 @@ describe("AppBundleMetadataClient", () => {
     };
     const plist: EntitlementPlistReader = { readJsonBytes: async () => associatedDomains };
 
-    await expect(new AppBundleMetadataClient(executor, plist).readEntitlements({
-      appBundlePath: "/tmp/Unsigned.app",
-    })).resolves.toBeNull();
+    await expect(
+      new AppBundleMetadataClient(executor, plist).readEntitlements({
+        appBundlePath: "/tmp/Unsigned.app",
+      }),
+    ).resolves.toBeNull();
   });
 
   test("returns an actionable redacted error when codesign is unavailable", async () => {
-    const executor: CodesignExecutor = { execute: async () => { throw new Error("spawn codesign ENOENT /tmp/secret.app"); } };
+    const executor: CodesignExecutor = {
+      execute: async () => {
+        throw new Error("spawn codesign ENOENT /tmp/secret.app");
+      },
+    };
     const plist: EntitlementPlistReader = { readJsonBytes: async () => associatedDomains };
 
-    await expect(new AppBundleMetadataClient(executor, plist).readEntitlements({
-      appBundlePath: "/tmp/secret.app",
-    })).rejects.toThrow("Confirm Xcode command-line tools are installed");
+    await expect(
+      new AppBundleMetadataClient(executor, plist).readEntitlements({
+        appBundlePath: "/tmp/secret.app",
+      }),
+    ).rejects.toThrow("Confirm Xcode command-line tools are installed");
   });
 
   test("redacts malformed entitlement output and artifact paths from errors", async () => {
     const executor: CodesignExecutor = { execute: async () => result("not a plist") };
 
-    const malformedPlist: EntitlementPlistReader = { readJsonBytes: async () => { throw new Error("malformed"); } };
-    await expect(new AppBundleMetadataClient(executor, malformedPlist).readEntitlements({
-      appBundlePath: "/tmp/secret.app",
-    })).rejects.toThrow("Unable to parse app-bundle entitlements");
-    await expect(new AppBundleMetadataClient(executor, malformedPlist).readEntitlements({
-      appBundlePath: "/tmp/secret.app",
-    })).rejects.not.toThrow("secret.app");
+    const malformedPlist: EntitlementPlistReader = {
+      readJsonBytes: async () => {
+        throw new Error("malformed");
+      },
+    };
+    await expect(
+      new AppBundleMetadataClient(executor, malformedPlist).readEntitlements({
+        appBundlePath: "/tmp/secret.app",
+      }),
+    ).rejects.toThrow("Unable to parse app-bundle entitlements");
+    await expect(
+      new AppBundleMetadataClient(executor, malformedPlist).readEntitlements({
+        appBundlePath: "/tmp/secret.app",
+      }),
+    ).rejects.not.toThrow("secret.app");
   });
 
   test("aborts the owned command when the timeout expires", async () => {
     const timer = new FakeTimer();
     let commandSignal: AbortSignal | undefined;
     const executor: CodesignExecutor = {
-      execute: async (_args, signal) => new Promise<ExecResult>((_resolve, reject) => {
-        commandSignal = signal;
-        signal?.addEventListener("abort", () => reject(new Error("child aborted")), { once: true });
-      }),
+      execute: async (_args, signal) =>
+        new Promise<ExecResult>((_resolve, reject) => {
+          commandSignal = signal;
+          signal?.addEventListener("abort", () => reject(new Error("child aborted")), {
+            once: true,
+          });
+        }),
     };
     const plist: EntitlementPlistReader = { readJsonBytes: async () => associatedDomains };
     const promise = new AppBundleMetadataClient(executor, plist, timer).readEntitlements({
@@ -117,10 +143,13 @@ describe("AppBundleMetadataClient", () => {
     const controller = new AbortController();
     let commandSignal: AbortSignal | undefined;
     const executor: CodesignExecutor = {
-      execute: async (_args, signal) => new Promise<ExecResult>((_resolve, reject) => {
-        commandSignal = signal;
-        signal?.addEventListener("abort", () => reject(new Error("child aborted")), { once: true });
-      }),
+      execute: async (_args, signal) =>
+        new Promise<ExecResult>((_resolve, reject) => {
+          commandSignal = signal;
+          signal?.addEventListener("abort", () => reject(new Error("child aborted")), {
+            once: true,
+          });
+        }),
     };
     const plist: EntitlementPlistReader = { readJsonBytes: async () => associatedDomains };
     const promise = new AppBundleMetadataClient(executor, plist).readEntitlements({

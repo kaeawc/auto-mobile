@@ -51,7 +51,7 @@ describe("startStartupMaintenance", () => {
 
     await Promise.resolve();
 
-    expect(log.at("warn").map(message => message.message)).toEqual([
+    expect(log.at("warn").map((message) => message.message)).toEqual([
       expect.stringContaining("Android CtrlProxy prefetch cleanup failed"),
     ]);
   });
@@ -69,7 +69,7 @@ describe("startStartupMaintenance", () => {
     });
     timer.advanceTime(STARTUP_MAINTENANCE_SLOW_WARNING_MS);
 
-    expect(log.at("warn").map(message => message.message)).toEqual([
+    expect(log.at("warn").map((message) => message.message)).toEqual([
       expect.stringContaining("Android CtrlProxy prefetch cleanup exceeded"),
     ]);
   });

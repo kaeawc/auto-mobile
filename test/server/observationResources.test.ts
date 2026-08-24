@@ -13,10 +13,7 @@ import {
   setSessionScreenshotResourceDependencies,
   setScreenshotFileSystem,
 } from "../../src/server/observationResources";
-import {
-  ResourceRegistry,
-  type ResourceReadContext,
-} from "../../src/server/resourceRegistry";
+import { ResourceRegistry, type ResourceReadContext } from "../../src/server/resourceRegistry";
 import {
   clearDirectSessionDevices,
   registerDirectSessionDevice,
@@ -36,10 +33,7 @@ function activeSession(device: BootedDevice = sessionDevice) {
   return { sessionUuid, device };
 }
 
-function readTemplate(
-  uri: string,
-  context: ResourceReadContext = { sessionUuid },
-) {
+function readTemplate(uri: string, context: ResourceReadContext = { sessionUuid }) {
   registerObservationResources();
   const match = ResourceRegistry.matchTemplate(uri);
   expect(match).toBeDefined();
@@ -66,11 +60,7 @@ function createTrackedScreenshot(
       return "hash";
     },
     startTrackedCapture(_options, trackerOptions) {
-      return ScreenshotJobTracker.startJob(
-        deviceId,
-        async () => result,
-        trackerOptions,
-      );
+      return ScreenshotJobTracker.startJob(deviceId, async () => result, trackerOptions);
     },
   };
 }
@@ -89,7 +79,9 @@ describe("session screenshot resources", () => {
     expect(ResourceRegistry.getTemplate(RESOURCE_URIS.SESSION_OBSERVATION)).toBeDefined();
     expect(ResourceRegistry.getTemplate(RESOURCE_URIS.SESSION_SCREENSHOT)).toBeDefined();
     expect(ResourceRegistry.getTemplate(RESOURCE_URIS.FRESH_SESSION_SCREENSHOT)).toBeDefined();
-    expect(ResourceRegistry.getTemplate("automobile:observation/{deviceId}/latest")).toBeUndefined();
+    expect(
+      ResourceRegistry.getTemplate("automobile:observation/{deviceId}/latest"),
+    ).toBeUndefined();
   });
 
   test("does not expose another device's cached observation through a session path", async () => {
@@ -98,7 +90,10 @@ describe("session screenshot resources", () => {
       name: "Pixel 10",
       platform: "android",
     };
-    const observeScreen = new RealObserveScreen(otherDevice, new FakeAdbClientFactory(new FakeAdbExecutor()));
+    const observeScreen = new RealObserveScreen(
+      otherDevice,
+      new FakeAdbClientFactory(new FakeAdbExecutor()),
+    );
     const observed: ObserveResult = {
       ...observeScreen.createBaseResult(),
       viewHierarchy: "only-other-device",
@@ -109,13 +104,13 @@ describe("session screenshot resources", () => {
       createScreenshotService: () => createTrackedScreenshot({ success: false }),
     });
 
-    const content = await readTemplate(
-      "automobile:observation/session/session-123/latest",
-    );
+    const content = await readTemplate("automobile:observation/session/session-123/latest");
 
     expect(content.uri).toBe("automobile:observation/session/session-123/latest");
     expect(content.mimeType).toBe("application/json");
-    expect(JSON.parse(content.text!).error).toContain("No observation available for sessionUuid session-123");
+    expect(JSON.parse(content.text!).error).toContain(
+      "No observation available for sessionUuid session-123",
+    );
   });
 
   test("resolves a direct-mode session registered by startDevice", async () => {
@@ -130,9 +125,7 @@ describe("session screenshot resources", () => {
     await observeScreen.cacheObserveResult(observed);
     registerDirectSessionDevice(sessionUuid, sessionDevice);
 
-    const content = await readTemplate(
-      "automobile:observation/session/session-123/latest",
-    );
+    const content = await readTemplate("automobile:observation/session/session-123/latest");
 
     expect(JSON.parse(content.text!).viewHierarchy).toBe("direct-mode-session");
   });
@@ -176,10 +169,7 @@ describe("session screenshot resources", () => {
       createScreenshotService: () => createTrackedScreenshot({ success: true }),
     });
 
-    const content = await readTemplate(
-      "automobile:observation/session/session-123/latest",
-      {},
-    );
+    const content = await readTemplate("automobile:observation/session/session-123/latest", {});
 
     expect(JSON.parse(content.text!).error).toContain("bound device session");
     expect(resolveCalls).toBe(0);
@@ -190,7 +180,7 @@ describe("session screenshot resources", () => {
     let captureDevice: BootedDevice | undefined;
     setSessionScreenshotResourceDependencies({
       resolveActiveSession: () => activeSession(),
-      createScreenshotService: device => {
+      createScreenshotService: (device) => {
         captureDevice = device;
         return createTrackedScreenshot({ success: true, path: "/tmp/fresh.png" });
       },
@@ -200,9 +190,7 @@ describe("session screenshot resources", () => {
       readFile: async () => image,
     });
 
-    const content = await readTemplate(
-      "automobile:device-session/session-123/screenshot",
-    );
+    const content = await readTemplate("automobile:device-session/session-123/screenshot");
 
     expect(captureDevice).toEqual(sessionDevice);
     expect(content).toEqual({
@@ -214,7 +202,7 @@ describe("session screenshot resources", () => {
 
   test("waits for a pending capture before taking a distinct fresh capture", async () => {
     let resolvePendingCapture: (result: ScreenshotResult) => void = () => {};
-    const pendingCapture = new Promise<ScreenshotResult>(resolve => {
+    const pendingCapture = new Promise<ScreenshotResult>((resolve) => {
       resolvePendingCapture = resolve;
     });
     ScreenshotJobTracker.startJob(sessionDevice.deviceId, async () => pendingCapture);
@@ -244,9 +232,7 @@ describe("session screenshot resources", () => {
       readFile: async () => image,
     });
 
-    const contentPromise = readTemplate(
-      "automobile:device-session/session-123/screenshot",
-    );
+    const contentPromise = readTemplate("automobile:device-session/session-123/screenshot");
     await Promise.resolve();
     expect(freshCaptureCount).toBe(0);
 
@@ -276,10 +262,10 @@ describe("session screenshot resources", () => {
       }),
     });
 
-    await readTemplate(
-      "automobile:device-session/session-123/screenshot",
-      { sessionUuid, signal: controller.signal },
-    );
+    await readTemplate("automobile:device-session/session-123/screenshot", {
+      sessionUuid,
+      signal: controller.signal,
+    });
 
     expect(receivedSignal).toBe(controller.signal);
   });
@@ -291,15 +277,14 @@ describe("session screenshot resources", () => {
         reads += 1;
         return reads === 1 ? activeSession() : undefined;
       },
-      createScreenshotService: () => createTrackedScreenshot({
-        success: true,
-        path: "/tmp/fresh.png",
-      }),
+      createScreenshotService: () =>
+        createTrackedScreenshot({
+          success: true,
+          path: "/tmp/fresh.png",
+        }),
     });
 
-    const content = await readTemplate(
-      "automobile:device-session/session-123/screenshot",
-    );
+    const content = await readTemplate("automobile:device-session/session-123/screenshot");
 
     expect(content.mimeType).toBe("application/json");
     expect(JSON.parse(content.text!).error).toContain("No active device session found");

@@ -57,7 +57,7 @@ export function encodePtsAndFlags(
     isConfig = false,
     isKeyFrame = false,
     rotation = null,
-  }: { isConfig?: boolean; isKeyFrame?: boolean; rotation?: number | null } = {}
+  }: { isConfig?: boolean; isKeyFrame?: boolean; rotation?: number | null } = {},
 ): bigint {
   let ptsAndFlags = presentationTimeUs & PTS_MASK;
   if (isConfig) {

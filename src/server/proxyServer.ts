@@ -48,9 +48,7 @@ function sessionOwnershipLostMessage(error: DaemonBoundSessionExpiredError): str
   return JSON.stringify(sessionOwnershipLostPayload(error));
 }
 
-function sessionOwnershipLostResult(
-  error: DaemonBoundSessionExpiredError,
-): CallToolResult {
+function sessionOwnershipLostResult(error: DaemonBoundSessionExpiredError): CallToolResult {
   return {
     content: [
       {
@@ -67,9 +65,7 @@ function sessionOwnershipLostError(error: DaemonBoundSessionExpiredError): McpEr
   return new McpError(-32603, sessionOwnershipLostMessage(error), payload);
 }
 
-function deviceControlTransportFailureResult(
-  error: DeviceControlTransportError,
-): CallToolResult {
+function deviceControlTransportFailureResult(error: DeviceControlTransportError): CallToolResult {
   const failure = sanitizeDeviceControlTransportFailure(error.failure);
   return {
     content: [
@@ -108,23 +104,26 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   const proxy = new DaemonMcpProxy(options.proxyConfig);
 
   // Create the MCP server
-  const server = new McpServer({
-    name: "AutoMobile",
-    version: getMcpServerVersion(),
-  }, {
-    capabilities: {
-      resources: {},
-      tools: {},
-      prompts: {},
+  const server = new McpServer(
+    {
+      name: "AutoMobile",
+      version: getMcpServerVersion(),
     },
-  });
+    {
+      capabilities: {
+        resources: {},
+        tools: {},
+        prompts: {},
+      },
+    },
+  );
 
   // Forward daemon-emitted list-changed notifications to the external client
   // (issue #3223): the proxy has already invalidated its matching cache, so a
   // client re-fetch after this notification returns fresh definitions. The
   // McpServer send helpers are no-ops until a transport connects, and the
   // try/catch keeps a mid-teardown transport from breaking the forward path.
-  proxy.onListChanged(kind => {
+  proxy.onListChanged((kind) => {
     try {
       if (kind === "tools") {
         server.sendToolListChanged();
@@ -145,7 +144,8 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
   });
 
   // Register prompts list handler (returns empty list)
-  const ListPromptsRequestSchema = require("@modelcontextprotocol/sdk/types.js").ListPromptsRequestSchema;
+  const ListPromptsRequestSchema =
+    require("@modelcontextprotocol/sdk/types.js").ListPromptsRequestSchema;
   server.server.setRequestHandler(ListPromptsRequestSchema, async () => {
     return {
       prompts: [],
@@ -162,14 +162,12 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         throw sessionOwnershipLostError(error);
       }
       logger.error(`[ProxyServer] Failed to list tools: ${error}`);
-      throw new ActionableError(
-        `Failed to list tools from daemon: ${errorMessage(error)}`
-      );
+      throw new ActionableError(`Failed to list tools from daemon: ${errorMessage(error)}`);
     }
   });
 
   // Register tools/call handler - forward to daemon
-  server.server.setRequestHandler(CallToolRequestSchema, async request => {
+  server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const name = request.params.name;
     const args = (request.params.arguments || {}) as Record<string, unknown>;
 
@@ -219,9 +217,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         throw sessionOwnershipLostError(error);
       }
       logger.error(`[ProxyServer] Failed to list resources: ${error}`);
-      throw new ActionableError(
-        `Failed to list resources from daemon: ${errorMessage(error)}`
-      );
+      throw new ActionableError(`Failed to list resources from daemon: ${errorMessage(error)}`);
     }
   });
 
@@ -236,13 +232,13 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       }
       logger.error(`[ProxyServer] Failed to list resource templates: ${error}`);
       throw new ActionableError(
-        `Failed to list resource templates from daemon: ${errorMessage(error)}`
+        `Failed to list resource templates from daemon: ${errorMessage(error)}`,
       );
     }
   });
 
   // Register resources/read handler - forward to daemon
-  server.server.setRequestHandler(ReadResourceRequestSchema, async request => {
+  server.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     const uri = request.params.uri;
 
     if (!uri) {
@@ -259,9 +255,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         throw sessionOwnershipLostError(error);
       }
       logger.error(`[ProxyServer] Resource read failed: ${uri} - ${error}`);
-      throw new ActionableError(
-        `Failed to read resource from daemon: ${errorMessage(error)}`
-      );
+      throw new ActionableError(`Failed to read resource from daemon: ${errorMessage(error)}`);
     }
   });
 

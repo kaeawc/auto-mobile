@@ -60,10 +60,14 @@ describe("ClearAppData", () => {
   describe("ios", () => {
     // Simulator UDIDs are standard 8-4-4-4-12 hex UUIDs; physical device UDIDs are not.
     const simDevice: BootedDevice = {
-      name: "ios-sim", platform: "ios", deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
+      name: "ios-sim",
+      platform: "ios",
+      deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
     };
     const physicalDevice: BootedDevice = {
-      name: "iphone", platform: "ios", deviceId: "00008030-001A2B3C0E11002E"
+      name: "iphone",
+      platform: "ios",
+      deviceId: "00008030-001A2B3C0E11002E",
     };
     const bundleId = "com.example.app";
     const tempDirs: string[] = [];
@@ -91,11 +95,15 @@ describe("ClearAppData", () => {
         const fakeSimctl = new FakeSimCtlClient();
         fakeSimctl.setContainerPath(bundleId, container);
 
-        const result = await new ClearAppData(simDevice, undefined, fakeSimctl as any).execute(bundleId);
+        const result = await new ClearAppData(simDevice, undefined, fakeSimctl as any).execute(
+          bundleId,
+        );
 
         expect(result.success).toBe(true);
         expect(result.packageName).toBe(bundleId);
-        expect(fakeSimctl.getMethodCalls("terminateApp")).toEqual([{ bundleId, deviceId: simDevice.deviceId }]);
+        expect(fakeSimctl.getMethodCalls("terminateApp")).toEqual([
+          { bundleId, deviceId: simDevice.deviceId },
+        ]);
         await expect(fs.access(path.join(container, "Documents"))).rejects.toThrow();
         await expect(fs.access(path.join(container, "Library"))).rejects.toThrow();
         await expect(fs.access(path.join(container, "tmp"))).rejects.toThrow();
@@ -105,7 +113,9 @@ describe("ClearAppData", () => {
 
       test("returns failure when the data container cannot be resolved", async () => {
         const fakeSimctl = new FakeSimCtlClient();
-        const result = await new ClearAppData(simDevice, undefined, fakeSimctl as any).execute(bundleId);
+        const result = await new ClearAppData(simDevice, undefined, fakeSimctl as any).execute(
+          bundleId,
+        );
         expect(result.success).toBe(false);
         expect(result.error).toContain("data container");
       });
@@ -116,10 +126,17 @@ describe("ClearAppData", () => {
         const fakeSimctl = new FakeSimCtlClient();
         const calls: Array<[string, string]> = [];
         const reinstaller: IosAppReinstaller = {
-          clearAppDataViaReinstall: async (deviceUdid, id) => { calls.push([deviceUdid, id]); },
+          clearAppDataViaReinstall: async (deviceUdid, id) => {
+            calls.push([deviceUdid, id]);
+          },
         };
 
-        const result = await new ClearAppData(physicalDevice, undefined, fakeSimctl as any, reinstaller).execute(bundleId);
+        const result = await new ClearAppData(
+          physicalDevice,
+          undefined,
+          fakeSimctl as any,
+          reinstaller,
+        ).execute(bundleId);
 
         expect(result.success).toBe(true);
         expect(calls).toEqual([[physicalDevice.deviceId, bundleId]]);
@@ -130,10 +147,17 @@ describe("ClearAppData", () => {
       test("returns failure when reinstall throws", async () => {
         const fakeSimctl = new FakeSimCtlClient();
         const reinstaller: IosAppReinstaller = {
-          clearAppDataViaReinstall: async () => { throw new Error("device offline"); },
+          clearAppDataViaReinstall: async () => {
+            throw new Error("device offline");
+          },
         };
 
-        const result = await new ClearAppData(physicalDevice, undefined, fakeSimctl as any, reinstaller).execute(bundleId);
+        const result = await new ClearAppData(
+          physicalDevice,
+          undefined,
+          fakeSimctl as any,
+          reinstaller,
+        ).execute(bundleId);
 
         expect(result.success).toBe(false);
         expect(result.error).toContain("device offline");

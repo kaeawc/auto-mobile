@@ -21,7 +21,7 @@ export function resolveImageBackend(options: ResolveImageBackendOptions = {}): I
   if (platform === "darwin" || platform === "linux") {
     return new SharpBackend({
       loadSharp: options.sharpLoader,
-      fallbackBackend: new JimpBackend()
+      fallbackBackend: new JimpBackend(),
     });
   }
   return new JimpBackend();

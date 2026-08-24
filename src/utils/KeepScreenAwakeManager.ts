@@ -1,5 +1,8 @@
 import { BootedDevice } from "../models";
-import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "./logger";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
@@ -45,7 +48,9 @@ export class KeepScreenAwakeManager {
       return { applied: false, skipReason: "emulator" };
     }
     if (deviceType === "unknown") {
-      logger.warn(`[KeepScreenAwake] Unable to detect device type for ${this.device.deviceId}; skipping keep-awake`);
+      logger.warn(
+        `[KeepScreenAwake] Unable to detect device type for ${this.device.deviceId}; skipping keep-awake`,
+      );
       return { applied: false, skipReason: "detection_failed" };
     }
 
@@ -57,7 +62,7 @@ export class KeepScreenAwakeManager {
         applied: true,
         method: "svc",
         svcWasEnabled: svcState.enabled,
-        originalStayOnWhilePluggedIn: svcState.value
+        originalStayOnWhilePluggedIn: svcState.value,
       };
     }
 
@@ -72,7 +77,7 @@ export class KeepScreenAwakeManager {
       method: "settings",
       originalStayOnWhilePluggedIn: settingsResult.originalStayOnWhilePluggedIn,
       originalScreenOffTimeout: settingsResult.originalScreenOffTimeout,
-      appliedSettings: settingsResult.appliedSettings
+      appliedSettings: settingsResult.appliedSettings,
     };
   }
 
@@ -87,26 +92,32 @@ export class KeepScreenAwakeManager {
         const restored = await this.restoreSetting(
           "global",
           "stay_on_while_plugged_in",
-          state.originalStayOnWhilePluggedIn
+          state.originalStayOnWhilePluggedIn,
         );
         if (restored) {
           return;
         }
         if (originalEnabled !== false) {
           if (originalEnabled === undefined) {
-            logger.warn(`[KeepScreenAwake] Skipping svc stayon restore on ${this.device.deviceId}: prior state unknown`);
+            logger.warn(
+              `[KeepScreenAwake] Skipping svc stayon restore on ${this.device.deviceId}: prior state unknown`,
+            );
           }
           return;
         }
         try {
           await this.adb.executeCommand("shell svc power stayon false");
         } catch (error) {
-          logger.warn(`[KeepScreenAwake] Failed to disable svc stayon on ${this.device.deviceId}: ${error}`);
+          logger.warn(
+            `[KeepScreenAwake] Failed to disable svc stayon on ${this.device.deviceId}: ${error}`,
+          );
         }
         return;
       }
       if (state.svcWasEnabled === undefined) {
-        logger.warn(`[KeepScreenAwake] Skipping svc stayon restore on ${this.device.deviceId}: prior state unknown`);
+        logger.warn(
+          `[KeepScreenAwake] Skipping svc stayon restore on ${this.device.deviceId}: prior state unknown`,
+        );
         return;
       }
       if (state.svcWasEnabled) {
@@ -115,7 +126,9 @@ export class KeepScreenAwakeManager {
       try {
         await this.adb.executeCommand("shell svc power stayon false");
       } catch (error) {
-        logger.warn(`[KeepScreenAwake] Failed to disable svc stayon on ${this.device.deviceId}: ${error}`);
+        logger.warn(
+          `[KeepScreenAwake] Failed to disable svc stayon on ${this.device.deviceId}: ${error}`,
+        );
       }
       return;
     }
@@ -128,16 +141,12 @@ export class KeepScreenAwakeManager {
       await this.restoreSetting(
         "global",
         "stay_on_while_plugged_in",
-        state.originalStayOnWhilePluggedIn
+        state.originalStayOnWhilePluggedIn,
       );
     }
 
     if (state.appliedSettings.screenOffTimeout) {
-      await this.restoreSetting(
-        "system",
-        "screen_off_timeout",
-        state.originalScreenOffTimeout
-      );
+      await this.restoreSetting("system", "screen_off_timeout", state.originalScreenOffTimeout);
     }
   }
 
@@ -151,7 +160,7 @@ export class KeepScreenAwakeManager {
         "shell getprop ro.kernel.qemu",
         undefined,
         undefined,
-        true
+        true,
       );
       const trimmed = result.stdout.trim();
       if (trimmed === "1") {
@@ -161,11 +170,13 @@ export class KeepScreenAwakeManager {
         return "physical";
       }
       logger.warn(
-        `[KeepScreenAwake] Unexpected ro.kernel.qemu value "${trimmed}" on ${this.device.deviceId}`
+        `[KeepScreenAwake] Unexpected ro.kernel.qemu value "${trimmed}" on ${this.device.deviceId}`,
       );
       return "unknown";
     } catch (error) {
-      logger.warn(`[KeepScreenAwake] Failed to read ro.kernel.qemu on ${this.device.deviceId}: ${error}`);
+      logger.warn(
+        `[KeepScreenAwake] Failed to read ro.kernel.qemu on ${this.device.deviceId}: ${error}`,
+      );
       return "unknown";
     }
   }
@@ -183,7 +194,9 @@ export class KeepScreenAwakeManager {
       await this.adb.executeCommand("shell svc power stayon true");
       return true;
     } catch (error) {
-      logger.info(`[KeepScreenAwake] svc power stayon failed on ${this.device.deviceId}, falling back: ${error}`);
+      logger.info(
+        `[KeepScreenAwake] svc power stayon failed on ${this.device.deviceId}, falling back: ${error}`,
+      );
       return false;
     }
   }
@@ -197,32 +210,44 @@ export class KeepScreenAwakeManager {
       screenOffTimeout: boolean;
     };
   }> {
-    const originalStayOnWhilePluggedIn = await this.readSetting("global", "stay_on_while_plugged_in");
+    const originalStayOnWhilePluggedIn = await this.readSetting(
+      "global",
+      "stay_on_while_plugged_in",
+    );
     const originalScreenOffTimeout = await this.readSetting("system", "screen_off_timeout");
     const appliedSettings = {
       stayOnWhilePluggedIn: false,
-      screenOffTimeout: false
+      screenOffTimeout: false,
     };
 
     try {
-      await this.putSetting("global", "stay_on_while_plugged_in", STAY_ON_WHILE_PLUGGED_IN_MASK, "int");
+      await this.putSetting(
+        "global",
+        "stay_on_while_plugged_in",
+        STAY_ON_WHILE_PLUGGED_IN_MASK,
+        "int",
+      );
       appliedSettings.stayOnWhilePluggedIn = true;
     } catch (error) {
-      logger.warn(`[KeepScreenAwake] Failed to set stay_on_while_plugged_in on ${this.device.deviceId}: ${error}`);
+      logger.warn(
+        `[KeepScreenAwake] Failed to set stay_on_while_plugged_in on ${this.device.deviceId}: ${error}`,
+      );
     }
 
     try {
       await this.putSetting("system", "screen_off_timeout", MAX_SCREEN_OFF_TIMEOUT_MS, "long");
       appliedSettings.screenOffTimeout = true;
     } catch (error) {
-      logger.warn(`[KeepScreenAwake] Failed to set screen_off_timeout on ${this.device.deviceId}: ${error}`);
+      logger.warn(
+        `[KeepScreenAwake] Failed to set screen_off_timeout on ${this.device.deviceId}: ${error}`,
+      );
     }
 
     return {
       applied: appliedSettings.stayOnWhilePluggedIn || appliedSettings.screenOffTimeout,
       originalStayOnWhilePluggedIn,
       originalScreenOffTimeout,
-      appliedSettings
+      appliedSettings,
     };
   }
 
@@ -233,7 +258,7 @@ export class KeepScreenAwakeManager {
     const value = await this.readSetting("global", "stay_on_while_plugged_in");
     return {
       value,
-      enabled: this.parseStayOnWhilePluggedIn(value)
+      enabled: this.parseStayOnWhilePluggedIn(value),
     };
   }
 
@@ -260,7 +285,7 @@ export class KeepScreenAwakeManager {
 
   private async readSetting(
     scope: "global" | "system",
-    key: string
+    key: string,
   ): Promise<string | null | undefined> {
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
@@ -271,20 +296,27 @@ export class KeepScreenAwakeManager {
           return null;
         }
         const trimmed = value.trim();
-        return (!trimmed || trimmed === "null") ? null : trimmed;
+        return !trimmed || trimmed === "null" ? null : trimmed;
       }
     } catch (error) {
       logger.debug(`[KeepScreenAwake] a11y settings get failed for ${scope}/${key}: ${error}`);
     }
     try {
-      const result = await this.adb.executeCommand(`shell settings get ${scope} ${key}`, undefined, undefined, true);
+      const result = await this.adb.executeCommand(
+        `shell settings get ${scope} ${key}`,
+        undefined,
+        undefined,
+        true,
+      );
       const trimmed = result.stdout.trim();
       if (!trimmed || trimmed === "null") {
         return null;
       }
       return trimmed;
     } catch (error) {
-      logger.warn(`[KeepScreenAwake] Failed to read ${scope} ${key} on ${this.device.deviceId}: ${error}`);
+      logger.warn(
+        `[KeepScreenAwake] Failed to read ${scope} ${key} on ${this.device.deviceId}: ${error}`,
+      );
       return undefined;
     }
   }
@@ -293,7 +325,7 @@ export class KeepScreenAwakeManager {
     scope: "global" | "system",
     key: string,
     value: string,
-    valueType: "string" | "int" | "long" | "float" = "string"
+    valueType: "string" | "int" | "long" | "float" = "string",
   ): Promise<void> {
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
@@ -307,10 +339,7 @@ export class KeepScreenAwakeManager {
     await this.adb.executeCommand(`shell settings put ${scope} ${key} ${value}`);
   }
 
-  private async deleteSetting(
-    scope: "global" | "system",
-    key: string
-  ): Promise<void> {
+  private async deleteSetting(scope: "global" | "system", key: string): Promise<void> {
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
       const a11yResult = await a11y.requestSettingsPut(scope, key, null);
@@ -326,10 +355,12 @@ export class KeepScreenAwakeManager {
   private async restoreSetting(
     scope: "global" | "system",
     key: string,
-    originalValue?: string | null
+    originalValue?: string | null,
   ): Promise<boolean> {
     if (originalValue === undefined) {
-      logger.warn(`[KeepScreenAwake] Missing original ${scope} ${key} for ${this.device.deviceId}; skipping restore`);
+      logger.warn(
+        `[KeepScreenAwake] Missing original ${scope} ${key} for ${this.device.deviceId}; skipping restore`,
+      );
       return false;
     }
 
@@ -341,7 +372,9 @@ export class KeepScreenAwakeManager {
       }
       return true;
     } catch (error) {
-      logger.warn(`[KeepScreenAwake] Failed to restore ${scope} ${key} on ${this.device.deviceId}: ${error}`);
+      logger.warn(
+        `[KeepScreenAwake] Failed to restore ${scope} ${key} on ${this.device.deviceId}: ${error}`,
+      );
       return false;
     }
   }

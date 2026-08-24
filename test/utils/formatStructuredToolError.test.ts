@@ -3,10 +3,12 @@ import { formatStructuredToolError } from "../../src/utils/formatStructuredToolE
 
 describe("formatStructuredToolError", () => {
   test("renders a structured {code, message} error as 'code: message'", () => {
-    expect(formatStructuredToolError({
-      code: "device_already_stopped",
-      message: "Emulator is not running",
-    })).toBe("device_already_stopped: Emulator is not running");
+    expect(
+      formatStructuredToolError({
+        code: "device_already_stopped",
+        message: "Emulator is not running",
+      }),
+    ).toBe("device_already_stopped: Emulator is not running");
   });
 
   test("returns a plain string error unchanged", () => {

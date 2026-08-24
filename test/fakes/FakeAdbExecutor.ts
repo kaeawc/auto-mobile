@@ -47,7 +47,7 @@ export class FakeAdbExecutor implements AdbExecutor {
       stderr,
       toString: () => stdout,
       trim: () => stdout.trim(),
-      includes: (searchString: string) => stdout.includes(searchString)
+      includes: (searchString: string) => stdout.includes(searchString),
     };
   }
 
@@ -62,9 +62,18 @@ export class FakeAdbExecutor implements AdbExecutor {
     return {
       stdout,
       stderr,
-      toString: typeof response.toString === "function" && response.toString !== Object.prototype.toString ? response.toString.bind(response) : () => stdout,
-      trim: typeof response.trim === "function" && response.trim !== String.prototype.trim ? response.trim.bind(response) : () => stdout.trim(),
-      includes: typeof response.includes === "function" && response.includes !== String.prototype.includes ? response.includes.bind(response) : (searchString: string) => stdout.includes(searchString)
+      toString:
+        typeof response.toString === "function" && response.toString !== Object.prototype.toString
+          ? response.toString.bind(response)
+          : () => stdout,
+      trim:
+        typeof response.trim === "function" && response.trim !== String.prototype.trim
+          ? response.trim.bind(response)
+          : () => stdout.trim(),
+      includes:
+        typeof response.includes === "function" && response.includes !== String.prototype.includes
+          ? response.includes.bind(response)
+          : (searchString: string) => stdout.includes(searchString),
     };
   }
 
@@ -89,7 +98,7 @@ export class FakeAdbExecutor implements AdbExecutor {
   setCommandResponseSequence(commandPattern: string, responses: ExecResult[]): void {
     this.commandResponseSequences.set(
       commandPattern,
-      responses.map(response => this.ensureExecResultMethods(response))
+      responses.map((response) => this.ensureExecResultMethods(response)),
     );
   }
 
@@ -166,7 +175,7 @@ export class FakeAdbExecutor implements AdbExecutor {
    * @returns Array of argv arrays, in call order
    */
   getExecutedArgv(): string[][] {
-    return this.executedArgv.map(args => [...args]);
+    return this.executedArgv.map((args) => [...args]);
   }
 
   getCommandCalls(): Array<{
@@ -185,7 +194,7 @@ export class FakeAdbExecutor implements AdbExecutor {
    * @returns true if any executed command contains the pattern
    */
   wasCommandExecuted(pattern: string): boolean {
-    return this.executedCommands.some(cmd => cmd.includes(pattern));
+    return this.executedCommands.some((cmd) => cmd.includes(pattern));
   }
 
   /**
@@ -237,7 +246,7 @@ export class FakeAdbExecutor implements AdbExecutor {
       options.timeoutMs,
       options.maxBuffer,
       options.noRetry,
-      options.signal
+      options.signal,
     );
   }
 
@@ -246,7 +255,7 @@ export class FakeAdbExecutor implements AdbExecutor {
     timeoutMs?: number,
     maxBuffer?: number,
     noRetry?: boolean,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<ExecResult> {
     this.executedCommands.push(command);
     this.commandCalls.push({ command, timeoutMs, maxBuffer, noRetry, signal });
@@ -285,7 +294,10 @@ export class FakeAdbExecutor implements AdbExecutor {
     return this.devices;
   }
 
-  async getDeviceStates(_options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<AdbDeviceState[]> {
+  async getDeviceStates(_options?: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  }): Promise<AdbDeviceState[]> {
     return this.deviceStates;
   }
 

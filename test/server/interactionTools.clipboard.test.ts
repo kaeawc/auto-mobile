@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { clipboardSchema, formatClipboardMessage, formatRecentAppsMessage, registerInteractionTools } from "../../src/server/interactionTools";
+import {
+  clipboardSchema,
+  formatClipboardMessage,
+  formatRecentAppsMessage,
+  registerInteractionTools,
+} from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
 describe("clipboard tool schema", () => {
@@ -49,8 +54,9 @@ describe("clipboard tool schema", () => {
   });
 
   test("keeps generated tool definition free of top-level combinators", () => {
-    const toolDefinition = ToolRegistry.getToolDefinitions()
-      .find(tool => tool.name === "clipboard");
+    const toolDefinition = ToolRegistry.getToolDefinitions().find(
+      (tool) => tool.name === "clipboard",
+    );
 
     expect(toolDefinition).toBeDefined();
     const schema = toolDefinition!.inputSchema as any;
@@ -78,17 +84,21 @@ describe("clipboard tool schema", () => {
   });
 
   test("formats successful get with content preview and empty clipboard message", () => {
-    expect(formatClipboardMessage({
-      success: true,
-      action: "get",
-      text: "hello",
-    })).toBe("Retrieved clipboard content: \"hello\"");
+    expect(
+      formatClipboardMessage({
+        success: true,
+        action: "get",
+        text: "hello",
+      }),
+    ).toBe('Retrieved clipboard content: "hello"');
 
-    expect(formatClipboardMessage({
-      success: true,
-      action: "get",
-      text: "",
-    })).toBe("Retrieved empty clipboard");
+    expect(
+      formatClipboardMessage({
+        success: true,
+        action: "get",
+        text: "",
+      }),
+    ).toBe("Retrieved empty clipboard");
   });
 
   test("formats failed recentApps without success wording", () => {
@@ -97,7 +107,9 @@ describe("clipboard tool schema", () => {
       error: "iOS App Switcher did not appear after recent apps invocation",
     });
 
-    expect(message).toBe("Failed to open recent apps: iOS App Switcher did not appear after recent apps invocation");
+    expect(message).toBe(
+      "Failed to open recent apps: iOS App Switcher did not appear after recent apps invocation",
+    );
     expect(message).not.toContain("Opened recent apps");
   });
 });

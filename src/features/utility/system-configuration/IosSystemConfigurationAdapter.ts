@@ -15,18 +15,11 @@ import type {
   BroadcastOptions,
   SystemConfigurationAdapter,
 } from "../../../utils/interfaces/SystemConfigurationAdapter";
-import {
-  extractCalendarFromLocale,
-  normalizeSettingValue,
-  normalizeTimeFormat,
-} from "./parsing";
-import {
-  buildAppleLanguages,
-  isIosSimulator,
-  parseAppleTimeFormatRaw,
-} from "./iosHelpers";
+import { extractCalendarFromLocale, normalizeSettingValue, normalizeTimeFormat } from "./parsing";
+import { buildAppleLanguages, isIosSimulator, parseAppleTimeFormatRaw } from "./iosHelpers";
 
-const IOS_PHYSICAL_CONFIGURATION_ERROR = "System configuration is not supported on physical iOS devices.";
+const IOS_PHYSICAL_CONFIGURATION_ERROR =
+  "System configuration is not supported on physical iOS devices.";
 const DEFAULT_CALENDAR_SYSTEM = "gregory";
 
 /**
@@ -39,7 +32,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
 
   constructor(
     private readonly device: BootedDevice,
-    private readonly processExecutor: HostCommandExecutor
+    private readonly processExecutor: HostCommandExecutor,
   ) {}
 
   async setLocale(languageTag: string, _options: BroadcastOptions): Promise<SetLocaleResult> {
@@ -54,7 +47,15 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
 
       const languages = this.buildAppleLanguages(languageTag);
       await this.processExecutor.executeCommand("xcrun", [
-        "simctl", "spawn", this.device.deviceId, "defaults", "write", ".GlobalPreferences", "AppleLanguages", "-array", ...languages
+        "simctl",
+        "spawn",
+        this.device.deviceId,
+        "defaults",
+        "write",
+        ".GlobalPreferences",
+        "AppleLanguages",
+        "-array",
+        ...languages,
       ]);
 
       const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleLocale");
@@ -63,7 +64,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
           success: false,
           languageTag,
           previousLanguageTag,
-          error: `Read-back verification failed: expected "${appleLocale}" but got "${readBack ?? "null"}"`
+          error: `Read-back verification failed: expected "${appleLocale}" but got "${readBack ?? "null"}"`,
         };
       }
 
@@ -72,14 +73,14 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
         languageTag,
         previousLanguageTag,
         appliedLanguages: languages,
-        method: "defaults write AppleLocale + AppleLanguages"
+        method: "defaults write AppleLocale + AppleLanguages",
       };
     } catch (error) {
       const errorMsg = errorMessage(error);
       return {
         success: false,
         languageTag,
-        error: `Failed to set locale: ${errorMsg}`
+        error: `Failed to set locale: ${errorMsg}`,
       };
     }
   }
@@ -93,11 +94,10 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       const previousZoneId = await this.iosDefaultsRead(".GlobalPreferences", "AppleTimeZone");
 
       // Disable auto-timezone before setting
-      await this.iosDefaultsWrite(
-        "com.apple.mobiletimerd",
-        "AutomaticTimeZoneSetting",
-        ["-bool", "NO"]
-      );
+      await this.iosDefaultsWrite("com.apple.mobiletimerd", "AutomaticTimeZoneSetting", [
+        "-bool",
+        "NO",
+      ]);
 
       await this.iosDefaultsWrite(".GlobalPreferences", "AppleTimeZone", [zoneId]);
 
@@ -107,30 +107,34 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
           success: false,
           zoneId,
           previousZoneId,
-          error: `Read-back verification failed: expected "${zoneId}" but got "${readBack ?? "null"}"`
+          error: `Read-back verification failed: expected "${zoneId}" but got "${readBack ?? "null"}"`,
         };
       }
 
       return {
         success: true,
         zoneId,
-        previousZoneId
+        previousZoneId,
       };
     } catch (error) {
       const errorMsg = errorMessage(error);
       return {
         success: false,
         zoneId,
-        error: `Failed to set time zone: ${errorMsg}`
+        error: `Failed to set time zone: ${errorMsg}`,
       };
     }
   }
 
-  async setTextDirection(rtl: boolean, _options: BroadcastOptions): Promise<SetTextDirectionResult> {
+  async setTextDirection(
+    rtl: boolean,
+    _options: BroadcastOptions,
+  ): Promise<SetTextDirectionResult> {
     return {
       success: false,
       rtl,
-      error: "Text direction is not supported on iOS. RTL is driven by the app's language; set an RTL locale (e.g., ar_SA) instead."
+      error:
+        "Text direction is not supported on iOS. RTL is driven by the app's language; set an RTL locale (e.g., ar_SA) instead.",
     };
   }
 
@@ -140,14 +144,16 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
     }
 
     try {
-      const previousRaw = await this.iosDefaultsRead(".GlobalPreferences", "AppleICUForce24HourTime");
-      const previousFormat = normalizeTimeFormat(parseAppleTimeFormatRaw(previousRaw));
-
-      await this.iosDefaultsWrite(
+      const previousRaw = await this.iosDefaultsRead(
         ".GlobalPreferences",
         "AppleICUForce24HourTime",
-        ["-bool", enabled ? "YES" : "NO"]
       );
+      const previousFormat = normalizeTimeFormat(parseAppleTimeFormatRaw(previousRaw));
+
+      await this.iosDefaultsWrite(".GlobalPreferences", "AppleICUForce24HourTime", [
+        "-bool",
+        enabled ? "YES" : "NO",
+      ]);
 
       const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleICUForce24HourTime");
       const expectedReadBack = enabled ? "1" : "0";
@@ -156,21 +162,21 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
           success: false,
           enabled,
           previousFormat,
-          error: `Read-back verification failed: expected "${expectedReadBack}" but got "${readBack ?? "null"}"`
+          error: `Read-back verification failed: expected "${expectedReadBack}" but got "${readBack ?? "null"}"`,
         };
       }
 
       return {
         success: true,
         enabled,
-        previousFormat
+        previousFormat,
       };
     } catch (error) {
       const errorMsg = errorMessage(error);
       return {
         success: false,
         enabled,
-        error: `Failed to set 24-hour format: ${errorMsg}`
+        error: `Failed to set 24-hour format: ${errorMsg}`,
       };
     }
   }
@@ -181,7 +187,10 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
     }
 
     try {
-      const previousCalendarSystem = await this.iosDefaultsRead(".GlobalPreferences", "AppleCalendar");
+      const previousCalendarSystem = await this.iosDefaultsRead(
+        ".GlobalPreferences",
+        "AppleCalendar",
+      );
       await this.iosDefaultsWrite(".GlobalPreferences", "AppleCalendar", [calendarSystem]);
       const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleCalendar");
       if (!readBack || readBack !== calendarSystem) {
@@ -189,20 +198,20 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
           success: false,
           calendarSystem: readBack ?? calendarSystem,
           previousCalendarSystem,
-          error: `Read-back verification failed: expected "${calendarSystem}" but got "${readBack ?? "null"}"`
+          error: `Read-back verification failed: expected "${calendarSystem}" but got "${readBack ?? "null"}"`,
         };
       }
       return {
         success: true,
         calendarSystem: readBack,
-        previousCalendarSystem
+        previousCalendarSystem,
       };
     } catch (error) {
       const errorMsg = errorMessage(error);
       return {
         success: false,
         calendarSystem,
-        error: `Failed to set calendar system: ${errorMsg}`
+        error: `Failed to set calendar system: ${errorMsg}`,
       };
     }
   }
@@ -217,7 +226,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       return {
         success: true,
         calendarSystem: calendar,
-        source: "default"
+        source: "default",
       };
     }
 
@@ -229,7 +238,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
           success: true,
           calendarSystem: calendarFromLocale,
           locale,
-          source: "locale"
+          source: "locale",
         };
       }
     }
@@ -238,7 +247,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       success: true,
       calendarSystem: DEFAULT_CALENDAR_SYSTEM,
       locale: locale ?? null,
-      source: "default"
+      source: "default",
     };
   }
 
@@ -250,7 +259,10 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
     const locale = await this.iosDefaultsRead(".GlobalPreferences", "AppleLocale");
     const languages = await this.iosDefaultsRead(".GlobalPreferences", "AppleLanguages");
     const timeZone = await this.iosDefaultsRead(".GlobalPreferences", "AppleTimeZone");
-    const timeFormatRaw = await this.iosDefaultsRead(".GlobalPreferences", "AppleICUForce24HourTime");
+    const timeFormatRaw = await this.iosDefaultsRead(
+      ".GlobalPreferences",
+      "AppleICUForce24HourTime",
+    );
     const timeFormat = normalizeTimeFormat(parseAppleTimeFormatRaw(timeFormatRaw));
     const calendarResult = await this.getCalendarSystem();
 
@@ -261,7 +273,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       timeZone,
       textDirection: null,
       timeFormat,
-      calendarSystem: calendarResult.calendarSystem ?? null
+      calendarSystem: calendarResult.calendarSystem ?? null,
     };
   }
 
@@ -282,25 +294,40 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
   private async iosDefaultsRead(domain: string, key: string): Promise<string | null> {
     try {
       const result = await this.processExecutor.executeCommand("xcrun", [
-        "simctl", "spawn", this.device.deviceId, "defaults", "read", domain, key
+        "simctl",
+        "spawn",
+        this.device.deviceId,
+        "defaults",
+        "read",
+        domain,
+        key,
       ]);
       return normalizeSettingValue(result.stdout);
     } catch (error) {
       // `defaults read` fails when the domain/key has never been set on this
       // simulator; null correctly signals "no value configured" to the caller.
-      logger.debug(`src/features/utility/system-configuration/IosSystemConfigurationAdapter.ts defaults read failed: ${error}`, error);
+      logger.debug(
+        `src/features/utility/system-configuration/IosSystemConfigurationAdapter.ts defaults read failed: ${error}`,
+        error,
+      );
       return null;
     }
   }
 
   private async iosDefaultsWrite(domain: string, key: string, valueArgs: string[]): Promise<void> {
     await this.processExecutor.executeCommand("xcrun", [
-      "simctl", "spawn", this.device.deviceId, "defaults", "write", domain, key, ...valueArgs
+      "simctl",
+      "spawn",
+      this.device.deviceId,
+      "defaults",
+      "write",
+      domain,
+      key,
+      ...valueArgs,
     ]);
   }
 
   private toAppleLocale(languageTag: string): string {
     return languageTag.replace(/-/g, "_");
   }
-
 }

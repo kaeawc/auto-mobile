@@ -11,7 +11,11 @@ import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/
 import type { BootedDevice } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-const DEVICE: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "test" } as BootedDevice;
+const DEVICE: BootedDevice = {
+  deviceId: "emulator-5554",
+  platform: "android",
+  name: "test",
+} as BootedDevice;
 
 class FakeProcess extends EventEmitter implements SpawnedProcess {
   readonly stdout = new PassThrough();
@@ -30,7 +34,7 @@ function fakeAdbFactory(
   commands: string[] = [],
   spawnArgs: string[][] = [],
   processes: FakeProcess[] = [],
-  wmSizeOutput = ""
+  wmSizeOutput = "",
 ): AdbClientFactory {
   return {
     create() {
@@ -53,7 +57,7 @@ function fakeAdbFactory(
 
 function makeSource(
   overrides: Partial<Parameters<typeof AndroidH264Source.prototype.constructor>[0]> = {},
-  wmSizeOutput = ""
+  wmSizeOutput = "",
 ) {
   const chunks: Buffer[] = [];
   const processes: FakeProcess[] = [];
@@ -63,7 +67,7 @@ function makeSource(
 
   const source = new AndroidH264Source({
     device: DEVICE,
-    onData: chunk => chunks.push(chunk),
+    onData: (chunk) => chunks.push(chunk),
     adbFactory: fakeAdbFactory(commands, spawnArgs, processes, wmSizeOutput),
     timer,
     segmentRotateMs: 1000,
@@ -123,7 +127,7 @@ describe("AndroidH264Source", () => {
   test("an explicit bitrate wins over the quality preset's default", async () => {
     const { source, spawnArgs } = makeSource(
       { quality: "low", bitrateBps: 1_000_000 },
-      "Physical size: 1080x2400\n"
+      "Physical size: 1080x2400\n",
     );
     await source.start();
     const args = spawnArgs[0].join(" ");
@@ -211,7 +215,7 @@ describe("AndroidH264Source", () => {
 
     expect(processes[0].killed).toContain("SIGINT");
     // Must NOT device-wide pkill: that would also kill a concurrent videoRecording.
-    expect(commands.some(command => command.includes("pkill"))).toBe(false);
+    expect(commands.some((command) => command.includes("pkill"))).toBe(false);
 
     // An exit after stop must not spawn another segment.
     processes[0].simulateExit(0, "SIGINT");
@@ -234,7 +238,7 @@ describe("AndroidH264Source", () => {
 
   test("does not rotate when a segment exits with a non-zero code; surfaces onError", async () => {
     let captured: Error | null = null;
-    const { source, processes } = makeSource({ onError: error => (captured = error) });
+    const { source, processes } = makeSource({ onError: (error) => (captured = error) });
     await source.start();
     expect(processes).toHaveLength(1);
 
@@ -266,7 +270,7 @@ describe("AndroidH264Source", () => {
       create() {
         return {
           spawn: () =>
-            new Promise<SpawnedProcess>(resolve => {
+            new Promise<SpawnedProcess>((resolve) => {
               resolveAdb = () => resolve(lateProcess);
             }),
           executeCommand: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
@@ -289,7 +293,7 @@ describe("AndroidH264Source", () => {
 
   test("surfaces a fatal error when a segment process errors", async () => {
     let captured: Error | null = null;
-    const { source, processes } = makeSource({ onError: error => (captured = error) });
+    const { source, processes } = makeSource({ onError: (error) => (captured = error) });
     await source.start();
 
     processes[0].emit("error", new Error("adb not found"));

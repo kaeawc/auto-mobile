@@ -17,7 +17,7 @@ describe("PostNotification", () => {
   beforeEach(() => {
     device = {
       deviceId: "test-device",
-      platform: "android"
+      platform: "android",
     } as BootedDevice;
 
     fakeAdb = new FakeAdbExecutor();
@@ -25,12 +25,12 @@ describe("PostNotification", () => {
     fakeWindow.configureCachedActiveWindow({
       appId: "com.example.app",
       activityName: "MainActivity",
-      layoutSeqSum: 1
+      layoutSeqSum: 1,
     } as any);
     fakeWindow.configureActiveWindow({
       appId: "com.example.app",
       activityName: "MainActivity",
-      layoutSeqSum: 1
+      layoutSeqSum: 1,
     } as any);
   });
 
@@ -45,47 +45,49 @@ describe("PostNotification", () => {
   test("posts via SDK receiver when available", async () => {
     fakeAdb.setCommandResponse("am broadcast", {
       stdout: "Broadcast completed: result=1",
-      stderr: ""
+      stderr: "",
     });
 
     const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
     const result = await postNotification.execute({
       title: "Hello",
       body: "World",
-      actions: [{ label: "Open", actionId: "open_action" }]
+      actions: [{ label: "Open", actionId: "open_action" }],
     });
 
     expect(result.success).toBe(true);
     expect(result.supported).toBe(true);
     expect(result.method).toBe("sdk");
-    expect(fakeAdb.wasCommandExecuted("am broadcast -n com.example.app"))
-      .toBe(true);
-    expect(fakeAdb.wasCommandExecuted("actions_json"))
-      .toBe(true);
+    expect(fakeAdb.wasCommandExecuted("am broadcast -n com.example.app")).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("actions_json")).toBe(true);
   });
 
   test("honors explicit Android appId instead of cached active window", async () => {
     fakeWindow.configureCachedActiveWindow({
       appId: "com.google.android.apps.nexuslauncher",
       activityName: "NexusLauncherActivity",
-      layoutSeqSum: 1
+      layoutSeqSum: 1,
     } as any);
     fakeAdb.setCommandResponse("am broadcast", {
       stdout: "Broadcast completed: result=1",
-      stderr: ""
+      stderr: "",
     });
 
     const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
     const result = await postNotification.execute({
       title: "AutoMobile Test",
       body: "Body",
-      appId: "dev.jasonpearson.automobile.playground"
+      appId: "dev.jasonpearson.automobile.playground",
     });
 
     expect(result.success).toBe(true);
     expect(result.appId).toBe("dev.jasonpearson.automobile.playground");
-    expect(fakeAdb.wasCommandExecuted("am broadcast -n dev.jasonpearson.automobile.playground")).toBe(true);
-    expect(fakeAdb.wasCommandExecuted("am broadcast -n com.google.android.apps.nexuslauncher")).toBe(false);
+    expect(
+      fakeAdb.wasCommandExecuted("am broadcast -n dev.jasonpearson.automobile.playground"),
+    ).toBe(true);
+    expect(
+      fakeAdb.wasCommandExecuted("am broadcast -n com.google.android.apps.nexuslauncher"),
+    ).toBe(false);
     expect(fakeWindow.getGetCachedActiveWindowCallCount()).toBe(0);
     expect(fakeWindow.getGetActiveCallCount()).toBe(0);
   });
@@ -95,7 +97,7 @@ describe("PostNotification", () => {
     const result = await postNotification.execute({
       title: "AutoMobile Test",
       body: "Body",
-      appId: "dev.jasonpearson.automobile.playground; echo injected"
+      appId: "dev.jasonpearson.automobile.playground; echo injected",
     });
 
     expect(result.success).toBe(false);
@@ -108,41 +110,45 @@ describe("PostNotification", () => {
     fakeWindow.configureCachedActiveWindow({
       appId: "com.google.android.apps.nexuslauncher",
       activityName: "NexusLauncherActivity",
-      layoutSeqSum: 1
+      layoutSeqSum: 1,
     } as any);
     fakeWindow.configureActiveWindow({
       appId: "dev.jasonpearson.automobile.playground",
       activityName: "MainActivity",
-      layoutSeqSum: 2
+      layoutSeqSum: 2,
     } as any);
     fakeAdb.setCommandResponse("am broadcast", {
       stdout: "Broadcast completed: result=1",
-      stderr: ""
+      stderr: "",
     });
 
     const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
     const result = await postNotification.execute({
       title: "AutoMobile Test",
-      body: "Body"
+      body: "Body",
     });
 
     expect(result.success).toBe(true);
     expect(result.appId).toBe("dev.jasonpearson.automobile.playground");
-    expect(fakeAdb.wasCommandExecuted("am broadcast -n dev.jasonpearson.automobile.playground")).toBe(true);
-    expect(fakeAdb.wasCommandExecuted("am broadcast -n com.google.android.apps.nexuslauncher")).toBe(false);
+    expect(
+      fakeAdb.wasCommandExecuted("am broadcast -n dev.jasonpearson.automobile.playground"),
+    ).toBe(true);
+    expect(
+      fakeAdb.wasCommandExecuted("am broadcast -n com.google.android.apps.nexuslauncher"),
+    ).toBe(false);
     expect(fakeWindow.getGetActiveCallCount()).toBe(1);
   });
 
   test("fails when SDK receiver is missing", async () => {
     fakeAdb.setCommandResponse("am broadcast", {
       stdout: "Error: No receiver found",
-      stderr: ""
+      stderr: "",
     });
 
     const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
     const result = await postNotification.execute({
       title: "Fallback",
-      body: "Body"
+      body: "Body",
     });
 
     expect(result.success).toBe(false);
@@ -155,7 +161,7 @@ describe("PostNotification", () => {
     const result = await postNotification.execute({
       title: "Big",
       body: "Picture",
-      imageType: "bigPicture"
+      imageType: "bigPicture",
     });
 
     expect(result.success).toBe(false);
@@ -166,13 +172,13 @@ describe("PostNotification", () => {
   test("does not retry when SDK receiver reports failure", async () => {
     fakeAdb.setCommandResponse("am broadcast", {
       stdout: "Broadcast completed: result=0",
-      stderr: ""
+      stderr: "",
     });
 
     const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
     const result = await postNotification.execute({
       title: "Fail",
-      body: "Body"
+      body: "Body",
     });
 
     expect(result.success).toBe(false);
@@ -187,7 +193,7 @@ describe("PostNotification", () => {
 
     fakeAdb.setCommandResponse("am broadcast", {
       stdout: "Broadcast completed: result=1",
-      stderr: ""
+      stderr: "",
     });
 
     const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
@@ -195,7 +201,7 @@ describe("PostNotification", () => {
       title: "Picture",
       body: "Body",
       imageType: "bigPicture",
-      imagePath
+      imagePath,
     });
 
     try {
@@ -219,7 +225,7 @@ describe("PostNotification", () => {
 
     fakeAdb.setCommandResponse("am broadcast", {
       stdout: "Broadcast completed: result=1",
-      stderr: ""
+      stderr: "",
     });
 
     const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
@@ -227,12 +233,14 @@ describe("PostNotification", () => {
       title: "Picture",
       body: "Body",
       imageType: "bigPicture",
-      imagePath: path.join("fixtures", "pic.png")
+      imagePath: path.join("fixtures", "pic.png"),
     });
 
     try {
       expect(result.success).toBe(true);
-      const pushCommand = fakeAdb.getExecutedCommands().find(command => command.startsWith("push "));
+      const pushCommand = fakeAdb
+        .getExecutedCommands()
+        .find((command) => command.startsWith("push "));
       expect(pushCommand?.replace(/\\\\/g, "\\")).toContain(`"${imagePath}"`);
       expect(fakeAdb.wasCommandExecuted("/sdcard/Download/automobile/pic.png")).toBe(true);
     } finally {

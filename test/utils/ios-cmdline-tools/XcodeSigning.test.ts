@@ -5,7 +5,8 @@ import { XcodeSigningManager } from "../../../src/utils/ios-cmdline-tools/XcodeS
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-const CERT_BASE64 = "MIIDETCCAfmgAwIBAgIUJQItJgRhsTPNGV58eJPhAw9xIWcwDQYJKoZIhvcNAQELBQAwGDEWMBQGA1UEAwwNVGVzdCBEZXYgQ2VydDAeFw0yNjAxMTgxOTE5MzVaFw0yNzAxMTgxOTE5MzVaMBgxFjAUBgNVBAMMDVRlc3QgRGV2IENlcnQwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDCXt1bEnb5HFGXYeCDJfGUK6A84+6ZowKRvfP4F9XmLn24Pp0bvd0sam7Ayp6rFMkRcCUJ0FmcEUV/JbW30uGmFlrCQG4k4Rved/xrXIYZK1ny2Z5hH0AG13JiStLIqUTARgx1NDnlQl18b5R8OjeXeWD79x/RFrNUyIinW2fnv3jzF8jjme6P3f8pK+TJmLIZQGpNQT+FApApOnND2AEh+RhjnJi3AIDXIpBo8dFhXmOqfE5mtb5gzIyKPrc15l74kW8ndxFoVjJtMinzjbYIsI6t4wOkTJn0hZYDwWHwBfx622cK35zxcGok16EbCdJlfdGxNseeUxWAJoki+MaZAgMBAAGjUzBRMB0GA1UdDgQWBBR4aCibWRc1OiPPqD0CqjTneWJcnTAfBgNVHSMEGDAWgBR4aCibWRc1OiPPqD0CqjTneWJcnTAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBAQAXZsPO3k4url4xeggh0AHjZHH4/FQUKPlrKH1+icN/PrPDqc3ubiuLynTN6oHYMM6bHF1i7/fjTXfwtSH4Y28YnLNA/5Yywz+A2PAr0VlMFDGNn9clM5AiZUrpwhOzRIC2opiSgUBVXcHJr9DlCo227ZaM4EmWlFPwyY6LNUyPfqECwFKmDgtuzSqICOGyJy2s1MGXUiWqeyyJgRe1ZdLhNaC3+3/I/0YBm6TYP8anir7vYZCyCDDEtOlNdv9+qQHtoym1f02VRpntDF+k5qiHPICFDVwHCaSXIoghyEqD3y9HH9GWiGKze3mXB7xofhGUL9ATLpRWrzxHSGVS6shr";
+const CERT_BASE64 =
+  "MIIDETCCAfmgAwIBAgIUJQItJgRhsTPNGV58eJPhAw9xIWcwDQYJKoZIhvcNAQELBQAwGDEWMBQGA1UEAwwNVGVzdCBEZXYgQ2VydDAeFw0yNjAxMTgxOTE5MzVaFw0yNzAxMTgxOTE5MzVaMBgxFjAUBgNVBAMMDVRlc3QgRGV2IENlcnQwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDCXt1bEnb5HFGXYeCDJfGUK6A84+6ZowKRvfP4F9XmLn24Pp0bvd0sam7Ayp6rFMkRcCUJ0FmcEUV/JbW30uGmFlrCQG4k4Rved/xrXIYZK1ny2Z5hH0AG13JiStLIqUTARgx1NDnlQl18b5R8OjeXeWD79x/RFrNUyIinW2fnv3jzF8jjme6P3f8pK+TJmLIZQGpNQT+FApApOnND2AEh+RhjnJi3AIDXIpBo8dFhXmOqfE5mtb5gzIyKPrc15l74kW8ndxFoVjJtMinzjbYIsI6t4wOkTJn0hZYDwWHwBfx622cK35zxcGok16EbCdJlfdGxNseeUxWAJoki+MaZAgMBAAGjUzBRMB0GA1UdDgQWBBR4aCibWRc1OiPPqD0CqjTneWJcnTAfBgNVHSMEGDAWgBR4aCibWRc1OiPPqD0CqjTneWJcnTAPBgNVHRMBAf8EBTADAQH/MA0GCSqGSIb3DQEBCwUAA4IBAQAXZsPO3k4url4xeggh0AHjZHH4/FQUKPlrKH1+icN/PrPDqc3ubiuLynTN6oHYMM6bHF1i7/fjTXfwtSH4Y28YnLNA/5Yywz+A2PAr0VlMFDGNn9clM5AiZUrpwhOzRIC2opiSgUBVXcHJr9DlCo227ZaM4EmWlFPwyY6LNUyPfqECwFKmDgtuzSqICOGyJy2s1MGXUiWqeyyJgRe1ZdLhNaC3+3/I/0YBm6TYP8anir7vYZCyCDDEtOlNdv9+qQHtoym1f02VRpntDF+k5qiHPICFDVwHCaSXIoghyEqD3y9HH9GWiGKze3mXB7xofhGUL9ATLpRWrzxHSGVS6shr";
 
 const deviceUdid = "00008030001E28C11E";
 const profileUuid = "A0B1C2D3-E4F5-6789-ABCD-EF0123456789";
@@ -71,7 +72,7 @@ const createFakeDependencies = (options?: { identities?: string; profiles?: stri
           const match = output.match(/^\s*\d+\)\s+([0-9A-F]{40,64})\s+"([^\"]+)"/im);
           return match ? [{ fingerprint: match[1].toUpperCase(), name: match[2] }] : [];
         },
-        decodeCms: async () => profileXml
+        decodeCms: async () => profileXml,
       },
       xcodebuild: {
         executeCommand: async (args: string[]) => {
@@ -80,31 +81,45 @@ const createFakeDependencies = (options?: { identities?: string; profiles?: stri
             return {
               stdout: `DEVELOPMENT_TEAM = ${teamId}`,
               stderr: "",
-              toString() { return this.stdout; },
-              trim() { return this.stdout.trim(); },
-              includes(searchString: string) { return this.stdout.includes(searchString); }
+              toString() {
+                return this.stdout;
+              },
+              trim() {
+                return this.stdout.trim();
+              },
+              includes(searchString: string) {
+                return this.stdout.includes(searchString);
+              },
             };
           }
           return {
             stdout: "",
             stderr: "",
-            toString() { return this.stdout; },
-            trim() { return this.stdout.trim(); },
-            includes(searchString: string) { return this.stdout.includes(searchString); }
+            toString() {
+              return this.stdout;
+            },
+            trim() {
+              return this.stdout.trim();
+            },
+            includes(searchString: string) {
+              return this.stdout.includes(searchString);
+            },
           };
         },
-        isAvailable: async () => true
+        isAvailable: async () => true,
       },
       readDir: async () => options?.profiles ?? ["test.mobileprovision"],
       readFile: async () => "",
       stat: async () => ({ isFile: () => true }),
-      writeFile: async (path: string) => { writtenFiles.push(path); },
+      writeFile: async (path: string) => {
+        writtenFiles.push(path);
+      },
       mkdir: async () => {},
       homedir: () => "/Users/test",
-      now: () => fakeTimer.now()
+      now: () => fakeTimer.now(),
     },
     writtenFiles,
-    xcodebuildArgs
+    xcodebuildArgs,
   };
 };
 
@@ -127,7 +142,7 @@ interface ProfileSpec {
 
 const makeProfileXml = (spec: ProfileSpec): string => {
   const devicesBlock = spec.provisionedDevices
-    ? `<key>ProvisionedDevices</key>\n<array>${spec.provisionedDevices.map(d => `<string>${d}</string>`).join("")}</array>`
+    ? `<key>ProvisionedDevices</key>\n<array>${spec.provisionedDevices.map((d) => `<string>${d}</string>`).join("")}</array>`
     : "";
   const certBlock = spec.includeMatchingCert
     ? `<key>DeveloperCertificates</key>\n<array><data>${CERT_BASE64}</data></array>`
@@ -167,22 +182,29 @@ const createEligibilityDependencies = (specs: ProfileSpec[]) => {
     securityClient: {
       getDiagnostics: async () => ({ available: true, version: null }),
       listCodeSigningIdentities: async () => [
-        { fingerprint, name: `Apple Development: Test (${teamId})` }
+        { fingerprint, name: `Apple Development: Test (${teamId})` },
       ],
       // decodeCms is called with the full profile path; key on the file name.
       decodeCms: async (path: string) => {
-        const match = [...byFile.keys()].find(name => path.includes(name));
+        const match = [...byFile.keys()].find((name) => path.includes(name));
         return match ? byFile.get(match)! : "";
-      }
+      },
     },
     xcodebuild: {
       executeCommand: async () => ({
-        stdout: "", stderr: "",
-        toString() { return this.stdout; },
-        trim() { return this.stdout.trim(); },
-        includes(s: string) { return this.stdout.includes(s); }
+        stdout: "",
+        stderr: "",
+        toString() {
+          return this.stdout;
+        },
+        trim() {
+          return this.stdout.trim();
+        },
+        includes(s: string) {
+          return this.stdout.includes(s);
+        },
       }),
-      isAvailable: async () => true
+      isAvailable: async () => true,
     },
     readDir: async () => fileNames,
     readFile: async () => "",
@@ -190,7 +212,7 @@ const createEligibilityDependencies = (specs: ProfileSpec[]) => {
     writeFile: async () => {},
     mkdir: async () => {},
     homedir: () => "/Users/test",
-    now: () => ELIGIBILITY_NOW
+    now: () => ELIGIBILITY_NOW,
   };
 };
 
@@ -227,51 +249,97 @@ describe("XcodeSigningManager profile eligibility (env-selected preferred profil
   test("selects a valid device-included development profile named via env (manual, no expiry/device warning)", async () => {
     const uuid = "11111111-1111-1111-1111-111111111111";
     process.env.AUTOMOBILE_IOS_PROFILE_UUID = uuid;
-    const manager = new XcodeSigningManager(createEligibilityDependencies([
-      { uuid, name: "Valid Dev", expiration: "2030-01-01T00:00:00Z", provisionedDevices: [deviceUdid], getTaskAllow: true, includeMatchingCert: true }
-    ]));
+    const manager = new XcodeSigningManager(
+      createEligibilityDependencies([
+        {
+          uuid,
+          name: "Valid Dev",
+          expiration: "2030-01-01T00:00:00Z",
+          provisionedDevices: [deviceUdid],
+          getTaskAllow: true,
+          includeMatchingCert: true,
+        },
+      ]),
+    );
 
     const resolution = await manager.resolveSigningForDevice(deviceUdid);
 
     expect(resolution.style).toBe("manual");
     expect(resolution.profile?.uuid).toBe(uuid);
-    expect(resolution.warnings.some(w => w.includes("expired"))).toBe(false);
-    expect(resolution.warnings.some(w => w.includes("does not include device"))).toBe(false);
+    expect(resolution.warnings.some((w) => w.includes("expired"))).toBe(false);
+    expect(resolution.warnings.some((w) => w.includes("does not include device"))).toBe(false);
   });
 
   test("warns when the env-selected profile is expired", async () => {
     const uuid = "22222222-2222-2222-2222-222222222222";
     process.env.AUTOMOBILE_IOS_PROFILE_UUID = uuid;
-    const manager = new XcodeSigningManager(createEligibilityDependencies([
-      { uuid, name: "Expired Dev", expiration: "2020-01-01T00:00:00Z", provisionedDevices: [deviceUdid], getTaskAllow: true, includeMatchingCert: true }
-    ]));
+    const manager = new XcodeSigningManager(
+      createEligibilityDependencies([
+        {
+          uuid,
+          name: "Expired Dev",
+          expiration: "2020-01-01T00:00:00Z",
+          provisionedDevices: [deviceUdid],
+          getTaskAllow: true,
+          includeMatchingCert: true,
+        },
+      ]),
+    );
 
     const resolution = await manager.resolveSigningForDevice(deviceUdid);
 
-    expect(resolution.warnings.some(w => w.includes("Expired Dev") && w.includes("expired"))).toBe(true);
+    expect(
+      resolution.warnings.some((w) => w.includes("Expired Dev") && w.includes("expired")),
+    ).toBe(true);
   });
 
   test("warns when the env-selected profile does not provision the target device", async () => {
     const uuid = "33333333-3333-3333-3333-333333333333";
     process.env.AUTOMOBILE_IOS_PROFILE_UUID = uuid;
-    const manager = new XcodeSigningManager(createEligibilityDependencies([
-      { uuid, name: "Wrong Device", expiration: "2030-01-01T00:00:00Z", provisionedDevices: [otherDevice], getTaskAllow: true, includeMatchingCert: true }
-    ]));
+    const manager = new XcodeSigningManager(
+      createEligibilityDependencies([
+        {
+          uuid,
+          name: "Wrong Device",
+          expiration: "2030-01-01T00:00:00Z",
+          provisionedDevices: [otherDevice],
+          getTaskAllow: true,
+          includeMatchingCert: true,
+        },
+      ]),
+    );
 
     const resolution = await manager.resolveSigningForDevice(deviceUdid);
 
-    expect(resolution.warnings.some(w => w.includes("does not include device") && w.includes(deviceUdid))).toBe(true);
+    expect(
+      resolution.warnings.some(
+        (w) => w.includes("does not include device") && w.includes(deviceUdid),
+      ),
+    ).toBe(true);
   });
 
   test("warns when the env-requested profile UUID is not present", async () => {
     process.env.AUTOMOBILE_IOS_PROFILE_UUID = "99999999-0000-0000-0000-000000000000";
-    const manager = new XcodeSigningManager(createEligibilityDependencies([
-      { uuid: "44444444-4444-4444-4444-444444444444", name: "Some Dev", expiration: "2030-01-01T00:00:00Z", provisionedDevices: [deviceUdid], getTaskAllow: true, includeMatchingCert: true }
-    ]));
+    const manager = new XcodeSigningManager(
+      createEligibilityDependencies([
+        {
+          uuid: "44444444-4444-4444-4444-444444444444",
+          name: "Some Dev",
+          expiration: "2030-01-01T00:00:00Z",
+          provisionedDevices: [deviceUdid],
+          getTaskAllow: true,
+          includeMatchingCert: true,
+        },
+      ]),
+    );
 
     const resolution = await manager.resolveSigningForDevice(deviceUdid);
 
-    expect(resolution.warnings.some(w => w.includes("99999999-0000-0000-0000-000000000000") && w.includes("not found"))).toBe(true);
+    expect(
+      resolution.warnings.some(
+        (w) => w.includes("99999999-0000-0000-0000-000000000000") && w.includes("not found"),
+      ),
+    ).toBe(true);
   });
 
   test("with no preferred profile, prefers development over enterprise/ad-hoc (development-first ordering)", async () => {
@@ -279,11 +347,33 @@ describe("XcodeSigningManager profile eligibility (env-selected preferred profil
     // carry the matching cert, so whichever is selected resolves to manual. The
     // ordering contract must pick the development profile.
     const devUuid = "aaaaaaaa-0000-0000-0000-000000000000";
-    const manager = new XcodeSigningManager(createEligibilityDependencies([
-      { uuid: "cccccccc-0000-0000-0000-000000000000", name: "Enterprise", expiration: "2030-01-01T00:00:00Z", provisionsAllDevices: true, includeMatchingCert: true },
-      { uuid: "bbbbbbbb-0000-0000-0000-000000000000", name: "AdHoc", expiration: "2030-01-01T00:00:00Z", provisionedDevices: [deviceUdid], getTaskAllow: false, includeMatchingCert: true },
-      { uuid: devUuid, name: "Development", expiration: "2030-01-01T00:00:00Z", provisionedDevices: [deviceUdid], getTaskAllow: true, includeMatchingCert: true },
-    ]));
+    const manager = new XcodeSigningManager(
+      createEligibilityDependencies([
+        {
+          uuid: "cccccccc-0000-0000-0000-000000000000",
+          name: "Enterprise",
+          expiration: "2030-01-01T00:00:00Z",
+          provisionsAllDevices: true,
+          includeMatchingCert: true,
+        },
+        {
+          uuid: "bbbbbbbb-0000-0000-0000-000000000000",
+          name: "AdHoc",
+          expiration: "2030-01-01T00:00:00Z",
+          provisionedDevices: [deviceUdid],
+          getTaskAllow: false,
+          includeMatchingCert: true,
+        },
+        {
+          uuid: devUuid,
+          name: "Development",
+          expiration: "2030-01-01T00:00:00Z",
+          provisionedDevices: [deviceUdid],
+          getTaskAllow: true,
+          includeMatchingCert: true,
+        },
+      ]),
+    );
 
     const resolution = await manager.resolveSigningForDevice(deviceUdid);
 
@@ -316,7 +406,9 @@ describe("XcodeSigningManager", () => {
     expect(resolution.profile?.uuid).toBe(profileUuid);
     expect(resolution.identity?.fingerprint).toBe(fingerprint);
     expect(resolution.buildSettings.join(" ")).toContain("CODE_SIGN_STYLE=Manual");
-    expect(resolution.buildSettings.join(" ")).toContain(`PROVISIONING_PROFILE_SPECIFIER=\"${profileName}\"`);
+    expect(resolution.buildSettings.join(" ")).toContain(
+      `PROVISIONING_PROFILE_SPECIFIER=\"${profileName}\"`,
+    );
     expect(writtenFiles.length).toBe(1);
   });
 

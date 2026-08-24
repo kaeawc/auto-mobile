@@ -73,7 +73,7 @@ export class IdentifyInteractions {
     observeResult: ObserveResult,
     options: IdentifyInteractionsOptions,
     currentScreen: string | null,
-    navigationEdges: NavigationEdge[]
+    navigationEdges: NavigationEdge[],
   ): IdentifyInteractionsResult {
     const screenName = currentScreen || "UnknownScreen";
     const viewHierarchy = observeResult.viewHierarchy;
@@ -87,9 +87,9 @@ export class IdentifyInteractions {
           totalInteractable: 0,
           byType: {},
           navigationOptions: 0,
-          inputFields: 0
+          inputFields: 0,
         },
-        error: "No observation available. Call the 'observe' tool first to capture screen state."
+        error: "No observation available. Call the 'observe' tool first to capture screen state.",
       };
     }
 
@@ -105,7 +105,7 @@ export class IdentifyInteractions {
       includeElementDetails,
       includeSuggestedParams,
       includeNavigation ? navigationEdges : [],
-      currentScreen
+      currentScreen,
     );
 
     const filtered = this.applyFilters(interactions, options.filter);
@@ -115,11 +115,15 @@ export class IdentifyInteractions {
       success: true,
       screenName,
       interactions: filtered,
-      summary
+      summary,
     };
   }
 
-  private collectCandidates(viewHierarchy: NonNullable<ObserveResult["viewHierarchy"]>, screenWidth: number, screenHeight: number): InteractionCandidate[] {
+  private collectCandidates(
+    viewHierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
+    screenWidth: number,
+    screenHeight: number,
+  ): InteractionCandidate[] {
     const candidates: InteractionCandidate[] = [];
     const seen = new Set<string>();
 
@@ -170,7 +174,7 @@ export class IdentifyInteractions {
     includeElementDetails: boolean,
     includeSuggestedParams: boolean,
     navigationEdges: NavigationEdge[],
-    currentScreen: string | null
+    currentScreen: string | null,
   ): IdentifiedInteraction[] {
     const interactions: IdentifiedInteraction[] = [];
     let index = 1;
@@ -181,7 +185,12 @@ export class IdentifyInteractions {
       const confidence = this.computeConfidence(element, type, candidate.hasText);
 
       const identifiers = this.getElementIdentifiers(element);
-      if (!identifiers.text && !identifiers.resourceId && !identifiers.contentDescription && type !== "scroll") {
+      if (
+        !identifiers.text &&
+        !identifiers.resourceId &&
+        !identifiers.contentDescription &&
+        type !== "scroll"
+      ) {
         continue;
       }
 
@@ -189,7 +198,7 @@ export class IdentifyInteractions {
         id: `int_${index++}`,
         type,
         description: this.buildDescription(type, identifiers),
-        confidence
+        confidence,
       };
 
       if (includeSuggestedParams) {
@@ -205,7 +214,7 @@ export class IdentifyInteractions {
           text: identifiers.text,
           contentDescription: identifiers.contentDescription,
           className: identifiers.className,
-          bounds: element.bounds
+          bounds: element.bounds,
         };
       }
 
@@ -213,7 +222,7 @@ export class IdentifyInteractions {
         const predictedOutcome = this.matchNavigationOutcome(
           identifiers,
           navigationEdges,
-          currentScreen
+          currentScreen,
         );
         if (predictedOutcome) {
           interaction.predictedOutcome = predictedOutcome;
@@ -228,17 +237,17 @@ export class IdentifyInteractions {
 
   private applyFilters(
     interactions: IdentifiedInteraction[],
-    filter?: IdentifyInteractionsOptions["filter"]
+    filter?: IdentifyInteractionsOptions["filter"],
   ): IdentifiedInteraction[] {
     let filtered = [...interactions];
 
     if (filter?.types && filter.types.length > 0) {
       const allowed = new Set(filter.types);
-      filtered = filtered.filter(interaction => allowed.has(interaction.type));
+      filtered = filtered.filter((interaction) => allowed.has(interaction.type));
     }
 
     if (typeof filter?.minConfidence === "number") {
-      filtered = filtered.filter(interaction => interaction.confidence >= filter.minConfidence!);
+      filtered = filtered.filter((interaction) => interaction.confidence >= filter.minConfidence!);
     }
 
     if (typeof filter?.limit === "number" && filter.limit > 0) {
@@ -248,7 +257,9 @@ export class IdentifyInteractions {
     return filtered;
   }
 
-  private buildSummary(interactions: IdentifiedInteraction[]): IdentifyInteractionsResult["summary"] {
+  private buildSummary(
+    interactions: IdentifiedInteraction[],
+  ): IdentifyInteractionsResult["summary"] {
     const byType: Record<string, number> = {};
     let navigationOptions = 0;
     let inputFields = 0;
@@ -267,7 +278,7 @@ export class IdentifyInteractions {
       totalInteractable: interactions.length,
       byType,
       navigationOptions,
-      inputFields
+      inputFields,
     };
   }
 
@@ -279,7 +290,7 @@ export class IdentifyInteractions {
       element.text || "",
       element["content-desc"] || "",
       element.className || element["class"] || "",
-      boundsKey
+      boundsKey,
     ].join("|");
   }
 
@@ -293,7 +304,7 @@ export class IdentifyInteractions {
       resourceId: element["resource-id"] ? String(element["resource-id"]) : undefined,
       text: element.text ? String(element.text) : undefined,
       contentDescription: element["content-desc"] ? String(element["content-desc"]) : undefined,
-      className: (element.className || element["class"] || "Unknown") as string
+      className: (element.className || element["class"] || "Unknown") as string,
     };
   }
 
@@ -339,10 +350,10 @@ export class IdentifyInteractions {
       "xcuielementtypetextfield",
       "xcuielementtypesecuretextfield",
       "xcuielementtypesearchfield",
-      "xcuielementtypetextview"
+      "xcuielementtypetextview",
     ];
 
-    if (inputKeywords.some(keyword => className.includes(keyword))) {
+    if (inputKeywords.some((keyword) => className.includes(keyword))) {
       return true;
     }
 
@@ -366,10 +377,10 @@ export class IdentifyInteractions {
       "radiobutton",
       "xcuielementtypeswitch",
       "xcuielementtypecheckbox",
-      "xcuielementtyperadiobutton"
+      "xcuielementtyperadiobutton",
     ];
 
-    if (toggleKeywords.some(keyword => className.includes(keyword))) {
+    if (toggleKeywords.some((keyword) => className.includes(keyword))) {
       return true;
     }
 
@@ -385,8 +396,8 @@ export class IdentifyInteractions {
   }
 
   private isLikelyNavigation(element: Element): boolean {
-    const text = `${element.text || ""} ${element["content-desc"] || ""} ${element["resource-id"] || ""}`
-      .toLowerCase();
+    const text =
+      `${element.text || ""} ${element["content-desc"] || ""} ${element["resource-id"] || ""}`.toLowerCase();
 
     const navKeywords = [
       "menu",
@@ -403,10 +414,10 @@ export class IdentifyInteractions {
       "login",
       "sign",
       "account",
-      "more"
+      "more",
     ];
 
-    return navKeywords.some(keyword => text.includes(keyword));
+    return navKeywords.some((keyword) => text.includes(keyword));
   }
 
   private getClassName(element: Element): string {
@@ -456,7 +467,10 @@ export class IdentifyInteractions {
     return Math.min(0.99, Math.max(0.1, Number(score.toFixed(2))));
   }
 
-  private buildDescription(type: InteractionType, identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>): string {
+  private buildDescription(
+    type: InteractionType,
+    identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
+  ): string {
     const label = identifiers.text || identifiers.contentDescription || identifiers.resourceId;
 
     switch (type) {
@@ -476,7 +490,7 @@ export class IdentifyInteractions {
 
   private buildSuggestedToolCall(
     type: InteractionType,
-    identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>
+    identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
   ): IdentifiedInteraction["suggestedToolCall"] | undefined {
     if (type === "scroll") {
       const container = identifiers.resourceId
@@ -489,8 +503,8 @@ export class IdentifyInteractions {
         tool: "swipeOn",
         params: {
           direction: "up", // finger swipes up to reveal content below
-          ...(container ? { container } : {})
-        }
+          ...(container ? { container } : {}),
+        },
       };
     }
 
@@ -501,8 +515,8 @@ export class IdentifyInteractions {
         tool: "tapOn",
         params: {
           id: identifiers.resourceId,
-          action: type === "input" ? "focus" : "tap"
-        }
+          action: type === "input" ? "focus" : "tap",
+        },
       };
     }
 
@@ -511,8 +525,8 @@ export class IdentifyInteractions {
         tool: "tapOn",
         params: {
           text: targetText,
-          action: type === "input" ? "focus" : "tap"
-        }
+          action: type === "input" ? "focus" : "tap",
+        },
       };
     }
 
@@ -522,7 +536,7 @@ export class IdentifyInteractions {
   private matchNavigationOutcome(
     identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
     navigationEdges: NavigationEdge[],
-    currentScreen: string
+    currentScreen: string,
   ): IdentifiedInteraction["predictedOutcome"] | undefined {
     let bestMatch: { edge: NavigationEdge; score: number } | null = null;
 
@@ -553,34 +567,35 @@ export class IdentifyInteractions {
       return {
         type: "screen_change",
         destination: edge.to,
-        confidence: Number(bestMatch.score.toFixed(2))
+        confidence: Number(bestMatch.score.toFixed(2)),
       };
     }
 
     if (dialogOpened) {
       return {
         type: "dialog",
-        confidence: Number(bestMatch.score.toFixed(2))
+        confidence: Number(bestMatch.score.toFixed(2)),
       };
     }
 
     return {
       type: "unknown",
-      confidence: Number(bestMatch.score.toFixed(2))
+      confidence: Number(bestMatch.score.toFixed(2)),
     };
   }
 
   private scoreEdgeMatch(
     identifiers: ReturnType<IdentifyInteractions["getElementIdentifiers"]>,
-    edge: NavigationEdge
+    edge: NavigationEdge,
   ): number {
     const args = edge.interaction?.args || {};
     const edgeText = typeof args.text === "string" ? args.text : undefined;
-    const edgeId = typeof args.elementId === "string"
-      ? args.elementId
-      : typeof args.id === "string"
-        ? args.id
-        : undefined;
+    const edgeId =
+      typeof args.elementId === "string"
+        ? args.elementId
+        : typeof args.id === "string"
+          ? args.id
+          : undefined;
 
     let score = 0;
 
@@ -589,7 +604,10 @@ export class IdentifyInteractions {
         score = Math.max(score, 0.95);
       }
 
-      if (edgeText && this.textMatches(edgeText, identifiers.text, identifiers.contentDescription)) {
+      if (
+        edgeText &&
+        this.textMatches(edgeText, identifiers.text, identifiers.contentDescription)
+      ) {
         score = Math.max(score, 0.85);
       }
     }
@@ -597,13 +615,23 @@ export class IdentifyInteractions {
     const selectedElements = edge.interaction?.uiState?.selectedElements || [];
     if (selectedElements.length > 0) {
       for (const selected of selectedElements) {
-        if (selected.resourceId && identifiers.resourceId && selected.resourceId === identifiers.resourceId) {
+        if (
+          selected.resourceId &&
+          identifiers.resourceId &&
+          selected.resourceId === identifiers.resourceId
+        ) {
           score = Math.max(score, 0.8);
         }
-        if (selected.text && this.textMatches(selected.text, identifiers.text, identifiers.contentDescription)) {
+        if (
+          selected.text &&
+          this.textMatches(selected.text, identifiers.text, identifiers.contentDescription)
+        ) {
           score = Math.max(score, 0.75);
         }
-        if (selected.contentDesc && this.textMatches(selected.contentDesc, identifiers.text, identifiers.contentDescription)) {
+        if (
+          selected.contentDesc &&
+          this.textMatches(selected.contentDesc, identifiers.text, identifiers.contentDescription)
+        ) {
           score = Math.max(score, 0.7);
         }
       }
@@ -617,8 +645,8 @@ export class IdentifyInteractions {
     if (!needle) {
       return false;
     }
-    const haystacks = [b, c].filter(Boolean).map(value => value!.toLowerCase());
-    return haystacks.some(value => value === needle);
+    const haystacks = [b, c].filter(Boolean).map((value) => value!.toLowerCase());
+    return haystacks.some((value) => value === needle);
   }
 
   private isDialogTransition(edge: NavigationEdge): boolean {

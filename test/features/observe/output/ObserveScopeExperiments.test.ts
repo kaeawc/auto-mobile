@@ -52,7 +52,7 @@ function androidFixture(): ObserveResult {
     node: [
       {
         "resource-id": STATUS_BAR,
-        "bounds": { left: 0, top: 0, right: 1080, bottom: 80 },
+        bounds: { left: 0, top: 0, right: 1080, bottom: 80 },
       },
       {
         class: "LinearLayout",
@@ -60,14 +60,14 @@ function androidFixture(): ObserveResult {
         node: [
           {
             "resource-id": HEADER,
-            "text": "Title",
-            "bounds": { left: 0, top: 80, right: 1080, bottom: 200 },
+            text: "Title",
+            bounds: { left: 0, top: 80, right: 1080, bottom: 200 },
           },
           {
             "resource-id": LIST,
-            "scrollable": true,
-            "bounds": { left: 0, top: 200, right: 1080, bottom: 2200 },
-            "node": [
+            scrollable: true,
+            bounds: { left: 0, top: 200, right: 1080, bottom: 2200 },
+            node: [
               { text: "Item 1", bounds: { left: 0, top: 200, right: 1080, bottom: 400 } },
               { text: "Item 2", bounds: { left: 0, top: 400, right: 1080, bottom: 600 } },
             ],
@@ -80,7 +80,7 @@ function androidFixture(): ObserveResult {
       },
       {
         "resource-id": NAV_BAR,
-        "bounds": { left: 0, top: 2300, right: 1080, bottom: 2400 },
+        bounds: { left: 0, top: 2300, right: 1080, bottom: 2400 },
       },
     ],
   };
@@ -95,11 +95,18 @@ function androidFixture(): ObserveResult {
       hierarchy: { node: root as unknown as ViewHierarchyNode },
     },
     elements: {
-      clickable: [{ "resource-id": HEADER, "bounds": { left: 0, top: 80, right: 1080, bottom: 200 } } as never],
-      scrollable: [{ "resource-id": LIST, "bounds": { left: 0, top: 200, right: 1080, bottom: 2200 } } as never],
+      clickable: [
+        { "resource-id": HEADER, bounds: { left: 0, top: 80, right: 1080, bottom: 200 } } as never,
+      ],
+      scrollable: [
+        { "resource-id": LIST, bounds: { left: 0, top: 200, right: 1080, bottom: 2200 } } as never,
+      ],
       text: [
-        { "resource-id": `${SYSUI}:id/clock`, "bounds": { left: 0, top: 0, right: 1080, bottom: 80 } } as never, // chrome
-        { "bounds": { left: 0, top: 400, right: 1080, bottom: 600 } } as never, // Item 2 (app, no id)
+        {
+          "resource-id": `${SYSUI}:id/clock`,
+          bounds: { left: 0, top: 0, right: 1080, bottom: 80 },
+        } as never, // chrome
+        { bounds: { left: 0, top: 400, right: 1080, bottom: 600 } } as never, // Item 2 (app, no id)
       ],
       media: [],
     },
@@ -152,7 +159,12 @@ function resourceIds(obs: ObserveResult): string[] {
 
 describe("readBounds", () => {
   test("reads the object shape", () => {
-    expect(readBounds({ left: 1, top: 2, right: 3, bottom: 4 })).toEqual({ left: 1, top: 2, right: 3, bottom: 4 });
+    expect(readBounds({ left: 1, top: 2, right: 3, bottom: 4 })).toEqual({
+      left: 1,
+      top: 2,
+      right: 3,
+      bottom: 4,
+    });
   });
   test("reads the compacted tuple shape", () => {
     expect(readBounds([1, 2, 3, 4])).toEqual({ left: 1, top: 2, right: 3, bottom: 4 });
@@ -200,7 +212,7 @@ describe("buildObserveScopeConfig", () => {
   test("a dimension the flag disabled is off even when the call requested it", () => {
     const cfg = buildObserveScopeConfig(
       { focus: false, overview: false, region: false },
-      { focus: { resourceId: "x" }, region: true, overview: true }
+      { focus: { resourceId: "x" }, region: true, overview: true },
     );
     expect(cfg.focus).toBe(false);
     expect(cfg.region).toBe(false);
@@ -222,7 +234,7 @@ describe("scopeToFocus", () => {
     const { result, focus } = scopeToFocus(obs);
     expect(focus).toEqual({ by: "foreground-app", matched: true, packageName: APP });
     const ids = resourceIds(result);
-    expect(ids.some(id => id.startsWith(SYSUI))).toBe(false); // status/nav bars gone
+    expect(ids.some((id) => id.startsWith(SYSUI))).toBe(false); // status/nav bars gone
     expect(ids).toContain(HEADER);
     expect(ids).toContain(LIST);
   });
@@ -233,7 +245,12 @@ describe("scopeToFocus", () => {
     // The two id-less list rows and the anonymous View survive.
     const texts: string[] = [];
     const walk = (nodes: Node[]): void => {
-      for (const n of nodes) { if (n.text) { texts.push(n.text); } walk(toNodeArray(n.node)); }
+      for (const n of nodes) {
+        if (n.text) {
+          texts.push(n.text);
+        }
+        walk(toNodeArray(n.node));
+      }
     };
     walk(roots(result));
     expect(texts).toContain("Item 1");
@@ -254,42 +271,61 @@ describe("scopeToFocus", () => {
     // AlertDialog's buttons are android:id/button1 etc. All belong to app content.
     roots(obs)[0].node!.push({
       "resource-id": "android:id/content",
-      "bounds": { left: 0, top: 300, right: 1080, bottom: 500 },
-      "node": [
-        { "resource-id": `${APP}:id/ok`, "text": "OK", "bounds": { left: 0, top: 300, right: 200, bottom: 500 } },
-        { "resource-id": "android:id/button1", "text": "Cancel", "bounds": { left: 200, top: 300, right: 400, bottom: 500 } },
+      bounds: { left: 0, top: 300, right: 1080, bottom: 500 },
+      node: [
+        {
+          "resource-id": `${APP}:id/ok`,
+          text: "OK",
+          bounds: { left: 0, top: 300, right: 200, bottom: 500 },
+        },
+        {
+          "resource-id": "android:id/button1",
+          text: "Cancel",
+          bounds: { left: 200, top: 300, right: 400, bottom: 500 },
+        },
       ],
     });
     const ids = resourceIds(scopeToFocus(obs).result);
     expect(ids).toContain("android:id/content"); // framework host kept
     expect(ids).toContain("android:id/button1"); // dialog button kept
     expect(ids).toContain(`${APP}:id/ok`); // app child under a framework host kept
-    expect(ids.some(id => id.startsWith(SYSUI))).toBe(false); // real chrome still dropped
+    expect(ids.some((id) => id.startsWith(SYSUI))).toBe(false); // real chrome still dropped
   });
 
   test("foreground-app scoping drops a dotted foreign IME package subtree", () => {
     const obs = androidFixture();
     roots(obs)[0].node!.push({
       "resource-id": "com.google.android.inputmethod.latin:id/keyboard",
-      "bounds": { left: 0, top: 1800, right: 1080, bottom: 2300 },
+      bounds: { left: 0, top: 1800, right: 1080, bottom: 2300 },
     });
     const ids = resourceIds(scopeToFocus(obs).result);
-    expect(ids.some(id => id.startsWith("com.google.android.inputmethod"))).toBe(false);
+    expect(ids.some((id) => id.startsWith("com.google.android.inputmethod"))).toBe(false);
   });
 
   test("foreground-app scoping is a no-op on iOS-style colon identifiers (undotted prefix)", () => {
     const iosRoot: Node = {
       class: "XCUIElementTypeApplication",
       node: [
-        { "resource-id": "row:0", "text": "First", "bounds": { left: 0, top: 0, right: 400, bottom: 100 } },
-        { "resource-id": "section:2:cell:1", "text": "Second", "bounds": { left: 0, top: 100, right: 400, bottom: 200 } },
+        {
+          "resource-id": "row:0",
+          text: "First",
+          bounds: { left: 0, top: 0, right: 400, bottom: 100 },
+        },
+        {
+          "resource-id": "section:2:cell:1",
+          text: "Second",
+          bounds: { left: 0, top: 100, right: 400, bottom: 200 },
+        },
       ],
     };
     const obs = {
       updatedAt: 0,
       screenSize: { width: 400, height: 800 },
       systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-      viewHierarchy: { packageName: "com.example.iosapp", hierarchy: { node: iosRoot as unknown as ViewHierarchyNode } },
+      viewHierarchy: {
+        packageName: "com.example.iosapp",
+        hierarchy: { node: iosRoot as unknown as ViewHierarchyNode },
+      },
     } as ObserveResult;
     const before = countNodes(roots(obs));
     const { result, focus } = scopeToFocus(obs);
@@ -327,7 +363,10 @@ describe("scopeToFocus", () => {
     const obs = androidFixture();
     // Strip the qualified ids so no node looks foreign — the real iOS shape.
     const strip = (nodes: Node[]): void => {
-      for (const n of nodes) { delete n["resource-id"]; strip(toNodeArray(n.node)); }
+      for (const n of nodes) {
+        delete n["resource-id"];
+        strip(toNodeArray(n.node));
+      }
     };
     strip(roots(obs));
     const before = countNodes(roots(obs));
@@ -417,14 +456,19 @@ describe("toOverview", () => {
     const obs = androidFixture();
     // A tappable, id-less control (Compose/iOS shape) with an a11y label.
     roots(obs)[0].node![1].node!.push({
-      "clickable": true,
+      clickable: true,
       "content-desc": "Add item",
-      "bounds": { left: 0, top: 2100, right: 200, bottom: 2200 },
+      bounds: { left: 0, top: 2100, right: 200, bottom: 2200 },
     });
     const result = toOverview(obs);
     const labels: string[] = [];
     const walk = (nodes: Node[]): void => {
-      for (const n of nodes) { if (n["content-desc"]) { labels.push(n["content-desc"]); } walk(toNodeArray(n.node)); }
+      for (const n of nodes) {
+        if (n["content-desc"]) {
+          labels.push(n["content-desc"]);
+        }
+        walk(toNodeArray(n.node));
+      }
     };
     walk(roots(result));
     expect(labels).toContain("Add item"); // NOT collapsed into omittedDescendants
@@ -450,7 +494,11 @@ describe("toOverview", () => {
 describe("applyObserveScopeExperiments", () => {
   test("no flags on returns the input unchanged (same reference)", () => {
     const obs = androidFixture();
-    const result = applyObserveScopeExperiments(obs, { focus: false, overview: false, region: false });
+    const result = applyObserveScopeExperiments(obs, {
+      focus: false,
+      overview: false,
+      region: false,
+    });
     expect(result).toBe(obs);
     expect(result.observeScope).toBeUndefined();
   });
@@ -458,7 +506,11 @@ describe("applyObserveScopeExperiments", () => {
   test("records applied transforms and node counts in observeScope", () => {
     const obs = androidFixture();
     const before = countNodes(roots(obs));
-    const result = applyObserveScopeExperiments(obs, { focus: true, overview: false, region: false });
+    const result = applyObserveScopeExperiments(obs, {
+      focus: true,
+      overview: false,
+      region: false,
+    });
     expect(result.observeScope?.applied).toEqual(["focus"]);
     expect(result.observeScope?.nodesBefore).toBe(before);
     expect(result.observeScope?.nodesAfter).toBeLessThan(before);
@@ -473,7 +525,7 @@ describe("applyObserveScopeExperiments", () => {
     // overview) — i.e. each entry's stage index strictly increases. This catches a
     // real regression (a stage recorded out of order) the type system cannot.
     const order = ["focus", "region", "overview"];
-    const indices = applied.map(k => order.indexOf(k));
+    const indices = applied.map((k) => order.indexOf(k));
     expect(indices).toEqual([...indices].sort((a, b) => a - b));
     expect(new Set(applied).size).toBe(applied.length); // no duplicate stages
     expect(applied).toContain("overview");
@@ -515,14 +567,20 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
   const NAV_BAR_BOUNDS: Bounds = { left: 0, top: 2300, right: 1080, bottom: 2400 };
 
   const boundsOf = (result: ObserveResult): Bounds[] =>
-    (result.layoutWarnings?.warnings ?? []).map(w => w.element.bounds as Bounds);
+    (result.layoutWarnings?.warnings ?? []).map((w) => w.element.bounds as Bounds);
 
   test("REGION drops a warning whose element falls outside the crop, marking scope 'scoped'", () => {
     const obs = androidFixture();
-    obs.layoutWarnings = { scope: "full", warnings: [warningAt(HEADER_BOUNDS), warningAt(NAV_BAR_BOUNDS)] };
+    obs.layoutWarnings = {
+      scope: "full",
+      warnings: [warningAt(HEADER_BOUNDS), warningAt(NAV_BAR_BOUNDS)],
+    };
     // Top-half crop keeps HEADER (top:80), prunes NAV_BAR (top:2300 > 1200).
     const result = applyObserveScopeExperiments(obs, {
-      focus: false, overview: false, region: true, regionBox: { x1: 0, y1: 0, x2: 1, y2: 0.5 },
+      focus: false,
+      overview: false,
+      region: true,
+      regionBox: { x1: 0, y1: 0, x2: 1, y2: 0.5 },
     });
     expect(result.layoutWarnings?.scope).toBe("scoped");
     expect(result.layoutWarnings?.warnings).toHaveLength(1);
@@ -531,9 +589,16 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
 
   test("FOCUS drops a warning for pruned foreign chrome", () => {
     const obs = androidFixture();
-    obs.layoutWarnings = { scope: "full", warnings: [warningAt(STATUS_BAR_BOUNDS), warningAt(HEADER_BOUNDS)] };
+    obs.layoutWarnings = {
+      scope: "full",
+      warnings: [warningAt(STATUS_BAR_BOUNDS), warningAt(HEADER_BOUNDS)],
+    };
     // Foreground-app focus prunes com.android.systemui chrome (status/nav bars).
-    const result = applyObserveScopeExperiments(obs, { focus: true, overview: false, region: false });
+    const result = applyObserveScopeExperiments(obs, {
+      focus: true,
+      overview: false,
+      region: false,
+    });
     expect(boundsOf(result)).toContainEqual(HEADER_BOUNDS);
     expect(boundsOf(result)).not.toContainEqual(STATUS_BAR_BOUNDS);
   });
@@ -544,8 +609,15 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
     // against the pre-collapse tree, so it is retained — the location is still
     // shown, represented by the kept `list` ancestor. Nothing is spatially
     // removed, so scope stays "full".
-    obs.layoutWarnings = { scope: "full", warnings: [warningAt(HEADER_BOUNDS), warningAt(ITEM2_BOUNDS)] };
-    const result = applyObserveScopeExperiments(obs, { focus: false, overview: true, region: false });
+    obs.layoutWarnings = {
+      scope: "full",
+      warnings: [warningAt(HEADER_BOUNDS), warningAt(ITEM2_BOUNDS)],
+    };
+    const result = applyObserveScopeExperiments(obs, {
+      focus: false,
+      overview: true,
+      region: false,
+    });
     expect(boundsOf(result)).toContainEqual(HEADER_BOUNDS);
     expect(boundsOf(result)).toContainEqual(ITEM2_BOUNDS);
     expect(result.layoutWarnings?.scope).toBe("full");
@@ -558,11 +630,21 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
     const B: Bounds = { left: 0, top: 80, right: 300, bottom: 140 };
     const obs = androidFixture();
     obs.viewHierarchy!.hierarchy.node = {
-      "$": { "resource-id": `${APP}:id/ios-root`, "bounds": { left: 0, top: 0, right: 1080, bottom: 2400 } },
-      "node": [{ $: { "resource-id": `${APP}:id/ios-cell`, "clickable": "true", "bounds": B } }],
+      $: {
+        "resource-id": `${APP}:id/ios-root`,
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+      },
+      node: [{ $: { "resource-id": `${APP}:id/ios-cell`, clickable: "true", bounds: B } }],
     } as never;
-    obs.layoutWarnings = { scope: "full", warnings: [{ ...warningAt(B), element: { resourceId: `${APP}:id/ios-cell`, bounds: B } }] };
-    const result = applyObserveScopeExperiments(obs, { focus: false, overview: true, region: false });
+    obs.layoutWarnings = {
+      scope: "full",
+      warnings: [{ ...warningAt(B), element: { resourceId: `${APP}:id/ios-cell`, bounds: B } }],
+    };
+    const result = applyObserveScopeExperiments(obs, {
+      focus: false,
+      overview: true,
+      region: false,
+    });
     expect(result.layoutWarnings?.warnings).toHaveLength(1);
   });
 
@@ -573,16 +655,26 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
     obs.layoutWarnings = { scope: "full", warnings: [warningAt([0, 2300, 1080, 2400])] };
     // Full-screen region keeps everything, so the tuple-bounds warning survives.
     const result = applyObserveScopeExperiments(obs, {
-      focus: false, overview: false, region: true, regionBox: { x1: 0, y1: 0, x2: 1, y2: 1 },
+      focus: false,
+      overview: false,
+      region: true,
+      regionBox: { x1: 0, y1: 0, x2: 1, y2: 1 },
     });
     expect(result.layoutWarnings?.warnings).toHaveLength(1);
   });
 
   test("downgrades a truncated list to 'scoped' and drops total when scoping removes warnings", () => {
     const obs = androidFixture();
-    obs.layoutWarnings = { scope: "truncated", total: 137, warnings: [warningAt(HEADER_BOUNDS), warningAt(NAV_BAR_BOUNDS)] };
+    obs.layoutWarnings = {
+      scope: "truncated",
+      total: 137,
+      warnings: [warningAt(HEADER_BOUNDS), warningAt(NAV_BAR_BOUNDS)],
+    };
     const result = applyObserveScopeExperiments(obs, {
-      focus: false, overview: false, region: true, regionBox: { x1: 0, y1: 0, x2: 1, y2: 0.5 },
+      focus: false,
+      overview: false,
+      region: true,
+      regionBox: { x1: 0, y1: 0, x2: 1, y2: 0.5 },
     });
     expect(result.layoutWarnings?.scope).toBe("scoped");
     expect(result.layoutWarnings?.total).toBeUndefined();
@@ -594,7 +686,10 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
     obs.layoutWarnings = { scope: "truncated", total: 137, warnings: [warningAt(HEADER_BOUNDS)] };
     // Full-screen region prunes nothing at HEADER, so the warning survives.
     const result = applyObserveScopeExperiments(obs, {
-      focus: false, overview: false, region: true, regionBox: { x1: 0, y1: 0, x2: 1, y2: 1 },
+      focus: false,
+      overview: false,
+      region: true,
+      regionBox: { x1: 0, y1: 0, x2: 1, y2: 1 },
     });
     expect(result.layoutWarnings?.scope).toBe("truncated");
     expect(result.layoutWarnings?.total).toBe(137);
@@ -606,11 +701,26 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
     const obs = androidFixture();
     // A card with a text child at identical bounds; OVERVIEW collapses the child.
     obs.viewHierarchy!.hierarchy.node = {
-      "resource-id": `${APP}:id/root`, "bounds": { left: 0, top: 0, right: 1080, bottom: 2400 },
-      "node": [{ "resource-id": `${APP}:id/card`, "clickable": true, "bounds": B, "node": [{ text: "Buried", bounds: B }] }],
+      "resource-id": `${APP}:id/root`,
+      bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+      node: [
+        {
+          "resource-id": `${APP}:id/card`,
+          clickable: true,
+          bounds: B,
+          node: [{ text: "Buried", bounds: B }],
+        },
+      ],
     } as never;
-    obs.layoutWarnings = { scope: "full", warnings: [{ ...warningAt(B), element: { text: "Buried", bounds: B } }] };
-    const result = applyObserveScopeExperiments(obs, { focus: false, overview: true, region: false });
+    obs.layoutWarnings = {
+      scope: "full",
+      warnings: [{ ...warningAt(B), element: { text: "Buried", bounds: B } }],
+    };
+    const result = applyObserveScopeExperiments(obs, {
+      focus: false,
+      overview: true,
+      region: false,
+    });
     // Matched against the pre-collapse tree, where the "Buried" child is present
     // and uniquely identified by its text — so the warning is retained (its
     // location is shown, summarized into the kept card).
@@ -624,7 +734,10 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
     // crop prunes nodes — so a capped-away warning could be out of view.
     obs.layoutWarnings = { scope: "truncated", total: 137, warnings: [warningAt(HEADER_BOUNDS)] };
     const result = applyObserveScopeExperiments(obs, {
-      focus: false, overview: false, region: true, regionBox: { x1: 0, y1: 0, x2: 1, y2: 0.5 },
+      focus: false,
+      overview: false,
+      region: true,
+      regionBox: { x1: 0, y1: 0, x2: 1, y2: 0.5 },
     });
     expect(result.layoutWarnings?.scope).toBe("scoped");
     expect(result.layoutWarnings?.total).toBeUndefined();
@@ -637,22 +750,32 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
     // Two siblings share an exact rectangle and the same text but differ by
     // resource-id. Anchor focus keeps only `kept`; `dropped` is pruned.
     obs.viewHierarchy!.hierarchy.node = {
-      "resource-id": `${APP}:id/root`, "bounds": { left: 0, top: 0, right: 1080, bottom: 2400 },
-      "node": [
-        { "resource-id": `${APP}:id/kept`, "text": "OK", "bounds": B },
-        { "resource-id": `${APP}:id/dropped`, "text": "OK", "bounds": B },
+      "resource-id": `${APP}:id/root`,
+      bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+      node: [
+        { "resource-id": `${APP}:id/kept`, text: "OK", bounds: B },
+        { "resource-id": `${APP}:id/dropped`, text: "OK", bounds: B },
       ],
     } as never;
-    const warn = (rid: string): Warning => ({ ...warningAt(B), element: { resourceId: rid, text: "OK", bounds: B } });
-    obs.layoutWarnings = { scope: "full", warnings: [warn(`${APP}:id/kept`), warn(`${APP}:id/dropped`)] };
+    const warn = (rid: string): Warning => ({
+      ...warningAt(B),
+      element: { resourceId: rid, text: "OK", bounds: B },
+    });
+    obs.layoutWarnings = {
+      scope: "full",
+      warnings: [warn(`${APP}:id/kept`), warn(`${APP}:id/dropped`)],
+    };
 
     const result = applyObserveScopeExperiments(obs, {
-      focus: true, focusAnchor: { resourceId: `${APP}:id/kept` }, overview: false, region: false,
+      focus: true,
+      focusAnchor: { resourceId: `${APP}:id/kept` },
+      overview: false,
+      region: false,
     });
 
     // The shared text must NOT keep the pruned node's warning: its resource-id
     // conflicts with the sole survivor's, so only `kept`'s warning remains.
-    const rids = (result.layoutWarnings?.warnings ?? []).map(w => w.element.resourceId);
+    const rids = (result.layoutWarnings?.warnings ?? []).map((w) => w.element.resourceId);
     expect(rids).toEqual([`${APP}:id/kept`]);
   });
 
@@ -661,31 +784,44 @@ describe("applyObserveScopeExperiments — co-scopes layoutWarnings (issue #5074
     const obs = androidFixture();
     // Same bounds and text, but different content-desc and no resource-id.
     obs.viewHierarchy!.hierarchy.node = {
-      "resource-id": `${APP}:id/root`, "bounds": { left: 0, top: 0, right: 1080, bottom: 2400 },
-      "node": [
-        { "resource-id": `${APP}:id/anchor`, "content-desc": "kept", "text": "OK", "bounds": B },
-        { "content-desc": "dropped", "text": "OK", "bounds": B },
+      "resource-id": `${APP}:id/root`,
+      bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+      node: [
+        { "resource-id": `${APP}:id/anchor`, "content-desc": "kept", text: "OK", bounds: B },
+        { "content-desc": "dropped", text: "OK", bounds: B },
       ],
     } as never;
-    const warn = (cd: string): Warning => ({ ...warningAt(B), element: { contentDesc: cd, text: "OK", bounds: B } });
+    const warn = (cd: string): Warning => ({
+      ...warningAt(B),
+      element: { contentDesc: cd, text: "OK", bounds: B },
+    });
     obs.layoutWarnings = { scope: "full", warnings: [warn("kept"), warn("dropped")] };
 
     const result = applyObserveScopeExperiments(obs, {
-      focus: true, focusAnchor: { resourceId: `${APP}:id/anchor` }, overview: false, region: false,
+      focus: true,
+      focusAnchor: { resourceId: `${APP}:id/anchor` },
+      overview: false,
+      region: false,
     });
 
     // Anchor focus keeps only the `kept` node; the shared text must not retain the
     // `dropped` warning, because its content-desc conflicts with the survivor's.
-    const descs = (result.layoutWarnings?.warnings ?? []).map(w => w.element.contentDesc);
+    const descs = (result.layoutWarnings?.warnings ?? []).map((w) => w.element.contentDesc);
     expect(descs).toEqual(["kept"]);
   });
 
   test("is pure — does not mutate the caller's layoutWarnings", () => {
     const obs = androidFixture();
-    obs.layoutWarnings = { scope: "full", warnings: [warningAt(HEADER_BOUNDS), warningAt(NAV_BAR_BOUNDS)] };
+    obs.layoutWarnings = {
+      scope: "full",
+      warnings: [warningAt(HEADER_BOUNDS), warningAt(NAV_BAR_BOUNDS)],
+    };
     const before = JSON.stringify(obs);
     applyObserveScopeExperiments(obs, {
-      focus: false, overview: false, region: true, regionBox: { x1: 0, y1: 0, x2: 1, y2: 0.5 },
+      focus: false,
+      overview: false,
+      region: true,
+      regionBox: { x1: 0, y1: 0, x2: 1, y2: 0.5 },
     });
     expect(JSON.stringify(obs)).toBe(before);
   });

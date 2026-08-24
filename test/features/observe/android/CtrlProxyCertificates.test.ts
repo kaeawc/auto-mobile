@@ -18,12 +18,16 @@ import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
 import { AndroidCtrlProxyManager } from "../../../../src/utils/CtrlProxyManager";
 import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { BootedDevice } from "../../../../src/models";
-import { FakeWebSocket, WebSocketState, createInstantFailureWebSocketFactory } from "../../../fakes/FakeWebSocket";
+import {
+  FakeWebSocket,
+  WebSocketState,
+  createInstantFailureWebSocketFactory,
+} from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { PortManager } from "../../../../src/utils/PortManager";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../../../src/utils/workingDirectory";
 
-describe("CtrlProxyCertificates (Android)", function() {
+describe("CtrlProxyCertificates (Android)", function () {
   let fakeAdb: FakeAdbExecutor;
   let testDevice: BootedDevice;
   // Manual (non-auto-advance) timer: request timeouts must NOT auto-fire and preempt the wire result
@@ -31,7 +35,7 @@ describe("CtrlProxyCertificates (Android)", function() {
   let fakeTimer: FakeTimer;
   const serverPort: number = 8765;
 
-  beforeEach(function() {
+  beforeEach(function () {
     fakeTimer = new FakeTimer();
     PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
 
@@ -43,15 +47,18 @@ describe("CtrlProxyCertificates (Android)", function() {
       deviceId: "test-device-certs",
       platform: "android",
       isEmulator: true,
-      name: "Test Device"
+      name: "Test Device",
     };
 
     AndroidCtrlProxyManager.resetInstances();
     AndroidCtrlProxyClient.resetInstances();
-    AndroidCtrlProxyManager.getInstance(testDevice, new FakeAdbClientFactory()).clearAvailabilityCache();
+    AndroidCtrlProxyManager.getInstance(
+      testDevice,
+      new FakeAdbClientFactory(),
+    ).clearAvailabilityCache();
   });
 
-  afterEach(function() {
+  afterEach(function () {
     NavigationGraphManager.getInstance();
     PortManager.setPortAvailabilityCheckerForTesting(null);
   });
@@ -85,7 +92,9 @@ describe("CtrlProxyCertificates (Android)", function() {
     }
   }
 
-  const createCapturingFactory = (timer: FakeTimer): {
+  const createCapturingFactory = (
+    timer: FakeTimer,
+  ): {
     factory: (url: string) => CapturingWebSocket;
     getSocket: () => CapturingWebSocket | null;
   } => {
@@ -95,35 +104,48 @@ describe("CtrlProxyCertificates (Android)", function() {
         socket = new CapturingWebSocket(url, "none", 0, timer);
         return socket;
       },
-      getSocket: () => socket
+      getSocket: () => socket,
     };
   };
 
   const waitForSocketOpen = async (socket: FakeWebSocket | null): Promise<void> => {
-    if (!socket || socket.readyState === WebSocketState.OPEN) { return; }
-    await new Promise<void>(resolve => socket.once("open", () => resolve()));
+    if (!socket || socket.readyState === WebSocketState.OPEN) {
+      return;
+    }
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
   };
 
-  const waitForSocket = async (getSocket: () => CapturingWebSocket | null): Promise<CapturingWebSocket | null> => {
+  const waitForSocket = async (
+    getSocket: () => CapturingWebSocket | null,
+  ): Promise<CapturingWebSocket | null> => {
     for (let i = 0; i < 5; i++) {
       const s = getSocket();
-      if (s) { return s; }
-      await new Promise(r => setImmediate(r));
+      if (s) {
+        return s;
+      }
+      await new Promise((r) => setImmediate(r));
     }
     return getSocket();
   };
 
-  const waitForSentMessages = async (socket: CapturingWebSocket | null, minCount = 1): Promise<void> => {
-    if (!socket) { return; }
+  const waitForSentMessages = async (
+    socket: CapturingWebSocket | null,
+    minCount = 1,
+  ): Promise<void> => {
+    if (!socket) {
+      return;
+    }
     for (let i = 0; i < 10; i++) {
-      if (socket.sentMessages.length >= minCount) { return; }
-      await new Promise(r => setImmediate(r));
+      if (socket.sentMessages.length >= minCount) {
+        return;
+      }
+      await new Promise((r) => setImmediate(r));
     }
   };
 
   const flushPromises = async (iterations = 5): Promise<void> => {
     for (let i = 0; i < iterations; i++) {
-      await new Promise(r => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
     }
   };
 
@@ -131,7 +153,9 @@ describe("CtrlProxyCertificates (Android)", function() {
     for (let i = socket.sentMessages.length - 1; i >= 0; i--) {
       try {
         const parsed = JSON.parse(socket.sentMessages[i]);
-        if (parsed.type === type) { return parsed; }
+        if (parsed.type === type) {
+          return parsed;
+        }
       } catch {
         // skip non-JSON control frames
       }
@@ -140,7 +164,7 @@ describe("CtrlProxyCertificates (Android)", function() {
   };
 
   const hasSentMessage = (socket: CapturingWebSocket, type: string): boolean =>
-    socket.sentMessages.some(raw => {
+    socket.sentMessages.some((raw) => {
       try {
         return JSON.parse(raw).type === type;
       } catch {
@@ -149,7 +173,9 @@ describe("CtrlProxyCertificates (Android)", function() {
     });
 
   /** Connect a capturing client and return the client + its socket. */
-  const connectClient = async (certificateFileSystem?: FakeCertificateFileSystem): Promise<{
+  const connectClient = async (
+    certificateFileSystem?: FakeCertificateFileSystem,
+  ): Promise<{
     client: AndroidCtrlProxyClient;
     socket: CapturingWebSocket;
   }> => {
@@ -165,7 +191,7 @@ describe("CtrlProxyCertificates (Android)", function() {
       undefined,
       undefined,
       undefined,
-      certificateFileSystem
+      certificateFileSystem,
     );
     await client.ensureConnected();
     const socket = await waitForSocket(getSocket);
@@ -181,15 +207,15 @@ describe("CtrlProxyCertificates (Android)", function() {
       testDevice,
       fakeAdb,
       createInstantFailureWebSocketFactory(fakeTimer),
-      fakeTimer
+      fakeTimer,
     );
 
   // ===========================================================================
   // requestInstallCaCertificate
   // ===========================================================================
 
-  describe("requestInstallCaCertificate", function() {
-    test("sends install_ca_cert and resolves with the installed alias on success", async function() {
+  describe("requestInstallCaCertificate", function () {
+    test("sends install_ca_cert and resolves with the installed alias on success", async function () {
       const { client, socket } = await connectClient();
       try {
         const baseCount = socket.sentMessages.length;
@@ -199,14 +225,16 @@ describe("CtrlProxyCertificates (Android)", function() {
         const sent = findSentMessage(socket, "install_ca_cert");
         expect(sent.certificate).toBe("PEMDATA");
 
-        socket.simulateMessage(JSON.stringify({
-          type: "ca_cert_result",
-          requestId: sent.requestId,
-          success: true,
-          action: "install",
-          alias: "user-alias-123",
-          totalTimeMs: 5,
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "ca_cert_result",
+            requestId: sent.requestId,
+            success: true,
+            action: "install",
+            alias: "user-alias-123",
+            totalTimeMs: 5,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(true);
@@ -217,7 +245,7 @@ describe("CtrlProxyCertificates (Android)", function() {
       }
     });
 
-    test("rejects an empty certificate payload without sending a request", async function() {
+    test("rejects an empty certificate payload without sending a request", async function () {
       const { client, socket } = await connectClient();
       try {
         const result = await client.requestInstallCaCertificate("");
@@ -229,7 +257,7 @@ describe("CtrlProxyCertificates (Android)", function() {
       }
     });
 
-    test("rejects a whitespace-only certificate payload", async function() {
+    test("rejects a whitespace-only certificate payload", async function () {
       const { client, socket } = await connectClient();
       try {
         const result = await client.requestInstallCaCertificate("   \n  ");
@@ -241,7 +269,7 @@ describe("CtrlProxyCertificates (Android)", function() {
       }
     });
 
-    test("surfaces the device error when installation fails", async function() {
+    test("surfaces the device error when installation fails", async function () {
       const { client, socket } = await connectClient();
       try {
         const baseCount = socket.sentMessages.length;
@@ -249,14 +277,16 @@ describe("CtrlProxyCertificates (Android)", function() {
         await waitForSentMessages(socket, baseCount + 1);
         const sent = findSentMessage(socket, "install_ca_cert");
 
-        socket.simulateMessage(JSON.stringify({
-          type: "ca_cert_result",
-          requestId: sent.requestId,
-          success: false,
-          action: "install",
-          error: "Device is not a device owner",
-          totalTimeMs: 2,
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "ca_cert_result",
+            requestId: sent.requestId,
+            success: false,
+            action: "install",
+            error: "Device is not a device owner",
+            totalTimeMs: 2,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(false);
@@ -267,7 +297,7 @@ describe("CtrlProxyCertificates (Android)", function() {
       }
     });
 
-    test("returns a connection error when the socket cannot connect", async function() {
+    test("returns a connection error when the socket cannot connect", async function () {
       const client = failingClient();
       try {
         const result = await client.requestInstallCaCertificate("PEMDATA");
@@ -283,57 +313,59 @@ describe("CtrlProxyCertificates (Android)", function() {
   // requestInstallCaCertificateFromFile
   // ===========================================================================
 
-  describe("requestInstallCaCertificateFromFile", function() {
+  describe("requestInstallCaCertificateFromFile", function () {
     const relativeCertificatePath = path.join("fixtures", "certs", "relative ca.crt");
     const daemonLaunchCwd = path.join(process.cwd(), "tmp", "automobile-launch");
     const relativeResolvedPath = path.join(daemonLaunchCwd, relativeCertificatePath);
     const fileUrlResolvedPath = path.join(process.cwd(), "tmp", "automobile ca.crt");
 
-    test("rejects an empty path without touching the device", async function() {
+    test("rejects an empty path without touching the device", async function () {
       const { client, socket } = await connectClient();
       try {
         const result = await client.requestInstallCaCertificateFromFile("   ");
         expect(result.success).toBe(false);
         expect(result.error).toContain("valid host file path");
-        expect(fakeAdb.getExecutedCommands().some(c => c.startsWith("push"))).toBe(false);
+        expect(fakeAdb.getExecutedCommands().some((c) => c.startsWith("push"))).toBe(false);
         expect(hasSentMessage(socket, "install_ca_cert_from_path")).toBe(false);
       } finally {
         await client.close();
       }
     });
 
-    test("rejects an on-device sdcard path (not a host file)", async function() {
+    test("rejects an on-device sdcard path (not a host file)", async function () {
       const { client } = await connectClient();
       try {
         const result = await client.requestInstallCaCertificateFromFile("/sdcard/Download/ca.crt");
         expect(result.success).toBe(false);
         expect(result.error).toContain("valid host file path");
-        expect(fakeAdb.getExecutedCommands().some(c => c.startsWith("push"))).toBe(false);
+        expect(fakeAdb.getExecutedCommands().some((c) => c.startsWith("push"))).toBe(false);
       } finally {
         await client.close();
       }
     });
 
-    test("rejects a content:// path", async function() {
+    test("rejects a content:// path", async function () {
       const { client } = await connectClient();
       try {
-        const result = await client.requestInstallCaCertificateFromFile("content://downloads/ca.crt");
+        const result = await client.requestInstallCaCertificateFromFile(
+          "content://downloads/ca.crt",
+        );
         expect(result.success).toBe(false);
         expect(result.error).toContain("valid host file path");
-        expect(fakeAdb.getExecutedCommands().some(c => c.startsWith("push"))).toBe(false);
+        expect(fakeAdb.getExecutedCommands().some((c) => c.startsWith("push"))).toBe(false);
       } finally {
         await client.close();
       }
     });
 
-    test("does not push a certificate for a nonexistent host file", async function() {
+    test("does not push a certificate for a nonexistent host file", async function () {
       const { client, socket } = await connectClient();
       try {
         const missing = `/tmp/automobile-cert-does-not-exist-${Date.now()}.crt`;
         const result = await client.requestInstallCaCertificateFromFile(missing);
         expect(result.success).toBe(false);
         // Never pushed the file and never asked the runner to install it.
-        expect(fakeAdb.getExecutedCommands().some(c => c.startsWith("push"))).toBe(false);
+        expect(fakeAdb.getExecutedCommands().some((c) => c.startsWith("push"))).toBe(false);
         expect(hasSentMessage(socket, "install_ca_cert_from_path")).toBe(false);
       } finally {
         await client.close();
@@ -353,60 +385,63 @@ describe("CtrlProxyCertificates (Android)", function() {
         resolvedPath: fileUrlResolvedPath,
         daemonLaunchCwd: undefined,
       },
-    ])("pushes $name and resolves the install result over the wire", async function({
-      certificatePath,
-      resolvedPath,
-      daemonLaunchCwd,
-    }) {
-      const previousLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
-      if (daemonLaunchCwd !== undefined) {
-        process.env[DAEMON_LAUNCH_CWD_ENV] = daemonLaunchCwd;
-      }
+    ])(
+      "pushes $name and resolves the install result over the wire",
+      async function ({ certificatePath, resolvedPath, daemonLaunchCwd }) {
+        const previousLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
+        if (daemonLaunchCwd !== undefined) {
+          process.env[DAEMON_LAUNCH_CWD_ENV] = daemonLaunchCwd;
+        }
 
-      try {
-        const fakeFileSystem = new FakeCertificateFileSystem();
-        fakeFileSystem.setFile(resolvedPath, 128);
-        const { client, socket } = await connectClient(fakeFileSystem);
         try {
-          const baseCount = socket.sentMessages.length;
-          const resultPromise = client.requestInstallCaCertificateFromFile(certificatePath);
-          await waitForSentMessages(socket, baseCount + 1);
+          const fakeFileSystem = new FakeCertificateFileSystem();
+          fakeFileSystem.setFile(resolvedPath, 128);
+          const { client, socket } = await connectClient(fakeFileSystem);
+          try {
+            const baseCount = socket.sentMessages.length;
+            const resultPromise = client.requestInstallCaCertificateFromFile(certificatePath);
+            await waitForSentMessages(socket, baseCount + 1);
 
-          const sent = findSentMessage(socket, "install_ca_cert_from_path");
-          expect(fakeFileSystem.statCalls).toEqual([resolvedPath]);
+            const sent = findSentMessage(socket, "install_ca_cert_from_path");
+            expect(fakeFileSystem.statCalls).toEqual([resolvedPath]);
 
-          const push = fakeAdb.getExecutedCommands().find(command => command.startsWith("push "));
-          expect(push?.replace(/\\\\/g, "\\")).toContain(`"${resolvedPath}"`);
-          expect(push).toEndWith(`"${sent.devicePath}"`);
+            const push = fakeAdb
+              .getExecutedCommands()
+              .find((command) => command.startsWith("push "));
+            expect(push?.replace(/\\\\/g, "\\")).toContain(`"${resolvedPath}"`);
+            expect(push).toEndWith(`"${sent.devicePath}"`);
 
-          socket.simulateMessage(JSON.stringify({
-            type: "ca_cert_result",
-            requestId: sent.requestId,
-            success: true,
-            action: "install",
-            alias: "user-ca-cert",
-            totalTimeMs: 3,
-          }));
+            socket.simulateMessage(
+              JSON.stringify({
+                type: "ca_cert_result",
+                requestId: sent.requestId,
+                success: true,
+                action: "install",
+                alias: "user-ca-cert",
+                totalTimeMs: 3,
+              }),
+            );
 
-          const result = await resultPromise;
-          expect(result).toMatchObject({
-            success: true,
-            action: "install",
-            alias: "user-ca-cert",
-          });
+            const result = await resultPromise;
+            expect(result).toMatchObject({
+              success: true,
+              action: "install",
+              alias: "user-ca-cert",
+            });
+          } finally {
+            await client.close();
+          }
         } finally {
-          await client.close();
+          if (previousLaunchCwd === undefined) {
+            delete process.env[DAEMON_LAUNCH_CWD_ENV];
+          } else {
+            process.env[DAEMON_LAUNCH_CWD_ENV] = previousLaunchCwd;
+          }
         }
-      } finally {
-        if (previousLaunchCwd === undefined) {
-          delete process.env[DAEMON_LAUNCH_CWD_ENV];
-        } else {
-          process.env[DAEMON_LAUNCH_CWD_ENV] = previousLaunchCwd;
-        }
-      }
-    });
+      },
+    );
 
-    test("rejects an empty certificate file before pushing or sending a wire request", async function() {
+    test("rejects an empty certificate file before pushing or sending a wire request", async function () {
       const resolvedPath = "/tmp/empty-ca.crt";
       const fakeFileSystem = new FakeCertificateFileSystem();
       fakeFileSystem.setFile(resolvedPath, 0);
@@ -417,7 +452,9 @@ describe("CtrlProxyCertificates (Android)", function() {
         expect(result.success).toBe(false);
         expect(result.error).toContain("Certificate file is empty");
         expect(fakeFileSystem.statCalls).toEqual([resolvedPath]);
-        expect(fakeAdb.getExecutedCommands().some(command => command.startsWith("push "))).toBe(false);
+        expect(fakeAdb.getExecutedCommands().some((command) => command.startsWith("push "))).toBe(
+          false,
+        );
         expect(hasSentMessage(socket, "install_ca_cert_from_path")).toBe(false);
       } finally {
         await client.close();
@@ -429,8 +466,8 @@ describe("CtrlProxyCertificates (Android)", function() {
   // requestRemoveCaCertificate
   // ===========================================================================
 
-  describe("requestRemoveCaCertificate", function() {
-    test("sends remove_ca_cert and resolves via the delegate handler on success", async function() {
+  describe("requestRemoveCaCertificate", function () {
+    test("sends remove_ca_cert and resolves via the delegate handler on success", async function () {
       const { client, socket } = await connectClient();
       try {
         const baseCount = socket.sentMessages.length;
@@ -440,14 +477,16 @@ describe("CtrlProxyCertificates (Android)", function() {
         const sent = findSentMessage(socket, "remove_ca_cert");
         expect(sent.alias).toBe("user-alias-123");
 
-        socket.simulateMessage(JSON.stringify({
-          type: "ca_cert_result",
-          requestId: sent.requestId,
-          success: true,
-          action: "remove",
-          alias: "user-alias-123",
-          totalTimeMs: 4,
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "ca_cert_result",
+            requestId: sent.requestId,
+            success: true,
+            action: "remove",
+            alias: "user-alias-123",
+            totalTimeMs: 4,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(true);
@@ -457,7 +496,7 @@ describe("CtrlProxyCertificates (Android)", function() {
       }
     });
 
-    test("rejects an empty alias without sending a request", async function() {
+    test("rejects an empty alias without sending a request", async function () {
       const { client, socket } = await connectClient();
       try {
         const result = await client.requestRemoveCaCertificate("  ");
@@ -469,7 +508,7 @@ describe("CtrlProxyCertificates (Android)", function() {
       }
     });
 
-    test("surfaces the device error when removal fails", async function() {
+    test("surfaces the device error when removal fails", async function () {
       const { client, socket } = await connectClient();
       try {
         const baseCount = socket.sentMessages.length;
@@ -477,14 +516,16 @@ describe("CtrlProxyCertificates (Android)", function() {
         await waitForSentMessages(socket, baseCount + 1);
         const sent = findSentMessage(socket, "remove_ca_cert");
 
-        socket.simulateMessage(JSON.stringify({
-          type: "ca_cert_result",
-          requestId: sent.requestId,
-          success: false,
-          action: "remove",
-          error: "Alias not found",
-          totalTimeMs: 1,
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "ca_cert_result",
+            requestId: sent.requestId,
+            success: false,
+            action: "remove",
+            error: "Alias not found",
+            totalTimeMs: 1,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(false);
@@ -494,7 +535,7 @@ describe("CtrlProxyCertificates (Android)", function() {
       }
     });
 
-    test("returns a connection error when the socket cannot connect", async function() {
+    test("returns a connection error when the socket cannot connect", async function () {
       const client = failingClient();
       try {
         const result = await client.requestRemoveCaCertificate("user-alias-123");
@@ -510,8 +551,8 @@ describe("CtrlProxyCertificates (Android)", function() {
   // requestDeviceOwnerStatus
   // ===========================================================================
 
-  describe("requestDeviceOwnerStatus", function() {
-    test("sends get_device_owner_status and resolves with owner/admin flags", async function() {
+  describe("requestDeviceOwnerStatus", function () {
+    test("sends get_device_owner_status and resolves with owner/admin flags", async function () {
       const { client, socket } = await connectClient();
       try {
         const baseCount = socket.sentMessages.length;
@@ -519,15 +560,17 @@ describe("CtrlProxyCertificates (Android)", function() {
         await waitForSentMessages(socket, baseCount + 1);
         const sent = findSentMessage(socket, "get_device_owner_status");
 
-        socket.simulateMessage(JSON.stringify({
-          type: "device_owner_status_result",
-          requestId: sent.requestId,
-          success: true,
-          isDeviceOwner: true,
-          isAdminActive: true,
-          packageName: "com.example.owner",
-          totalTimeMs: 3,
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "device_owner_status_result",
+            requestId: sent.requestId,
+            success: true,
+            isDeviceOwner: true,
+            isAdminActive: true,
+            packageName: "com.example.owner",
+            totalTimeMs: 3,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(true);
@@ -539,7 +582,7 @@ describe("CtrlProxyCertificates (Android)", function() {
       }
     });
 
-    test("reports a non-owner device", async function() {
+    test("reports a non-owner device", async function () {
       const { client, socket } = await connectClient();
       try {
         const baseCount = socket.sentMessages.length;
@@ -547,14 +590,16 @@ describe("CtrlProxyCertificates (Android)", function() {
         await waitForSentMessages(socket, baseCount + 1);
         const sent = findSentMessage(socket, "get_device_owner_status");
 
-        socket.simulateMessage(JSON.stringify({
-          type: "device_owner_status_result",
-          requestId: sent.requestId,
-          success: true,
-          isDeviceOwner: false,
-          isAdminActive: false,
-          totalTimeMs: 3,
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "device_owner_status_result",
+            requestId: sent.requestId,
+            success: true,
+            isDeviceOwner: false,
+            isAdminActive: false,
+            totalTimeMs: 3,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(true);
@@ -565,7 +610,7 @@ describe("CtrlProxyCertificates (Android)", function() {
       }
     });
 
-    test("returns a connection error when the socket cannot connect", async function() {
+    test("returns a connection error when the socket cannot connect", async function () {
       const client = failingClient();
       try {
         const result = await client.requestDeviceOwnerStatus();
@@ -582,8 +627,8 @@ describe("CtrlProxyCertificates (Android)", function() {
   // requestPermission
   // ===========================================================================
 
-  describe("requestPermission", function() {
-    test("sends get_permission and resolves granted", async function() {
+  describe("requestPermission", function () {
+    test("sends get_permission and resolves granted", async function () {
       const { client, socket } = await connectClient();
       try {
         const baseCount = socket.sentMessages.length;
@@ -594,17 +639,19 @@ describe("CtrlProxyCertificates (Android)", function() {
         expect(sent.permission).toBe("android.permission.CAMERA");
         expect(sent.requestPermission).toBe(true);
 
-        socket.simulateMessage(JSON.stringify({
-          type: "permission_result",
-          requestId: sent.requestId,
-          success: true,
-          permission: "android.permission.CAMERA",
-          granted: true,
-          requestLaunched: true,
-          canRequest: true,
-          requiresSettings: false,
-          totalTimeMs: 6,
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "permission_result",
+            requestId: sent.requestId,
+            success: true,
+            permission: "android.permission.CAMERA",
+            granted: true,
+            requestLaunched: true,
+            canRequest: true,
+            requiresSettings: false,
+            totalTimeMs: 6,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(true);
@@ -615,7 +662,7 @@ describe("CtrlProxyCertificates (Android)", function() {
       }
     });
 
-    test("rejects an empty permission name without sending a request", async function() {
+    test("rejects an empty permission name without sending a request", async function () {
       const { client, socket } = await connectClient();
       try {
         const result = await client.requestPermission("   ");
@@ -628,7 +675,7 @@ describe("CtrlProxyCertificates (Android)", function() {
       }
     });
 
-    test("reports a not-granted permission that requires settings", async function() {
+    test("reports a not-granted permission that requires settings", async function () {
       const { client, socket } = await connectClient();
       try {
         const baseCount = socket.sentMessages.length;
@@ -636,17 +683,19 @@ describe("CtrlProxyCertificates (Android)", function() {
         await waitForSentMessages(socket, baseCount + 1);
         const sent = findSentMessage(socket, "get_permission");
 
-        socket.simulateMessage(JSON.stringify({
-          type: "permission_result",
-          requestId: sent.requestId,
-          success: true,
-          permission: "android.permission.SYSTEM_ALERT_WINDOW",
-          granted: false,
-          requestLaunched: false,
-          canRequest: false,
-          requiresSettings: true,
-          totalTimeMs: 6,
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "permission_result",
+            requestId: sent.requestId,
+            success: true,
+            permission: "android.permission.SYSTEM_ALERT_WINDOW",
+            granted: false,
+            requestLaunched: false,
+            canRequest: false,
+            requiresSettings: true,
+            totalTimeMs: 6,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(true);
@@ -657,7 +706,7 @@ describe("CtrlProxyCertificates (Android)", function() {
       }
     });
 
-    test("returns success:false (not a granted permission) when the request times out", async function() {
+    test("returns success:false (not a granted permission) when the request times out", async function () {
       const { client, socket } = await connectClient();
       try {
         const baseCount = socket.sentMessages.length;
@@ -677,7 +726,7 @@ describe("CtrlProxyCertificates (Android)", function() {
       }
     });
 
-    test("returns a connection error when the socket cannot connect", async function() {
+    test("returns a connection error when the socket cannot connect", async function () {
       const client = failingClient();
       try {
         const result = await client.requestPermission("android.permission.CAMERA");

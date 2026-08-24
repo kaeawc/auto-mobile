@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { ResourceRegistry } from "../../../src/server/resourceRegistry";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
@@ -28,28 +37,28 @@ describe("MCP Booted Device Resources", () => {
     platform: "android",
     deviceId: "emulator-5554",
     transportId: "1",
-    source: "local"
+    source: "local",
   };
 
   const mockAndroidDevice2: BootedDevice = {
     name: "Pixel_8_API_35",
     platform: "android",
     deviceId: "emulator-5556",
-    source: "local"
+    source: "local",
   };
 
   const mockIosDevice1: BootedDevice = {
     name: "iPhone 15 Pro",
     platform: "ios",
     deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
-    source: "local"
+    source: "local",
   };
 
   const mockIosDevice2: BootedDevice = {
     name: "iPad Pro (12.9-inch)",
     platform: "ios",
     deviceId: "B2C3D4E5-F6A7-8901-BCDE-F12345678901",
-    source: "local"
+    source: "local",
   };
 
   beforeAll(async () => {
@@ -80,52 +89,62 @@ describe("MCP Booted Device Resources", () => {
   });
 
   describe("Resource Listing", () => {
-    test("should include booted devices resource in list", async function() {
+    test("should include booted devices resource in list", async function () {
       const { client } = fixture.getContext();
 
       const listResourcesResponseSchema = z.object({
-        resources: z.array(z.object({
-          uri: z.string(),
-          name: z.string().optional(),
-          description: z.string().optional(),
-          mimeType: z.string().optional()
-        }))
+        resources: z.array(
+          z.object({
+            uri: z.string(),
+            name: z.string().optional(),
+            description: z.string().optional(),
+            mimeType: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/list",
-        params: {}
-      }, listResourcesResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/list",
+          params: {},
+        },
+        listResourcesResponseSchema,
+      );
 
       // Verify booted devices resource is present
       const bootedDevicesResource = result.resources.find(
-        (r: any) => r.uri === "automobile:devices/booted"
+        (r: any) => r.uri === "automobile:devices/booted",
       );
       expect(bootedDevicesResource).toBeDefined();
       expect(bootedDevicesResource?.name).toBe("Booted Devices");
       expect(bootedDevicesResource?.mimeType).toBe("application/json");
     });
 
-    test("should include booted devices template in resource templates list", async function() {
+    test("should include booted devices template in resource templates list", async function () {
       const { client } = fixture.getContext();
 
       const listResourceTemplatesResponseSchema = z.object({
-        resourceTemplates: z.array(z.object({
-          uriTemplate: z.string(),
-          name: z.string().optional(),
-          description: z.string().optional(),
-          mimeType: z.string().optional()
-        }))
+        resourceTemplates: z.array(
+          z.object({
+            uriTemplate: z.string(),
+            name: z.string().optional(),
+            description: z.string().optional(),
+            mimeType: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/templates/list",
-        params: {}
-      }, listResourceTemplatesResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/templates/list",
+          params: {},
+        },
+        listResourceTemplatesResponseSchema,
+      );
 
       // Verify booted devices template is present
       const bootedDevicesTemplate = result.resourceTemplates.find(
-        (t: any) => t.uriTemplate === "automobile:devices/booted/{platform}"
+        (t: any) => t.uriTemplate === "automobile:devices/booted/{platform}",
       );
       expect(bootedDevicesTemplate).toBeDefined();
       expect(bootedDevicesTemplate?.name).toBe("Platform-specific Booted Devices");
@@ -134,7 +153,7 @@ describe("MCP Booted Device Resources", () => {
   });
 
   describe("Resource Reading with Mock Devices", () => {
-    test("should return correct counts when there are multiple devices", async function() {
+    test("should return correct counts when there are multiple devices", async function () {
       // Set up mock devices
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
       fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
@@ -142,20 +161,25 @@ describe("MCP Booted Device Resources", () => {
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/booted"
-        }
-      }, readResourceResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/booted",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       // Verify response structure
       expect(result.contents).toHaveLength(1);
@@ -176,7 +200,7 @@ describe("MCP Booted Device Resources", () => {
       expect(data.observationComplete).toBe(true);
       expect(data.platformObservations).toEqual({
         android: { observationComplete: true },
-        ios: { observationComplete: true }
+        ios: { observationComplete: true },
       });
       expect(data.devices[0]).toMatchObject({
         identity: {
@@ -186,7 +210,7 @@ describe("MCP Booted Device Resources", () => {
         },
         lifecycleState: "booted",
         readiness: { state: "unknown" },
-        capabilities: { automation: null }
+        capabilities: { automation: null },
       });
       expect(data.devices[2]).toMatchObject({
         identity: {
@@ -199,25 +223,30 @@ describe("MCP Booted Device Resources", () => {
       expect(() => new Date(data.lastUpdated)).not.toThrow();
     });
 
-    test("should return empty results when no devices are booted", async function() {
+    test("should return empty results when no devices are booted", async function () {
       // No devices set up - fakeDeviceUtils returns empty by default
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/booted"
-        }
-      }, readResourceResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/booted",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
       expect(data.totalCount).toBe(0);
@@ -229,7 +258,7 @@ describe("MCP Booted Device Resources", () => {
       expect(data.poolStatus).toBeUndefined();
     });
 
-    test("should filter correctly for android platform", async function() {
+    test("should filter correctly for android platform", async function () {
       // Set up both Android and iOS devices
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
       fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1, mockIosDevice2]);
@@ -237,20 +266,25 @@ describe("MCP Booted Device Resources", () => {
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/booted/android"
-        }
-      }, readResourceResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/booted/android",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       // Verify response structure
       expect(result.contents).toHaveLength(1);
@@ -272,7 +306,7 @@ describe("MCP Booted Device Resources", () => {
       }
     });
 
-    test("should filter correctly for ios platform", async function() {
+    test("should filter correctly for ios platform", async function () {
       // Set up both Android and iOS devices
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
       fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1, mockIosDevice2]);
@@ -280,20 +314,25 @@ describe("MCP Booted Device Resources", () => {
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/booted/ios"
-        }
-      }, readResourceResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/booted/ios",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       // Verify response structure
       expect(result.contents).toHaveLength(1);
@@ -315,27 +354,32 @@ describe("MCP Booted Device Resources", () => {
       }
     });
 
-    test("should include all device properties in response", async function() {
+    test("should include all device properties in response", async function () {
       // Set up a single device to check all properties
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
 
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/booted"
-        }
-      }, readResourceResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/booted",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
       expect(data.devices).toHaveLength(1);
@@ -349,37 +393,44 @@ describe("MCP Booted Device Resources", () => {
       expect(device.poolStatus).toBeUndefined();
     });
 
-    test("includes per-device lock state from the lock probe", async function() {
+    test("includes per-device lock state from the lock probe", async function () {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
       // Only the first device is locked; the probe reports the rest unlocked.
-      setDeviceLockProbe(async device => device.deviceId === mockAndroidDevice1.deviceId);
+      setDeviceLockProbe(async (device) => device.deviceId === mockAndroidDevice1.deviceId);
 
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/booted"
-        }
-      }, readResourceResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/booted",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
-      const locked = data.devices.find(device => device.deviceId === mockAndroidDevice1.deviceId);
-      const unlocked = data.devices.find(device => device.deviceId === mockAndroidDevice2.deviceId);
+      const locked = data.devices.find((device) => device.deviceId === mockAndroidDevice1.deviceId);
+      const unlocked = data.devices.find(
+        (device) => device.deviceId === mockAndroidDevice2.deviceId,
+      );
       expect(locked?.locked).toBe(true);
       expect(unlocked?.locked).toBe(false);
     });
 
-    test("omits lock state for a device the probe cannot read", async function() {
+    test("omits lock state for a device the probe cannot read", async function () {
       fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
       // iOS (and any unreadable device) yields undefined — the field is then omitted entirely.
       setDeviceLockProbe(async () => undefined);
@@ -387,51 +438,61 @@ describe("MCP Booted Device Resources", () => {
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/booted"
-        }
-      }, readResourceResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/booted",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
       expect(data.devices[0].locked).toBeUndefined();
     });
 
-    test("lock-states resource surfaces per-device lock from the probe", async function() {
+    test("lock-states resource surfaces per-device lock from the probe", async function () {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
       // Only the first device is locked; the probe reports the rest unlocked.
-      setDeviceLockProbe(async device => device.deviceId === mockAndroidDevice1.deviceId);
+      setDeviceLockProbe(async (device) => device.deviceId === mockAndroidDevice1.deviceId);
 
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/lockStates"
-        }
-      }, readResourceResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/lockStates",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       const data: DeviceLockStatesResourceContent = JSON.parse(result.contents[0].text!);
-      const locked = data.lockStates.find(s => s.deviceId === mockAndroidDevice1.deviceId);
-      const unlocked = data.lockStates.find(s => s.deviceId === mockAndroidDevice2.deviceId);
+      const locked = data.lockStates.find((s) => s.deviceId === mockAndroidDevice1.deviceId);
+      const unlocked = data.lockStates.find((s) => s.deviceId === mockAndroidDevice2.deviceId);
       expect(locked?.locked).toBe(true);
       expect(unlocked?.locked).toBe(false);
       // lastUpdated is a canonical ISO 8601 timestamp: it round-trips through Date, proving it is a
@@ -439,27 +500,32 @@ describe("MCP Booted Device Resources", () => {
       expect(data.lastUpdated).toBe(new Date(data.lastUpdated).toISOString());
     });
 
-    test("lock-states resource omits lock for a device the probe cannot read", async function() {
+    test("lock-states resource omits lock for a device the probe cannot read", async function () {
       fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
       setDeviceLockProbe(async () => undefined);
 
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/lockStates"
-        }
-      }, readResourceResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/lockStates",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       const data: DeviceLockStatesResourceContent = JSON.parse(result.contents[0].text!);
       expect(data.lockStates).toHaveLength(1);
@@ -467,7 +533,7 @@ describe("MCP Booted Device Resources", () => {
       expect(data.lockStates[0].locked).toBeUndefined();
     });
 
-    test("resource-update notification fans out to the lock-states resource, not just booted", async function() {
+    test("resource-update notification fans out to the lock-states resource, not just booted", async function () {
       // A device start/kill changes both the full booted resource and this lightweight one, so
       // subscribers to either must be notified — regression guard for the notify set.
       const spy = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue(undefined);
@@ -482,19 +548,23 @@ describe("MCP Booted Device Resources", () => {
       }
     });
 
-    test("should include pool status when daemon is initialized", async function() {
+    test("should include pool status when daemon is initialized", async function () {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
 
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
       const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
-      const { FakeInstalledAppsRepository } = await import("../../fakes/FakeInstalledAppsRepository");
+      const { FakeInstalledAppsRepository } =
+        await import("../../fakes/FakeInstalledAppsRepository");
       const fakeAppsRepo = new FakeInstalledAppsRepository();
-      const devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceUtils);
-      await devicePool.initializeWithDevices([
-        mockAndroidDevice1,
-        mockAndroidDevice2
-      ]);
+      const devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceUtils,
+      );
+      await devicePool.initializeWithDevices([mockAndroidDevice1, mockAndroidDevice2]);
 
       const sessionId = "session-123";
       await devicePool.assignDeviceToSession(sessionId);
@@ -503,20 +573,25 @@ describe("MCP Booted Device Resources", () => {
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/booted"
-        }
-      }, readResourceResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/booted",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
       expect(data.poolStatus).toEqual({
@@ -525,15 +600,15 @@ describe("MCP Booted Device Resources", () => {
         assigned: 1,
         error: 0,
         total: 2,
-        recoveryPolicy: { onLoss: false, maxAttempts: 2 }
+        recoveryPolicy: { onLoss: false, maxAttempts: 2 },
       });
 
-      const assignedDevice = data.devices.find(device => device.assignedSession === sessionId);
+      const assignedDevice = data.devices.find((device) => device.assignedSession === sessionId);
       expect(assignedDevice).toBeDefined();
       expect(assignedDevice?.poolStatus).toBe("assigned");
 
       const idleDevice = data.devices.find(
-        device => device.deviceId !== assignedDevice?.deviceId
+        (device) => device.deviceId !== assignedDevice?.deviceId,
       );
       expect(idleDevice).toBeDefined();
       expect(idleDevice?.poolStatus).toBe("idle");
@@ -542,35 +617,46 @@ describe("MCP Booted Device Resources", () => {
       sessionManager.stopCleanupTimer();
     });
 
-    test("should not include phantom pool devices in pool status", async function() {
+    test("should not include phantom pool devices in pool status", async function () {
       fakeDeviceUtils.setBootedDevices("android", []);
 
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
       const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
-      const { FakeInstalledAppsRepository } = await import("../../fakes/FakeInstalledAppsRepository");
+      const { FakeInstalledAppsRepository } =
+        await import("../../fakes/FakeInstalledAppsRepository");
       const fakeAppsRepo = new FakeInstalledAppsRepository();
-      const devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo);
+      const devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+      );
       await devicePool.initializeWithDevices([mockAndroidDevice1]);
       DaemonState.getInstance().initialize(sessionManager, devicePool);
 
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/booted"
-        }
-      }, readResourceResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/booted",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
       expect(data.devices).toHaveLength(0);
@@ -580,13 +666,13 @@ describe("MCP Booted Device Resources", () => {
         assigned: 0,
         error: 0,
         total: 0,
-        recoveryPolicy: { onLoss: false, maxAttempts: 2 }
+        recoveryPolicy: { onLoss: false, maxAttempts: 2 },
       });
 
       sessionManager.stopCleanupTimer();
     });
 
-    test("preserves pool stats for a platform whose discovery fails", async function() {
+    test("preserves pool stats for a platform whose discovery fails", async function () {
       // Android discovery succeeds with zero booted devices; iOS discovery fails
       // after the iOS device has already been assigned.
       fakeDeviceUtils.setBootedDevices("android", []);
@@ -595,14 +681,15 @@ describe("MCP Booted Device Resources", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
       const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
-      const { FakeInstalledAppsRepository } = await import("../../fakes/FakeInstalledAppsRepository");
+      const { FakeInstalledAppsRepository } =
+        await import("../../fakes/FakeInstalledAppsRepository");
       const fakeAppsRepo = new FakeInstalledAppsRepository();
       const devicePool = new DevicePool(
         sessionManager,
         "test-daemon-session-id",
         fakeTimer,
         fakeAppsRepo,
-        fakeDeviceUtils
+        fakeDeviceUtils,
       );
       // An idle Android phantom (no longer booted) plus an assigned iOS device.
       await devicePool.initializeWithDevices([mockAndroidDevice1, mockIosDevice1]);
@@ -614,20 +701,25 @@ describe("MCP Booted Device Resources", () => {
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/booted"
-        }
-      }, readResourceResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/booted",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
       // The Android phantom is dropped (android discovery succeeded, empty), but
@@ -639,9 +731,9 @@ describe("MCP Booted Device Resources", () => {
           observationComplete: false,
           discoveryError: {
             code: "unavailable",
-            message: "iOS booted-device discovery is unavailable."
-          }
-        }
+            message: "iOS booted-device discovery is unavailable.",
+          },
+        },
       });
       expect(data.poolStatus).toEqual({
         enabled: true,
@@ -649,30 +741,35 @@ describe("MCP Booted Device Resources", () => {
         assigned: 1,
         error: 0,
         total: 1,
-        recoveryPolicy: { onLoss: false, maxAttempts: 2 }
+        recoveryPolicy: { onLoss: false, maxAttempts: 2 },
       });
 
       sessionManager.stopCleanupTimer();
     });
 
-    test("should return error for invalid platform", async function() {
+    test("should return error for invalid platform", async function () {
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      const result = await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/booted/invalid"
-        }
-      }, readResourceResponseSchema);
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/booted/invalid",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       // Verify error response
       expect(result.contents).toHaveLength(1);
@@ -684,26 +781,31 @@ describe("MCP Booted Device Resources", () => {
   });
 
   describe("Device Manager Integration", () => {
-    test("should call getBootedDevices for android when filtering", async function() {
+    test("should call getBootedDevices for android when filtering", async function () {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
 
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/booted/android"
-        }
-      }, readResourceResponseSchema);
+      await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/booted/android",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       // Verify getBootedDevices was called for android
       expect(fakeDeviceUtils.wasMethodCalled("getBootedDevices")).toBe(true);
@@ -711,27 +813,32 @@ describe("MCP Booted Device Resources", () => {
       expect(operations).toContain("getBootedDevices:android");
     });
 
-    test("should call getBootedDevices for both platforms when requesting all devices", async function() {
+    test("should call getBootedDevices for both platforms when requesting all devices", async function () {
       fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
       fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
 
       const { client } = fixture.getContext();
 
       const readResourceResponseSchema = z.object({
-        contents: z.array(z.object({
-          uri: z.string(),
-          mimeType: z.string().optional(),
-          text: z.string().optional(),
-          blob: z.string().optional()
-        }))
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+            blob: z.string().optional(),
+          }),
+        ),
       });
 
-      await client.request({
-        method: "resources/read",
-        params: {
-          uri: "automobile:devices/booted"
-        }
-      }, readResourceResponseSchema);
+      await client.request(
+        {
+          method: "resources/read",
+          params: {
+            uri: "automobile:devices/booted",
+          },
+        },
+        readResourceResponseSchema,
+      );
 
       // Verify getBootedDevices was called for both platforms
       const operations = fakeDeviceUtils.getExecutedOperations();
@@ -756,11 +863,11 @@ describe("ResourceRegistry Template Matching", () => {
       "Test Item",
       "Test item description",
       "application/json",
-      async params => ({
+      async (params) => ({
         uri: `test://items/${params.id}`,
         mimeType: "application/json",
-        text: JSON.stringify({ id: params.id })
-      })
+        text: JSON.stringify({ id: params.id }),
+      }),
     );
 
     const match = ResourceRegistry.matchTemplate("test://items/123");
@@ -775,11 +882,11 @@ describe("ResourceRegistry Template Matching", () => {
       "User Post",
       "A user's post",
       "application/json",
-      async params => ({
+      async (params) => ({
         uri: `test://users/${params.userId}/posts/${params.postId}`,
         mimeType: "application/json",
-        text: JSON.stringify(params)
-      })
+        text: JSON.stringify(params),
+      }),
     );
 
     const match = ResourceRegistry.matchTemplate("test://users/user-123/posts/post-456");
@@ -793,11 +900,11 @@ describe("ResourceRegistry Template Matching", () => {
       "Test Item",
       "Test item description",
       "application/json",
-      async params => ({
+      async (params) => ({
         uri: `test://items/${params.id}`,
         mimeType: "application/json",
-        text: "{}"
-      })
+        text: "{}",
+      }),
     );
 
     expect(ResourceRegistry.matchTemplate("test://other/123")).toBeUndefined();
@@ -815,8 +922,8 @@ describe("ResourceRegistry Template Matching", () => {
       async () => ({
         uri: "test://items/special",
         mimeType: "application/json",
-        text: JSON.stringify({ type: "exact" })
-      })
+        text: JSON.stringify({ type: "exact" }),
+      }),
     );
 
     ResourceRegistry.registerTemplate(
@@ -824,11 +931,11 @@ describe("ResourceRegistry Template Matching", () => {
       "Generic Item",
       "A generic item",
       "application/json",
-      async params => ({
+      async (params) => ({
         uri: `test://items/${params.id}`,
         mimeType: "application/json",
-        text: JSON.stringify({ type: "template", id: params.id })
-      })
+        text: JSON.stringify({ type: "template", id: params.id }),
+      }),
     );
 
     // Exact match should be found
@@ -851,8 +958,8 @@ describe("ResourceRegistry Template Matching", () => {
       async () => ({
         uri: "test://items/1",
         mimeType: "application/json",
-        text: "{}"
-      })
+        text: "{}",
+      }),
     );
 
     const definitions = ResourceRegistry.getTemplateDefinitions();
@@ -861,7 +968,7 @@ describe("ResourceRegistry Template Matching", () => {
       uriTemplate: "test://items/{id}",
       name: "Test Item",
       description: "Test item description",
-      mimeType: "application/json"
+      mimeType: "application/json",
     });
   });
 
@@ -871,7 +978,7 @@ describe("ResourceRegistry Template Matching", () => {
       "Test Item",
       "Test item description",
       "application/json",
-      async params => ({ uri: `test://items/${params.id}`, text: "{}" })
+      async (params) => ({ uri: `test://items/${params.id}`, text: "{}" }),
     );
 
     const first = ResourceRegistry.matchTemplate("test://items/1");
@@ -893,7 +1000,7 @@ describe("ResourceRegistry Template Matching", () => {
       "Test Item",
       "Test item description",
       "application/json",
-      async params => ({ uri: `test://items/${params.id}`, text: "{}" })
+      async (params) => ({ uri: `test://items/${params.id}`, text: "{}" }),
     );
 
     // Count RegExp constructions while only reading, not registering.
@@ -923,7 +1030,7 @@ describe("ResourceRegistry Template Matching", () => {
       "File",
       "A nested file",
       "application/json",
-      async params => ({ uri: `test://files/${params.id}/${params.path}`, text: "{}" })
+      async (params) => ({ uri: `test://files/${params.id}/${params.path}`, text: "{}" }),
     );
 
     const match = ResourceRegistry.matchTemplate("test://files/app1/dir/sub/file.txt");
@@ -947,11 +1054,13 @@ describe("booted device readiness", () => {
   });
 
   test("reports an unavailable Android service as not ready", () => {
-    expect(readinessFromServiceStatus("android", {
-      ...compatibleService,
-      enabled: false,
-      running: false,
-    })).toEqual({ state: "not_ready" });
+    expect(
+      readinessFromServiceStatus("android", {
+        ...compatibleService,
+        enabled: false,
+        running: false,
+      }),
+    ).toEqual({ state: "not_ready" });
   });
 
   test("reports a verified iOS runner as ready", () => {

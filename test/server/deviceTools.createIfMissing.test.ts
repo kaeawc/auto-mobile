@@ -51,9 +51,13 @@ describe("startDevice --create-if-missing wiring", () => {
 
   async function callStartDevice(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     const tool = ToolRegistry.getTool("startDevice");
-    if (!tool) {throw new Error("startDevice not registered");}
+    if (!tool) {
+      throw new Error("startDevice not registered");
+    }
     const result = await tool.handler(args);
-    return JSON.parse(typeof result === "string" ? result : (result as any).content?.[0]?.text ?? "{}");
+    return JSON.parse(
+      typeof result === "string" ? result : ((result as any).content?.[0]?.text ?? "{}"),
+    );
   }
 
   it("accepts createIfMissing through the tool schema", () => {
@@ -63,15 +67,17 @@ describe("startDevice --create-if-missing wiring", () => {
 
   it("does NOT create anything when the gate is off (default)", async () => {
     await expect(callStartDevice({ platform: "ios" })).rejects.toThrow(
-      /No ios device matching criteria found/
+      /No ios device matching criteria found/,
     );
     expect(fakeProvisioner.requests).toEqual([]);
-    expect(fakeDeviceUtils.getExecutedOperations().some(op => op.startsWith("startDevice:"))).toBe(false);
+    expect(
+      fakeDeviceUtils.getExecutedOperations().some((op) => op.startsWith("startDevice:")),
+    ).toBe(false);
   });
 
   it("does NOT create anything when the flag is explicitly false", async () => {
     await expect(callStartDevice({ platform: "ios", createIfMissing: false })).rejects.toThrow(
-      /No ios device matching criteria found/
+      /No ios device matching criteria found/,
     );
     expect(fakeProvisioner.requests).toEqual([]);
     // The handler forwards the explicit flag to the gate so precedence is decided there.
@@ -89,7 +95,9 @@ describe("startDevice --create-if-missing wiring", () => {
     expect(result.name).toBe("AutoMobile-iPhone-17-abcd1234");
     expect(result.deviceId).toBe("CREATED-UDID");
     expect(result.source).toBe("cold-boot");
-    expect(fakeDeviceUtils.getExecutedOperations().some(op => op.startsWith("startDevice:"))).toBe(true);
+    expect(
+      fakeDeviceUtils.getExecutedOperations().some((op) => op.startsWith("startDevice:")),
+    ).toBe(true);
   });
 
   it("creates an Android AVD when the gate is on", async () => {

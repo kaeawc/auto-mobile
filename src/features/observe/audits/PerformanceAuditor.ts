@@ -4,7 +4,10 @@ import { ThresholdManager } from "../../performance/ThresholdManager";
 import { isPerformanceAuditEnabled } from "../../performance/performanceAuditConfig";
 import { DeviceCapabilitiesDetector } from "../../../utils/DeviceCapabilities";
 import type { BootedDevice, ObserveResult } from "../../../models";
-import { defaultAdbClientFactory, type AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  defaultAdbClientFactory,
+  type AdbClientFactory,
+} from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 
 export interface PerformanceAuditorOptions {
@@ -56,7 +59,9 @@ export class PerformanceAuditor {
 
     try {
       await perf.track("performanceAudit", async () => {
-        logger.info(`[PerformanceAudit] Running UI performance audit for ${result.activeWindow?.appId}`);
+        logger.info(
+          `[PerformanceAudit] Running UI performance audit for ${result.activeWindow?.appId}`,
+        );
 
         // Initialize components
         const capabilitiesDetector = new DeviceCapabilitiesDetector(this.device, this.adbFactory);
@@ -69,7 +74,7 @@ export class PerformanceAuditor {
         // Get or create thresholds
         const thresholds = await thresholdManager.getOrCreateThresholds(
           this.device.deviceId,
-          capabilities
+          capabilities,
         );
 
         // Run the audit
@@ -77,7 +82,7 @@ export class PerformanceAuditor {
           result.activeWindow!.appId,
           thresholds,
           result.screenSize,
-          perf
+          perf,
         );
 
         // Attach audit result to observe result
@@ -88,12 +93,12 @@ export class PerformanceAuditor {
         await thresholdManager.updateThresholdWeight(
           this.device.deviceId,
           sessionId,
-          auditResult.passed
+          auditResult.passed,
         );
 
         if (!auditResult.passed) {
           logger.warn(
-            `[PerformanceAudit] Performance audit FAILED with ${auditResult.violations.length} violations`
+            `[PerformanceAudit] Performance audit FAILED with ${auditResult.violations.length} violations`,
           );
         } else {
           logger.info("[PerformanceAudit] Performance audit PASSED");
@@ -101,7 +106,11 @@ export class PerformanceAuditor {
 
         // Start continuous performance monitoring for this device/package
         const { getPerformanceMonitor } = await import("../../performance/PerformanceMonitor");
-        getPerformanceMonitor().startMonitoring(this.device.deviceId, result.activeWindow!.appId, this.device.platform);
+        getPerformanceMonitor().startMonitoring(
+          this.device.deviceId,
+          result.activeWindow!.appId,
+          this.device.platform,
+        );
       });
     } catch (error) {
       logger.error(`[PerformanceAudit] Failed to run performance audit: ${error}`);

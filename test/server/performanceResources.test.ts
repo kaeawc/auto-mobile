@@ -13,7 +13,9 @@ import { buildPerformanceAuditResponse } from "../../src/server/performanceData"
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { registerPerformanceResources } from "../../src/server/performanceResources";
 
-function makeMetrics(overrides: Partial<PerformanceAuditMetricsRecord> = {}): PerformanceAuditMetricsRecord {
+function makeMetrics(
+  overrides: Partial<PerformanceAuditMetricsRecord> = {},
+): PerformanceAuditMetricsRecord {
   return {
     p50Ms: 8,
     p90Ms: 12,
@@ -67,7 +69,7 @@ describe("performanceData", () => {
 
       const response = await buildPerformanceAuditResponse(
         {},
-        { auditRepository: auditRepo, toolCallRepository: toolCallRepo }
+        { auditRepository: auditRepo, toolCallRepository: toolCallRepo },
       );
 
       expect(response.results).toHaveLength(1);
@@ -82,7 +84,7 @@ describe("performanceData", () => {
 
       const response = await buildPerformanceAuditResponse(
         { deviceId: "device-2" },
-        { auditRepository: auditRepo, toolCallRepository: toolCallRepo }
+        { auditRepository: auditRepo, toolCallRepository: toolCallRepo },
       );
 
       expect(response.results).toHaveLength(1);
@@ -92,7 +94,7 @@ describe("performanceData", () => {
     test("returns empty results and a null range when nothing matches", async () => {
       const response = await buildPerformanceAuditResponse(
         { deviceId: "no-such-device" },
-        { auditRepository: auditRepo, toolCallRepository: toolCallRepo }
+        { auditRepository: auditRepo, toolCallRepository: toolCallRepo },
       );
 
       expect(response.results).toHaveLength(0);
@@ -106,7 +108,7 @@ describe("performanceData", () => {
 
       const response = await buildPerformanceAuditResponse(
         { limit: 1 },
-        { auditRepository: auditRepo, toolCallRepository: toolCallRepo }
+        { auditRepository: auditRepo, toolCallRepository: toolCallRepo },
       );
 
       expect(response.results).toHaveLength(1);
@@ -126,9 +128,11 @@ describe("performanceData", () => {
       expect(ResourceRegistry.getResource("automobile:performance-results")).toBeDefined();
 
       const templates = ResourceRegistry.getAllTemplates();
-      const queryTemplates = templates.filter(t => t.uriTemplate.startsWith("automobile:performance-results"));
-      expect(queryTemplates.map(template => template.uriTemplate)).toEqual([
-        "automobile:performance-results{?startTime,endTime,limit,offset,deviceId}"
+      const queryTemplates = templates.filter((t) =>
+        t.uriTemplate.startsWith("automobile:performance-results"),
+      );
+      expect(queryTemplates.map((template) => template.uriTemplate)).toEqual([
+        "automobile:performance-results{?startTime,endTime,limit,offset,deviceId}",
       ]);
     });
   });

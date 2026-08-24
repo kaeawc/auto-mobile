@@ -33,7 +33,7 @@ describe("releaseDeviceLabelSessions ordering", () => {
     // is observable: releaseDevice must not run until this has fully resolved.
     let releaseSettled = false;
     const releaseSpy = spyOn(sessionManager, "releaseSession").mockImplementation(async () => {
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
       releaseSettled = true;
       return "emulator-5554";
     });

@@ -1,5 +1,11 @@
 import { loadSharp, type SharpFactory } from "../loadSharp";
-import type { ImageBackend, ImageMetadata, ImageOperation, ImagePipeline, RawImage } from "./ImageBackend";
+import type {
+  ImageBackend,
+  ImageMetadata,
+  ImageOperation,
+  ImagePipeline,
+  RawImage,
+} from "./ImageBackend";
 
 export type SharpLoader = () => Promise<SharpFactory>;
 
@@ -25,7 +31,7 @@ export class SharpBackend implements ImageBackend {
 
   private async withSharp<T>(
     operation: (sharp: SharpFactory) => Promise<T>,
-    fallback: () => Promise<T>
+    fallback: () => Promise<T>,
   ): Promise<T> {
     let sharp: SharpFactory;
     try {
@@ -39,7 +45,10 @@ export class SharpBackend implements ImageBackend {
     return operation(sharp);
   }
 
-  private applyOperation(image: ReturnType<SharpFactory>, op: ImageOperation): ReturnType<SharpFactory> {
+  private applyOperation(
+    image: ReturnType<SharpFactory>,
+    op: ImageOperation,
+  ): ReturnType<SharpFactory> {
     switch (op.type) {
       case "resize": {
         const kernel = op.mode === "nearest" ? "nearest" : undefined;
@@ -50,7 +59,7 @@ export class SharpBackend implements ImageBackend {
           width: op.width,
           height: op.height,
           fit: op.maintainAspectRatio ? "cover" : "fill",
-          kernel
+          kernel,
         });
       }
       case "crop":
@@ -58,7 +67,10 @@ export class SharpBackend implements ImageBackend {
     }
   }
 
-  private applyEncoding(image: ReturnType<SharpFactory>, pipeline: ImagePipeline): ReturnType<SharpFactory> {
+  private applyEncoding(
+    image: ReturnType<SharpFactory>,
+    pipeline: ImagePipeline,
+  ): ReturnType<SharpFactory> {
     switch (pipeline.encoding?.mime) {
       case "image/png":
         return image.png();
@@ -67,7 +79,7 @@ export class SharpBackend implements ImageBackend {
         return image.webp({
           quality: typeof options?.quality === "number" ? options.quality : undefined,
           lossless: options?.lossless === true ? true : undefined,
-          nearLossless: options?.nearLossless === true ? true : undefined
+          nearLossless: options?.nearLossless === true ? true : undefined,
         });
       }
       default:
@@ -75,14 +87,18 @@ export class SharpBackend implements ImageBackend {
     }
   }
 
-  private async applyPipeline(sharp: SharpFactory, source: Buffer, pipeline: ImagePipeline): Promise<ReturnType<SharpFactory>> {
+  private async applyPipeline(
+    sharp: SharpFactory,
+    source: Buffer,
+    pipeline: ImagePipeline,
+  ): Promise<ReturnType<SharpFactory>> {
     let image = sharp(source);
     let hasResizeInCurrentPipeline = false;
     let hasCropInCurrentPipeline = false;
     for (const operation of pipeline.operations) {
       if (
-        (operation.type === "resize" && hasResizeInCurrentPipeline)
-        || (operation.type === "crop" && hasCropInCurrentPipeline)
+        (operation.type === "resize" && hasResizeInCurrentPipeline) ||
+        (operation.type === "crop" && hasCropInCurrentPipeline)
       ) {
         // Sharp collapses some repeated operations in one pipeline; materialize only at compatibility boundaries.
         image = sharp(await image.toBuffer());
@@ -102,29 +118,29 @@ export class SharpBackend implements ImageBackend {
 
   public async execute(source: Buffer, pipeline: ImagePipeline): Promise<Buffer> {
     return this.withSharp(
-      async sharp => (await this.applyPipeline(sharp, source, pipeline)).toBuffer(),
-      () => this.fallbackBackend!.execute(source, pipeline)
+      async (sharp) => (await this.applyPipeline(sharp, source, pipeline)).toBuffer(),
+      () => this.fallbackBackend!.execute(source, pipeline),
     );
   }
 
   public async metadata(source: Buffer): Promise<ImageMetadata> {
     return this.withSharp(
-      async sharp => {
+      async (sharp) => {
         const metadata = await sharp(source).metadata();
         return {
           width: metadata.width ?? 0,
           height: metadata.height ?? 0,
           format: metadata.format ?? "",
-          size: source.length
+          size: source.length,
         };
       },
-      () => this.fallbackBackend!.metadata(source)
+      () => this.fallbackBackend!.metadata(source),
     );
   }
 
   public async rawPixels(source: Buffer): Promise<RawImage> {
     return this.withSharp(
-      async sharp => {
+      async (sharp) => {
         const { data, info } = await sharp(source)
           .ensureAlpha()
           .raw()
@@ -132,10 +148,10 @@ export class SharpBackend implements ImageBackend {
         return {
           width: info.width,
           height: info.height,
-          data: Buffer.from(data)
+          data: Buffer.from(data),
         };
       },
-      () => this.fallbackBackend!.rawPixels(source)
+      () => this.fallbackBackend!.rawPixels(source),
     );
   }
 }

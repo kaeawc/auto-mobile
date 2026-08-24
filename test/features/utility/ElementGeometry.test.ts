@@ -2,7 +2,12 @@ import { describe, expect, test, it } from "bun:test";
 import { DefaultElementGeometry } from "../../../src/features/utility/ElementGeometry";
 import type { Element } from "../../../src/models/Element";
 
-function elementWithBounds(bounds: { left: number; top: number; right: number; bottom: number }): Element {
+function elementWithBounds(bounds: {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}): Element {
   return { bounds } as unknown as Element;
 }
 
@@ -60,7 +65,9 @@ describe("ElementGeometry getSwipeDurationFromSpeed", () => {
 
 describe("ElementGeometry isElementVisible", () => {
   const geometry = new DefaultElementGeometry();
-  const cases: Array<[string, { left: number; top: number; right: number; bottom: number }, boolean]> = [
+  const cases: Array<
+    [string, { left: number; top: number; right: number; bottom: number }, boolean]
+  > = [
     ["fully on screen", { left: 10, top: 10, right: 100, bottom: 100 }, true],
     ["partially clipped left edge", { left: -50, top: 10, right: 20, bottom: 100 }, true],
     ["entirely off the left edge", { left: -100, top: 10, right: 0, bottom: 100 }, false],

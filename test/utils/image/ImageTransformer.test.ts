@@ -22,7 +22,7 @@ describe("ImageTransformer (declarative pipeline + backend delegation)", () => {
 
       const pipeline = backend.lastPipeline!;
       expect(pipeline.operations).toEqual([
-        { type: "resize", width: 100, height: 200, maintainAspectRatio: false }
+        { type: "resize", width: 100, height: 200, maintainAspectRatio: false },
       ]);
       expect(pipeline.encoding).toBeNull();
     });
@@ -31,7 +31,7 @@ describe("ImageTransformer (declarative pipeline + backend delegation)", () => {
       await imageOf().resize(100).disableCache().toBuffer();
 
       expect(backend.lastPipeline!.operations).toEqual([
-        { type: "resize", width: 100, height: undefined, maintainAspectRatio: true }
+        { type: "resize", width: 100, height: undefined, maintainAspectRatio: true },
       ]);
     });
 
@@ -39,7 +39,7 @@ describe("ImageTransformer (declarative pipeline + backend delegation)", () => {
       await imageOf().crop(50, 40).disableCache().toBuffer();
 
       expect(backend.lastPipeline!.operations).toEqual([
-        { type: "crop", x: 0, y: 0, width: 50, height: 40 }
+        { type: "crop", x: 0, y: 0, width: 50, height: 40 },
       ]);
     });
 
@@ -49,7 +49,7 @@ describe("ImageTransformer (declarative pipeline + backend delegation)", () => {
       const pipeline = backend.lastPipeline!;
       expect(pipeline.operations).toEqual([
         { type: "crop", x: 5, y: 6, width: 50, height: 40 },
-        { type: "resize", width: 20, height: 20, maintainAspectRatio: false }
+        { type: "resize", width: 20, height: 20, maintainAspectRatio: false },
       ]);
       expect(pipeline.encoding).toEqual({ mime: "image/png" });
     });
@@ -63,7 +63,7 @@ describe("ImageTransformer (declarative pipeline + backend delegation)", () => {
       await imageOf().webp().disableCache().toBuffer();
       expect(backend.lastPipeline!.encoding).toEqual({
         mime: "image/webp",
-        options: { quality: 75 }
+        options: { quality: 75 },
       });
     });
 
@@ -71,7 +71,7 @@ describe("ImageTransformer (declarative pipeline + backend delegation)", () => {
       await imageOf().webp({ lossless: true, quality: 90 }).disableCache().toBuffer();
       expect(backend.lastPipeline!.encoding).toEqual({
         mime: "image/webp",
-        options: { lossless: true, quality: 90 }
+        options: { lossless: true, quality: 90 },
       });
     });
 
@@ -79,7 +79,7 @@ describe("ImageTransformer (declarative pipeline + backend delegation)", () => {
       await imageOf().webp({ nearLossless: true, quality: 40 }).disableCache().toBuffer();
       expect(backend.lastPipeline!.encoding).toEqual({
         mime: "image/webp",
-        options: { nearLossless: true, quality: 40 }
+        options: { nearLossless: true, quality: 40 },
       });
     });
   });
@@ -99,7 +99,7 @@ describe("ImageTransformer (declarative pipeline + backend delegation)", () => {
     test("toBuffer wraps backend failures in an 'Image processing error' message", async () => {
       backend.setShouldThrowOnExecute(true);
       await expect(imageOf().png().disableCache().toBuffer()).rejects.toThrow(
-        "Image processing error: Simulated error in execute"
+        "Image processing error: Simulated error in execute",
       );
     });
 
@@ -113,7 +113,7 @@ describe("ImageTransformer (declarative pipeline + backend delegation)", () => {
     test("getMetadata wraps backend failures", async () => {
       backend.setShouldThrowOnMetadata(true);
       await expect(imageOf().getMetadata()).rejects.toThrow(
-        "Failed to get image metadata: Simulated error in metadata"
+        "Failed to get image metadata: Simulated error in metadata",
       );
     });
   });
@@ -132,8 +132,12 @@ describe("ImageTransformer (declarative pipeline + backend delegation)", () => {
     });
 
     test("webp rejects out-of-range quality", () => {
-      expect(() => imageOf().webp({ quality: 101 })).toThrow("WebP quality must be between 1 and 100");
-      expect(() => imageOf().webp({ quality: -1 })).toThrow("WebP quality must be between 1 and 100");
+      expect(() => imageOf().webp({ quality: 101 })).toThrow(
+        "WebP quality must be between 1 and 100",
+      );
+      expect(() => imageOf().webp({ quality: -1 })).toThrow(
+        "WebP quality must be between 1 and 100",
+      );
     });
 
     test("webp quality 0 falls back to the default (preserved || quirk)", async () => {
@@ -142,7 +146,7 @@ describe("ImageTransformer (declarative pipeline + backend delegation)", () => {
       await imageOf().webp({ quality: 0 }).disableCache().toBuffer();
       expect(backend.lastPipeline!.encoding).toEqual({
         mime: "image/webp",
-        options: { quality: 75 }
+        options: { quality: 75 },
       });
     });
 

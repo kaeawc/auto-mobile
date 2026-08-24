@@ -33,7 +33,7 @@ function isDarkThemeValue(value: string): boolean {
 }
 
 export async function detectHostAppearance(
-  hostDefaults: HostDefaultsClient = new DefaultHostDefaultsClient()
+  hostDefaults: HostDefaultsClient = new DefaultHostDefaultsClient(),
 ): Promise<AppearanceMode> {
   if (hostDefaults.isSupported()) {
     const style = await hostDefaults.readGlobal("AppleInterfaceStyle");
@@ -59,17 +59,9 @@ export async function detectHostAppearance(
       return isDarkThemeValue(gnomeTheme.stdout) ? "dark" : "light";
     }
 
-    const kdeTheme = await runCommand("kreadconfig5", [
-      "--group",
-      "General",
-      "--key",
-      "ColorScheme",
-    ]) ?? await runCommand("kreadconfig6", [
-      "--group",
-      "General",
-      "--key",
-      "ColorScheme",
-    ]);
+    const kdeTheme =
+      (await runCommand("kreadconfig5", ["--group", "General", "--key", "ColorScheme"])) ??
+      (await runCommand("kreadconfig6", ["--group", "General", "--key", "ColorScheme"]));
     if (kdeTheme?.stdout) {
       return isDarkThemeValue(kdeTheme.stdout) ? "dark" : "light";
     }

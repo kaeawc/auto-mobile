@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
-import {
-  DaemonLauncher,
-  type DaemonProcessSpawner,
-} from "../../src/daemon/DaemonLauncher";
+import { DaemonLauncher, type DaemonProcessSpawner } from "../../src/daemon/DaemonLauncher";
 import { DAEMON_SHUTDOWN_TIMEOUT_MS } from "../../src/daemon/constants";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -52,7 +49,7 @@ describe("DaemonLauncher", () => {
       version: "1.2.3",
       environment: { PATH: "/tools:/other" },
       platform: "linux",
-      executableExists: path => path === "/tools/bunx",
+      executableExists: (path) => path === "/tools/bunx",
     });
 
     expect(launcher.resolveCommand()).toEqual({
@@ -99,7 +96,7 @@ describe("DaemonLauncher", () => {
       version: "1.2.3",
       environment: { Path: "C:\\Tools", PATHEXT: ".CMD;.EXE" },
       platform: "win32",
-      executableExists: path => path === "C:\\Tools\\bunx.EXE",
+      executableExists: (path) => path === "C:\\Tools\\bunx.EXE",
     });
 
     expect(launcher.resolveCommand().command).toBe("C:\\Tools\\bunx.EXE");
@@ -119,7 +116,7 @@ describe("DaemonLauncher", () => {
         aborted = signal.aborted;
         return true;
       },
-      formatFailure: async summary => new Error(summary),
+      formatFailure: async (summary) => new Error(summary),
     });
 
     expect(spawner.calls).toHaveLength(1);
@@ -147,7 +144,7 @@ describe("DaemonLauncher", () => {
         readinessSignal = signal;
         return new Promise<boolean>(() => {});
       },
-      formatFailure: async summary => new Error(`formatted: ${summary}`),
+      formatFailure: async (summary) => new Error(`formatted: ${summary}`),
     });
     spawner.process.emit("error", new Error("ENOENT"));
 
@@ -168,18 +165,20 @@ describe("DaemonLauncher", () => {
     });
     const finalChecks: Array<number | undefined> = [];
 
-    await expect(launcher.launchAndWait({
-      command: "auto-mobile",
-      args: ["--daemon-mode"],
-      spawnOptions: {},
-      timeoutMs: 100,
-      waitForReady: async () => false,
-      isReadyForLaunchedProcess: async pid => {
-        finalChecks.push(pid);
-        return false;
-      },
-      formatFailure: async summary => new Error(`formatted: ${summary}`),
-    })).rejects.toThrow("formatted: Daemon failed to start within 100ms");
+    await expect(
+      launcher.launchAndWait({
+        command: "auto-mobile",
+        args: ["--daemon-mode"],
+        spawnOptions: {},
+        timeoutMs: 100,
+        waitForReady: async () => false,
+        isReadyForLaunchedProcess: async (pid) => {
+          finalChecks.push(pid);
+          return false;
+        },
+        formatFailure: async (summary) => new Error(`formatted: ${summary}`),
+      }),
+    ).rejects.toThrow("formatted: Daemon failed to start within 100ms");
 
     expect(finalChecks).toEqual([12345]);
     expect(spawner.process.signals).toEqual(["SIGTERM"]);
@@ -197,18 +196,20 @@ describe("DaemonLauncher", () => {
       timer,
     });
     let settled = false;
-    const launch = launcher.launchAndWait({
-      command: "auto-mobile",
-      args: ["--daemon-mode"],
-      spawnOptions: {},
-      timeoutMs: 100,
-      waitForReady: async () => false,
-      formatFailure: async summary => new Error(summary),
-    }).finally(() => {
-      settled = true;
-    });
+    const launch = launcher
+      .launchAndWait({
+        command: "auto-mobile",
+        args: ["--daemon-mode"],
+        spawnOptions: {},
+        timeoutMs: 100,
+        waitForReady: async () => false,
+        formatFailure: async (summary) => new Error(summary),
+      })
+      .finally(() => {
+        settled = true;
+      });
 
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(spawner.process.signals).toEqual(["SIGTERM"]);
     expect(settled).toBe(false);
 
@@ -227,14 +228,16 @@ describe("DaemonLauncher", () => {
       timer,
     });
 
-    await expect(launcher.launchAndWait({
-      command: "auto-mobile",
-      args: ["--daemon-mode"],
-      spawnOptions: {},
-      timeoutMs: 100,
-      waitForReady: async () => false,
-      formatFailure: async summary => new Error(summary),
-    })).rejects.toThrow("Daemon failed to start within 100ms");
+    await expect(
+      launcher.launchAndWait({
+        command: "auto-mobile",
+        args: ["--daemon-mode"],
+        spawnOptions: {},
+        timeoutMs: 100,
+        waitForReady: async () => false,
+        formatFailure: async (summary) => new Error(summary),
+      }),
+    ).rejects.toThrow("Daemon failed to start within 100ms");
 
     expect(spawner.process.signals).toEqual(["SIGTERM", "SIGKILL"]);
     expect(spawner.process.exitCode).toBe(0);
@@ -262,10 +265,10 @@ describe("DaemonLauncher", () => {
         finalReadinessSignal = signal;
         return new Promise<boolean>(() => {});
       },
-      formatFailure: async summary => new Error(summary),
+      formatFailure: async (summary) => new Error(summary),
     });
 
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(spawner.process.signals).toEqual([]);
     expect(timer.getPendingTimeoutCount()).toBe(1);
 
@@ -295,14 +298,16 @@ describe("DaemonLauncher", () => {
       },
     });
 
-    await expect(launcher.launchAndWait({
-      command: "bunx",
-      args: ["-y", "@kaeawc/auto-mobile@1.2.3", "--daemon-mode"],
-      spawnOptions: { detached: true },
-      timeoutMs: 100,
-      waitForReady: async () => false,
-      formatFailure: async summary => new Error(summary),
-    })).rejects.toThrow("Daemon failed to start within 100ms");
+    await expect(
+      launcher.launchAndWait({
+        command: "bunx",
+        args: ["-y", "@kaeawc/auto-mobile@1.2.3", "--daemon-mode"],
+        spawnOptions: { detached: true },
+        timeoutMs: 100,
+        waitForReady: async () => false,
+        formatFailure: async (summary) => new Error(summary),
+      }),
+    ).rejects.toThrow("Daemon failed to start within 100ms");
 
     expect(processGroupSignals).toEqual([
       { pid: 12345, signal: "SIGTERM" },
@@ -336,18 +341,20 @@ describe("DaemonLauncher", () => {
       },
     });
     let settled = false;
-    const launch = launcher.launchAndWait({
-      command: "bunx",
-      args: ["-y", "@kaeawc/auto-mobile@1.2.3", "--daemon-mode"],
-      spawnOptions: { detached: true },
-      timeoutMs: 100,
-      waitForReady: async () => false,
-      formatFailure: async summary => new Error(summary),
-    }).finally(() => {
-      settled = true;
-    });
+    const launch = launcher
+      .launchAndWait({
+        command: "bunx",
+        args: ["-y", "@kaeawc/auto-mobile@1.2.3", "--daemon-mode"],
+        spawnOptions: { detached: true },
+        timeoutMs: 100,
+        waitForReady: async () => false,
+        formatFailure: async (summary) => new Error(summary),
+      })
+      .finally(() => {
+        settled = true;
+      });
 
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(processGroupSignals).toEqual(["SIGTERM", 0]);
     expect(settled).toBe(false);
 
@@ -379,10 +386,10 @@ describe("DaemonLauncher", () => {
       spawnOptions: { detached: true },
       timeoutMs: 100,
       waitForReady: async () => false,
-      formatFailure: async summary => new Error(summary),
+      formatFailure: async (summary) => new Error(summary),
     });
 
-    await new Promise<void>(resolve => setImmediate(resolve));
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(spawner.process.signals).toEqual(["SIGTERM"]);
 
     timer.advanceTime(DAEMON_SHUTDOWN_TIMEOUT_MS);
@@ -403,11 +410,11 @@ describe("DaemonLauncher", () => {
       spawnOptions: {},
       timeoutMs: 100,
       waitForReady: async () => false,
-      isReadyForLaunchedProcess: async pid => {
+      isReadyForLaunchedProcess: async (pid) => {
         finalChecks.push(pid);
         return true;
       },
-      formatFailure: async summary => new Error(summary),
+      formatFailure: async (summary) => new Error(summary),
     });
 
     expect(finalChecks).toEqual([12345]);
@@ -418,19 +425,21 @@ describe("DaemonLauncher", () => {
     const spawner = new FakeDaemonSpawner();
     const launcher = new DaemonLauncher({ spawn: spawner.spawn.bind(spawner) });
 
-    await expect(launcher.launchAndWait({
-      command: "auto-mobile",
-      args: ["--daemon-mode"],
-      spawnOptions: {},
-      timeoutMs: 100,
-      waitForReady: async () => false,
-      isReadyForLaunchedProcess: async () => {
-        await Promise.resolve();
-        spawner.process.emit("error", new Error("late child error"));
-        return false;
-      },
-      formatFailure: async summary => new Error(`formatted: ${summary}`),
-    })).rejects.toThrow("formatted: Daemon subprocess failed to spawn: late child error");
+    await expect(
+      launcher.launchAndWait({
+        command: "auto-mobile",
+        args: ["--daemon-mode"],
+        spawnOptions: {},
+        timeoutMs: 100,
+        waitForReady: async () => false,
+        isReadyForLaunchedProcess: async () => {
+          await Promise.resolve();
+          spawner.process.emit("error", new Error("late child error"));
+          return false;
+        },
+        formatFailure: async (summary) => new Error(`formatted: ${summary}`),
+      }),
+    ).rejects.toThrow("formatted: Daemon subprocess failed to spawn: late child error");
 
     expect(spawner.process.signals).toEqual([]);
     expect(spawner.process.listenerCount("error")).toBe(0);

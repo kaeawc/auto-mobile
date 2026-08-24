@@ -13,17 +13,21 @@ describe("GetDeepLinks", () => {
     deepLinks: {
       schemes: ["https", "myapp"],
       hosts: ["example.com", "app.example.com"],
-      intentFilters: [{
-        action: "android.intent.action.VIEW",
-        category: ["android.intent.category.DEFAULT"],
-        data: [{
-          scheme: "https",
-          host: "example.com"
-        }]
-      }],
-      supportedMimeTypes: ["text/plain"]
+      intentFilters: [
+        {
+          action: "android.intent.action.VIEW",
+          category: ["android.intent.category.DEFAULT"],
+          data: [
+            {
+              scheme: "https",
+              host: "example.com",
+            },
+          ],
+        },
+      ],
+      supportedMimeTypes: ["text/plain"],
     },
-    rawOutput: "mock output"
+    rawOutput: "mock output",
   };
 
   beforeEach(() => {
@@ -33,7 +37,7 @@ describe("GetDeepLinks", () => {
 
     // Create mock DeepLinkManager
     mockDeepLinkManager = {
-      getDeepLinks: async (appId: string) => mockDeepLinkResult
+      getDeepLinks: async (appId: string) => mockDeepLinkResult,
     } as any;
 
     // Replace the internal deepLinkManager with our mock
@@ -96,9 +100,9 @@ describe("GetDeepLinks", () => {
           schemes: [],
           hosts: [],
           intentFilters: [],
-          supportedMimeTypes: []
+          supportedMimeTypes: [],
         },
-        error: "Package not found"
+        error: "Package not found",
       };
 
       mockDeepLinkManager.getDeepLinks = async () => failureResult;

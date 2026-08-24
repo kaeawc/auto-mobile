@@ -40,7 +40,7 @@ export type RowCapTable = "performance_audit_results" | "test_executions" | "fai
 export async function pruneTableByRowCap(
   db: Kysely<Database>,
   table: RowCapTable,
-  maxRows: number
+  maxRows: number,
 ): Promise<number> {
   const count = await db
     .selectFrom(table)
@@ -66,13 +66,12 @@ export async function pruneTableByRowCap(
 
   const deleted = await db
     .deleteFrom(table)
-    .where(eb => eb.or([
-      eb("timestamp", "<", threshold.timestamp),
-      eb.and([
-        eb("timestamp", "=", threshold.timestamp),
-        eb("id", "<", threshold.id),
+    .where((eb) =>
+      eb.or([
+        eb("timestamp", "<", threshold.timestamp),
+        eb.and([eb("timestamp", "=", threshold.timestamp), eb("id", "<", threshold.id)]),
       ]),
-    ]))
+    )
     .executeTakeFirst();
 
   return Number(deleted.numDeletedRows ?? 0);
@@ -104,7 +103,7 @@ export function createRowCapRetentionState(): RowCapRetentionState {
 export async function runAmortizedRetention(
   state: RowCapRetentionState,
   runCleanup: () => Promise<void>,
-  checkInterval: number = CLEANUP_CHECK_INTERVAL
+  checkInterval: number = CLEANUP_CHECK_INTERVAL,
 ): Promise<void> {
   state.insertsSinceCleanup += 1;
   if (state.insertsSinceCleanup < checkInterval) {

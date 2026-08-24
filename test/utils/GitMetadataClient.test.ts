@@ -4,12 +4,21 @@ import { DefaultGitMetadataClient, type GitCommandRunner } from "../../src/utils
 
 const OWN = "@kaeawc/auto-mobile";
 
-const fakeRunner = (responses: Record<string, string | null>): GitCommandRunner =>
+const fakeRunner =
+  (responses: Record<string, string | null>): GitCommandRunner =>
   (_command, args) => {
-    if (args[0] === "rev-parse" && args[1] === "--show-toplevel") {return responses.toplevel ?? null;}
-    if (args[0] === "rev-parse" && args[1] === "--short=12") {return responses.sha ?? null;}
-    if (args[0] === "status") {return responses.status ?? null;}
-    if (args[0] === "diff") {return responses.diff ?? null;}
+    if (args[0] === "rev-parse" && args[1] === "--show-toplevel") {
+      return responses.toplevel ?? null;
+    }
+    if (args[0] === "rev-parse" && args[1] === "--short=12") {
+      return responses.sha ?? null;
+    }
+    if (args[0] === "status") {
+      return responses.status ?? null;
+    }
+    if (args[0] === "diff") {
+      return responses.diff ?? null;
+    }
     return null;
   };
 
@@ -18,23 +27,40 @@ describe("DefaultGitMetadataClient", () => {
   // production boundary deliberately uses shell:false argv execution. A jj
   // workspace has no Git worktree, so its optional Git metadata is expected
   // to be unavailable and is covered by the injected-runner tests below.
-  test.skipIf(process.platform === "win32" || !existsSync(".git"))("uses the default runner in this Git source checkout", () => {
-    const readPackageName = (directory: string): string | null =>
-      (JSON.parse(readFileSync(join(directory, "package.json"), "utf8")) as { name?: string }).name ?? null;
+  test.skipIf(process.platform === "win32" || !existsSync(".git"))(
+    "uses the default runner in this Git source checkout",
+    () => {
+      const readPackageName = (directory: string): string | null =>
+        (JSON.parse(readFileSync(join(directory, "package.json"), "utf8")) as { name?: string })
+          .name ?? null;
 
-    expect(new DefaultGitMetadataClient().readVersion(process.cwd(), readPackageName)?.shortSha).toMatch(/^[0-9a-f]{12}$/);
-  });
+      expect(
+        new DefaultGitMetadataClient().readVersion(process.cwd(), readPackageName)?.shortSha,
+      ).toMatch(/^[0-9a-f]{12}$/);
+    },
+  );
 
   test("uses argv and a short timeout when executing git", () => {
-    const calls: Array<{ command: string; args: readonly string[]; cwd: string; timeoutMs: number }> = [];
+    const calls: Array<{
+      command: string;
+      args: readonly string[];
+      cwd: string;
+      timeoutMs: number;
+    }> = [];
     const client = new DefaultGitMetadataClient((command, args, options) => {
       calls.push({ command, args, cwd: options.cwd, timeoutMs: options.timeoutMs });
-      if (args[1] === "--show-toplevel") {return "/src/auto-mobile";}
-      if (args[1] === "--short=12") {return "1a2b3c4d5e6f";}
+      if (args[1] === "--show-toplevel") {
+        return "/src/auto-mobile";
+      }
+      if (args[1] === "--short=12") {
+        return "1a2b3c4d5e6f";
+      }
       return "";
     });
 
-    expect(client.readVersion("/src/auto-mobile", () => OWN)).toMatchObject({ shortSha: "1a2b3c4d5e6f" });
+    expect(client.readVersion("/src/auto-mobile", () => OWN)).toMatchObject({
+      shortSha: "1a2b3c4d5e6f",
+    });
     expect(calls).toContainEqual({
       command: "git",
       args: ["rev-parse", "--show-toplevel"],
@@ -62,11 +88,13 @@ describe("DefaultGitMetadataClient", () => {
   });
 
   test("accepts detached HEAD because revision probing does not require a branch", () => {
-    const client = new DefaultGitMetadataClient(fakeRunner({
-      toplevel: "/src/auto-mobile",
-      sha: "1a2b3c4d5e6f",
-      status: "",
-    }));
+    const client = new DefaultGitMetadataClient(
+      fakeRunner({
+        toplevel: "/src/auto-mobile",
+        sha: "1a2b3c4d5e6f",
+        status: "",
+      }),
+    );
 
     expect(client.readVersion("/src/auto-mobile", () => OWN)).toEqual({
       shortSha: "1a2b3c4d5e6f",
@@ -76,7 +104,9 @@ describe("DefaultGitMetadataClient", () => {
   });
 
   test("returns null when the repository root is not AutoMobile", () => {
-    const client = new DefaultGitMetadataClient(fakeRunner({ toplevel: "/host/repo", sha: "deadbeefcafe" }));
+    const client = new DefaultGitMetadataClient(
+      fakeRunner({ toplevel: "/host/repo", sha: "deadbeefcafe" }),
+    );
 
     expect(client.readVersion("/host/repo/vendor/auto-mobile", () => "some-host-app")).toBeNull();
   });

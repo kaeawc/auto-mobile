@@ -50,9 +50,7 @@ export function h264MacroblocksPerFrame(width: number, height: number): number {
 export function h264SpsProfileLevelId(nal: Buffer): string | undefined {
   // nal[0] is the NAL header; profile_idc, constraint flags, and level_idc
   // immediately follow it in an SPS RBSP (H.264 §7.3.2.1.1).
-  return nal.length >= 4 && (nal[0] & 0x1f) === 7
-    ? nal.subarray(1, 4).toString("hex")
-    : undefined;
+  return nal.length >= 4 && (nal[0] & 0x1f) === 7 ? nal.subarray(1, 4).toString("hex") : undefined;
 }
 
 /** Return the level_idc byte from an SPS NAL unit. */
@@ -84,7 +82,7 @@ export interface H264SpsSendCompatibility {
  */
 export function evaluateH264SpsForSend(
   sps: Buffer,
-  profile: H264Profile = DEFAULT_H264_PROFILE
+  profile: H264Profile = DEFAULT_H264_PROFILE,
 ): H264SpsSendCompatibility {
   const profileLevelId = h264SpsProfileLevelId(sps);
   if (profileLevelId && !isCompatibleProfileForSession(profileLevelId, profile)) {
@@ -108,7 +106,10 @@ export function evaluateH264SpsForSend(
  * Dispatches per-source so Baseline and Main are each accepted only for their
  * own session; there is no union that would let one session accept the other.
  */
-export function isCompatibleProfileForSession(profileLevelId: string, profile: H264Profile): boolean {
+export function isCompatibleProfileForSession(
+  profileLevelId: string,
+  profile: H264Profile,
+): boolean {
   return profile === "main"
     ? isCompatibleMainProfile(profileLevelId)
     : isCompatibleConstrainedBaselineProfile(profileLevelId);

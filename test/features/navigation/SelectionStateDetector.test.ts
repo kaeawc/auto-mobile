@@ -4,17 +4,18 @@ import { FakeScreenshotUtils } from "../../fakes/FakeScreenshotUtils";
 import { FakeImageUtils } from "../../fakes/FakeImageUtils";
 import { Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 
-const createHierarchy = (node: Record<string, any>): ViewHierarchyResult => ({
-  hierarchy: {
-    node
-  }
-} as ViewHierarchyResult);
+const createHierarchy = (node: Record<string, any>): ViewHierarchyResult =>
+  ({
+    hierarchy: {
+      node,
+    },
+  }) as ViewHierarchyResult;
 
 const createObservation = (viewHierarchy: ViewHierarchyResult): ObserveResult => ({
   updatedAt: Date.now(),
   screenSize: { width: 100, height: 100 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  viewHierarchy
+  viewHierarchy,
 });
 
 describe("SelectionStateDetector", () => {
@@ -27,12 +28,12 @@ describe("SelectionStateDetector", () => {
       createHierarchy({
         text: "Home",
         selected: "true",
-        bounds: { left: 0, top: 0, right: 50, bottom: 50 }
-      })
+        bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+      }),
     );
 
     const selected = await detector.detectSelectedElements({
-      currentObservation: observation
+      currentObservation: observation,
     });
 
     expect(selected).toHaveLength(1);
@@ -52,21 +53,21 @@ describe("SelectionStateDetector", () => {
     screenshotUtils.setCompareImagesResult({
       similarity: 90,
       pixelDifference: 10,
-      totalPixels: 100
+      totalPixels: 100,
     });
 
     const observation = createObservation(
       createHierarchy({
         text: "NotSelected",
         selected: "false",
-        bounds: { left: 0, top: 0, right: 50, bottom: 50 }
-      })
+        bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+      }),
     );
 
     const element: Element = {
-      "bounds": { left: 0, top: 0, right: 50, bottom: 50 },
-      "text": "Tab1",
-      "resource-id": "tab1"
+      bounds: { left: 0, top: 0, right: 50, bottom: 50 },
+      text: "Tab1",
+      "resource-id": "tab1",
     };
 
     const selected = await detector.detectSelectedElements({
@@ -74,7 +75,7 @@ describe("SelectionStateDetector", () => {
       previousObservation: observation,
       tappedElement: element,
       beforeScreenshotPath: "before.png",
-      afterScreenshotPath: "after.png"
+      afterScreenshotPath: "after.png",
     });
 
     expect(selected).toHaveLength(1);

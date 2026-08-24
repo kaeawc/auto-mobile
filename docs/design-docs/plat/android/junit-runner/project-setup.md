@@ -10,10 +10,10 @@ The runner is published to Maven Central. Add it as a `testImplementation` depen
 module whose UI you want to test.
 
 === "Version Catalog (recommended)"
-    ```toml
-    # gradle/libs.versions.toml
-    [versions]
-    auto-mobile-junit-runner = "0.0.13"
+
+````toml # gradle/libs.versions.toml
+[versions]
+auto-mobile-junit-runner = "0.0.13"
 
     [libraries]
     auto-mobile-junit-runner = { module = "dev.jasonpearson.auto-mobile:auto-mobile-junit-runner", version.ref = "auto-mobile-junit-runner" }
@@ -27,12 +27,12 @@ module whose UI you want to test.
     ```
 
 === "Direct coordinate"
-    ```kotlin
+`kotlin
     // app/build.gradle.kts
     dependencies {
         testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.13")
     }
-    ```
+    `
 
 ### Using a SNAPSHOT build
 
@@ -55,7 +55,7 @@ runtime/package identity:
 cd android
 ./gradlew :junit-runner:publishToMavenLocal
 ./gradlew :test-plan-validation:publishToMavenLocal
-```
+````
 
 Then add `mavenLocal()` **before** the other repositories in your project's
 `settings.gradle.kts`:
@@ -79,10 +79,10 @@ auto-mobile-junit-runner = "0.0.13-SNAPSHOT"
 ```
 
 !!! warning "SNAPSHOT transitive dependency"
-    The `auto-mobile-junit-runner` POM references `auto-mobile-test-plan-validation` as a transitive
-    dependency. When using SNAPSHOTs both must be published to mavenLocal together. The Maven Central
-    release only carries stable versions — do not mix `mavenLocal()` versions with the Maven Central
-    release.
+The `auto-mobile-junit-runner` POM references `auto-mobile-test-plan-validation` as a transitive
+dependency. When using SNAPSHOTs both must be published to mavenLocal together. The Maven Central
+release only carries stable versions — do not mix `mavenLocal()` versions with the Maven Central
+release.
 
 ## Gradle test task configuration
 
@@ -107,9 +107,9 @@ tasks.withType<Test>().configureEach {
 ```
 
 !!! note "Configuration cache compatibility"
-    Use `providers.environmentVariable(...)` instead of reading `System.getenv()` directly so the
-    Gradle configuration cache can store the task correctly. Calling `.orNull` at task execution time
-    is safe; calling it during configuration will cause a cache miss on every build.
+Use `providers.environmentVariable(...)` instead of reading `System.getenv()` directly so the
+Gradle configuration cache can store the task correctly. Calling `.orNull` at task execution time
+is safe; calling it during configuration will cause a cache miss on every build.
 
 ### Optional: pass additional tuning properties
 
@@ -168,9 +168,9 @@ bun dist/src/index.js --daemon-mode &
 ```
 
 !!! tip "Starting the daemon from the source directory"
-    When using a local checkout, start the daemon from the repository root so that the daemon's
-    working directory is the project root. This ensures schema files in `schemas/` are resolved
-    correctly relative to `process.cwd()`.
+When using a local checkout, start the daemon from the repository root so that the daemon's
+working directory is the project root. This ensures schema files in `schemas/` are resolved
+correctly relative to `process.cwd()`.
 
 ### CtrlProxy (Accessibility Service)
 
@@ -243,16 +243,19 @@ AUTOMOBILE_CTRL_PROXY_APK_PATH=/path/to/control-proxy-debug.apk \
 ### Watching test results
 
 Test XML reports are written to:
+
 ```
 app/build/test-results/testDebugUnitTest/
 ```
 
 HTML report:
+
 ```
 app/build/reports/tests/testDebugUnitTest/index.html
 ```
 
 Verbose log files for each test execution are written to:
+
 ```
 app/scratch/test-logs/
 ```
@@ -268,13 +271,13 @@ across all test workers on the host — you do not need to run multiple daemon i
 
 ## Troubleshooting
 
-| Problem | Likely cause | Fix |
-|---|---|---|
-| `Could not resolve auto-mobile-junit-runner` | Missing `mavenLocal()` or wrong version | Ensure `mavenLocal()` is first in `settings.gradle.kts`; republish both SNAPSHOT modules |
-| `Could not find test-plan.schema.json` | Daemon running old binary with path bug | Restart daemon from the auto-mobile source directory; verify the latest binary is installed |
-| `Failed to terminate app: Command failed` | App APK not installed on device | Run `adb install -r app-debug.apk` before tests |
-| `Daemon failed to start within Xms` | `bunx` unavailable or slow | Install `auto-mobile` globally and start the daemon manually before running tests |
-| `No Android devices found — skipping` | `adb devices` shows no device | Start your emulator or connect a device; check `ANDROID_HOME` is set |
+| Problem                                      | Likely cause                            | Fix                                                                                         |
+| -------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `Could not resolve auto-mobile-junit-runner` | Missing `mavenLocal()` or wrong version | Ensure `mavenLocal()` is first in `settings.gradle.kts`; republish both SNAPSHOT modules    |
+| `Could not find test-plan.schema.json`       | Daemon running old binary with path bug | Restart daemon from the auto-mobile source directory; verify the latest binary is installed |
+| `Failed to terminate app: Command failed`    | App APK not installed on device         | Run `adb install -r app-debug.apk` before tests                                             |
+| `Daemon failed to start within Xms`          | `bunx` unavailable or slow              | Install `auto-mobile` globally and start the daemon manually before running tests           |
+| `No Android devices found — skipping`        | `adb devices` shows no device           | Start your emulator or connect a device; check `ANDROID_HOME` is set                        |
 
 ## See also
 

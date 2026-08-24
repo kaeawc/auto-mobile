@@ -93,7 +93,7 @@ describe("DeviceSnapshotRepository", () => {
           includeSettings: true,
           osVersion: "17",
         }),
-      })
+      }),
     );
 
     const result = await repo.getSnapshot("snap-1");
@@ -120,7 +120,7 @@ describe("DeviceSnapshotRepository", () => {
         createdAt: "2025-05-05T00:00:00.000Z",
         lastAccessedAt: "2025-05-05T00:00:00.000Z",
         sizeBytes: 4096,
-      })
+      }),
     );
 
     const result = await repo.getSnapshot("snap-1");
@@ -172,10 +172,10 @@ describe("DeviceSnapshotRepository", () => {
 
   test("listSnapshots orders by lastAccessedAt", async () => {
     await repo.insertSnapshot(
-      makeRecord({ snapshotName: "snap-old", lastAccessedAt: "2024-01-01T00:00:00.000Z" })
+      makeRecord({ snapshotName: "snap-old", lastAccessedAt: "2024-01-01T00:00:00.000Z" }),
     );
     await repo.insertSnapshot(
-      makeRecord({ snapshotName: "snap-new", lastAccessedAt: "2024-06-01T00:00:00.000Z" })
+      makeRecord({ snapshotName: "snap-new", lastAccessedAt: "2024-06-01T00:00:00.000Z" }),
     );
 
     const descResults = await repo.listSnapshots({ orderByLastAccessed: "desc" });
@@ -187,10 +187,10 @@ describe("DeviceSnapshotRepository", () => {
 
   test("listSnapshots orders by createdAt", async () => {
     await repo.insertSnapshot(
-      makeRecord({ snapshotName: "snap-old", createdAt: "2024-01-01T00:00:00.000Z" })
+      makeRecord({ snapshotName: "snap-old", createdAt: "2024-01-01T00:00:00.000Z" }),
     );
     await repo.insertSnapshot(
-      makeRecord({ snapshotName: "snap-new", createdAt: "2024-06-01T00:00:00.000Z" })
+      makeRecord({ snapshotName: "snap-new", createdAt: "2024-06-01T00:00:00.000Z" }),
     );
 
     const descResults = await repo.listSnapshots({ orderByCreatedAt: "desc" });

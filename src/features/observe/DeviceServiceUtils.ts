@@ -10,7 +10,12 @@ import type { Timer } from "../../utils/SystemTimer";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger, type Logger } from "../../utils/logger";
 import type { GestureResult, TextResult, ScreenshotResult } from "./DeviceService";
-import type { BaseResult, GestureTimingResult, ActionTimingResult, DelegateContext } from "./shared/types";
+import type {
+  BaseResult,
+  GestureTimingResult,
+  ActionTimingResult,
+  DelegateContext,
+} from "./shared/types";
 
 // =============================================================================
 // Connection Utilities
@@ -43,7 +48,7 @@ export const DEFAULT_CONNECTION_OPTIONS: ConnectionOptions = {
 export async function waitWithRetry(
   condition: () => boolean | Promise<boolean>,
   options: Partial<ConnectionOptions> = {},
-  timer: Timer
+  timer: Timer,
 ): Promise<boolean> {
   const opts = { ...DEFAULT_CONNECTION_OPTIONS, ...options };
 
@@ -53,7 +58,7 @@ export async function waitWithRetry(
     }
 
     if (attempt < opts.maxAttempts - 1) {
-      await new Promise<void>(resolve => {
+      await new Promise<void>((resolve) => {
         timer.setTimeout(resolve, opts.delayMs);
       });
     }
@@ -71,7 +76,7 @@ export async function waitWithRetry(
  */
 export function createGestureTimeoutResult(
   operationType: string,
-  timeoutMs: number
+  timeoutMs: number,
 ): GestureResult {
   return {
     success: false,
@@ -83,10 +88,7 @@ export function createGestureTimeoutResult(
 /**
  * Create a timeout error result for text operations.
  */
-export function createTextTimeoutResult(
-  operationType: string,
-  timeoutMs: number
-): TextResult {
+export function createTextTimeoutResult(operationType: string, timeoutMs: number): TextResult {
   return {
     success: false,
     totalTimeMs: timeoutMs,
@@ -145,19 +147,18 @@ export interface CachedHierarchy<T> {
 export function isCacheValid<T>(
   cache: CachedHierarchy<T> | null,
   maxAgeMs: number,
-  currentTime: number
+  currentTime: number,
 ): boolean {
-  if (!cache) {return false;}
+  if (!cache) {
+    return false;
+  }
   return currentTime - cache.receivedAt < maxAgeMs;
 }
 
 /**
  * Create a fresh cache entry.
  */
-export function createCacheEntry<T>(
-  hierarchy: T,
-  timestamp: number
-): CachedHierarchy<T> {
+export function createCacheEntry<T>(hierarchy: T, timestamp: number): CachedHierarchy<T> {
   return {
     hierarchy,
     receivedAt: timestamp,
@@ -189,7 +190,7 @@ export function parseMessage<T>(data: string | Buffer, log: Logger = logger): T 
 export function createMessage(
   type: string,
   requestId: string,
-  params: Record<string, unknown> = {}
+  params: Record<string, unknown> = {},
 ): string {
   return JSON.stringify({
     type,
@@ -208,7 +209,7 @@ export function createMessage(
  * flow used by WebSocket delegate methods.
  */
 type RequiredKeys<T> = {
-  [K in keyof T]-?: object extends Pick<T, K> ? never : K
+  [K in keyof T]-?: object extends Pick<T, K> ? never : K;
 }[keyof T];
 
 type RequiredNonBaseResultKeys<T> = Exclude<RequiredKeys<T>, keyof BaseResult>;
@@ -219,15 +220,15 @@ type UnsupportedCommandErrorBuilder<T> = (messageType: string, error: string) =>
 
 type CommandFallbackBuilders<T> = [RequiredNonBaseResultKeys<T>] extends [never]
   ? {
-    notConnectedError?: NotConnectedErrorBuilder<T>;
-    timeoutError?: TimeoutErrorBuilder<T>;
-    unsupportedCommandError?: UnsupportedCommandErrorBuilder<T>;
-  }
+      notConnectedError?: NotConnectedErrorBuilder<T>;
+      timeoutError?: TimeoutErrorBuilder<T>;
+      unsupportedCommandError?: UnsupportedCommandErrorBuilder<T>;
+    }
   : {
-    notConnectedError: NotConnectedErrorBuilder<T>;
-    timeoutError: TimeoutErrorBuilder<T>;
-    unsupportedCommandError: UnsupportedCommandErrorBuilder<T>;
-  };
+      notConnectedError: NotConnectedErrorBuilder<T>;
+      timeoutError: TimeoutErrorBuilder<T>;
+      unsupportedCommandError: UnsupportedCommandErrorBuilder<T>;
+    };
 
 interface SendCommandBaseOptions {
   idPrefix: string;
@@ -248,7 +249,7 @@ export type SendCommandOptions<T> = SendCommandBaseOptions & CommandFallbackBuil
 
 export async function sendCommand<T>(
   context: DelegateContext,
-  options: SendCommandOptions<T>
+  options: SendCommandOptions<T>,
 ): Promise<T> {
   if (options.cancelScreenshotBackoff !== false) {
     context.cancelScreenshotBackoff();
@@ -287,18 +288,20 @@ export async function sendCommand<T>(
   const label = options.errorLabel ?? options.responseType;
   const timeoutFactory = options.timeoutError
     ? (_id: string, _type: string, timeout: number) => options.timeoutError!(timeout)
-    : (_id: string, _type: string, timeout: number) => ({
-      success: false,
-      totalTimeMs: timeout,
-      error: `${label} timed out after ${timeout}ms`,
-    } as T);
-  const responseErrorFactory = (error: string, totalTimeMs: number): T => options.unsupportedCommandError
-    ? options.unsupportedCommandError(options.messageType, error)
-    : ({
-      success: false,
-      totalTimeMs,
-      error,
-    } as T);
+    : (_id: string, _type: string, timeout: number) =>
+        ({
+          success: false,
+          totalTimeMs: timeout,
+          error: `${label} timed out after ${timeout}ms`,
+        }) as T;
+  const responseErrorFactory = (error: string, totalTimeMs: number): T =>
+    options.unsupportedCommandError
+      ? options.unsupportedCommandError(options.messageType, error)
+      : ({
+          success: false,
+          totalTimeMs,
+          error,
+        } as T);
 
   const promise = context.requestManager.register<T>(
     requestId,
@@ -384,7 +387,9 @@ export function toTextResult(result: PlatformTextResult): TextResult {
  * @param result Platform-specific result (A11yImeActionResult, XCTestImeActionResult)
  * @returns Unified ImeActionResult
  */
-export function toImeActionResult(result: PlatformImeActionResult): import("./DeviceService").ImeActionResult {
+export function toImeActionResult(
+  result: PlatformImeActionResult,
+): import("./DeviceService").ImeActionResult {
   return {
     success: result.success,
     totalTimeMs: result.totalTimeMs,

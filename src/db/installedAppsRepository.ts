@@ -12,20 +12,20 @@ export interface InstalledAppsStore {
     userId: number,
     packageName: string,
     isSystem: boolean,
-    timestampMs: number
+    timestampMs: number,
   ): Promise<void>;
-  removeInstalledApp(
-    deviceId: string,
-    userId: number,
-    packageName: string
-  ): Promise<void>;
+  removeInstalledApp(deviceId: string, userId: number, packageName: string): Promise<void>;
   removeInstalledAppForDevice(deviceId: string, packageName: string): Promise<void>;
   markDeviceStale(deviceId: string): Promise<void>;
   markProfileStale(deviceId: string, userId: number): Promise<void>;
   touchDevice(deviceId: string, timestampMs: number): Promise<void>;
   clearDeviceSession(deviceId: string): Promise<void>;
   clearOldDaemonSessions(currentDaemonSessionId: string): Promise<void>;
-  setSessionTracking(daemonSessionId: string, deviceId: string, deviceSessionStart: number): Promise<void>;
+  setSessionTracking(
+    daemonSessionId: string,
+    deviceId: string,
+    deviceSessionStart: number,
+  ): Promise<void>;
 }
 
 export class InstalledAppsRepository implements InstalledAppsStore {
@@ -76,26 +76,16 @@ export class InstalledAppsRepository implements InstalledAppsStore {
 
   async listInstalledApps(deviceId: string): Promise<DbInstalledApp[]> {
     const db = await this.getDb();
-    return db
-      .selectFrom("installed_apps")
-      .selectAll()
-      .where("device_id", "=", deviceId)
-      .execute();
+    return db.selectFrom("installed_apps").selectAll().where("device_id", "=", deviceId).execute();
   }
 
   async replaceInstalledApps(deviceId: string, apps: NewInstalledApp[]): Promise<void> {
     const db = await this.getDb();
-    await db.transaction().execute(async trx => {
-      await trx
-        .deleteFrom("installed_apps")
-        .where("device_id", "=", deviceId)
-        .execute();
+    await db.transaction().execute(async (trx) => {
+      await trx.deleteFrom("installed_apps").where("device_id", "=", deviceId).execute();
 
       if (apps.length > 0) {
-        await trx
-          .insertInto("installed_apps")
-          .values(apps)
-          .execute();
+        await trx.insertInto("installed_apps").values(apps).execute();
       }
     });
   }
@@ -105,7 +95,7 @@ export class InstalledAppsRepository implements InstalledAppsStore {
     userId: number,
     packageName: string,
     isSystem: boolean,
-    timestampMs: number
+    timestampMs: number,
   ): Promise<void> {
     const db = await this.getDb();
     const row: NewInstalledApp = {
@@ -114,26 +104,22 @@ export class InstalledAppsRepository implements InstalledAppsStore {
       package_name: packageName,
       is_system: isSystem ? 1 : 0,
       installed_at: timestampMs,
-      last_verified_at: timestampMs
+      last_verified_at: timestampMs,
     };
 
     await db
       .insertInto("installed_apps")
       .values(row)
-      .onConflict(oc =>
+      .onConflict((oc) =>
         oc.columns(["device_id", "user_id", "package_name"]).doUpdateSet({
           is_system: row.is_system,
-          last_verified_at: row.last_verified_at
-        })
+          last_verified_at: row.last_verified_at,
+        }),
       )
       .execute();
   }
 
-  async removeInstalledApp(
-    deviceId: string,
-    userId: number,
-    packageName: string
-  ): Promise<void> {
+  async removeInstalledApp(deviceId: string, userId: number, packageName: string): Promise<void> {
     const db = await this.getDb();
     await db
       .deleteFrom("installed_apps")
@@ -143,10 +129,7 @@ export class InstalledAppsRepository implements InstalledAppsStore {
       .execute();
   }
 
-  async removeInstalledAppForDevice(
-    deviceId: string,
-    packageName: string
-  ): Promise<void> {
+  async removeInstalledAppForDevice(deviceId: string, packageName: string): Promise<void> {
     const db = await this.getDb();
     await db
       .deleteFrom("installed_apps")
@@ -185,10 +168,7 @@ export class InstalledAppsRepository implements InstalledAppsStore {
 
   async clearDeviceSession(deviceId: string): Promise<void> {
     const db = await this.getDb();
-    await db
-      .deleteFrom("installed_apps")
-      .where("device_id", "=", deviceId)
-      .execute();
+    await db.deleteFrom("installed_apps").where("device_id", "=", deviceId).execute();
   }
 
   async clearOldDaemonSessions(currentDaemonSessionId: string): Promise<void> {
@@ -203,14 +183,14 @@ export class InstalledAppsRepository implements InstalledAppsStore {
   async setSessionTracking(
     daemonSessionId: string,
     deviceId: string,
-    deviceSessionStart: number
+    deviceSessionStart: number,
   ): Promise<void> {
     const db = await this.getDb();
     await db
       .updateTable("installed_apps")
       .set({
         daemon_session_id: daemonSessionId,
-        device_session_start: deviceSessionStart
+        device_session_start: deviceSessionStart,
       })
       .where("device_id", "=", deviceId)
       .where("daemon_session_id", "is", null)

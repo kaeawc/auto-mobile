@@ -2,14 +2,21 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import { promises as fsPromises } from "node:fs";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import path from "path";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { Window } from "./Window";
 import { logger } from "../../utils/logger";
 import { ScreenshotResult } from "../../models/ScreenshotResult";
 import { Image } from "../../utils/image-utils";
 import { BootedDevice } from "../../models";
-import { ScreenshotJobHandle, ScreenshotJobOptions, ScreenshotJobTracker } from "../../utils/ScreenshotJobTracker";
+import {
+  ScreenshotJobHandle,
+  ScreenshotJobOptions,
+  ScreenshotJobTracker,
+} from "../../utils/ScreenshotJobTracker";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
@@ -100,21 +107,21 @@ export class TakeScreenshot implements ScreenshotService {
       // Get all files in cache with their stats
       const files = await fsPromises.readdir(cacheDir);
       const fileStats = await Promise.all(
-        files.map(async file => {
+        files.map(async (file) => {
           const filePath = path.join(cacheDir, file);
           const stats = await fsPromises.stat(filePath);
           return { path: filePath, stats, mtime: stats.mtime.getTime() };
-        })
+        }),
       );
 
       // Evict oldest-first until under the limit, but never a file young enough
       // to be an in-flight capture from another process sharing this dir (in
       // production each agent runs its own client process writing here).
       const toDelete = selectScreenshotsToEvict(
-        fileStats.map(f => ({ path: f.path, size: f.stats.size, mtimeMs: f.mtime })),
+        fileStats.map((f) => ({ path: f.path, size: f.stats.size, mtimeMs: f.mtime })),
         TakeScreenshot.MAX_CACHE_SIZE_BYTES,
         SCREENSHOT_MIN_EVICT_AGE_MS,
-        Date.now()
+        Date.now(),
       );
       for (const filePath of toDelete) {
         await fsPromises.unlink(filePath);
@@ -155,10 +162,12 @@ export class TakeScreenshot implements ScreenshotService {
    */
   async execute(
     options: ScreenshotOptions = { format: "png" },
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
-    logger.info(`[SCREENSHOT] *** Starting screenshot capture with startTime: ${startTime}, format: ${options.format} ***`);
+    logger.info(
+      `[SCREENSHOT] *** Starting screenshot capture with startTime: ${startTime}, format: ${options.format} ***`,
+    );
 
     try {
       if (signal?.aborted) {
@@ -171,7 +180,9 @@ export class TakeScreenshot implements ScreenshotService {
       const captureResult = await this.captureScreenshot(finalPath, options, signal);
       const totalDuration = this.timer.now() - startTime;
 
-      logger.info(`[SCREENSHOT] *** Screenshot capture completed: success=${captureResult.success}, total execute time: ${totalDuration}ms ***`);
+      logger.info(
+        `[SCREENSHOT] *** Screenshot capture completed: success=${captureResult.success}, total execute time: ${totalDuration}ms ***`,
+      );
       return captureResult;
     } catch (err) {
       const totalDuration = this.timer.now() - startTime;
@@ -179,7 +190,7 @@ export class TakeScreenshot implements ScreenshotService {
       logger.warn(`[SCREENSHOT] Execute failed after ${totalDuration}ms: ${errorMsg}`);
       return {
         success: false,
-        error: `Failed to take screenshot: ${errorMsg}`
+        error: `Failed to take screenshot: ${errorMsg}`,
       };
     }
   }
@@ -189,12 +200,12 @@ export class TakeScreenshot implements ScreenshotService {
    */
   startTrackedCapture(
     options: ScreenshotOptions = { format: "png" },
-    trackerOptions: ScreenshotJobOptions = {}
+    trackerOptions: ScreenshotJobOptions = {},
   ): ScreenshotJobHandle {
     return ScreenshotJobTracker.startJob(
       this.device.deviceId,
-      signal => this.execute(options, signal),
-      trackerOptions
+      (signal) => this.execute(options, signal),
+      trackerOptions,
     );
   }
 
@@ -207,9 +218,8 @@ export class TakeScreenshot implements ScreenshotService {
   private async captureScreenshot(
     finalPath: string,
     options: ScreenshotOptions = { format: "png" },
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<ScreenshotResult> {
-
     logger.info(`[SCREENSHOT] Starting screenshot capture with format: ${options.format}`);
 
     switch (this.device.platform) {
@@ -231,9 +241,8 @@ export class TakeScreenshot implements ScreenshotService {
   private async captureAndroidScreenshot(
     finalPath: string,
     options: ScreenshotOptions = { format: "png" },
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<ScreenshotResult> {
-
     logger.info(`[SCREENSHOT] Starting screenshot capture with format: ${options.format}`);
 
     // Try base64 approach first (faster for smaller screenshots)
@@ -241,8 +250,14 @@ export class TakeScreenshot implements ScreenshotService {
       return await this.captureScreenshotBase64(finalPath, options, signal);
     } catch (err) {
       const errorMsg = errorMessage(err);
-      if (errorMsg.includes("maxBuffer") || errorMsg.includes("stdout") || errorMsg.includes("buffer")) {
-        logger.info(`[SCREENSHOT] Base64 approach failed (${errorMsg}), falling back to file pull approach`);
+      if (
+        errorMsg.includes("maxBuffer") ||
+        errorMsg.includes("stdout") ||
+        errorMsg.includes("buffer")
+      ) {
+        logger.info(
+          `[SCREENSHOT] Base64 approach failed (${errorMsg}), falling back to file pull approach`,
+        );
         return await this.captureScreenshotFilePull(finalPath, options, signal);
       } else {
         // For other errors, don't fallback
@@ -266,7 +281,7 @@ export class TakeScreenshot implements ScreenshotService {
       const client = IOSCtrlProxyClient.getInstance(this.device);
 
       // Ensure connected before requesting screenshot
-      if (!await client.ensureConnected()) {
+      if (!(await client.ensureConnected())) {
         return {
           success: false,
           error: "Failed to connect to CtrlProxy iOS",
@@ -354,7 +369,9 @@ export class TakeScreenshot implements ScreenshotService {
         base64Data,
         width,
         height,
-        this.device.platform === "ios" ? IOS_CTRLPROXY_SCREENSHOT_METADATA : ANDROID_ADB_SCREENSHOT_METADATA
+        this.device.platform === "ios"
+          ? IOS_CTRLPROXY_SCREENSHOT_METADATA
+          : ANDROID_ADB_SCREENSHOT_METADATA,
       );
     } catch (error) {
       logger.debug(`[SCREENSHOT] Failed to push screenshot to observation stream: ${error}`);
@@ -370,7 +387,7 @@ export class TakeScreenshot implements ScreenshotService {
   private async captureScreenshotBase64(
     finalPath: string,
     options: ScreenshotOptions = { format: "png" },
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
     logger.info(`[SCREENSHOT] Trying base64 approach`);
@@ -395,7 +412,9 @@ export class TakeScreenshot implements ScreenshotService {
     const cleanedOutput = result.stdout.replace(/[\r\n]/g, "");
     const imageBuffer = Buffer.from(cleanedOutput, "base64");
     const decodeDuration = this.timer.now() - decodeStartTime;
-    logger.info(`[SCREENSHOT] Base64 decode took ${decodeDuration}ms, buffer size: ${imageBuffer.length} bytes`);
+    logger.info(
+      `[SCREENSHOT] Base64 decode took ${decodeDuration}ms, buffer size: ${imageBuffer.length} bytes`,
+    );
 
     // Handle format conversion and save securely
     if (options.format !== "webp") {
@@ -410,7 +429,7 @@ export class TakeScreenshot implements ScreenshotService {
       const image = Image.fromBuffer(imageBuffer);
       const transformer = image.webp({
         quality: options.quality || 75,
-        lossless: options.lossless
+        lossless: options.lossless,
       });
       const convertedImage = await transformer.toBuffer();
       const convertDuration = this.timer.now() - convertStartTime;
@@ -428,7 +447,7 @@ export class TakeScreenshot implements ScreenshotService {
 
     return {
       success: true,
-      path: finalPath
+      path: finalPath,
     };
   }
 
@@ -441,7 +460,7 @@ export class TakeScreenshot implements ScreenshotService {
   private async captureScreenshotFilePull(
     finalPath: string,
     options: ScreenshotOptions = { format: "png" },
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
     logger.info(`[SCREENSHOT] Using file pull approach`);
@@ -453,19 +472,37 @@ export class TakeScreenshot implements ScreenshotService {
       const tempLocalFile = `${finalPath}.temp`;
 
       // Step 1: Take screenshot on device
-      const screencapResult = await this.adb.executeCommand(`shell screencap -p ${tempFile}`, undefined, undefined, undefined, signal);
+      const screencapResult = await this.adb.executeCommand(
+        `shell screencap -p ${tempFile}`,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      );
       if (screencapResult.stderr && screencapResult.stderr.includes("error")) {
         throw new Error(`Screencap failed: ${screencapResult.stderr}`);
       }
 
       // Step 2: Pull file from device to local filesystem
-      const pullResult = await this.adb.executeCommand(`pull ${tempFile} ${tempLocalFile}`, undefined, undefined, undefined, signal);
+      const pullResult = await this.adb.executeCommand(
+        `pull ${tempFile} ${tempLocalFile}`,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      );
       if (pullResult.stderr && pullResult.stderr.includes("error")) {
         throw new Error(`Failed to pull screenshot: ${pullResult.stderr}`);
       }
 
       // Step 3: Clean up temp file on device
-      await this.adb.executeCommand(`shell rm ${tempFile}`, undefined, undefined, undefined, signal);
+      await this.adb.executeCommand(
+        `shell rm ${tempFile}`,
+        undefined,
+        undefined,
+        undefined,
+        signal,
+      );
 
       const cmdDuration = this.timer.now() - cmdStartTime;
       logger.info(`[SCREENSHOT] Screenshot capture and pull took ${cmdDuration}ms`);
@@ -474,7 +511,9 @@ export class TakeScreenshot implements ScreenshotService {
       const readStartTime = this.timer.now();
       const imageBuffer = await fsPromises.readFile(tempLocalFile);
       const readDuration = this.timer.now() - readStartTime;
-      logger.info(`[SCREENSHOT] File read took ${readDuration}ms, buffer size: ${imageBuffer.length} bytes`);
+      logger.info(
+        `[SCREENSHOT] File read took ${readDuration}ms, buffer size: ${imageBuffer.length} bytes`,
+      );
 
       // Step 5: Handle format conversion and save to final path
       if (options.format !== "webp") {
@@ -489,7 +528,7 @@ export class TakeScreenshot implements ScreenshotService {
         const image = Image.fromBuffer(imageBuffer);
         const transformer = image.webp({
           quality: options.quality || 75,
-          lossless: options.lossless
+          lossless: options.lossless,
         });
         const convertedImage = await transformer.toBuffer();
         const convertDuration = this.timer.now() - convertStartTime;
@@ -508,12 +547,14 @@ export class TakeScreenshot implements ScreenshotService {
 
       return {
         success: true,
-        path: finalPath
+        path: finalPath,
       };
     } catch (err) {
       const totalDuration = this.timer.now() - startTime;
       const errorMsg = errorMessage(err);
-      logger.warn(`[SCREENSHOT] File pull screenshot capture failed after ${totalDuration}ms: ${errorMsg}`);
+      logger.warn(
+        `[SCREENSHOT] File pull screenshot capture failed after ${totalDuration}ms: ${errorMsg}`,
+      );
 
       // Clean up any temp files
       try {

@@ -22,11 +22,8 @@ describe("AUTOMOBILE_ALWAYS_LOAD_TOOLS advertisement", () => {
 
   beforeAll(() => {
     original = process.env[FLAG];
-    ToolRegistry.register(
-      TOOL,
-      "throwaway tool for always-load coverage",
-      z.object({}),
-      async () => createJSONToolResponse({ ok: true })
+    ToolRegistry.register(TOOL, "throwaway tool for always-load coverage", z.object({}), async () =>
+      createJSONToolResponse({ ok: true }),
     );
   });
 
@@ -43,9 +40,9 @@ describe("AUTOMOBILE_ALWAYS_LOAD_TOOLS advertisement", () => {
     (ToolRegistry as unknown as { tools: Map<string, unknown> }).tools.delete(TOOL);
   });
 
-  test("advertises _meta.anthropic/alwaysLoad when the flag is exactly \"true\"", () => {
+  test('advertises _meta.anthropic/alwaysLoad when the flag is exactly "true"', () => {
     process.env[FLAG] = "true";
-    const def = ToolRegistry.getToolDefinitions().find(d => d.name === TOOL);
+    const def = ToolRegistry.getToolDefinitions().find((d) => d.name === TOOL);
     expect((def as any)._meta).toEqual({ "anthropic/alwaysLoad": true });
   });
 
@@ -61,7 +58,7 @@ describe("AUTOMOBILE_ALWAYS_LOAD_TOOLS advertisement", () => {
     } else {
       process.env[FLAG] = value;
     }
-    const def = ToolRegistry.getToolDefinitions().find(d => d.name === TOOL);
+    const def = ToolRegistry.getToolDefinitions().find((d) => d.name === TOOL);
     expect((def as any)._meta).toBeUndefined();
   });
 });

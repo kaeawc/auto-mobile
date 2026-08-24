@@ -1,6 +1,9 @@
 import { errorMessage } from "./describeUnknownError";
 import { logger } from "./logger";
-import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import {
   DeepLinkResult,
@@ -10,7 +13,7 @@ import {
   ViewHierarchyResult,
   BootedDevice,
   IosInfoPlist,
-  ExecResult
+  ExecResult,
 } from "../models";
 import type { ElementParser } from "./interfaces/ElementParser";
 import type { ElementGeometry } from "./interfaces/ElementGeometry";
@@ -19,7 +22,10 @@ import { DefaultElementGeometry } from "../features/utility/ElementGeometry";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
 import { PlistClient, type PlistReader } from "./ios-cmdline-tools/PlistClient";
-import { AppBundleMetadataClient, type AppBundleMetadata } from "./ios-cmdline-tools/AppBundleMetadataClient";
+import {
+  AppBundleMetadataClient,
+  type AppBundleMetadata,
+} from "./ios-cmdline-tools/AppBundleMetadataClient";
 
 /**
  * Runs a host program (NOT `xcrun simctl`) **by argv, never via a shell**. Used
@@ -37,28 +43,29 @@ export type HostExec = (file: string, args: string[], stdin?: string) => Promise
 const makeExecResult = (stdout: string, stderr: string): ExecResult => ({
   stdout,
   stderr,
-  toString() { return stdout; },
-  trim() { return stdout.trim(); },
-  includes(searchString: string) { return stdout.includes(searchString); },
+  toString() {
+    return stdout;
+  },
+  trim() {
+    return stdout.trim();
+  },
+  includes(searchString: string) {
+    return stdout.includes(searchString);
+  },
 });
 
 const defaultHostExec: HostExec = async (file, args, stdin) => {
   const { execFile } = await import("child_process");
   return new Promise<ExecResult>((resolve, reject) => {
-    const child = execFile(
-      file,
-      args,
-      { maxBuffer: 16 * 1024 * 1024 },
-      (error, stdout, stderr) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        const out = typeof stdout === "string" ? stdout : stdout.toString();
-        const err = typeof stderr === "string" ? stderr : stderr.toString();
-        resolve(makeExecResult(out, err));
+    const child = execFile(file, args, { maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+        return;
       }
-    );
+      const out = typeof stdout === "string" ? stdout : stdout.toString();
+      const err = typeof stderr === "string" ? stderr : stderr.toString();
+      resolve(makeExecResult(out, err));
+    });
     if (stdin !== undefined) {
       child.stdin?.end(stdin);
     }
@@ -100,7 +107,7 @@ export interface DeepLinkManager {
   handleIntentChooser(
     viewHierarchy: ViewHierarchyResult,
     preference?: "always" | "just_once" | "custom",
-    customAppPackage?: string
+    customAppPackage?: string,
   ): Promise<IntentChooserResult>;
 }
 
@@ -124,7 +131,10 @@ export class DeepLinkManager implements DeepLinkManager {
     appBundleMetadata: AppBundleMetadata = new AppBundleMetadataClient(),
   ) {
     // Detect if the argument is a factory (has create method) or an executor
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
+    if (
+      adbFactoryOrExecutor &&
+      typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
+    ) {
       this.adbFactory = adbFactoryOrExecutor as AdbClientFactory;
       this.adbUtils = this.adbFactory.create(device);
     } else if (adbFactoryOrExecutor) {
@@ -146,19 +156,19 @@ export class DeepLinkManager implements DeepLinkManager {
   }
 
   /**
-     * Set the target device ID
-     * @param deviceId - Device identifier
-     */
+   * Set the target device ID
+   * @param deviceId - Device identifier
+   */
   setDeviceId(device: BootedDevice): void {
     this.device = device;
     this.adbUtils = this.adbFactory.create(device);
   }
 
   /**
-     * Get deep links for an application by querying the package manager
-     * @param appId - The application package ID
-     * @returns Promise with deep link information
-     */
+   * Get deep links for an application by querying the package manager
+   * @param appId - The application package ID
+   * @returns Promise with deep link information
+   */
   async getDeepLinks(appId: string): Promise<DeepLinkResult> {
     switch (this.device?.platform) {
       case "ios":
@@ -170,22 +180,24 @@ export class DeepLinkManager implements DeepLinkManager {
   }
 
   /**
-     * Android deep-link discovery via `dumpsys package`.
-     * @param appId - The application package ID
-     * @returns Promise with deep link information
-     */
+   * Android deep-link discovery via `dumpsys package`.
+   * @param appId - The application package ID
+   * @returns Promise with deep link information
+   */
   private async getDeepLinksAndroid(appId: string): Promise<DeepLinkResult> {
     try {
       logger.info(`[DeepLinkManager] Querying deep links for app: ${appId}`);
 
       // Use dumpsys package to get detailed package information including intent filters
       const packageInfoResult = await this.adbUtils.executeCommand(
-        `shell dumpsys package ${appId}`
+        `shell dumpsys package ${appId}`,
       );
 
       // Check if the command failed (stderr indicates failure)
       if (packageInfoResult.stderr && packageInfoResult.stderr.trim().length > 0) {
-        logger.error(`[DeepLinkManager] ADB command failed for ${appId}: ${packageInfoResult.stderr}`);
+        logger.error(
+          `[DeepLinkManager] ADB command failed for ${appId}: ${packageInfoResult.stderr}`,
+        );
         return {
           success: false,
           appId,
@@ -193,9 +205,9 @@ export class DeepLinkManager implements DeepLinkManager {
             schemes: [],
             hosts: [],
             intentFilters: [],
-            supportedMimeTypes: []
+            supportedMimeTypes: [],
           },
-          error: packageInfoResult.stderr
+          error: packageInfoResult.stderr,
         };
       }
 
@@ -206,7 +218,7 @@ export class DeepLinkManager implements DeepLinkManager {
         success: true,
         appId,
         deepLinks,
-        rawOutput: packageInfoResult.stdout
+        rawOutput: packageInfoResult.stdout,
       };
     } catch (error) {
       logger.error(`[DeepLinkManager] Failed to get deep links for ${appId}: ${error}`);
@@ -217,9 +229,9 @@ export class DeepLinkManager implements DeepLinkManager {
           schemes: [],
           hosts: [],
           intentFilters: [],
-          supportedMimeTypes: []
+          supportedMimeTypes: [],
         },
-        error: errorMessage(error)
+        error: errorMessage(error),
       };
     }
   }
@@ -243,7 +255,7 @@ export class DeepLinkManager implements DeepLinkManager {
       if (!isIosSimulatorUdid(udid)) {
         return this.emptyIosResult(
           bundleId,
-          `Physical-device deep-link discovery for ${bundleId} is not yet implemented`
+          `Physical-device deep-link discovery for ${bundleId} is not yet implemented`,
         );
       }
 
@@ -253,7 +265,10 @@ export class DeepLinkManager implements DeepLinkManager {
       let appPath = "";
       try {
         const container = await this.simctl.executeCommandArgs([
-          "get_app_container", udid, bundleId, "app"
+          "get_app_container",
+          udid,
+          bundleId,
+          "app",
         ]);
         appPath = container.stdout.trim();
       } catch (error) {
@@ -266,7 +281,7 @@ export class DeepLinkManager implements DeepLinkManager {
       // 2. Info.plist -> JSON via host plutil. argv form (no shell): the
       //    bundle path is a literal argument, so a crafted `.app` name cannot
       //    inject host commands.
-      const info = await this.plist.readJsonFile(`${appPath}/Info.plist`) as IosInfoPlist;
+      const info = (await this.plist.readJsonFile(`${appPath}/Info.plist`)) as IosInfoPlist;
 
       const schemes = this.parseCFBundleURLSchemes(info);
       const hosts = await this.parseAssociatedDomains(appPath, bundleId);
@@ -279,9 +294,9 @@ export class DeepLinkManager implements DeepLinkManager {
           schemes,
           hosts,
           supportedMimeTypes,
-          intentFilters: this.synthesizeIosIntentFilters(schemes, hosts)
+          intentFilters: this.synthesizeIosIntentFilters(schemes, hosts),
         },
-        rawOutput: JSON.stringify(info)
+        rawOutput: JSON.stringify(info),
       };
     } catch (error) {
       logger.error(`[DeepLinkManager] Failed to get iOS deep links for ${bundleId}: ${error}`);
@@ -294,7 +309,7 @@ export class DeepLinkManager implements DeepLinkManager {
       success: false,
       appId,
       deepLinks: { schemes: [], hosts: [], intentFilters: [], supportedMimeTypes: [] },
-      error
+      error,
     };
   }
 
@@ -338,7 +353,7 @@ export class DeepLinkManager implements DeepLinkManager {
     }
     return domains
       .filter((d): d is string => typeof d === "string" && d.startsWith("applinks:"))
-      .map(d => d.slice("applinks:".length));
+      .map((d) => d.slice("applinks:".length));
   }
 
   /**
@@ -346,26 +361,25 @@ export class DeepLinkManager implements DeepLinkManager {
    * `DeepLinkResult` shape stays populated for platform-agnostic consumers.
    */
   private synthesizeIosIntentFilters(schemes: string[], hosts: string[]): IntentFilter[] {
-    const data = [
-      ...schemes.map(scheme => ({ scheme })),
-      ...hosts.map(host => ({ host }))
-    ];
+    const data = [...schemes.map((scheme) => ({ scheme })), ...hosts.map((host) => ({ host }))];
     if (data.length === 0) {
       return [];
     }
-    return [{
-      action: "android.intent.action.VIEW",
-      category: [],
-      data
-    }];
+    return [
+      {
+        action: "android.intent.action.VIEW",
+        category: [],
+        data,
+      },
+    ];
   }
 
   /**
    * Parse deep link results from dumpsys package output
-     * @param appId - The application package ID
+   * @param appId - The application package ID
    * @param dumpsysOutput - Output from dumpsys package command
-     * @returns Parsed deep link information
-     */
+   * @returns Parsed deep link information
+   */
   private parsePackageDumpsysOutput(appId: string, dumpsysOutput: string): DeepLinkInfo {
     const schemes = new Set<string>();
     const hosts = new Set<string>();
@@ -388,7 +402,11 @@ export class DeepLinkManager implements DeepLinkManager {
 
       // Process schemes section
       if (inSchemesSection) {
-        if (line === "" || line.startsWith("Non-Data Actions:") || line.startsWith("Receiver Resolver Table:")) {
+        if (
+          line === "" ||
+          line.startsWith("Non-Data Actions:") ||
+          line.startsWith("Receiver Resolver Table:")
+        ) {
           inSchemesSection = false;
           continue;
         }
@@ -424,7 +442,7 @@ export class DeepLinkManager implements DeepLinkManager {
         currentFilter = {
           action: "android.intent.action.VIEW",
           category: [],
-          data: []
+          data: [],
         };
       }
 
@@ -439,7 +457,9 @@ export class DeepLinkManager implements DeepLinkManager {
         if (line.startsWith("Scheme:")) {
           const scheme = line.replace("Scheme:", "").trim().replace(/"/g, "");
           schemes.add(scheme);
-          if (!currentFilter.data) {currentFilter.data = [];}
+          if (!currentFilter.data) {
+            currentFilter.data = [];
+          }
           currentFilter.data.push({ scheme });
         }
 
@@ -448,7 +468,9 @@ export class DeepLinkManager implements DeepLinkManager {
           if (authorityMatch) {
             const host = authorityMatch[1];
             hosts.add(host);
-            if (!currentFilter.data) {currentFilter.data = [];}
+            if (!currentFilter.data) {
+              currentFilter.data = [];
+            }
             // Find existing data entry with scheme or create new one
             const lastDataEntry = currentFilter.data[currentFilter.data.length - 1];
             if (lastDataEntry && !lastDataEntry.host) {
@@ -462,7 +484,9 @@ export class DeepLinkManager implements DeepLinkManager {
         if (line.startsWith("Type:")) {
           const mimeType = line.replace("Type:", "").trim().replace(/"/g, "");
           supportedMimeTypes.add(mimeType);
-          if (!currentFilter.data) {currentFilter.data = [];}
+          if (!currentFilter.data) {
+            currentFilter.data = [];
+          }
           currentFilter.data.push({ mimeType });
         }
 
@@ -486,15 +510,15 @@ export class DeepLinkManager implements DeepLinkManager {
       schemes: Array.from(schemes),
       hosts: Array.from(hosts),
       intentFilters,
-      supportedMimeTypes: Array.from(supportedMimeTypes)
+      supportedMimeTypes: Array.from(supportedMimeTypes),
     };
   }
 
   /**
-     * Detect system intent chooser dialog in view hierarchy
+   * Detect system intent chooser dialog in view hierarchy
    * @param viewHierarchy - Current view hierarchy result
-     * @returns True if intent chooser is detected
-     */
+   * @returns True if intent chooser is detected
+   */
   detectIntentChooser(viewHierarchy: ViewHierarchyResult): boolean {
     try {
       // If the hierarchy is empty, return false
@@ -508,19 +532,19 @@ export class DeepLinkManager implements DeepLinkManager {
         "Open with",
         "Complete action using",
         "Always",
-        "Just once"
+        "Just once",
       ];
 
       const classIndicators = [
         "com.android.internal.app.ChooserActivity",
-        "com.android.internal.app.ResolverActivity"
+        "com.android.internal.app.ResolverActivity",
       ];
 
       const resourceIdIndicators = [
         "android:id/button_always",
         "android:id/button_once",
         "resolver_list",
-        "chooser_list"
+        "chooser_list",
       ];
 
       // Get root nodes from the view hierarchy
@@ -531,7 +555,9 @@ export class DeepLinkManager implements DeepLinkManager {
         let foundIndicator = false;
 
         this.parser.traverseNode(rootNode, (node: any) => {
-          if (foundIndicator) {return;}
+          if (foundIndicator) {
+            return;
+          }
 
           const nodeProperties = this.parser.extractNodeProperties(node);
           const nodeClass = nodeProperties.class || "";
@@ -575,18 +601,17 @@ export class DeepLinkManager implements DeepLinkManager {
     }
   }
 
-
   /**
-     * Handle system intent chooser dialog automatically
+   * Handle system intent chooser dialog automatically
    * @param viewHierarchy - Current view hierarchy result
-     * @param preference - User preference for handling ("always", "just_once", or "custom")
-     * @param customAppPackage - Optional specific app package to select
-     * @returns Result of intent chooser handling
-     */
+   * @param preference - User preference for handling ("always", "just_once", or "custom")
+   * @param customAppPackage - Optional specific app package to select
+   * @returns Result of intent chooser handling
+   */
   async handleIntentChooser(
     viewHierarchy: ViewHierarchyResult,
     preference: "always" | "just_once" | "custom" = "just_once",
-    customAppPackage?: string
+    customAppPackage?: string,
   ): Promise<IntentChooserResult> {
     try {
       const detected = this.detectIntentChooser(viewHierarchy);
@@ -594,7 +619,7 @@ export class DeepLinkManager implements DeepLinkManager {
       if (!detected) {
         return {
           success: true,
-          detected: false
+          detected: false,
         };
       }
 
@@ -608,50 +633,62 @@ export class DeepLinkManager implements DeepLinkManager {
         // Look for "Always" button
         for (const rootNode of rootNodes) {
           targetElement = this.findButtonByText(rootNode, ["Always", "ALWAYS"]);
-          if (targetElement) {break;}
+          if (targetElement) {
+            break;
+          }
         }
       } else if (preference === "just_once") {
         // Look for "Just once" button
         for (const rootNode of rootNodes) {
           targetElement = this.findButtonByText(rootNode, ["Just once", "JUST ONCE", "Once"]);
-          if (targetElement) {break;}
+          if (targetElement) {
+            break;
+          }
         }
       } else if (preference === "custom" && customAppPackage) {
         // Look for specific app in the list
         for (const rootNode of rootNodes) {
           targetElement = this.findAppInChooser(rootNode, customAppPackage);
-          if (targetElement) {break;}
+          if (targetElement) {
+            break;
+          }
         }
       }
 
       if (targetElement) {
         // Simulate tap on the target element
         const center = this.geometry.getElementCenter(targetElement);
-        const tapResult = await this.adbUtils.executeCommand(`shell input tap ${center.x} ${center.y}`);
+        const tapResult = await this.adbUtils.executeCommand(
+          `shell input tap ${center.x} ${center.y}`,
+        );
 
         // Check if tap command failed
         if (tapResult.stderr && tapResult.stderr.trim().length > 0) {
-          logger.error(`[DeepLinkManager] Failed to tap on intent chooser option: ${tapResult.stderr}`);
+          logger.error(
+            `[DeepLinkManager] Failed to tap on intent chooser option: ${tapResult.stderr}`,
+          );
           return {
             success: false,
             detected: true,
-            error: tapResult.stderr
+            error: tapResult.stderr,
           };
         }
 
-        logger.info(`[DeepLinkManager] Tapped on intent chooser option at (${center.x}, ${center.y})`);
+        logger.info(
+          `[DeepLinkManager] Tapped on intent chooser option at (${center.x}, ${center.y})`,
+        );
 
         return {
           success: true,
           detected: true,
           action: preference,
-          appSelected: customAppPackage
+          appSelected: customAppPackage,
         };
       } else {
         return {
           success: false,
           detected: true,
-          error: `Could not find target element for preference: ${preference}`
+          error: `Could not find target element for preference: ${preference}`,
         };
       }
     } catch (error) {
@@ -659,30 +696,34 @@ export class DeepLinkManager implements DeepLinkManager {
       return {
         success: false,
         detected: true,
-        error: errorMessage(error)
+        error: errorMessage(error),
       };
     }
   }
 
   /**
-     * Find a button by text content in the view hierarchy
-     * @param node - Root node to search from
-     * @param textOptions - Array of text options to match
-     * @returns Found element or null
-     */
+   * Find a button by text content in the view hierarchy
+   * @param node - Root node to search from
+   * @param textOptions - Array of text options to match
+   * @returns Found element or null
+   */
   private findButtonByText(node: any, textOptions: string[]): any {
     let foundElement: any = null;
 
     this.parser.traverseNode(node, (currentNode: any) => {
-      if (foundElement) {return;} // Already found
+      if (foundElement) {
+        return;
+      } // Already found
 
       const properties = this.parser.extractNodeProperties(currentNode);
       const text = properties.text || properties["content-desc"] || "";
       const className = properties.class || "";
 
       // Check if this is a button-like element with matching text
-      if ((className.includes("Button") || className.includes("TextView")) &&
-                textOptions.some(option => text.toLowerCase().includes(option.toLowerCase()))) {
+      if (
+        (className.includes("Button") || className.includes("TextView")) &&
+        textOptions.some((option) => text.toLowerCase().includes(option.toLowerCase()))
+      ) {
         foundElement = currentNode;
       }
     });
@@ -691,16 +732,18 @@ export class DeepLinkManager implements DeepLinkManager {
   }
 
   /**
-     * Find a specific app in the intent chooser list
-     * @param node - Root node to search from
-     * @param appPackage - App package to find
-     * @returns Found element or null
-     */
+   * Find a specific app in the intent chooser list
+   * @param node - Root node to search from
+   * @param appPackage - App package to find
+   * @returns Found element or null
+   */
   private findAppInChooser(node: any, appPackage: string): any {
     let foundElement: any = null;
 
     this.parser.traverseNode(node, (currentNode: any) => {
-      if (foundElement) {return;} // Already found
+      if (foundElement) {
+        return;
+      } // Already found
 
       const properties = this.parser.extractNodeProperties(currentNode);
       const resourceId = properties["resource-id"] || "";

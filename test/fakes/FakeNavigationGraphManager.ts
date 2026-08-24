@@ -17,14 +17,20 @@ import {
   NavigationGraphNodeResource,
   NavigationGraphNodeResourceProvider,
   NavigationAppSummary,
-  NavigationAppListProvider
+  NavigationAppListProvider,
 } from "../../src/utils/interfaces/NavigationGraph";
 
 /**
  * Fake implementation of NavigationGraph for testing.
  * Allows full control over navigation graph state and behavior.
  */
-export class FakeNavigationGraphManager implements NavigationGraph, NavigationGraphSummaryProvider, NavigationGraphNodeResourceProvider, NavigationAppListProvider {
+export class FakeNavigationGraphManager
+  implements
+    NavigationGraph,
+    NavigationGraphSummaryProvider,
+    NavigationGraphNodeResourceProvider,
+    NavigationAppListProvider
+{
   private currentAppId: string | null = null;
   private currentScreen: string | null = null;
   private nodes: Map<string, NavigationNode> = new Map();
@@ -78,7 +84,7 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
       id: this.nextEdgeId++,
       from: edge.from,
       to: edge.to,
-      toolName: edge.interaction?.toolName ?? null
+      toolName: edge.interaction?.toolName ?? null,
     });
   }
 
@@ -191,7 +197,7 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
         screenName: event.destination,
         firstSeenAt: event.timestamp,
         lastSeenAt: event.timestamp,
-        visitCount: 1
+        visitCount: 1,
       });
       this.nodeSummaryIds.set(event.destination, this.nextNodeId++);
     } else {
@@ -208,14 +214,14 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
         timestamp: event.timestamp,
         edgeType: "tool",
         interaction: lastInteraction,
-        uiState: lastInteraction.uiState
+        uiState: lastInteraction.uiState,
       };
       this.edges.push(edge);
       this.edgeSummaries.push({
         id: this.nextEdgeId++,
         from: edge.from,
         to: edge.to,
-        toolName: edge.interaction?.toolName ?? null
+        toolName: edge.interaction?.toolName ?? null,
       });
     }
 
@@ -232,7 +238,7 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
       toolName,
       args,
       timestamp: Date.now(),
-      uiState
+      uiState,
     });
   }
 
@@ -254,7 +260,7 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
         found: false,
         path: [],
         startScreen: "",
-        targetScreen
+        targetScreen,
       };
     }
 
@@ -263,19 +269,19 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
         found: true,
         path: [],
         startScreen: this.currentScreen,
-        targetScreen
+        targetScreen,
       };
     }
 
     const startScreen = this.currentScreen;
     const queue: Array<{ screen: string; path: NavigationEdge[] }> = [
-      { screen: startScreen, path: [] }
+      { screen: startScreen, path: [] },
     ];
     const visited = new Set<string>([startScreen]);
 
     while (queue.length > 0) {
       const current = queue.shift()!;
-      const outgoing = this.edges.filter(edge => edge.from === current.screen);
+      const outgoing = this.edges.filter((edge) => edge.from === current.screen);
 
       for (const edge of outgoing) {
         if (visited.has(edge.to)) {
@@ -287,7 +293,7 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
             found: true,
             path: nextPath,
             startScreen,
-            targetScreen
+            targetScreen,
           };
         }
         visited.add(edge.to);
@@ -299,7 +305,7 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
       found: false,
       path: [],
       startScreen: this.currentScreen,
-      targetScreen
+      targetScreen,
     };
   }
 
@@ -315,12 +321,12 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
 
   getEdgesFrom(screenName: string): NavigationEdge[] {
     this.trackCall("getEdgesFrom", [screenName]);
-    return this.edges.filter(e => e.from === screenName);
+    return this.edges.filter((e) => e.from === screenName);
   }
 
   getEdgesTo(screenName: string): NavigationEdge[] {
     this.trackCall("getEdgesTo", [screenName]);
-    return this.edges.filter(e => e.to === screenName);
+    return this.edges.filter((e) => e.to === screenName);
   }
 
   getStats(): NavigationGraphStats {
@@ -329,9 +335,9 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
       nodeCount: this.nodes.size,
       edgeCount: this.edges.length,
       currentScreen: this.currentScreen,
-      knownEdgeCount: this.edges.filter(e => e.edgeType === "tool").length,
-      unknownEdgeCount: this.edges.filter(e => e.edgeType === "unknown").length,
-      toolCallHistorySize: this.toolCallHistory.length
+      knownEdgeCount: this.edges.filter((e) => e.edgeType === "tool").length,
+      unknownEdgeCount: this.edges.filter((e) => e.edgeType === "unknown").length,
+      toolCallHistorySize: this.toolCallHistory.length,
     };
   }
 
@@ -361,23 +367,23 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
       appId: this.currentAppId,
       nodes: Array.from(this.nodes.values()),
       edges: [...this.edges],
-      currentScreen: this.currentScreen
+      currentScreen: this.currentScreen,
     };
   }
 
   async exportGraphSummary(): Promise<NavigationGraphSummary> {
     this.trackCall("exportGraphSummary", []);
-    const nodes: NavigationGraphSummaryNode[] = Array.from(this.nodes.values()).map(node => ({
+    const nodes: NavigationGraphSummaryNode[] = Array.from(this.nodes.values()).map((node) => ({
       id: this.nodeSummaryIds.get(node.screenName) ?? this.nextNodeId++,
       screenName: node.screenName,
-      visitCount: node.visitCount
+      visitCount: node.visitCount,
     }));
 
     return {
       appId: this.currentAppId,
       nodes,
       edges: [...this.edgeSummaries],
-      currentScreen: this.currentScreen
+      currentScreen: this.currentScreen,
     };
   }
 
@@ -398,25 +404,25 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
   private buildNodeResource(
     node: NavigationNode,
     nodeId: number,
-    appId: string
+    appId: string,
   ): NavigationGraphNodeResource {
     const detail: NavigationGraphNodeDetail = {
       id: nodeId,
-      ...node
+      ...node,
     };
 
     return {
       appId,
       node: detail,
       isCurrentScreen: appId === this.currentAppId && this.currentScreen === node.screenName,
-      edgesFrom: this.edges.filter(edge => edge.from === node.screenName),
-      edgesTo: this.edges.filter(edge => edge.to === node.screenName),
+      edgesFrom: this.edges.filter((edge) => edge.from === node.screenName),
+      edgesTo: this.edges.filter((edge) => edge.to === node.screenName),
     };
   }
 
   async getNodeResourceById(
     nodeId: number,
-    appId?: string
+    appId?: string,
   ): Promise<NavigationGraphNodeResource | null> {
     this.trackCall("getNodeResourceById", [nodeId, appId]);
 
@@ -426,7 +432,7 @@ export class FakeNavigationGraphManager implements NavigationGraph, NavigationGr
     }
 
     const screenName = Array.from(this.nodeSummaryIds.entries()).find(
-      ([, id]) => id === nodeId
+      ([, id]) => id === nodeId,
     )?.[0];
 
     if (!screenName) {

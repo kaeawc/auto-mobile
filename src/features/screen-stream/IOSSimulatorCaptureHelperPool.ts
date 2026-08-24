@@ -40,14 +40,20 @@ export interface IosSimulatorCaptureHelperLease {
   on(event: "malformed", listener: (error: MalformedFrameError) => void): this;
   on(event: "stderr", listener: (line: string) => void): this;
   on(event: "readiness", listener: (status: IosScreenCaptureReadiness) => void): this;
-  on(event: "exit", listener: (info: { code: number | null; signal: NodeJS.Signals | null }) => void): this;
+  on(
+    event: "exit",
+    listener: (info: { code: number | null; signal: NodeJS.Signals | null }) => void,
+  ): this;
   on(event: "error", listener: (error: Error) => void): this;
 }
 
-type SimulatorHelper = Pick<IOSScreenCaptureHelper, "start" | "stop" | "isRunning" | "requestKeyFrame"> & {
+type SimulatorHelper = Pick<
+  IOSScreenCaptureHelper,
+  "start" | "stop" | "isRunning" | "requestKeyFrame"
+> & {
   on<E extends keyof IosScreenCaptureHelperEvents>(
     event: E,
-    listener: IosScreenCaptureHelperEvents[E]
+    listener: IosScreenCaptureHelperEvents[E],
   ): SimulatorHelper;
 };
 
@@ -101,7 +107,8 @@ export class IOSSimulatorCaptureHelperPool {
   constructor(options: SimulatorCaptureHelperPoolOptions = {}) {
     this.idleTtlMs = options.idleTtlMs ?? IOS_SIMULATOR_HELPER_IDLE_TTL_MS;
     this.timer = options.timer ?? defaultTimer;
-    this.createHelper = options.createHelper ?? (helperOptions => new IOSScreenCaptureHelper(helperOptions));
+    this.createHelper =
+      options.createHelper ?? ((helperOptions) => new IOSScreenCaptureHelper(helperOptions));
   }
 
   acquire(options: IosScreenCaptureHelperOptions): IosSimulatorCaptureHelperLease {
@@ -117,7 +124,7 @@ export class IOSSimulatorCaptureHelperPool {
       this.entries.clear();
       for (const entry of entries) {
         this.clearEntryIdleTimer(entry);
-        await entry.helper.stop().catch(error => {
+        await entry.helper.stop().catch((error) => {
           logger.debug(`[IOSSimulatorCaptureHelperPool] helper shutdown failed: ${error}`);
         });
       }
@@ -143,7 +150,7 @@ export class IOSSimulatorCaptureHelperPool {
    */
   private async resolveOrCreateEntry(
     targetKey: string,
-    lease: PooledSimulatorCaptureHelperLease
+    lease: PooledSimulatorCaptureHelperLease,
   ): Promise<HelperEntry | null> {
     let entry = this.entries.get(targetKey);
     if (entry?.failedStopFailed) {
@@ -190,7 +197,7 @@ export class IOSSimulatorCaptureHelperPool {
   private finalizeAttach(
     entry: HelperEntry,
     lease: PooledSimulatorCaptureHelperLease,
-    targetKey: string
+    targetKey: string,
   ): void {
     this.clearEntryIdleTimer(entry);
     entry.leases.add(lease);
@@ -279,19 +286,23 @@ export class IOSSimulatorCaptureHelperPool {
   }
 
   private wireHelper(entry: HelperEntry): void {
-    entry.helper.on("frame", frame => {
+    entry.helper.on("frame", (frame) => {
       entry.latestFrame = frame;
       this.broadcast(entry, "frame", frame);
     });
-    entry.helper.on("encodedVideo", video => this.broadcast(entry, "encodedVideo", video));
-    entry.helper.on("capability", token => this.broadcast(entry, "capability", token));
-    entry.helper.on("permission", permission => this.broadcast(entry, "permission", permission));
-    entry.helper.on("permissionTarget", target => this.broadcast(entry, "permissionTarget", target));
-    entry.helper.on("frameMetrics", metrics => this.broadcast(entry, "frameMetrics", metrics));
-    entry.helper.on("captureMetrics", metrics => this.broadcast(entry, "captureMetrics", metrics));
-    entry.helper.on("audio", audio => this.broadcast(entry, "audio", audio));
-    entry.helper.on("malformed", error => this.broadcast(entry, "malformed", error));
-    entry.helper.on("stderr", line => {
+    entry.helper.on("encodedVideo", (video) => this.broadcast(entry, "encodedVideo", video));
+    entry.helper.on("capability", (token) => this.broadcast(entry, "capability", token));
+    entry.helper.on("permission", (permission) => this.broadcast(entry, "permission", permission));
+    entry.helper.on("permissionTarget", (target) =>
+      this.broadcast(entry, "permissionTarget", target),
+    );
+    entry.helper.on("frameMetrics", (metrics) => this.broadcast(entry, "frameMetrics", metrics));
+    entry.helper.on("captureMetrics", (metrics) =>
+      this.broadcast(entry, "captureMetrics", metrics),
+    );
+    entry.helper.on("audio", (audio) => this.broadcast(entry, "audio", audio));
+    entry.helper.on("malformed", (error) => this.broadcast(entry, "malformed", error));
+    entry.helper.on("stderr", (line) => {
       // The helper can report a terminal ScreenCaptureKit error without exiting.
       // Keeping that process warm would hand the next reconnect a frozen session.
       if (isFatalHelperStderr(line) && this.entries.get(entry.key) === entry) {
@@ -300,15 +311,15 @@ export class IOSSimulatorCaptureHelperPool {
       }
       this.broadcast(entry, "stderr", line);
     });
-    entry.helper.on("readiness", readiness => this.broadcast(entry, "readiness", readiness));
-    entry.helper.on("error", error => {
+    entry.helper.on("readiness", (readiness) => this.broadcast(entry, "readiness", readiness));
+    entry.helper.on("error", (error) => {
       if (this.entries.get(entry.key) === entry) {
         entry.failed = true;
         this.enqueueBestEffort(() => this.stopFailedEntry(entry), "failed helper stop failed");
       }
       this.broadcast(entry, "error", error);
     });
-    entry.helper.on("exit", info => {
+    entry.helper.on("exit", (info) => {
       this.broadcast(entry, "exit", info);
       if (this.entries.get(entry.key) === entry) {
         this.clearEntryIdleTimer(entry);
@@ -320,7 +331,7 @@ export class IOSSimulatorCaptureHelperPool {
   private broadcast<E extends keyof IosScreenCaptureHelperEvents>(
     entry: HelperEntry,
     event: E,
-    value: Parameters<IosScreenCaptureHelperEvents[E]>[0]
+    value: Parameters<IosScreenCaptureHelperEvents[E]>[0],
   ): void {
     for (const lease of entry.leases) {
       lease.forward(event, value);
@@ -384,7 +395,7 @@ export class IOSSimulatorCaptureHelperPool {
   }
 
   private enqueueBestEffort(action: () => Promise<void>, failureMessage: string): void {
-    void this.enqueue(action).catch(error => {
+    void this.enqueue(action).catch((error) => {
       logger.warn(`[IOSSimulatorCaptureHelperPool] ${failureMessage}: ${error}`);
     });
   }
@@ -397,7 +408,10 @@ export class IOSSimulatorCaptureHelperPool {
   }
 }
 
-class PooledSimulatorCaptureHelperLease extends EventEmitter implements IosSimulatorCaptureHelperLease {
+class PooledSimulatorCaptureHelperLease
+  extends EventEmitter
+  implements IosSimulatorCaptureHelperLease
+{
   private started = false;
   private attachment: Promise<void> | null = null;
   private attachmentGeneration = 0;
@@ -405,7 +419,7 @@ class PooledSimulatorCaptureHelperLease extends EventEmitter implements IosSimul
 
   constructor(
     private readonly pool: IOSSimulatorCaptureHelperPool,
-    readonly options: IosScreenCaptureHelperOptions
+    readonly options: IosScreenCaptureHelperOptions,
   ) {
     super();
   }
@@ -461,7 +475,7 @@ class PooledSimulatorCaptureHelperLease extends EventEmitter implements IosSimul
 
   forward<E extends keyof IosScreenCaptureHelperEvents>(
     event: E,
-    value: Parameters<IosScreenCaptureHelperEvents[E]>[0]
+    value: Parameters<IosScreenCaptureHelperEvents[E]>[0],
   ): void {
     if (this.started) {
       this.emit(event, value);

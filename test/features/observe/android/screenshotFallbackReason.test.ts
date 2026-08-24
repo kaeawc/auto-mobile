@@ -8,7 +8,7 @@ describe("fallbackReasonForCtrlProxyFailure", () => {
   it("maps the distinguishable rate-limit wire error to ctrlproxy_rate_limited", () => {
     // AC3: a genuine platform rate-limit must be classified distinctly, not as a generic failure.
     expect(fallbackReasonForCtrlProxyFailure(CTRLPROXY_RATE_LIMITED_ERROR)).toBe(
-      "ctrlproxy_rate_limited"
+      "ctrlproxy_rate_limited",
     );
   });
 
@@ -19,7 +19,7 @@ describe("fallbackReasonForCtrlProxyFailure", () => {
   it("maps a generic old-APK screenshot_error to ctrlproxy_failed (backward compatible)", () => {
     // AC4: an older APK only emits the generic message; it must keep classifying as today's reason.
     expect(fallbackReasonForCtrlProxyFailure("Failed to capture screenshot")).toBe(
-      "ctrlproxy_failed"
+      "ctrlproxy_failed",
     );
   });
 

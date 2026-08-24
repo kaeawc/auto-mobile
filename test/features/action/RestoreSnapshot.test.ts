@@ -25,7 +25,7 @@ describe("RestoreSnapshot", () => {
       deviceId: "emulator-5554",
       name: "Pixel_5",
       platform: "android",
-      isEmulator: true
+      isEmulator: true,
     };
 
     // Create fakes
@@ -45,7 +45,7 @@ describe("RestoreSnapshot", () => {
     fakeAdb.setCommandResult("shell pm clear com.example.app", "Success");
     fakeAdb.setCommandResult(
       "shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.example.app",
-      ""
+      "",
     );
   });
 
@@ -72,9 +72,8 @@ describe("RestoreSnapshot", () => {
         platform: "android",
         snapshotType: "vm",
         includeAppData: true,
-        includeSettings: false
+        includeSettings: false,
       };
-
 
       // Setup VM snapshot load command
       fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "OK");
@@ -82,7 +81,7 @@ describe("RestoreSnapshot", () => {
       const result = await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: true
+        useVmSnapshot: true,
       });
 
       expect(result.snapshotType).toBe("vm");
@@ -103,18 +102,23 @@ describe("RestoreSnapshot", () => {
         platform: "android",
         snapshotType: "vm",
         includeAppData: true,
-        includeSettings: false
+        includeSettings: false,
       };
 
-
       // Setup VM snapshot load command to fail
-      fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "", "KO: snapshot load failed");
+      fakeAdb.setCommandResult(
+        `emu avd snapshot load ${snapshotName}`,
+        "",
+        "KO: snapshot load failed",
+      );
 
-      await expect(restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: true
-      })).rejects.toThrow("Failed to restore VM snapshot");
+      await expect(
+        restoreSnapshot.execute({
+          snapshotName,
+          manifest,
+          useVmSnapshot: true,
+        }),
+      ).rejects.toThrow("Failed to restore VM snapshot");
     });
 
     it("should throw error when VM snapshot load fails with KO in stdout", async () => {
@@ -129,18 +133,19 @@ describe("RestoreSnapshot", () => {
         platform: "android",
         snapshotType: "vm",
         includeAppData: true,
-        includeSettings: false
+        includeSettings: false,
       };
-
 
       // Setup VM snapshot load command to fail (KO in stdout)
       fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "KO: snapshot load failed");
 
-      await expect(restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: true
-      })).rejects.toThrow("Failed to restore VM snapshot");
+      await expect(
+        restoreSnapshot.execute({
+          snapshotName,
+          manifest,
+          useVmSnapshot: true,
+        }),
+      ).rejects.toThrow("Failed to restore VM snapshot");
     });
 
     it("should throw error when VM snapshot load returns no OK response", async () => {
@@ -155,18 +160,19 @@ describe("RestoreSnapshot", () => {
         platform: "android",
         snapshotType: "vm",
         includeAppData: true,
-        includeSettings: false
+        includeSettings: false,
       };
-
 
       // Setup VM snapshot load command with empty output
       fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "", "");
 
-      await expect(restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: true
-      })).rejects.toThrow("no response from emulator");
+      await expect(
+        restoreSnapshot.execute({
+          snapshotName,
+          manifest,
+          useVmSnapshot: true,
+        }),
+      ).rejects.toThrow("no response from emulator");
     });
 
     it("should surface offline errors when VM snapshot command fails", async () => {
@@ -181,21 +187,19 @@ describe("RestoreSnapshot", () => {
         platform: "android",
         snapshotType: "vm",
         includeAppData: true,
-        includeSettings: false
+        includeSettings: false,
       };
 
-
       // Setup VM snapshot load command to throw offline error
-      fakeAdb.setCommandError(
-        `emu avd snapshot load ${snapshotName}`,
-        new Error("device offline")
-      );
+      fakeAdb.setCommandError(`emu avd snapshot load ${snapshotName}`, new Error("device offline"));
 
-      await expect(restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: true
-      })).rejects.toThrow("offline");
+      await expect(
+        restoreSnapshot.execute({
+          snapshotName,
+          manifest,
+          useVmSnapshot: true,
+        }),
+      ).rejects.toThrow("offline");
     });
 
     it("should pass VM snapshot timeout to adb command", async () => {
@@ -211,9 +215,8 @@ describe("RestoreSnapshot", () => {
         platform: "android",
         snapshotType: "vm",
         includeAppData: true,
-        includeSettings: false
+        includeSettings: false,
       };
-
 
       // Setup VM snapshot load command
       fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "OK");
@@ -222,12 +225,12 @@ describe("RestoreSnapshot", () => {
         snapshotName,
         manifest,
         useVmSnapshot: true,
-        vmSnapshotTimeoutMs
+        vmSnapshotTimeoutMs,
       });
 
-      const call = fakeAdb.getCommandCalls().find(
-        entry => entry.command === `emu avd snapshot load ${snapshotName}`
-      );
+      const call = fakeAdb
+        .getCommandCalls()
+        .find((entry) => entry.command === `emu avd snapshot load ${snapshotName}`);
       expect(call?.timeoutMs).toBe(vmSnapshotTimeoutMs);
     });
 
@@ -243,14 +246,13 @@ describe("RestoreSnapshot", () => {
         platform: "android",
         snapshotType: "vm",
         includeAppData: false,
-        includeSettings: false
+        includeSettings: false,
       };
-
 
       const result = await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       // Should use ADB restore even for VM snapshot when flag is false
@@ -266,7 +268,7 @@ describe("RestoreSnapshot", () => {
         deviceId: "ABC123DEF",
         name: "Pixel_5_Physical",
         platform: "android",
-        isEmulator: false
+        isEmulator: false,
       };
 
       const restorePhysical = new RestoreSnapshot(
@@ -274,7 +276,7 @@ describe("RestoreSnapshot", () => {
         fakeAdbFactory,
         undefined,
         fakeTimer,
-        store
+        store,
       );
 
       // Create VM snapshot manifest (but can't restore on physical device)
@@ -286,14 +288,13 @@ describe("RestoreSnapshot", () => {
         platform: "android",
         snapshotType: "vm",
         includeAppData: false,
-        includeSettings: false
+        includeSettings: false,
       };
-
 
       const result = await restorePhysical.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: true
+        useVmSnapshot: true,
       });
 
       // Should use ADB restore for physical device
@@ -319,10 +320,9 @@ describe("RestoreSnapshot", () => {
         settings: {
           global: { airplane_mode_on: "1", wifi_on: "0" },
           secure: { android_id: "xyz789", mock_location: "0" },
-          system: { screen_brightness: "200", font_scale: "1.2" }
-        }
+          system: { screen_brightness: "200", font_scale: "1.2" },
+        },
       };
-
 
       // Setup settings restore commands
       fakeAdb.setCommandResult("shell settings put global airplane_mode_on '1'", "");
@@ -335,15 +335,21 @@ describe("RestoreSnapshot", () => {
       await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       // Verify all settings were restored
-      expect(fakeAdb.wasCommandExecuted("shell settings put global airplane_mode_on '1'")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings put global airplane_mode_on '1'")).toBe(
+        true,
+      );
       expect(fakeAdb.wasCommandExecuted("shell settings put global wifi_on '0'")).toBe(true);
-      expect(fakeAdb.wasCommandExecuted("shell settings put secure android_id 'xyz789'")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings put secure android_id 'xyz789'")).toBe(
+        true,
+      );
       expect(fakeAdb.wasCommandExecuted("shell settings put secure mock_location '0'")).toBe(true);
-      expect(fakeAdb.wasCommandExecuted("shell settings put system screen_brightness '200'")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings put system screen_brightness '200'")).toBe(
+        true,
+      );
       expect(fakeAdb.wasCommandExecuted("shell settings put system font_scale '1.2'")).toBe(true);
     });
 
@@ -363,28 +369,30 @@ describe("RestoreSnapshot", () => {
         settings: {
           global: { test_key: "value with spaces and 'quotes'" },
           secure: {},
-          system: {}
-        }
+          system: {},
+        },
       };
 
-
       // Setup settings restore command with escaped value
-      fakeAdb.setCommandResult("shell settings put global test_key 'value with spaces and '\\''quotes'\\'''", "");
+      fakeAdb.setCommandResult(
+        "shell settings put global test_key 'value with spaces and '\\''quotes'\\'''",
+        "",
+      );
 
       await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       // Verify special characters were escaped properly — assert the FULL command,
       // including the shell-quoted value, so deleting the escaping cannot pass.
       const putCommands = fakeAdb
         .getCommandCalls()
-        .map(call => call.command)
-        .filter(command => command.startsWith("shell settings put global test_key"));
+        .map((call) => call.command)
+        .filter((command) => command.startsWith("shell settings put global test_key"));
       expect(putCommands).toEqual([
-        "shell settings put global test_key 'value with spaces and '\\''quotes'\\'''"
+        "shell settings put global test_key 'value with spaces and '\\''quotes'\\'''",
       ]);
     });
 
@@ -404,15 +412,14 @@ describe("RestoreSnapshot", () => {
         settings: {
           global: {},
           secure: {},
-          system: {}
-        }
+          system: {},
+        },
       };
-
 
       await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       // Verify no settings commands were called
@@ -431,14 +438,13 @@ describe("RestoreSnapshot", () => {
         platform: "android",
         snapshotType: "adb",
         includeAppData: false,
-        includeSettings: false
+        includeSettings: false,
       };
-
 
       await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       // Verify no settings commands were called
@@ -459,15 +465,16 @@ describe("RestoreSnapshot", () => {
         platform: "ios",
         snapshotType: "adb",
         includeAppData: false,
-        includeSettings: false
+        includeSettings: false,
       };
 
-
-      await expect(restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: false
-      })).rejects.toThrow("Snapshot platform 'ios' does not match device platform 'android'");
+      await expect(
+        restoreSnapshot.execute({
+          snapshotName,
+          manifest,
+          useVmSnapshot: false,
+        }),
+      ).rejects.toThrow("Snapshot platform 'ios' does not match device platform 'android'");
     });
 
     it("should handle app clear failures gracefully", async () => {
@@ -490,10 +497,9 @@ describe("RestoreSnapshot", () => {
           totalPackages: 2,
           backedUpPackages: ["com.example.app1", "com.example.app2"],
           skippedPackages: [],
-          failedPackages: []
-        }
+          failedPackages: [],
+        },
       };
-
 
       // Setup clear commands - one succeeds, one fails
       fakeAdb.setCommandResult("shell pm clear com.example.app1", "Success");
@@ -503,7 +509,7 @@ describe("RestoreSnapshot", () => {
       await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       expect(fakeAdb.wasCommandExecuted("shell pm clear com.example.app1")).toBe(true);
@@ -525,14 +531,13 @@ describe("RestoreSnapshot", () => {
         snapshotType: "adb",
         includeAppData: false,
         includeSettings: false,
-        packages: ["com.example.app"]
+        packages: ["com.example.app"],
       };
-
 
       await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       // Verify pm clear was not called
@@ -552,14 +557,13 @@ describe("RestoreSnapshot", () => {
         snapshotType: "adb",
         includeAppData: true,
         includeSettings: false,
-        packages: []
+        packages: [],
       };
-
 
       await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       // Verify pm clear was not called
@@ -578,14 +582,13 @@ describe("RestoreSnapshot", () => {
         platform: "android",
         snapshotType: "adb",
         includeAppData: false,
-        includeSettings: false
+        includeSettings: false,
       };
-
 
       await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       // Verify app launch was not called
@@ -612,16 +615,15 @@ describe("RestoreSnapshot", () => {
           totalPackages: 1,
           backedUpPackages: ["com.example.app"],
           skippedPackages: [],
-          failedPackages: []
-        }
+          failedPackages: [],
+        },
       };
-
 
       // Should not throw, just skip restore
       const result = await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       expect(result.snapshotType).toBe("adb");
@@ -648,8 +650,8 @@ describe("RestoreSnapshot", () => {
           totalPackages: 1,
           backedUpPackages: ["com.example.app"],
           skippedPackages: [],
-          failedPackages: []
-        }
+          failedPackages: [],
+        },
       };
 
       // Create empty backup file
@@ -658,11 +660,10 @@ describe("RestoreSnapshot", () => {
       const backupFilePath = store.getBackupFilePath(snapshotName);
       await fs.writeFile(backupFilePath, "", "utf-8"); // Empty file
 
-
       const result = await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       expect(result.snapshotType).toBe("adb");
@@ -676,10 +677,7 @@ describe("RestoreSnapshot", () => {
       // but referenced in the catch block, causing a ReferenceError instead of a
       // graceful failure when adb executeCommand throws mid-restore.
       const backupFilePath = "/tmp/backup.ab";
-      fakeAdb.setCommandError(
-        `restore "${backupFilePath}"`,
-        new Error("adb connection dropped")
-      );
+      fakeAdb.setCommandError(`restore "${backupFilePath}"`, new Error("adb connection dropped"));
 
       const result = await (restoreSnapshot as any).performAdbRestore(backupFilePath, 30000);
 
@@ -710,8 +708,8 @@ describe("RestoreSnapshot", () => {
           backedUpPackages: ["com.example.app"],
           skippedPackages: [],
           failedPackages: [],
-          backupTimedOut: false
-        }
+          backupTimedOut: false,
+        },
       };
 
       // Create backup file
@@ -720,14 +718,13 @@ describe("RestoreSnapshot", () => {
       const backupFilePath = store.getBackupFilePath(snapshotName);
       await fs.writeFile(backupFilePath, "backup data", "utf-8");
 
-
       // Setup restore command result
       fakeAdb.setCommandResult(`restore "${backupFilePath}"`, "");
 
       const result = await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       expect(result.snapshotType).toBe("adb");
@@ -759,19 +756,18 @@ describe("RestoreSnapshot", () => {
           totalPackages: 1,
           backedUpPackages: [],
           skippedPackages: [],
-          failedPackages: []
-        }
+          failedPackages: [],
+        },
       };
 
       // Create app data directory but no backup file
       const appDataPath = store.getAppDataPath(snapshotName);
       await fs.mkdir(appDataPath, { recursive: true });
 
-
       const result = await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       expect(result.snapshotType).toBe("adb");
@@ -801,8 +797,8 @@ describe("RestoreSnapshot", () => {
           backedUpPackages: ["com.example.app1"],
           skippedPackages: [],
           failedPackages: [],
-          backupTimedOut: false
-        }
+          backupTimedOut: false,
+        },
       };
 
       // Create backup file
@@ -810,7 +806,6 @@ describe("RestoreSnapshot", () => {
       await fs.mkdir(appDataPath, { recursive: true });
       const backupFilePath = store.getBackupFilePath(snapshotName);
       await fs.writeFile(backupFilePath, "backup data", "utf-8");
-
 
       // Setup clear commands
       fakeAdb.setCommandResult("shell pm clear com.example.app1", "Success");
@@ -820,7 +815,7 @@ describe("RestoreSnapshot", () => {
       await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       // Only the backed-up package is cleared. app2 was never captured
@@ -853,8 +848,8 @@ describe("RestoreSnapshot", () => {
           backedUpPackages: [foregroundApp],
           skippedPackages: [],
           failedPackages: [],
-          backupTimedOut: false
-        }
+          backupTimedOut: false,
+        },
       };
 
       // Create backup file
@@ -863,19 +858,20 @@ describe("RestoreSnapshot", () => {
       const backupFilePath = store.getBackupFilePath(snapshotName);
       await fs.writeFile(backupFilePath, "backup data", "utf-8");
 
-
       fakeAdb.setCommandResult(`restore "${backupFilePath}"`, "");
 
       await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: false
+        useVmSnapshot: false,
       });
 
       // Verify foreground app was launched
-      expect(fakeAdb.wasCommandExecuted(
-        `shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${foregroundApp}`
-      )).toBe(true);
+      expect(
+        fakeAdb.wasCommandExecuted(
+          `shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${foregroundApp}`,
+        ),
+      ).toBe(true);
     });
 
     it("should restore VM snapshot with timer sleep", async () => {
@@ -890,9 +886,8 @@ describe("RestoreSnapshot", () => {
         platform: "android",
         snapshotType: "vm",
         includeAppData: true,
-        includeSettings: false
+        includeSettings: false,
       };
-
 
       // Setup VM snapshot load command
       fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "OK");
@@ -900,7 +895,7 @@ describe("RestoreSnapshot", () => {
       await restoreSnapshot.execute({
         snapshotName,
         manifest,
-        useVmSnapshot: true
+        useVmSnapshot: true,
       });
 
       // Verify sleep was called for stabilization
@@ -909,7 +904,6 @@ describe("RestoreSnapshot", () => {
       // Verify VM restore command was called
       expect(fakeAdb.wasCommandExecuted(`emu avd snapshot load ${snapshotName}`)).toBe(true);
     });
-
   });
 });
 
@@ -923,7 +917,12 @@ describe("RestoreSnapshot restores settings before the slow app-data phase (#423
   let basePath: string;
 
   beforeEach(async () => {
-    device = { deviceId: "emulator-5554", name: "Pixel_5", platform: "android", isEmulator: true } as BootedDevice;
+    device = {
+      deviceId: "emulator-5554",
+      name: "Pixel_5",
+      platform: "android",
+      isEmulator: true,
+    } as BootedDevice;
     fakeAdb = new FakeAdbClient();
     fakeAdbFactory = { create: () => fakeAdb as any };
     fakeTimer = new FakeTimer();
@@ -934,7 +933,11 @@ describe("RestoreSnapshot restores settings before the slow app-data phase (#423
   });
 
   afterEach(async () => {
-    try { await fs.rm(basePath, { recursive: true, force: true }); } catch { /* ignore */ }
+    try {
+      await fs.rm(basePath, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
     fakeTimer.reset();
   });
 
@@ -942,19 +945,24 @@ describe("RestoreSnapshot restores settings before the slow app-data phase (#423
   // only appDataBackup.backedUpPackages was actually captured. Clearing the
   // former wipes data that can never be restored, and the volume of pm clear
   // calls is what exhausted the request budget before restoreSettings ran.
-  const manifestWith = (allPackages: string[], backedUp: string[]): DeviceSnapshotManifest => ({
-    snapshotName: "scope-test",
-    timestamp: new Date().toISOString(),
-    deviceId: device.deviceId,
-    deviceName: device.name,
-    platform: "android",
-    snapshotType: "adb",
-    includeAppData: true,
-    includeSettings: true,
-    packages: allPackages,
-    settings: { system: { screen_off_timeout: "60000" }, global: {}, secure: {} },
-    appDataBackup: { backedUpPackages: backedUp, skippedPackages: [], totalPackages: allPackages.length }
-  } as unknown as DeviceSnapshotManifest);
+  const manifestWith = (allPackages: string[], backedUp: string[]): DeviceSnapshotManifest =>
+    ({
+      snapshotName: "scope-test",
+      timestamp: new Date().toISOString(),
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "android",
+      snapshotType: "adb",
+      includeAppData: true,
+      includeSettings: true,
+      packages: allPackages,
+      settings: { system: { screen_off_timeout: "60000" }, global: {}, secure: {} },
+      appDataBackup: {
+        backedUpPackages: backedUp,
+        skippedPackages: [],
+        totalPackages: allPackages.length,
+      },
+    }) as unknown as DeviceSnapshotManifest;
 
   it("clears only the backed-up packages, not every installed package (#4236 P1)", async () => {
     // The default restore path: manifest.packages is every installed package but
@@ -962,10 +970,12 @@ describe("RestoreSnapshot restores settings before the slow app-data phase (#423
     // request budget before the restore could finish.
     const manifest = manifestWith(
       ["com.example.app", "com.android.systemui", "com.google.android.gms"],
-      ["com.example.app"]
+      ["com.example.app"],
     );
 
-    await restoreSnapshot.execute({ snapshotName: "scope-test", manifest, useVmSnapshot: false }).catch(() => undefined);
+    await restoreSnapshot
+      .execute({ snapshotName: "scope-test", manifest, useVmSnapshot: false })
+      .catch(() => undefined);
 
     expect(fakeAdb.getCommandCount("pm clear com.example.app")).toBeGreaterThan(0);
     expect(fakeAdb.getCommandCount("pm clear com.android.systemui")).toBe(0);
@@ -975,7 +985,9 @@ describe("RestoreSnapshot restores settings before the slow app-data phase (#423
   it("clears nothing when no packages were backed up (#4236 P1)", async () => {
     const manifest = manifestWith(["com.example.app", "com.android.systemui"], []);
 
-    await restoreSnapshot.execute({ snapshotName: "scope-test", manifest, useVmSnapshot: false }).catch(() => undefined);
+    await restoreSnapshot
+      .execute({ snapshotName: "scope-test", manifest, useVmSnapshot: false })
+      .catch(() => undefined);
 
     expect(fakeAdb.getCommandCount("pm clear")).toBe(0);
   });
@@ -987,11 +999,15 @@ describe("RestoreSnapshot restores settings before the slow app-data phase (#423
     // than timing -- otherwise the test passes with either order.
     const manifest = manifestWith(["com.example.app"], ["com.example.app"]);
 
-    await restoreSnapshot.execute({ snapshotName: "scope-test", manifest, useVmSnapshot: false }).catch(() => undefined);
+    await restoreSnapshot
+      .execute({ snapshotName: "scope-test", manifest, useVmSnapshot: false })
+      .catch(() => undefined);
 
     const commands = fakeAdb.getAllCommands();
-    const settingsAt = commands.findIndex(c => c.includes("settings put system screen_off_timeout"));
-    const clearAt = commands.findIndex(c => c.includes("pm clear"));
+    const settingsAt = commands.findIndex((c) =>
+      c.includes("settings put system screen_off_timeout"),
+    );
+    const clearAt = commands.findIndex((c) => c.includes("pm clear"));
 
     expect(settingsAt).toBeGreaterThanOrEqual(0);
     expect(clearAt).toBeGreaterThanOrEqual(0);
@@ -1067,10 +1083,7 @@ describe("RestoreSnapshot (iOS)", () => {
       useVmSnapshot: false,
     });
 
-    const restored = await fs.readFile(
-      path.join(containerRoot, "Documents", "data.txt"),
-      "utf-8"
-    );
+    const restored = await fs.readFile(path.join(containerRoot, "Documents", "data.txt"), "utf-8");
     expect(restored).toBe("new-data");
     expect(simctl.getMethodCalls("terminateApp")).toHaveLength(1);
   });
@@ -1099,11 +1112,13 @@ describe("RestoreSnapshot (iOS)", () => {
       },
     };
 
-    await expect(makeRestore().execute({
-      snapshotName,
-      manifest,
-      useVmSnapshot: false,
-    })).rejects.toThrow("App(s) not installed");
+    await expect(
+      makeRestore().execute({
+        snapshotName,
+        manifest,
+        useVmSnapshot: false,
+      }),
+    ).rejects.toThrow("App(s) not installed");
   });
 
   it("throws on major iOS version mismatch", async () => {
@@ -1114,15 +1129,17 @@ describe("RestoreSnapshot (iOS)", () => {
       isAvailable: true,
       runtime: "com.apple.CoreSimulator.SimRuntime.iOS-17-0",
     });
-    simctl.setRuntimes([{
-      bundlePath: "/runtime",
-      buildversion: "A123",
-      runtimeRoot: "/runtime/root",
-      identifier: "com.apple.CoreSimulator.SimRuntime.iOS-17-0",
-      version: "17.0",
-      isAvailable: true,
-      name: "iOS 17.0",
-    }]);
+    simctl.setRuntimes([
+      {
+        bundlePath: "/runtime",
+        buildversion: "A123",
+        runtimeRoot: "/runtime/root",
+        identifier: "com.apple.CoreSimulator.SimRuntime.iOS-17-0",
+        version: "17.0",
+        isAvailable: true,
+        name: "iOS 17.0",
+      },
+    ]);
 
     const manifest: DeviceSnapshotManifest = {
       snapshotName: "version-mismatch",
@@ -1140,11 +1157,13 @@ describe("RestoreSnapshot (iOS)", () => {
       },
     };
 
-    await expect(makeRestore().execute({
-      snapshotName: "version-mismatch",
-      manifest,
-      useVmSnapshot: false,
-    })).rejects.toThrow("incompatible");
+    await expect(
+      makeRestore().execute({
+        snapshotName: "version-mismatch",
+        manifest,
+        useVmSnapshot: false,
+      }),
+    ).rejects.toThrow("incompatible");
   });
 
   it("skips restore when backup method is none", async () => {
@@ -1199,10 +1218,16 @@ describe("RestoreSnapshot (iOS)", () => {
 
     await makeRestore().execute({ snapshotName, manifest, useVmSnapshot: false });
 
-    const argvCommands = simctl.getMethodCalls("executeCommandArgs").map(c => c.args);
-    expect(argvCommands).toContainEqual(
-      ["spawn", device.deviceId, "defaults", "write", ".GlobalPreferences", "AppleLocale", "nl_BE"]
-    );
+    const argvCommands = simctl.getMethodCalls("executeCommandArgs").map((c) => c.args);
+    expect(argvCommands).toContainEqual([
+      "spawn",
+      device.deviceId,
+      "defaults",
+      "write",
+      ".GlobalPreferences",
+      "AppleLocale",
+      "nl_BE",
+    ]);
     expect(argvCommands).toContainEqual(["ui", device.deviceId, "appearance", "dark"]);
     expect(argvCommands).toContainEqual(["ui", device.deviceId, "content_size", "large"]);
   });
@@ -1225,15 +1250,17 @@ describe("RestoreSnapshot (iOS)", () => {
 
     await makeRestore().execute({ snapshotName, manifest, useVmSnapshot: false });
 
-    const argvCommands = simctl.getMethodCalls("executeCommandArgs").map(c => c.args as string[]);
-    expect(argvCommands.some(args => args.includes("defaults") && args.includes("write"))).toBe(false);
+    const argvCommands = simctl.getMethodCalls("executeCommandArgs").map((c) => c.args as string[]);
+    expect(argvCommands.some((args) => args.includes("defaults") && args.includes("write"))).toBe(
+      false,
+    );
   });
 
   it("continues restoring remaining settings when one key write fails (non-fatal)", async () => {
     const snapshotName = "settings-partial";
     simctl.setCommandArgsError(
       ["spawn", device.deviceId, "defaults", "write", ".GlobalPreferences", "AppleLocale", "nl_BE"],
-      new Error("write failed")
+      new Error("write failed"),
     );
     const manifest: DeviceSnapshotManifest = {
       snapshotName,
@@ -1253,7 +1280,7 @@ describe("RestoreSnapshot (iOS)", () => {
     // Should not throw despite the failed key write.
     await makeRestore().execute({ snapshotName, manifest, useVmSnapshot: false });
 
-    const argvCommands = simctl.getMethodCalls("executeCommandArgs").map(c => c.args);
+    const argvCommands = simctl.getMethodCalls("executeCommandArgs").map((c) => c.args);
     // UI restore still runs after the failed defaults write.
     expect(argvCommands).toContainEqual(["ui", device.deviceId, "appearance", "light"]);
   });

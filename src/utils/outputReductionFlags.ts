@@ -81,7 +81,7 @@ export const OUTPUT_REDUCTION_FLAG_SPECS: OutputReductionFlagSpec[] = [
  */
 export function parseOutputReductionFlags(
   args: string[],
-  env: Record<string, string | undefined>
+  env: Record<string, string | undefined>,
 ): OutputReductionFlags {
   const resolve = (spec: OutputReductionFlagSpec): boolean =>
     args.includes(spec.cli) || env[spec.env] === "1";

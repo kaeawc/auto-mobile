@@ -50,7 +50,7 @@ const OMITTED_TOOLS = new Set([
   "listDeviceImages",
   "checkRunningDevices",
   "listDevices",
-  "setActiveDevice"
+  "setActiveDevice",
 ]);
 
 /**
@@ -85,7 +85,7 @@ export class YamlPlanSerializer implements PlanSerializer {
   async exportPlanFromLogs(
     logDir: string,
     planName: string,
-    outputPath: string
+    outputPath: string,
   ): Promise<{
     success: boolean;
     planPath?: string;
@@ -96,7 +96,7 @@ export class YamlPlanSerializer implements PlanSerializer {
     try {
       // Read all log files in the directory
       const files = await fs.readdir(logDir);
-      const logFiles = files.filter(f => f.endsWith(".json")).sort();
+      const logFiles = files.filter((f) => f.endsWith(".json")).sort();
 
       if (logFiles.length === 0) {
         return { success: false, error: "No log files found" };
@@ -117,7 +117,10 @@ export class YamlPlanSerializer implements PlanSerializer {
           const content = await fs.readFile(logPath, "utf-8");
 
           // Handle both single JSON objects and newline-delimited JSON
-          const lines = content.trim().split("\n").filter(line => line.trim());
+          const lines = content
+            .trim()
+            .split("\n")
+            .filter((line) => line.trim());
 
           for (const line of lines) {
             try {
@@ -139,7 +142,9 @@ export class YamlPlanSerializer implements PlanSerializer {
       }
 
       // Sort by timestamp
-      allToolCalls.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      allToolCalls.sort(
+        (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+      );
 
       // Find the last observe call
       let lastObserveIndex = -1;
@@ -161,7 +166,7 @@ export class YamlPlanSerializer implements PlanSerializer {
           planSteps.push({
             tool: toolCall.tool,
             params: toolCall.params,
-            ...(toolCall.optional === true ? { optional: true } : {})
+            ...(toolCall.optional === true ? { optional: true } : {}),
           });
         }
       }
@@ -178,15 +183,15 @@ export class YamlPlanSerializer implements PlanSerializer {
         mcpVersion,
         metadata: {
           createdAt: new Date().toISOString(),
-          version: "1.0.0"
-        }
+          version: "1.0.0",
+        },
       };
 
       // Convert to YAML
       const yamlContent = yaml.dump(plan, {
         indent: 2,
         lineWidth: -1,
-        noRefs: true
+        noRefs: true,
       });
 
       // Write to file
@@ -197,9 +202,8 @@ export class YamlPlanSerializer implements PlanSerializer {
         success: true,
         planPath: outputPath,
         planContent: yamlContent,
-        stepCount: planSteps.length
+        stepCount: planSteps.length,
       };
-
     } catch (error) {
       logger.error(`Failed to export plan: ${error}`);
       return { success: false, error: `${error}` };
@@ -239,14 +243,15 @@ export class YamlPlanSerializer implements PlanSerializer {
       }
 
       if (report.migrated) {
-        const applied = report.appliedMigrations.length > 0 ? report.appliedMigrations.join(", ") : "none";
+        const applied =
+          report.appliedMigrations.length > 0 ? report.appliedMigrations.join(", ") : "none";
         logger.info(
-          `[PLAN_MIGRATION] Plan '${planName}' migrated (${report.originalVersion} -> ${report.targetVersion}). Applied: ${applied}`
+          `[PLAN_MIGRATION] Plan '${planName}' migrated (${report.originalVersion} -> ${report.targetVersion}). Applied: ${applied}`,
         );
       }
 
       if (report.warnings.length > 0) {
-        report.warnings.forEach(warning => {
+        report.warnings.forEach((warning) => {
           const location = warning.stepIndex !== undefined ? `step ${warning.stepIndex}` : "plan";
           logger.warn(`[PLAN_MIGRATION] ${location}: ${warning.message}`);
         });
@@ -272,8 +277,8 @@ export class YamlPlanSerializer implements PlanSerializer {
         mcpVersion: migratedPlan.mcpVersion,
         metadata: migratedPlan.metadata || {
           createdAt: new Date().toISOString(),
-          version: "1.0.0"
-        }
+          version: "1.0.0",
+        },
       };
 
       // Validate plan structure

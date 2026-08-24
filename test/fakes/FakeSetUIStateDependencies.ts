@@ -14,7 +14,7 @@ interface TapOnElementLike {
   execute(
     options: { text?: string; elementId?: string; action: string },
     progress?: any,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<TapOnElementResult>;
 }
 
@@ -38,7 +38,7 @@ interface ClearTextLike {
 interface SwipeOnLike {
   execute(
     options: { direction: string; lookFor?: { text?: string; elementId?: string } },
-    progress?: any
+    progress?: any,
   ): Promise<SwipeOnResult>;
 }
 
@@ -73,13 +73,13 @@ export class FakeTapOnElement implements TapOnElementLike {
   private defaultResult: TapOnElementResult = {
     success: true,
     action: "tap",
-    element: { bounds: { left: 0, top: 0, right: 100, bottom: 50 } }
+    element: { bounds: { left: 0, top: 0, right: 100, bottom: 50 } },
   };
 
   async execute(
     options: { text?: string; elementId?: string; action: string },
     _progress?: any,
-    _signal?: AbortSignal
+    _signal?: AbortSignal,
   ): Promise<TapOnElementResult> {
     this.calls.push({ options });
     const key = options.text ?? options.elementId ?? "";
@@ -177,12 +177,12 @@ export class FakeSwipeOn implements SwipeOnLike {
     y1: 500,
     x2: 0,
     y2: 100,
-    duration: 300
+    duration: 300,
   };
 
   async execute(
     options: { direction: string; lookFor?: { text?: string; elementId?: string } },
-    _progress?: any
+    _progress?: any,
   ): Promise<SwipeOnResult> {
     this.calls.push({ options });
     this.swipeCount++;
@@ -196,7 +196,7 @@ export class FakeSwipeOn implements SwipeOnLike {
           ...this.defaultResult,
           found: true,
           element,
-          scrollIterations: this.swipeCount
+          scrollIterations: this.swipeCount,
         };
       }
     }
@@ -252,7 +252,7 @@ export class FakeObserveScreenForSetUIState implements ObserveScreen {
     return {
       updatedAt: Date.now(),
       screenSize: { width: 1080, height: 1920 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     };
   }
 
@@ -261,7 +261,7 @@ export class FakeObserveScreenForSetUIState implements ObserveScreen {
     _perf?: any,
     _skipWaitForFresh?: boolean,
     _minTimestamp?: number,
-    _signal?: AbortSignal
+    _signal?: AbortSignal,
   ): Promise<ObserveResult> {
     this.callCount++;
     if (this.resultFactory) {
@@ -282,7 +282,7 @@ export class FakeObserveScreenForSetUIState implements ObserveScreen {
   setViewHierarchy(hierarchy: ViewHierarchyResult): void {
     this.result = {
       ...this.result,
-      viewHierarchy: hierarchy
+      viewHierarchy: hierarchy,
     };
   }
 

@@ -3,7 +3,7 @@ import { WakeAndUnlock } from "../../../src/features/action/WakeAndUnlock";
 import type {
   DeviceLockType,
   IosScreenUnlocker,
-  LockCredentialStore
+  LockCredentialStore,
 } from "../../../src/features/action/WakeAndUnlock";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -21,7 +21,11 @@ class FakeCredentialStore implements LockCredentialStore {
   async getRecordedCredential(): Promise<string | null> {
     return this.recorded;
   }
-  async rememberLock(deviceId: string, lockType: DeviceLockType, credential: string | null): Promise<void> {
+  async rememberLock(
+    deviceId: string,
+    lockType: DeviceLockType,
+    credential: string | null,
+  ): Promise<void> {
     this.remembered.push({ deviceId, lockType, credential });
   }
 }
@@ -35,7 +39,11 @@ class FakeIosUnlocker implements IosScreenUnlocker {
   }
 }
 
-const androidDevice: BootedDevice = { deviceId: "wau-android", platform: "android", name: "Android" };
+const androidDevice: BootedDevice = {
+  deviceId: "wau-android",
+  platform: "android",
+  name: "Android",
+};
 const iosDevice: BootedDevice = { deviceId: "wau-ios", platform: "ios", name: "iOS" };
 
 const SECURE_PIN_COMMANDS = [
@@ -45,7 +53,7 @@ const SECURE_PIN_COMMANDS = [
   "shell input keyevent KEYCODE_2",
   "shell input keyevent KEYCODE_3",
   "shell input keyevent KEYCODE_4",
-  "shell input keyevent KEYCODE_ENTER"
+  "shell input keyevent KEYCODE_ENTER",
 ];
 
 describe("WakeAndUnlock", () => {
@@ -71,7 +79,12 @@ describe("WakeAndUnlock", () => {
 
     const result = await android().execute();
 
-    expect(result).toMatchObject({ success: true, wasAsleep: false, wasLocked: false, unlocked: true });
+    expect(result).toMatchObject({
+      success: true,
+      wasAsleep: false,
+      wasLocked: false,
+      unlocked: true,
+    });
     expect(adb.getExecutedCommands()).toEqual([]);
   });
 
@@ -81,7 +94,12 @@ describe("WakeAndUnlock", () => {
 
     const result = await android().execute();
 
-    expect(result).toMatchObject({ success: true, wasAsleep: true, wasLocked: false, unlocked: true });
+    expect(result).toMatchObject({
+      success: true,
+      wasAsleep: true,
+      wasLocked: false,
+      unlocked: true,
+    });
     expect(adb.getExecutedCommands()).toEqual(["shell input keyevent KEYCODE_WAKEUP"]);
   });
 
@@ -94,9 +112,11 @@ describe("WakeAndUnlock", () => {
     expect(result).toMatchObject({ success: true, wasLocked: true, secure: false, unlocked: true });
     expect(adb.getExecutedCommands()).toEqual([
       "shell input keyevent KEYCODE_WAKEUP",
-      "shell wm dismiss-keyguard"
+      "shell wm dismiss-keyguard",
     ]);
-    expect(store.remembered).toEqual([{ deviceId: "wau-android", lockType: "swipe", credential: null }]);
+    expect(store.remembered).toEqual([
+      { deviceId: "wau-android", lockType: "swipe", credential: null },
+    ]);
   });
 
   test("swipe lock that does not dismiss: reports failure, remembers nothing", async () => {
@@ -120,7 +140,9 @@ describe("WakeAndUnlock", () => {
     expect(result).toMatchObject({ success: true, wasLocked: true, secure: true, unlocked: true });
     expect(result.usedRecordedCredential).toBe(false);
     expect(adb.getExecutedCommands()).toEqual(SECURE_PIN_COMMANDS);
-    expect(store.remembered).toEqual([{ deviceId: "wau-android", lockType: "pin", credential: "1234" }]);
+    expect(store.remembered).toEqual([
+      { deviceId: "wau-android", lockType: "pin", credential: "1234" },
+    ]);
   });
 
   test("secure lock, no pin, nothing recorded: throws an actionable error, sends no keys", async () => {
@@ -129,7 +151,7 @@ describe("WakeAndUnlock", () => {
 
     await expect(android().execute()).rejects.toThrow(/secure-locked/i);
     // dismiss-keyguard was issued before we knew a pin was required, but no digits.
-    expect(adb.getExecutedCommands().some(c => c.includes("KEYCODE_1"))).toBe(false);
+    expect(adb.getExecutedCommands().some((c) => c.includes("KEYCODE_1"))).toBe(false);
   });
 
   test("secure lock, no pin, recorded credential: unlocks with it and does not re-remember", async () => {
@@ -198,7 +220,7 @@ describe("WakeAndUnlock", () => {
       "shell input keyevent KEYCODE_2",
       "shell input keyevent KEYCODE_3",
       "shell input keyevent KEYCODE_4",
-      "shell input keyevent KEYCODE_ENTER"
+      "shell input keyevent KEYCODE_ENTER",
     ]);
   });
 
@@ -212,8 +234,10 @@ describe("WakeAndUnlock", () => {
     expect(result.success).toBe(true);
     expect(result.unlocked).toBe(true);
     expect(result.secure).toBeUndefined(); // never guessed
-    expect(store.remembered).toEqual([{ deviceId: "wau-android", lockType: "swipe", credential: null }]);
-    expect(adb.getExecutedCommands().some(c => c.includes("KEYCODE_1"))).toBe(false);
+    expect(store.remembered).toEqual([
+      { deviceId: "wau-android", lockType: "swipe", credential: null },
+    ]);
+    expect(adb.getExecutedCommands().some((c) => c.includes("KEYCODE_1"))).toBe(false);
   });
 
   test("unknown secure status, no pin, stays locked: throws asking for a pin", async () => {
@@ -234,12 +258,16 @@ describe("WakeAndUnlock", () => {
     expect(result.success).toBe(false);
     expect(result.usedRecordedCredential).toBe(true);
     // The stale recorded credential is cleared so it is not retried next time.
-    expect(store.remembered).toEqual([{ deviceId: "wau-android", lockType: "pin", credential: null }]);
+    expect(store.remembered).toEqual([
+      { deviceId: "wau-android", lockType: "pin", credential: null },
+    ]);
   });
 
   test("iOS: delegates to the iOS unlocker and ignores the pin", async () => {
     const ios = new FakeIosUnlocker();
-    const result = await new WakeAndUnlock(iosDevice, adb, { timer, iosUnlocker: ios }).execute("1234");
+    const result = await new WakeAndUnlock(iosDevice, adb, { timer, iosUnlocker: ios }).execute(
+      "1234",
+    );
 
     expect(ios.calls).toBe(1);
     expect(result).toMatchObject({ success: true, platform: "ios", unlocked: true });

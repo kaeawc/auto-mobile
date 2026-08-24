@@ -240,10 +240,22 @@ describe("DeviceSessionRepository", () => {
   test("DevicePool stale emulator eviction persists device-disconnected release reason", async () => {
     const timer = new FakeTimer();
     const fakeDeviceUtils = new FakeDeviceUtils();
-    const androidDevice = { name: "Pixel 7", platform: "android" as const, deviceId: "emulator-5554" };
+    const androidDevice = {
+      name: "Pixel 7",
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+    };
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     const sessionManager = new SessionManager(timer, repo);
-    const pool = new DevicePool(sessionManager, "daemon-session-1", timer, undefined, fakeDeviceUtils, undefined, repo);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session-1",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+      undefined,
+      repo,
+    );
 
     try {
       await pool.initializeWithDevices([androidDevice]);
@@ -252,8 +264,9 @@ describe("DeviceSessionRepository", () => {
       fakeDeviceUtils.markDeviceAsStopped("Pixel 7");
       fakeDeviceUtils.markDeviceAsStopped("emulator-5554");
 
-      await expect(pool.bindOrReuseDeviceSession("session-2", "emulator-5554", "android"))
-        .rejects.toThrow(/not available|shut down|disconnected/);
+      await expect(
+        pool.bindOrReuseDeviceSession("session-2", "emulator-5554", "android"),
+      ).rejects.toThrow(/not available|shut down|disconnected/);
 
       const row = await repo.getSession("session-1");
       expect(row!.release_reason).toMatch(
@@ -268,7 +281,11 @@ describe("DeviceSessionRepository", () => {
     process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
     const timer = new FakeTimer();
     const fakeDeviceUtils = new FakeDeviceUtils();
-    const androidDevice = { name: "Pixel 7", platform: "android" as const, deviceId: "emulator-5554" };
+    const androidDevice = {
+      name: "Pixel 7",
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+    };
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
     const sessionManager = new SessionManager(timer, repo);
     const pool = new DevicePool(
@@ -305,7 +322,7 @@ describe("DeviceSessionRepository", () => {
     await db.schema.dropTable("device_sessions").execute();
 
     await expect(
-      repo.markStaleActiveSessionsExpired("current-daemon", 5000, "daemon-restart")
+      repo.markStaleActiveSessionsExpired("current-daemon", 5000, "daemon-restart"),
     ).rejects.toThrow(/no such table/);
   });
 
@@ -345,10 +362,10 @@ describe("DeviceSessionRepository", () => {
           sessionTimeoutMs: 60_000,
           heartbeatTimeoutMs: 60_000,
           hasReceivedHeartbeat: false,
-        })
+        }),
       ).rejects.toThrow(/no such table/);
       expect(warnSpy).toHaveBeenCalled();
-      const logged = warnSpy.mock.calls.map(c => String(c[0])).join("\n");
+      const logged = warnSpy.mock.calls.map((c) => String(c[0])).join("\n");
       expect(logged).toContain("session-fail");
     } finally {
       warnSpy.mockRestore();

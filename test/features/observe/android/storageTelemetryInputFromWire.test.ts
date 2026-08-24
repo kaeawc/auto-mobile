@@ -12,10 +12,18 @@ describe("storageTelemetryInputFromWire (Android #3000)", () => {
   const base = { type: "storage_changed" as const };
 
   test("maps the core wire fields with defaults", () => {
-    const input = storageTelemetryInputFromWire({
-      ...base, packageName: "com.example", fileName: "prefs.xml", key: "theme",
-      value: "dark", valueType: "STRING", changeType: "modify",
-    }, 1234);
+    const input = storageTelemetryInputFromWire(
+      {
+        ...base,
+        packageName: "com.example",
+        fileName: "prefs.xml",
+        key: "theme",
+        value: "dark",
+        valueType: "STRING",
+        changeType: "modify",
+      },
+      1234,
+    );
     expect(input).toEqual({
       timestamp: 1234,
       applicationId: "com.example",
@@ -28,23 +36,43 @@ describe("storageTelemetryInputFromWire (Android #3000)", () => {
   });
 
   test("threads a runner-supplied previousValue through", () => {
-    const input = storageTelemetryInputFromWire({
-      ...base, fileName: "prefs.xml", key: "theme", value: "dark", previousValue: "light",
-    }, 1000);
+    const input = storageTelemetryInputFromWire(
+      {
+        ...base,
+        fileName: "prefs.xml",
+        key: "theme",
+        value: "dark",
+        previousValue: "light",
+      },
+      1000,
+    );
     expect(input.previousValue).toBe("light");
   });
 
   test("honors an explicit previousValue: null verbatim (skips lookup)", () => {
-    const input = storageTelemetryInputFromWire({
-      ...base, fileName: "prefs.xml", key: "theme", value: "dark", previousValue: null,
-    }, 1000);
+    const input = storageTelemetryInputFromWire(
+      {
+        ...base,
+        fileName: "prefs.xml",
+        key: "theme",
+        value: "dark",
+        previousValue: null,
+      },
+      1000,
+    );
     expect(input).toHaveProperty("previousValue", null);
   });
 
   test("omits previousValue entirely when the runner does not emit it (auto-lookup)", () => {
-    const input = storageTelemetryInputFromWire({
-      ...base, fileName: "prefs.xml", key: "theme", value: "dark",
-    }, 1000);
+    const input = storageTelemetryInputFromWire(
+      {
+        ...base,
+        fileName: "prefs.xml",
+        key: "theme",
+        value: "dark",
+      },
+      1000,
+    );
     // Field must be absent so the repository's `!== undefined` guard triggers the
     // auto-lookup for legacy runners.
     expect("previousValue" in input).toBe(false);

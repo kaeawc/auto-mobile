@@ -5,7 +5,7 @@ import {
   ObserveResult,
   PredictedAction,
   PredictionTarget,
-  Predictions
+  Predictions,
 } from "../../models";
 import { NavigationEdge, NavigationGraphManager } from "../navigation/NavigationGraphManager";
 import { PredictionHistoryRepository } from "../../db/predictionHistoryRepository";
@@ -72,13 +72,23 @@ export class EdgeMatchIndex {
       return;
     }
     this.addKey(this.swipeByText, normalizeIdentifier(container.text), edge, index);
-    this.addKey(this.swipeById, normalizeIdentifier(container.elementId || container.resourceId), edge, index);
+    this.addKey(
+      this.swipeById,
+      normalizeIdentifier(container.elementId || container.resourceId),
+      edge,
+      index,
+    );
     this.addKey(this.swipeByDesc, normalizeIdentifier(container.contentDesc), edge, index);
   }
 
   // First edge wins for a given key (preserves edge-order tie-breaking); empty
   // keys are skipped, matching the old `if (!normalized) return false` guards.
-  private addKey(map: Map<string, IndexedEdge>, key: string | undefined, edge: NavigationEdge, index: number): void {
+  private addKey(
+    map: Map<string, IndexedEdge>,
+    key: string | undefined,
+    edge: NavigationEdge,
+    index: number,
+  ): void {
     if (!key || map.has(key)) {
       return;
     }
@@ -152,8 +162,8 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
     }
 
     const edges = await navGraph.getEdgesFrom(currentScreen);
-    const actionableEdges = edges.filter(edge =>
-      edge.interaction?.toolName === "tapOn" || edge.interaction?.toolName === "swipeOn"
+    const actionableEdges = edges.filter(
+      (edge) => edge.interaction?.toolName === "tapOn" || edge.interaction?.toolName === "swipeOn",
     );
     if (actionableEdges.length === 0) {
       return undefined;
@@ -171,9 +181,14 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
     const transitionStats = appId
       ? await this.historyRepository.getTransitionStatsForScreen(appId, currentScreen)
       : [];
-    const transitionStatsByKey = new Map<string, typeof transitionStats[number]>();
+    const transitionStatsByKey = new Map<string, (typeof transitionStats)[number]>();
     for (const stat of transitionStats) {
-      const key = this.buildTransitionKey(stat.from_screen, stat.to_screen, stat.tool_name, stat.tool_args);
+      const key = this.buildTransitionKey(
+        stat.from_screen,
+        stat.to_screen,
+        stat.tool_name,
+        stat.tool_args,
+      );
       transitionStatsByKey.set(key, stat);
     }
 
@@ -195,22 +210,24 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
         const predictedElements = await this.getPredictedElements(
           navGraph,
           match.to,
-          predictedElementsByScreen
+          predictedElementsByScreen,
         );
         const confidence = this.getAdjustedConfidence(
-          transitionStatsByKey.get(this.buildTransitionKey(
-            currentScreen,
-            match.to,
-            match.interaction.toolName,
-            normalizeToolArgs(match.interaction.args)
-          ))
+          transitionStatsByKey.get(
+            this.buildTransitionKey(
+              currentScreen,
+              match.to,
+              match.interaction.toolName,
+              normalizeToolArgs(match.interaction.args),
+            ),
+          ),
         );
         likelyActions.push({
           action: match.interaction.toolName,
           target: predictionTarget,
           predictedScreen: match.to,
           predictedElements: predictedElements.length > 0 ? predictedElements : undefined,
-          confidence
+          confidence,
         });
         matchedEdges.add(edgeKey);
       }
@@ -221,8 +238,8 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
         elementContentDesc: interactable.contentDesc,
         predictedOutcome: {
           screenName: match.to,
-          basedOn: "navigation_graph"
-        }
+          basedOn: "navigation_graph",
+        },
       });
     }
 
@@ -232,11 +249,13 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
 
     return {
       likelyActions,
-      interactableElements
+      interactableElements,
     };
   }
 
-  private extractInteractables(viewHierarchy: ObserveResult["viewHierarchy"]): InteractableElement[] {
+  private extractInteractables(
+    viewHierarchy: ObserveResult["viewHierarchy"],
+  ): InteractableElement[] {
     if (!viewHierarchy) {
       return [];
     }
@@ -257,14 +276,17 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
         contentDesc: element["content-desc"],
         resourceId: element["resource-id"],
         clickable,
-        scrollable
+        scrollable,
       });
     }
 
     return interactables;
   }
 
-  private buildTarget(edge: NavigationEdge, interactable: InteractableElement): PredictionTarget | null {
+  private buildTarget(
+    edge: NavigationEdge,
+    interactable: InteractableElement,
+  ): PredictionTarget | null {
     const args = edge.interaction?.args;
     const uiState = edge.interaction?.uiState;
     const toolName = edge.interaction?.toolName;
@@ -281,7 +303,7 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
       return {
         text,
         elementId,
-        contentDesc
+        contentDesc,
       };
     }
 
@@ -294,7 +316,7 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
         target.container = {
           text: container.text,
           elementId: container.elementId || container.resourceId,
-          contentDesc: container.contentDesc
+          contentDesc: container.contentDesc,
         };
       }
 
@@ -302,7 +324,7 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
         target.lookFor = {
           text: lookFor.text,
           elementId: lookFor.elementId || lookFor.resourceId,
-          contentDesc: lookFor.contentDesc
+          contentDesc: lookFor.contentDesc,
         };
       }
 
@@ -325,17 +347,12 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
     fromScreen: string,
     toScreen: string,
     toolName: string,
-    toolArgs: string
+    toolArgs: string,
   ): string {
     return `${fromScreen}:${toScreen}:${toolName}:${toolArgs}`;
   }
 
-  private getAdjustedConfidence(
-    stats?: {
-      attempts: number;
-      successes: number;
-    }
-  ): number {
+  private getAdjustedConfidence(stats?: { attempts: number; successes: number }): number {
     if (!stats) {
       return this.DEFAULT_CONFIDENCE;
     }
@@ -348,18 +365,18 @@ export class PredictiveUIState implements PredictiveUIStateInterface {
   private adjustConfidence(
     baseConfidence: number,
     historicalAccuracy: number,
-    sampleSize: number
+    sampleSize: number,
   ): number {
     const historyWeight = Math.min(sampleSize / 100, 0.8);
     const baseWeight = 1 - historyWeight;
-    const adjusted = (baseConfidence * baseWeight) + (historicalAccuracy * historyWeight);
+    const adjusted = baseConfidence * baseWeight + historicalAccuracy * historyWeight;
     return Math.max(0, Math.min(1, adjusted));
   }
 
   private async getPredictedElements(
     navGraph: NavigationGraphManager,
     screenName: string,
-    cache: Map<string, string[]>
+    cache: Map<string, string[]>,
   ): Promise<string[]> {
     if (cache.has(screenName)) {
       return cache.get(screenName) ?? [];

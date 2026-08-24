@@ -84,9 +84,7 @@ export class TestCoverageRepository {
       .returningAll()
       .executeTakeFirstOrThrow();
 
-    logger.info(
-      `[TEST_COVERAGE] Started coverage session: ${sessionUuid} for app: ${appId}`
-    );
+    logger.info(`[TEST_COVERAGE] Started coverage session: ${sessionUuid} for app: ${appId}`);
 
     return result;
   }
@@ -115,10 +113,10 @@ export class TestCoverageRepository {
     return db
       .insertInto("test_coverage_sessions")
       .values(newSession)
-      .onConflict(oc =>
-        oc.column("session_uuid").doUpdateSet(eb => ({
+      .onConflict((oc) =>
+        oc.column("session_uuid").doUpdateSet((eb) => ({
           session_uuid: eb.ref("test_coverage_sessions.session_uuid"),
-        }))
+        })),
       )
       .returningAll()
       .executeTakeFirstOrThrow();
@@ -161,11 +159,11 @@ export class TestCoverageRepository {
     await db
       .insertInto("test_node_coverage")
       .values(newCoverage)
-      .onConflict(oc =>
-        oc.columns(["session_id", "node_id"]).doUpdateSet(eb => ({
+      .onConflict((oc) =>
+        oc.columns(["session_id", "node_id"]).doUpdateSet((eb) => ({
           visit_count: eb("test_node_coverage.visit_count", "+", 1),
           last_visit_time: timestamp,
-        }))
+        })),
       )
       .execute();
 
@@ -182,11 +180,7 @@ export class TestCoverageRepository {
   /**
    * Record an edge traversal during a test session.
    */
-  async recordEdgeTraversal(
-    sessionId: number,
-    edgeId: number,
-    timestamp: number
-  ): Promise<void> {
+  async recordEdgeTraversal(sessionId: number, edgeId: number, timestamp: number): Promise<void> {
     const db = this.getDb();
 
     // Atomic upsert on UNIQUE(session_id, edge_id) (idx_test_edge_coverage_session_edge).
@@ -202,11 +196,11 @@ export class TestCoverageRepository {
     await db
       .insertInto("test_edge_coverage")
       .values(newCoverage)
-      .onConflict(oc =>
-        oc.columns(["session_id", "edge_id"]).doUpdateSet(eb => ({
+      .onConflict((oc) =>
+        oc.columns(["session_id", "edge_id"]).doUpdateSet((eb) => ({
           traversal_count: eb("test_edge_coverage.traversal_count", "+", 1),
           last_traversal_time: timestamp,
-        }))
+        })),
       )
       .execute();
 
@@ -306,7 +300,7 @@ export class TestCoverageRepository {
       .distinct()
       .execute();
 
-    const coveredNodeIdSet = new Set(coveredNodeIds.map(row => row.node_id));
+    const coveredNodeIdSet = new Set(coveredNodeIds.map((row) => row.node_id));
 
     // Get all covered edge IDs (from any test session for this app)
     const coveredEdgeIds = await db
@@ -317,11 +311,11 @@ export class TestCoverageRepository {
       .distinct()
       .execute();
 
-    const coveredEdgeIdSet = new Set(coveredEdgeIds.map(row => row.edge_id));
+    const coveredEdgeIdSet = new Set(coveredEdgeIds.map((row) => row.edge_id));
 
     // Find uncovered nodes and edges
-    const uncoveredNodes = allNodes.filter(node => !coveredNodeIdSet.has(node.id));
-    const uncoveredEdges = allEdges.filter(edge => !coveredEdgeIdSet.has(edge.id));
+    const uncoveredNodes = allNodes.filter((node) => !coveredNodeIdSet.has(node.id));
+    const uncoveredEdges = allEdges.filter((edge) => !coveredEdgeIdSet.has(edge.id));
 
     const totalNodes = allNodes.length;
     const coveredNodesCount = coveredNodeIdSet.size;
@@ -350,10 +344,7 @@ export class TestCoverageRepository {
   async clearCoverageForApp(appId: string): Promise<void> {
     const db = this.getDb();
 
-    await db
-      .deleteFrom("test_coverage_sessions")
-      .where("app_id", "=", appId)
-      .execute();
+    await db.deleteFrom("test_coverage_sessions").where("app_id", "=", appId).execute();
 
     logger.info(`[TEST_COVERAGE] Cleared all coverage data for app: ${appId}`);
   }
@@ -364,10 +355,7 @@ export class TestCoverageRepository {
   async clearSession(sessionUuid: string): Promise<void> {
     const db = this.getDb();
 
-    await db
-      .deleteFrom("test_coverage_sessions")
-      .where("session_uuid", "=", sessionUuid)
-      .execute();
+    await db.deleteFrom("test_coverage_sessions").where("session_uuid", "=", sessionUuid).execute();
 
     logger.info(`[TEST_COVERAGE] Cleared coverage session: ${sessionUuid}`);
   }

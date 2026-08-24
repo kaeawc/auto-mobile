@@ -11,7 +11,10 @@ import {
 } from "../features/observe/output/ObserveScopeExperiments";
 import type { ObserveScopeInput } from "../models/ObserveScope";
 import { capLayoutWarnings } from "../features/observe/audits/SafeAreaAuditor";
-import { isInPlacePressButton, isNavigationPressButton } from "../features/action/pressButtonPolicy";
+import {
+  isInPlacePressButton,
+  isNavigationPressButton,
+} from "../features/action/pressButtonPolicy";
 import { serverConfig } from "../utils/ServerConfig";
 import { getStructuredPayload, stringifyToolResponse } from "../utils/toolUtils";
 import { isSubmitImeAction } from "../models/ImeActionResult";
@@ -71,7 +74,7 @@ type ObservationActionClass = "navigation" | "inPlace" | "scroll" | "unknown";
 
 function classifyObservationAction(
   name: string,
-  args?: Record<string, unknown>
+  args?: Record<string, unknown>,
 ): ObservationActionClass {
   switch (name) {
     case "tapOn":
@@ -261,14 +264,14 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   };
   const scopeConfig = buildObserveScopeConfig(
     scopeFlags,
-    ctx.args?.scope as ObserveScopeInput | undefined
+    ctx.args?.scope as ObserveScopeInput | undefined,
   );
-  const scopeActive = !ctx.internal && (
-    scopeFlags.focus ||
-    scopeFlags.overview ||
-    scopeFlags.region ||
-    (scopeConfig.gatedOff?.length ?? 0) > 0
-  );
+  const scopeActive =
+    !ctx.internal &&
+    (scopeFlags.focus ||
+      scopeFlags.overview ||
+      scopeFlags.region ||
+      (scopeConfig.gatedOff?.length ?? 0) > 0);
 
   // Internal tool-to-tool calls (#3053) always get the full sanitized observation:
   // the diff/strip transforms are for the agent-facing wire only, so an internal
@@ -277,7 +280,8 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   const noObserveEnabled = serverConfig.isActionsNoObserveEnabled() && !ctx.internal;
   // Precedence (#3026 / #2762): `--actions-no-observe` strips the embedded
   // observation entirely, so `--actions-diff-observe` is moot when both are on.
-  const diffActive = serverConfig.isActionsDiffObserveEnabled() && !noObserveEnabled && !ctx.internal;
+  const diffActive =
+    serverConfig.isActionsDiffObserveEnabled() && !noObserveEnabled && !ctx.internal;
   const canDiff = diffActive && !!ctx.sessionUuid && !!ctx.baselineStore;
   const isObserveTool = ctx.name === "observe";
 
@@ -350,7 +354,11 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       } else if (!diffActive) {
         observationDiff = { mode: "full", reason: "disabled" };
       } else if (!ctx.sessionUuid || !ctx.baselineStore) {
-        observationDiff = { mode: "full", reason: "missing_session", toScreen: observationScreenIdentity(sanitized) };
+        observationDiff = {
+          mode: "full",
+          reason: "missing_session",
+          toScreen: observationScreenIdentity(sanitized),
+        };
       } else if (!hasRenderableHierarchy(sanitized)) {
         const baseline = ctx.baselineStore.get(ctx.sessionUuid);
         observationDiff = {
@@ -369,7 +377,11 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         // against current state.
         const baseline = ctx.baselineStore!.get(ctx.sessionUuid!);
         if (!baseline) {
-          observationDiff = { mode: "full", reason: "missing_baseline", toScreen: observationScreenIdentity(sanitized) };
+          observationDiff = {
+            mode: "full",
+            reason: "missing_baseline",
+            toScreen: observationScreenIdentity(sanitized),
+          };
         } else if (!hasRenderableHierarchy(baseline)) {
           observationDiff = {
             mode: "full",
@@ -377,7 +389,9 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             fromScreen: observationScreenIdentity(baseline),
             toScreen: observationScreenIdentity(sanitized),
           };
-        } else if (shouldDiffObservation(baseline, sanitized, classifyObservationAction(ctx.name, ctx.args))) {
+        } else if (
+          shouldDiffObservation(baseline, sanitized, classifyObservationAction(ctx.name, ctx.args))
+        ) {
           observationOut = diffObserveResult(baseline, sanitized);
           observationDiff = {
             mode: "diff",
@@ -407,11 +421,11 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   }
 
   if (
-    ctx.artifactWriter
-    && !ctx.internal
-    && hasArtifactableObservation
-    && sanitizedPayload
-    && shouldArtifactObservationPayload(ctx, sanitizedPayload)
+    ctx.artifactWriter &&
+    !ctx.internal &&
+    hasArtifactableObservation &&
+    sanitizedPayload &&
+    shouldArtifactObservationPayload(ctx, sanitizedPayload)
   ) {
     if (isObserveTool) {
       // Keep compact wait status inline: without it, an artifacted `observe`
@@ -443,16 +457,18 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
   if (textPart) {
     textPart.text = stringifyToolResponse(sanitizedPayload);
   }
-  pendingBaselineUpdate && ctx.baselineStore!.set(pendingBaselineUpdate.sessionUuid, pendingBaselineUpdate.observation);
+  pendingBaselineUpdate &&
+    ctx.baselineStore!.set(pendingBaselineUpdate.sessionUuid, pendingBaselineUpdate.observation);
 
   return response;
 }
 
 function pickObserveWaitMetadata(payload: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
-    OBSERVE_WAIT_METADATA_KEYS
-      .filter(key => payload[key] !== undefined)
-      .map(key => [key, payload[key]])
+    OBSERVE_WAIT_METADATA_KEYS.filter((key) => payload[key] !== undefined).map((key) => [
+      key,
+      payload[key],
+    ]),
   );
 }
 
@@ -462,20 +478,26 @@ function artifactMode(ctx: FinalizeToolResponseContext): ObservationArtifactMode
 
 function shouldArtifactObservationPayload(
   ctx: FinalizeToolResponseContext,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): boolean {
   if (artifactMode(ctx) === "always") {
     return true;
   }
 
-  return Buffer.byteLength(stringifyToolResponse(payload), "utf8") > DEFAULT_OBSERVATION_INLINE_MAX_BYTES;
+  return (
+    Buffer.byteLength(stringifyToolResponse(payload), "utf8") > DEFAULT_OBSERVATION_INLINE_MAX_BYTES
+  );
 }
 
 function writeObservationArtifact(
   ctx: FinalizeToolResponseContext,
-  observationPayload: unknown
+  observationPayload: unknown,
 ): ObservationArtifactMetadata {
-  return writeJsonArtifact(ctx, getObservationArtifactPayload(observationPayload), observationPayload);
+  return writeJsonArtifact(
+    ctx,
+    getObservationArtifactPayload(observationPayload),
+    observationPayload,
+  );
 }
 
 function getObservationArtifactPayload(observationPayload: unknown): ObservationArtifactPayload {
@@ -492,7 +514,7 @@ function getObservationArtifactPayload(observationPayload: unknown): Observation
 function writeJsonArtifact(
   ctx: FinalizeToolResponseContext,
   payload: ObservationArtifactPayload,
-  data: unknown
+  data: unknown,
 ): ObservationArtifactMetadata {
   return ctx.artifactWriter!.writeJsonArtifact({
     tool: ctx.name,
@@ -503,7 +525,7 @@ function writeJsonArtifact(
 
 function artifactNonObservationPayload(
   ctx: FinalizeToolResponseContext,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   if (!ctx.artifactWriter || ctx.internal) {
     return undefined;
@@ -523,7 +545,7 @@ function artifactNonObservationPayload(
 
 function artifactExecutePlanPayload(
   ctx: FinalizeToolResponseContext,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   let changed = false;
   const nextPayload: Record<string, unknown> = { ...payload };
@@ -531,7 +553,7 @@ function artifactExecutePlanPayload(
     const failureObservation = artifactPlanObservation(
       ctx,
       payload.failedStep.failureObservation,
-      "ExecutePlanFailureObservation"
+      "ExecutePlanFailureObservation",
     );
     if (failureObservation) {
       nextPayload.failedStep = { ...payload.failedStep, failureObservation };
@@ -541,7 +563,7 @@ function artifactExecutePlanPayload(
 
   if (isRecord(payload.debug) && Array.isArray(payload.debug.steps)) {
     let debugChanged = false;
-    const steps = payload.debug.steps.map(step => {
+    const steps = payload.debug.steps.map((step) => {
       if (!isRecord(step) || !isRecord(step.details)) {
         return step;
       }
@@ -551,7 +573,7 @@ function artifactExecutePlanPayload(
       const stepObservation = artifactPlanObservation(
         ctx,
         details.stepObservation,
-        "ExecutePlanDebugStepObservation"
+        "ExecutePlanDebugStepObservation",
       );
       if (stepObservation) {
         details = { ...details, stepObservation };
@@ -561,7 +583,7 @@ function artifactExecutePlanPayload(
       const failureObservation = artifactPlanObservation(
         ctx,
         details.failureObservation,
-        "ExecutePlanDebugFailureObservation"
+        "ExecutePlanDebugFailureObservation",
       );
       if (failureObservation) {
         details = { ...details, failureObservation };
@@ -587,7 +609,7 @@ function artifactExecutePlanPayload(
 function artifactPlanObservation(
   ctx: FinalizeToolResponseContext,
   observation: unknown,
-  payloadPrefix: string
+  payloadPrefix: string,
 ): Record<string, unknown> | undefined {
   if (!isRecord(observation)) {
     return undefined;
@@ -596,11 +618,19 @@ function artifactPlanObservation(
   let changed = false;
   const next: Record<string, unknown> = { ...observation };
   if (observation.viewHierarchy !== undefined) {
-    next.viewHierarchy = writeJsonArtifact(ctx, `${payloadPrefix}ViewHierarchy`, observation.viewHierarchy);
+    next.viewHierarchy = writeJsonArtifact(
+      ctx,
+      `${payloadPrefix}ViewHierarchy`,
+      observation.viewHierarchy,
+    );
     changed = true;
   }
   if (observation.rawViewHierarchy !== undefined) {
-    next.rawViewHierarchy = writeJsonArtifact(ctx, `${payloadPrefix}RawViewHierarchy`, observation.rawViewHierarchy);
+    next.rawViewHierarchy = writeJsonArtifact(
+      ctx,
+      `${payloadPrefix}RawViewHierarchy`,
+      observation.rawViewHierarchy,
+    );
     changed = true;
   }
 
@@ -609,7 +639,7 @@ function artifactPlanObservation(
 
 function artifactBugReportPayload(
   ctx: FinalizeToolResponseContext,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   let changed = false;
   const next: Record<string, unknown> = { ...payload };
@@ -645,7 +675,7 @@ function artifactBugReportPayload(
 
 function artifactNetworkGraphPayload(
   ctx: FinalizeToolResponseContext,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): Record<string, unknown> | undefined {
   if (!Array.isArray(payload.graph)) {
     return undefined;
@@ -696,7 +726,7 @@ function isObserveResult(value: unknown): value is ObserveResult {
   }
 
   const record = value as Record<string, unknown>;
-  return OBSERVE_RESULT_MARKERS.some(key => key in record);
+  return OBSERVE_RESULT_MARKERS.some((key) => key in record);
 }
 
 function hasRenderableHierarchy(observation: ObserveResult): boolean {
@@ -720,7 +750,7 @@ function observationScreenIdentity(observation: ObserveResult): ObservationDiffS
 function shouldDiffObservation(
   baseline: ObserveResult,
   next: ObserveResult,
-  actionClass: ObservationActionClass
+  actionClass: ObservationActionClass,
 ): boolean {
   if (actionClass === "inPlace" || actionClass === "scroll") {
     return isSameStableMutationSurface(baseline, next);
@@ -736,16 +766,21 @@ function isSameStableMutationSurface(baseline: ObserveResult, next: ObserveResul
   return hasCompatibleStableMutationIdentity(baseline, next);
 }
 
-function hasCompatibleStableMutationIdentity(baseline: ObserveResult, next: ObserveResult): boolean {
+function hasCompatibleStableMutationIdentity(
+  baseline: ObserveResult,
+  next: ObserveResult,
+): boolean {
   const baselineIdentity = baseline.screenIdentity;
   const nextIdentity = next.screenIdentity;
   if (!baselineIdentity || !nextIdentity) {
     return true;
   }
 
-  return baselineIdentity.platform === nextIdentity.platform
-    && baselineIdentity.source === nextIdentity.source
-    && baselineIdentity.key === nextIdentity.key;
+  return (
+    baselineIdentity.platform === nextIdentity.platform &&
+    baselineIdentity.source === nextIdentity.source &&
+    baselineIdentity.key === nextIdentity.key
+  );
 }
 
 function hasSameWindowPackageSurface(baseline: ObserveResult, next: ObserveResult): boolean {

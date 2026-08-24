@@ -18,7 +18,11 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
   let sessionManager: SessionManager;
   let timer: FakeTimer;
   let fakeDeviceUtils: FakeDeviceUtils;
-  const androidDevice = { name: "Pixel 7", platform: "android" as const, deviceId: "emulator-5554" };
+  const androidDevice = {
+    name: "Pixel 7",
+    platform: "android" as const,
+    deviceId: "emulator-5554",
+  };
 
   beforeEach(async () => {
     timer = new FakeTimer();
@@ -37,15 +41,20 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     const warnSpy = spyOn(logger, "warn");
     const evictError = new Error("removeDevice failed");
     // Force the eviction chain to reject.
-    const evictSpy = spyOn(pool as unknown as {
-      evictMissingPooledDevice: (...args: unknown[]) => Promise<void>;
-    }, "evictMissingPooledDevice").mockRejectedValue(evictError);
+    const evictSpy = spyOn(
+      pool as unknown as {
+        evictMissingPooledDevice: (...args: unknown[]) => Promise<void>;
+      },
+      "evictMissingPooledDevice",
+    ).mockRejectedValue(evictError);
 
     const child = new EventEmitter();
     // Register the exit listener under test.
-    (pool as unknown as {
-      trackStartedDeviceProcess: (device: unknown, child: unknown) => void;
-    }).trackStartedDeviceProcess(androidDevice, child);
+    (
+      pool as unknown as {
+        trackStartedDeviceProcess: (device: unknown, child: unknown) => void;
+      }
+    ).trackStartedDeviceProcess(androidDevice, child);
 
     // Fire the process-exit event; the rejection must be caught, not unhandled.
     child.emit("exit", 1, null);
@@ -57,7 +66,7 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
 
     expect(evictSpy).toHaveBeenCalledTimes(1);
     const loggedEviction = warnSpy.mock.calls.some(
-      call => typeof call[0] === "string" && call[0].includes("Failed to evict emulator-5554")
+      (call) => typeof call[0] === "string" && call[0].includes("Failed to evict emulator-5554"),
     );
     expect(loggedEviction).toBe(true);
 
@@ -97,15 +106,20 @@ describe("DevicePool emulator-exit eviction rejection handling", () => {
     };
 
     const child = new EventEmitter() as unknown as {
-      once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): void;
+      once(
+        event: "exit",
+        listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+      ): void;
       stdout: EventEmitter;
       stderr: EventEmitter;
     };
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
-    await (diagnosticPool as unknown as {
-      trackStartedDeviceProcess: (device: unknown, child: unknown) => Promise<void>;
-    }).trackStartedDeviceProcess(androidDevice, child);
+    await (
+      diagnosticPool as unknown as {
+        trackStartedDeviceProcess: (device: unknown, child: unknown) => Promise<void>;
+      }
+    ).trackStartedDeviceProcess(androidDevice, child);
     child.stdout.emit("data", Buffer.from("token="));
     (child as unknown as EventEmitter).emit("exit", 1, null);
     child.stderr.emit("data", Buffer.from("emulator died\n"));

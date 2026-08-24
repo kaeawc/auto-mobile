@@ -9,12 +9,12 @@ import {
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
-describe("CtrlProxyVoiceOver", function() {
+describe("CtrlProxyVoiceOver", function () {
   let testDevice: BootedDevice;
   let fakeTimer: FakeTimer;
   const serverPort = 8765;
 
-  beforeEach(function() {
+  beforeEach(function () {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
 
@@ -41,8 +41,11 @@ describe("CtrlProxyVoiceOver", function() {
   }
 
   const createCapturingFactory = (
-    timer?: FakeTimer
-  ): { factory: (url: string) => CapturingWebSocket; getSocket: () => CapturingWebSocket | null } => {
+    timer?: FakeTimer,
+  ): {
+    factory: (url: string) => CapturingWebSocket;
+    getSocket: () => CapturingWebSocket | null;
+  } => {
     let socket: CapturingWebSocket | null = null;
     return {
       factory: (url: string) => {
@@ -54,29 +57,37 @@ describe("CtrlProxyVoiceOver", function() {
   };
 
   const waitForSocket = async (
-    getSocket: () => CapturingWebSocket | null
+    getSocket: () => CapturingWebSocket | null,
   ): Promise<CapturingWebSocket | null> => {
     for (let i = 0; i < 5; i++) {
       const s = getSocket();
-      if (s) {return s;}
-      await new Promise(r => setImmediate(r));
+      if (s) {
+        return s;
+      }
+      await new Promise((r) => setImmediate(r));
     }
     return getSocket();
   };
 
   const waitForSocketOpen = async (socket: FakeWebSocket | null): Promise<void> => {
-    if (!socket || socket.readyState === WebSocketState.OPEN) {return;}
-    await new Promise<void>(resolve => socket.once("open", () => resolve()));
+    if (!socket || socket.readyState === WebSocketState.OPEN) {
+      return;
+    }
+    await new Promise<void>((resolve) => socket.once("open", () => resolve()));
   };
 
   const waitForSentMessages = async (
     socket: CapturingWebSocket | null,
-    minCount = 1
+    minCount = 1,
   ): Promise<void> => {
-    if (!socket) {return;}
+    if (!socket) {
+      return;
+    }
     for (let i = 0; i < 10; i++) {
-      if (commandPayloads(socket).length >= minCount) {return;}
-      await new Promise(r => setImmediate(r));
+      if (commandPayloads(socket).length >= minCount) {
+        return;
+      }
+      await new Promise((r) => setImmediate(r));
     }
   };
 
@@ -88,17 +99,22 @@ describe("CtrlProxyVoiceOver", function() {
 
   const commandPayloads = (socket: CapturingWebSocket): any[] =>
     socket.sentMessages
-      .map(message => JSON.parse(message))
-      .filter(payload => !syncMessageTypes.has(payload.type));
+      .map((message) => JSON.parse(message))
+      .filter((payload) => !syncMessageTypes.has(payload.type));
 
   // ---------------------------------------------------------------------------
   // Tests
   // ---------------------------------------------------------------------------
 
-  describe("requestVoiceOverState", function() {
-    test("returns enabled=true when VoiceOver is running", async function() {
+  describe("requestVoiceOverState", function () {
+    test("returns enabled=true when VoiceOver is running", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
         const resultPromise = client.requestVoiceOverState();
@@ -111,13 +127,15 @@ describe("CtrlProxyVoiceOver", function() {
         expect(sentMsg.type).toBe("get_voiceover_state");
         expect(typeof sentMsg.requestId).toBe("string");
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "voiceover_state_result",
-          requestId: sentMsg.requestId,
-          success: true,
-          enabled: true,
-          totalTimeMs: 2,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "voiceover_state_result",
+            requestId: sentMsg.requestId,
+            success: true,
+            enabled: true,
+            totalTimeMs: 2,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(true);
@@ -127,9 +145,14 @@ describe("CtrlProxyVoiceOver", function() {
       }
     });
 
-    test("returns enabled=false when VoiceOver is not running", async function() {
+    test("returns enabled=false when VoiceOver is not running", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
         const resultPromise = client.requestVoiceOverState();
@@ -139,13 +162,15 @@ describe("CtrlProxyVoiceOver", function() {
 
         const sentMsg = commandPayloads(socket!)[0];
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "voiceover_state_result",
-          requestId: sentMsg.requestId,
-          success: true,
-          enabled: false,
-          totalTimeMs: 1,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "voiceover_state_result",
+            requestId: sentMsg.requestId,
+            success: true,
+            enabled: false,
+            totalTimeMs: 1,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(true);
@@ -155,12 +180,12 @@ describe("CtrlProxyVoiceOver", function() {
       }
     });
 
-    test("returns success=false and enabled=false when not connected", async function() {
+    test("returns success=false and enabled=false when not connected", async function () {
       const client = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         createInstantFailureWebSocketFactory(fakeTimer),
-        fakeTimer
+        fakeTimer,
       );
 
       try {
@@ -179,13 +204,18 @@ describe("CtrlProxyVoiceOver", function() {
     // already asserts the type AND the requestId AND the decoded result.
   });
 
-  describe("requestVoiceOverActivate", function() {
+  describe("requestVoiceOverActivate", function () {
     // Regression guard for #2857: VoiceOver activation must ride the existing
     // `request_action` command (a real `RequestType`), not the phantom
     // `request_voiceover_action` the runner rejected as "Unknown command type".
-    test("sends request_action (not request_voiceover_action) and passes label + action", async function() {
+    test("sends request_action (not request_voiceover_action) and passes label + action", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
         const resultPromise = client.requestVoiceOverActivate("Submit", "activate");
@@ -201,13 +231,15 @@ describe("CtrlProxyVoiceOver", function() {
         expect(typeof sentMsg.requestId).toBe("string");
 
         // The runner replies with action_result, which resolves the request.
-        socket!.simulateMessage(JSON.stringify({
-          type: "action_result",
-          requestId: sentMsg.requestId,
-          success: true,
-          action: "activate",
-          totalTimeMs: 3,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "action_result",
+            requestId: sentMsg.requestId,
+            success: true,
+            action: "activate",
+            totalTimeMs: 3,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(true);
@@ -216,9 +248,14 @@ describe("CtrlProxyVoiceOver", function() {
       }
     });
 
-    test("maps long_press through the same request_action command", async function() {
+    test("maps long_press through the same request_action command", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
         const resultPromise = client.requestVoiceOverActivate("Row", "long_press");
@@ -230,11 +267,13 @@ describe("CtrlProxyVoiceOver", function() {
         expect(sentMsg.type).toBe("request_action");
         expect(sentMsg.action).toBe("long_press");
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "action_result",
-          requestId: sentMsg.requestId,
-          success: true,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "action_result",
+            requestId: sentMsg.requestId,
+            success: true,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(true);
@@ -248,7 +287,7 @@ describe("CtrlProxyVoiceOver", function() {
     // single return type. If someone re-introduces a divergent
     // `CtrlProxyVoiceOverActionResult`, these mutual assignments stop compiling
     // and the typecheck gate fails.
-    test("returns the same CtrlProxyActionResult type as requestAction (compile-time guard)", function() {
+    test("returns the same CtrlProxyActionResult type as requestAction (compile-time guard)", function () {
       type ActivateResult = Awaited<ReturnType<IOSCtrlProxy["requestVoiceOverActivate"]>>;
       type ActionResult = Awaited<ReturnType<IOSCtrlProxy["requestAction"]>>;
 
@@ -271,9 +310,14 @@ describe("CtrlProxyVoiceOver", function() {
     // here for parity with `requestVoiceOverState`) produces the byte-identical
     // shape, so this test pins the observable behavior, not the handler's
     // presence specifically.
-    test("resolves gracefully when the device does not support request_action", async function() {
+    test("resolves gracefully when the device does not support request_action", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
         await client.ensureConnected();
@@ -282,11 +326,13 @@ describe("CtrlProxyVoiceOver", function() {
         await waitForSocketOpen(socket);
 
         // Device advertises a command set that excludes request_action.
-        socket!.simulateMessage(JSON.stringify({
-          type: "connected",
-          id: 1,
-          supportedCommands: ["request_recent_apps"],
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "connected",
+            id: 1,
+            supportedCommands: ["request_recent_apps"],
+          }),
+        );
 
         const result = await client.requestVoiceOverActivate("Submit", "activate");
 
@@ -301,10 +347,15 @@ describe("CtrlProxyVoiceOver", function() {
     });
   });
 
-  describe("requestSetVoiceOverEnabled", function() {
-    test("emits set_voiceover_state with the enabled param and resolves on success", async function() {
+  describe("requestSetVoiceOverEnabled", function () {
+    test("emits set_voiceover_state with the enabled param and resolves on success", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
         const resultPromise = client.requestSetVoiceOverEnabled(true);
@@ -318,12 +369,14 @@ describe("CtrlProxyVoiceOver", function() {
         expect((sentMsg as { enabled?: boolean }).enabled).toBe(true);
         expect(typeof sentMsg.requestId).toBe("string");
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "voiceover_set_result",
-          requestId: sentMsg.requestId,
-          success: true,
-          totalTimeMs: 3,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "voiceover_set_result",
+            requestId: sentMsg.requestId,
+            success: true,
+            totalTimeMs: 3,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(true);
@@ -332,9 +385,14 @@ describe("CtrlProxyVoiceOver", function() {
       }
     });
 
-    test("resolves a runner failure as a typed result (never a silent success)", async function() {
+    test("resolves a runner failure as a typed result (never a silent success)", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        fakeTimer,
+      );
 
       try {
         const resultPromise = client.requestSetVoiceOverEnabled(false);
@@ -345,13 +403,15 @@ describe("CtrlProxyVoiceOver", function() {
         const sentMsg = commandPayloads(socket!)[0];
         expect((sentMsg as { enabled?: boolean }).enabled).toBe(false);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "voiceover_set_result",
-          requestId: sentMsg.requestId,
-          success: false,
-          error: "VoiceOver toggle row not found",
-          totalTimeMs: 4,
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "voiceover_set_result",
+            requestId: sentMsg.requestId,
+            success: false,
+            error: "VoiceOver toggle row not found",
+            totalTimeMs: 4,
+          }),
+        );
 
         const result = await resultPromise;
         expect(result.success).toBe(false);

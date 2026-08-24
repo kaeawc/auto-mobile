@@ -152,9 +152,7 @@ function extractInternalMcpRequestTimeoutMs(params: unknown): number | undefined
     return undefined;
   }
   const value = (params as Record<string, unknown>)[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
-  return typeof value === "number" && Number.isFinite(value) && value > 0
-    ? value
-    : undefined;
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 function stripInternalToolParams(params: unknown): unknown {

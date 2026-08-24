@@ -8,9 +8,7 @@ import type { SystemConfigurationAdapter } from "../../utils/interfaces/SystemCo
 import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
 import { FeatureFlagService } from "../../features/featureFlags/FeatureFlagService";
 import type { HostCommandExecutor } from "../../utils/HostCommandExecutor";
-import type {
-  AdbClientFactory,
-} from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../utils/AccessibilityDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
@@ -19,20 +17,18 @@ import { AndroidCtrlProxyClient } from "../../features/observe/android/AndroidCt
 import { IOSCtrlProxyClient } from "../../features/observe/ios/IOSCtrlProxyClient";
 import { createTapStrategy } from "../../features/action/strategies/createTapStrategy";
 import { createSystemConfigurationAdapter } from "../../features/utility/system-configuration/createSystemConfigurationAdapter";
-import {
-  getSystemTrayDependencies,
-} from "../systemTrayHelpers";
+import { getSystemTrayDependencies } from "../systemTrayHelpers";
 import { createNotificationUIDetector } from "../system-tray/createNotificationUIDetector";
 
 type CtrlProxyClientFactory = (
   device: BootedDevice,
-  adbFactory: AdbClientFactory
+  adbFactory: AdbClientFactory,
 ) => CtrlProxyClient;
 
 function resolveCtrlProxy(
   device: BootedDevice,
   adbFactory: AdbClientFactory,
-  options: CreatePlatformClientOptions
+  options: CreatePlatformClientOptions,
 ): CtrlProxyClient {
   if (options.ctrlProxy) {
     return options.ctrlProxy;
@@ -77,15 +73,12 @@ export interface CreatePlatformClientOptions {
  */
 export function createPlatformClient(
   device: BootedDevice,
-  options: CreatePlatformClientOptions = {}
+  options: CreatePlatformClientOptions = {},
 ): PlatformClient {
   const adbFactory = options.adbFactory ?? defaultAdbClientFactory;
-  const accessibilityDetector =
-    options.accessibilityDetector ?? defaultAccessibilityDetector;
-  const iosVoiceOverDetector =
-    options.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
-  const processExecutor =
-    options.processExecutor ?? new DefaultHostCommandExecutor();
+  const accessibilityDetector = options.accessibilityDetector ?? defaultAccessibilityDetector;
+  const iosVoiceOverDetector = options.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
+  const processExecutor = options.processExecutor ?? new DefaultHostCommandExecutor();
 
   const ctrlProxy = resolveCtrlProxy(device, adbFactory, options);
 
@@ -98,16 +91,14 @@ export function createPlatformClient(
     createTapStrategy(device, adb, accessibilityDetector, iosVoiceOverDetector, featureFlags);
 
   const systemConfiguration =
-    options.systemConfiguration ??
-    createSystemConfigurationAdapter(device, adb, processExecutor);
+    options.systemConfiguration ?? createSystemConfigurationAdapter(device, adb, processExecutor);
 
   // createNotificationUIDetector reads its dependencies lazily through
   // the supplied getter so callers that swap fakes via
   // setSystemTrayDependencies between invocations still see the latest
   // overrides — same shape as systemTrayHelpers.handleSystemTrayLookFor.
   const notificationUI =
-    options.notificationUI ??
-    createNotificationUIDetector(device, getSystemTrayDependencies);
+    options.notificationUI ?? createNotificationUIDetector(device, getSystemTrayDependencies);
 
   return {
     device,

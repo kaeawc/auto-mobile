@@ -1,7 +1,15 @@
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
-import { ActionableError, BootedDevice, InstalledAppsByProfile, SystemInstalledApp } from "../../models";
+import {
+  ActionableError,
+  BootedDevice,
+  InstalledAppsByProfile,
+  SystemInstalledApp,
+} from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../db/installedAppsRepository";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -9,7 +17,10 @@ import type { InstalledApp as DbInstalledApp, NewInstalledApp } from "../../db/t
 import { AndroidCtrlProxyClient } from "./android";
 import { getInstalledAppsCacheWriteCoordinator } from "../../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../../db/dbWriteBarrier";
-import { getIosInstalledAppBundleId, type IosInstalledAppRecord } from "../../utils/ios-cmdline-tools/iosInstalledApp";
+import {
+  getIosInstalledAppBundleId,
+  type IosInstalledAppRecord,
+} from "../../utils/ios-cmdline-tools/iosInstalledApp";
 
 const INSTALLED_APPS_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -49,7 +60,7 @@ export class ListInstalledApps {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     simctl: SimCtlClient | null = null,
-    options: ListInstalledAppsOptions = {}
+    options: ListInstalledAppsOptions = {},
   ) {
     this.adb = adbFactory.create(device);
     this.simctl = simctl || new SimCtlClient(device);
@@ -69,9 +80,9 @@ export class ListInstalledApps {
     try {
       switch (this.device.platform) {
         case "ios":
-          return (await this.executeIosDetailed()).map(app => getIosInstalledAppBundleId(app)).filter(
-            (bundleId): bundleId is string => bundleId !== undefined
-          );
+          return (await this.executeIosDetailed())
+            .map((app) => getIosInstalledAppBundleId(app))
+            .filter((bundleId): bundleId is string => bundleId !== undefined);
         case "android":
           // For backward compatibility, just return package names
           const detailedApps = await this.executeDetailed();
@@ -166,7 +177,9 @@ export class ListInstalledApps {
       return null;
     }
 
-    const lastVerifiedAt = await this.installedAppsRepository.getLatestVerification(this.device.deviceId);
+    const lastVerifiedAt = await this.installedAppsRepository.getLatestVerification(
+      this.device.deviceId,
+    );
     if (!lastVerifiedAt) {
       return null;
     }
@@ -181,20 +194,24 @@ export class ListInstalledApps {
       return null;
     }
 
-    const foregroundApp = this.device.platform === "android" ? await this.adb.getForegroundApp() : null;
-    logger.info(`[ListInstalledApps] Using cached installed apps list (age ${cacheAgeMs}ms, rows ${cachedRows.length})`);
+    const foregroundApp =
+      this.device.platform === "android" ? await this.adb.getForegroundApp() : null;
+    logger.info(
+      `[ListInstalledApps] Using cached installed apps list (age ${cacheAgeMs}ms, rows ${cachedRows.length})`,
+    );
     return this.buildInstalledAppsFromRows(cachedRows, foregroundApp);
   }
 
   private buildInstalledAppsFromRows(
     rows: DbInstalledApp[],
-    foregroundApp: { packageName: string; userId: number } | null
+    foregroundApp: { packageName: string; userId: number } | null,
   ): InstalledAppsByProfile {
     const installedApps: InstalledAppsByProfile = { profiles: {}, system: [] };
     const systemAppsMap = new Map<string, SystemInstalledApp>();
 
     for (const row of rows) {
-      const isForeground = foregroundApp !== null &&
+      const isForeground =
+        foregroundApp !== null &&
         foregroundApp.packageName === row.package_name &&
         foregroundApp.userId === row.user_id;
 
@@ -210,7 +227,7 @@ export class ListInstalledApps {
             packageName: row.package_name,
             userIds: [row.user_id],
             foreground: isForeground,
-            recent: false
+            recent: false,
           });
         }
       } else {
@@ -219,7 +236,7 @@ export class ListInstalledApps {
           packageName: row.package_name,
           userId: row.user_id,
           foreground: isForeground,
-          recent: false
+          recent: false,
         });
       }
     }
@@ -229,7 +246,9 @@ export class ListInstalledApps {
   }
 
   private async rebuildInstalledAppsCache(): Promise<InstalledAppsDetailedResult> {
-    const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(this.device.deviceId);
+    const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(
+      this.device.deviceId,
+    );
     const installedApps: InstalledAppsByProfile = { profiles: {}, system: [] };
     const systemAppsMap = new Map<string, SystemInstalledApp>();
     const cacheEntries: NewInstalledApp[] = [];
@@ -240,7 +259,9 @@ export class ListInstalledApps {
     // Get all users on the device
     logger.info("[ListInstalledApps] Getting list of users...");
     const users = await this.adb.listUsers();
-    logger.info(`[ListInstalledApps] Found ${users.length} user(s): ${users.map(u => `${u.userId}:${u.name}`).join(", ")}`);
+    logger.info(
+      `[ListInstalledApps] Found ${users.length} user(s): ${users.map((u) => `${u.userId}:${u.name}`).join(", ")}`,
+    );
     if (users.length === 0) {
       logger.warn("[ListInstalledApps] No users reported; skipping cache update");
       return { apps: installedApps, successful: false };
@@ -256,20 +277,23 @@ export class ListInstalledApps {
 
         const { userPackages, systemPackages } = await this.partitionPackagesForUser(user.userId);
 
-        logger.info(`[ListInstalledApps] Found ${userPackages.length} user package(s) and ${systemPackages.length} system package(s) for user ${user.userId}`);
+        logger.info(
+          `[ListInstalledApps] Found ${userPackages.length} user package(s) and ${systemPackages.length} system package(s) for user ${user.userId}`,
+        );
 
         installedApps.profiles[user.userId] = installedApps.profiles[user.userId] || [];
 
         for (const packageName of userPackages) {
-          const isForeground = foregroundApp !== null &&
-                               foregroundApp.packageName === packageName &&
-                               foregroundApp.userId === user.userId;
+          const isForeground =
+            foregroundApp !== null &&
+            foregroundApp.packageName === packageName &&
+            foregroundApp.userId === user.userId;
 
           installedApps.profiles[user.userId].push({
             packageName,
             userId: user.userId,
             foreground: isForeground,
-            recent: false // TODO: Implement recent app detection
+            recent: false, // TODO: Implement recent app detection
           });
 
           const cacheKey = `${user.userId}:${packageName}:0`;
@@ -281,15 +305,16 @@ export class ListInstalledApps {
               package_name: packageName,
               is_system: 0,
               installed_at: timestampMs,
-              last_verified_at: timestampMs
+              last_verified_at: timestampMs,
             });
           }
         }
 
         for (const packageName of systemPackages) {
-          const isForeground = foregroundApp !== null &&
-                               foregroundApp.packageName === packageName &&
-                               foregroundApp.userId === user.userId;
+          const isForeground =
+            foregroundApp !== null &&
+            foregroundApp.packageName === packageName &&
+            foregroundApp.userId === user.userId;
 
           const existing = systemAppsMap.get(packageName);
           if (existing) {
@@ -302,7 +327,7 @@ export class ListInstalledApps {
               packageName,
               userIds: [user.userId],
               foreground: isForeground,
-              recent: false // TODO: Implement recent app detection
+              recent: false, // TODO: Implement recent app detection
             });
           }
 
@@ -315,7 +340,7 @@ export class ListInstalledApps {
               package_name: packageName,
               is_system: 1,
               installed_at: timestampMs,
-              last_verified_at: timestampMs
+              last_verified_at: timestampMs,
             });
           }
         }
@@ -327,19 +352,35 @@ export class ListInstalledApps {
     }
 
     installedApps.system = Array.from(systemAppsMap.values());
-    const profileAppCount = Object.values(installedApps.profiles).reduce((count, apps) => count + apps.length, 0);
+    const profileAppCount = Object.values(installedApps.profiles).reduce(
+      (count, apps) => count + apps.length,
+      0,
+    );
 
-    logger.info(`Found ${profileAppCount} user app(s) across ${users.length} user(s); ${installedApps.system.length} system app(s) deduped`);
+    logger.info(
+      `Found ${profileAppCount} user app(s) across ${users.length} user(s); ${installedApps.system.length} system app(s) deduped`,
+    );
 
     if (this.cacheEnabled && !hadUserErrors) {
       try {
-        const committed = await getInstalledAppsCacheWriteCoordinator().commitRebuild(this.device.deviceId, cacheGeneration, () =>
-          getDbWriteBarrier().track(() =>
-            this.installedAppsRepository.replaceInstalledApps(this.device.deviceId, cacheEntries)
-          ).then(() => undefined)
+        const committed = await getInstalledAppsCacheWriteCoordinator().commitRebuild(
+          this.device.deviceId,
+          cacheGeneration,
+          () =>
+            getDbWriteBarrier()
+              .track(() =>
+                this.installedAppsRepository.replaceInstalledApps(
+                  this.device.deviceId,
+                  cacheEntries,
+                ),
+              )
+              .then(() => undefined),
         );
         if (committed) {
-          getInstalledAppsCacheWriteCoordinator().markRebuilt(this.device.deviceId, cacheGeneration);
+          getInstalledAppsCacheWriteCoordinator().markRebuilt(
+            this.device.deviceId,
+            cacheGeneration,
+          );
         }
       } catch (error) {
         // The live result remains valid even if its persistence fails. Keep a
@@ -356,7 +397,7 @@ export class ListInstalledApps {
   // Why: PackageManager runs as the service user, so cross-user queries
   // (`--user N` for non-current user) fall back to ADB.
   private async partitionPackagesForUser(
-    userId: number
+    userId: number,
   ): Promise<{ userPackages: string[]; systemPackages: string[] }> {
     if (this.device.platform === "android") {
       try {
@@ -371,7 +412,9 @@ export class ListInstalledApps {
           return { userPackages, systemPackages };
         }
       } catch (error) {
-        logger.debug(`[ListInstalledApps] WebSocket package list failed, falling back to ADB: ${error}`);
+        logger.debug(
+          `[ListInstalledApps] WebSocket package list failed, falling back to ADB: ${error}`,
+        );
       }
     }
 
@@ -381,16 +424,16 @@ export class ListInstalledApps {
     ]);
     const systemPackages = this.parsePackages(systemRes.stdout);
     const systemSet = new Set(systemPackages);
-    const userPackages = this.parsePackages(allRes.stdout).filter(p => !systemSet.has(p));
+    const userPackages = this.parsePackages(allRes.stdout).filter((p) => !systemSet.has(p));
     return { userPackages, systemPackages };
   }
 
   private parsePackages(stdout: string): string[] {
     return stdout
       .split("\n")
-      .filter(line => line.startsWith("package:"))
-      .map(line => line.replace("package:", "").trim())
-      .filter(pkg => pkg.length > 0);
+      .filter((line) => line.startsWith("package:"))
+      .map((line) => line.replace("package:", "").trim())
+      .filter((pkg) => pkg.length > 0);
   }
 
   private flattenPackageNames(detailedApps: InstalledAppsByProfile): string[] {

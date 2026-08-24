@@ -4,17 +4,18 @@ import { FakeSelectionStateDetector } from "../../fakes/FakeSelectionStateDetect
 import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 
-const createHierarchy = (node: Record<string, any>): ViewHierarchyResult => ({
-  hierarchy: {
-    node
-  }
-} as ViewHierarchyResult);
+const createHierarchy = (node: Record<string, any>): ViewHierarchyResult =>
+  ({
+    hierarchy: {
+      node,
+    },
+  }) as ViewHierarchyResult;
 
 const createObservation = (viewHierarchy: ViewHierarchyResult): ObserveResult => ({
   updatedAt: Date.now(),
   screenSize: { width: 100, height: 100 },
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-  viewHierarchy
+  viewHierarchy,
 });
 
 describe("SelectionStateTracker", () => {
@@ -31,20 +32,20 @@ describe("SelectionStateTracker", () => {
       createHierarchy({
         text: "Tab1",
         selected: "false",
-        bounds: { left: 0, top: 0, right: 10, bottom: 10 }
-      })
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      }),
     );
 
     const element: Element = {
       bounds: { left: 0, top: 0, right: 10, bottom: 10 },
       text: "Tab1",
-      clickable: true
+      clickable: true,
     };
 
     const state = await tracker.prepare({
       action: "tap",
       observation,
-      element
+      element,
     });
 
     expect(state).toBeNull();
@@ -58,27 +59,27 @@ describe("SelectionStateTracker", () => {
     const tracker = new SelectionStateTracker({
       detector,
       screenshotCapturer: capturer,
-      isUiPerfModeEnabled: () => true
+      isUiPerfModeEnabled: () => true,
     });
 
     const observation = createObservation(
       createHierarchy({
         text: "Home",
         selected: "true",
-        bounds: { left: 0, top: 0, right: 10, bottom: 10 }
-      })
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      }),
     );
 
     const element: Element = {
       bounds: { left: 0, top: 0, right: 10, bottom: 10 },
       text: "Home",
-      clickable: true
+      clickable: true,
     };
 
     const state = await tracker.prepare({
       action: "tap",
       observation,
-      element
+      element,
     });
 
     expect(state).toBeNull();
@@ -92,35 +93,35 @@ describe("SelectionStateTracker", () => {
     const tracker = new SelectionStateTracker({
       detector,
       screenshotCapturer: capturer,
-      isUiPerfModeEnabled: () => true
+      isUiPerfModeEnabled: () => true,
     });
 
     capturer.setPaths(["before.png", "after.png"]);
     detector.setResult([
       {
         text: "Tab1",
-        selectedState: { method: "visual", confidence: 0.6 }
-      }
+        selectedState: { method: "visual", confidence: 0.6 },
+      },
     ]);
 
     const observation = createObservation(
       createHierarchy({
         text: "Tab1",
         selected: "false",
-        bounds: { left: 0, top: 0, right: 10, bottom: 10 }
-      })
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      }),
     );
 
     const element: Element = {
       bounds: { left: 0, top: 0, right: 10, bottom: 10 },
       text: "Tab1",
-      clickable: true
+      clickable: true,
     };
 
     const state = await tracker.prepare({
       action: "tap",
       observation,
-      element
+      element,
     });
 
     expect(state?.beforeScreenshotPath).toBe("before.png");
@@ -130,7 +131,7 @@ describe("SelectionStateTracker", () => {
       selectionState: state,
       currentObservation: observation,
       previousObservation: observation,
-      element
+      element,
     });
 
     expect(selected).toHaveLength(1);
@@ -148,25 +149,25 @@ describe("SelectionStateTracker", () => {
     const tracker = new SelectionStateTracker({
       detector,
       screenshotCapturer: capturer,
-      isUiPerfModeEnabled: () => true
+      isUiPerfModeEnabled: () => true,
     });
 
     const observation = createObservation(
       createHierarchy({
         text: "Label",
-        bounds: { left: 0, top: 0, right: 10, bottom: 10 }
-      })
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      }),
     );
 
     const element: Element = {
       bounds: { left: 0, top: 0, right: 10, bottom: 10 },
-      text: "Label"
+      text: "Label",
     };
 
     const state = await tracker.prepare({
       action: "tap",
       observation,
-      element
+      element,
     });
 
     expect(state).toBeNull();

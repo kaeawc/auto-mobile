@@ -62,12 +62,12 @@ The gate is **two-tier** — a value can enable the safe rebuild while still
 refusing the destructive reset. This is deliberate: `true` should not silently
 drop a user's data.
 
-| Value | Safe history rebuild | Destructive reset of a **populated** DB |
-| --- | --- | --- |
-| _(unset)_ | ✅ enabled (default) | ❌ refused |
-| `true`, `yes`, `on`, or any other non-falsy value | ✅ enabled | ❌ refused |
-| `1` | ✅ enabled | ✅ allowed (timestamped backup written first) |
-| `0`, `false`, `no`, `off` | ❌ disabled | ❌ refused |
+| Value                                             | Safe history rebuild | Destructive reset of a **populated** DB       |
+| ------------------------------------------------- | -------------------- | --------------------------------------------- |
+| _(unset)_                                         | ✅ enabled (default) | ❌ refused                                    |
+| `true`, `yes`, `on`, or any other non-falsy value | ✅ enabled           | ❌ refused                                    |
+| `1`                                               | ✅ enabled           | ✅ allowed (timestamped backup written first) |
+| `0`, `false`, `no`, `off`                         | ❌ disabled          | ❌ refused                                    |
 
 - **Safe rebuild is enabled by default** and by any non-falsy value. The
   destructive reset requires an **explicit `1`** — merely non-falsy is not

@@ -4,7 +4,11 @@ import type { Database, NewPerformanceAuditResult } from "./types";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
-import { createRowCapRetentionState, pruneTableByRowCap, runAmortizedRetention } from "./rowCapRetention";
+import {
+  createRowCapRetentionState,
+  pruneTableByRowCap,
+  runAmortizedRetention,
+} from "./rowCapRetention";
 
 const RETENTION_MAX_ROWS = 10_000;
 const RETENTION_MAX_AGE_HOURS = 24;
@@ -180,7 +184,7 @@ export class PerformanceAuditRepository {
     const hasMore = rows.length > limit;
     const trimmed = hasMore ? rows.slice(0, limit) : rows;
 
-    const results: PerformanceAuditHistoryEntry[] = trimmed.map(row => ({
+    const results: PerformanceAuditHistoryEntry[] = trimmed.map((row) => ({
       id: row.id,
       deviceId: row.device_id,
       sessionId: row.session_id,
@@ -213,7 +217,9 @@ export class PerformanceAuditRepository {
     };
   }
 
-  async listResultsSince(query: PerformanceAuditStreamQuery): Promise<PerformanceAuditHistoryEntry[]> {
+  async listResultsSince(
+    query: PerformanceAuditStreamQuery,
+  ): Promise<PerformanceAuditHistoryEntry[]> {
     const db = this.getDb();
     const limit = Math.min(Math.max(1, query.limit ?? 50), STREAM_LIMIT_MAX);
 
@@ -260,13 +266,12 @@ export class PerformanceAuditRepository {
     }
     if (query.sinceTimestamp) {
       const sinceId = query.sinceId ?? 0;
-      builder = builder.where(eb => eb.or([
-        eb("timestamp", ">", query.sinceTimestamp),
-        eb.and([
-          eb("timestamp", "=", query.sinceTimestamp),
-          eb("id", ">", sinceId),
+      builder = builder.where((eb) =>
+        eb.or([
+          eb("timestamp", ">", query.sinceTimestamp),
+          eb.and([eb("timestamp", "=", query.sinceTimestamp), eb("id", ">", sinceId)]),
         ]),
-      ]));
+      );
     }
 
     const rows = await builder
@@ -275,7 +280,7 @@ export class PerformanceAuditRepository {
       .limit(limit)
       .execute();
 
-    return rows.map(row => ({
+    return rows.map((row) => ({
       id: row.id,
       deviceId: row.device_id,
       sessionId: row.session_id,
@@ -354,7 +359,7 @@ export class PerformanceAuditRepository {
     }
 
     pruningTimer = defaultTimer.setInterval(() => {
-      this.pruneOldRecords().catch(error => {
+      this.pruneOldRecords().catch((error) => {
         logger.warn(`[PerformanceAuditRepository] Periodic pruning error: ${error}`);
       });
     }, PRUNING_INTERVAL_MS);
@@ -362,7 +367,9 @@ export class PerformanceAuditRepository {
     // Don't prevent process exit
     pruningTimer.unref();
 
-    logger.info(`[PerformanceAuditRepository] Started periodic pruning (every ${PRUNING_INTERVAL_MS / 1000}s)`);
+    logger.info(
+      `[PerformanceAuditRepository] Started periodic pruning (every ${PRUNING_INTERVAL_MS / 1000}s)`,
+    );
   }
 
   /**

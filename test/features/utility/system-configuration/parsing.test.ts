@@ -87,7 +87,11 @@ describe("extractCalendarFromLocale", () => {
     ["reads the BCP-47 -u-ca- extension", "en-US-u-ca-gregory", "gregory"],
     ["reads -u-ca- from an underscore locale", "en_US_u_ca_japanese", "japanese"],
     ["joins a multi-segment calendar type", "en-US-u-ca-islamic-civil", "islamic-civil"],
-    ["prefers the keyword form over the extension", "en-US-u-ca-gregory@calendar=buddhist", "buddhist"],
+    [
+      "prefers the keyword form over the extension",
+      "en-US-u-ca-gregory@calendar=buddhist",
+      "buddhist",
+    ],
     ["reads -u-ca- when another key precedes it", "en-US-u-nu-latn-ca-persian", "persian"],
     ["returns null when there is no calendar", "en-US", null],
     ["returns null for a -u- extension without ca", "en-US-u-nu-latn", null],

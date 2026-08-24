@@ -54,14 +54,17 @@ describe("securePermissions", () => {
     expect(statSync(dir).mode & 0o777).toBe(0o700);
   });
 
-  (isWindows ? test.skip : test)("ensureSecureDir repairs a pre-existing loose directory", async () => {
-    const dir = tempPath("secure-dir-repair");
-    await fsPromises.mkdir(dir, { recursive: true, mode: 0o755 });
+  (isWindows ? test.skip : test)(
+    "ensureSecureDir repairs a pre-existing loose directory",
+    async () => {
+      const dir = tempPath("secure-dir-repair");
+      await fsPromises.mkdir(dir, { recursive: true, mode: 0o755 });
 
-    await ensureSecureDir(dir);
+      await ensureSecureDir(dir);
 
-    expect(statSync(dir).mode & 0o777).toBe(0o700);
-  });
+      expect(statSync(dir).mode & 0o777).toBe(0o700);
+    },
+  );
 
   (isWindows ? test.skip : test)("secureFile sets 0o600 on the file", async () => {
     const dir = tempPath("secure-file");

@@ -36,7 +36,12 @@ export class SdkFrameMetricsStore {
    * broadcasts ~1/s, so a sample older than a couple seconds means the app
    * stopped reporting and the sampler should fall back to dumpsys).
    */
-  getFresh(deviceId: string, packageName: string, now: number, ttlMs: number): SdkFrameSample | null {
+  getFresh(
+    deviceId: string,
+    packageName: string,
+    now: number,
+    ttlMs: number,
+  ): SdkFrameSample | null {
     const sample = this.byKey.get(SdkFrameMetricsStore.key(deviceId, packageName));
     if (!sample || now - sample.receivedAt > ttlMs) {
       return null;

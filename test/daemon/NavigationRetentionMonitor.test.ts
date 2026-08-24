@@ -76,7 +76,7 @@ describe("NavigationRetentionMonitor", () => {
   test("drops overlapping ticks while a pass is in flight", async () => {
     const timer = new FakeTimer();
     let release: (() => void) | undefined;
-    const gate = new Promise<void>(resolve => {
+    const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
     let calls = 0;

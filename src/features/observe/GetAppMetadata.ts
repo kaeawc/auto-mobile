@@ -1,7 +1,10 @@
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { AppMetadataResult } from "../../models/AppMetadataResult";
 import type { BootedDevice, ExecResult } from "../../models";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "./android";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
@@ -11,7 +14,10 @@ import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType"
  */
 export interface IosAppMetadataSource {
   listApps(deviceId?: string): Promise<Record<string, unknown>[]>;
-  getPhysicalDeviceAppInfo(deviceId: string, bundleId: string): Promise<Record<string, unknown> | null>;
+  getPhysicalDeviceAppInfo(
+    deviceId: string,
+    bundleId: string,
+  ): Promise<Record<string, unknown> | null>;
 }
 
 export class GetAppMetadata {
@@ -22,7 +28,7 @@ export class GetAppMetadata {
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    iosSource: IosAppMetadataSource | null = null
+    iosSource: IosAppMetadataSource | null = null,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -43,9 +49,16 @@ export class GetAppMetadata {
       const info = await a11y.requestPackageInfo(packageName, { includePermissions: false }, 4000);
       if (info.success) {
         const versionName = info.versionName ?? "";
-        const buildNumber = info.versionCode !== undefined && info.versionCode !== null ? String(info.versionCode) : "";
-        const firstInstallTime = info.firstInstallTime ? new Date(info.firstInstallTime).toString() : undefined;
-        const lastUpdateTime = info.lastUpdateTime ? new Date(info.lastUpdateTime).toString() : undefined;
+        const buildNumber =
+          info.versionCode !== undefined && info.versionCode !== null
+            ? String(info.versionCode)
+            : "";
+        const firstInstallTime = info.firstInstallTime
+          ? new Date(info.firstInstallTime).toString()
+          : undefined;
+        const lastUpdateTime = info.lastUpdateTime
+          ? new Date(info.lastUpdateTime).toString()
+          : undefined;
         if (!versionName && !buildNumber) {
           return null;
         }
@@ -56,7 +69,7 @@ export class GetAppMetadata {
           buildNumber,
           installPath: "",
           ...(firstInstallTime ? { firstInstallTime } : {}),
-          ...(lastUpdateTime ? { lastUpdateTime } : {})
+          ...(lastUpdateTime ? { lastUpdateTime } : {}),
         };
       }
       logger.debug(`[GetAppMetadata] a11y package info failed: ${info.error}`);
@@ -94,7 +107,7 @@ export class GetAppMetadata {
       buildNumber: versionCode ?? "",
       installPath: codePath ?? "",
       ...(firstInstallTime ? { firstInstallTime } : {}),
-      ...(lastUpdateTime ? { lastUpdateTime } : {})
+      ...(lastUpdateTime ? { lastUpdateTime } : {}),
     };
   }
 
@@ -180,14 +193,14 @@ function readAppField(app: Record<string, unknown>, keys: string[]): string | un
 
 export function findAppByBundleId(
   apps: Record<string, unknown>[],
-  bundleId: string
+  bundleId: string,
 ): Record<string, unknown> | null {
   for (const app of apps) {
     const id = readAppField(app, [
       "bundleId",
       "bundleIdentifier",
       "bundleID",
-      "CFBundleIdentifier"
+      "CFBundleIdentifier",
     ]);
     if (id === bundleId) {
       return app;
@@ -198,35 +211,27 @@ export function findAppByBundleId(
 
 export function iosRecordToMetadata(
   bundleId: string,
-  app: Record<string, unknown>
+  app: Record<string, unknown>,
 ): AppMetadataResult {
-  const versionName = readAppField(app, [
-    "bundleShortVersionString",
-    "CFBundleShortVersionString",
-    "BundleShortVersionString",
-    "version"
-  ]) ?? "";
+  const versionName =
+    readAppField(app, [
+      "bundleShortVersionString",
+      "CFBundleShortVersionString",
+      "BundleShortVersionString",
+      "version",
+    ]) ?? "";
 
-  const buildNumber = readAppField(app, [
-    "bundleVersion",
-    "CFBundleVersion",
-    "BundleVersion"
-  ]) ?? "";
+  const buildNumber =
+    readAppField(app, ["bundleVersion", "CFBundleVersion", "BundleVersion"]) ?? "";
 
-  const installPath = readAppField(app, [
-    "bundlePath",
-    "bundleURL",
-    "bundleContainer",
-    "path",
-    "Path",
-    "url"
-  ]) ?? "";
+  const installPath =
+    readAppField(app, ["bundlePath", "bundleURL", "bundleContainer", "path", "Path", "url"]) ?? "";
 
   return {
     appId: bundleId,
     platform: "ios",
     versionName,
     buildNumber,
-    installPath
+    installPath,
   };
 }

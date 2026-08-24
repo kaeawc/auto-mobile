@@ -90,7 +90,7 @@ function asScalableBounds(value: unknown): Record<string, unknown> | null {
     return null;
   }
   const candidate = value as Record<string, unknown>;
-  const hasNumericEdge = BOUNDS_EDGES.some(edge => typeof candidate[edge] === "number");
+  const hasNumericEdge = BOUNDS_EDGES.some((edge) => typeof candidate[edge] === "number");
   return hasNumericEdge ? candidate : null;
 }
 
@@ -196,7 +196,7 @@ function scaleEdgeInsetsInPlace(insets: Record<string, unknown>, nativeScale: nu
  */
 export function convertHierarchyToCanonicalPixels(
   hierarchy: ViewHierarchyResult,
-  metadata: ScreenScaleMetadata
+  metadata: ScreenScaleMetadata,
 ): void {
   const { nativeScale, pixelWidth, pixelHeight } = metadata;
 

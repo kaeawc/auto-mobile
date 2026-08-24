@@ -7,7 +7,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 describe("TapOnElement selectionStrategy", () => {
   test("passes selectionStrategy to the element selector", () => {
     const fakeSelector = new FakeElementSelector({
-      bounds: { left: 0, top: 0, right: 10, bottom: 10 }
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
     } as any);
     const tapOnElement = new TapOnElement(
       {
@@ -18,17 +18,17 @@ describe("TapOnElement selectionStrategy", () => {
       new FakeAdbClient() as any,
       {
         timer: new FakeTimer(),
-        elementSelector: fakeSelector
-      }
+        elementSelector: fakeSelector,
+      },
     );
 
     const result = (tapOnElement as any).findElementInHierarchy(
       {
         text: "Match",
         action: "tap",
-        selectionStrategy: "random"
+        selectionStrategy: "random",
       },
-      { hierarchy: { node: {} } }
+      { hierarchy: { node: {} } },
     );
 
     expect(result.selection.element).not.toBeNull();

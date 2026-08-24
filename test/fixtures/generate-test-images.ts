@@ -196,7 +196,7 @@ async function generateTestImages(): Promise<void> {
   console.log("\nAll test images generated successfully!");
 }
 
-generateTestImages().catch(error => {
+generateTestImages().catch((error) => {
   console.error("Failed to generate test images:", error);
   process.exit(1);
 });

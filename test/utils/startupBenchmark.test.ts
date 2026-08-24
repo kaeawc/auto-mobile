@@ -128,7 +128,7 @@ describe("StartupBenchmark checkpoints", () => {
     const fileSystem: StartupBenchmarkFileSystem = {
       existsSync: () => true,
       mkdirSync: () => undefined,
-      writeFileSync: filePath => {
+      writeFileSync: (filePath) => {
         writes.push(filePath.toString());
       },
       renameSync: (from, to) => {
@@ -165,7 +165,7 @@ describe("StartupBenchmark checkpoints", () => {
     await expect(
       benchmark.runPhase("databasePreflight", async () => {
         throw failure;
-      })
+      }),
     ).rejects.toBe(failure);
 
     expect(JSON.parse(readFileSync(outputPath, "utf8"))).toMatchObject({
@@ -182,8 +182,12 @@ describe("isStartupBenchmarkEnabled", () => {
     const environment = { AUTOMOBILE_STARTUP_BENCHMARK: "1" };
 
     expect(isStartupBenchmarkEnabled(["bun", "index.ts", "--daemon-mode"], environment)).toBe(true);
-    expect(isStartupBenchmarkEnabled(["auto-mobile", "--daemon", "start"], environment)).toBe(false);
-    expect(isStartupBenchmarkEnabled(["auto-mobile", "--daemon", "health"], environment)).toBe(false);
+    expect(isStartupBenchmarkEnabled(["auto-mobile", "--daemon", "start"], environment)).toBe(
+      false,
+    );
+    expect(isStartupBenchmarkEnabled(["auto-mobile", "--daemon", "health"], environment)).toBe(
+      false,
+    );
   });
 
   test("keeps the explicit benchmark flag available outside daemon mode", () => {

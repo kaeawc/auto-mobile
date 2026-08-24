@@ -27,7 +27,7 @@ export type StructuredContentOmissionReason = "no-schema" | "flag";
  */
 export function structuredContentOmissionReason(
   hasOutputSchema: boolean,
-  flagEnabled: boolean = serverConfig.isToolResultsNoStructuredContentEnabled()
+  flagEnabled: boolean = serverConfig.isToolResultsNoStructuredContentEnabled(),
 ): StructuredContentOmissionReason | null {
   if (!hasOutputSchema) {
     return "no-schema";
@@ -86,7 +86,7 @@ export function responseCarriesStructuredContent(response: unknown): boolean {
  */
 export function stripToolResultStructuredContent<T>(
   response: T,
-  reason: StructuredContentOmissionReason | null
+  reason: StructuredContentOmissionReason | null,
 ): T {
   if (reason !== null && responseCarriesStructuredContent(response)) {
     delete (response as Record<string, unknown>).structuredContent;

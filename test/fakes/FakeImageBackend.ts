@@ -2,7 +2,7 @@ import type {
   ImageBackend,
   ImageMetadata,
   ImagePipeline,
-  RawImage
+  RawImage,
 } from "../../src/utils/image/backend/ImageBackend";
 
 /**
@@ -20,18 +20,13 @@ export class FakeImageBackend implements ImageBackend {
     width: 1080,
     height: 2400,
     format: "png",
-    size: 1024000
+    size: 1024000,
   };
   private rawPixelsResult: RawImage = {
     width: 2,
     height: 2,
     // 2x2 RGBA: red, green, blue, white.
-    data: Buffer.from([
-      255, 0, 0, 255,
-      0, 255, 0, 255,
-      0, 0, 255, 255,
-      255, 255, 255, 255
-    ])
+    data: Buffer.from([255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255]),
   };
 
   // Error injection.
@@ -56,7 +51,7 @@ export class FakeImageBackend implements ImageBackend {
     this.rawPixelsResult = {
       width: raw.width,
       height: raw.height,
-      data: Buffer.from(raw.data)
+      data: Buffer.from(raw.data),
     };
   }
 
@@ -103,7 +98,7 @@ export class FakeImageBackend implements ImageBackend {
     return {
       width: this.rawPixelsResult.width,
       height: this.rawPixelsResult.height,
-      data: Buffer.from(this.rawPixelsResult.data)
+      data: Buffer.from(this.rawPixelsResult.data),
     };
   }
 }

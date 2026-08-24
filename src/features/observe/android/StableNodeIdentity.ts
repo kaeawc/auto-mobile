@@ -63,12 +63,7 @@ export const STABLE_VIEW_ID_PREFIX = "s-";
  * `occlusionState`/`occludedBy`/`occludedByViewId` churn nondeterministically
  * between captures (#3051, #3519).
  */
-const CONTENT_FIELDS: readonly string[] = [
-  "resource-id",
-  "content-desc",
-  "text",
-  "test-tag",
-];
+const CONTENT_FIELDS: readonly string[] = ["resource-id", "content-desc", "text", "test-tag"];
 
 /** Normalize the `node` child slot (absent / single object / array) to an array. */
 function toChildArray(node: Record<string, unknown>): Record<string, unknown>[] {
@@ -115,7 +110,7 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
     // boundaries (text can contain any delimiter we might pick by hand).
     const canonical = JSON.stringify([
       node["class"] ?? node.className ?? "",
-      ...CONTENT_FIELDS.map(field => node[field] ?? ""),
+      ...CONTENT_FIELDS.map((field) => node[field] ?? ""),
       childHashes,
     ]);
     const hash = createHash("sha256").update(canonical).digest("hex").slice(0, 16);
@@ -160,7 +155,7 @@ export function assignStableViewIds(root: unknown): Map<string, string> {
  */
 export function applyStableViewIdRewrites(
   root: unknown,
-  rewrittenViewIds: ReadonlyMap<string, string>
+  rewrittenViewIds: ReadonlyMap<string, string>,
 ): void {
   if (!root || typeof root !== "object" || rewrittenViewIds.size === 0) {
     return;

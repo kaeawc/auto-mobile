@@ -11,7 +11,7 @@ import {
   FakeWebSocket,
   createInstantFailureWebSocketFactory,
   createSuccessWebSocketFactory,
-  WebSocketState
+  WebSocketState,
 } from "../../fakes/FakeWebSocket";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -29,7 +29,7 @@ import { FakeSocket } from "../../fakes/FakeNetServer";
 import { FakeScreenshotBackoffScheduler } from "../../../src/features/observe/ScreenshotBackoffScheduler";
 import { CTRLPROXY_RATE_LIMITED_ERROR } from "../../../src/features/observe/android/screenshotFallbackReason";
 
-describe("AndroidCtrlProxyClient", function() {
+describe("AndroidCtrlProxyClient", function () {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
   let fakeAdb: FakeAdbExecutor;
   let testDevice: BootedDevice;
@@ -37,7 +37,7 @@ describe("AndroidCtrlProxyClient", function() {
   let fakeAdbFactory: FakeAdbClientFactory;
   const serverPort: number = 8765;
 
-  beforeEach(async function() {
+  beforeEach(async function () {
     // Create fake timer with auto-advance for async event flushing
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
@@ -52,7 +52,7 @@ describe("AndroidCtrlProxyClient", function() {
       deviceId: "test-device",
       platform: "android",
       isEmulator: true,
-      name: "Test Device"
+      name: "Test Device",
     };
 
     // Create FakeAdbClientFactory for AndroidCtrlProxyManager
@@ -67,7 +67,7 @@ describe("AndroidCtrlProxyClient", function() {
       testDevice,
       fakeAdb,
       createSuccessWebSocketFactory(),
-      fakeTimer
+      fakeTimer,
     );
     AndroidCtrlProxyManager.getInstance(testDevice, fakeAdbFactory).clearAvailabilityCache();
 
@@ -75,7 +75,7 @@ describe("AndroidCtrlProxyClient", function() {
     accessibilityServiceClient.invalidateCache();
   });
 
-  afterEach(async function() {
+  afterEach(async function () {
     // Clean up WebSocket connections
     if (accessibilityServiceClient) {
       await accessibilityServiceClient.close();
@@ -92,7 +92,9 @@ describe("AndroidCtrlProxyClient", function() {
     }
   }
 
-  const createCapturingWebSocketFactory = (timer?: FakeTimer): {
+  const createCapturingWebSocketFactory = (
+    timer?: FakeTimer,
+  ): {
     factory: (url: string) => CapturingWebSocket;
     getSocket: () => CapturingWebSocket | null;
   } => {
@@ -103,7 +105,7 @@ describe("AndroidCtrlProxyClient", function() {
         socket = new CapturingWebSocket(url, "none", 0, timer);
         return socket;
       },
-      getSocket: () => socket
+      getSocket: () => socket,
     };
   };
 
@@ -114,23 +116,28 @@ describe("AndroidCtrlProxyClient", function() {
     if (socket.readyState === WebSocketState.OPEN) {
       return;
     }
-    await new Promise<void>(resolve => {
+    await new Promise<void>((resolve) => {
       socket.once("open", () => resolve());
     });
   };
 
-  const waitForSocket = async (getSocket: () => FakeWebSocket | null): Promise<FakeWebSocket | null> => {
+  const waitForSocket = async (
+    getSocket: () => FakeWebSocket | null,
+  ): Promise<FakeWebSocket | null> => {
     for (let attempt = 0; attempt < 5; attempt++) {
       const socket = getSocket();
       if (socket) {
         return socket;
       }
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
     }
     return getSocket();
   };
 
-  const waitForSentMessages = async (socket: CapturingWebSocket | null, minCount: number = 1): Promise<void> => {
+  const waitForSentMessages = async (
+    socket: CapturingWebSocket | null,
+    minCount: number = 1,
+  ): Promise<void> => {
     if (!socket) {
       return;
     }
@@ -138,13 +145,13 @@ describe("AndroidCtrlProxyClient", function() {
       if (socket.sentMessages.length >= minCount) {
         return;
       }
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
     }
   };
 
   const flushPromises = async (iterations: number = 5): Promise<void> => {
     for (let i = 0; i < iterations; i += 1) {
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
     }
   };
 
@@ -189,7 +196,7 @@ describe("AndroidCtrlProxyClient", function() {
   test("aborts a connect whose platform setup completes after close()", async () => {
     const manualTimer = new FakeTimer();
     let releaseForward!: () => void;
-    const forwardGate = new Promise<void>(resolve => {
+    const forwardGate = new Promise<void>((resolve) => {
       releaseForward = resolve;
     });
     class GatedForwardAdb extends FakeAdbExecutor {
@@ -247,7 +254,7 @@ describe("AndroidCtrlProxyClient", function() {
     // query hops before assigning currentScreen. Drain setImmediate + microtasks
     // so the navigation and hierarchy paths settle deterministically (#3063).
     for (let i = 0; i < 10; i++) {
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
       await timer.advanceTimersByTimeAsync(1);
     }
   };
@@ -263,7 +270,7 @@ describe("AndroidCtrlProxyClient", function() {
       testDevice,
       fakeAdb,
       factory,
-      testTimer
+      testTimer,
     );
     const resultPromise = testClient.getLatestHierarchy(true, 2000);
     const socket = await waitForSocket(getSocket);
@@ -272,31 +279,35 @@ describe("AndroidCtrlProxyClient", function() {
     }
     await waitForSocketOpen(socket);
 
-    socket.simulateMessage(JSON.stringify({
-      type: "navigation_event",
-      event: {
-        destination: "SdkHome",
-        source: "SdkStart",
-        arguments: {},
-        metadata: {},
-        timestamp: testTimer.now(),
-        sequenceNumber: 1,
-        applicationId: "com.example.sdk",
-      }
-    }));
+    socket.simulateMessage(
+      JSON.stringify({
+        type: "navigation_event",
+        event: {
+          destination: "SdkHome",
+          source: "SdkStart",
+          arguments: {},
+          metadata: {},
+          timestamp: testTimer.now(),
+          sequenceNumber: 1,
+          applicationId: "com.example.sdk",
+        },
+      }),
+    );
 
-    socket.simulateMessage(JSON.stringify({
-      type: "hierarchy_update",
-      timestamp: testTimer.now(),
-      data: {
-        updatedAt: testTimer.now(),
-        packageName: "com.example.sdk",
-        hierarchy: {
-          "text": "SDK Home",
-          "resource-id": "com.example.sdk:id/home",
-        }
-      }
-    }));
+    socket.simulateMessage(
+      JSON.stringify({
+        type: "hierarchy_update",
+        timestamp: testTimer.now(),
+        data: {
+          updatedAt: testTimer.now(),
+          packageName: "com.example.sdk",
+          hierarchy: {
+            text: "SDK Home",
+            "resource-id": "com.example.sdk:id/home",
+          },
+        },
+      }),
+    );
 
     return { navHarness, navManager, resultPromise, testClient, testTimer };
   };
@@ -328,20 +339,21 @@ describe("AndroidCtrlProxyClient", function() {
         command: "subscribe",
         deviceId: testDevice.deviceId,
         screenshotIntervalMs: 250,
-      })
+      }),
     );
     socket.reset();
     return socket;
   };
 
   const getScreenshotUpdates = (socket: FakeSocket): ScreenshotUpdateMessage[] => {
-    return socket.getWrittenMessages<ScreenshotUpdateMessage>()
-      .filter(message => message.type === "screenshot_update");
+    return socket
+      .getWrittenMessages<ScreenshotUpdateMessage>()
+      .filter((message) => message.type === "screenshot_update");
   };
 
   const expectSingleScreenshotUpdate = (
     socket: FakeSocket,
-    expected: Partial<ScreenshotUpdateMessage>
+    expected: Partial<ScreenshotUpdateMessage>,
   ): void => {
     expect(getScreenshotUpdates(socket)).toEqual([expect.objectContaining(expected)]);
   };
@@ -375,7 +387,7 @@ describe("AndroidCtrlProxyClient", function() {
     (accessibilityServiceClient as any).pushScreenshotToObservationStream(
       base64,
       { screenshotMimeType: "image/png", screenshotFormat: "png" },
-      binding
+      binding,
     );
   };
 
@@ -388,10 +400,10 @@ describe("AndroidCtrlProxyClient", function() {
 
   const forwardScreenshotBinding = (
     width: number = 1080,
-    height: number = 2340
+    height: number = 2340,
   ): { captureSequence: number; width: number; height: number } => {
     (accessibilityServiceClient as any).handleHierarchyUpdate(
-      hierarchyWithScreenSize(width, height)
+      hierarchyWithScreenSize(width, height),
     );
     const binding = (accessibilityServiceClient as any).screenGeometry.bind();
     if (!binding) {
@@ -407,7 +419,7 @@ describe("AndroidCtrlProxyClient", function() {
   };
 
   const startScreenshotBackoffAndReadRequest = async (
-    ctrlProxySocket: CapturingWebSocket
+    ctrlProxySocket: CapturingWebSocket,
   ): Promise<{ requestId: string }> => {
     (accessibilityServiceClient as any).startScreenshotBackoff();
     await fakeTimer.advanceTimersByTimeAsync(0);
@@ -423,7 +435,7 @@ describe("AndroidCtrlProxyClient", function() {
       testDevice,
       fakeAdb,
       createSuccessWebSocketFactory(fakeTimer),
-      fakeTimer
+      fakeTimer,
     );
     accessibilityServiceClient.invalidateCache();
   };
@@ -440,13 +452,13 @@ describe("AndroidCtrlProxyClient", function() {
       testDevice,
       fakeAdb,
       factory,
-      fakeTimer
+      fakeTimer,
     );
     accessibilityServiceClient.invalidateCache();
     const streamSocket = await startStreamServerWithScreenshotSubscriber();
 
     await accessibilityServiceClient.ensureConnected();
-    const ctrlProxySocket = await waitForSocket(getSocket) as CapturingWebSocket | null;
+    const ctrlProxySocket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
     await waitForSocketOpen(ctrlProxySocket);
     if (!ctrlProxySocket) {
       throw new Error("Expected capturing CtrlProxy socket");
@@ -461,7 +473,9 @@ describe("AndroidCtrlProxyClient", function() {
       stderr: "",
     });
 
-    const result = await (accessibilityServiceClient as any).captureScreenshotViaAdb("websocket_unavailable");
+    const result = await (accessibilityServiceClient as any).captureScreenshotViaAdb(
+      "websocket_unavailable",
+    );
 
     expect(result).toMatchObject({
       success: true,
@@ -499,17 +513,20 @@ describe("AndroidCtrlProxyClient", function() {
     const { streamSocket, ctrlProxySocket } = await startCapturingBackoffStreamTest();
 
     const request = await startScreenshotBackoffAndReadRequest(ctrlProxySocket);
-    ctrlProxySocket.emit("message", JSON.stringify({
-      type: "screenshot",
-      requestId: request.requestId,
-      data: "jpeg-base64",
-      format: "jpeg",
-      timestamp: 123,
-      screenshotCaptureDurationMs: 42,
-      screenshotEncodeDurationMs: 7,
-      screenshotByteLength: 1200,
-      screenshotBase64Length: 1600,
-    }));
+    ctrlProxySocket.emit(
+      "message",
+      JSON.stringify({
+        type: "screenshot",
+        requestId: request.requestId,
+        data: "jpeg-base64",
+        format: "jpeg",
+        timestamp: 123,
+        screenshotCaptureDurationMs: 42,
+        screenshotEncodeDurationMs: 7,
+        screenshotByteLength: 1200,
+        screenshotBase64Length: 1600,
+      }),
+    );
     await flushPromises();
 
     expectSingleScreenshotUpdate(streamSocket, {
@@ -555,11 +572,14 @@ describe("AndroidCtrlProxyClient", function() {
     streamSocket.reset();
 
     const request = await startScreenshotBackoffAndReadRequest(ctrlProxySocket);
-    ctrlProxySocket.emit("message", JSON.stringify({
-      type: "screenshot_error",
-      requestId: request.requestId,
-      error: "Runner failed to capture screenshot",
-    }));
+    ctrlProxySocket.emit(
+      "message",
+      JSON.stringify({
+        type: "screenshot_error",
+        requestId: request.requestId,
+        error: "Runner failed to capture screenshot",
+      }),
+    );
     await flushPromises();
 
     expectSingleScreenshotUpdate(streamSocket, {
@@ -578,11 +598,14 @@ describe("AndroidCtrlProxyClient", function() {
     setAdbPngScreenshotResponse();
 
     const request = await startScreenshotBackoffAndReadRequest(ctrlProxySocket);
-    ctrlProxySocket.emit("message", JSON.stringify({
-      type: "screenshot_error",
-      requestId: request.requestId,
-      error: "Screenshot timeout",
-    }));
+    ctrlProxySocket.emit(
+      "message",
+      JSON.stringify({
+        type: "screenshot_error",
+        requestId: request.requestId,
+        error: "Screenshot timeout",
+      }),
+    );
     await flushPromises();
 
     expectSingleScreenshotUpdate(streamSocket, {
@@ -627,12 +650,12 @@ describe("AndroidCtrlProxyClient", function() {
     (accessibilityServiceClient as any).a11yScreenshotSupported = false;
 
     let resolveAdbCapture: ((result: { stdout: string; stderr: string }) => void) | null = null;
-    const adbCapture = new Promise<{ stdout: string; stderr: string }>(resolve => {
+    const adbCapture = new Promise<{ stdout: string; stderr: string }>((resolve) => {
       resolveAdbCapture = resolve;
     });
-    spyOn(fakeAdb, "executeCommand").mockImplementation(async command => {
+    spyOn(fakeAdb, "executeCommand").mockImplementation(async (command) => {
       if (command.includes("screencap -p")) {
-        return await adbCapture as any;
+        return (await adbCapture) as any;
       }
       return { stdout: "", stderr: "" } as any;
     });
@@ -652,7 +675,7 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  describe("a11y screenshot support latch", function() {
+  describe("a11y screenshot support latch", function () {
     // Drives AndroidCtrlProxyClient.captureScreenshotForObservationStream() through the real socket:
     // each failed a11y screenshot increments a consecutive-failure counter; on the
     // A11Y_SCREENSHOT_MAX_FAILURES-th (=3) it latches a11yScreenshotSupported=false so every future
@@ -674,14 +697,14 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         factory,
-        localTimer
+        localTimer,
       );
       accessibilityServiceClient.invalidateCache();
       // ADB PNG fallback used whenever an a11y capture fails or the latch is set.
       setAdbPngScreenshotResponse();
 
       await accessibilityServiceClient.ensureConnected();
-      const socket = await waitForSocket(getSocket) as CapturingWebSocket | null;
+      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
       await waitForSocketOpen(socket);
       if (!socket) {
         throw new Error("Expected capturing CtrlProxy socket");
@@ -690,7 +713,7 @@ describe("AndroidCtrlProxyClient", function() {
     };
 
     const countScreenshotRequests = (socket: CapturingWebSocket): number =>
-      socket.sentMessages.filter(raw => {
+      socket.sentMessages.filter((raw) => {
         try {
           return JSON.parse(raw).type === "request_screenshot";
         } catch {
@@ -701,20 +724,29 @@ describe("AndroidCtrlProxyClient", function() {
     const driveA11yScreenshot = async (
       client: AndroidCtrlProxyClient,
       socket: CapturingWebSocket,
-      resolveWith: { kind: "error"; error?: string } | { kind: "success" }
+      resolveWith: { kind: "error"; error?: string } | { kind: "success" },
     ): Promise<any> => {
       const before = countScreenshotRequests(socket);
-      const capturePromise = (client as any).captureScreenshotForObservationStream() as Promise<any>;
+      const capturePromise = (
+        client as any
+      ).captureScreenshotForObservationStream() as Promise<any>;
       await waitForSentMessages(socket, socket.sentMessages.length + 1);
       const request = findSentMessage(socket, "request_screenshot");
       expect(countScreenshotRequests(socket)).toBe(before + 1);
-      const frame = resolveWith.kind === "error"
-        ? {
-          type: "screenshot_error",
-          requestId: request.requestId,
-          error: resolveWith.error ?? "Runner failed to capture screenshot",
-        }
-        : { type: "screenshot", requestId: request.requestId, data: "jpeg-base64", format: "jpeg", timestamp: 1 };
+      const frame =
+        resolveWith.kind === "error"
+          ? {
+              type: "screenshot_error",
+              requestId: request.requestId,
+              error: resolveWith.error ?? "Runner failed to capture screenshot",
+            }
+          : {
+              type: "screenshot",
+              requestId: request.requestId,
+              data: "jpeg-base64",
+              format: "jpeg",
+              timestamp: 1,
+            };
       socket.emit("message", JSON.stringify(frame));
       await flushPromises();
       return capturePromise;
@@ -724,7 +756,9 @@ describe("AndroidCtrlProxyClient", function() {
       for (let i = socket.sentMessages.length - 1; i >= 0; i--) {
         try {
           const parsed = JSON.parse(socket.sentMessages[i]);
-          if (parsed.type === type) { return parsed; }
+          if (parsed.type === type) {
+            return parsed;
+          }
         } catch {
           // skip non-JSON control frames
         }
@@ -738,22 +772,29 @@ describe("AndroidCtrlProxyClient", function() {
     // the other two tests catch).
     const driveFailureTolerant = async (
       client: AndroidCtrlProxyClient,
-      socket: CapturingWebSocket
+      socket: CapturingWebSocket,
     ): Promise<void> => {
       const before = countScreenshotRequests(socket);
-      const capturePromise = (client as any).captureScreenshotForObservationStream() as Promise<any>;
+      const capturePromise = (
+        client as any
+      ).captureScreenshotForObservationStream() as Promise<any>;
       await flushPromises();
       if (countScreenshotRequests(socket) > before) {
         const request = findSentMessage(socket, "request_screenshot");
-        socket.emit("message", JSON.stringify({
-          type: "screenshot_error", requestId: request.requestId, error: "Runner failed to capture screenshot",
-        }));
+        socket.emit(
+          "message",
+          JSON.stringify({
+            type: "screenshot_error",
+            requestId: request.requestId,
+            error: "Runner failed to capture screenshot",
+          }),
+        );
         await flushPromises();
       }
       await capturePromise;
     };
 
-    test("latches to permanent ADB fallback after three consecutive a11y screenshot failures", async function() {
+    test("latches to permanent ADB fallback after three consecutive a11y screenshot failures", async function () {
       const { client, socket } = await setupConnectedCapturingClient();
 
       await driveFailureTolerant(client, socket);
@@ -764,13 +805,13 @@ describe("AndroidCtrlProxyClient", function() {
 
       // Once latched, a further capture must NOT send another a11y request — it goes straight to ADB.
       const requestsBefore = countScreenshotRequests(socket);
-      const result = await (client as any).captureScreenshotForObservationStream() as any;
+      const result = (await (client as any).captureScreenshotForObservationStream()) as any;
       await flushPromises();
       expect(countScreenshotRequests(socket)).toBe(requestsBefore);
       expect(result.screenshotCaptureSource).toBe("android_adb_screencap");
     });
 
-    test("keeps attempting a11y screenshots after only two consecutive failures", async function() {
+    test("keeps attempting a11y screenshots after only two consecutive failures", async function () {
       const { client, socket } = await setupConnectedCapturingClient();
 
       await driveA11yScreenshot(client, socket, { kind: "error" });
@@ -784,7 +825,7 @@ describe("AndroidCtrlProxyClient", function() {
       expect(countScreenshotRequests(socket)).toBe(requestsBefore + 1);
     });
 
-    test("resets the failure counter after a successful a11y screenshot", async function() {
+    test("resets the failure counter after a successful a11y screenshot", async function () {
       const { client, socket } = await setupConnectedCapturingClient();
 
       await driveA11yScreenshot(client, socket, { kind: "error" });
@@ -800,7 +841,7 @@ describe("AndroidCtrlProxyClient", function() {
       expect((client as any).a11yScreenshotSupported).not.toBe(false);
     });
 
-    test("does not count rate-limited screenshots as unsupported failures", async function() {
+    test("does not count rate-limited screenshots as unsupported failures", async function () {
       const { client, socket } = await setupConnectedCapturingClient();
 
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -821,7 +862,7 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  test("allocates an Android forwarding port while skipping the iOS SDK hierarchy server port", async function() {
+  test("allocates an Android forwarding port while skipping the iOS SDK hierarchy server port", async function () {
     await accessibilityServiceClient.close();
     AndroidCtrlProxyClient.resetInstances();
     PortManager.reset();
@@ -838,19 +879,21 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         createSuccessWebSocketFactory(),
-        fakeTimer
+        fakeTimer,
       );
 
       expect(checkedPorts).toEqual([8765, 8767]);
-      expect((accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }).getWebSocketUrl()).toBe(
-        "ws://127.0.0.1:8767/ws"
-      );
+      expect(
+        (
+          accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }
+        ).getWebSocketUrl(),
+      ).toBe("ws://127.0.0.1:8767/ws");
     } finally {
       PortManager.setPortAvailabilityCheckerForTesting(null);
     }
   });
 
-  test("setupPortForwarding reallocates while preserving Android's reserved ports", async function() {
+  test("setupPortForwarding reallocates while preserving Android's reserved ports", async function () {
     await accessibilityServiceClient.close();
     AndroidCtrlProxyClient.resetInstances();
     PortManager.reset();
@@ -868,21 +911,25 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         createSuccessWebSocketFactory(),
-        fakeTimer
+        fakeTimer,
       );
       unavailablePorts.add(8765);
 
-      await (accessibilityServiceClient as unknown as {
-        setupPortForwarding: () => Promise<void>;
-        getWebSocketUrl: () => string;
-      }).setupPortForwarding();
+      await (
+        accessibilityServiceClient as unknown as {
+          setupPortForwarding: () => Promise<void>;
+          getWebSocketUrl: () => string;
+        }
+      ).setupPortForwarding();
 
       expect(checkedPorts).toEqual([8765, 8765, 8767]);
       expect(fakeAdb.getExecutedCommands()).toContain("forward --remove tcp:8767");
       expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8767 tcp:8765");
-      expect((accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }).getWebSocketUrl()).toBe(
-        "ws://127.0.0.1:8767/ws"
-      );
+      expect(
+        (
+          accessibilityServiceClient as unknown as { getWebSocketUrl: () => string }
+        ).getWebSocketUrl(),
+      ).toBe("ws://127.0.0.1:8767/ws");
     } finally {
       PortManager.setPortAvailabilityCheckerForTesting(null);
     }
@@ -890,35 +937,38 @@ describe("AndroidCtrlProxyClient", function() {
 
   // Windows Bun evaluates the Android barrel and direct import as separate module
   // records, so their singleton registries cannot exercise this lifecycle.
-  test.skipIf(process.platform === "win32")("late invalidated-observer cleanup cannot release a replacement observer's port", async function() {
-    await accessibilityServiceClient.close();
-    AndroidCtrlProxyClient.resetInstances();
-    PortManager.reset();
-    PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
-    try {
-      const original = AndroidCtrlProxyClient.getInstance(testDevice, fakeAdbFactory);
-      const originalPort = PortManager.getPort(testDevice.deviceId);
-      original.invalidateForShutdownRecovery();
-
-      const replacement = AndroidCtrlProxyClient.getInstance(testDevice, fakeAdbFactory);
-      const replacementPort = PortManager.getPort(testDevice.deviceId);
-      expect(replacementPort).not.toBe(originalPort);
-
-      await original.close();
-      expect(PortManager.getPort(testDevice.deviceId)).toBe(replacementPort);
-
-      await replacement.close();
-    } finally {
-      PortManager.setPortAvailabilityCheckerForTesting(null);
+  test.skipIf(process.platform === "win32")(
+    "late invalidated-observer cleanup cannot release a replacement observer's port",
+    async function () {
+      await accessibilityServiceClient.close();
+      AndroidCtrlProxyClient.resetInstances();
       PortManager.reset();
-    }
-  });
+      PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
+      try {
+        const original = AndroidCtrlProxyClient.getInstance(testDevice, fakeAdbFactory);
+        const originalPort = PortManager.getPort(testDevice.deviceId);
+        original.invalidateForShutdownRecovery();
 
-  describe("connection lifecycle", function() {
-    test("notifies the observation stream when the WebSocket connection closes", function() {
+        const replacement = AndroidCtrlProxyClient.getInstance(testDevice, fakeAdbFactory);
+        const replacementPort = PortManager.getPort(testDevice.deviceId);
+        expect(replacementPort).not.toBe(originalPort);
+
+        await original.close();
+        expect(PortManager.getPort(testDevice.deviceId)).toBe(replacementPort);
+
+        await replacement.close();
+      } finally {
+        PortManager.setPortAvailabilityCheckerForTesting(null);
+        PortManager.reset();
+      }
+    },
+  );
+
+  describe("connection lifecycle", function () {
+    test("notifies the observation stream when the WebSocket connection closes", function () {
       const lostDeviceIds: string[] = [];
       const notifier: DeviceConnectionLostNotifier = {
-        onDeviceConnectionLost: deviceId => {
+        onDeviceConnectionLost: (deviceId) => {
           lostDeviceIds.push(deviceId);
         },
       };
@@ -930,7 +980,7 @@ describe("AndroidCtrlProxyClient", function() {
         undefined,
         undefined,
         undefined,
-        notifier
+        notifier,
       );
 
       (testClient as any).onConnectionClosed();
@@ -939,24 +989,24 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  describe("getLatestHierarchy", function() {
-    test("should return hierarchy data when WebSocket receives fresh data", async function() {
+  describe("getLatestHierarchy", function () {
+    test("should return hierarchy data when WebSocket receives fresh data", async function () {
       const mockHierarchyData = {
         updatedAt: 1750934583218,
         packageName: "com.google.android.deskclock",
         hierarchy: {
-          "text": "6:43 AM",
+          text: "6:43 AM",
           "content-desc": "6:43 AM",
           "resource-id": "com.google.android.deskclock:id/digital_clock",
-          "bounds": {
+          bounds: {
             left: 175,
             top: 687,
             right: 692,
-            bottom: 973
+            bottom: 973,
           },
-          "clickable": "false",
-          "enabled": "true"
-        }
+          clickable: "false",
+          enabled: "true",
+        },
       };
 
       // Use FakeTimer for fast, deterministic test execution
@@ -968,7 +1018,7 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         factory,
-        testTimer
+        testTimer,
       );
 
       try {
@@ -977,11 +1027,13 @@ describe("AndroidCtrlProxyClient", function() {
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: testTimer.now(),
-          data: mockHierarchyData
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: mockHierarchyData,
+          }),
+        );
 
         const result = await resultPromise;
 
@@ -997,14 +1049,14 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("should return cached data when not waiting for fresh data", async function() {
+    test("should return cached data when not waiting for fresh data", async function () {
       const mockHierarchyData = {
         updatedAt: 100, // Use timer-relative timestamp
         packageName: "com.google.android.deskclock",
         hierarchy: {
           text: "Cached Data",
-          clickable: "true"
-        }
+          clickable: "true",
+        },
       };
 
       const testTimer = new FakeTimer();
@@ -1014,7 +1066,7 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         factory,
-        testTimer
+        testTimer,
       );
 
       try {
@@ -1027,11 +1079,13 @@ describe("AndroidCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
 
         // Simulate message - this sets cachedHierarchy
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: testTimer.now(),
-          data: mockHierarchyData
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: mockHierarchyData,
+          }),
+        );
 
         // Now advance time so the polling interval finds the fresh data
         await testTimer.resolvePromise(firstResultPromise);
@@ -1051,7 +1105,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("should timeout when no data received within timeout period", async function() {
+    test("should timeout when no data received within timeout period", async function () {
       // Use FakeWebSocket that connects successfully but sends no data
       // Use delayed mode with 1ms for fast execution
 
@@ -1059,7 +1113,7 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer
+        fakeTimer,
       );
 
       try {
@@ -1074,7 +1128,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("should return fresh data when WebSocket push arrives after 100ms under contention (regression #2285)", async function() {
+    test("should return fresh data when WebSocket push arrives after 100ms under contention (regression #2285)", async function () {
       // Pre-bug: default timeout was 100ms. When ADB pipe is busy (concurrent
       // screenshots, dumpsys, etc.), the WebSocket push routinely lands after
       // 100ms and getLatestHierarchy fell back to stale cache (~31% stale rate
@@ -1085,7 +1139,7 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         factory,
-        testTimer
+        testTimer,
       );
 
       try {
@@ -1101,15 +1155,17 @@ describe("AndroidCtrlProxyClient", function() {
         // resolved null, returning stale cache (here: no cache → null).
         await testTimer.advanceTimersByTimeAsync(300);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: testTimer.now(),
-          data: {
-            updatedAt: testTimer.now(),
-            packageName: "com.example.app",
-            hierarchy: { text: "Contended push" }
-          }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "Contended push" },
+            },
+          }),
+        );
 
         const result = await testTimer.resolvePromise(resultPromise);
 
@@ -1121,32 +1177,34 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("tracks concurrent suppressed hierarchy syncs independently", async function() {
+    test("tracks concurrent suppressed hierarchy syncs independently", async function () {
       const testTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
-        testTimer
+        testTimer,
       );
       const suppressionCount = (): number =>
-        (testClient as unknown as {
-          hierarchyObservationStreamSuppressions: Set<unknown>;
-        }).hierarchyObservationStreamSuppressions.size;
+        (
+          testClient as unknown as {
+            hierarchyObservationStreamSuppressions: Set<unknown>;
+          }
+        ).hierarchyObservationStreamSuppressions.size;
 
       try {
         const firstRequest = testClient.requestHierarchySyncWithoutObservationStreamPush(
           undefined,
           false,
           undefined,
-          3000
+          3000,
         );
         const secondRequest = testClient.requestHierarchySyncWithoutObservationStreamPush(
           undefined,
           false,
           undefined,
-          3000
+          3000,
         );
 
         const socket = await waitForSocket(getSocket);
@@ -1156,27 +1214,31 @@ describe("AndroidCtrlProxyClient", function() {
 
         expect(suppressionCount()).toBe(2);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: testTimer.now(),
-          data: {
-            updatedAt: 100,
-            packageName: "com.example",
-            hierarchy: { text: "First sync" },
-          },
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: 100,
+              packageName: "com.example",
+              hierarchy: { text: "First sync" },
+            },
+          }),
+        );
 
         expect(suppressionCount()).toBe(1);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: testTimer.now(),
-          data: {
-            updatedAt: 200,
-            packageName: "com.example",
-            hierarchy: { text: "Second sync" },
-          },
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: 200,
+              packageName: "com.example",
+              hierarchy: { text: "Second sync" },
+            },
+          }),
+        );
 
         expect(suppressionCount()).toBe(0);
 
@@ -1191,7 +1253,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("should handle WebSocket connection failure gracefully", async function() {
+    test("should handle WebSocket connection failure gracefully", async function () {
       // Use FakeWebSocket with instant failure and FakeTimer for fast, reliable test execution
       // See issues #68 (timeout race condition) and #72 (cache contamination)
 
@@ -1199,7 +1261,7 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         createInstantFailureWebSocketFactory(fakeTimer),
-        fakeTimer
+        fakeTimer,
       );
 
       try {
@@ -1213,7 +1275,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("should seed navigation graph from hierarchy updates", async function() {
+    test("should seed navigation graph from hierarchy updates", async function () {
       NavigationGraphManager.resetInstance();
       const navHarness = await installInMemoryNavManager();
       const navManager = navHarness.manager;
@@ -1225,7 +1287,7 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         factory,
-        testTimer
+        testTimer,
       );
 
       try {
@@ -1234,19 +1296,21 @@ describe("AndroidCtrlProxyClient", function() {
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: testTimer.now(),
-          data: {
-            updatedAt: testTimer.now(),
-            packageName: "com.google.android.deskclock",
-            hierarchy: {
-              "text": "6:43 AM",
-              "content-desc": "6:43 AM",
-              "resource-id": "com.google.android.deskclock:id/digital_clock",
-            }
-          }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.google.android.deskclock",
+              hierarchy: {
+                text: "6:43 AM",
+                "content-desc": "6:43 AM",
+                "resource-id": "com.google.android.deskclock:id/digital_clock",
+              },
+            },
+          }),
+        );
 
         await resultPromise;
         // HierarchyNavigationDetector debounces via setTimeout(100ms); in autoAdvance
@@ -1255,7 +1319,7 @@ describe("AndroidCtrlProxyClient", function() {
         // the async setCurrentApp call inside recordHierarchyNavigation reaches its
         // first synchronous assignment (this.currentAppId = appId).
         for (let i = 0; i < 10; i++) {
-          await new Promise<void>(resolve => setImmediate(resolve));
+          await new Promise<void>((resolve) => setImmediate(resolve));
           await testTimer.advanceTimersByTimeAsync(1);
         }
 
@@ -1272,7 +1336,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("should preserve SDK screen names when hierarchy updates follow navigation events", async function() {
+    test("should preserve SDK screen names when hierarchy updates follow navigation events", async function () {
       const { navHarness, navManager, resultPromise, testClient, testTimer } =
         await startSdkNavigationHierarchyInterleaving();
 
@@ -1287,7 +1351,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("skips the hierarchy-navigation detector for an SDK app after a navigation_event (#3068)", async function() {
+    test("skips the hierarchy-navigation detector for an SDK app after a navigation_event (#3068)", async function () {
       // Pins the sdkNavigationAppIds skip MECHANISM (layer 1), independent of the
       // NavigationGraphManager early-return (layer 2) that also protects the SDK
       // screen name. A navigation_event registers the app in sdkNavigationAppIds;
@@ -1305,7 +1369,7 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         factory,
-        testTimer
+        testTimer,
       );
 
       // Eagerly construct the detector via the public getter so the spy is in
@@ -1319,35 +1383,39 @@ describe("AndroidCtrlProxyClient", function() {
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "navigation_event",
-          event: {
-            destination: "SdkHome",
-            source: "SdkStart",
-            arguments: {},
-            metadata: {},
-            timestamp: testTimer.now(),
-            sequenceNumber: 1,
-            applicationId: "com.example.sdk",
-          }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "navigation_event",
+            event: {
+              destination: "SdkHome",
+              source: "SdkStart",
+              arguments: {},
+              metadata: {},
+              timestamp: testTimer.now(),
+              sequenceNumber: 1,
+              applicationId: "com.example.sdk",
+            },
+          }),
+        );
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: testTimer.now(),
-          data: {
-            updatedAt: testTimer.now(),
-            packageName: "com.example.sdk",
-            hierarchy: {
-              "text": "SDK Home",
-              "resource-id": "com.example.sdk:id/home",
-            }
-          }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.sdk",
+              hierarchy: {
+                text: "SDK Home",
+                "resource-id": "com.example.sdk:id/home",
+              },
+            },
+          }),
+        );
 
         await resultPromise;
         for (let i = 0; i < 10; i++) {
-          await new Promise<void>(resolve => setImmediate(resolve));
+          await new Promise<void>((resolve) => setImmediate(resolve));
           await testTimer.advanceTimersByTimeAsync(1);
         }
 
@@ -1361,7 +1429,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("feeds the hierarchy-navigation detector for a non-SDK app hierarchy_update (#3068)", async function() {
+    test("feeds the hierarchy-navigation detector for a non-SDK app hierarchy_update (#3068)", async function () {
       // Negative control for the skip above: without a navigation_event the app is
       // NOT in sdkNavigationAppIds, so shouldUseHierarchyNavigation returns true and
       // the detector IS invoked. This proves the assertion above discriminates the
@@ -1376,7 +1444,7 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         factory,
-        testTimer
+        testTimer,
       );
 
       const detector = testClient.getHierarchyNavigationDetector();
@@ -1388,22 +1456,24 @@ describe("AndroidCtrlProxyClient", function() {
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: testTimer.now(),
-          data: {
-            updatedAt: testTimer.now(),
-            packageName: "com.example.noneofthesdk",
-            hierarchy: {
-              "text": "Regular Home",
-              "resource-id": "com.example.noneofthesdk:id/home",
-            }
-          }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.noneofthesdk",
+              hierarchy: {
+                text: "Regular Home",
+                "resource-id": "com.example.noneofthesdk:id/home",
+              },
+            },
+          }),
+        );
 
         await resultPromise;
         for (let i = 0; i < 10; i++) {
-          await new Promise<void>(resolve => setImmediate(resolve));
+          await new Promise<void>((resolve) => setImmediate(resolve));
           await testTimer.advanceTimersByTimeAsync(1);
         }
 
@@ -1415,7 +1485,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("resolves build/device provenance on the hierarchy path for a non-SDK app (#4984)", async function() {
+    test("resolves build/device provenance on the hierarchy path for a non-SDK app (#4984)", async function () {
       // Apps without the AutoMobile SDK never emit navigation_event, so the hierarchy
       // path must kick off build-context resolution — otherwise every reach records
       // under the default/legacy build. Asserting requestPackageInfo is consulted
@@ -1426,27 +1496,37 @@ describe("AndroidCtrlProxyClient", function() {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
-      const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({ success: true, versionCode: 42 } as never);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        testTimer,
+      );
+      const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({
+        success: true,
+        versionCode: 42,
+      } as never);
 
       try {
         const resultPromise = testClient.getLatestHierarchy(true, 2000);
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: testTimer.now(),
-          data: {
-            updatedAt: testTimer.now(),
-            packageName: "com.example.nosdk",
-            hierarchy: { "text": "Home", "resource-id": "com.example.nosdk:id/home" },
-          }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.nosdk",
+              hierarchy: { text: "Home", "resource-id": "com.example.nosdk:id/home" },
+            },
+          }),
+        );
 
         await resultPromise;
         for (let i = 0; i < 10; i++) {
-          await new Promise<void>(resolve => setImmediate(resolve));
+          await new Promise<void>((resolve) => setImmediate(resolve));
           await testTimer.advanceTimersByTimeAsync(1);
         }
 
@@ -1461,7 +1541,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("does not apply a build context built from a failed package-info result (#4984)", async function() {
+    test("does not apply a build context built from a failed package-info result (#4984)", async function () {
       // A transient package-info failure must NOT be persisted as version 0 — defer
       // instead, so a later event retries. setBuildContext must not be called.
       NavigationGraphManager.resetInstance();
@@ -1471,27 +1551,36 @@ describe("AndroidCtrlProxyClient", function() {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
-      const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({ success: false } as never);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        testTimer,
+      );
+      const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({
+        success: false,
+      } as never);
 
       try {
         const resultPromise = testClient.getLatestHierarchy(true, 2000);
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: testTimer.now(),
-          data: {
-            updatedAt: testTimer.now(),
-            packageName: "com.example.nosdk",
-            hierarchy: { "text": "Home", "resource-id": "com.example.nosdk:id/home" },
-          }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.nosdk",
+              hierarchy: { text: "Home", "resource-id": "com.example.nosdk:id/home" },
+            },
+          }),
+        );
 
         await resultPromise;
         for (let i = 0; i < 10; i++) {
-          await new Promise<void>(resolve => setImmediate(resolve));
+          await new Promise<void>((resolve) => setImmediate(resolve));
           await testTimer.advanceTimersByTimeAsync(1);
         }
 
@@ -1506,13 +1595,18 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("releaseSessionBinding clears the binding and cached detector for the released session (#4984)", async function() {
+    test("releaseSessionBinding clears the binding and cached detector for the released session (#4984)", async function () {
       NavigationGraphManager.resetInstance();
       const navHarness = await installInMemoryNavManager();
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        testTimer,
+      );
 
       try {
         testClient.bindSession("session-A");
@@ -1536,7 +1630,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("build-context resolution is deferred out-of-band, not run inline with the message handler (#2885/#4984)", async function() {
+    test("build-context resolution is deferred out-of-band, not run inline with the message handler (#2885/#4984)", async function () {
       // Regression guard for the macOS/Windows-CI-only #2885 failure: ensureBuildContext
       // must NOT call requestPackageInfo (a WS send + RequestManager timeout timer)
       // synchronously inside the WS message handler, or it reorders the barrier-tracked
@@ -1546,38 +1640,60 @@ describe("AndroidCtrlProxyClient", function() {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
-      const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({ success: false } as never);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        testTimer,
+      );
+      const pkgInfoSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({
+        success: false,
+      } as never);
 
       try {
         const resultPromise = testClient.getLatestHierarchy(true, 2000);
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "navigation_event",
-          event: {
-            destination: "Home", source: "Start", arguments: {}, metadata: {},
-            timestamp: testTimer.now(), sequenceNumber: 1, applicationId: "com.example.app",
-          }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "navigation_event",
+            event: {
+              destination: "Home",
+              source: "Start",
+              arguments: {},
+              metadata: {},
+              timestamp: testTimer.now(),
+              sequenceNumber: 1,
+              applicationId: "com.example.app",
+            },
+          }),
+        );
 
         // Drain MICROTASKS only (never setImmediate): the deferred resolution is
         // dispatched on a macrotask, so if it ran inline requestPackageInfo would
         // already have fired here. It must not have.
-        for (let i = 0; i < 5; i++) { await Promise.resolve(); }
+        for (let i = 0; i < 5; i++) {
+          await Promise.resolve();
+        }
         expect(pkgInfoSpy).not.toHaveBeenCalled();
 
         // Let getLatestHierarchy resolve, then allow macrotasks: the deferred
         // resolution now runs and consults requestPackageInfo out-of-band.
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: testTimer.now(),
-          data: { updatedAt: testTimer.now(), packageName: "com.example.app", hierarchy: { "text": "Home" } }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "Home" },
+            },
+          }),
+        );
         await resultPromise;
         for (let i = 0; i < 10; i++) {
-          await new Promise<void>(resolve => setImmediate(resolve));
+          await new Promise<void>((resolve) => setImmediate(resolve));
           await testTimer.advanceTimersByTimeAsync(1);
         }
         expect(pkgInfoSpy).toHaveBeenCalled();
@@ -1588,55 +1704,84 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("serializes navigation graph writes when WebSocket frames arrive back-to-back", async function() {
+    test("serializes navigation graph writes when WebSocket frames arrive back-to-back", async function () {
       NavigationGraphManager.resetInstance();
       const navHarness = await installInMemoryNavManager();
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        testTimer,
+      );
       let allowFirstWrite: (() => void) | undefined;
-      const firstWriteAllowed = new Promise<void>(resolve => {
+      const firstWriteAllowed = new Promise<void>((resolve) => {
         allowFirstWrite = resolve;
       });
-      const recordNavigationEvent = navHarness.manager.recordNavigationEvent.bind(navHarness.manager);
-      const recordNavigationEventSpy = spyOn(navHarness.manager, "recordNavigationEvent")
-        .mockImplementation(async event => {
-          if (event.destination === "First") {
-            await firstWriteAllowed;
-          }
-          await recordNavigationEvent(event);
-        });
+      const recordNavigationEvent = navHarness.manager.recordNavigationEvent.bind(
+        navHarness.manager,
+      );
+      const recordNavigationEventSpy = spyOn(
+        navHarness.manager,
+        "recordNavigationEvent",
+      ).mockImplementation(async (event) => {
+        if (event.destination === "First") {
+          await firstWriteAllowed;
+        }
+        await recordNavigationEvent(event);
+      });
 
       try {
         const resultPromise = testClient.getLatestHierarchy(true, 2000);
         const socket = await waitForSocket(getSocket);
         await waitForSocketOpen(socket);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "navigation_event",
-          event: {
-            destination: "First", source: "Start", arguments: {}, metadata: {},
-            timestamp: testTimer.now(), sequenceNumber: 1, applicationId: "com.example.app",
-          }
-        }));
-        socket!.simulateMessage(JSON.stringify({
-          type: "navigation_event",
-          event: {
-            destination: "Second", source: "First", arguments: {}, metadata: {},
-            timestamp: testTimer.now(), sequenceNumber: 2, applicationId: "com.example.app",
-          }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "navigation_event",
+            event: {
+              destination: "First",
+              source: "Start",
+              arguments: {},
+              metadata: {},
+              timestamp: testTimer.now(),
+              sequenceNumber: 1,
+              applicationId: "com.example.app",
+            },
+          }),
+        );
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "navigation_event",
+            event: {
+              destination: "Second",
+              source: "First",
+              arguments: {},
+              metadata: {},
+              timestamp: testTimer.now(),
+              sequenceNumber: 2,
+              applicationId: "com.example.app",
+            },
+          }),
+        );
 
         await flushPromises();
         expect(recordNavigationEventSpy).toHaveBeenCalledTimes(1);
 
         allowFirstWrite!();
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: testTimer.now(),
-          data: { updatedAt: testTimer.now(), packageName: "com.example.app", hierarchy: { "text": "Second" } }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "Second" },
+            },
+          }),
+        );
         await resultPromise;
         await settleNavigationHierarchyInterleaving(testTimer);
 
@@ -1648,7 +1793,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("clears resolved build contexts on connection close so the next event re-resolves (#4984)", async function() {
+    test("clears resolved build contexts on connection close so the next event re-resolves (#4984)", async function () {
       // While the WS has no client, a package_event has zero listeners, so an app can be
       // replaced unobserved. onConnectionClosed must invalidate cached contexts so the
       // next event after reconnect re-resolves the hash instead of using the stale build.
@@ -1657,18 +1802,40 @@ describe("AndroidCtrlProxyClient", function() {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        testTimer,
+      );
       const DIGEST = "a".repeat(64);
       fakeAdb.setCommandResponse("pm path", { stdout: "package:/a/base.apk", stderr: "" });
       fakeAdb.setCommandResponse("sha256sum", { stdout: `${DIGEST}  /a/base.apk`, stderr: "" });
-      const pkgSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({ success: true, versionCode: 5 } as never);
+      const pkgSpy = spyOn(testClient, "requestPackageInfo").mockResolvedValue({
+        success: true,
+        versionCode: 5,
+      } as never);
       const settle = async (): Promise<void> => {
-        for (let i = 0; i < 10; i++) { await new Promise<void>(r => setImmediate(r)); await testTimer.advanceTimersByTimeAsync(1); }
+        for (let i = 0; i < 10; i++) {
+          await new Promise<void>((r) => setImmediate(r));
+          await testTimer.advanceTimersByTimeAsync(1);
+        }
       };
-      const navEvent = (dest: string): void => socket!.simulateMessage(JSON.stringify({
-        type: "navigation_event",
-        event: { destination: dest, source: "s", arguments: {}, metadata: {}, timestamp: testTimer.now(), sequenceNumber: 1, applicationId: "com.example.app" }
-      }));
+      const navEvent = (dest: string): void =>
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "navigation_event",
+            event: {
+              destination: dest,
+              source: "s",
+              arguments: {},
+              metadata: {},
+              timestamp: testTimer.now(),
+              sequenceNumber: 1,
+              applicationId: "com.example.app",
+            },
+          }),
+        );
       let socket: Awaited<ReturnType<typeof waitForSocket>>;
 
       try {
@@ -1677,10 +1844,17 @@ describe("AndroidCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
 
         navEvent("Home");
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update", timestamp: testTimer.now(),
-          data: { updatedAt: testTimer.now(), packageName: "com.example.app", hierarchy: { "text": "Home" } }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: testTimer.now(),
+            data: {
+              updatedAt: testTimer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "Home" },
+            },
+          }),
+        );
         await resultPromise;
         await settle();
         expect(pkgSpy).toHaveBeenCalledTimes(1); // resolved once
@@ -1702,7 +1876,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("routes the navigation-graph write through the DB-write barrier for shutdown drain (#2885)", async function() {
+    test("routes the navigation-graph write through the DB-write barrier for shutdown drain (#2885)", async function () {
       resetDbWriteBarrier();
       // The Android handler resolves getDbWriteBarrier() per write (#2912), so a
       // spy on the freshly-reset shared barrier observes the nav write's
@@ -1732,19 +1906,19 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  describe("convertToViewHierarchyResult", function() {
-    test("preserves Android snapshot truncation reasons", function() {
+  describe("convertToViewHierarchyResult", function () {
+    test("preserves Android snapshot truncation reasons", function () {
       const result = accessibilityServiceClient.convertToViewHierarchyResult({
         updatedAt: 1,
         packageName: "com.example",
         hierarchy: { text: "root" },
-        truncationReasons: ["max_nodes", "cancelled"]
+        truncationReasons: ["max_nodes", "cancelled"],
       });
 
       expect(result.truncationReasons).toEqual(["max_nodes", "cancelled"]);
     });
 
-    test("should convert accessibility hierarchy to ViewHierarchyResult format", function() {
+    test("should convert accessibility hierarchy to ViewHierarchyResult format", function () {
       const accessibilityHierarchy = {
         updatedAt: 1750934583218,
         packageName: "com.google.android.deskclock",
@@ -1754,26 +1928,26 @@ describe("AndroidCtrlProxyClient", function() {
           {
             bounds: { left: 0, top: 368, right: 1440, bottom: 2752 },
             reason: "compose-interop-no-hide-descendants",
-            areaPercent: 79
-          }
+            areaPercent: 79,
+          },
         ],
         hierarchy: {
-          "text": "6:43 AM",
+          text: "6:43 AM",
           "content-desc": "6:43 AM",
           "resource-id": "com.google.android.deskclock:id/digital_clock",
-          "className": "android.widget.TextClock",
-          "occlusionState": "partial",
-          "occludedBy": "Debug menu",
-          "occludedByViewId": "stable-debug-menu",
-          "bounds": {
+          className: "android.widget.TextClock",
+          occlusionState: "partial",
+          occludedBy: "Debug menu",
+          occludedByViewId: "stable-debug-menu",
+          bounds: {
             left: 175,
             top: 687,
             right: 692,
-            bottom: 973
+            bottom: 973,
           },
-          "clickable": "false",
-          "enabled": "true",
-          "node": [
+          clickable: "false",
+          enabled: "true",
+          node: [
             {
               text: "Child Node",
               className: "android.widget.TextView",
@@ -1781,15 +1955,16 @@ describe("AndroidCtrlProxyClient", function() {
                 left: 0,
                 top: 0,
                 right: 100,
-                bottom: 50
+                bottom: 50,
               },
-              clickable: "true"
-            }
-          ]
-        }
+              clickable: "true",
+            },
+          ],
+        },
       };
 
-      const result = accessibilityServiceClient.convertToViewHierarchyResult(accessibilityHierarchy);
+      const result =
+        accessibilityServiceClient.convertToViewHierarchyResult(accessibilityHierarchy);
 
       expect(result.hierarchy.text).toBe("6:43 AM");
       expect(result.hierarchy["content-desc"]).toBe("6:43 AM");
@@ -1799,7 +1974,7 @@ describe("AndroidCtrlProxyClient", function() {
         left: 175,
         top: 687,
         right: 692,
-        bottom: 973
+        bottom: 973,
       });
       expect(result.hierarchy.clickable).toBeUndefined();
       expect(result.hierarchy.enabled).toBe("true");
@@ -1812,8 +1987,8 @@ describe("AndroidCtrlProxyClient", function() {
         {
           bounds: { left: 0, top: 368, right: 1440, bottom: 2752 },
           reason: "compose-interop-no-hide-descendants",
-          areaPercent: 79
-        }
+          areaPercent: 79,
+        },
       ]);
 
       // Check child node conversion
@@ -1825,12 +2000,12 @@ describe("AndroidCtrlProxyClient", function() {
         left: 0,
         top: 0,
         right: 100,
-        bottom: 50
+        bottom: 50,
       });
       expect(result.hierarchy.node.clickable).toBe("true");
     });
 
-    test("should handle single child node correctly", function() {
+    test("should handle single child node correctly", function () {
       const accessibilityHierarchy = {
         updatedAt: 1750934583218,
         packageName: "com.test.app",
@@ -1839,20 +2014,21 @@ describe("AndroidCtrlProxyClient", function() {
           node: [
             {
               text: "Single Child",
-              clickable: "true"
-            }
-          ]
-        }
+              clickable: "true",
+            },
+          ],
+        },
       };
 
-      const result = accessibilityServiceClient.convertToViewHierarchyResult(accessibilityHierarchy);
+      const result =
+        accessibilityServiceClient.convertToViewHierarchyResult(accessibilityHierarchy);
 
       expect(typeof result.hierarchy.node).toBe("object"); // Single child should not be in array
       expect(result.hierarchy.node.text).toBe("Single Child");
       expect(result.hierarchy.node.clickable).toBe("true");
     });
 
-    test("retains the additive #4548 scale metadata reported by the runner", function() {
+    test("retains the additive #4548 scale metadata reported by the runner", function () {
       const result = accessibilityServiceClient.convertToViewHierarchyResult({
         updatedAt: 1750934583218,
         packageName: "com.test.app",
@@ -1869,7 +2045,7 @@ describe("AndroidCtrlProxyClient", function() {
       expect(result.pixelHeight).toBe(2340);
     });
 
-    test("omits the scale metadata keys for legacy payloads and for the runner's JSON nulls", function() {
+    test("omits the scale metadata keys for legacy payloads and for the runner's JSON nulls", function () {
       const base = {
         updatedAt: 1750934583218,
         packageName: "com.test.app",
@@ -1898,7 +2074,7 @@ describe("AndroidCtrlProxyClient", function() {
       expect("pixelHeight" in nulls).toBe(false);
     });
 
-    test("omits ALL scale fields when the metadata tuple is partial or degenerate (all-or-nothing, matches retention)", function() {
+    test("omits ALL scale fields when the metadata tuple is partial or degenerate (all-or-nothing, matches retention)", function () {
       const base = {
         updatedAt: 1750934583218,
         packageName: "com.test.app",
@@ -1916,14 +2092,17 @@ describe("AndroidCtrlProxyClient", function() {
         { nativeScale: 1, pixelWidth: 0, pixelHeight: 2340 },
       ];
       for (const partial of partials) {
-        const result = accessibilityServiceClient.convertToViewHierarchyResult({ ...base, ...partial } as any);
+        const result = accessibilityServiceClient.convertToViewHierarchyResult({
+          ...base,
+          ...partial,
+        } as any);
         expect("nativeScale" in result).toBe(false);
         expect("pixelWidth" in result).toBe(false);
         expect("pixelHeight" in result).toBe(false);
       }
     });
 
-    test("carries scale metadata through the rootless (UIAutomator-fallback) early return", function() {
+    test("carries scale metadata through the rootless (UIAutomator-fallback) early return", function () {
       // A ctrlProxyIncomplete payload with no hierarchy node takes the early return; #4549 must
       // still see the metadata off this route.
       const rootless = accessibilityServiceClient.convertToViewHierarchyResult({
@@ -1955,20 +2134,22 @@ describe("AndroidCtrlProxyClient", function() {
       expect("pixelHeight" in rootlessLegacy).toBe(false);
     });
 
-    test("should handle conversion errors gracefully", function() {
+    test("should handle conversion errors gracefully", function () {
       // Create a hierarchy that will cause conversion issues
       const problematicHierarchy = {
         updatedAt: 1750934583218,
         packageName: "com.test.app",
-        hierarchy: null as any
+        hierarchy: null as any,
       };
 
       const result = accessibilityServiceClient.convertToViewHierarchyResult(problematicHierarchy);
 
-      expect(result.hierarchy.error).toContain("Accessibility hierarchy missing from accessibility service");
+      expect(result.hierarchy.error).toContain(
+        "Accessibility hierarchy missing from accessibility service",
+      );
     });
 
-    test("rewrites the runner's path-derived UUID view-ids into stable content ids at ingest (#3228)", function() {
+    test("rewrites the runner's path-derived UUID view-ids into stable content ids at ingest (#3228)", function () {
       // The runner emits a positional UUID for id-less nodes; two captures of the
       // same row at different scroll offsets carry DIFFERENT UUIDs. Ingest must
       // rewrite them into content-derived ids so the row keeps one identity.
@@ -1978,21 +2159,21 @@ describe("AndroidCtrlProxyClient", function() {
         hierarchy: {
           "resource-id": "com.test.app:id/root",
           "view-id": "com.test.app:id/root",
-          "node": [
+          node: [
             {
               "view-id": uuid,
               "content-desc": "Basic long press card",
-              "bounds": { left: 42, top, right: 1038, bottom: top + 231 }
-            }
-          ]
-        }
+              bounds: { left: 42, top, right: 1038, bottom: top + 231 },
+            },
+          ],
+        },
       });
 
       const before = accessibilityServiceClient.convertToViewHierarchyResult(
-        capture("791e44df-05d9-5e5a-3ea7-c898eedcb939", 1404)
+        capture("791e44df-05d9-5e5a-3ea7-c898eedcb939", 1404),
       );
       const after = accessibilityServiceClient.convertToViewHierarchyResult(
-        capture("8eb00289-ddfa-18de-7fc7-480b4d13d8cf", 1079)
+        capture("8eb00289-ddfa-18de-7fc7-480b4d13d8cf", 1079),
       );
 
       const beforeId = (before.hierarchy.node as any)["view-id"];
@@ -2003,41 +2184,42 @@ describe("AndroidCtrlProxyClient", function() {
       expect(before.hierarchy["view-id"]).toBe("com.test.app:id/root");
     });
 
-    test("rewrites accessibility-focused mirror occlusion links against the emitted hierarchy ids", function() {
+    test("rewrites accessibility-focused mirror occlusion links against the emitted hierarchy ids", function () {
       const focusedUuid = "11111111-1111-4111-8111-111111111111";
       const occluderUuid = "22222222-2222-4222-8222-222222222222";
       const accessibilityHierarchy = {
-        "updatedAt": 1750934583218,
-        "packageName": "com.test.app",
-        "hierarchy": {
+        updatedAt: 1750934583218,
+        packageName: "com.test.app",
+        hierarchy: {
           "resource-id": "com.test.app:id/root",
           "view-id": "com.test.app:id/root",
-          "node": [
+          node: [
             {
               "view-id": focusedUuid,
-              "text": "Covered",
-              "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
-              "occlusionState": "partial",
-              "occludedBy": "unlabeled view",
-              "occludedByViewId": occluderUuid,
+              text: "Covered",
+              bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+              occlusionState: "partial",
+              occludedBy: "unlabeled view",
+              occludedByViewId: occluderUuid,
             },
             {
               "view-id": occluderUuid,
-              "bounds": { left: 0, top: 0, right: 50, bottom: 50 },
+              bounds: { left: 0, top: 0, right: 50, bottom: 50 },
             },
           ],
         },
         "accessibility-focused-element": {
           "view-id": focusedUuid,
-          "text": "Covered",
-          "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
-          "occlusionState": "partial",
-          "occludedBy": "unlabeled view",
-          "occludedByViewId": occluderUuid,
+          text: "Covered",
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+          occlusionState: "partial",
+          occludedBy: "unlabeled view",
+          occludedByViewId: occluderUuid,
         },
       };
 
-      const result = accessibilityServiceClient.convertToViewHierarchyResult(accessibilityHierarchy);
+      const result =
+        accessibilityServiceClient.convertToViewHierarchyResult(accessibilityHierarchy);
       const hierarchyChildren = result.hierarchy.node as any[];
       const focusedNode = hierarchyChildren[0];
       const occluderNode = hierarchyChildren[1];
@@ -2048,11 +2230,10 @@ describe("AndroidCtrlProxyClient", function() {
       expect(focusedMirror.occludedByViewId).toBe(occluderNode["view-id"]);
       expect(focusedMirror.occludedByViewId).not.toBe(occluderUuid);
     });
-
   });
 
-  describe("focus element conversion", function() {
-    test("normalizes Android runner className while preserving the public compatibility alias", function() {
+  describe("focus element conversion", function () {
+    test("normalizes Android runner className while preserving the public compatibility alias", function () {
       const focus = new CtrlProxyFocus({} as any);
 
       const element = focus.convertAccessibilityNodeToElement({
@@ -2066,9 +2247,8 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  describe("getAccessibilityHierarchy", function() {
-    test("should return null when service is not available", async function() {
-
+  describe("getAccessibilityHierarchy", function () {
+    test("should return null when service is not available", async function () {
       // Configure service as not available
       fakeAdb.setCommandResponse("pm list packages", { stdout: "", stderr: "" });
 
@@ -2076,13 +2256,13 @@ describe("AndroidCtrlProxyClient", function() {
       expect(result).toBeNull();
     });
 
-    test("preserves a fresh delegate verdict instead of comparing the device timestamp to the host clock", async function() {
+    test("preserves a fresh delegate verdict instead of comparing the device timestamp to the host clock", async function () {
       const { factory, getSocket } = createCapturingWebSocketFactory(fakeTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
-        fakeTimer
+        fakeTimer,
       );
       const manager = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdb);
       const availability = spyOn(manager, "isAvailable").mockResolvedValue(true);
@@ -2093,18 +2273,20 @@ describe("AndroidCtrlProxyClient", function() {
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: fakeTimer.now(),
-          data: {
-            // A real device may be behind the daemon host clock. The hierarchy
-            // was verified by this WebSocket update, so its clock must not turn
-            // the public result into a false stale observation.
-            updatedAt: fakeTimer.now() - 60_000,
-            packageName: "com.example.app",
-            hierarchy: { text: "fresh from device" },
-          },
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: fakeTimer.now(),
+            data: {
+              // A real device may be behind the daemon host clock. The hierarchy
+              // was verified by this WebSocket update, so its clock must not turn
+              // the public result into a false stale observation.
+              updatedAt: fakeTimer.now() - 60_000,
+              packageName: "com.example.app",
+              hierarchy: { text: "fresh from device" },
+            },
+          }),
+        );
 
         const result = await resultPromise;
 
@@ -2115,7 +2297,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("fresh-hierarchy wait fails fast — well under the timeout budget — when the screen is off", async function() {
+    test("fresh-hierarchy wait fails fast — well under the timeout budget — when the screen is off", async function () {
       fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
 
       // Screen off: the connection succeeds (so the fresh-data wait is actually entered), but no
@@ -2131,7 +2313,7 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         createSuccessWebSocketFactory(manualTimer),
-        manualTimer
+        manualTimer,
       );
 
       // A generous wait budget so the fast-fail signal is unmistakable: the screen-off exit lands
@@ -2144,7 +2326,9 @@ describe("AndroidCtrlProxyClient", function() {
       const budgetMs = 8000;
       try {
         let response: { hierarchy: unknown; fresh: boolean } | undefined;
-        void asleepClient.getLatestHierarchy(true, budgetMs).then(r => { response = r; });
+        void asleepClient.getLatestHierarchy(true, budgetMs).then((r) => {
+          response = r;
+        });
 
         // Let ensureConnected + the interval registration settle before advancing time.
         await flushPromises();
@@ -2165,8 +2349,8 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  describe("package events", function() {
-    test("should upsert package on added event", async function() {
+  describe("package events", function () {
+    test("should upsert package on added event", async function () {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
@@ -2178,7 +2362,7 @@ describe("AndroidCtrlProxyClient", function() {
         fakeAdb,
         factory,
         timer,
-        repo
+        repo,
       );
 
       try {
@@ -2187,16 +2371,18 @@ describe("AndroidCtrlProxyClient", function() {
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "package_event",
-          timestamp,
-          event: {
-            action: "added",
-            packageName: "com.example.new",
-            userId: 0,
-            isSystem: false
-          }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "package_event",
+            timestamp,
+            event: {
+              action: "added",
+              packageName: "com.example.new",
+              userId: 0,
+              isSystem: false,
+            },
+          }),
+        );
 
         await flushPromises();
 
@@ -2211,7 +2397,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("should remove package for a single user on removed event", async function() {
+    test("should remove package for a single user on removed event", async function () {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
@@ -2224,7 +2410,7 @@ describe("AndroidCtrlProxyClient", function() {
           package_name: "com.example.remove",
           is_system: 0,
           installed_at: baseTime,
-          last_verified_at: baseTime
+          last_verified_at: baseTime,
         },
         {
           device_id: testDevice.deviceId,
@@ -2232,8 +2418,8 @@ describe("AndroidCtrlProxyClient", function() {
           package_name: "com.example.remove",
           is_system: 0,
           installed_at: baseTime,
-          last_verified_at: baseTime
-        }
+          last_verified_at: baseTime,
+        },
       ]);
 
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
@@ -2242,7 +2428,7 @@ describe("AndroidCtrlProxyClient", function() {
         fakeAdb,
         factory,
         timer,
-        repo
+        repo,
       );
 
       try {
@@ -2251,27 +2437,29 @@ describe("AndroidCtrlProxyClient", function() {
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "package_event",
-          timestamp: timer.now(),
-          event: {
-            action: "removed",
-            packageName: "com.example.remove",
-            userId: 0
-          }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "package_event",
+            timestamp: timer.now(),
+            event: {
+              action: "removed",
+              packageName: "com.example.remove",
+              userId: 0,
+            },
+          }),
+        );
 
         await flushPromises();
 
         const rows = await repo.listInstalledApps(testDevice.deviceId);
-        expect(rows.some(row => row.user_id === 0)).toBe(false);
-        expect(rows.some(row => row.user_id === 10)).toBe(true);
+        expect(rows.some((row) => row.user_id === 0)).toBe(false);
+        expect(rows.some((row) => row.user_id === 10)).toBe(true);
       } finally {
         await testClient.close();
       }
     });
 
-    test("should remove package for all users when removedForAllUsers is true", async function() {
+    test("should remove package for all users when removedForAllUsers is true", async function () {
       const repo = new FakeInstalledAppsRepository();
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
@@ -2284,7 +2472,7 @@ describe("AndroidCtrlProxyClient", function() {
           package_name: "com.example.all",
           is_system: 0,
           installed_at: baseTime,
-          last_verified_at: baseTime
+          last_verified_at: baseTime,
         },
         {
           device_id: testDevice.deviceId,
@@ -2292,8 +2480,8 @@ describe("AndroidCtrlProxyClient", function() {
           package_name: "com.example.all",
           is_system: 0,
           installed_at: baseTime,
-          last_verified_at: baseTime
-        }
+          last_verified_at: baseTime,
+        },
       ]);
 
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
@@ -2302,7 +2490,7 @@ describe("AndroidCtrlProxyClient", function() {
         fakeAdb,
         factory,
         timer,
-        repo
+        repo,
       );
 
       try {
@@ -2311,16 +2499,18 @@ describe("AndroidCtrlProxyClient", function() {
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "package_event",
-          timestamp: timer.now(),
-          event: {
-            action: "removed",
-            packageName: "com.example.all",
-            userId: 0,
-            removedForAllUsers: true
-          }
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "package_event",
+            timestamp: timer.now(),
+            event: {
+              action: "removed",
+              packageName: "com.example.all",
+              userId: 0,
+              removedForAllUsers: true,
+            },
+          }),
+        );
 
         await flushPromises();
 
@@ -2332,8 +2522,8 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  describe("highlight requests", function() {
-    test("requestAddHighlight sends payload and resolves highlight response", async function() {
+  describe("highlight requests", function () {
+    test("requestAddHighlight sends payload and resolves highlight response", async function () {
       const highlightTimer = new FakeTimer();
       // Don't use autoAdvance - we need to control time for the request timeout
 
@@ -2342,7 +2532,7 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         factory,
-        highlightTimer
+        highlightTimer,
       );
 
       const shape: HighlightShape = {
@@ -2351,12 +2541,12 @@ describe("AndroidCtrlProxyClient", function() {
           x: 10,
           y: 20,
           width: 100,
-          height: 80
+          height: 80,
         },
         style: {
           strokeColor: "#FF0000",
-          strokeWidth: 4
-        }
+          strokeWidth: 4,
+        },
       };
 
       try {
@@ -2370,8 +2560,12 @@ describe("AndroidCtrlProxyClient", function() {
         await waitForSentMessages(socket, 2); // sync message + highlight request
 
         // Find the highlight request among sent messages (sync messages may precede it)
-        const highlightMsg = socket!.sentMessages.find(m => {
-          try { return JSON.parse(m).type === "add_highlight"; } catch { return false; }
+        const highlightMsg = socket!.sentMessages.find((m) => {
+          try {
+            return JSON.parse(m).type === "add_highlight";
+          } catch {
+            return false;
+          }
         });
         expect(highlightMsg).toBeDefined();
         const payload = JSON.parse(highlightMsg!);
@@ -2379,12 +2573,14 @@ describe("AndroidCtrlProxyClient", function() {
         expect(payload.shape.bounds.width).toBe(100);
 
         // Simulate the response from the server
-        socket!.simulateMessage(JSON.stringify({
-          type: "highlight_response",
-          requestId: payload.requestId,
-          success: true,
-          error: null
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "highlight_response",
+            requestId: payload.requestId,
+            success: true,
+            error: null,
+          }),
+        );
 
         // Advance time to process the response
         const result = await highlightTimer.resolvePromise(requestPromise);
@@ -2393,11 +2589,10 @@ describe("AndroidCtrlProxyClient", function() {
         await testClient.close();
       }
     });
-
   });
 
-  describe("error frame handling (issue #2985)", function() {
-    test("a type:error frame correlated by requestId fails the awaiting request fast", async function() {
+  describe("error frame handling (issue #2985)", function () {
+    test("a type:error frame correlated by requestId fails the awaiting request fast", async function () {
       // The Android runner now emits a structured `type:"error"` envelope on decode/handler
       // failures (issue #2985). Without a consumer branch the awaiter would hang to timeout; this
       // asserts the pending request resolves immediately with a failed result carrying the message.
@@ -2407,13 +2602,13 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       const shape: HighlightShape = {
         type: "box",
         bounds: { x: 10, y: 20, width: 100, height: 80 },
-        style: { strokeColor: "#FF0000", strokeWidth: 4 }
+        style: { strokeColor: "#FF0000", strokeWidth: 4 },
       };
 
       try {
@@ -2424,20 +2619,26 @@ describe("AndroidCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket as CapturingWebSocket, 2);
 
-        const highlightMsg = (socket as CapturingWebSocket).sentMessages.find(m => {
-          try { return JSON.parse(m).type === "add_highlight"; } catch { return false; }
+        const highlightMsg = (socket as CapturingWebSocket).sentMessages.find((m) => {
+          try {
+            return JSON.parse(m).type === "add_highlight";
+          } catch {
+            return false;
+          }
         });
         expect(highlightMsg).toBeDefined();
         const payload = JSON.parse(highlightMsg!);
 
         // Runner reports a structured error correlated by the request's id.
-        socket!.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: payload.requestId,
-          success: false,
-          error: "Malformed request: a numeric value is out of range or not representable.",
-          timestamp: errorTimer.now()
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: payload.requestId,
+            success: false,
+            error: "Malformed request: a numeric value is out of range or not representable.",
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         const result = await errorTimer.resolvePromise(requestPromise);
         expect(result.success).toBe(false);
@@ -2447,7 +2648,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("unknown command errors are rewritten with Android runner upgrade guidance", async function() {
+    test("unknown command errors are rewritten with Android runner upgrade guidance", async function () {
       const errorTimer = new FakeTimer();
 
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
@@ -2455,36 +2656,46 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       const shape: HighlightShape = {
         type: "box",
         bounds: { x: 10, y: 20, width: 100, height: 80 },
-        style: { strokeColor: "#FF0000", strokeWidth: 4 }
+        style: { strokeColor: "#FF0000", strokeWidth: 4 },
       };
 
       try {
-        const requestPromise = testClient.requestAddHighlight("highlight-stale-runner", shape, 2000);
+        const requestPromise = testClient.requestAddHighlight(
+          "highlight-stale-runner",
+          shape,
+          2000,
+        );
 
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket as CapturingWebSocket, 2);
 
-        const highlightMsg = (socket as CapturingWebSocket).sentMessages.find(m => {
-          try { return JSON.parse(m).type === "add_highlight"; } catch { return false; }
+        const highlightMsg = (socket as CapturingWebSocket).sentMessages.find((m) => {
+          try {
+            return JSON.parse(m).type === "add_highlight";
+          } catch {
+            return false;
+          }
         });
         expect(highlightMsg).toBeDefined();
         const payload = JSON.parse(highlightMsg!);
 
-        socket!.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: payload.requestId,
-          success: false,
-          error: "Unknown command type: add_highlight",
-          timestamp: errorTimer.now()
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: payload.requestId,
+            success: false,
+            error: "Unknown command type: add_highlight",
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         const result = await errorTimer.resolvePromise(requestPromise);
         expect(result.success).toBe(false);
@@ -2499,7 +2710,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("a type:error frame with a non-matching requestId does not disturb other requests", async function() {
+    test("a type:error frame with a non-matching requestId does not disturb other requests", async function () {
       // A null/unknown requestId (e.g. an unparseable payload the runner couldn't correlate) must
       // be a safe no-op: it must not crash, and must not wrongly resolve an unrelated pending
       // request. Here an in-flight highlight request must survive a mismatched error frame and
@@ -2511,13 +2722,13 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       const shape: HighlightShape = {
         type: "box",
         bounds: { x: 10, y: 20, width: 100, height: 80 },
-        style: { strokeColor: "#FF0000", strokeWidth: 4 }
+        style: { strokeColor: "#FF0000", strokeWidth: 4 },
       };
 
       try {
@@ -2528,27 +2739,35 @@ describe("AndroidCtrlProxyClient", function() {
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket as CapturingWebSocket, 2);
 
-        const highlightMsg = (socket as CapturingWebSocket).sentMessages.find(m => {
-          try { return JSON.parse(m).type === "add_highlight"; } catch { return false; }
+        const highlightMsg = (socket as CapturingWebSocket).sentMessages.find((m) => {
+          try {
+            return JSON.parse(m).type === "add_highlight";
+          } catch {
+            return false;
+          }
         });
         const payload = JSON.parse(highlightMsg!);
 
         // Error frame for an unrelated / uncorrelated request — must be ignored.
-        socket!.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: "some-other-id",
-          success: false,
-          error: "Malformed request: the payload is not valid JSON",
-          timestamp: errorTimer.now()
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: "some-other-id",
+            success: false,
+            error: "Malformed request: the payload is not valid JSON",
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         // The real response for our request still arrives and resolves it.
-        socket!.simulateMessage(JSON.stringify({
-          type: "highlight_response",
-          requestId: payload.requestId,
-          success: true,
-          error: null
-        }));
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "highlight_response",
+            requestId: payload.requestId,
+            success: true,
+            error: null,
+          }),
+        );
 
         const result = await errorTimer.resolvePromise(requestPromise);
         expect(result.success).toBe(true);
@@ -2558,7 +2777,7 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  describe("hierarchy error frame correlation (issue #3032)", function() {
+  describe("hierarchy error frame correlation (issue #3032)", function () {
     // request_hierarchy does NOT await through RequestManager — it blocks in
     // CtrlProxyHierarchy.waitForFreshData for a hierarchy_update push. Before #3032 a runner
     // type:"error" frame for a hierarchy requestId no-op'd in resolveError and the caller hung to
@@ -2566,20 +2785,24 @@ describe("AndroidCtrlProxyClient", function() {
     // wait fast, while remaining a safe no-op for uncorrelated ids.
 
     const findSentMessageOfType = (socket: CapturingWebSocket, type: string): any | undefined => {
-      const raw = socket.sentMessages.find(m => {
-        try { return JSON.parse(m).type === type; } catch { return false; }
+      const raw = socket.sentMessages.find((m) => {
+        try {
+          return JSON.parse(m).type === type;
+        } catch {
+          return false;
+        }
       });
       return raw ? JSON.parse(raw) : undefined;
     };
 
-    test("a type:error frame for an in-flight hierarchy requestId fails requestHierarchySync fast", async function() {
+    test("a type:error frame for an in-flight hierarchy requestId fails requestHierarchySync fast", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       try {
@@ -2587,7 +2810,7 @@ describe("AndroidCtrlProxyClient", function() {
         // 10s hierarchy sync timeout — the whole point is to NOT wait for it.
         const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
 
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
@@ -2597,13 +2820,15 @@ describe("AndroidCtrlProxyClient", function() {
         expect(hierarchyMsg.requestId).toBeDefined();
 
         // Runner reports a structured handler failure correlated to the hierarchy requestId.
-        socket.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: hierarchyMsg.requestId,
-          success: false,
-          error: "request_hierarchy handler failed: view hierarchy extraction threw",
-          timestamp: errorTimer.now()
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: hierarchyMsg.requestId,
+            success: false,
+            error: "request_hierarchy handler failed: view hierarchy extraction threw",
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         // Fail fast: no timer advance toward the 10s timeout. Only flush microtasks/setImmediate.
         await flushPromises();
@@ -2617,21 +2842,21 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("a type:error frame with an unknown requestId does not disturb an in-flight hierarchy sync", async function() {
+    test("a type:error frame with an unknown requestId does not disturb an in-flight hierarchy sync", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       try {
         testClient.invalidateCache();
         const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
 
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
@@ -2640,24 +2865,28 @@ describe("AndroidCtrlProxyClient", function() {
         expect(hierarchyMsg).toBeDefined();
 
         // Error frame for an uncorrelated id — must be a safe no-op for the hierarchy wait.
-        socket.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: "some-unrelated-id",
-          success: false,
-          error: "Malformed request: the payload is not valid JSON",
-          timestamp: errorTimer.now()
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: "some-unrelated-id",
+            success: false,
+            error: "Malformed request: the payload is not valid JSON",
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         // The real hierarchy push for our request still arrives and resolves the sync normally.
-        socket.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: errorTimer.now(),
-          data: {
-            updatedAt: errorTimer.now(),
-            packageName: "com.example.app",
-            hierarchy: { text: "Recovered after uncorrelated error" }
-          }
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: errorTimer.now(),
+            data: {
+              updatedAt: errorTimer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "Recovered after uncorrelated error" },
+            },
+          }),
+        );
 
         const result = await errorTimer.resolvePromise(syncPromise);
 
@@ -2669,7 +2898,7 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  describe("hierarchy stale-nudge error frame correlation (issue #3061)", function() {
+  describe("hierarchy stale-nudge error frame correlation (issue #3061)", function () {
     // Sibling of #3032 for the request_hierarchy_if_stale nudge. That nudge is minted with a
     // `stale_` requestId from INSIDE waitForFreshData's interval callback (the "no push after 2s"
     // path). Before #3061 that id was never registered in pendingHierarchyRejectors, so a runner
@@ -2678,8 +2907,12 @@ describe("AndroidCtrlProxyClient", function() {
     // id during the stale window remains a safe no-op.
 
     const findSentMessageOfType = (socket: CapturingWebSocket, type: string): any | undefined => {
-      const raw = socket.sentMessages.find(m => {
-        try { return JSON.parse(m).type === type; } catch { return false; }
+      const raw = socket.sentMessages.find((m) => {
+        try {
+          return JSON.parse(m).type === type;
+        } catch {
+          return false;
+        }
       });
       return raw ? JSON.parse(raw) : undefined;
     };
@@ -2690,7 +2923,10 @@ describe("AndroidCtrlProxyClient", function() {
     // request_hierarchy send. Rather than assume a fixed number of flushes (a microtask-ordering
     // flake vector), retry advancing time until the nudge appears. Total advance stays well under
     // the 10s sync timeout so a later "no timeout occurred" assertion remains valid.
-    const driveUntilStaleNudge = async (socket: CapturingWebSocket, timer: FakeTimer): Promise<any> => {
+    const driveUntilStaleNudge = async (
+      socket: CapturingWebSocket,
+      timer: FakeTimer,
+    ): Promise<any> => {
       for (let attempt = 0; attempt < 3; attempt++) {
         await flushPromises();
         timer.advanceTime(2100);
@@ -2703,14 +2939,14 @@ describe("AndroidCtrlProxyClient", function() {
       return undefined;
     };
 
-    test("a type:error frame for an in-flight request_hierarchy_if_stale nudge fails the sync fast", async function() {
+    test("a type:error frame for an in-flight request_hierarchy_if_stale nudge fails the sync fast", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       try {
@@ -2718,7 +2954,7 @@ describe("AndroidCtrlProxyClient", function() {
         // 10s hierarchy sync timeout — the whole point is to NOT wait for it.
         const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
 
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
@@ -2734,13 +2970,15 @@ describe("AndroidCtrlProxyClient", function() {
         expect(String(staleMsg.requestId).startsWith("stale_")).toBe(true);
 
         // Runner reports a structured handler failure correlated to the stale nudge's requestId.
-        socket.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: staleMsg.requestId,
-          success: false,
-          error: "request_hierarchy_if_stale handler failed: view hierarchy extraction threw",
-          timestamp: errorTimer.now()
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: staleMsg.requestId,
+            success: false,
+            error: "request_hierarchy_if_stale handler failed: view hierarchy extraction threw",
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         // Fail fast: only flush microtasks/setImmediate, no advance toward the 10s timeout.
         await flushPromises();
@@ -2754,21 +2992,21 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("a type:error frame with an unknown requestId does not disturb the stale-nudge wait", async function() {
+    test("a type:error frame with an unknown requestId does not disturb the stale-nudge wait", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       try {
         testClient.invalidateCache();
         const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
 
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
@@ -2778,24 +3016,28 @@ describe("AndroidCtrlProxyClient", function() {
         expect(staleMsg).toBeDefined();
 
         // Error frame for an uncorrelated id — must be a safe no-op for the stale-nudge wait.
-        socket.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: "some-unrelated-id",
-          success: false,
-          error: "Malformed request: the payload is not valid JSON",
-          timestamp: errorTimer.now()
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: "some-unrelated-id",
+            success: false,
+            error: "Malformed request: the payload is not valid JSON",
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         // The real hierarchy push for our request still arrives and resolves the sync normally.
-        socket.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: errorTimer.now(),
-          data: {
-            updatedAt: errorTimer.now(),
-            packageName: "com.example.app",
-            hierarchy: { text: "Recovered after uncorrelated stale error" }
-          }
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: errorTimer.now(),
+            data: {
+              updatedAt: errorTimer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "Recovered after uncorrelated stale error" },
+            },
+          }),
+        );
 
         const result = await errorTimer.resolvePromise(syncPromise);
 
@@ -2806,7 +3048,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("a stale-nudge error frame does NOT discard stale cache on the getLatestHierarchy path", async function() {
+    test("a stale-nudge error frame does NOT discard stale cache on the getLatestHierarchy path", async function () {
       // getLatestHierarchy (unlike requestHierarchySync) enters waitForFreshData with NO primary
       // requestId — its timeout is meant to gracefully fall through to the stale cache. The stale
       // nudge is therefore left uncorrelated there (gated on `requestId` in waitForFreshData). This
@@ -2820,25 +3062,27 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       try {
         // Prime the connection + cache via a sync that a push resolves quickly.
         const primePromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
-        socket.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: errorTimer.now(),
-          data: {
-            updatedAt: errorTimer.now(),
-            packageName: "com.example.app",
-            hierarchy: { text: "Stale cache preserved" }
-          }
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: errorTimer.now(),
+            data: {
+              updatedAt: errorTimer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "Stale cache preserved" },
+            },
+          }),
+        );
         await errorTimer.resolvePromise(primePromise);
 
         // Let time pass so the cached data is stale relative to the next wait's start; this forces
@@ -2857,13 +3101,15 @@ describe("AndroidCtrlProxyClient", function() {
         expect(String(staleMsg.requestId).startsWith("stale_")).toBe(true);
 
         // Error frame for the stale id — must be a safe no-op on this path.
-        socket.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: staleMsg.requestId,
-          success: false,
-          error: "request_hierarchy_if_stale handler failed: view hierarchy extraction threw",
-          timestamp: errorTimer.now()
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: staleMsg.requestId,
+            success: false,
+            error: "request_hierarchy_if_stale handler failed: view hierarchy extraction threw",
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         // The wait falls through to its timeout and returns the STALE CACHE (not null).
         const result = await errorTimer.resolvePromise(latestPromise);
@@ -2876,7 +3122,7 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  describe("runner error surfacing via diagnostics (issue #3062)", function() {
+  describe("runner error surfacing via diagnostics (issue #3062)", function () {
     // Follow-up to #3032 / #3061. Those made a correlated runner type:"error" frame fail the
     // hierarchy wait fast, but requestHierarchySync still collapsed the rejection to `null` —
     // indistinguishable from a plain timeout `null`. #3062 threads a per-call `diagnostics`
@@ -2884,13 +3130,20 @@ describe("AndroidCtrlProxyClient", function() {
     // populated) apart from "the push never arrived" (timeout: null result, diagnostics untouched).
 
     const findSentMessageOfType = (socket: CapturingWebSocket, type: string): any | undefined => {
-      const raw = socket.sentMessages.find(m => {
-        try { return JSON.parse(m).type === type; } catch { return false; }
+      const raw = socket.sentMessages.find((m) => {
+        try {
+          return JSON.parse(m).type === type;
+        } catch {
+          return false;
+        }
       });
       return raw ? JSON.parse(raw) : undefined;
     };
 
-    const driveUntilStaleNudge = async (socket: CapturingWebSocket, timer: FakeTimer): Promise<any> => {
+    const driveUntilStaleNudge = async (
+      socket: CapturingWebSocket,
+      timer: FakeTimer,
+    ): Promise<any> => {
       for (let attempt = 0; attempt < 3; attempt++) {
         await flushPromises();
         timer.advanceTime(2100);
@@ -2903,22 +3156,28 @@ describe("AndroidCtrlProxyClient", function() {
       return undefined;
     };
 
-    test("a correlated runner error populates diagnostics.runnerError while still returning null", async function() {
+    test("a correlated runner error populates diagnostics.runnerError while still returning null", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, diagnostics);
+        const syncPromise = testClient.requestHierarchySync(
+          undefined,
+          false,
+          undefined,
+          10000,
+          diagnostics,
+        );
 
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
@@ -2928,13 +3187,15 @@ describe("AndroidCtrlProxyClient", function() {
         expect(hierarchyMsg.requestId).toBeDefined();
 
         const runnerText = "request_hierarchy handler failed: view hierarchy extraction threw";
-        socket.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: hierarchyMsg.requestId,
-          success: false,
-          error: runnerText,
-          timestamp: errorTimer.now()
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: hierarchyMsg.requestId,
+            success: false,
+            error: runnerText,
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         await flushPromises();
         const result = await syncPromise;
@@ -2950,23 +3211,29 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("a plain timeout leaves diagnostics.runnerError undefined (no misattribution)", async function() {
+    test("a plain timeout leaves diagnostics.runnerError undefined (no misattribution)", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
         // Short timeout; never deliver a push or an error frame -> genuine timeout.
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 3000, diagnostics);
+        const syncPromise = testClient.requestHierarchySync(
+          undefined,
+          false,
+          undefined,
+          3000,
+          diagnostics,
+        );
 
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
@@ -2981,43 +3248,53 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("an uncorrelated error id leaves diagnostics.runnerError undefined and the push still resolves", async function() {
+    test("an uncorrelated error id leaves diagnostics.runnerError undefined and the push still resolves", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, diagnostics);
+        const syncPromise = testClient.requestHierarchySync(
+          undefined,
+          false,
+          undefined,
+          10000,
+          diagnostics,
+        );
 
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
 
-        socket.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: "some-unrelated-id",
-          success: false,
-          error: "Malformed request: the payload is not valid JSON",
-          timestamp: errorTimer.now()
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: "some-unrelated-id",
+            success: false,
+            error: "Malformed request: the payload is not valid JSON",
+            timestamp: errorTimer.now(),
+          }),
+        );
 
-        socket.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: errorTimer.now(),
-          data: {
-            updatedAt: errorTimer.now(),
-            packageName: "com.example.app",
-            hierarchy: { text: "Recovered after uncorrelated error" }
-          }
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: errorTimer.now(),
+            data: {
+              updatedAt: errorTimer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "Recovered after uncorrelated error" },
+            },
+          }),
+        );
 
         const result = await errorTimer.resolvePromise(syncPromise);
 
@@ -3029,22 +3306,28 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("a correlated stale-nudge runner error also populates diagnostics.runnerError", async function() {
+    test("a correlated stale-nudge runner error also populates diagnostics.runnerError", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createCapturingWebSocketFactory(errorTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, diagnostics);
+        const syncPromise = testClient.requestHierarchySync(
+          undefined,
+          false,
+          undefined,
+          10000,
+          diagnostics,
+        );
 
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
@@ -3053,14 +3336,17 @@ describe("AndroidCtrlProxyClient", function() {
         expect(staleMsg).toBeDefined();
         expect(String(staleMsg.requestId).startsWith("stale_")).toBe(true);
 
-        const runnerText = "request_hierarchy_if_stale handler failed: view hierarchy extraction threw";
-        socket.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: staleMsg.requestId,
-          success: false,
-          error: runnerText,
-          timestamp: errorTimer.now()
-        }));
+        const runnerText =
+          "request_hierarchy_if_stale handler failed: view hierarchy extraction threw";
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: staleMsg.requestId,
+            success: false,
+            error: runnerText,
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         await flushPromises();
         const result = await syncPromise;
@@ -3073,7 +3359,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("verifyServiceReady surfaces the runner error text in its terminal warn", async function() {
+    test("verifyServiceReady surfaces the runner error text in its terminal warn", async function () {
       // Consumption test: prove the diagnostics text actually reaches an observable, default-level
       // log line (not just the dropped per-attempt debug), attributing the deterministic handler
       // failure instead of an anonymous "no hierarchy". Spy on the module logger's warn.
@@ -3090,7 +3376,7 @@ describe("AndroidCtrlProxyClient", function() {
         undefined,
         undefined,
         undefined,
-        log
+        log,
       );
 
       try {
@@ -3098,7 +3384,7 @@ describe("AndroidCtrlProxyClient", function() {
         // Single attempt so one correlated error frame drives it straight to the terminal warn.
         const verifyPromise = testClient.verifyServiceReady(1, 10, 10000);
 
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
@@ -3107,18 +3393,22 @@ describe("AndroidCtrlProxyClient", function() {
         expect(hierarchyMsg).toBeDefined();
 
         const runnerText = "request_hierarchy handler failed: view hierarchy extraction threw";
-        socket.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: hierarchyMsg.requestId,
-          success: false,
-          error: runnerText,
-          timestamp: errorTimer.now()
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: hierarchyMsg.requestId,
+            success: false,
+            error: runnerText,
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         const ready = await errorTimer.resolvePromise(verifyPromise);
 
         expect(ready).toBe(false);
-        const terminalWarn = log.at("warn").find(({ message }) => message.includes("Service not ready"));
+        const terminalWarn = log
+          .at("warn")
+          .find(({ message }) => message.includes("Service not ready"));
         expect(terminalWarn?.message).toContain(runnerText);
       } finally {
         await testClient.close();
@@ -3126,7 +3416,7 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  describe("verifyServiceReady deterministic runner-error short-circuit (issue #3097)", function() {
+  describe("verifyServiceReady deterministic runner-error short-circuit (issue #3097)", function () {
     // Follow-up to #3062. That surfaced the runner's structured error text to verifyServiceReady
     // via diagnostics, but the method still retried to exhaustion even when every attempt failed
     // with the SAME deterministic runner handler error. #3097 short-circuits the retry loop once
@@ -3136,10 +3426,14 @@ describe("AndroidCtrlProxyClient", function() {
 
     const sentHierarchyRequests = (socket: CapturingWebSocket): any[] =>
       socket.sentMessages
-        .map(m => {
-          try { return JSON.parse(m); } catch { return null; }
+        .map((m) => {
+          try {
+            return JSON.parse(m);
+          } catch {
+            return null;
+          }
         })
-        .filter(m => m && m.type === "request_hierarchy");
+        .filter((m) => m && m.type === "request_hierarchy");
 
     // Advance fake time in small steps (firing retry-delay sleeps and wait intervals) until the
     // Nth request_hierarchy frame has been sent — i.e. until the retry loop reaches attempt N.
@@ -3147,7 +3441,7 @@ describe("AndroidCtrlProxyClient", function() {
       socket: CapturingWebSocket,
       timer: FakeTimer,
       minCount: number,
-      stepMs: number = 250
+      stepMs: number = 250,
     ): Promise<any[]> => {
       for (let i = 0; i < 40; i++) {
         const msgs = sentHierarchyRequests(socket);
@@ -3164,15 +3458,17 @@ describe("AndroidCtrlProxyClient", function() {
       socket: CapturingWebSocket,
       timer: FakeTimer,
       requestId: string,
-      errorText: string
+      errorText: string,
     ): void => {
-      socket.simulateMessage(JSON.stringify({
-        type: "error",
-        requestId,
-        success: false,
-        error: errorText,
-        timestamp: timer.now()
-      }));
+      socket.simulateMessage(
+        JSON.stringify({
+          type: "error",
+          requestId,
+          success: false,
+          error: errorText,
+          timestamp: timer.now(),
+        }),
+      );
     };
 
     const createShortCircuitTestClient = (): {
@@ -3195,19 +3491,19 @@ describe("AndroidCtrlProxyClient", function() {
         undefined,
         undefined,
         undefined,
-        log
+        log,
       );
       return { testClient, getSocket, timer, log };
     };
 
-    test("identical runner error on 2 consecutive attempts short-circuits the remaining retries", async function() {
+    test("identical runner error on 2 consecutive attempts short-circuits the remaining retries", async function () {
       const { testClient, getSocket, timer, log } = createShortCircuitTestClient();
 
       try {
         testClient.invalidateCache();
         const verifyPromise = testClient.verifyServiceReady(5, 500, 10000);
 
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
@@ -3229,7 +3525,9 @@ describe("AndroidCtrlProxyClient", function() {
         expect(ready).toBe(false);
         // Short-circuited after 2 attempts: attempts 3-5 never sent a request.
         expect(sentHierarchyRequests(socket).length).toBe(2);
-        const terminalWarn = log.at("warn").find(({ message }) => message.includes("Service not ready"));
+        const terminalWarn = log
+          .at("warn")
+          .find(({ message }) => message.includes("Service not ready"));
         expect(terminalWarn?.message).toContain("short-circuited");
         expect(terminalWarn?.message).toContain("2/5 verification attempts");
         expect(terminalWarn?.message).toContain(runnerText);
@@ -3238,7 +3536,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("a transient runner error on the first attempt still recovers on the retry", async function() {
+    test("a transient runner error on the first attempt still recovers on the retry", async function () {
       // The regression guard for the startup path this method exists to verify: ONE handler
       // error during bring-up must not conclude "deterministic" — the retry still runs and a
       // successful push flips the verification to ready.
@@ -3248,53 +3546,67 @@ describe("AndroidCtrlProxyClient", function() {
         testClient.invalidateCache();
         const verifyPromise = testClient.verifyServiceReady(5, 500, 10000);
 
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
         // Attempt 1: correlated runner error (transient bring-up failure).
         let msgs = await advanceUntilHierarchyRequests(socket, timer, 1);
         expect(msgs.length).toBe(1);
-        simulateRunnerError(socket, timer, msgs[0].requestId, "request_hierarchy handler failed: service still starting");
+        simulateRunnerError(
+          socket,
+          timer,
+          msgs[0].requestId,
+          "request_hierarchy handler failed: service still starting",
+        );
         await flushPromises();
 
         // Attempt 2: the service came up; deliver a fresh hierarchy push.
         msgs = await advanceUntilHierarchyRequests(socket, timer, 2);
         expect(msgs.length).toBe(2);
-        socket.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: timer.now(),
-          data: {
-            updatedAt: timer.now(),
-            packageName: "com.example.app",
-            hierarchy: { text: "Service recovered" }
-          }
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: timer.now(),
+            data: {
+              updatedAt: timer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "Service recovered" },
+            },
+          }),
+        );
 
         const ready = await timer.resolvePromise(verifyPromise);
 
         expect(ready).toBe(true);
-        expect(log.at("warn").find(({ message }) => message.includes("Service not ready"))).toBeUndefined();
+        expect(
+          log.at("warn").find(({ message }) => message.includes("Service not ready")),
+        ).toBeUndefined();
       } finally {
         await testClient.close();
       }
     });
 
-    test("differing runner error texts never short-circuit (full retry budget)", async function() {
+    test("differing runner error texts never short-circuit (full retry budget)", async function () {
       const { testClient, getSocket, timer, log } = createShortCircuitTestClient();
 
       try {
         testClient.invalidateCache();
         const verifyPromise = testClient.verifyServiceReady(3, 500, 10000);
 
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
         for (let attempt = 1; attempt <= 3; attempt++) {
           const msgs = await advanceUntilHierarchyRequests(socket, timer, attempt);
           expect(msgs.length).toBe(attempt);
-          simulateRunnerError(socket, timer, msgs[attempt - 1].requestId, `handler failed: distinct cause ${attempt}`);
+          simulateRunnerError(
+            socket,
+            timer,
+            msgs[attempt - 1].requestId,
+            `handler failed: distinct cause ${attempt}`,
+          );
           await flushPromises();
         }
 
@@ -3303,7 +3615,9 @@ describe("AndroidCtrlProxyClient", function() {
         expect(ready).toBe(false);
         // All 3 attempts ran: varying error text is not treated as deterministic.
         expect(sentHierarchyRequests(socket).length).toBe(3);
-        const terminalWarn = log.at("warn").find(({ message }) => message.includes("Service not ready"));
+        const terminalWarn = log
+          .at("warn")
+          .find(({ message }) => message.includes("Service not ready"));
         expect(terminalWarn?.message).not.toContain("short-circuited");
         expect(terminalWarn?.message).toContain("after 3 verification attempts");
         expect(terminalWarn?.message).toContain("distinct cause 3");
@@ -3312,7 +3626,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("a plain timeout between identical runner errors resets the streak", async function() {
+    test("a plain timeout between identical runner errors resets the streak", async function () {
       // error X -> timeout -> error X -> error X with maxAttempts=5: the timeout on attempt 2
       // breaks the streak, so the short-circuit lands after attempt 4 (streak rebuilt on 3+4),
       // not after attempt 3 (which a no-reset implementation would produce).
@@ -3323,7 +3637,7 @@ describe("AndroidCtrlProxyClient", function() {
         // timeoutMs=1000 keeps the timed-out attempt below the 2000ms stale-nudge threshold.
         const verifyPromise = testClient.verifyServiceReady(5, 500, 1000);
 
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
@@ -3352,7 +3666,9 @@ describe("AndroidCtrlProxyClient", function() {
         expect(ready).toBe(false);
         // 4 attempts, not 3 (timeout reset the streak) and not 5 (short-circuit stopped attempt 5).
         expect(sentHierarchyRequests(socket).length).toBe(4);
-        const terminalWarn = log.at("warn").find(({ message }) => message.includes("Service not ready"));
+        const terminalWarn = log
+          .at("warn")
+          .find(({ message }) => message.includes("Service not ready"));
         expect(terminalWarn?.message).toContain("short-circuited");
         expect(terminalWarn?.message).toContain("4/5 verification attempts");
       } finally {
@@ -3361,7 +3677,7 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  describe("hierarchy ADB-broadcast fallback error frame correlation (issue #3089)", function() {
+  describe("hierarchy ADB-broadcast fallback error frame correlation (issue #3089)", function () {
     // Last member of the #3032/#3061 waitForFreshData hang class. When the WebSocket
     // request_hierarchy send fails, requestHierarchySync falls back to an
     // `am broadcast ... EXTRACT_HIERARCHY --es uuid sync_<ts>_<id>` and then waits for a push.
@@ -3380,15 +3696,24 @@ describe("AndroidCtrlProxyClient", function() {
         const str = data.toString();
         this.sentMessages.push(str);
         let parsed: any = null;
-        try { parsed = JSON.parse(str); } catch { parsed = null; }
-        if (parsed && (parsed.type === "request_hierarchy" || parsed.type === "request_hierarchy_if_stale")) {
+        try {
+          parsed = JSON.parse(str);
+        } catch {
+          parsed = null;
+        }
+        if (
+          parsed &&
+          (parsed.type === "request_hierarchy" || parsed.type === "request_hierarchy_if_stale")
+        ) {
           throw new Error("Simulated WebSocket send failure (forces ADB-broadcast fallback)");
         }
         // Any other frame: accept silently (base FakeWebSocket.send only checks OPEN and no-ops).
       }
     }
 
-    const createSendFailingFactory = (timer?: FakeTimer): {
+    const createSendFailingFactory = (
+      timer?: FakeTimer,
+    ): {
       factory: (url: string) => HierarchySendFailingWebSocket;
       getSocket: () => HierarchySendFailingWebSocket | null;
     } => {
@@ -3398,7 +3723,7 @@ describe("AndroidCtrlProxyClient", function() {
           socket = new HierarchySendFailingWebSocket(url, "none", 0, timer);
           return socket;
         },
-        getSocket: () => socket
+        getSocket: () => socket,
       };
     };
 
@@ -3407,26 +3732,26 @@ describe("AndroidCtrlProxyClient", function() {
     // send throws, so retry across setImmediate flushes rather than assuming a fixed ordering.
     const waitForBroadcastUuid = async (adb: FakeAdbExecutor): Promise<string | undefined> => {
       for (let attempt = 0; attempt < 10; attempt++) {
-        const cmd = adb.getExecutedCommands().find(c => c.includes("EXTRACT_HIERARCHY"));
+        const cmd = adb.getExecutedCommands().find((c) => c.includes("EXTRACT_HIERARCHY"));
         if (cmd) {
           const match = cmd.match(/--es uuid (sync_[^\s"]+)/);
           if (match) {
             return match[1];
           }
         }
-        await new Promise(resolve => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve));
       }
       return undefined;
     };
 
-    test("a type:error frame echoing the broadcast sync_ uuid fails requestHierarchySync fast", async function() {
+    test("a type:error frame echoing the broadcast sync_ uuid fails requestHierarchySync fast", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createSendFailingFactory(errorTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       try {
@@ -3434,7 +3759,7 @@ describe("AndroidCtrlProxyClient", function() {
         // 10s hierarchy sync timeout — the whole point is to NOT wait for it.
         const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
 
-        const socket = await waitForSocket(getSocket) as HierarchySendFailingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as HierarchySendFailingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
@@ -3447,13 +3772,15 @@ describe("AndroidCtrlProxyClient", function() {
 
         // Runner reports a correlated handler failure echoing the broadcast uuid (issue #3089: the
         // EXTRACT_HIERARCHY handler emits a type:"error" frame keyed by the broadcast uuid on failure).
-        socket.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: uuid,
-          success: false,
-          error: "Failed to extract hierarchy",
-          timestamp: errorTimer.now()
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: uuid,
+            success: false,
+            error: "Failed to extract hierarchy",
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         // Fail fast: no timer advance toward the 10s timeout. Only flush microtasks/setImmediate.
         await flushPromises();
@@ -3467,22 +3794,28 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("a broadcast-fallback runner error populates diagnostics.runnerError (parity with #3062)", async function() {
+    test("a broadcast-fallback runner error populates diagnostics.runnerError (parity with #3062)", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createSendFailingFactory(errorTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       try {
         testClient.invalidateCache();
         const diagnostics: HierarchySyncDiagnostics = {};
-        const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000, diagnostics);
+        const syncPromise = testClient.requestHierarchySync(
+          undefined,
+          false,
+          undefined,
+          10000,
+          diagnostics,
+        );
 
-        const socket = await waitForSocket(getSocket) as HierarchySendFailingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as HierarchySendFailingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
@@ -3491,13 +3824,15 @@ describe("AndroidCtrlProxyClient", function() {
         await flushPromises();
 
         const runnerText = "Failed to extract hierarchy";
-        socket.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: uuid,
-          success: false,
-          error: runnerText,
-          timestamp: errorTimer.now()
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: uuid,
+            success: false,
+            error: runnerText,
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         await flushPromises();
         const result = await syncPromise;
@@ -3512,21 +3847,21 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test("an uncorrelated error id during the broadcast fallback is a safe no-op; the push still resolves", async function() {
+    test("an uncorrelated error id during the broadcast fallback is a safe no-op; the push still resolves", async function () {
       const errorTimer = new FakeTimer();
       const { factory, getSocket } = createSendFailingFactory(errorTimer);
       const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       try {
         testClient.invalidateCache();
         const syncPromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
 
-        const socket = await waitForSocket(getSocket) as HierarchySendFailingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as HierarchySendFailingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
 
@@ -3535,35 +3870,41 @@ describe("AndroidCtrlProxyClient", function() {
         await flushPromises();
 
         // Error frame for an uncorrelated id — must be a safe no-op for the broadcast-fallback wait.
-        socket.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: "some-unrelated-id",
-          success: false,
-          error: "Malformed request: the payload is not valid JSON",
-          timestamp: errorTimer.now()
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: "some-unrelated-id",
+            success: false,
+            error: "Malformed request: the payload is not valid JSON",
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         // The real hierarchy push for our request still arrives and resolves the sync normally.
-        socket.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: errorTimer.now(),
-          data: {
-            updatedAt: errorTimer.now(),
-            packageName: "com.example.app",
-            hierarchy: { text: "Recovered after uncorrelated broadcast error" }
-          }
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: errorTimer.now(),
+            data: {
+              updatedAt: errorTimer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "Recovered after uncorrelated broadcast error" },
+            },
+          }),
+        );
 
         const result = await errorTimer.resolvePromise(syncPromise);
 
         expect(result).not.toBeNull();
-        expect(result!.hierarchy.hierarchy.text).toBe("Recovered after uncorrelated broadcast error");
+        expect(result!.hierarchy.hierarchy.text).toBe(
+          "Recovered after uncorrelated broadcast error",
+        );
       } finally {
         await testClient.close();
       }
     });
 
-    test("a sync_-prefixed error frame does NOT disturb the getLatestHierarchy stale-cache path", async function() {
+    test("a sync_-prefixed error frame does NOT disturb the getLatestHierarchy stale-cache path", async function () {
       // getLatestHierarchy never mints a broadcast sync_ uuid and enters waitForFreshData with NO
       // requestId — its timeout is meant to gracefully fall through to the stale cache. This locks in
       // that the #3089 correlation is scoped to requestHierarchySync: a sync_-shaped error frame is an
@@ -3574,25 +3915,27 @@ describe("AndroidCtrlProxyClient", function() {
         testDevice,
         fakeAdb,
         factory,
-        errorTimer
+        errorTimer,
       );
 
       try {
         // Prime the connection + cache via a sync that a push resolves quickly.
         const primePromise = testClient.requestHierarchySync(undefined, false, undefined, 10000);
-        const socket = await waitForSocket(getSocket) as CapturingWebSocket;
+        const socket = (await waitForSocket(getSocket)) as CapturingWebSocket;
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
         await waitForSentMessages(socket, 1);
-        socket.simulateMessage(JSON.stringify({
-          type: "hierarchy_update",
-          timestamp: errorTimer.now(),
-          data: {
-            updatedAt: errorTimer.now(),
-            packageName: "com.example.app",
-            hierarchy: { text: "Stale cache preserved" }
-          }
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "hierarchy_update",
+            timestamp: errorTimer.now(),
+            data: {
+              updatedAt: errorTimer.now(),
+              packageName: "com.example.app",
+              hierarchy: { text: "Stale cache preserved" },
+            },
+          }),
+        );
         await errorTimer.resolvePromise(primePromise);
 
         // Let time pass so the cached data is stale relative to the next wait's start.
@@ -3602,13 +3945,15 @@ describe("AndroidCtrlProxyClient", function() {
 
         // Inject a sync_-shaped error frame — no rejector is registered for it on this path.
         await flushPromises();
-        socket.simulateMessage(JSON.stringify({
-          type: "error",
-          requestId: `sync_${errorTimer.now()}_deadbeef`,
-          success: false,
-          error: "Failed to extract hierarchy",
-          timestamp: errorTimer.now()
-        }));
+        socket.simulateMessage(
+          JSON.stringify({
+            type: "error",
+            requestId: `sync_${errorTimer.now()}_deadbeef`,
+            success: false,
+            error: "Failed to extract hierarchy",
+            timestamp: errorTimer.now(),
+          }),
+        );
 
         // The wait falls through to its timeout and returns the STALE CACHE (not null).
         const result = await errorTimer.resolvePromise(latestPromise);
@@ -3621,8 +3966,8 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  describe("bindSession", function() {
-    afterEach(function() {
+  describe("bindSession", function () {
+    afterEach(function () {
       NavigationGraphManager.resetInstance();
     });
 
@@ -3631,12 +3976,12 @@ describe("AndroidCtrlProxyClient", function() {
     // the pool guarantees one live session per device at a time. These assertions
     // make a routing-semantics regression fail loudly instead of silently mixing
     // one session's navigation state into another's.
-    test("is unbound (null) until a session is bound", function() {
+    test("is unbound (null) until a session is bound", function () {
       // The per-test client from beforeEach is created without a session bound.
       expect(accessibilityServiceClient.getBoundSessionId()).toBeNull();
     });
 
-    test("is last-writer-wins: the most recently bound session is the active one", function() {
+    test("is last-writer-wins: the most recently bound session is the active one", function () {
       accessibilityServiceClient.bindSession("session-A");
       expect(accessibilityServiceClient.getBoundSessionId()).toBe("session-A");
 
@@ -3646,7 +3991,7 @@ describe("AndroidCtrlProxyClient", function() {
       expect(accessibilityServiceClient.getBoundSessionId()).toBe("session-B");
     });
 
-    test("re-binding the same session is idempotent", function() {
+    test("re-binding the same session is idempotent", function () {
       accessibilityServiceClient.bindSession("session-A");
       accessibilityServiceClient.bindSession("session-A");
       expect(accessibilityServiceClient.getBoundSessionId()).toBe("session-A");
@@ -3660,11 +4005,13 @@ describe("AndroidCtrlProxyClient", function() {
 
     test("binds an explicitly forwarded initial hierarchy for later static-screen screenshots", () => {
       let backoffStarts = 0;
-      (accessibilityServiceClient as any).startScreenshotBackoff = () => { backoffStarts++; };
+      (accessibilityServiceClient as any).startScreenshotBackoff = () => {
+        backoffStarts++;
+      };
 
       accessibilityServiceClient.recordInitialObservationStreamHierarchy(
         hierarchyWithScreenSize(1080, 2340),
-        41
+        41,
       );
 
       expect((accessibilityServiceClient as any).screenGeometry.bind()).toEqual({
@@ -3682,7 +4029,7 @@ describe("AndroidCtrlProxyClient", function() {
 
       accessibilityServiceClient.recordInitialObservationStreamHierarchy(
         hierarchyWithScreenSize(1080, 2340),
-        null
+        null,
       );
 
       expect(geometry.bind()).toBeNull();
@@ -3691,7 +4038,9 @@ describe("AndroidCtrlProxyClient", function() {
     test("claims provenance after a hierarchy is forwarded to the observation stream", async () => {
       const socket = await startStreamServerWithScreenshotSubscriber();
 
-      (accessibilityServiceClient as any).handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
+      (accessibilityServiceClient as any).handleHierarchyUpdate(
+        hierarchyWithScreenSize(1080, 2340),
+      );
       pushScreenshotThroughClient(pngFrame(1080, 2340));
 
       const updates = getScreenshotUpdates(socket);
@@ -3703,7 +4052,9 @@ describe("AndroidCtrlProxyClient", function() {
       const socket = await startStreamServerWithScreenshotSubscriber();
 
       // Establish a real capture first, so an unconditional claim would have an id to attach.
-      (accessibilityServiceClient as any).handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
+      (accessibilityServiceClient as any).handleHierarchyUpdate(
+        hierarchyWithScreenSize(1080, 2340),
+      );
       socket.reset();
 
       // The device changes resolution and that hierarchy's push is suppressed (explicit
@@ -3740,13 +4091,17 @@ describe("AndroidCtrlProxyClient", function() {
       // hierarchy and let the desktop tap stale content.
       const socket = await startStreamServerWithScreenshotSubscriber();
 
-      (accessibilityServiceClient as any).handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
+      (accessibilityServiceClient as any).handleHierarchyUpdate(
+        hierarchyWithScreenSize(1080, 2340),
+      );
       const boundToScreenA = (accessibilityServiceClient as any).screenGeometry.bind();
       expect(boundToScreenA).not.toBeNull();
 
       // Screen B arrives and is forwarded while the frame is still in flight. Same resolution, so
       // the geometry cache is unchanged and the provenance stays valid — only the capture moves.
-      (accessibilityServiceClient as any).handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
+      (accessibilityServiceClient as any).handleHierarchyUpdate(
+        hierarchyWithScreenSize(1080, 2340),
+      );
       const currentAfterB = (accessibilityServiceClient as any).screenGeometry.bind();
       expect(currentAfterB.captureSequence).toBeGreaterThan(boundToScreenA.captureSequence);
       socket.reset();
@@ -3755,7 +4110,7 @@ describe("AndroidCtrlProxyClient", function() {
       (accessibilityServiceClient as any).pushScreenshotToObservationStream(
         pngFrame(1080, 2340),
         { screenshotMimeType: "image/png", screenshotFormat: "png" },
-        boundToScreenA
+        boundToScreenA,
       );
 
       const updates = getScreenshotUpdates(socket);
@@ -3767,7 +4122,9 @@ describe("AndroidCtrlProxyClient", function() {
     test("drops provenance again when the device resolution changes", async () => {
       const socket = await startStreamServerWithScreenshotSubscriber();
 
-      (accessibilityServiceClient as any).handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
+      (accessibilityServiceClient as any).handleHierarchyUpdate(
+        hierarchyWithScreenSize(1080, 2340),
+      );
       pushScreenshotThroughClient(pngFrame(1080, 2340));
       expect(getScreenshotUpdates(socket)[0].captureSequence).toBeGreaterThan(0);
       socket.reset();
@@ -3807,7 +4164,9 @@ describe("AndroidCtrlProxyClient", function() {
     });
 
     test("legacy hierarchy without the fields leaves metadata null and behavior unchanged", () => {
-      (accessibilityServiceClient as any).handleHierarchyUpdate(hierarchyWithScreenSize(1080, 2340));
+      (accessibilityServiceClient as any).handleHierarchyUpdate(
+        hierarchyWithScreenSize(1080, 2340),
+      );
 
       expect(accessibilityServiceClient.getScreenScaleMetadata()).toBeNull();
       const geometry = (accessibilityServiceClient as any).screenGeometry;
@@ -3835,8 +4194,8 @@ describe("AndroidCtrlProxyClient", function() {
     });
   });
 
-  describe("shared rate-limit floor accounting (issue #4927)", function() {
-    test("one-shot requestScreenshot advances the shared floor clock so the stream scheduler coalesces around it", async function() {
+  describe("shared rate-limit floor accounting (issue #4927)", function () {
+    test("one-shot requestScreenshot advances the shared floor clock so the stream scheduler coalesces around it", async function () {
       const localTimer = new FakeTimer();
       localTimer.enableAutoAdvance();
       const fakeScheduler = new FakeScreenshotBackoffScheduler();
@@ -3854,11 +4213,11 @@ describe("AndroidCtrlProxyClient", function() {
         undefined, // sdkEventIngestor
         undefined, // loggerInstance
         undefined, // certificateFileSystem
-        fakeScheduler
+        fakeScheduler,
       );
       client.invalidateCache();
       await client.ensureConnected();
-      const socket = await waitForSocket(getSocket) as CapturingWebSocket | null;
+      const socket = (await waitForSocket(getSocket)) as CapturingWebSocket | null;
       await waitForSocketOpen(socket);
       if (!socket) {
         throw new Error("Expected capturing CtrlProxy socket");
@@ -3874,16 +4233,29 @@ describe("AndroidCtrlProxyClient", function() {
       await waitForSentMessages(socket, before + 1);
 
       const req = socket.sentMessages
-        .map(raw => { try { return JSON.parse(raw); } catch { return null; } })
+        .map((raw) => {
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return null;
+          }
+        })
         .reverse()
-        .find(m => m && m.type === "request_screenshot");
+        .find((m) => m && m.type === "request_screenshot");
       expect(req).toBeTruthy();
       expect(fakeScheduler.noteCaptureStartedCalls).toBe(1);
 
       // Resolve the request so the pending promise settles; the assertion above is the contract.
-      socket.emit("message", JSON.stringify({
-        type: "screenshot", requestId: req.requestId, data: "jpeg-base64", format: "jpeg", timestamp: 1,
-      }));
+      socket.emit(
+        "message",
+        JSON.stringify({
+          type: "screenshot",
+          requestId: req.requestId,
+          data: "jpeg-base64",
+          format: "jpeg",
+          timestamp: 1,
+        }),
+      );
       await capture.catch(() => undefined);
 
       await client.close();

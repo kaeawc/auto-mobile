@@ -5,7 +5,13 @@ import ts from "typescript";
 const SOURCE_ROOT = "src";
 const OWNER = "src/utils/ios-cmdline-tools/SimulatorTccSqliteClient.ts";
 const SQLITE_COMMAND = "sqlite3";
-const ARGV_EXECUTION_NAMES = new Set(["executeCommand", "execFile", "execFileSync", "spawn", "spawnSync"]);
+const ARGV_EXECUTION_NAMES = new Set([
+  "executeCommand",
+  "execFile",
+  "execFileSync",
+  "spawn",
+  "spawnSync",
+]);
 const SHELL_EXECUTION_NAMES = new Set(["exec", "execSync"]);
 const SHELL_COMMAND_NAMES = new Set(["sh", "bash", "zsh"]);
 
@@ -21,7 +27,7 @@ interface Violation {
 }
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
       return sourceFiles(path);
@@ -65,7 +71,13 @@ function findViolations(file: string): Violation[] {
   if (!source.includes(SQLITE_COMMAND)) {
     return [];
   }
-  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
   const violations: Violation[] = [];
   const sqliteCommandVariables = new Set<string>();
   const executionAliases = new Set<string>();
@@ -93,7 +105,9 @@ function findViolations(file: string): Violation[] {
       return false;
     }
     if (ts.isArrayLiteralExpression(expression)) {
-      return expression.elements.some(element => ts.isExpression(element) && containsSqliteCommand(element));
+      return expression.elements.some(
+        (element) => ts.isExpression(element) && containsSqliteCommand(element),
+      );
     }
     return expression.getText(sourceFile).includes(SQLITE_COMMAND);
   };
@@ -104,21 +118,37 @@ function findViolations(file: string): Violation[] {
         sqliteCommandVariables.add(node.name.text);
       }
       const initializerName = commandName(node.initializer as ts.LeftHandSideExpression);
-      if (initializerName && (ARGV_EXECUTION_NAMES.has(initializerName) || executionAliases.has(initializerName))) {
+      if (
+        initializerName &&
+        (ARGV_EXECUTION_NAMES.has(initializerName) || executionAliases.has(initializerName))
+      ) {
         executionAliases.add(node.name.text);
       }
     }
     if (ts.isCallExpression(node)) {
       const name = commandName(node.expression);
       const firstArgument = stringValue(node.arguments[0]);
-      const isArgvExecution = ARGV_EXECUTION_NAMES.has(name ?? "") || executionAliases.has(name ?? "");
-      const isShellExecution = SHELL_EXECUTION_NAMES.has(name ?? "") || executionAliases.has(name ?? "");
+      const isArgvExecution =
+        ARGV_EXECUTION_NAMES.has(name ?? "") || executionAliases.has(name ?? "");
+      const isShellExecution =
+        SHELL_EXECUTION_NAMES.has(name ?? "") || executionAliases.has(name ?? "");
       const directArgvSqlite = isArgvExecution && isSqliteExecutionArgument(node.arguments[0]);
       const directShellSqlite = isShellExecution && containsSqliteCommand(node.arguments[0]);
-      const wrappedShellSqlite = isArgvExecution && firstArgument !== undefined && isShellExecutablePath(firstArgument) && node.arguments.slice(1).some(containsSqliteCommand);
+      const wrappedShellSqlite =
+        isArgvExecution &&
+        firstArgument !== undefined &&
+        isShellExecutablePath(firstArgument) &&
+        node.arguments.slice(1).some(containsSqliteCommand);
       if (directArgvSqlite || directShellSqlite || wrappedShellSqlite) {
-        const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-        violations.push({ file, line: line + 1, column: character + 1, text: node.getText(sourceFile) });
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+          node.getStart(sourceFile),
+        );
+        violations.push({
+          file,
+          line: line + 1,
+          column: character + 1,
+          text: node.getText(sourceFile),
+        });
       }
     }
     ts.forEachChild(node, visit);
@@ -129,13 +159,19 @@ function findViolations(file: string): Violation[] {
 }
 
 const violations = sourceFiles(SOURCE_ROOT)
-  .filter(file => file.replaceAll("\\", "/") !== OWNER && !DOCUMENTED_DIAGNOSTIC_EXCEPTIONS.has(file.replaceAll("\\", "/")))
+  .filter(
+    (file) =>
+      file.replaceAll("\\", "/") !== OWNER &&
+      !DOCUMENTED_DIAGNOSTIC_EXCEPTIONS.has(file.replaceAll("\\", "/")),
+  )
   .flatMap(findViolations);
 
 if (violations.length > 0) {
   console.error("error: simulator TCC sqlite3 execution must use SimulatorTccSqliteClient:");
   for (const violation of violations) {
-    console.error(`${relative(SOURCE_ROOT, violation.file)}:${violation.line}:${violation.column}: ${violation.text}`);
+    console.error(
+      `${relative(SOURCE_ROOT, violation.file)}:${violation.line}:${violation.column}: ${violation.text}`,
+    );
   }
   process.exit(1);
 }

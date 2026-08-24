@@ -61,27 +61,27 @@ interface MockClient {
 
 function makeFormScreenObserve(): ObserveResult {
   const nameField: Element = {
-    "bounds": { left: 16, top: 120, right: 374, bottom: 164 },
-    "text": "",
+    bounds: { left: 16, top: 120, right: 374, bottom: 164 },
+    text: "",
     "content-desc": "Full name",
     "resource-id": "nameInput",
-    "class": "UITextField",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "enabled": true,
+    class: "UITextField",
+    clickable: true,
+    focusable: true,
+    focused: false,
+    enabled: true,
   };
 
   const emailField: Element = {
-    "bounds": { left: 16, top: 184, right: 374, bottom: 228 },
-    "text": "",
+    bounds: { left: 16, top: 184, right: 374, bottom: 228 },
+    text: "",
     "content-desc": "Email address",
     "resource-id": "emailInput",
-    "class": "UITextField",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "enabled": true,
+    class: "UITextField",
+    clickable: true,
+    focusable: true,
+    focused: false,
+    enabled: true,
   };
 
   // UISwitch grouped with its label.
@@ -89,28 +89,28 @@ function makeFormScreenObserve(): ObserveResult {
   // includes both the label text and the switch state ("off" or "on").
   // The child UILabel is not accessible separately.
   const termsToggle: Element = {
-    "bounds": { left: 16, top: 280, right: 374, bottom: 328 },
-    "text": "",
+    bounds: { left: 16, top: 280, right: 374, bottom: 328 },
+    text: "",
     "content-desc": "Accept terms and conditions, off",
     "resource-id": "termsToggle",
-    "class": "UISwitch",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "checked": false,
-    "enabled": true,
+    class: "UISwitch",
+    clickable: true,
+    focusable: true,
+    focused: false,
+    checked: false,
+    enabled: true,
   };
 
   const submitButton: Element = {
-    "bounds": { left: 16, top: 380, right: 374, bottom: 424 },
-    "text": "Submit",
+    bounds: { left: 16, top: 380, right: 374, bottom: 424 },
+    text: "Submit",
     "content-desc": "Submit",
     "resource-id": "submitButton",
-    "class": "UIButton",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "enabled": false, // Disabled until terms are accepted
+    class: "UIButton",
+    clickable: true,
+    focusable: true,
+    focused: false,
+    enabled: false, // Disabled until terms are accepted
   };
 
   return {
@@ -136,52 +136,52 @@ function makeFormScreenObserve(): ObserveResult {
 
 function makeAfterNameInputObserve(): ObserveResult {
   const nameField: Element = {
-    "bounds": { left: 16, top: 120, right: 374, bottom: 164 },
-    "text": "Jane Smith",
+    bounds: { left: 16, top: 120, right: 374, bottom: 164 },
+    text: "Jane Smith",
     "content-desc": "Full name",
     "resource-id": "nameInput",
-    "class": "UITextField",
-    "clickable": true,
-    "focusable": true,
-    "focused": true,
-    "enabled": true,
+    class: "UITextField",
+    clickable: true,
+    focusable: true,
+    focused: true,
+    enabled: true,
   };
 
   const emailField: Element = {
-    "bounds": { left: 16, top: 184, right: 374, bottom: 228 },
-    "text": "",
+    bounds: { left: 16, top: 184, right: 374, bottom: 228 },
+    text: "",
     "content-desc": "Email address",
     "resource-id": "emailInput",
-    "class": "UITextField",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "enabled": true,
+    class: "UITextField",
+    clickable: true,
+    focusable: true,
+    focused: false,
+    enabled: true,
   };
 
   const termsToggle: Element = {
-    "bounds": { left: 16, top: 280, right: 374, bottom: 328 },
-    "text": "",
+    bounds: { left: 16, top: 280, right: 374, bottom: 328 },
+    text: "",
     "content-desc": "Accept terms and conditions, off",
     "resource-id": "termsToggle",
-    "class": "UISwitch",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "checked": false,
-    "enabled": true,
+    class: "UISwitch",
+    clickable: true,
+    focusable: true,
+    focused: false,
+    checked: false,
+    enabled: true,
   };
 
   const submitButton: Element = {
-    "bounds": { left: 16, top: 380, right: 374, bottom: 424 },
-    "text": "Submit",
+    bounds: { left: 16, top: 380, right: 374, bottom: 424 },
+    text: "Submit",
     "content-desc": "Submit",
     "resource-id": "submitButton",
-    "class": "UIButton",
-    "clickable": true,
-    "focusable": false,
-    "focused": false,
-    "enabled": false,
+    class: "UIButton",
+    clickable: true,
+    focusable: false,
+    focused: false,
+    enabled: false,
   };
 
   return {
@@ -208,54 +208,54 @@ function makeAfterNameInputObserve(): ObserveResult {
 
 function makeAfterTermsToggleObserve(): ObserveResult {
   const nameField: Element = {
-    "bounds": { left: 16, top: 120, right: 374, bottom: 164 },
-    "text": "Jane Smith",
+    bounds: { left: 16, top: 120, right: 374, bottom: 164 },
+    text: "Jane Smith",
     "content-desc": "Full name",
     "resource-id": "nameInput",
-    "class": "UITextField",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "enabled": true,
+    class: "UITextField",
+    clickable: true,
+    focusable: true,
+    focused: false,
+    enabled: true,
   };
 
   const emailField: Element = {
-    "bounds": { left: 16, top: 184, right: 374, bottom: 228 },
-    "text": "jane@example.com",
+    bounds: { left: 16, top: 184, right: 374, bottom: 228 },
+    text: "jane@example.com",
     "content-desc": "Email address",
     "resource-id": "emailInput",
-    "class": "UITextField",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "enabled": true,
+    class: "UITextField",
+    clickable: true,
+    focusable: true,
+    focused: false,
+    enabled: true,
   };
 
   // Toggle state changed: content-desc now includes "on" instead of "off"
   const termsToggle: Element = {
-    "bounds": { left: 16, top: 280, right: 374, bottom: 328 },
-    "text": "",
+    bounds: { left: 16, top: 280, right: 374, bottom: 328 },
+    text: "",
     "content-desc": "Accept terms and conditions, on",
     "resource-id": "termsToggle",
-    "class": "UISwitch",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "checked": true,
-    "enabled": true,
+    class: "UISwitch",
+    clickable: true,
+    focusable: true,
+    focused: false,
+    checked: true,
+    enabled: true,
   };
 
   // Submit button is now enabled after accepting terms
   const submitButton: Element = {
-    "bounds": { left: 16, top: 380, right: 374, bottom: 424 },
-    "text": "Submit",
+    bounds: { left: 16, top: 380, right: 374, bottom: 424 },
+    text: "Submit",
     "content-desc": "Submit",
     "resource-id": "submitButton",
-    "class": "UIButton",
-    "clickable": true,
-    "focusable": true,
-    "focused": false,
-    "enabled": true,
+    class: "UIButton",
+    clickable: true,
+    focusable: true,
+    focused: false,
+    enabled: true,
   };
 
   return {
@@ -281,15 +281,15 @@ function makeAfterTermsToggleObserve(): ObserveResult {
 
 function makeConfirmationObserve(): ObserveResult {
   const confirmationLabel: Element = {
-    "bounds": { left: 16, top: 200, right: 374, bottom: 280 },
-    "text": "Registration complete",
+    bounds: { left: 16, top: 200, right: 374, bottom: 280 },
+    text: "Registration complete",
     "content-desc": "Registration complete",
     "resource-id": "confirmationLabel",
-    "class": "UILabel",
-    "clickable": false,
-    "focusable": true,
-    "focused": false,
-    "enabled": true,
+    class: "UILabel",
+    clickable: false,
+    focusable: true,
+    focused: false,
+    enabled: true,
   };
 
   return {
@@ -389,11 +389,14 @@ async function main(): Promise<void> {
 
   console.log("\nForm elements:");
   for (const el of formObserve.elements?.text ?? []) {
-    const state = el.checked !== undefined
-      ? ` [checked: ${el.checked}]`
-      : el.enabled === false ? " [disabled]" : "";
+    const state =
+      el.checked !== undefined
+        ? ` [checked: ${el.checked}]`
+        : el.enabled === false
+          ? " [disabled]"
+          : "";
     console.log(
-      `  [${el["resource-id"]}]  class=${el["class"]}  content-desc="${el["content-desc"] ?? el.text ?? ""}"${state}`
+      `  [${el["resource-id"]}]  class=${el["class"]}  content-desc="${el["content-desc"] ?? el.text ?? ""}"${state}`,
     );
   }
 
@@ -414,7 +417,7 @@ async function main(): Promise<void> {
 
   const afterNameObserve = await client.observe();
   const nameField = afterNameObserve.elements?.text?.find(
-    el => el["resource-id"] === "nameInput"
+    (el) => el["resource-id"] === "nameInput",
   );
   console.log(`Name field text: "${nameField?.text ?? "not found"}"`);
 
@@ -444,7 +447,9 @@ async function main(): Promise<void> {
   console.log("      content-desc is 'Accept terms and conditions, off'.");
   console.log("      Use elementId to target a grouped control — text targets the");
   console.log("      child label which is not accessible separately.");
-  console.log("      VoiceOver expresses state as 'off'/'on'; TalkBack uses 'not checked'/'checked'.");
+  console.log(
+    "      VoiceOver expresses state as 'off'/'on'; TalkBack uses 'not checked'/'checked'.",
+  );
 
   const tapToggleResult = await client.tapOn({ elementId: "termsToggle" });
   printResult("tapOn result (toggle)", tapToggleResult);
@@ -456,13 +461,13 @@ async function main(): Promise<void> {
 
   const afterToggleObserve = await client.observe();
   const toggleElement = afterToggleObserve.elements?.text?.find(
-    el => el["resource-id"] === "termsToggle"
+    (el) => el["resource-id"] === "termsToggle",
   );
   console.log(`Toggle content-desc: "${toggleElement?.["content-desc"] ?? "not found"}"`);
   console.log(`Toggle checked: ${toggleElement?.checked}`);
 
   const submitButton = afterToggleObserve.elements?.text?.find(
-    el => el["resource-id"] === "submitButton"
+    (el) => el["resource-id"] === "submitButton",
   );
   console.log(`Submit button enabled: ${submitButton?.enabled ?? false}`);
 
@@ -504,7 +509,7 @@ async function main(): Promise<void> {
   console.log("    accessibilityFocusedElement; use focusedElement to verify input focus.");
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error("Fatal error:", error);
   process.exit(1);
 });

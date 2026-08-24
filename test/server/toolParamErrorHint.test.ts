@@ -27,16 +27,16 @@ function containerError(): z.ZodError {
 describe("formatToolParamError container hint", () => {
   test.each(["tapOn", "swipeOn"])(
     "%s appends the container hint when the container field is invalid",
-    toolName => {
+    (toolName) => {
       expect(formatToolParamError(toolName, containerError())).toContain(HINT);
-    }
+    },
   );
 
   test.each(["pinchOn", "dragAndDrop", "observe"])(
     "%s does NOT append the container hint (branch is tapOn/swipeOn only)",
-    toolName => {
+    (toolName) => {
       expect(formatToolParamError(toolName, containerError())).not.toContain(HINT);
-    }
+    },
   );
 
   test("tapOn omits the hint when the failing field is not container", () => {

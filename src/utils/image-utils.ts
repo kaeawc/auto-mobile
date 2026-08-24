@@ -17,19 +17,13 @@ export class JimpImageUtils implements ImageUtilsInterface {
     buffer: Buffer,
     width: number,
     height?: number,
-    maintainAspectRatio = true
+    maintainAspectRatio = true,
   ): Promise<Buffer> {
     const image = Image.fromBuffer(buffer);
     return image.resize(width, height, maintainAspectRatio).toBuffer();
   }
 
-  public async crop(
-    buffer: Buffer,
-    width: number,
-    height: number,
-    x = 0,
-    y = 0
-  ): Promise<Buffer> {
+  public async crop(buffer: Buffer, width: number, height: number, x = 0, y = 0): Promise<Buffer> {
     const image = Image.fromBuffer(buffer);
     return image.crop(width, height, x, y).toBuffer();
   }
@@ -45,7 +39,7 @@ export class JimpImageUtils implements ImageUtilsInterface {
       quality?: number;
       lossless?: boolean;
       nearLossless?: boolean;
-    }
+    },
   ): Promise<Buffer> {
     const image = Image.fromBuffer(buffer);
     return image.webp(options).toBuffer();
@@ -66,9 +60,9 @@ export class JimpImageUtils implements ImageUtilsInterface {
 
   public async batchProcess(
     buffers: Buffer[],
-    transform: (buffer: Buffer) => Promise<Buffer>
+    transform: (buffer: Buffer) => Promise<Buffer>,
   ): Promise<Buffer[]> {
-    const tasks = buffers.map(buffer => transform(buffer));
+    const tasks = buffers.map((buffer) => transform(buffer));
     return Promise.all(tasks);
   }
 }

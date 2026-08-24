@@ -17,14 +17,14 @@ const enabledVisionConfig: VisionFallbackConfig = {
   confidenceThreshold: "high",
   maxCostUsd: 1.0,
   cacheResults: false,
-  cacheTtlMinutes: 60
+  cacheTtlMinutes: 60,
 };
 
 describe("DragAndDrop vision fallback", () => {
   const device: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    name: "Test Device"
+    name: "Test Device",
   };
 
   let fakeObserveScreen: FakeObserveScreen;
@@ -37,7 +37,7 @@ describe("DragAndDrop vision fallback", () => {
   const createEmptyHierarchy = (): ViewHierarchyResult => ({
     hierarchy: { node: [] },
     packageName: "com.test.app",
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
   });
 
   // Hierarchy with source element but no target
@@ -47,22 +47,22 @@ describe("DragAndDrop vision fallback", () => {
         {
           $: {
             "resource-id": "source-id",
-            "text": "Source",
-            "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
-            "class": "android.widget.TextView"
-          }
-        }
-      ]
+            text: "Source",
+            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            class: "android.widget.TextView",
+          },
+        },
+      ],
     },
     packageName: "com.test.app",
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
   });
 
   const createObserveResult = (hierarchy?: ViewHierarchyResult): ObserveResult => ({
     updatedAt: Date.now(),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: hierarchy ?? createEmptyHierarchy()
+    viewHierarchy: hierarchy ?? createEmptyHierarchy(),
   });
 
   beforeEach(() => {
@@ -74,9 +74,11 @@ describe("DragAndDrop vision fallback", () => {
     fakeObserveScreen.setObserveResult(() => createObserveResult());
 
     managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-      isAvailable: async () => true
+      isAvailable: async () => true,
     } as any);
-    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy as any);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeCtrlProxy as any,
+    );
   });
 
   afterEach(() => {
@@ -88,7 +90,7 @@ describe("DragAndDrop vision fallback", () => {
     const dnd = new DragAndDrop(device, fakeAdbClientFactory, fakeTimer, {
       visionConfig: enabledVisionConfig,
       screenshotCapturer: capturer,
-      visionAnalyzer: analyzer
+      visionAnalyzer: analyzer,
     });
     (dnd as any).observeScreen = fakeObserveScreen;
     return dnd;
@@ -102,18 +104,18 @@ describe("DragAndDrop vision fallback", () => {
       found: false,
       confidence: "high",
       navigationSteps: [
-        { action: "scroll", direction: "up", description: "Scroll up to reveal source item" }
+        { action: "scroll", direction: "up", description: "Scroll up to reveal source item" },
       ],
       costUsd: 0.002,
       durationMs: 50,
       screenshotPath: "/screenshot.png",
-      provider: "claude"
+      provider: "claude",
     });
 
     const dnd = createDragAndDrop(capturer, analyzer);
     const result = await dnd.execute({
       source: { text: "MissingSource" },
-      target: { text: "Target" }
+      target: { text: "Target" },
     });
 
     expect(result.success).toBe(false);
@@ -132,18 +134,23 @@ describe("DragAndDrop vision fallback", () => {
       found: false,
       confidence: "medium",
       alternativeSelectors: [
-        { type: "resourceId", value: "com.app:id/drop_zone", confidence: 0.75, reasoning: "Drop zone visible" }
+        {
+          type: "resourceId",
+          value: "com.app:id/drop_zone",
+          confidence: 0.75,
+          reasoning: "Drop zone visible",
+        },
       ],
       costUsd: 0.001,
       durationMs: 30,
       screenshotPath: "/screenshot.png",
-      provider: "claude"
+      provider: "claude",
     });
 
     const dnd = createDragAndDrop(capturer, analyzer);
     const result = await dnd.execute({
       source: { text: "Source" },
-      target: { text: "MissingTarget" }
+      target: { text: "MissingTarget" },
     });
 
     expect(result.success).toBe(false);
@@ -159,13 +166,13 @@ describe("DragAndDrop vision fallback", () => {
     const dnd = new DragAndDrop(device, fakeAdbClientFactory, fakeTimer, {
       visionConfig: { ...enabledVisionConfig, enabled: false },
       screenshotCapturer: capturer,
-      visionAnalyzer: analyzer
+      visionAnalyzer: analyzer,
     });
     (dnd as any).observeScreen = fakeObserveScreen;
 
     const result = await dnd.execute({
       source: { text: "MissingSource" },
-      target: { text: "Target" }
+      target: { text: "Target" },
     });
 
     expect(result.success).toBe(false);
@@ -180,7 +187,7 @@ describe("DragAndDrop vision fallback", () => {
     const dnd = createDragAndDrop(capturer, analyzer);
     await dnd.execute({
       source: { text: "MySourceItem" },
-      target: { text: "SomeTarget" }
+      target: { text: "SomeTarget" },
     });
 
     const calls = analyzer.getCalls();

@@ -31,9 +31,10 @@ class RecordingAdbExecutor extends FakeAdbExecutor {
     return await super.execute(args, options);
   }
 
-  override async getBootedAndroidDevices(
-    options?: { bypassCache?: boolean; throwOnMissingAdb?: boolean }
-  ): Promise<BootedDevice[]> {
+  override async getBootedAndroidDevices(options?: {
+    bypassCache?: boolean;
+    throwOnMissingAdb?: boolean;
+  }): Promise<BootedDevice[]> {
     this.lastDiscoveryOptions = options;
     return super.getBootedAndroidDevices();
   }
@@ -42,24 +43,33 @@ class RecordingAdbExecutor extends FakeAdbExecutor {
 describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
   test("uses the AVD name property when the emulator console returns no name", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setDevices([{
-      name: "ignored",
-      platform: "android",
-      deviceId: "emulator-5554",
-    } satisfies BootedDevice]);
+    adb.setDevices([
+      {
+        name: "ignored",
+        platform: "android",
+        deviceId: "emulator-5554",
+      } satisfies BootedDevice,
+    ]);
     adb.setCommandResponse("emu avd name", execResult("\n"));
     adb.setCommandResponse(
       "shell getprop ro.boot.qemu.avd_name",
       execResult("Codex_KVM_Verify\nignored trailing output"),
     );
-    const client = new AndroidEmulatorClient(null, null, new FakeTimer(), new FakeAdbClientFactory(adb));
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+    );
 
-    await expect(client.getBootedDevicesChecked()).resolves.toEqual([{
-      name: "Codex_KVM_Verify",
-      platform: "android",
-      deviceId: "emulator-5554",
-      source: "local",
-    }]);
+    await expect(client.getBootedDevicesChecked()).resolves.toEqual([
+      {
+        name: "Codex_KVM_Verify",
+        platform: "android",
+        deviceId: "emulator-5554",
+        source: "local",
+      },
+    ]);
     expect(adb.getExecutedCommands()).toEqual([
       "emu avd name",
       "shell getprop ro.boot.qemu.avd_name",
@@ -68,32 +78,48 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
 
   test("preserves transport identity when AVD-name lookup fails", async () => {
     const adb = new FakeAdbExecutor();
-    adb.setDevices([{
-      name: "ignored",
-      platform: "android",
-      deviceId: "emulator-5554",
-      transportId: "42",
-    } satisfies BootedDevice]);
+    adb.setDevices([
+      {
+        name: "ignored",
+        platform: "android",
+        deviceId: "emulator-5554",
+        transportId: "42",
+      } satisfies BootedDevice,
+    ]);
     adb.setCommandError("emu avd name", new Error("emulator console unavailable"));
-    const client = new AndroidEmulatorClient(null, null, new FakeTimer(), new FakeAdbClientFactory(adb));
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+    );
 
-    await expect(client.getBootedDevicesChecked()).resolves.toEqual([{
-      name: "Unknown (emulator-5554)",
-      platform: "android",
-      deviceId: "emulator-5554",
-      transportId: "42",
-      source: "local",
-    }]);
+    await expect(client.getBootedDevicesChecked()).resolves.toEqual([
+      {
+        name: "Unknown (emulator-5554)",
+        platform: "android",
+        deviceId: "emulator-5554",
+        transportId: "42",
+        source: "local",
+      },
+    ]);
   });
 
   test("bypasses the device-list cache only when terminating", async () => {
     const adb = new RecordingAdbExecutor();
-    adb.setDevices([{
-      name: "Pixel 8",
-      platform: "android",
-      deviceId: "emulator-5554",
-    } satisfies BootedDevice]);
-    const client = new AndroidEmulatorClient(null, null, new FakeTimer(), new FakeAdbClientFactory(adb));
+    adb.setDevices([
+      {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+      } satisfies BootedDevice,
+    ]);
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+    );
 
     await client.getBootedDevices();
     expect(adb.lastDiscoveryOptions).toMatchObject({ throwOnMissingAdb: true });
@@ -116,12 +142,19 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
 
   test("propagates discovery failures during shutdown", async () => {
     const adb = new FailingDiscoveryAdbExecutor();
-    const client = new AndroidEmulatorClient(null, null, new FakeTimer(), new FakeAdbClientFactory(adb));
+    const client = new AndroidEmulatorClient(
+      null,
+      null,
+      new FakeTimer(),
+      new FakeAdbClientFactory(adb),
+    );
 
-    await expect(client.killDevice({
-      name: "Pixel 8",
-      platform: "android",
-      deviceId: "emulator-5554",
-    })).rejects.toThrow("adb server unavailable");
+    await expect(
+      client.killDevice({
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554",
+      }),
+    ).rejects.toThrow("adb server unavailable");
   });
 });

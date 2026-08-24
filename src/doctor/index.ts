@@ -95,7 +95,7 @@ function resolveDoctorRunners(dependencies: RunDoctorDependencies): ResolvedDoct
  */
 export async function runDoctor(
   options: DoctorOptions = {},
-  dependencies: RunDoctorDependencies = {}
+  dependencies: RunDoctorDependencies = {},
 ): Promise<DoctorReport> {
   const allChecks: CheckResult[] = [];
 
@@ -108,8 +108,11 @@ export async function runDoctor(
   allChecks.push(...systemChecks);
 
   // Determine which platform checks to run
-  const runAndroid = options.android === true || (options.android !== false && options.ios !== true);
-  const runIos = options.ios === true || (options.ios !== true && options.android !== true && process.platform === "darwin");
+  const runAndroid =
+    options.android === true || (options.android !== false && options.ios !== true);
+  const runIos =
+    options.ios === true ||
+    (options.ios !== true && options.android !== true && process.platform === "darwin");
 
   // Run Android checks if applicable
   let androidChecks: CheckResult[] | undefined;
@@ -187,7 +190,7 @@ function collectAllChecks(report: DoctorReport): CheckResult[] {
  */
 export async function applyClientBuildIdentity(
   report: DoctorReport,
-  runCheck: () => Promise<CheckResult> = () => checkDaemonBuildIdentity()
+  runCheck: () => Promise<CheckResult> = () => checkDaemonBuildIdentity(),
 ): Promise<DoctorReport> {
   if (!report?.autoMobile?.checks) {
     return report;
@@ -195,7 +198,7 @@ export async function applyClientBuildIdentity(
 
   const clientCheck = await runCheck();
   const checks = report.autoMobile.checks;
-  const idx = checks.findIndex(check => check.name === clientCheck.name);
+  const idx = checks.findIndex((check) => check.name === clientCheck.name);
   if (idx >= 0) {
     checks[idx] = clientCheck;
   } else {

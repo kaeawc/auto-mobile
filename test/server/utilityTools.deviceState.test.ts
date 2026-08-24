@@ -42,12 +42,16 @@ describe("device state tools", () => {
 
     expect(setTool).toBeDefined();
     expect(setTool?.requiresDevice).toBe(true);
-    expect(() => setTool!.schema.parse({
-      doNotDisturb: { enabled: true },
-    })).not.toThrow();
-    expect(() => setTool!.schema.parse({
-      doNotDisturb: { mode: "priority" },
-    })).not.toThrow();
+    expect(() =>
+      setTool!.schema.parse({
+        doNotDisturb: { enabled: true },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      setTool!.schema.parse({
+        doNotDisturb: { mode: "priority" },
+      }),
+    ).not.toThrow();
     expect(() => setTool!.schema.parse({})).toThrow();
   });
 
@@ -56,7 +60,7 @@ describe("device state tools", () => {
     const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     const fakeDeviceManager = new FakeDeviceManager(
       [],
-      [createBootedDevice("sim-new", "ios", "iPhone 16")]
+      [createBootedDevice("sim-new", "ios", "iPhone 16")],
     );
     const devicePool = new DevicePool(
       sessionManager,
@@ -64,7 +68,7 @@ describe("device state tools", () => {
       fakeTimer,
       new FakeInstalledAppsRepository(),
       fakeDeviceManager,
-      new DefaultRetryExecutor(fakeTimer)
+      new DefaultRetryExecutor(fakeTimer),
     );
     DaemonState.getInstance().initialize(sessionManager, devicePool);
 
@@ -90,7 +94,7 @@ describe("device state tools", () => {
       [
         createBootedDevice("sim-a", "ios", "iPhone 15"),
         createBootedDevice("sim-b", "ios", "iPhone 16"),
-      ]
+      ],
     );
     const devicePool = new DevicePool(
       sessionManager,
@@ -98,7 +102,7 @@ describe("device state tools", () => {
       fakeTimer,
       new FakeInstalledAppsRepository(),
       fakeDeviceManager,
-      new DefaultRetryExecutor(fakeTimer)
+      new DefaultRetryExecutor(fakeTimer),
     );
     await devicePool.initializeWithDevices([
       createBootedDevice("sim-a", "ios", "iPhone 15"),
@@ -109,11 +113,13 @@ describe("device state tools", () => {
     DaemonState.getInstance().initialize(sessionManager, devicePool);
 
     const setActiveDevice = ToolRegistry.getTool("setActiveDevice");
-    await expect(setActiveDevice!.handler({
-      deviceId: "sim-b",
-      platform: "ios",
-      sessionUuid: "session-a",
-    })).rejects.toThrow(/already assigned to session session-b/);
+    await expect(
+      setActiveDevice!.handler({
+        deviceId: "sim-b",
+        platform: "ios",
+        sessionUuid: "session-a",
+      }),
+    ).rejects.toThrow(/already assigned to session session-b/);
 
     expect(sessionManager.getSession("session-a")?.assignedDevice).toBe("sim-a");
     expect(devicePool.getDevice("sim-a")?.sessionId).toBe("session-a");

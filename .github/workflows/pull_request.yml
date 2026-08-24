@@ -43,6 +43,7 @@ jobs:
       ios_changed: ${{ steps.filter-ios.outputs.ios }}
       native_integration_changed: ${{ steps.filter-native-integration.outputs.native_integration }}
       ts_changed: ${{ steps.filter-ts.outputs.ts }}
+      format_changed: ${{ steps.filter-format.outputs.format }}
       android_should_run: ${{ steps.android_should_run.outputs.should_run }}
       ios_should_run: ${{ steps.ios_should_run.outputs.should_run }}
       ios_integration_should_run: ${{ steps.ios_integration_should_run.outputs.should_run }}
@@ -382,6 +383,33 @@ jobs:
               - '.github/workflows/pull_request.yml'
               - '.github/actions/setup-auto-mobile-npm-package/**'
 
+      # oxfmt formats more than TypeScript (notably Markdown, YAML, JSON, and
+      # TOML), so this intentionally has a broader scope than `filter-ts`.
+      # Keep its CI gate from allowing a docs/config-only formatting violation
+      # to land and later block an unrelated TypeScript PR.
+      - name: "Check for formatting-related changes"
+        id: filter-format
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            format:
+              - '**/*.ts'
+              - '**/*.mts'
+              - '**/*.cts'
+              - '**/*.tsx'
+              - '**/*.js'
+              - '**/*.mjs'
+              - '**/*.cjs'
+              - '**/*.json'
+              - '**/*.jsonc'
+              - '**/*.md'
+              - '**/*.yml'
+              - '**/*.yaml'
+              - '**/*.toml'
+              - '.oxfmtrc.json'
+              - '.gitignore'
+              - '.prettierignore'
+
       - name: "Decide if Android jobs should run"
         id: android_should_run
         env:
@@ -677,11 +705,20 @@ jobs:
     timeout-minutes: 70
     name: "Fast Validation"
     runs-on: ubuntu-latest
-    needs: detect-changes
+    needs: [detect-changes, format-check]
     # This required check must always report a result, including auto-chore
     # changes and a failed change-detection job.
     if: always()
     steps:
+      - name: "Require formatter result"
+        shell: bash
+        run: |
+          formatter_result="${{ needs.format-check.result }}"
+          if [[ "$formatter_result" == "failure" || "$formatter_result" == "cancelled" ]]; then
+            echo "Formatter gate concluded $formatter_result"
+            exit 1
+          fi
+
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
@@ -1143,7 +1180,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'typescript' ]
+        language: ["typescript"]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1405,8 +1442,30 @@ jobs:
           path: "*.heapsnapshot"
 
   # =============================================================================
-  # TypeScript Code Coverage
+  # Formatting and TypeScript Code Coverage
   # =============================================================================
+
+  format-check:
+    timeout-minutes: 10
+    name: "Check Formatting"
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.format_changed == 'true'
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: "Install Bun dependencies"
+        run: bun install --frozen-lockfile
+
+      - name: "Check formatting"
+        run: bun run format:check
 
   ts-code-coverage:
     name: "Node TypeScript Build and Test (ubuntu-latest)"
@@ -2075,8 +2134,8 @@ jobs:
       - name: "Install JDK"
         uses: actions/setup-java@v5
         with:
-          distribution: 'zulu'
-          java-version: '21'
+          distribution: "zulu"
+          java-version: "21"
 
       - name: "Validate Kotlin 2.2 consumer compatibility"
         run: bash scripts/android/validate-junit-runner-kotlin-consumer.sh
@@ -2116,7 +2175,7 @@ jobs:
       - uses: ./.github/actions/android-emulator
         with:
           script: "./gradlew :junit-runner:test --stacktrace --info"
-          working-directory: './android/'
+          working-directory: "./android/"
           accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -2144,7 +2203,7 @@ jobs:
         if: always()
         with:
           check_name: "JUnit Runner Emulator Test Report"
-          report_paths: '**/build/test-results/**/*.xml'
+          report_paths: "**/build/test-results/**/*.xml"
 
   # Emulator.wtf session-based tests (see #94 for investigation context)
   # Requires EMULATOR_WTF_ENABLED=true variable and EMULATOR_WTF_API_KEY secret
@@ -2221,7 +2280,7 @@ jobs:
         if: always()
         with:
           check_name: "JUnit Runner Emulator.wtf Test Report"
-          report_paths: '**/build/test-results/**/*.xml'
+          report_paths: "**/build/test-results/**/*.xml"
 
   playground-automobile-emulator-tests:
     name: "Run Playground Automobile Emulator Tests"
@@ -2249,7 +2308,7 @@ jobs:
           AUTOMOBILE_ENABLED_TOOLS: "navigateTo,getNavigationGraph,explore"
         with:
           script: "../scripts/android/verify-sdk-ctrl-proxy-permission-contract.sh control-proxy/build/outputs/apk/debug/control-proxy-debug.apk && ../scripts/android/navigation-graph-sdk-event-integration.sh && ./gradlew :playground:app:test --stacktrace --info"
-          working-directory: './android/'
+          working-directory: "./android/"
           accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
@@ -2269,7 +2328,7 @@ jobs:
         if: always()
         with:
           check_name: "Playground Automobile Emulator Test Report"
-          report_paths: '**/build/test-results/**/*.xml'
+          report_paths: "**/build/test-results/**/*.xml"
 
   build-junit-runner-library:
     timeout-minutes: 20
@@ -2374,7 +2433,7 @@ jobs:
 
       - name: "Store Sample APK"
         uses: actions/upload-artifact@v6
-        if: success()  # Only upload if build succeeded
+        if: success() # Only upload if build succeeded
         with:
           name: playground-app-apk
           path: android/playground/app/build/outputs/apk/debug/playground-app-debug.apk
@@ -2869,7 +2928,6 @@ jobs:
           name: pinned-runtime-graph-report
           path: ci-logs/pinned-runtime-graph.log
           retention-days: 90
-
 
   # =============================================================================
   # Gate Jobs for Branch Protection

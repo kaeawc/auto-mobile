@@ -206,7 +206,8 @@ export class AdbClient implements AdbExecutor {
     } else {
       this.execAsync = execAsyncFn ? this.wrapExecAsync(execAsyncFn) : execFileAsync;
     }
-    this.spawnFn = spawnFn || ((file, args, options) => adbHostProcessExecutor.spawn(file, args, options));
+    this.spawnFn =
+      spawnFn || ((file, args, options) => adbHostProcessExecutor.spawn(file, args, options));
     this.retryExecutor = retryExecutor;
     this.timer = timer;
     // Initialize with fallback, will be updated lazily
@@ -918,25 +919,27 @@ export class AdbClient implements AdbExecutor {
         args,
         maxBuffer ? { maxBuffer } : undefined,
       );
-      result.then((execResult) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        cleanup();
-        if (pendingTerminationError) {
-          reject(pendingTerminationError);
-          return;
-        }
-        resolve(execResult);
-      }).catch((error: unknown) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        cleanup();
-        reject(pendingTerminationError ?? error);
-      });
+      result
+        .then((execResult) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          cleanup();
+          if (pendingTerminationError) {
+            reject(pendingTerminationError);
+            return;
+          }
+          resolve(execResult);
+        })
+        .catch((error: unknown) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          cleanup();
+          reject(pendingTerminationError ?? error);
+        });
 
       this.activeProcesses.add(child);
 

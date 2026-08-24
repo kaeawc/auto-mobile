@@ -11,7 +11,7 @@ export const RETENTION_MAX_ROWS = 10_000;
 // (cap + CLEANUP_CHECK_INTERVAL rows) and negligible against the 10k cap.
 export const CLEANUP_CHECK_INTERVAL = 256;
 
-export type EventTableName = typeof EVENT_TABLES[number];
+export type EventTableName = (typeof EVENT_TABLES)[number];
 
 export interface EventRetentionState {
   cleanupInProgress: boolean;
@@ -27,7 +27,7 @@ export async function pruneEventTableByCount(
   // Number of rows just inserted. A batched multi-row INSERT (#3138) advances
   // the amortization counter by the whole batch so retention still fires roughly
   // every `checkInterval` rows rather than every `checkInterval` batches.
-  inserted: number = 1
+  inserted: number = 1,
 ): Promise<void> {
   // The counter is bumped synchronously on every call, so retention still fires
   // deterministically every N inserts without putting a scan on the hot path.
@@ -37,7 +37,9 @@ export async function pruneEventTableByCount(
   }
   state.insertsSinceCleanup = 0;
 
-  if (state.cleanupInProgress) {return;}
+  if (state.cleanupInProgress) {
+    return;
+  }
   state.cleanupInProgress = true;
   try {
     const resolvedDb = db ?? (getDatabase() as unknown as Kysely<Database>);
@@ -67,13 +69,12 @@ export async function pruneEventTableByCount(
       if (threshold) {
         await resolvedDb
           .deleteFrom(table)
-          .where(eb => eb.or([
-            eb("timestamp", "<", threshold.timestamp),
-            eb.and([
-              eb("timestamp", "=", threshold.timestamp),
-              eb("id", "<", threshold.id),
+          .where((eb) =>
+            eb.or([
+              eb("timestamp", "<", threshold.timestamp),
+              eb.and([eb("timestamp", "=", threshold.timestamp), eb("id", "<", threshold.id)]),
             ]),
-          ]))
+          )
           .execute();
       }
     }

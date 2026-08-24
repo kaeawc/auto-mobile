@@ -31,7 +31,7 @@ describe("TapOnElement VoiceOver mode", () => {
       {
         iosVoiceOverDetector: fakeVoiceOverDetector,
         timer: fakeTimer,
-      }
+      },
     );
 
     executeiOSTapWithCoordinates = null;
@@ -48,7 +48,9 @@ describe("TapOnElement VoiceOver mode", () => {
 
     const wireCtrlProxy = async () => {
       const iosModule = await import("../../../src/features/observe/ios");
-      getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+      getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIosClient as any,
+      );
     };
 
     afterEach(() => {
@@ -57,7 +59,7 @@ describe("TapOnElement VoiceOver mode", () => {
     });
 
     const element = {
-      "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+      bounds: { left: 0, top: 0, right: 100, bottom: 100 },
       "ios-accessibility-label": "Settings",
     } as any;
 
@@ -87,7 +89,9 @@ describe("TapOnElement VoiceOver mode", () => {
 
       await (tapOnElement as any).executeiOSTap("tap", 50, 50, 50, element, true);
 
-      expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([{ label: "Settings", action: "activate" }]);
+      expect(fakeIosClient.getVoiceOverActivateHistory()).toEqual([
+        { label: "Settings", action: "activate" },
+      ]);
       expect(fakeIosClient.getTapHistory()).toHaveLength(0);
     });
 
@@ -108,20 +112,22 @@ describe("TapOnElement VoiceOver mode", () => {
       // records its artifact against the fake CtrlProxy client.
       executeiOSTapWithCoordinates = spyOn(
         tapOnElement as any,
-        "executeiOSTapWithCoordinates"
+        "executeiOSTapWithCoordinates",
       ).mockResolvedValue(undefined);
     });
 
     test("uses ios-accessibility-label as VoiceOver label", async () => {
       const element = {
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         "ios-accessibility-label": "Settings Button",
-        "text": "Settings",
+        text: "Settings",
       } as any;
 
       // Patch IOSCtrlProxyClient.getInstance to return fakeIosClient
       const iosModule = await import("../../../src/features/observe/ios");
-      const getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+      const getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIosClient as any,
+      );
 
       await (tapOnElement as any).executeIOSTapWithVoiceOver("tap", element, 50, 50, 50);
 
@@ -140,7 +146,9 @@ describe("TapOnElement VoiceOver mode", () => {
       } as any;
 
       const iosModule = await import("../../../src/features/observe/ios");
-      const getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+      const getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIosClient as any,
+      );
 
       await (tapOnElement as any).executeIOSTapWithVoiceOver("tap", element, 50, 50, 50);
 
@@ -157,7 +165,9 @@ describe("TapOnElement VoiceOver mode", () => {
       } as any;
 
       const iosModule = await import("../../../src/features/observe/ios");
-      const getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+      const getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIosClient as any,
+      );
 
       await (tapOnElement as any).executeIOSTapWithVoiceOver("tap", element, 50, 50, 50);
 
@@ -169,12 +179,14 @@ describe("TapOnElement VoiceOver mode", () => {
 
     test("maps longPress action to long_press VoiceOver action", async () => {
       const element = {
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         "ios-accessibility-label": "Delete",
       } as any;
 
       const iosModule = await import("../../../src/features/observe/ios");
-      const getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+      const getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIosClient as any,
+      );
 
       await (tapOnElement as any).executeIOSTapWithVoiceOver("longPress", element, 50, 50, 1000);
 
@@ -187,12 +199,14 @@ describe("TapOnElement VoiceOver mode", () => {
 
     test("maps tap action to activate VoiceOver action", async () => {
       const element = {
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         "ios-accessibility-label": "Save",
       } as any;
 
       const iosModule = await import("../../../src/features/observe/ios");
-      const getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+      const getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIosClient as any,
+      );
 
       await (tapOnElement as any).executeIOSTapWithVoiceOver("tap", element, 50, 50, 50);
 
@@ -204,12 +218,14 @@ describe("TapOnElement VoiceOver mode", () => {
 
     test("maps doubleTap action to activate VoiceOver action", async () => {
       const element = {
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         "ios-accessibility-label": "Item",
       } as any;
 
       const iosModule = await import("../../../src/features/observe/ios");
-      const getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+      const getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIosClient as any,
+      );
 
       await (tapOnElement as any).executeIOSTapWithVoiceOver("doubleTap", element, 50, 50, 50);
 
@@ -221,14 +237,16 @@ describe("TapOnElement VoiceOver mode", () => {
 
     test("falls back to coordinate tap when requestVoiceOverActivate fails", async () => {
       const element = {
-        "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
+        bounds: { left: 0, top: 0, right: 100, bottom: 100 },
         "ios-accessibility-label": "Button",
       } as any;
 
       fakeIosClient.setVoiceOverActivateResult({ success: false, error: "Element not found" });
 
       const iosModule = await import("../../../src/features/observe/ios");
-      const getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
+      const getInstanceSpy = spyOn(iosModule.IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIosClient as any,
+      );
 
       await (tapOnElement as any).executeIOSTapWithVoiceOver("tap", element, 50, 50, 50);
 
@@ -237,5 +255,4 @@ describe("TapOnElement VoiceOver mode", () => {
       getInstanceSpy.mockRestore();
     });
   });
-
 });

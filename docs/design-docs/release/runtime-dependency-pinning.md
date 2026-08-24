@@ -64,9 +64,9 @@ release contract.
 The pinned graph is mirrored in `scripts/release/runtime-graph.json` (the
 manifest) and enforced by:
 
-| Guard                            | Where                                 | What it proves                                                                   |
-| -------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------- |
-| `pin-runtime-deps.ts --check`    | Fast Validation (`runtime-pins`)      | `package.json` + manifest are in lock-step with `bun.lock` (hermetic)            |
+| Guard                            | Where                                 | What it proves                                                                                      |
+| -------------------------------- | ------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `pin-runtime-deps.ts --check`    | Fast Validation (`runtime-pins`)      | `package.json` + manifest are in lock-step with `bun.lock` (hermetic)                               |
 | `verify-pinned-runtime-graph.sh` | PR benchmarks job + release preflight | a clean-cache install of the **packed** artifact reproduces every exact and bundled runtime version |
 
 ## Refreshing the graph (dependency / security updates)

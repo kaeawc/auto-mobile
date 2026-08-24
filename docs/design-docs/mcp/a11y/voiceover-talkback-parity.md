@@ -6,25 +6,25 @@ This document compares iOS VoiceOver and Android TalkBack support in AutoMobile 
 
 ## Feature Coverage Matrix
 
-| Feature | TalkBack (Android) | VoiceOver (iOS) | Notes |
-|---------|-------------------|-----------------|-------|
-| Auto-detection | ✅ | ✅ | Both use 60s TTL cache |
-| Detection overhead <50ms | ✅ | ✅ | Validated by benchmarks |
-| Feature flag override | ✅ | ✅ | `force-accessibility-mode` |
-| `tapOn` adaptation | ✅ `ACTION_CLICK` | ✅ Accessibility activation | Transparent to agent |
-| `swipeOn` / scroll adaptation | ✅ `ACTION_SCROLL_FORWARD/BACKWARD` | ❌ Unsupported | CtrlProxy scroll endpoints synthesize XCTest swipes, which do not reach VoiceOver |
-| `inputText` / `clearText` | ✅ Unchanged | ✅ Unchanged | Both use text injection |
-| `pressButton` | ✅ Unchanged | ✅ Unchanged | Device/navigation buttons |
-| `accessibilityState` in observe | ✅ `service: "talkback"` | ✅ `service: "voiceover"` | |
-| `accessibilityFocusedElement` | ✅ Reported | ✅ With iOS SDK | Requires SDK-enriched hierarchy |
-| Programmatic enable/disable | ✅ Via ADB | ✅ Simulator + physical device | Physical uses Settings automation (English locale) |
-| MCP tool to toggle | ✅ `TalkBackToggle` | ✅ `VoiceOverToggle` (Simulator + device) | See Gap 2/3 below |
-| Three-finger swipe fallback | N/A | ✅ | VoiceOver-specific |
-| Two-finger swipe fallback | ✅ | N/A | TalkBack-specific |
-| Boomerang gesture | ✅ | ✅ | Both supported |
-| User-facing documentation | ✅ `docs/using/talkback.md` | ✅ `docs/using/voiceover.md` | Added in Phase 4 |
-| Example scripts | ✅ 3 scripts | ✅ 3 scripts | Added in Phase 4 |
-| Detection performance benchmark | ✅ | ✅ | Added in Phase 4 |
+| Feature                         | TalkBack (Android)                  | VoiceOver (iOS)                           | Notes                                                                             |
+| ------------------------------- | ----------------------------------- | ----------------------------------------- | --------------------------------------------------------------------------------- |
+| Auto-detection                  | ✅                                  | ✅                                        | Both use 60s TTL cache                                                            |
+| Detection overhead <50ms        | ✅                                  | ✅                                        | Validated by benchmarks                                                           |
+| Feature flag override           | ✅                                  | ✅                                        | `force-accessibility-mode`                                                        |
+| `tapOn` adaptation              | ✅ `ACTION_CLICK`                   | ✅ Accessibility activation               | Transparent to agent                                                              |
+| `swipeOn` / scroll adaptation   | ✅ `ACTION_SCROLL_FORWARD/BACKWARD` | ❌ Unsupported                            | CtrlProxy scroll endpoints synthesize XCTest swipes, which do not reach VoiceOver |
+| `inputText` / `clearText`       | ✅ Unchanged                        | ✅ Unchanged                              | Both use text injection                                                           |
+| `pressButton`                   | ✅ Unchanged                        | ✅ Unchanged                              | Device/navigation buttons                                                         |
+| `accessibilityState` in observe | ✅ `service: "talkback"`            | ✅ `service: "voiceover"`                 |                                                                                   |
+| `accessibilityFocusedElement`   | ✅ Reported                         | ✅ With iOS SDK                           | Requires SDK-enriched hierarchy                                                   |
+| Programmatic enable/disable     | ✅ Via ADB                          | ✅ Simulator + physical device            | Physical uses Settings automation (English locale)                                |
+| MCP tool to toggle              | ✅ `TalkBackToggle`                 | ✅ `VoiceOverToggle` (Simulator + device) | See Gap 2/3 below                                                                 |
+| Three-finger swipe fallback     | N/A                                 | ✅                                        | VoiceOver-specific                                                                |
+| Two-finger swipe fallback       | ✅                                  | N/A                                       | TalkBack-specific                                                                 |
+| Boomerang gesture               | ✅                                  | ✅                                        | Both supported                                                                    |
+| User-facing documentation       | ✅ `docs/using/talkback.md`         | ✅ `docs/using/voiceover.md`              | Added in Phase 4                                                                  |
+| Example scripts                 | ✅ 3 scripts                        | ✅ 3 scripts                              | Added in Phase 4                                                                  |
+| Detection performance benchmark | ✅                                  | ✅                                        | Added in Phase 4                                                                  |
 
 ---
 
@@ -59,6 +59,7 @@ This document compares iOS VoiceOver and Android TalkBack support in AutoMobile 
 **TalkBack:** The `accessibility` MCP tool (backed by `TalkBackToggle.ts`) enables/disables TalkBack from an agent session.
 
 **VoiceOver (Simulator):** Resolved. The `accessibility` MCP tool now accepts `voiceover: true/false` and delegates to `VoiceOverToggle.ts`. Example usage:
+
 - `accessibility({ voiceover: true })` → `{ voiceover: { supported: true, applied: true, currentState: true } }`
 - `accessibility({ voiceover: false })` → `{ voiceover: { supported: true, applied: true, currentState: false } }`
 - `accessibility({})` → `{ enabled: true, service: "voiceover" }` (detect-only, unchanged)

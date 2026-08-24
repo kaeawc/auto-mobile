@@ -24,8 +24,8 @@ export function hasEventAllMarkersCliOverride(args: string[]): boolean {
 export function splitMarkers(value: string): string[] {
   return value
     .split(",")
-    .map(marker => marker.trim())
-    .filter(marker => marker.length > 0);
+    .map((marker) => marker.trim())
+    .filter((marker) => marker.length > 0);
 }
 
 /**
@@ -33,10 +33,7 @@ export function splitMarkers(value: string): string[] {
  * `AUTOMOBILE_EVENT_ALL_MARKERS` env var. Returns an empty array when unset,
  * which leaves marker-based auto-promotion disabled.
  */
-export function parseEventAllMarkersConfig(
-  args: string[],
-  env: NodeJS.ProcessEnv
-): string[] {
+export function parseEventAllMarkersConfig(args: string[], env: NodeJS.ProcessEnv): string[] {
   const raw = firstFlagValue(args, [EVENT_ALL_MARKERS_FLAG]) ?? env[EVENT_ALL_MARKERS_ENV];
   if (!raw) {
     return [];

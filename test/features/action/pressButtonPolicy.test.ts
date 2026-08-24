@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   isInPlacePressButton,
   isNavigationPressButton,
-  resolveAndroidKeyCode
+  resolveAndroidKeyCode,
 } from "../../../src/features/action/pressButtonPolicy";
 
 describe("pressButtonPolicy", () => {
@@ -37,7 +37,7 @@ describe("pressButtonPolicy", () => {
     ["__proto__"],
     // Control row: an ordinary unsupported button must behave identically.
     ["definitely_not_a_button"],
-  ])("rejects the prototype-named button %s", button => {
+  ])("rejects the prototype-named button %s", (button) => {
     expect(resolveAndroidKeyCode(button)).toBeUndefined();
   });
 });

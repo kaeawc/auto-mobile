@@ -6,7 +6,7 @@ import type {
   ExplorationMode,
   ExplorationStrategy,
   PlannedInteraction,
-  TrackedElement
+  TrackedElement,
 } from "./ExploreTypes";
 import { getElementKey } from "./ExploreElementExtraction";
 
@@ -44,7 +44,7 @@ export function calculateNavigationScore(element: Element): number {
  */
 export function calculateNoveltyScore(
   element: Element,
-  exploredElements: Map<string, TrackedElement>
+  exploredElements: Map<string, TrackedElement>,
 ): number {
   const elementKey = getElementKey(element);
   const tracked = exploredElements.get(elementKey);
@@ -103,7 +103,7 @@ export function selectBreadthFirst(elements: Element[]): Element | null {
  */
 export function selectDepthFirst(
   elements: Element[],
-  exploredElements: Map<string, TrackedElement>
+  exploredElements: Map<string, TrackedElement>,
 ): Element | null {
   if (elements.length === 0) {
     return null;
@@ -144,14 +144,14 @@ interface WeightedSelectionResult {
 export function selectWeighted(
   elements: Element[],
   mode: ExplorationMode,
-  exploredElements: Map<string, TrackedElement>
+  exploredElements: Map<string, TrackedElement>,
 ): WeightedSelectionResult | null {
   if (elements.length === 0) {
     return null;
   }
 
   // Calculate scores for each element
-  const scored = elements.map(element => {
+  const scored = elements.map((element) => {
     const navScore = calculateNavigationScore(element);
     const novelty = calculateNoveltyScore(element, exploredElements);
     const coverage = estimateCoverageGain(element);
@@ -174,12 +174,12 @@ export function selectWeighted(
       navScore,
       novelty,
       coverage,
-      finalScore
+      finalScore,
     };
   });
 
   // Highest final score wins; single pass instead of a full sort for [0].
-  const selected = maxByScore(scored, s => s.finalScore);
+  const selected = maxByScore(scored, (s) => s.finalScore);
   return {
     element: selected.element,
     stats: {
@@ -189,8 +189,8 @@ export function selectWeighted(
       score: selected.navScore,
       novelty: selected.novelty,
       coverage: selected.coverage,
-      finalScore: selected.finalScore
-    }
+      finalScore: selected.finalScore,
+    },
   };
 }
 
@@ -212,9 +212,9 @@ export function rankElementsForDryRun(
   elements: Element[],
   strategy: ExplorationStrategy,
   mode: ExplorationMode,
-  exploredElements: Map<string, TrackedElement>
+  exploredElements: Map<string, TrackedElement>,
 ): RankedElement[] {
-  const scored = elements.map(element => {
+  const scored = elements.map((element) => {
     const navScore = calculateNavigationScore(element);
     const novelty = calculateNoveltyScore(element, exploredElements);
     const coverage = estimateCoverageGain(element);
@@ -245,7 +245,7 @@ export function rankElementsForDryRun(
       score,
       reason,
       action: isScrollable ? "swipeOn" : "tapOn",
-      whitelistStatus: "unknown"
+      whitelistStatus: "unknown",
     } as RankedElement;
   });
 
@@ -279,7 +279,7 @@ export function getElementTarget(element: Element): PlannedInteraction["target"]
  */
 export function predictOutcomeForElement(
   element: Element,
-  edges: NavigationEdge[]
+  edges: NavigationEdge[],
 ): PlannedInteraction["predictedOutcome"] {
   if (edges.length === 0) {
     return { screen: "unknown", confidence: 0 };
@@ -318,10 +318,7 @@ export function scoreEdgeMatch(element: Element, edge: NavigationEdge): number {
   }
 
   if (uiState.scrollPosition) {
-    score = Math.max(
-      score,
-      scoreScrollPositionMatch(element, uiState.scrollPosition)
-    );
+    score = Math.max(score, scoreScrollPositionMatch(element, uiState.scrollPosition));
   }
 
   return score;
@@ -332,25 +329,17 @@ export function scoreEdgeMatch(element: Element, edge: NavigationEdge): number {
  */
 export function scoreSelectedElementMatch(
   element: Element,
-  selected: { text?: string; resourceId?: string; contentDesc?: string }
+  selected: { text?: string; resourceId?: string; contentDesc?: string },
 ): number {
   let score = 0;
   score = Math.max(
     score,
-    scoreIdentifierMatch(element["resource-id"], selected.resourceId, 0.95, 0.85)
+    scoreIdentifierMatch(element["resource-id"], selected.resourceId, 0.95, 0.85),
   );
+  score = Math.max(score, scoreIdentifierMatch(element.text, selected.text, 0.9, 0.7));
   score = Math.max(
     score,
-    scoreIdentifierMatch(element.text, selected.text, 0.9, 0.7)
-  );
-  score = Math.max(
-    score,
-    scoreIdentifierMatch(
-      element["content-desc"],
-      selected.contentDesc,
-      0.85,
-      0.65
-    )
+    scoreIdentifierMatch(element["content-desc"], selected.contentDesc, 0.85, 0.65),
   );
   return score;
 }
@@ -363,22 +352,17 @@ export function scoreScrollPositionMatch(
   scrollPosition: {
     container?: { text?: string; resourceId?: string; contentDesc?: string };
     targetElement: { text?: string; resourceId?: string; contentDesc?: string };
-  }
+  },
 ): number {
   let score = 0;
   if (scrollPosition.container) {
     score = Math.max(
       score,
-      scoreIdentifierMatch(
-        element["resource-id"],
-        scrollPosition.container.resourceId,
-        0.8,
-        0.7
-      )
+      scoreIdentifierMatch(element["resource-id"], scrollPosition.container.resourceId, 0.8, 0.7),
     );
     score = Math.max(
       score,
-      scoreIdentifierMatch(element.text, scrollPosition.container.text, 0.75, 0.65)
+      scoreIdentifierMatch(element.text, scrollPosition.container.text, 0.75, 0.65),
     );
     score = Math.max(
       score,
@@ -386,28 +370,18 @@ export function scoreScrollPositionMatch(
         element["content-desc"],
         scrollPosition.container.contentDesc,
         0.75,
-        0.65
-      )
+        0.65,
+      ),
     );
   }
 
   score = Math.max(
     score,
-    scoreIdentifierMatch(
-      element["resource-id"],
-      scrollPosition.targetElement.resourceId,
-      0.8,
-      0.7
-    )
+    scoreIdentifierMatch(element["resource-id"], scrollPosition.targetElement.resourceId, 0.8, 0.7),
   );
   score = Math.max(
     score,
-    scoreIdentifierMatch(
-      element.text,
-      scrollPosition.targetElement.text,
-      0.75,
-      0.65
-    )
+    scoreIdentifierMatch(element.text, scrollPosition.targetElement.text, 0.75, 0.65),
   );
   score = Math.max(
     score,
@@ -415,8 +389,8 @@ export function scoreScrollPositionMatch(
       element["content-desc"],
       scrollPosition.targetElement.contentDesc,
       0.75,
-      0.65
-    )
+      0.65,
+    ),
   );
 
   return score;
@@ -429,7 +403,7 @@ export function scoreIdentifierMatch(
   value: string | undefined,
   candidate: string | undefined,
   fullMatchScore: number,
-  partialMatchScore: number
+  partialMatchScore: number,
 ): number {
   if (!value || !candidate) {
     return 0;

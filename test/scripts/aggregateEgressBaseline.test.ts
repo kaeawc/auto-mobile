@@ -48,18 +48,29 @@ describe("#4387 aggregate-egress-baseline script", () => {
   });
 
   test("reads every stage-latency record under the directory, recursing into per-run subdirs", async () => {
-    writeFileSync(path.join(dir, "stage-latency.json"), JSON.stringify(sampleRecord({ egressKbps: 100 })));
+    writeFileSync(
+      path.join(dir, "stage-latency.json"),
+      JSON.stringify(sampleRecord({ egressKbps: 100 })),
+    );
     const nested = path.join(dir, "run-2");
     mkdirSync(nested);
-    writeFileSync(path.join(nested, "stage-latency.json"), JSON.stringify(sampleRecord({ egressKbps: 300 })));
+    writeFileSync(
+      path.join(nested, "stage-latency.json"),
+      JSON.stringify(sampleRecord({ egressKbps: 300 })),
+    );
 
     const records = await readCaptureStageRecords(dir);
     expect(records).toHaveLength(2);
-    expect(records.map(r => r.egressKbps).sort((a, b) => (a ?? 0) - (b ?? 0))).toEqual([100, 300]);
+    expect(records.map((r) => r.egressKbps).sort((a, b) => (a ?? 0) - (b ?? 0))).toEqual([
+      100, 300,
+    ]);
   });
 
   test("skips non-JSON files and JSON that is not a stage-latency record", async () => {
-    writeFileSync(path.join(dir, "stage-latency.json"), JSON.stringify(sampleRecord({ egressKbps: 200 })));
+    writeFileSync(
+      path.join(dir, "stage-latency.json"),
+      JSON.stringify(sampleRecord({ egressKbps: 200 })),
+    );
     writeFileSync(path.join(dir, "chrome.log"), "not json at all");
     writeFileSync(path.join(dir, "unrelated.json"), JSON.stringify({ hello: "world" }));
 
@@ -69,9 +80,18 @@ describe("#4387 aggregate-egress-baseline script", () => {
   });
 
   test("summarizes the directory into p50/p95, honoring the platform filter", async () => {
-    writeFileSync(path.join(dir, "a.json"), JSON.stringify(sampleRecord({ platform: "ios", egressKbps: 100 })));
-    writeFileSync(path.join(dir, "b.json"), JSON.stringify(sampleRecord({ platform: "android", egressKbps: 900 })));
-    writeFileSync(path.join(dir, "c.json"), JSON.stringify(sampleRecord({ platform: "ios", egressKbps: 300 })));
+    writeFileSync(
+      path.join(dir, "a.json"),
+      JSON.stringify(sampleRecord({ platform: "ios", egressKbps: 100 })),
+    );
+    writeFileSync(
+      path.join(dir, "b.json"),
+      JSON.stringify(sampleRecord({ platform: "android", egressKbps: 900 })),
+    );
+    writeFileSync(
+      path.join(dir, "c.json"),
+      JSON.stringify(sampleRecord({ platform: "ios", egressKbps: 300 })),
+    );
 
     const summary = await summarizeBaselineFromDir(dir, { platform: "ios" });
     expect(summary.platform).toBe("ios");

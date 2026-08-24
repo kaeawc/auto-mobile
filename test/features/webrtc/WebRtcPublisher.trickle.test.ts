@@ -23,7 +23,11 @@ class FakeTricklePc {
   connectionStateChange = {
     subscribe: (callback: (state: string) => void) => {
       this.connectionStateCb = callback;
-      return { unSubscribe: () => { this.connectionStateCb = undefined; } };
+      return {
+        unSubscribe: () => {
+          this.connectionStateCb = undefined;
+        },
+      };
     },
   };
   // Never resolves: proves the trickle path does not block on gathering.
@@ -34,7 +38,11 @@ class FakeTricklePc {
       return { unSubscribe: () => {} };
     },
   };
-  localDescription = { sdp: ["v=0", "m=video 9 UDP/TLS/RTP/SAVPF 102", "a=mid:0", "a=ice-ufrag:u", "a=ice-pwd:p"].join("\r\n") };
+  localDescription = {
+    sdp: ["v=0", "m=video 9 UDP/TLS/RTP/SAVPF 102", "a=mid:0", "a=ice-ufrag:u", "a=ice-pwd:p"].join(
+      "\r\n",
+    ),
+  };
   addTransceiver() {
     return { sender: { ssrc: 1, onPictureLossIndication: { subscribe: () => {} } } };
   }
@@ -50,7 +58,9 @@ class FakeTricklePc {
   async close() {
     this.closed = true;
   }
-  emitCandidate(candidate: { candidate: string; sdpMid?: string; sdpMLineIndex?: number } | null): void {
+  emitCandidate(
+    candidate: { candidate: string; sdpMid?: string; sdpMLineIndex?: number } | null,
+  ): void {
     this.candidateCb?.(candidate);
   }
   emitConnectionState(state: "connected" | "failed" | "disconnected"): void {
@@ -67,13 +77,17 @@ function makePublisher(pc: FakeTricklePc, trickleIce: boolean) {
       createPeerConnection: () => pc as unknown as RTCPeerConnection,
       createWhipClient: () =>
         ({
-          publish: async () => ({ answerSdp: VIDEO_ONLY_WHIP_ANSWER, resourceUrl: "https://coord/whip/s", etag: "\"etag\"" }),
+          publish: async () => ({
+            answerSdp: VIDEO_ONLY_WHIP_ANSWER,
+            resourceUrl: "https://coord/whip/s",
+            etag: '"etag"',
+          }),
           patchCandidate: async (url: string, _etag: string, fragment: string) => {
             patched.push({ url, fragment });
           },
           delete: async () => {},
         }) as unknown as WhipClient,
-    }
+    },
   );
   return { publisher, patched };
 }
@@ -134,7 +148,12 @@ describe("WebRtcPublisher trickle ICE", () => {
     let peerIndex = 0;
     let publishIndex = 0;
     const publisher = new WebRtcPublisher(
-      { streamId: "s", whipEndpoint: "https://coord/whip", trickleIce: true, maxReconnectAttempts: 1 },
+      {
+        streamId: "s",
+        whipEndpoint: "https://coord/whip",
+        trickleIce: true,
+        maxReconnectAttempts: 1,
+      },
       {
         createPeerConnection: () => peers[peerIndex++] as unknown as RTCPeerConnection,
         createWhipClient: () =>
@@ -142,14 +161,14 @@ describe("WebRtcPublisher trickle ICE", () => {
             publish: async () => ({
               answerSdp: VIDEO_ONLY_WHIP_ANSWER,
               resourceUrl: `https://coord/whip/session-${++publishIndex}`,
-              etag: "\"etag\"",
+              etag: '"etag"',
             }),
             patchCandidate: async (url: string, _etag: string, fragment: string) => {
               patched.push({ url, fragment });
             },
             delete: async () => {},
           }) as unknown as WhipClient,
-      }
+      },
     );
 
     await publisher.start();
@@ -158,12 +177,18 @@ describe("WebRtcPublisher trickle ICE", () => {
       await Promise.resolve();
     }
 
-    first.emitCandidate({ candidate: "candidate:stale 1 udp 1 1.2.3.4 7000 typ host", sdpMid: "0" });
-    second.emitCandidate({ candidate: "candidate:current 1 udp 1 1.2.3.4 8000 typ host", sdpMid: "0" });
+    first.emitCandidate({
+      candidate: "candidate:stale 1 udp 1 1.2.3.4 7000 typ host",
+      sdpMid: "0",
+    });
+    second.emitCandidate({
+      candidate: "candidate:current 1 udp 1 1.2.3.4 8000 typ host",
+      sdpMid: "0",
+    });
     second.emitCandidate(null);
 
     expect(patched).toHaveLength(2);
-    expect(patched.every(patch => patch.url === "https://coord/whip/session-2")).toBe(true);
+    expect(patched.every((patch) => patch.url === "https://coord/whip/session-2")).toBe(true);
     expect(patched[0].fragment).toContain("candidate:current");
     expect(patched[1].fragment).toContain("a=end-of-candidates");
 

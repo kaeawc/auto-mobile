@@ -1,6 +1,11 @@
 import type { Element } from "../../models/Element";
 import type { ScreenSize } from "../../models/ScreenSize";
-import { ActionableError, type BootedDevice, type CurrentFocusResult, type TraversalOrderResult } from "../../models";
+import {
+  ActionableError,
+  type BootedDevice,
+  type CurrentFocusResult,
+  type TraversalOrderResult,
+} from "../../models";
 import type { ElementSelector as FocusElementSelector } from "./ElementSelector";
 import { DeviceDetection } from "../../utils/DeviceDetection";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
@@ -24,7 +29,7 @@ export interface FocusNavigationDriver {
     y1: number,
     x2: number,
     y2: number,
-    durationMs: number
+    durationMs: number,
   ): Promise<A11ySwipeResult>;
   getScreenSize(): Promise<ScreenSize>;
 }
@@ -67,15 +72,21 @@ class DefaultFocusNavigationDriver implements FocusNavigationDriver {
     y1: number,
     x2: number,
     y2: number,
-    durationMs: number
+    durationMs: number,
   ): Promise<A11ySwipeResult> {
     return this.accessibilityService.requestSwipe(x1, y1, x2, y2, durationMs);
   }
 
   async getScreenSize(): Promise<ScreenSize> {
-    const hierarchy = await this.accessibilityService.getAccessibilityHierarchy(undefined, undefined, true);
+    const hierarchy = await this.accessibilityService.getAccessibilityHierarchy(
+      undefined,
+      undefined,
+      true,
+    );
     if (!hierarchy?.screenWidth || !hierarchy.screenHeight) {
-      throw new ActionableError("CtrlProxy did not provide screen dimensions for TalkBack navigation");
+      throw new ActionableError(
+        "CtrlProxy did not provide screen dimensions for TalkBack navigation",
+      );
     }
     return { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
   }
@@ -102,8 +113,7 @@ export class FocusNavigationExecutor {
 
   constructor(dependencies: FocusNavigationExecutorDependencies = {}) {
     this.matcher = dependencies.matcher ?? new FocusElementMatcher();
-    this.pathCalculator =
-      dependencies.pathCalculator ?? new FocusPathCalculator(this.matcher);
+    this.pathCalculator = dependencies.pathCalculator ?? new FocusPathCalculator(this.matcher);
     this.timer = dependencies.timer ?? defaultTimer;
     this.driverFactory = dependencies.driverFactory ?? new DefaultFocusNavigationDriverFactory();
     this.deviceResolver = dependencies.deviceResolver ?? this.resolveDevice;
@@ -113,22 +123,22 @@ export class FocusNavigationExecutor {
     deviceId: string,
     targetSelector: FocusElementSelector,
     path: FocusNavigationPath,
-    options: NavigationOptions = {}
+    options: NavigationOptions = {},
   ): Promise<boolean> {
     const maxSwipes = options.maxSwipes ?? FocusNavigationExecutor.DEFAULT_MAX_SWIPES;
     const verificationInterval = Math.max(
       1,
-      options.verificationInterval ?? FocusNavigationExecutor.DEFAULT_VERIFICATION_INTERVAL
+      options.verificationInterval ?? FocusNavigationExecutor.DEFAULT_VERIFICATION_INTERVAL,
     );
     const swipeDelay = Math.max(
       0,
-      options.swipeDelay ?? FocusNavigationExecutor.DEFAULT_SWIPE_DELAY_MS
+      options.swipeDelay ?? FocusNavigationExecutor.DEFAULT_SWIPE_DELAY_MS,
     );
 
     if (path.swipeCount > maxSwipes) {
       throw new ActionableError(
         `Target requires ${path.swipeCount} swipes (max: ${maxSwipes}). ` +
-        "Try scrolling the container first or narrow the selector."
+          "Try scrolling the container first or narrow the selector.",
       );
     }
 
@@ -157,10 +167,7 @@ export class FocusNavigationExecutor {
     let bestDistance = Number.POSITIVE_INFINITY;
 
     if (remainingSwipes === 0) {
-      const initialVerification = await this.verifyNavigationState(
-        driver,
-        targetSelector
-      );
+      const initialVerification = await this.verifyNavigationState(driver, targetSelector);
       if (initialVerification.reachedTarget) {
         options.onFocusObserved?.(initialVerification.currentFocus);
         return true;
@@ -169,25 +176,25 @@ export class FocusNavigationExecutor {
       if (initialVerification.targetIndex === null) {
         throw new ActionableError(
           `Target not found (${this.describeSelector(targetSelector)}). ` +
-          "Try using debugSearch to validate the selector."
+            "Try using debugSearch to validate the selector.",
         );
       }
 
       const recalculated = this.pathCalculator.calculatePath(
         initialVerification.currentFocus,
         targetSelector,
-        initialVerification.orderedElements
+        initialVerification.orderedElements,
       );
       if (!recalculated) {
         throw new ActionableError(
           `Target not found (${this.describeSelector(targetSelector)}). ` +
-          "Try using debugSearch to validate the selector."
+            "Try using debugSearch to validate the selector.",
         );
       }
       if (recalculated.swipeCount > maxSwipes) {
         throw new ActionableError(
           `Target requires ${recalculated.swipeCount} swipes (max: ${maxSwipes}). ` +
-          "Try scrolling the container first or narrow the selector."
+            "Try scrolling the container first or narrow the selector.",
         );
       }
       currentPath = recalculated;
@@ -202,7 +209,7 @@ export class FocusNavigationExecutor {
       if (totalSwipes > maxSwipes) {
         throw new ActionableError(
           `Focus navigation exceeded max swipes (${maxSwipes}). ` +
-          "Try scrolling the container first or narrow the selector."
+            "Try scrolling the container first or narrow the selector.",
         );
       }
 
@@ -237,19 +244,19 @@ export class FocusNavigationExecutor {
       if (verification.targetIndex === null) {
         throw new ActionableError(
           `Target element disappeared during navigation (${this.describeSelector(targetSelector)}). ` +
-          "Try using debugSearch to validate the selector."
+            "Try using debugSearch to validate the selector.",
         );
       }
 
       const recalculated = this.pathCalculator.calculatePath(
         verification.currentFocus,
         targetSelector,
-        verification.orderedElements
+        verification.orderedElements,
       );
       if (!recalculated) {
         throw new ActionableError(
           `Target element disappeared during navigation (${this.describeSelector(targetSelector)}). ` +
-          "Try using debugSearch to validate the selector."
+            "Try using debugSearch to validate the selector.",
         );
       }
 
@@ -275,15 +282,15 @@ export class FocusNavigationExecutor {
           if (!focusMoved) {
             throw new ActionableError(
               "Focus did not move after multiple swipes. " +
-              "Try scrolling the container or ensure the element is focusable."
+                "Try scrolling the container or ensure the element is focusable.",
             );
           }
           throw new ActionableError(
             distanceToTarget === null
               ? "Focus navigation could not track the TalkBack cursor position. " +
-                "Try scrolling the container first or narrow the selector."
+                  "Try scrolling the container first or narrow the selector."
               : "Focus navigation is not converging on the target. " +
-                "Try scrolling the container first or narrow the selector."
+                  "Try scrolling the container first or narrow the selector.",
           );
         }
       }
@@ -293,7 +300,7 @@ export class FocusNavigationExecutor {
         if (recalculated.swipeCount > remainingAllowed) {
           throw new ActionableError(
             `Target requires ${recalculated.swipeCount} additional swipes (max remaining: ${remainingAllowed}). ` +
-            "Try scrolling the container first or narrow the selector."
+              "Try scrolling the container first or narrow the selector.",
           );
         }
         currentPath = recalculated;
@@ -301,10 +308,7 @@ export class FocusNavigationExecutor {
       }
     }
 
-    const finalVerification = await this.verifyNavigationState(
-      driver,
-      targetSelector
-    );
+    const finalVerification = await this.verifyNavigationState(driver, targetSelector);
     options.onFocusObserved?.(finalVerification.currentFocus);
     return finalVerification.reachedTarget;
   }
@@ -314,14 +318,14 @@ export class FocusNavigationExecutor {
     return {
       name: deviceId,
       deviceId,
-      platform
+      platform,
     };
   }
 
   private async performFocusSwipe(
     driver: FocusNavigationDriver,
     direction: "forward" | "backward",
-    screenSize: ScreenSize
+    screenSize: ScreenSize,
   ): Promise<void> {
     const { x1, y1, x2, y2 } = this.getSwipeCoordinates(direction, screenSize);
     const result = await driver.requestSwipe(
@@ -329,7 +333,7 @@ export class FocusNavigationExecutor {
       y1,
       x2,
       y2,
-      FocusNavigationExecutor.DEFAULT_SWIPE_DURATION_MS
+      FocusNavigationExecutor.DEFAULT_SWIPE_DURATION_MS,
     );
     if (!result.success) {
       throw new ActionableError(result.error || "Failed to perform focus swipe.");
@@ -338,7 +342,7 @@ export class FocusNavigationExecutor {
 
   private getSwipeCoordinates(
     direction: "forward" | "backward",
-    screenSize: ScreenSize
+    screenSize: ScreenSize,
   ): { x1: number; y1: number; x2: number; y2: number } {
     const midY = Math.round(screenSize.height * 0.5);
     const padding = Math.round(screenSize.width * 0.2);
@@ -349,7 +353,7 @@ export class FocusNavigationExecutor {
 
   private async verifyNavigationState(
     driver: FocusNavigationDriver,
-    targetSelector: FocusElementSelector
+    targetSelector: FocusElementSelector,
   ): Promise<NavigationVerification> {
     const traversal = await driver.requestTraversalOrder();
     if (traversal.error) {
@@ -379,7 +383,7 @@ export class FocusNavigationExecutor {
       orderedElements,
       currentFocus,
       targetIndex,
-      reachedTarget
+      reachedTarget,
     };
   }
 
@@ -387,8 +391,10 @@ export class FocusNavigationExecutor {
     if (!element) {
       return null;
     }
-    const resourceId = element["resource-id"] ?? (element as { resourceId?: string }).resourceId ?? "";
-    const contentDesc = element["content-desc"] ?? (element as { contentDesc?: string }).contentDesc ?? "";
+    const resourceId =
+      element["resource-id"] ?? (element as { resourceId?: string }).resourceId ?? "";
+    const contentDesc =
+      element["content-desc"] ?? (element as { contentDesc?: string }).contentDesc ?? "";
     const testTag = element["test-tag"] ?? (element as { testTag?: string }).testTag ?? "";
     const text = element.text ?? "";
     const bounds = element.bounds
@@ -399,7 +405,7 @@ export class FocusNavigationExecutor {
 
   private shouldRecalculatePath(
     currentPath: FocusNavigationPath,
-    recalculated: FocusNavigationPath
+    recalculated: FocusNavigationPath,
   ): boolean {
     return (
       currentPath.targetFocusIndex !== recalculated.targetFocusIndex ||

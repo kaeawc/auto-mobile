@@ -18,12 +18,7 @@ import { join } from "path";
 /** Repo root, relative to this file (`test/parity/pinchGoldenVectors.ts`). */
 export const REPO_ROOT = join(import.meta.dir, "..", "..");
 
-export const CANONICAL_JSON_PATH = join(
-  REPO_ROOT,
-  "test",
-  "fixtures",
-  "pinch-golden-vectors.json",
-);
+export const CANONICAL_JSON_PATH = join(REPO_ROOT, "test", "fixtures", "pinch-golden-vectors.json");
 export const SWIFT_TEST_PATH = join(
   REPO_ROOT,
   "ios",
@@ -92,12 +87,7 @@ export function assertNoStringLiterals(region: string, label: string): void {
  * and ends at its matching `close` delimiter (inclusive). Used to carve out just the golden table
  * literal from a larger test function body.
  */
-function extractBalanced(
-  source: string,
-  fromIndex: number,
-  open: string,
-  close: string,
-): string {
+function extractBalanced(source: string, fromIndex: number, open: string, close: string): string {
   const start = source.indexOf(open, fromIndex);
   if (start < 0) {
     throw new Error(`could not find '${open}' after index ${fromIndex}`);
@@ -150,12 +140,7 @@ export function extractNumericTableRegion(
   }
   // Start after the marker so a type annotation in the marker (e.g. Swift's `[Vector]`) is not
   // mistaken for the opening delimiter of the literal.
-  const region = extractBalanced(
-    source,
-    markerIndex + assignmentMarker.length,
-    open,
-    close,
-  );
+  const region = extractBalanced(source, markerIndex + assignmentMarker.length, open, close);
   // Fail loudly if a string literal ever appears inside the table region so a digit-bearing label
   // can never silently corrupt positional number extraction (Item 2, issue #3021).
   assertNoStringLiterals(region, filePath);
@@ -303,9 +288,7 @@ export function diffGoldenTables(
     const ep = sortPoints(e.expected);
     for (let j = 0; j < ep.length; j++) {
       if (!near(ap[j][0], ep[j][0]) || !near(ap[j][1], ep[j][1])) {
-        diffs.push(
-          `row ${i} point ${j}: (${ap[j]}) !== (${ep[j]})`,
-        );
+        diffs.push(`row ${i} point ${j}: (${ap[j]}) !== (${ep[j]})`);
       }
     }
   }

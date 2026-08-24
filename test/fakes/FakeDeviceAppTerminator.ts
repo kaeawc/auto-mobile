@@ -33,7 +33,7 @@ export class FakeDeviceAppTerminator implements DeviceAppTerminator {
 
   async terminateApp(
     deviceUdid: string,
-    bundleId: string
+    bundleId: string,
   ): Promise<{ wasInstalled: boolean; wasRunning: boolean }> {
     this.terminateCalls.push({ deviceUdid, bundleId });
     if (this.error) {

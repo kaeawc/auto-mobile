@@ -1,14 +1,16 @@
-import {
-  ResourceRegistry,
-  ResourceContent,
-  getRequestedResourceUri,
-} from "./resourceRegistry";
+import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { GetAppMetadata, IosAppMetadataSource } from "../features/observe/GetAppMetadata";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../utils/ios-cmdline-tools/DeviceAppManager";
-import { BootedDevice, InstalledApp, InstalledAppsByProfile, Platform, SystemInstalledApp } from "../models";
+import {
+  BootedDevice,
+  InstalledApp,
+  InstalledAppsByProfile,
+  Platform,
+  SystemInstalledApp,
+} from "../models";
 import { logger } from "../utils/logger";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
@@ -19,11 +21,11 @@ import { getIosInstalledAppBundleId } from "../utils/ios-cmdline-tools/iosInstal
 export const APP_RESOURCE_TEMPLATES = {
   DEVICE_APPS: "automobile:devices/{deviceId}/apps",
   DEVICE_APP: "automobile:devices/{deviceId}/apps/{packageName}",
-  DEVICE_APP_METADATA: "automobile:devices/{deviceId}/apps/{appId}/metadata"
+  DEVICE_APP_METADATA: "automobile:devices/{deviceId}/apps/{appId}/metadata",
 } as const;
 
 export const APPS_RESOURCE_URIS = {
-  BASE: "automobile:apps"
+  BASE: "automobile:apps",
 } as const;
 
 const APPS_QUERY_KEYS = ["deviceId", "platform", "search", "type", "profile"] as const;
@@ -117,7 +119,7 @@ function toInstalledAppInfo(app: InstalledApp): InstalledAppInfo {
     userId: app.userId,
     userProfile: userProfileForUserId(app.userId),
     foreground: app.foreground,
-    recent: app.recent
+    recent: app.recent,
   };
 }
 
@@ -128,7 +130,7 @@ function toQueryAndroidApp(app: AndroidInstalledAppInfo): AppsQueryAppInfo {
     userId: app.userId,
     userProfile: app.userProfile,
     foreground: app.foreground,
-    recent: app.recent
+    recent: app.recent,
   };
 }
 
@@ -138,7 +140,7 @@ function toQuerySystemApp(app: SystemInstalledApp): AppsQueryAppInfo {
     type: "system",
     userIds: app.userIds,
     foreground: app.foreground,
-    recent: app.recent
+    recent: app.recent,
   };
 }
 
@@ -189,7 +191,7 @@ function extractIosDisplayName(app: Record<string, unknown>): string | undefined
     "CFBundleDisplayName",
     "CFBundleName",
     "displayName",
-    "name"
+    "name",
   ]);
 }
 
@@ -201,18 +203,12 @@ function extractIosVersion(app: Record<string, unknown>): string | undefined {
     "CFBundleVersion",
     "BundleShortVersionString",
     "BundleVersion",
-    "version"
+    "version",
   ]);
 }
 
 function extractIosPath(app: Record<string, unknown>): string | undefined {
-  return readIosAppField(app, [
-    "bundlePath",
-    "bundleContainer",
-    "path",
-    "Path",
-    "dataContainer"
-  ]);
+  return readIosAppField(app, ["bundlePath", "bundleContainer", "path", "Path", "dataContainer"]);
 }
 
 function toQueryIosApp(app: IosInstalledAppInfo): AppsQueryAppInfo {
@@ -223,7 +219,7 @@ function toQueryIosApp(app: IosInstalledAppInfo): AppsQueryAppInfo {
     userProfile: "personal",
     foreground: false,
     recent: false,
-    displayName: app.displayName
+    displayName: app.displayName,
   };
 }
 
@@ -297,7 +293,7 @@ function createAppsResourceContent(
   apps: InstalledAppInfo[],
   foregroundApp: string | null,
   lastUpdated: string,
-  message?: string
+  message?: string,
 ): AppsResourceContent {
   return {
     deviceId: device.deviceId,
@@ -306,7 +302,7 @@ function createAppsResourceContent(
     totalCount: apps.length,
     foregroundApp,
     lastUpdated,
-    ...(message ? { message } : {})
+    ...(message ? { message } : {}),
   };
 }
 
@@ -318,13 +314,13 @@ async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> 
   try {
     const manager = PlatformDeviceManagerFactory.getInstance();
     const androidDevices = await manager.getBootedDevices("android");
-    const android = androidDevices.find(device => device.deviceId === deviceId);
+    const android = androidDevices.find((device) => device.deviceId === deviceId);
     if (android) {
       return android;
     }
 
     const iosDevices = await manager.getBootedDevices("ios");
-    return iosDevices.find(device => device.deviceId === deviceId) ?? null;
+    return iosDevices.find((device) => device.deviceId === deviceId) ?? null;
   } catch (error) {
     logger.warn(`[AppResources] Failed to list booted devices: ${error}`);
     return null;
@@ -336,14 +332,17 @@ interface FetchedAppsCacheEntry {
   cacheable: boolean;
 }
 
-async function fetchAppsForDevice(device: BootedDevice, timer: Timer = defaultTimer): Promise<FetchedAppsCacheEntry> {
+async function fetchAppsForDevice(
+  device: BootedDevice,
+  timer: Timer = defaultTimer,
+): Promise<FetchedAppsCacheEntry> {
   const listInstalledApps = new ListInstalledApps(device);
   const lastUpdated = new Date().toISOString();
 
   if (device.platform === "android") {
     const result = await listInstalledApps.executeDetailedResult();
     const { userApps, queryApps } = normalizeAndroidApps(result.apps);
-    const foregroundApp = queryApps.find(app => app.foreground)?.packageName ?? null;
+    const foregroundApp = queryApps.find((app) => app.foreground)?.packageName ?? null;
     const message = getAndroidAppsMessage(device.deviceId);
 
     return {
@@ -352,8 +351,8 @@ async function fetchAppsForDevice(device: BootedDevice, timer: Timer = defaultTi
         expiresAt: timer.now() + APPS_CACHE_TTL_MS,
         content: createAppsResourceContent(device, userApps, foregroundApp, lastUpdated, message),
         appsByPackage: buildAppsByPackage(userApps),
-        queryApps
-      }
+        queryApps,
+      },
     };
   }
 
@@ -373,11 +372,11 @@ async function fetchAppsForDevice(device: BootedDevice, timer: Timer = defaultTi
       bundleId,
       displayName,
       ...(version ? { version } : {}),
-      ...(path ? { path } : {})
+      ...(path ? { path } : {}),
     };
     apps.push(info);
     queryApps.push({
-      ...toQueryIosApp(info)
+      ...toQueryIosApp(info),
     });
   }
 
@@ -387,12 +386,15 @@ async function fetchAppsForDevice(device: BootedDevice, timer: Timer = defaultTi
       expiresAt: timer.now() + APPS_CACHE_TTL_MS,
       content: createAppsResourceContent(device, apps, null, lastUpdated),
       appsByPackage: buildAppsByPackage(apps),
-      queryApps
-    }
+      queryApps,
+    },
   };
 }
 
-async function ensureAppsCacheEntry(deviceId: string, timer: Timer = defaultTimer): Promise<AppsCacheEntry | null> {
+async function ensureAppsCacheEntry(
+  deviceId: string,
+  timer: Timer = defaultTimer,
+): Promise<AppsCacheEntry | null> {
   const cached = appCacheByDeviceId.get(deviceId);
   if (cached && cached.expiresAt > timer.now()) {
     return cached;
@@ -405,10 +407,17 @@ async function ensureAppsCacheEntry(deviceId: string, timer: Timer = defaultTime
 
   const cacheGeneration = getInstalledAppsCacheWriteCoordinator().beginRebuild(deviceId);
   const result = await fetchAppsForDevice(device, timer);
-  if (result.cacheable && (device.platform !== "android" || !getInstalledAppsCacheWriteCoordinator().isDirty(deviceId))) {
-    await getInstalledAppsCacheWriteCoordinator().commitRebuild(deviceId, cacheGeneration, async () => {
-      appCacheByDeviceId.set(deviceId, result.entry);
-    });
+  if (
+    result.cacheable &&
+    (device.platform !== "android" || !getInstalledAppsCacheWriteCoordinator().isDirty(deviceId))
+  ) {
+    await getInstalledAppsCacheWriteCoordinator().commitRebuild(
+      deviceId,
+      cacheGeneration,
+      async () => {
+        appCacheByDeviceId.set(deviceId, result.entry);
+      },
+    );
   }
   return result.entry;
 }
@@ -434,7 +443,7 @@ function parseProfileParam(value: string | undefined): number | undefined {
 }
 
 function parseAppsQueryParams(params: Record<string, string>): AppsQueryOptions {
-  const unknownKeys = Object.keys(params).filter(key => !APPS_QUERY_PARAM_KEYS.has(key));
+  const unknownKeys = Object.keys(params).filter((key) => !APPS_QUERY_PARAM_KEYS.has(key));
   if (unknownKeys.length > 0) {
     throw new Error(`Unknown query parameters: ${unknownKeys.join(", ")}`);
   }
@@ -469,7 +478,7 @@ function parseAppsQueryParams(params: Record<string, string>): AppsQueryOptions 
     search: search ?? undefined,
     type,
     profile: parseProfileParam(params.profile),
-    deviceId
+    deviceId,
   };
 }
 
@@ -495,10 +504,13 @@ function buildAppsUri(options: AppsQueryOptions): string {
   return queryString ? `${APPS_RESOURCE_URIS.BASE}?${queryString}` : APPS_RESOURCE_URIS.BASE;
 }
 
-function filterAppsByQuery(apps: AppsQueryAppInfo[], options: AppsQueryOptions): AppsQueryAppInfo[] {
+function filterAppsByQuery(
+  apps: AppsQueryAppInfo[],
+  options: AppsQueryOptions,
+): AppsQueryAppInfo[] {
   const searchTerm = options.search?.toLowerCase();
 
-  return apps.filter(app => {
+  return apps.filter((app) => {
     if (options.type && app.type !== options.type) {
       return false;
     }
@@ -535,7 +547,7 @@ async function getAppsQueryDevice(options: AppsQueryOptions): Promise<BootedDevi
 
   for (const platform of platforms) {
     const devices = await manager.getBootedDevices(platform);
-    const matched = devices.find(device => device.deviceId === options.deviceId);
+    const matched = devices.find((device) => device.deviceId === options.deviceId);
     if (matched) {
       return matched;
     }
@@ -546,7 +558,7 @@ async function getAppsQueryDevice(options: AppsQueryOptions): Promise<BootedDevi
 
 async function getAppsQueryResource(
   options: AppsQueryOptions,
-  uri: string
+  uri: string,
 ): Promise<ResourceContent> {
   try {
     const device = await getAppsQueryDevice(options);
@@ -556,13 +568,15 @@ async function getAppsQueryResource(
     }
 
     const apps = filterAppsByQuery(cacheEntry.queryApps, options);
-    const deviceEntries: AppsQueryDeviceContent[] = [{
-      deviceId: device.deviceId,
-      platform: device.platform,
-      totalCount: apps.length,
-      lastUpdated: cacheEntry.content.lastUpdated,
-      apps
-    }];
+    const deviceEntries: AppsQueryDeviceContent[] = [
+      {
+        deviceId: device.deviceId,
+        platform: device.platform,
+        totalCount: apps.length,
+        lastUpdated: cacheEntry.content.lastUpdated,
+        apps,
+      },
+    ];
 
     const parsed = Date.parse(cacheEntry.content.lastUpdated);
     const lastUpdated = Number.isNaN(parsed)
@@ -574,7 +588,7 @@ async function getAppsQueryResource(
       totalCount: apps.length,
       deviceCount: 1,
       lastUpdated,
-      devices: deviceEntries
+      devices: deviceEntries,
     };
 
     if (options.deviceId) {
@@ -584,16 +598,20 @@ async function getAppsQueryResource(
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify(content, null, 2)
+      text: JSON.stringify(content, null, 2),
     };
   } catch (error) {
     logger.error(`[AppResources] Failed to read apps resource: ${error}`);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to read apps resource: ${error}`
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          error: `Failed to read apps resource: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -604,16 +622,20 @@ async function getAppsResource(deviceId: string): Promise<ResourceContent> {
     return {
       uri: getDeviceAppsUri(deviceId),
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Device not found or not booted: ${deviceId}`
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          error: `Device not found or not booted: ${deviceId}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 
   return {
     uri: getDeviceAppsUri(deviceId),
     mimeType: "application/json",
-    text: JSON.stringify(cacheEntry.content, null, 2)
+    text: JSON.stringify(cacheEntry.content, null, 2),
   };
 }
 
@@ -625,9 +647,13 @@ async function getAppResource(deviceId: string, packageName: string): Promise<Re
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Device not found or not booted: ${deviceId}`
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          error: `Device not found or not booted: ${deviceId}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 
@@ -635,13 +661,13 @@ async function getAppResource(deviceId: string, packageName: string): Promise<Re
   const filteredContent: AppsResourceContent = {
     ...cacheEntry.content,
     apps: matchingApps,
-    totalCount: matchingApps.length
+    totalCount: matchingApps.length,
   };
 
   return {
     uri,
     mimeType: "application/json",
-    text: JSON.stringify(filteredContent, null, 2)
+    text: JSON.stringify(filteredContent, null, 2),
   };
 }
 
@@ -654,7 +680,7 @@ function registerDeviceAppResource(device: BootedDevice): void {
     `List of installed user apps for device ${device.deviceId} (${device.platform}). ` +
       `System apps: use automobile:apps?deviceId=${device.deviceId}&type=system.`,
     "application/json",
-    () => getAppsResource(device.deviceId)
+    () => getAppsResource(device.deviceId),
   );
 
   registeredDeviceResources.set(device.deviceId, uri);
@@ -681,7 +707,7 @@ export async function syncInstalledAppResources(): Promise<void> {
     logger.warn(`[AppResources] Failed to get booted devices: ${error}`);
   }
 
-  const currentDeviceIds = new Set(devices.map(device => device.deviceId));
+  const currentDeviceIds = new Set(devices.map((device) => device.deviceId));
   let changed = false;
 
   for (const device of devices) {
@@ -699,9 +725,13 @@ export async function syncInstalledAppResources(): Promise<void> {
         const { InstalledAppsRepository } = await import("../db/installedAppsRepository");
         const repo = new InstalledAppsRepository();
         await getInstalledAppsCacheWriteCoordinator().invalidate(deviceId, () =>
-          getDbWriteBarrier().track(() => repo.clearDeviceSession(deviceId)).then(() => undefined)
+          getDbWriteBarrier()
+            .track(() => repo.clearDeviceSession(deviceId))
+            .then(() => undefined),
         );
-        logger.info(`[AppResources] Cleared installed apps cache for disappeared device: ${deviceId}`);
+        logger.info(
+          `[AppResources] Cleared installed apps cache for disappeared device: ${deviceId}`,
+        );
       } catch (error) {
         logger.warn(`[AppResources] Failed to clear cache for device ${deviceId}: ${error}`);
       }
@@ -720,7 +750,7 @@ export async function notifyInstalledAppResourceUpdated(deviceId: string): Promi
   await ResourceRegistry.notifyResourcesUpdated([
     getDeviceAppsUri(deviceId),
     APPS_RESOURCE_URIS.BASE,
-    ...queryUris
+    ...queryUris,
   ]);
 }
 
@@ -782,14 +812,14 @@ function createIosMetadataSource(device: BootedDevice): IosAppMetadataSource {
   return {
     listApps: (deviceId?: string) => simctl.listApps(deviceId),
     getPhysicalDeviceAppInfo: (deviceId: string, bundleId: string) =>
-      deviceAppManager.getInstalledAppInfo(deviceId, bundleId)
+      deviceAppManager.getInstalledAppInfo(deviceId, bundleId),
   };
 }
 
 async function getAppMetadataResource(
   deviceId: string,
   appId: string,
-  timer: Timer = defaultTimer
+  timer: Timer = defaultTimer,
 ): Promise<ResourceContent> {
   const uri = `automobile:devices/${deviceId}/apps/${appId}/metadata`;
 
@@ -806,7 +836,7 @@ async function getAppMetadataResource(
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2)
+      text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2),
     };
   }
 
@@ -819,23 +849,27 @@ async function getAppMetadataResource(
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({ error: `App not found: ${appId}` }, null, 2)
+        text: JSON.stringify({ error: `App not found: ${appId}` }, null, 2),
       };
     }
 
     const content: ResourceContent = {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify(metadata, null, 2)
+      text: JSON.stringify(metadata, null, 2),
     };
 
-    await getInstalledAppsCacheWriteCoordinator().commitRebuild(deviceId, cacheGeneration, async () => {
-      appMetadataCacheByKey.set(cacheKey, {
-        deviceId,
-        expiresAt: timer.now() + APP_METADATA_CACHE_TTL_MS,
-        content
-      });
-    });
+    await getInstalledAppsCacheWriteCoordinator().commitRebuild(
+      deviceId,
+      cacheGeneration,
+      async () => {
+        appMetadataCacheByKey.set(cacheKey, {
+          deviceId,
+          expiresAt: timer.now() + APP_METADATA_CACHE_TTL_MS,
+          content,
+        });
+      },
+    );
 
     return content;
   } catch (error) {
@@ -843,7 +877,7 @@ async function getAppMetadataResource(
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to get app metadata: ${error}` }, null, 2)
+      text: JSON.stringify({ error: `Failed to get app metadata: ${error}` }, null, 2),
     };
   }
 }
@@ -854,7 +888,7 @@ export function registerAppResources(): void {
     "Installed Apps",
     "List installed apps across booted devices with optional query filters (deviceId required).",
     "application/json",
-    () => getAppsQueryResource({}, APPS_RESOURCE_URIS.BASE)
+    () => getAppsQueryResource({}, APPS_RESOURCE_URIS.BASE),
   );
 
   ResourceRegistry.registerTemplate(
@@ -862,22 +896,27 @@ export function registerAppResources(): void {
     "Installed Apps",
     "List installed apps across booted devices with optional query filters.",
     "application/json",
-    async params => {
-    try {
-      const options = parseAppsQueryParams(params);
-      const uri = getRequestedResourceUri(params) || buildAppsUri(options);
-      return getAppsQueryResource(options, uri);
-    } catch (error) {
-      logger.error(`[AppResources] Failed to parse apps query params: ${error}`);
-      return {
-        uri: APPS_RESOURCE_URIS.BASE,
-        mimeType: "application/json",
-        text: JSON.stringify({
-          error: `Invalid apps query parameters: ${error}`
-        }, null, 2)
-      };
-    }
-  });
+    async (params) => {
+      try {
+        const options = parseAppsQueryParams(params);
+        const uri = getRequestedResourceUri(params) || buildAppsUri(options);
+        return getAppsQueryResource(options, uri);
+      } catch (error) {
+        logger.error(`[AppResources] Failed to parse apps query params: ${error}`);
+        return {
+          uri: APPS_RESOURCE_URIS.BASE,
+          mimeType: "application/json",
+          text: JSON.stringify(
+            {
+              error: `Invalid apps query parameters: ${error}`,
+            },
+            null,
+            2,
+          ),
+        };
+      }
+    },
+  );
 
   ResourceRegistry.registerTemplate(
     APP_RESOURCE_TEMPLATES.DEVICE_APPS,
@@ -885,7 +924,7 @@ export function registerAppResources(): void {
     "List of installed user apps for a specific device. " +
       "System apps: use automobile:apps?deviceId=DEVICE_ID&type=system.",
     "application/json",
-    async params => getAppsResource(params.deviceId)
+    async (params) => getAppsResource(params.deviceId),
   );
 
   ResourceRegistry.registerTemplate(
@@ -894,7 +933,7 @@ export function registerAppResources(): void {
     "Details for a specific user app installed on a specific device. " +
       "System apps: use automobile:apps?deviceId=DEVICE_ID&type=system&search=PACKAGE_NAME.",
     "application/json",
-    async params => getAppResource(params.deviceId, params.packageName)
+    async (params) => getAppResource(params.deviceId, params.packageName),
   );
 
   ResourceRegistry.registerTemplate(
@@ -903,7 +942,7 @@ export function registerAppResources(): void {
     "Version, build number, install path, and timestamps for an installed app. " +
       "Returns normalized metadata for both Android (package name) and iOS (bundle ID).",
     "application/json",
-    async params => getAppMetadataResource(params.deviceId, params.appId)
+    async (params) => getAppMetadataResource(params.deviceId, params.appId),
   );
 
   void syncInstalledAppResources();

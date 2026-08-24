@@ -88,8 +88,8 @@ runs:
     - name: "Install JDK"
       uses: actions/setup-java@v5
       with:
-        distribution: 'zulu'
-        java-version: '21'
+        distribution: "zulu"
+        java-version: "21"
 
     - name: "Set up jemalloc"
       if: ${{ inputs.malloc-replacement == 'jemalloc' }}
@@ -208,8 +208,8 @@ runs:
         cache-cleanup: "on-success"
         build-scan-publish: true
         cache-disabled: ${{ inputs.reuse-build-cache == 'false' }}
-        build-scan-terms-of-use-url: 'https://gradle.com/help/legal-terms-of-use'
-        build-scan-terms-of-use-agree: 'yes'
+        build-scan-terms-of-use-url: "https://gradle.com/help/legal-terms-of-use"
+        build-scan-terms-of-use-agree: "yes"
         validate-wrappers: true
 
     - name: "Restore Android SDK Cache"
@@ -264,7 +264,7 @@ runs:
       uses: mikepenz/action-junit-report@v6
       if: steps.junit-reports-exist.outputs.files_exists == 'true'
       with:
-        report_paths: '**/build/test-results/testDebugUnitTest/TEST-*.xml'
+        report_paths: "**/build/test-results/testDebugUnitTest/TEST-*.xml"
 
     - name: "Rename Configuration Cache HTML Report"
       shell: ${{ inputs.shell }}

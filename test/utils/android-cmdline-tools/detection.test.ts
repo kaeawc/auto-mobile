@@ -14,7 +14,7 @@ import {
   clearDetectionCache,
   getAndroidHomeWithSystemImages,
   getCmdlineToolsRoot,
-  isHomebrewToolsPath
+  isHomebrewToolsPath,
 } from "../../../src/utils/android-cmdline-tools/detection";
 import { FakeSystemDetection } from "../../fakes/FakeSystemDetection";
 
@@ -102,7 +102,9 @@ describe("Android Command Line Tools - Detection", () => {
 
     test("should return path when homebrew installation exists on macOS", () => {
       systemDetection.setPlatform("darwin");
-      systemDetection.addExistingFile("/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest");
+      systemDetection.addExistingFile(
+        "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest",
+      );
 
       const path = getHomebrewAndroidToolsPath(systemDetection);
 
@@ -119,7 +121,9 @@ describe("Android Command Line Tools - Detection", () => {
 
     test("should return Intel Homebrew path when it exists on macOS", () => {
       systemDetection.setPlatform("darwin");
-      systemDetection.addExistingFile("/usr/local/share/android-commandlinetools/cmdline-tools/latest");
+      systemDetection.addExistingFile(
+        "/usr/local/share/android-commandlinetools/cmdline-tools/latest",
+      );
 
       const path = getHomebrewAndroidToolsPath(systemDetection);
 
@@ -188,9 +192,15 @@ describe("Android Command Line Tools - Detection", () => {
 
   describe("isHomebrewToolsPath", () => {
     test("should detect Homebrew paths by prefix", () => {
-      expect(isHomebrewToolsPath("/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest")).toBe(true);
-      expect(isHomebrewToolsPath("/usr/local/share/android-commandlinetools/cmdline-tools/latest")).toBe(true);
-      expect(isHomebrewToolsPath("/Users/test/Library/Android/sdk/cmdline-tools/latest")).toBe(false);
+      expect(
+        isHomebrewToolsPath("/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest"),
+      ).toBe(true);
+      expect(
+        isHomebrewToolsPath("/usr/local/share/android-commandlinetools/cmdline-tools/latest"),
+      ).toBe(true);
+      expect(isHomebrewToolsPath("/Users/test/Library/Android/sdk/cmdline-tools/latest")).toBe(
+        false,
+      );
     });
   });
 
@@ -259,13 +269,13 @@ describe("Android Command Line Tools - Detection", () => {
         {
           path: "/typical/path",
           source: "typical" as const,
-          available_tools: ["apkanalyzer", "sdkmanager"]
+          available_tools: ["apkanalyzer", "sdkmanager"],
         },
         {
           path: "/homebrew/path",
           source: "homebrew" as const,
-          available_tools: ["apkanalyzer"]
-        }
+          available_tools: ["apkanalyzer"],
+        },
       ];
 
       const best = getBestAndroidToolsLocation(locations);
@@ -277,13 +287,13 @@ describe("Android Command Line Tools - Detection", () => {
         {
           path: "/path1",
           source: "typical" as const,
-          available_tools: ["d8", "r8"]
+          available_tools: ["d8", "r8"],
         },
         {
           path: "/path2",
           source: "typical" as const,
-          available_tools: ["apkanalyzer", "sdkmanager", "avdmanager"]
-        }
+          available_tools: ["apkanalyzer", "sdkmanager", "avdmanager"],
+        },
       ];
 
       const best = getBestAndroidToolsLocation(locations);
@@ -295,13 +305,13 @@ describe("Android Command Line Tools - Detection", () => {
         {
           path: "/path-typical",
           source: "typical" as const,
-          available_tools: ["apkanalyzer", "sdkmanager", "avdmanager"]
+          available_tools: ["apkanalyzer", "sdkmanager", "avdmanager"],
         },
         {
           path: "/path-android-home",
           source: "android_home" as const,
-          available_tools: ["apkanalyzer", "sdkmanager"]
-        }
+          available_tools: ["apkanalyzer", "sdkmanager"],
+        },
       ];
 
       const best = getBestAndroidToolsLocation(locations);
@@ -313,23 +323,23 @@ describe("Android Command Line Tools - Detection", () => {
         {
           path: "/manual",
           source: "manual" as const,
-          available_tools: ["apkanalyzer", "sdkmanager", "avdmanager", "lint"]
+          available_tools: ["apkanalyzer", "sdkmanager", "avdmanager", "lint"],
         },
         {
           path: "/path",
           source: "path" as const,
-          available_tools: ["apkanalyzer", "sdkmanager", "avdmanager"]
+          available_tools: ["apkanalyzer", "sdkmanager", "avdmanager"],
         },
         {
           path: "/android-sdk-root",
           source: "android_sdk_root" as const,
-          available_tools: ["apkanalyzer", "sdkmanager"]
+          available_tools: ["apkanalyzer", "sdkmanager"],
         },
         {
           path: "/homebrew",
           source: "homebrew" as const,
-          available_tools: ["apkanalyzer"]
-        }
+          available_tools: ["apkanalyzer"],
+        },
       ];
 
       const best = getBestAndroidToolsLocation(locations);
@@ -342,7 +352,7 @@ describe("Android Command Line Tools - Detection", () => {
       const location = {
         path: "/test/path",
         source: "typical" as const,
-        available_tools: ["apkanalyzer", "sdkmanager", "avdmanager"]
+        available_tools: ["apkanalyzer", "sdkmanager", "avdmanager"],
       };
 
       const result = validateRequiredTools(location, ["apkanalyzer", "sdkmanager"]);
@@ -355,7 +365,7 @@ describe("Android Command Line Tools - Detection", () => {
       const location = {
         path: "/test/path",
         source: "typical" as const,
-        available_tools: ["apkanalyzer"]
+        available_tools: ["apkanalyzer"],
       };
 
       const result = validateRequiredTools(location, ["apkanalyzer", "sdkmanager", "avdmanager"]);
@@ -370,7 +380,7 @@ describe("Android Command Line Tools - Detection", () => {
       const location = {
         path: "/test/path",
         source: "typical" as const,
-        available_tools: []
+        available_tools: [],
       };
 
       const result = validateRequiredTools(location, []);
@@ -391,7 +401,9 @@ describe("Android Command Line Tools - Detection", () => {
 
     test("should return null when no tools are available in homebrew path", async () => {
       systemDetection.setPlatform("darwin");
-      systemDetection.addExistingFile("/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest");
+      systemDetection.addExistingFile(
+        "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest",
+      );
 
       const result = await detectHomebrewAndroidTools(systemDetection);
 
@@ -443,11 +455,11 @@ describe("Android Command Line Tools - Detection", () => {
 
       const result = await detectAndroidCommandLineTools(systemDetection);
 
-      expect(result.map(location => normalizePath(location.path))).toEqual([
+      expect(result.map((location) => normalizePath(location.path))).toEqual([
         homebrewPath,
-        sdkPath
+        sdkPath,
       ]);
-      expect(result.map(location => location.source)).toEqual(["homebrew", "android_sdk_root"]);
+      expect(result.map((location) => location.source)).toEqual(["homebrew", "android_sdk_root"]);
     });
 
     test("should handle errors gracefully and continue detection", async () => {
@@ -465,7 +477,7 @@ describe("Android Command Line Tools - Detection", () => {
       const location = {
         path: "/test/path",
         source: "homebrew" as const,
-        available_tools: ["apkanalyzer", "sdkmanager", "avdmanager"]
+        available_tools: ["apkanalyzer", "sdkmanager", "avdmanager"],
       };
 
       const validationResult = validateRequiredTools(location, ["sdkmanager", "avdmanager"]);

@@ -19,7 +19,7 @@ if (!packageManagerVersion || !engineVersion || packageManagerVersion !== engine
 
 function findYamlFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true })
-    .flatMap(entry => {
+    .flatMap((entry) => {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) {
         return findYamlFiles(path);
@@ -52,13 +52,13 @@ function findBunSetupSteps(value: unknown, visited = new WeakSet<object>()): Wor
   visited.add(value);
 
   if (Array.isArray(value)) {
-    return value.flatMap(item => findBunSetupSteps(item, visited));
+    return value.flatMap((item) => findBunSetupSteps(item, visited));
   }
 
   const node = value as WorkflowNode;
   const steps =
     typeof node.uses === "string" && node.uses.startsWith("oven-sh/setup-bun@") ? [node] : [];
-  return steps.concat(Object.values(node).flatMap(item => findBunSetupSteps(item, visited)));
+  return steps.concat(Object.values(node).flatMap((item) => findBunSetupSteps(item, visited)));
 }
 
 function lineForBunSetup(content: string, occurrence: number): number {
@@ -80,7 +80,8 @@ const mismatches = workflowPaths.flatMap((path) => {
   const document = load(content, { filename: path });
   return findBunSetupSteps(document).flatMap((step, index) => {
     const version = step.with?.["bun-version"];
-    const normalizedVersion = version === undefined || version === null ? "<missing>" : String(version);
+    const normalizedVersion =
+      version === undefined || version === null ? "<missing>" : String(version);
     return normalizedVersion === packageManagerVersion
       ? []
       : `${path}:${lineForBunSetup(content, index)}: ${normalizedVersion}`;

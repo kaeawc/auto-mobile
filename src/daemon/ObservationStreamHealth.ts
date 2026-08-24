@@ -20,9 +20,7 @@ export class DefaultObservationStreamHealth implements ObservationStreamHealth {
 
   isHealthy(): boolean {
     const server = this.dependencies.getServer();
-    return server !== null &&
-      server.isListening() &&
-      server.hasActiveSocketPath();
+    return server !== null && server.isListening() && server.hasActiveSocketPath();
   }
 
   async recover(): Promise<void> {

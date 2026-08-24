@@ -10,20 +10,25 @@ describe("SecurityClient", () => {
       platform: () => "darwin",
       execute: async (file, args) => {
         calls.push({ file, args });
-        return createExecResult('  1) ABCDEF0123456789ABCDEF0123456789ABCDEF01 "Apple Development: Test"\n     1 valid identities found', "");
-      }
+        return createExecResult(
+          '  1) ABCDEF0123456789ABCDEF0123456789ABCDEF01 "Apple Development: Test"\n     1 valid identities found',
+          "",
+        );
+      },
     });
 
     await expect(client.listCodeSigningIdentities()).resolves.toEqual([
-      { fingerprint: "ABCDEF0123456789ABCDEF0123456789ABCDEF01", name: "Apple Development: Test" }
+      { fingerprint: "ABCDEF0123456789ABCDEF0123456789ABCDEF01", name: "Apple Development: Test" },
     ]);
-    expect(calls).toEqual([{ file: "security", args: ["find-identity", "-v", "-p", "codesigning"] }]);
+    expect(calls).toEqual([
+      { file: "security", args: ["find-identity", "-v", "-p", "codesigning"] },
+    ]);
   });
 
   test("returns no identities when the keychain has none", async () => {
     const client = new SecurityClient({
       platform: () => "darwin",
-      execute: async () => createExecResult("  0 valid identities found", "")
+      execute: async () => createExecResult("  0 valid identities found", ""),
     });
 
     await expect(client.listCodeSigningIdentities()).resolves.toEqual([]);
@@ -36,10 +41,13 @@ describe("SecurityClient", () => {
       execute: async (file, args) => {
         calls.push({ file, args });
         return createExecResult("security commands", "");
-      }
+      },
     });
 
-    await expect(client.getDiagnostics({ timeoutMs: 1234 })).resolves.toEqual({ available: true, version: null });
+    await expect(client.getDiagnostics({ timeoutMs: 1234 })).resolves.toEqual({
+      available: true,
+      version: null,
+    });
     expect(calls).toEqual([{ file: "security", args: ["help"] }]);
   });
 
@@ -51,7 +59,7 @@ describe("SecurityClient", () => {
       execute: async (file, args) => {
         calls.push({ file, args });
         return createExecResult("<plist />", "");
-      }
+      },
     });
 
     await expect(client.decodeCms(profilePath)).resolves.toBe("<plist />");
@@ -63,7 +71,7 @@ describe("SecurityClient", () => {
       platform: () => "darwin",
       execute: async () => {
         throw new Error("User interaction is not allowed. secret-keychain-detail");
-      }
+      },
     });
 
     await expect(client.listCodeSigningIdentities()).rejects.toThrow("Unlock the login keychain");
@@ -80,10 +88,12 @@ describe("SecurityClient", () => {
         signal = options?.signal;
         killSignal = options?.killSignal;
         return new Promise((_resolve, reject) => {
-          signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+          signal?.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          );
         });
       },
-      timer
+      timer,
     });
 
     const decoding = client.decodeCms("/tmp/profile.mobileprovision", { timeoutMs: 1234 });
@@ -103,10 +113,12 @@ describe("SecurityClient", () => {
       execute: async () => {
         calls += 1;
         return createExecResult("", "");
-      }
+      },
     });
 
-    await expect(client.decodeCms("/tmp/profile.mobileprovision", { signal: controller.signal })).rejects.toThrow("cancelled");
+    await expect(
+      client.decodeCms("/tmp/profile.mobileprovision", { signal: controller.signal }),
+    ).rejects.toThrow("cancelled");
     expect(calls).toBe(0);
   });
 
@@ -118,12 +130,16 @@ describe("SecurityClient", () => {
       execute: async (_file, _args, options) => {
         childSignal = options?.signal;
         return new Promise((_resolve, reject) => {
-          childSignal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+          childSignal?.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          );
         });
-      }
+      },
     });
 
-    const decoding = client.decodeCms("/tmp/profile.mobileprovision", { signal: controller.signal });
+    const decoding = client.decodeCms("/tmp/profile.mobileprovision", {
+      signal: controller.signal,
+    });
     controller.abort();
 
     await expect(decoding).rejects.toThrow("Security CMS decoding was cancelled");

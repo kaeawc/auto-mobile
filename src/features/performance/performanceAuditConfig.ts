@@ -9,7 +9,9 @@ function parseEnvBoolean(value: string | undefined): boolean {
 }
 
 export function isPerformanceAuditEnabled(): boolean {
-  return serverConfig.isUiPerfModeEnabled()
-    && isDebugPerfEnabled()
-    && !parseEnvBoolean(process.env[DISABLE_PERF_AUDIT_ENV]);
+  return (
+    serverConfig.isUiPerfModeEnabled() &&
+    isDebugPerfEnabled() &&
+    !parseEnvBoolean(process.env[DISABLE_PERF_AUDIT_ENV])
+  );
 }

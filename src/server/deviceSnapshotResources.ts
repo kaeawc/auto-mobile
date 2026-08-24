@@ -11,21 +11,29 @@ async function getSnapshotArchive(): Promise<ResourceContent> {
     return {
       uri: DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE,
       mimeType: "application/json",
-      text: JSON.stringify({
-        snapshots,
-        count,
-        totalSizeBytes,
-        maxArchiveSizeMb: config.maxArchiveSizeMb,
-      }, null, 2),
+      text: JSON.stringify(
+        {
+          snapshots,
+          count,
+          totalSizeBytes,
+          maxArchiveSizeMb: config.maxArchiveSizeMb,
+        },
+        null,
+        2,
+      ),
     };
   } catch (error) {
     logger.error(`[DeviceSnapshotResources] Failed to list snapshots: ${error}`);
     return {
       uri: DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to list snapshots: ${error}`,
-      }, null, 2),
+      text: JSON.stringify(
+        {
+          error: `Failed to list snapshots: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -36,7 +44,7 @@ export function registerDeviceSnapshotResources(): void {
     "Device Snapshot Archive",
     "Metadata list for captured device snapshots.",
     "application/json",
-    getSnapshotArchive
+    getSnapshotArchive,
   );
 
   logger.info("[DeviceSnapshotResources] Registered device snapshot resources");

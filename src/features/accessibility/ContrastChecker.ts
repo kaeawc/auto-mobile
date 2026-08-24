@@ -92,10 +92,10 @@ interface ContrastCheckConfig {
 
   /** Maximum cache sizes */
   maxCacheSize?: {
-    screenshots?: number;    // Default: 10
-    colorPairs?: number;     // Default: 1000
-    elements?: number;       // Default: 500
-    backgrounds?: number;    // Default: 200
+    screenshots?: number; // Default: 10
+    colorPairs?: number; // Default: 1000
+    elements?: number; // Default: 500
+    backgrounds?: number; // Default: 200
   };
 }
 
@@ -176,7 +176,7 @@ export class ContrastChecker {
     config: ContrastCheckConfig = {},
     timer: Timer = defaultTimer,
     backend: ImageBackend = resolveImageBackend(),
-    private readonly deps: ContrastCheckerDependencies = { readFile: fs.readFile }
+    private readonly deps: ContrastCheckerDependencies = { readFile: fs.readFile },
   ) {
     this.timer = timer;
     this.backend = backend;
@@ -209,7 +209,7 @@ export class ContrastChecker {
   async checkContrast(
     screenshotPath: string,
     element: Element,
-    wcagLevel: WcagLevel
+    wcagLevel: WcagLevel,
   ): Promise<ContrastResult | null> {
     try {
       // Phase 3: Check element-level cache
@@ -273,7 +273,7 @@ export class ContrastChecker {
   async checkContrastBatch(
     screenshotPath: string,
     elements: Element[],
-    wcagLevel: WcagLevel
+    wcagLevel: WcagLevel,
   ): Promise<Map<Element, ContrastResult | null>> {
     const results = new Map<Element, ContrastResult | null>();
 
@@ -337,7 +337,7 @@ export class ContrastChecker {
   private async checkContrastWithImage(
     image: RawImage,
     element: Element,
-    wcagLevel: WcagLevel
+    wcagLevel: WcagLevel,
   ): Promise<ContrastResult | null> {
     // Extract element bounds
     const { left, top, right, bottom } = element.bounds;
@@ -360,23 +360,34 @@ export class ContrastChecker {
         : false;
       const baseRequiredRatio = this.getRequiredContrastRatio(element, wcagLevel);
       const requiredRatio = this.applyShadowAdjustment(baseRequiredRatio, element, shadowDetected);
-      const meetsAA = ratio >= this.applyShadowAdjustment(
-        this.getRequiredContrastRatio(element, "AA"),
-        element,
-        shadowDetected
-      );
-      const meetsAAA = ratio >= this.applyShadowAdjustment(
-        this.getRequiredContrastRatio(element, "AAA"),
-        element,
-        shadowDetected
-      );
+      const meetsAA =
+        ratio >=
+        this.applyShadowAdjustment(
+          this.getRequiredContrastRatio(element, "AA"),
+          element,
+          shadowDetected,
+        );
+      const meetsAAA =
+        ratio >=
+        this.applyShadowAdjustment(
+          this.getRequiredContrastRatio(element, "AAA"),
+          element,
+          shadowDetected,
+        );
 
       return {
         ratio,
         minRatio: ratio,
         maxRatio: ratio,
         avgRatio: ratio,
-        samples: [{ x: Math.floor((left + right) / 2), y: Math.floor((top + bottom) / 2), ratio, backgroundColor }],
+        samples: [
+          {
+            x: Math.floor((left + right) / 2),
+            y: Math.floor((top + bottom) / 2),
+            ratio,
+            backgroundColor,
+          },
+        ],
         textColor,
         backgroundColor,
         shadowDetected,
@@ -388,30 +399,38 @@ export class ContrastChecker {
     }
 
     const samplePoints = this.getSamplingPoints(element.bounds, this.config.samplingPoints);
-    const baseSamples = await this.sampleBackgroundColors(image, element.bounds, textColor, samplePoints);
-    const baseGradient = this.config.detectGradients
-      ? this.detectGradient(baseSamples)
-      : null;
+    const baseSamples = await this.sampleBackgroundColors(
+      image,
+      element.bounds,
+      textColor,
+      samplePoints,
+    );
+    const baseGradient = this.config.detectGradients ? this.detectGradient(baseSamples) : null;
 
     let samples = baseSamples;
     let gradient: GradientInfo | undefined;
     if (baseGradient?.isGradient) {
       gradient = baseGradient;
       const gradientPoints = this.getGradientSamplingPoints(element.bounds, gradient.direction);
-      const gradientSamples = await this.sampleBackgroundColors(image, element.bounds, textColor, gradientPoints);
+      const gradientSamples = await this.sampleBackgroundColors(
+        image,
+        element.bounds,
+        textColor,
+        gradientPoints,
+      );
       samples = this.mergeSamples(baseSamples, gradientSamples);
     }
 
-    const sampleRatios = samples.map(sample => {
+    const sampleRatios = samples.map((sample) => {
       const ratio = this.getCachedContrast(textColor, sample.backgroundColor);
       return { ...sample, ratio };
     });
 
-    const ratios = sampleRatios.map(sample => sample.ratio);
+    const ratios = sampleRatios.map((sample) => sample.ratio);
     const minRatio = Math.min(...ratios);
     const maxRatio = Math.max(...ratios);
     const avgRatio = ratios.reduce((sum, value) => sum + value, 0) / ratios.length;
-    const backgroundColor = this.averageColor(sampleRatios.map(sample => sample.backgroundColor));
+    const backgroundColor = this.averageColor(sampleRatios.map((sample) => sample.backgroundColor));
     this.setBackgroundCache(element.bounds, backgroundColor);
 
     const shadowDetected = this.config.detectTextShadows
@@ -420,16 +439,20 @@ export class ContrastChecker {
     const baseRequiredRatio = this.getRequiredContrastRatio(element, wcagLevel);
     const requiredRatio = this.applyShadowAdjustment(baseRequiredRatio, element, shadowDetected);
 
-    const meetsAA = minRatio >= this.applyShadowAdjustment(
-      this.getRequiredContrastRatio(element, "AA"),
-      element,
-      shadowDetected
-    );
-    const meetsAAA = minRatio >= this.applyShadowAdjustment(
-      this.getRequiredContrastRatio(element, "AAA"),
-      element,
-      shadowDetected
-    );
+    const meetsAA =
+      minRatio >=
+      this.applyShadowAdjustment(
+        this.getRequiredContrastRatio(element, "AA"),
+        element,
+        shadowDetected,
+      );
+    const meetsAAA =
+      minRatio >=
+      this.applyShadowAdjustment(
+        this.getRequiredContrastRatio(element, "AAA"),
+        element,
+        shadowDetected,
+      );
 
     return {
       ratio: minRatio,
@@ -460,7 +483,7 @@ export class ContrastChecker {
     const now = this.timer.now();
 
     // Check if cache is valid (not expired)
-    if (cached && (now - cached.timestamp) < this.config.screenshotCacheTTL) {
+    if (cached && now - cached.timestamp < this.config.screenshotCacheTTL) {
       // Verify the cached image is still valid by checking file fingerprint
       const currentFingerprint = await this.getScreenshotFingerprint(path);
       if (cached.fingerprint === currentFingerprint) {
@@ -640,16 +663,14 @@ export class ContrastChecker {
    */
   private cleanupCache<K, V extends { timestamp: number }>(
     cache: Map<K, V>,
-    maxSize: number
+    maxSize: number,
   ): void {
     if (cache.size <= maxSize) {
       return;
     }
 
     // Convert to array and sort by timestamp (oldest first)
-    const entries = Array.from(cache.entries()).sort(
-      (a, b) => a[1].timestamp - b[1].timestamp
-    );
+    const entries = Array.from(cache.entries()).sort((a, b) => a[1].timestamp - b[1].timestamp);
 
     // Remove oldest entries until we're at maxSize
     const toRemove = cache.size - maxSize;
@@ -689,11 +710,17 @@ export class ContrastChecker {
     image: RawImage,
     bounds: Element["bounds"],
     textColor: RGB,
-    points: Array<{ x: number; y: number }>
+    points: Array<{ x: number; y: number }>,
   ): Promise<ContrastSample[]> {
     const samples: ContrastSample[] = [];
     for (const point of points) {
-      const backgroundColor = await this.sampleBackgroundAtPoint(image, bounds, textColor, point.x, point.y);
+      const backgroundColor = await this.sampleBackgroundAtPoint(
+        image,
+        bounds,
+        textColor,
+        point.x,
+        point.y,
+      );
       samples.push({
         x: point.x,
         y: point.y,
@@ -709,7 +736,7 @@ export class ContrastChecker {
     bounds: Element["bounds"],
     textColor: RGB,
     x: number,
-    y: number
+    y: number,
   ): Promise<RGB> {
     const searchRadii = [2, 4, 6, 8];
     for (const radius of searchRadii) {
@@ -739,7 +766,10 @@ export class ContrastChecker {
     return await this.sampleBackgroundEdgeColor(image, bounds);
   }
 
-  private async sampleBackgroundEdgeColor(image: RawImage, bounds: Element["bounds"]): Promise<RGB> {
+  private async sampleBackgroundEdgeColor(
+    image: RawImage,
+    bounds: Element["bounds"],
+  ): Promise<RGB> {
     const cached = this.config.enableBackgroundCache ? this.getBackgroundCache(bounds) : null;
     if (cached) {
       return cached;
@@ -850,7 +880,7 @@ export class ContrastChecker {
       return null;
     }
 
-    const colors = samples.map(sample => sample.backgroundColor);
+    const colors = samples.map((sample) => sample.backgroundColor);
     const variance = this.calculateColorVariance(colors);
     const gradientThreshold = 250;
     if (variance < gradientThreshold) {
@@ -887,10 +917,10 @@ export class ContrastChecker {
   } {
     const sortedByX = [...samples].sort((a, b) => a.x - b.x);
     const sortedByY = [...samples].sort((a, b) => a.y - b.y);
-    const left = this.averageColor(sortedByX.slice(0, 3).map(sample => sample.backgroundColor));
-    const right = this.averageColor(sortedByX.slice(-3).map(sample => sample.backgroundColor));
-    const top = this.averageColor(sortedByY.slice(0, 3).map(sample => sample.backgroundColor));
-    const bottom = this.averageColor(sortedByY.slice(-3).map(sample => sample.backgroundColor));
+    const left = this.averageColor(sortedByX.slice(0, 3).map((sample) => sample.backgroundColor));
+    const right = this.averageColor(sortedByX.slice(-3).map((sample) => sample.backgroundColor));
+    const top = this.averageColor(sortedByY.slice(0, 3).map((sample) => sample.backgroundColor));
+    const bottom = this.averageColor(sortedByY.slice(-3).map((sample) => sample.backgroundColor));
 
     const horizontalDelta = this.colorDistance(left, right);
     const verticalDelta = this.colorDistance(top, bottom);
@@ -908,10 +938,18 @@ export class ContrastChecker {
     const diagonalDownDelta = this.colorDistance(topLeft, bottomRight);
     const diagonalUpDelta = this.colorDistance(topRight, bottomLeft);
 
-    if (horizontalDelta >= verticalDelta && horizontalDelta >= diagonalDownDelta && horizontalDelta >= diagonalUpDelta) {
+    if (
+      horizontalDelta >= verticalDelta &&
+      horizontalDelta >= diagonalDownDelta &&
+      horizontalDelta >= diagonalUpDelta
+    ) {
       return { direction: "horizontal", startColor: left, endColor: right };
     }
-    if (verticalDelta >= horizontalDelta && verticalDelta >= diagonalDownDelta && verticalDelta >= diagonalUpDelta) {
+    if (
+      verticalDelta >= horizontalDelta &&
+      verticalDelta >= diagonalDownDelta &&
+      verticalDelta >= diagonalUpDelta
+    ) {
       return { direction: "vertical", startColor: top, endColor: bottom };
     }
 
@@ -939,7 +977,7 @@ export class ContrastChecker {
 
   private getGradientSamplingPoints(
     bounds: Element["bounds"],
-    direction: GradientDirection
+    direction: GradientDirection,
   ): Array<{ x: number; y: number }> {
     const { left, top, right, bottom } = bounds;
     const width = right - left;
@@ -980,7 +1018,10 @@ export class ContrastChecker {
     return points;
   }
 
-  private mergeSamples(baseSamples: ContrastSample[], extraSamples: ContrastSample[]): ContrastSample[] {
+  private mergeSamples(
+    baseSamples: ContrastSample[],
+    extraSamples: ContrastSample[],
+  ): ContrastSample[] {
     const seen = new Set<string>();
     const merged: ContrastSample[] = [];
     for (const sample of [...baseSamples, ...extraSamples]) {
@@ -996,7 +1037,7 @@ export class ContrastChecker {
 
   private getSamplingPoints(
     bounds: Element["bounds"],
-    count: 5 | 9 | 13
+    count: 5 | 9 | 13,
   ): Array<{ x: number; y: number }> {
     const { left, top, right, bottom } = bounds;
     const width = right - left;
@@ -1011,10 +1052,19 @@ export class ContrastChecker {
     const points: Array<{ x: number; y: number }> = [];
 
     if (count === 5) {
-      points.push({ x: Math.round(xStart + positions[0] * (xEnd - xStart)), y: Math.round(yStart + positions[0] * (yEnd - yStart)) });
-      points.push({ x: Math.round(xStart), y: Math.round(yStart + positions[0] * (yEnd - yStart)) });
+      points.push({
+        x: Math.round(xStart + positions[0] * (xEnd - xStart)),
+        y: Math.round(yStart + positions[0] * (yEnd - yStart)),
+      });
+      points.push({
+        x: Math.round(xStart),
+        y: Math.round(yStart + positions[0] * (yEnd - yStart)),
+      });
       points.push({ x: Math.round(xEnd), y: Math.round(yStart + positions[0] * (yEnd - yStart)) });
-      points.push({ x: Math.round(xStart + positions[0] * (xEnd - xStart)), y: Math.round(yStart) });
+      points.push({
+        x: Math.round(xStart + positions[0] * (xEnd - xStart)),
+        y: Math.round(yStart),
+      });
       points.push({ x: Math.round(xStart + positions[0] * (xEnd - xStart)), y: Math.round(yEnd) });
       return points;
     }
@@ -1042,7 +1092,7 @@ export class ContrastChecker {
     image: RawImage,
     bounds: Element["bounds"],
     textColor: RGB,
-    backgroundColor: RGB
+    backgroundColor: RGB,
   ): boolean {
     const { left, top, right, bottom } = bounds;
     const inset = 1;
@@ -1081,7 +1131,7 @@ export class ContrastChecker {
   private applyShadowAdjustment(
     requiredRatio: number,
     element: Element,
-    shadowDetected: boolean
+    shadowDetected: boolean,
   ): number {
     if (!shadowDetected || !this.isLargeText(element)) {
       return requiredRatio;
@@ -1120,7 +1170,7 @@ export class ContrastChecker {
         g: acc.g + color.g,
         b: acc.b + color.b,
       }),
-      { r: 0, g: 0, b: 0 }
+      { r: 0, g: 0, b: 0 },
     );
 
     return {

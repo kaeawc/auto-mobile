@@ -13,16 +13,12 @@ describe("Clipboard iOS", () => {
     mockDevice = {
       name: "Test iPhone",
       platform: "ios",
-      deviceId: "test-iphone"
+      deviceId: "test-iphone",
     };
 
     fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
 
-    clipboard = new Clipboard(
-      mockDevice,
-      new FakeAdbClientFactory(),
-      () => fakeIOSCtrlProxy
-    );
+    clipboard = new Clipboard(mockDevice, new FakeAdbClientFactory(), () => fakeIOSCtrlProxy);
   });
 
   test("get returns clipboard text", async () => {
@@ -169,7 +165,6 @@ describe("Clipboard Android", () => {
     expect(result.method).toBe("a11y");
     expect(result.error).toContain("Clipboard read is restricted");
     expect(fakeAdb.getAllCommands()).not.toContain("shell cmd clipboard get");
-
   });
 
   test("get returns default accessibility error when Android read fails without details", async () => {
@@ -188,7 +183,6 @@ describe("Clipboard Android", () => {
     expect(result.error).toBe("Accessibility clipboard get failed");
     expect(result.method).toBe("a11y");
     expect(fakeAdb.getAllCommands()).not.toContain("shell cmd clipboard get");
-
   });
 
   test("get does not use unsupported cmd clipboard fallback for an empty accessibility read", async () => {
@@ -210,6 +204,5 @@ describe("Clipboard Android", () => {
     expect(result.text).toBe("");
     expect(result.method).toBe("a11y");
     expect(fakeAdb.getAllCommands()).not.toContain("shell cmd clipboard get");
-
   });
 });

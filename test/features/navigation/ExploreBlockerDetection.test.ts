@@ -6,35 +6,32 @@ import {
   isPermissionDialog,
   isLoginScreen,
   isRatingDialog,
-  detectAndHandleBlockers
+  detectAndHandleBlockers,
 } from "../../../src/features/navigation/ExploreBlockerDetection";
 
 describe("ExploreBlockerDetection", () => {
   function createMockElement(overrides: Partial<Element> = {}): Element {
     return {
-      "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
-      "clickable": true,
-      "enabled": true,
-      "text": "Button",
-      "class": "android.widget.Button",
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      clickable: true,
+      enabled: true,
+      text: "Button",
+      class: "android.widget.Button",
       "resource-id": "com.test:id/button",
-      ...overrides
+      ...overrides,
     } as Element;
   }
 
   describe("isPermissionDialog", () => {
     test("should detect dialog with 'Allow' button", () => {
-      const elements = [
-        createMockElement({ text: "Allow" }),
-        createMockElement({ text: "Deny" })
-      ];
+      const elements = [createMockElement({ text: "Allow" }), createMockElement({ text: "Deny" })];
 
       expect(isPermissionDialog(elements)).toBe(true);
     });
 
     test("should detect dialog with 'permission' text", () => {
       const elements = [
-        createMockElement({ text: "This app needs permission to access your camera" })
+        createMockElement({ text: "This app needs permission to access your camera" }),
       ];
 
       expect(isPermissionDialog(elements)).toBe(true);
@@ -43,24 +40,20 @@ describe("ExploreBlockerDetection", () => {
     test("should detect dialog with 'While using' option", () => {
       const elements = [
         createMockElement({ text: "While using the app" }),
-        createMockElement({ text: "Only this time" })
+        createMockElement({ text: "Only this time" }),
       ];
 
       expect(isPermissionDialog(elements)).toBe(true);
     });
 
     test("should detect dialog with 'access' text", () => {
-      const elements = [
-        createMockElement({ text: "Allow access to photos?" })
-      ];
+      const elements = [createMockElement({ text: "Allow access to photos?" })];
 
       expect(isPermissionDialog(elements)).toBe(true);
     });
 
     test("should detect via content-desc", () => {
-      const elements = [
-        createMockElement({ "text": "", "content-desc": "Allow permission button" })
-      ];
+      const elements = [createMockElement({ text: "", "content-desc": "Allow permission button" })];
 
       expect(isPermissionDialog(elements)).toBe(true);
     });
@@ -68,17 +61,14 @@ describe("ExploreBlockerDetection", () => {
     test("should not detect regular buttons", () => {
       const elements = [
         createMockElement({ text: "Submit" }),
-        createMockElement({ text: "Cancel" })
+        createMockElement({ text: "Cancel" }),
       ];
 
       expect(isPermissionDialog(elements)).toBe(false);
     });
 
     test("should be case insensitive", () => {
-      const elements = [
-        createMockElement({ text: "ALLOW" }),
-        createMockElement({ text: "DENY" })
-      ];
+      const elements = [createMockElement({ text: "ALLOW" }), createMockElement({ text: "DENY" })];
 
       expect(isPermissionDialog(elements)).toBe(true);
     });
@@ -87,8 +77,8 @@ describe("ExploreBlockerDetection", () => {
   describe("isLoginScreen", () => {
     test("should detect screen with login text and EditText", () => {
       const elements = [
-        createMockElement({ "text": "Login", "class": "android.widget.Button" }),
-        createMockElement({ "text": "", "class": "android.widget.EditText" })
+        createMockElement({ text: "Login", class: "android.widget.Button" }),
+        createMockElement({ text: "", class: "android.widget.EditText" }),
       ];
 
       expect(isLoginScreen(elements)).toBe(true);
@@ -96,8 +86,8 @@ describe("ExploreBlockerDetection", () => {
 
     test("should detect screen with sign in text", () => {
       const elements = [
-        createMockElement({ "text": "Sign in", "class": "android.widget.Button" }),
-        createMockElement({ "text": "", "class": "android.widget.EditText" })
+        createMockElement({ text: "Sign in", class: "android.widget.Button" }),
+        createMockElement({ text: "", class: "android.widget.EditText" }),
       ];
 
       expect(isLoginScreen(elements)).toBe(true);
@@ -105,8 +95,8 @@ describe("ExploreBlockerDetection", () => {
 
     test("should detect screen with password field", () => {
       const elements = [
-        createMockElement({ "text": "Password", "class": "android.widget.TextView" }),
-        createMockElement({ "text": "", "class": "android.widget.EditText" })
+        createMockElement({ text: "Password", class: "android.widget.TextView" }),
+        createMockElement({ text: "", class: "android.widget.EditText" }),
       ];
 
       expect(isLoginScreen(elements)).toBe(true);
@@ -114,8 +104,8 @@ describe("ExploreBlockerDetection", () => {
 
     test("should detect screen with username field", () => {
       const elements = [
-        createMockElement({ "text": "Username", "class": "android.widget.TextView" }),
-        createMockElement({ "text": "", "class": "android.widget.EditText" })
+        createMockElement({ text: "Username", class: "android.widget.TextView" }),
+        createMockElement({ text: "", class: "android.widget.EditText" }),
       ];
 
       expect(isLoginScreen(elements)).toBe(true);
@@ -123,8 +113,8 @@ describe("ExploreBlockerDetection", () => {
 
     test("should not detect without EditText", () => {
       const elements = [
-        createMockElement({ "text": "Login", "class": "android.widget.Button" }),
-        createMockElement({ "text": "Password", "class": "android.widget.TextView" })
+        createMockElement({ text: "Login", class: "android.widget.Button" }),
+        createMockElement({ text: "Password", class: "android.widget.TextView" }),
       ];
 
       expect(isLoginScreen(elements)).toBe(false);
@@ -132,8 +122,8 @@ describe("ExploreBlockerDetection", () => {
 
     test("should not detect without login keywords", () => {
       const elements = [
-        createMockElement({ "text": "Search", "class": "android.widget.Button" }),
-        createMockElement({ "text": "", "class": "android.widget.EditText" })
+        createMockElement({ text: "Search", class: "android.widget.Button" }),
+        createMockElement({ text: "", class: "android.widget.EditText" }),
       ];
 
       expect(isLoginScreen(elements)).toBe(false);
@@ -141,8 +131,8 @@ describe("ExploreBlockerDetection", () => {
 
     test("should be case insensitive", () => {
       const elements = [
-        createMockElement({ "text": "SIGN IN", "class": "android.widget.Button" }),
-        createMockElement({ "text": "", "class": "android.widget.EditText" })
+        createMockElement({ text: "SIGN IN", class: "android.widget.Button" }),
+        createMockElement({ text: "", class: "android.widget.EditText" }),
       ];
 
       expect(isLoginScreen(elements)).toBe(true);
@@ -153,7 +143,7 @@ describe("ExploreBlockerDetection", () => {
     test("should detect dialog with 'rate' text", () => {
       const elements = [
         createMockElement({ text: "Rate this app" }),
-        createMockElement({ text: "Not now" })
+        createMockElement({ text: "Not now" }),
       ];
 
       expect(isRatingDialog(elements)).toBe(true);
@@ -162,24 +152,20 @@ describe("ExploreBlockerDetection", () => {
     test("should detect dialog with 'review' text", () => {
       const elements = [
         createMockElement({ text: "Leave a review" }),
-        createMockElement({ text: "Later" })
+        createMockElement({ text: "Later" }),
       ];
 
       expect(isRatingDialog(elements)).toBe(true);
     });
 
     test("should detect dialog with 'feedback' text", () => {
-      const elements = [
-        createMockElement({ text: "Give us feedback" })
-      ];
+      const elements = [createMockElement({ text: "Give us feedback" })];
 
       expect(isRatingDialog(elements)).toBe(true);
     });
 
     test("should detect dialog with 'enjoy' text", () => {
-      const elements = [
-        createMockElement({ text: "Enjoying the app?" })
-      ];
+      const elements = [createMockElement({ text: "Enjoying the app?" })];
 
       expect(isRatingDialog(elements)).toBe(true);
     });
@@ -187,16 +173,14 @@ describe("ExploreBlockerDetection", () => {
     test("should detect dialog with 'star' text", () => {
       const elements = [
         createMockElement({ text: "5 stars" }),
-        createMockElement({ text: "Submit" })
+        createMockElement({ text: "Submit" }),
       ];
 
       expect(isRatingDialog(elements)).toBe(true);
     });
 
     test("should detect via content-desc", () => {
-      const elements = [
-        createMockElement({ "text": "", "content-desc": "Rate app dialog" })
-      ];
+      const elements = [createMockElement({ text: "", "content-desc": "Rate app dialog" })];
 
       expect(isRatingDialog(elements)).toBe(true);
     });
@@ -204,16 +188,14 @@ describe("ExploreBlockerDetection", () => {
     test("should not detect regular screens", () => {
       const elements = [
         createMockElement({ text: "Home" }),
-        createMockElement({ text: "Settings" })
+        createMockElement({ text: "Settings" }),
       ];
 
       expect(isRatingDialog(elements)).toBe(false);
     });
 
     test("should be case insensitive", () => {
-      const elements = [
-        createMockElement({ text: "RATE THIS APP" })
-      ];
+      const elements = [createMockElement({ text: "RATE THIS APP" })];
 
       expect(isRatingDialog(elements)).toBe(true);
     });
@@ -255,15 +237,13 @@ describe("ExploreBlockerDetection", () => {
       ["Enjoying the app?", true],
       ["Enjoy this app?", true],
       ["(rate)", true],
-      ["\"review\"", true]
+      ['"review"', true],
     ])("isRatingDialog(%p) === %p", (text: string, expected: boolean) => {
       expect(isRatingDialog([createMockElement({ text })])).toBe(expected);
     });
 
     test("does not match across the text / content-desc boundary", () => {
-      const elements = [
-        createMockElement({ "text": "Get sta", "content-desc": "rted" })
-      ];
+      const elements = [createMockElement({ text: "Get sta", "content-desc": "rted" })];
 
       expect(isRatingDialog(elements)).toBe(false);
     });
@@ -275,7 +255,7 @@ describe("ExploreBlockerDetection", () => {
         createMockElement({ text: "Home" }),
         createMockElement({ text: "Profile" }),
         createMockElement({ text: "Settings" }),
-        createMockElement({ text: "Help" })
+        createMockElement({ text: "Help" }),
       ];
 
       expect(isPermissionDialog(elements)).toBe(false);
@@ -290,9 +270,7 @@ describe("ExploreBlockerDetection", () => {
     });
 
     test("should handle elements with missing text fields", () => {
-      const elements = [
-        createMockElement({ "text": undefined, "content-desc": undefined })
-      ];
+      const elements = [createMockElement({ text: undefined, "content-desc": undefined })];
 
       expect(isPermissionDialog(elements)).toBe(false);
       expect(isLoginScreen(elements)).toBe(false);
@@ -305,7 +283,10 @@ describe("ExploreBlockerDetection", () => {
     // elements. detectAndHandleBlockers -> extractAllElements only touches
     // flattenViewHierarchy, so this is the entire seam. Tracks call count so we
     // can prove the error/missing-hierarchy guards bail out *before* extraction.
-    function makeParser(elements: Element[]): { parser: ElementParser; extractionCount: () => number } {
+    function makeParser(elements: Element[]): {
+      parser: ElementParser;
+      extractionCount: () => number;
+    } {
       let calls = 0;
       const parser = {
         flattenViewHierarchy: () => {
@@ -316,7 +297,10 @@ describe("ExploreBlockerDetection", () => {
       return { parser, extractionCount: () => calls };
     }
 
-    function observationWith(hierarchy: { error?: string }, packageName = "com.test"): ObserveResult {
+    function observationWith(
+      hierarchy: { error?: string },
+      packageName = "com.test",
+    ): ObserveResult {
       return {
         viewHierarchy: { hierarchy, packageName },
       } as unknown as ObserveResult;
@@ -328,12 +312,12 @@ describe("ExploreBlockerDetection", () => {
     // handlePermissionDialog and dismissDialog no-op (they skip non-clickable
     // nodes and never construct a TapOnElement), so no real device call fires.
     const permissionAndLoginElements: Element[] = [
-      { "text": "Allow access", "clickable": false } as Element,
-      { "text": "password", "class": "android.widget.EditText", "clickable": false } as Element,
+      { text: "Allow access", clickable: false } as Element,
+      { text: "password", class: "android.widget.EditText", clickable: false } as Element,
     ];
     const loginElements: Element[] = [
-      { "text": "Sign in", "clickable": false } as Element,
-      { "text": "", "class": "android.widget.EditText", "clickable": false } as Element,
+      { text: "Sign in", clickable: false } as Element,
+      { text: "", class: "android.widget.EditText", clickable: false } as Element,
     ];
 
     test("handles a permission-and-login screen as a permission dialog, not a login dead-end", async () => {
@@ -348,7 +332,9 @@ describe("ExploreBlockerDetection", () => {
         device,
         null,
         parser,
-        async () => { deadEndCalls += 1; }
+        async () => {
+          deadEndCalls += 1;
+        },
       );
 
       expect(deadEndCalls).toBe(0);
@@ -365,7 +351,9 @@ describe("ExploreBlockerDetection", () => {
         device,
         null,
         parser,
-        async () => { deadEndCalls += 1; }
+        async () => {
+          deadEndCalls += 1;
+        },
       );
 
       expect(deadEndCalls).toBe(1);
@@ -375,8 +363,8 @@ describe("ExploreBlockerDetection", () => {
     test("returns false and never handles blockers on a regular screen", async () => {
       let deadEndCalls = 0;
       const { parser } = makeParser([
-        { "text": "Home", "clickable": true } as Element,
-        { "text": "Settings", "clickable": true } as Element,
+        { text: "Home", clickable: true } as Element,
+        { text: "Settings", clickable: true } as Element,
       ]);
 
       const result = await detectAndHandleBlockers(
@@ -384,7 +372,9 @@ describe("ExploreBlockerDetection", () => {
         device,
         null,
         parser,
-        async () => { deadEndCalls += 1; }
+        async () => {
+          deadEndCalls += 1;
+        },
       );
 
       expect(result).toBe(false);
@@ -403,7 +393,9 @@ describe("ExploreBlockerDetection", () => {
         device,
         null,
         parser,
-        async () => { deadEndCalls += 1; }
+        async () => {
+          deadEndCalls += 1;
+        },
       );
 
       expect(result).toBe(false);
@@ -420,7 +412,9 @@ describe("ExploreBlockerDetection", () => {
         device,
         null,
         parser,
-        async () => { deadEndCalls += 1; }
+        async () => {
+          deadEndCalls += 1;
+        },
       );
 
       expect(result).toBe(false);

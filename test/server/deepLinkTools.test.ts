@@ -2,7 +2,7 @@ import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import { registerDeepLinkTools } from "../../src/server/deepLinkTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
-describe("Deep Link Tools Registration", function() {
+describe("Deep Link Tools Registration", function () {
   beforeEach(() => {
     // Clear the tool registry before each test
     (ToolRegistry as any).tools.clear();
@@ -18,7 +18,7 @@ describe("Deep Link Tools Registration", function() {
       registerDeepLinkTools();
 
       const registeredTools = ToolRegistry.getToolDefinitions();
-      const toolNames = registeredTools.map(tool => tool.name);
+      const toolNames = registeredTools.map((tool) => tool.name);
 
       expect(toolNames).toContain("getDeepLinks");
     });
@@ -38,16 +38,15 @@ describe("Deep Link Tools Registration", function() {
       const invalidArgs = { appId: 123, platform: "android" };
       expect(() => tool!.schema.parse(invalidArgs)).toThrow();
     });
-
   });
 
-  describe("Tool Handlers", function() {
+  describe("Tool Handlers", function () {
     beforeEach(() => {
       registerDeepLinkTools();
     });
 
     describe("getDeepLinks handler", () => {
-      test("should validate app ID parameter and fail gracefully", async function() {
+      test("should validate app ID parameter and fail gracefully", async function () {
         const tool = ToolRegistry.getTool("getDeepLinks");
         expect(tool).toBeDefined();
 
@@ -66,15 +65,14 @@ describe("Deep Link Tools Registration", function() {
         expect(() => tool!.schema.parse({})).toThrow();
       });
     });
-
   });
 
-  describe("Error Handling", function() {
+  describe("Error Handling", function () {
     beforeEach(() => {
       registerDeepLinkTools();
     });
 
-    test("should reject missing appId in schema", async function() {
+    test("should reject missing appId in schema", async function () {
       const tool = ToolRegistry.getTool("getDeepLinks");
       expect(tool).toBeDefined();
 

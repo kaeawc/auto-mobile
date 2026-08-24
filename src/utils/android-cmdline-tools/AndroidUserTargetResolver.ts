@@ -1,6 +1,10 @@
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
 
-export type UserTargetSource = "explicit" | "foregroundPackage" | "managedProfile" | "primaryFallback";
+export type UserTargetSource =
+  | "explicit"
+  | "foregroundPackage"
+  | "managedProfile"
+  | "primaryFallback";
 
 export interface ResolvedUserTarget {
   userId: number;
@@ -35,7 +39,7 @@ export class AndroidUserTargetResolver {
     }
 
     const users = await this.adb.listUsers(request.signal);
-    const managedProfile = users.find(user => user.running && (user.flags & 0x20) !== 0);
+    const managedProfile = users.find((user) => user.running && (user.flags & 0x20) !== 0);
     if (managedProfile) {
       return { userId: managedProfile.userId, source: "managedProfile" };
     }

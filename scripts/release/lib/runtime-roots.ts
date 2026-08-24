@@ -14,15 +14,9 @@ function addRootFromSpec(roots: Set<string>, spec: string): void {
   ) {
     return;
   }
-  const pkgName = spec.startsWith("@")
-    ? spec.split("/").slice(0, 2).join("/")
-    : spec.split("/")[0];
+  const pkgName = spec.startsWith("@") ? spec.split("/").slice(0, 2).join("/") : spec.split("/")[0];
   const topLevel = pkgName.split("/")[0];
-  if (
-    BUILTINS.has(pkgName) ||
-    BUILTINS.has(topLevel) ||
-    pkgName.startsWith("@img/")
-  ) {
+  if (BUILTINS.has(pkgName) || BUILTINS.has(topLevel) || pkgName.startsWith("@img/")) {
     return;
   }
   roots.add(pkgName);
@@ -33,10 +27,7 @@ function collectSourceFiles(dir: string, out: string[]): void {
     const full = path.join(dir, entry);
     if (statSync(full).isDirectory()) {
       collectSourceFiles(full, out);
-    } else if (
-      (entry.endsWith(".ts") || entry.endsWith(".js")) &&
-      !entry.endsWith(".map")
-    ) {
+    } else if ((entry.endsWith(".ts") || entry.endsWith(".js")) && !entry.endsWith(".map")) {
       out.push(full);
     }
   }
@@ -55,10 +46,7 @@ function isRuntimeRequire(node: ts.CallExpression): boolean {
   );
 }
 
-function addStringSpecifier(
-  roots: Set<string>,
-  expression: ts.Expression | undefined,
-): void {
+function addStringSpecifier(roots: Set<string>, expression: ts.Expression | undefined): void {
   if (expression && ts.isStringLiteralLike(expression)) {
     addRootFromSpec(roots, expression.text);
   }
@@ -83,10 +71,7 @@ export function runtimeRootsInSource(
   );
 
   const visit = (node: ts.Node): void => {
-    if (
-      ts.isCallExpression(node) &&
-      node.expression.kind === ts.SyntaxKind.ImportKeyword
-    ) {
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       addStringSpecifier(roots, node.arguments[0]);
     }
     if (!dynamicImportsOnly) {

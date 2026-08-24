@@ -15,7 +15,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 const IOS_DEVICE: BootedDevice = {
   deviceId: "11111111-2222-3333-4444-555555555555",
   platform: "ios",
-  name: "iPhone 16 Pro"
+  name: "iPhone 16 Pro",
 };
 
 describe("DragAndDrop - iOS", () => {
@@ -33,19 +33,33 @@ describe("DragAndDrop - iOS", () => {
   const createHierarchy = (): ViewHierarchyResult => ({
     hierarchy: {
       node: [
-        { $: { "resource-id": "source-id", "text": "Source", "bounds": { left: 0, top: 0, right: 100, bottom: 100 }, "class": "XCUIElementTypeCell" } },
-        { $: { "resource-id": "target-id", "text": "Target", "bounds": { left: 200, top: 200, right: 300, bottom: 300 }, "class": "XCUIElementTypeCell" } }
-      ]
+        {
+          $: {
+            "resource-id": "source-id",
+            text: "Source",
+            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            class: "XCUIElementTypeCell",
+          },
+        },
+        {
+          $: {
+            "resource-id": "target-id",
+            text: "Target",
+            bounds: { left: 200, top: 200, right: 300, bottom: 300 },
+            class: "XCUIElementTypeCell",
+          },
+        },
+      ],
     },
     packageName: "com.test.app",
-    updatedAt: Date.now()
+    updatedAt: Date.now(),
   });
 
   const createObserveResult = (): ObserveResult => ({
     updatedAt: Date.now(),
     screenSize: { width: 1170, height: 2532 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-    viewHierarchy: createHierarchy()
+    viewHierarchy: createHierarchy(),
   });
 
   beforeEach(() => {
@@ -59,13 +73,19 @@ describe("DragAndDrop - iOS", () => {
 
     fakeObserveScreen.setObserveResult(() => createObserveResult());
     fakeWindow.configureCachedActiveWindow(null);
-    fakeWindow.configureActiveWindow({ appId: "com.test.app", activityName: "Main", layoutSeqSum: 1 });
+    fakeWindow.configureActiveWindow({
+      appId: "com.test.app",
+      activityName: "Main",
+      layoutSeqSum: 1,
+    });
 
     // If the Android availability guard ran on iOS, this would force failure — it must NOT run.
     managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
-      isAvailable: async () => false
+      isAvailable: async () => false,
     } as any);
-    androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeAndroidClient as any);
+    androidSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeAndroidClient as any,
+    );
     iosSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIosClient as any);
 
     dragAndDrop = new DragAndDrop(IOS_DEVICE, null, fakeTimer);
@@ -88,7 +108,7 @@ describe("DragAndDrop - iOS", () => {
       target: { elementId: "target-id" },
       pressDurationMs: 600,
       dragDurationMs: 500,
-      holdDurationMs: 200
+      holdDurationMs: 200,
     });
 
     expect(result.success).toBe(true);
@@ -111,7 +131,7 @@ describe("DragAndDrop - iOS", () => {
 
     const result = await dragAndDrop.execute({
       source: { elementId: "source-id" },
-      target: { elementId: "target-id" }
+      target: { elementId: "target-id" },
     });
 
     expect(result.success).toBe(true);
@@ -123,7 +143,7 @@ describe("DragAndDrop - iOS", () => {
 
     const result = await dragAndDrop.execute({
       source: { elementId: "source-id" },
-      target: { elementId: "target-id" }
+      target: { elementId: "target-id" },
     });
 
     expect(result.success).toBe(false);
@@ -135,7 +155,7 @@ describe("DragAndDrop - iOS", () => {
 
     await dragAndDrop.execute({
       source: { elementId: "source-id" },
-      target: { elementId: "target-id" }
+      target: { elementId: "target-id" },
     });
 
     // iOS forces a fresh runner snapshot; the Android service is never asked.
@@ -154,7 +174,7 @@ describe("DragAndDrop - iOS", () => {
 
     await dragAndDrop.execute({
       source: { elementId: "source-id" },
-      target: { elementId: "target-id" }
+      target: { elementId: "target-id" },
     });
 
     expect(syncSpy).toHaveBeenCalled();
@@ -171,18 +191,32 @@ describe("DragAndDrop - iOS", () => {
     fakeIosClient.setViewHierarchyResult({
       hierarchy: {
         node: [
-          { $: { "resource-id": "source-id", "text": "Source", "bounds": { left: 450, top: 450, right: 550, bottom: 550 }, "class": "XCUIElementTypeCell" } },
-          { $: { "resource-id": "target-id", "text": "Target", "bounds": { left: 650, top: 650, right: 750, bottom: 750 }, "class": "XCUIElementTypeCell" } }
-        ]
+          {
+            $: {
+              "resource-id": "source-id",
+              text: "Source",
+              bounds: { left: 450, top: 450, right: 550, bottom: 550 },
+              class: "XCUIElementTypeCell",
+            },
+          },
+          {
+            $: {
+              "resource-id": "target-id",
+              text: "Target",
+              bounds: { left: 650, top: 650, right: 750, bottom: 750 },
+              class: "XCUIElementTypeCell",
+            },
+          },
+        ],
       },
       packageName: "com.test.app",
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
     });
     fakeIosClient.setDragResult({ success: true, totalTimeMs: 1, gestureTimeMs: 1 });
 
     const result = await dragAndDrop.execute({
       source: { elementId: "source-id" },
-      target: { elementId: "target-id" }
+      target: { elementId: "target-id" },
     });
 
     expect(result.success).toBe(true);
@@ -201,7 +235,7 @@ describe("DragAndDrop - iOS", () => {
 
     const result = await dragAndDrop.execute({
       source: { elementId: "source-id" },
-      target: { elementId: "target-id" }
+      target: { elementId: "target-id" },
     });
 
     expect(result.success).toBe(true);
@@ -218,7 +252,7 @@ describe("DragAndDrop - iOS", () => {
     const result = await dragAndDrop.execute({
       source: { elementId: "source-id" },
       target: { elementId: "target-id" },
-      dragDurationMs: 800
+      dragDurationMs: 800,
     });
 
     expect(result.success).toBe(true);

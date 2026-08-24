@@ -188,7 +188,7 @@ export class VideoServerJarProvider {
     if (expected.length === 0) {
       logger.info(
         "[VIDEO_JAR] Expected checksum unknown for the pinned version; returning null " +
-        "without touching the network (jar is integrity-unverifiable)"
+          "without touching the network (jar is integrity-unverifiable)",
       );
       return null;
     }
@@ -282,8 +282,8 @@ export class VideoServerJarProvider {
         // checksum case; a mismatch is unconditional.)
         throw new ActionableError(
           `video-server jar checksum verification failed. Expected: ${expected}, Got: ${actual}. ` +
-          "The downloaded automobile-video.jar does not match the pinned release checksum; " +
-          "this indicates a corrupted or tampered download and is never silently accepted."
+            "The downloaded automobile-video.jar does not match the pinned release checksum; " +
+            "this indicates a corrupted or tampered download and is never silently accepted.",
         );
       }
 
@@ -291,14 +291,17 @@ export class VideoServerJarProvider {
       // with a .jar name before it is ever pushed to a device.
       if (!this.hasClassesDex(tempPath)) {
         throw new ActionableError(
-          "video-server jar is not a valid zip containing classes.dex (truncated or error-page download)."
+          "video-server jar is not a valid zip containing classes.dex (truncated or error-page download).",
         );
       }
 
       const { size } = await fs.stat(tempPath);
       await fs.rename(tempPath, jarPath);
       await this.writeMetadata(dir, actual, size);
-      logger.info("[VIDEO_JAR] Downloaded, verified, and cached jar", { path: jarPath, sha256: actual });
+      logger.info("[VIDEO_JAR] Downloaded, verified, and cached jar", {
+        path: jarPath,
+        sha256: actual,
+      });
       return jarPath;
     } catch (error) {
       await fs.rm(tempPath, { force: true }).catch(() => {});
@@ -316,7 +319,7 @@ export class VideoServerJarProvider {
     await fs.writeFile(
       path.join(dir, VIDEO_SERVER_JAR_METADATA_FILENAME),
       JSON.stringify(metadata, null, 2),
-      { encoding: "utf8", mode: SECURE_FILE_MODE }
+      { encoding: "utf8", mode: SECURE_FILE_MODE },
     );
   }
 
@@ -324,7 +327,7 @@ export class VideoServerJarProvider {
   private hasClassesDex(filePath: string): boolean {
     try {
       const zip = new AdmZip(filePath);
-      return zip.getEntries().some(entry => entry.entryName === REQUIRED_DEX_ENTRY);
+      return zip.getEntries().some((entry) => entry.entryName === REQUIRED_DEX_ENTRY);
     } catch (error) {
       // A truncated download / HTML error page is not a valid zip.
       logger.warn("[VIDEO_JAR] Structural check failed (not a valid zip)", {

@@ -39,7 +39,7 @@ class FakeSimulatorHelper extends EventEmitter {
 
   override on<E extends keyof IosScreenCaptureHelperEvents>(
     event: E,
-    listener: IosScreenCaptureHelperEvents[E]
+    listener: IosScreenCaptureHelperEvents[E],
   ): this {
     return super.on(event, listener as (...args: any[]) => void);
   }
@@ -83,8 +83,8 @@ describe("IOSSimulatorCaptureHelperPool", () => {
     const first = pool.acquire(simulatorOptions());
     const firstFrames: number[] = [];
     const firstQueueDepths: number[] = [];
-    first.on("frame", frame => firstFrames.push(frame.header.width));
-    first.on("frameMetrics", metrics => firstQueueDepths.push(metrics.queueDepth));
+    first.on("frame", (frame) => firstFrames.push(frame.header.width));
+    first.on("frameMetrics", (metrics) => firstQueueDepths.push(metrics.queueDepth));
 
     await first.start();
     helpers[0].emit("frame", {
@@ -104,7 +104,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
     const second = pool.acquire(simulatorOptions());
     const secondFrames: number[] = [];
-    second.on("frame", frame => secondFrames.push(frame.header.width));
+    second.on("frame", (frame) => secondFrames.push(frame.header.width));
     await second.start();
     helpers[0].emit("frame", {
       header: { width: 2, height: 1, bytesPerRow: 8, timestampMs: 2 },
@@ -138,7 +138,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
     const second = pool.acquire(simulatorOptions());
     const secondFrames: number[] = [];
-    second.on("frame", frame => secondFrames.push(frame.header.width));
+    second.on("frame", (frame) => secondFrames.push(frame.header.width));
     await second.start();
 
     expect(helpers).toHaveLength(2);
@@ -166,7 +166,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
     helpers[0].emit(
       "stderr",
-      "warn: no frames received within 10s. Grant 'Screen Recording' to your terminal/IDE."
+      "warn: no frames received within 10s. Grant 'Screen Recording' to your terminal/IDE.",
     );
     await flushMicrotasks();
 
@@ -203,7 +203,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
       await flushMicrotasks();
 
       expect(warning).toHaveBeenCalledWith(
-        expect.stringContaining("failed helper stop failed: Error: stop failed")
+        expect.stringContaining("failed helper stop failed: Error: stop failed"),
       );
     } finally {
       warning.mockRestore();
@@ -234,7 +234,7 @@ describe("IOSSimulatorCaptureHelperPool", () => {
 
       // Failed cleanup surfaced its error, and the poisoned entry was dropped.
       expect(warning).toHaveBeenCalledWith(
-        expect.stringContaining("failed helper stop failed: Error: stop failed")
+        expect.stringContaining("failed helper stop failed: Error: stop failed"),
       );
       expect(helpers[0].stops).toBe(1);
 
@@ -384,8 +384,12 @@ describe("IOSSimulatorCaptureHelperPool", () => {
     // frame replay is disabled on the encoded path.
     const replayed: number[] = [];
     const second = pool.acquire(encodedOptions());
-    second.on("frame", frame => replayed.push(frame.header.width));
-    helpers[0].emit("encodedVideo", { keyframe: false, presentationTimestampMs: 1, payload: Buffer.from([0, 0, 0, 1, 0x41]) });
+    second.on("frame", (frame) => replayed.push(frame.header.width));
+    helpers[0].emit("encodedVideo", {
+      keyframe: false,
+      presentationTimestampMs: 1,
+      payload: Buffer.from([0, 0, 0, 1, 0x41]),
+    });
     await second.start();
 
     expect(helpers).toHaveLength(1);
@@ -405,12 +409,16 @@ describe("IOSSimulatorCaptureHelperPool", () => {
     const lease = pool.acquire(encodedOptions());
     const records: boolean[] = [];
     const capabilities: string[] = [];
-    lease.on("encodedVideo", video => records.push(video.keyframe));
-    lease.on("capability", token => capabilities.push(token));
+    lease.on("encodedVideo", (video) => records.push(video.keyframe));
+    lease.on("capability", (token) => capabilities.push(token));
     await lease.start();
 
     helpers[0].emit("capability", "encoded-video-h264");
-    helpers[0].emit("encodedVideo", { keyframe: true, presentationTimestampMs: 1, payload: Buffer.from([0x65]) });
+    helpers[0].emit("encodedVideo", {
+      keyframe: true,
+      presentationTimestampMs: 1,
+      payload: Buffer.from([0x65]),
+    });
 
     expect(capabilities).toEqual(["encoded-video-h264"]);
     expect(records).toEqual([true]);

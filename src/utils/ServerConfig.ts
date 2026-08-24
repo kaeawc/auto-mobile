@@ -1,6 +1,4 @@
-import type {
-  AccessibilityAuditConfig,
-} from "../models/AccessibilityAudit";
+import type { AccessibilityAuditConfig } from "../models/AccessibilityAudit";
 import type {
   VideoRecordingConfigInput,
   DeviceSnapshotConfigInput,
@@ -242,7 +240,12 @@ class ServerConfig {
     this._occlusionEnabled = enabled;
   }
 
-  getAccessibilityFlagsConfig(): { includeNotImportantViews: boolean; reportViewIds: boolean; retrieveInteractiveWindows: boolean; occlusionEnabled: boolean } {
+  getAccessibilityFlagsConfig(): {
+    includeNotImportantViews: boolean;
+    reportViewIds: boolean;
+    retrieveInteractiveWindows: boolean;
+    occlusionEnabled: boolean;
+  } {
     return {
       includeNotImportantViews: this._a11yIncludeNotImportantViews,
       reportViewIds: this._a11yReportViewIds,
@@ -298,7 +301,6 @@ class ServerConfig {
   isActionsNoObserveEnabled(): boolean {
     return this._actionsNoObserve;
   }
-
 }
 
 export const serverConfig = ServerConfig.getInstance();

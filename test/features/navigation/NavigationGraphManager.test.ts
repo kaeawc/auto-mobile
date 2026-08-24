@@ -1,14 +1,24 @@
-import { expect, describe, test, beforeEach, afterEach, beforeAll, afterAll, it, spyOn } from "bun:test";
+import {
+  expect,
+  describe,
+  test,
+  beforeEach,
+  afterEach,
+  beforeAll,
+  afterAll,
+  it,
+  spyOn,
+} from "bun:test";
 import type { Kysely } from "kysely";
 import {
   NavigationGraphManager,
-  NavigationEvent
+  NavigationEvent,
 } from "../../../src/features/navigation/NavigationGraphManager";
 import { runMigrations } from "../../helpers/database";
 import { createTestDatabase } from "../../db/testDbHelper";
 import {
   installInMemoryNavManager,
-  type InMemoryNavManagerHarness
+  type InMemoryNavManagerHarness,
 } from "../../helpers/navigationTestHarness";
 import { NavigationRepository } from "../../../src/db/navigationRepository";
 import { TestCoverageRepository } from "../../../src/db/testCoverageRepository";
@@ -50,7 +60,7 @@ describe("NavigationGraphManager", () => {
   function makeFreshManager(): NavigationGraphManager {
     return NavigationGraphManager.createForTesting(
       new NavigationRepository(harness.db),
-      new TestCoverageRepository(undefined, harness.db)
+      new TestCoverageRepository(undefined, harness.db),
     );
   }
 
@@ -130,7 +140,7 @@ describe("NavigationGraphManager", () => {
 
       const apps = await manager.listAppsWithGraph();
 
-      const seeded = apps.find(app => app.appId === "com.example.graph");
+      const seeded = apps.find((app) => app.appId === "com.example.graph");
       expect(seeded).toEqual({
         appId: "com.example.graph",
         displayName: null,
@@ -142,7 +152,7 @@ describe("NavigationGraphManager", () => {
       // beforeEach sets current app "com.test.app" via setCurrentApp, which
       // creates the app row but records no nodes — so it must not appear.
       const apps = await manager.listAppsWithGraph();
-      expect(apps.some(app => app.appId === "com.test.app")).toBe(false);
+      expect(apps.some((app) => app.appId === "com.test.app")).toBe(false);
     });
   });
 
@@ -374,17 +384,14 @@ describe("NavigationGraphManager", () => {
       const edges = Array.from({ length: 40 }, (_, index) =>
         createCountingDBEdge(index + 1, `Screen${index}`, `Screen${index + 1}`, () => {
           fromScreenReadCount++;
-        })
+        }),
       );
 
-      const getEdgesSpy = spyOn(
-        NavigationRepository.prototype,
-        "getEdges"
-      ).mockResolvedValue(edges);
+      const getEdgesSpy = spyOn(NavigationRepository.prototype, "getEdges").mockResolvedValue(
+        edges,
+      );
 
-      const result = await manager
-        .findPath("Screen40")
-        .finally(() => getEdgesSpy.mockRestore());
+      const result = await manager.findPath("Screen40").finally(() => getEdgesSpy.mockRestore());
 
       expect(result.found).toBe(true);
       expect(result.path).toHaveLength(40);
@@ -408,7 +415,7 @@ describe("NavigationGraphManager", () => {
       const result = await manager.findPath("Target");
 
       expect(result.found).toBe(true);
-      expect(result.path.map(edge => [edge.from, edge.to])).toEqual([
+      expect(result.path.map((edge) => [edge.from, edge.to])).toEqual([
         ["Home", "Shortcut"],
         ["Shortcut", "Target"],
       ]);
@@ -439,24 +446,15 @@ describe("NavigationGraphManager", () => {
       manager.recordToolCall("pressButton", { button: "BACK" });
       await manager.recordNavigationEvent(createEvent("Home", now + 700));
 
-      const uiElementsSpy = spyOn(
-        NavigationRepository.prototype,
-        "getUIElementsForEdge"
-      );
-      const scrollPositionSpy = spyOn(
-        NavigationRepository.prototype,
-        "getScrollPosition"
-      );
-      const edgeModalsSpy = spyOn(
-        NavigationRepository.prototype,
-        "getEdgeModals"
-      );
+      const uiElementsSpy = spyOn(NavigationRepository.prototype, "getUIElementsForEdge");
+      const scrollPositionSpy = spyOn(NavigationRepository.prototype, "getScrollPosition");
+      const edgeModalsSpy = spyOn(NavigationRepository.prototype, "getEdgeModals");
 
       try {
         const result = await manager.findPath("Target");
 
         expect(result.found).toBe(true);
-        expect(result.path.map(edge => [edge.from, edge.to])).toEqual([
+        expect(result.path.map((edge) => [edge.from, edge.to])).toEqual([
           ["Home", "PathA"],
           ["PathA", "Target"],
         ]);
@@ -488,18 +486,9 @@ describe("NavigationGraphManager", () => {
       manager.recordToolCall("tapOn", { text: "B" });
       await manager.recordNavigationEvent(createEvent("B", now + 200));
 
-      const uiElementsSpy = spyOn(
-        NavigationRepository.prototype,
-        "getUIElementsForEdge"
-      );
-      const scrollPositionSpy = spyOn(
-        NavigationRepository.prototype,
-        "getScrollPosition"
-      );
-      const edgeModalsSpy = spyOn(
-        NavigationRepository.prototype,
-        "getEdgeModals"
-      );
+      const uiElementsSpy = spyOn(NavigationRepository.prototype, "getUIElementsForEdge");
+      const scrollPositionSpy = spyOn(NavigationRepository.prototype, "getScrollPosition");
+      const edgeModalsSpy = spyOn(NavigationRepository.prototype, "getEdgeModals");
 
       try {
         const result = await manager.findPath("Missing");
@@ -595,7 +584,7 @@ describe("NavigationGraphManager", () => {
       expect(exported.edges).toHaveLength(1);
       expect(exported.currentScreen).toBe("Settings");
 
-      const homeNode = exported.nodes.find(n => n.screenName === "Home");
+      const homeNode = exported.nodes.find((n) => n.screenName === "Home");
       expect(homeNode).toBeDefined();
       expect(homeNode!.visitCount).toBe(1);
     });
@@ -612,11 +601,11 @@ describe("NavigationGraphManager", () => {
 
       expect(exported.appId).toBe("com.apple.Preferences");
       expect(exported.currentScreen).toBeNull();
-      expect(exported.nodes.map(node => node.screenName)).toEqual([
+      expect(exported.nodes.map((node) => node.screenName)).toEqual([
         "iOS General",
         "iOS Settings",
       ]);
-      expect(exported.edges.map(edge => [edge.from, edge.to])).toEqual([
+      expect(exported.edges.map((edge) => [edge.from, edge.to])).toEqual([
         ["iOS Settings", "iOS General"],
       ]);
       expect(await manager.exportGraphForApp(null)).toEqual({
@@ -636,12 +625,12 @@ describe("NavigationGraphManager", () => {
 
       const history = await manager.exportGraphHistory();
 
-      expect(history.nodes.map(node => node.screenName)).toEqual(["Home", "Settings", "Profile"]);
-      expect(history.edges.map(edge => [edge.from, edge.to])).toEqual([
+      expect(history.nodes.map((node) => node.screenName)).toEqual(["Home", "Settings", "Profile"]);
+      expect(history.edges.map((edge) => [edge.from, edge.to])).toEqual([
         ["Home", "Settings"],
         ["Settings", "Profile"],
       ]);
-      expect(history.nodes.every(node => node.id !== null)).toBe(true);
+      expect(history.nodes.every((node) => node.id !== null)).toBe(true);
     });
 
     // N navigation events produce N-1 edges, so 5 events == 4 edges. Requesting a
@@ -661,12 +650,42 @@ describe("NavigationGraphManager", () => {
     }
 
     const limitRows: LimitRow[] = [
-      { name: "returns every edge and no cursor when no limit is given", limit: undefined, expectedEdgeCount: 4, expectNextCursor: false },
-      { name: "caps the page and emits a cursor when the limit is below the edge count", limit: 2, expectedEdgeCount: 2, expectNextCursor: true },
-      { name: "treats a zero limit as the default page size", limit: 0, expectedEdgeCount: 4, expectNextCursor: false },
-      { name: "treats a negative limit as the default page size", limit: -5, expectedEdgeCount: 4, expectNextCursor: false },
-      { name: "floors a fractional limit toward zero", limit: 2.9, expectedEdgeCount: 2, expectNextCursor: true },
-      { name: "returns every edge when the limit exceeds the edge count", limit: 1000, expectedEdgeCount: 4, expectNextCursor: false },
+      {
+        name: "returns every edge and no cursor when no limit is given",
+        limit: undefined,
+        expectedEdgeCount: 4,
+        expectNextCursor: false,
+      },
+      {
+        name: "caps the page and emits a cursor when the limit is below the edge count",
+        limit: 2,
+        expectedEdgeCount: 2,
+        expectNextCursor: true,
+      },
+      {
+        name: "treats a zero limit as the default page size",
+        limit: 0,
+        expectedEdgeCount: 4,
+        expectNextCursor: false,
+      },
+      {
+        name: "treats a negative limit as the default page size",
+        limit: -5,
+        expectedEdgeCount: 4,
+        expectNextCursor: false,
+      },
+      {
+        name: "floors a fractional limit toward zero",
+        limit: 2.9,
+        expectedEdgeCount: 2,
+        expectNextCursor: true,
+      },
+      {
+        name: "returns every edge when the limit exceeds the edge count",
+        limit: 1000,
+        expectedEdgeCount: 4,
+        expectNextCursor: false,
+      },
     ];
 
     test.each(limitRows)("$name", async ({ limit, expectedEdgeCount, expectNextCursor }) => {
@@ -698,8 +717,8 @@ describe("NavigationGraphManager", () => {
 
       // No edge is dropped or repeated across the two pages.
       const seenIds = [
-        ...firstPage.edges.map(edge => edge.id),
-        ...secondPage.edges.map(edge => edge.id),
+        ...firstPage.edges.map((edge) => edge.id),
+        ...secondPage.edges.map((edge) => edge.id),
       ];
       expect(new Set(seenIds).size).toBe(4);
     });
@@ -719,9 +738,9 @@ describe("NavigationGraphManager", () => {
     test("rejects a malformed cursor rather than silently returning the first page", async () => {
       await seedLinearEdges(2);
 
-      await expect(
-        manager.exportGraphHistory({ cursor: "not-a-cursor" })
-      ).rejects.toThrow(/Invalid history cursor/);
+      await expect(manager.exportGraphHistory({ cursor: "not-a-cursor" })).rejects.toThrow(
+        /Invalid history cursor/,
+      );
     });
   });
 
@@ -762,23 +781,20 @@ describe("NavigationGraphManager", () => {
 
       const edges = await manager.getEdgesTo("Settings");
       expect(edges).toHaveLength(2);
-      edges.forEach(e => expect(e.to).toBe("Settings"));
+      edges.forEach((e) => expect(e.to).toBe("Settings"));
     });
   });
 });
 
 // Helper function to create navigation events
-function createEvent(
-  destination: string,
-  timestamp?: number
-): NavigationEvent {
+function createEvent(destination: string, timestamp?: number): NavigationEvent {
   return {
     destination,
     source: "TEST",
     arguments: {},
     metadata: {},
     timestamp: timestamp ?? Date.now(),
-    sequenceNumber: 0
+    sequenceNumber: 0,
   };
 }
 
@@ -786,7 +802,7 @@ function createEvent(
 function createEventWithApp(
   destination: string,
   applicationId: string,
-  timestamp?: number
+  timestamp?: number,
 ): NavigationEvent {
   return {
     destination,
@@ -795,7 +811,7 @@ function createEventWithApp(
     metadata: {},
     timestamp: timestamp ?? Date.now(),
     sequenceNumber: 0,
-    applicationId
+    applicationId,
   };
 }
 
@@ -803,7 +819,7 @@ function createCountingDBEdge(
   id: number,
   from: string,
   to: string,
-  onFromScreenRead: () => void
+  onFromScreenRead: () => void,
 ): DBNavigationEdge {
   const edge = {
     id,
@@ -847,13 +863,13 @@ describe("NavigationGraphManager - Scroll Position", () => {
     // Record a swipeOn tool call
     manager.recordToolCall("swipeOn", {
       direction: "down",
-      lookFor: { text: "Advanced Settings" }
+      lookFor: { text: "Advanced Settings" },
     });
 
     // Update with scroll position
     manager.updateScrollPosition({
       targetElement: { text: "Advanced Settings" },
-      direction: "down"
+      direction: "down",
     });
 
     // Record navigation event to correlate
@@ -873,17 +889,21 @@ describe("NavigationGraphManager - Scroll Position", () => {
     // Record a swipeOn tool call with existing UI state
     const existingUIState = {
       selectedElements: [{ text: "Settings Tab" }],
-      destinationId: "Settings"
+      destinationId: "Settings",
     };
-    manager.recordToolCall("swipeOn", {
-      direction: "down",
-      lookFor: { text: "Advanced Settings" }
-    }, existingUIState);
+    manager.recordToolCall(
+      "swipeOn",
+      {
+        direction: "down",
+        lookFor: { text: "Advanced Settings" },
+      },
+      existingUIState,
+    );
 
     // Update with scroll position
     manager.updateScrollPosition({
       targetElement: { text: "Advanced Settings" },
-      direction: "down"
+      direction: "down",
     });
 
     // Record navigation event
@@ -905,14 +925,14 @@ describe("NavigationGraphManager - Scroll Position", () => {
       direction: "up",
       lookFor: { text: "Item" },
       container: { resourceId: "com.app:id/list" },
-      speed: "slow"
+      speed: "slow",
     });
 
     manager.updateScrollPosition({
       targetElement: { text: "Item" },
       container: { resourceId: "com.app:id/list" },
       direction: "up",
-      speed: "slow"
+      speed: "slow",
     });
 
     await manager.recordNavigationEvent(createEvent("Home"));
@@ -934,7 +954,7 @@ describe("NavigationGraphManager - Scroll Position", () => {
     // Try to update scroll position
     manager.updateScrollPosition({
       targetElement: { text: "Element" },
-      direction: "down"
+      direction: "down",
     });
 
     // Should not throw, just log and return
@@ -945,18 +965,18 @@ describe("NavigationGraphManager - Scroll Position", () => {
     // Record multiple swipeOn calls
     manager.recordToolCall("swipeOn", {
       direction: "down",
-      lookFor: { text: "First" }
+      lookFor: { text: "First" },
     });
 
     manager.recordToolCall("swipeOn", {
       direction: "up",
-      lookFor: { text: "Second" }
+      lookFor: { text: "Second" },
     });
 
     // Update should affect the most recent one
     manager.updateScrollPosition({
       targetElement: { text: "Second" },
-      direction: "up"
+      direction: "up",
     });
 
     await manager.recordNavigationEvent(createEvent("Screen1"));
@@ -991,7 +1011,7 @@ describe("NavigationGraphManager - Named Nodes Only", () => {
         fromFingerprint: null,
         toFingerprint: "abc123def456",
         timestamp: Date.now(),
-        packageName: "com.test.namedapp"
+        packageName: "com.test.namedapp",
       });
 
       // Should have no nodes since app has no named nodes yet
@@ -1011,7 +1031,7 @@ describe("NavigationGraphManager - Named Nodes Only", () => {
         toFingerprint: "fingerprint_home_123",
         fingerprintData: JSON.stringify({ layout: "home" }),
         timestamp: now + 500, // Within 1000ms window
-        packageName: "com.test.namedapp"
+        packageName: "com.test.namedapp",
       });
 
       // Should still have only one node (HomeScreen)
@@ -1035,7 +1055,7 @@ describe("NavigationGraphManager - Named Nodes Only", () => {
         toFingerprint: "fingerprint_settings_456",
         fingerprintData: JSON.stringify({ layout: "settings" }),
         timestamp: now + 1500, // Outside 1000ms window
-        packageName: "com.test.namedapp"
+        packageName: "com.test.namedapp",
       });
 
       // Should have suggestions
@@ -1053,7 +1073,7 @@ describe("NavigationGraphManager - Named Nodes Only", () => {
         fromFingerprint: null,
         toFingerprint: "fingerprint_home_123",
         timestamp: now + 500,
-        packageName: "com.test.namedapp"
+        packageName: "com.test.namedapp",
       });
 
       // Navigate away
@@ -1065,7 +1085,7 @@ describe("NavigationGraphManager - Named Nodes Only", () => {
         fromFingerprint: null,
         toFingerprint: "fingerprint_home_123",
         timestamp: now + 5000, // 3000ms after Settings navigation, well outside window
-        packageName: "com.test.namedapp"
+        packageName: "com.test.namedapp",
       });
 
       // Should update current screen to HomeScreen
@@ -1097,7 +1117,7 @@ describe("NavigationGraphManager - Named Nodes Only", () => {
         toFingerprint: "fingerprint_settings_456",
         fingerprintData: JSON.stringify({ layout: "settings" }),
         timestamp: now + 1500, // Outside window
-        packageName: "com.test.namedapp"
+        packageName: "com.test.namedapp",
       });
 
       // Get suggestions
@@ -1105,7 +1125,7 @@ describe("NavigationGraphManager - Named Nodes Only", () => {
       expect(suggestions.length).toBeGreaterThanOrEqual(1);
 
       const settingsSuggestion = suggestions.find(
-        s => s.fingerprintHash === "fingerprint_settings_456"
+        (s) => s.fingerprintHash === "fingerprint_settings_456",
       );
       expect(settingsSuggestion).toBeDefined();
 
@@ -1120,7 +1140,7 @@ describe("NavigationGraphManager - Named Nodes Only", () => {
       // Suggestion should no longer appear in unpromoted list
       const remainingSuggestions = await manager.getSuggestions();
       const stillPresent = remainingSuggestions.find(
-        s => s.fingerprintHash === "fingerprint_settings_456"
+        (s) => s.fingerprintHash === "fingerprint_settings_456",
       );
       expect(stillPresent).toBeUndefined();
     });
@@ -1135,13 +1155,13 @@ describe("NavigationGraphManager - Named Nodes Only", () => {
         toFingerprint: "fingerprint_settings_456",
         fingerprintData: JSON.stringify({ layout: "settings" }),
         timestamp: now + 1500, // Outside HomeScreen's window
-        packageName: "com.test.namedapp"
+        packageName: "com.test.namedapp",
       });
 
       // Promote suggestion
       const suggestions = await manager.getSuggestions();
       const settingsSuggestion = suggestions.find(
-        s => s.fingerprintHash === "fingerprint_settings_456"
+        (s) => s.fingerprintHash === "fingerprint_settings_456",
       );
       await manager.promoteSuggestion(settingsSuggestion!.id, "SettingsScreen");
 
@@ -1154,14 +1174,13 @@ describe("NavigationGraphManager - Named Nodes Only", () => {
         fromFingerprint: null,
         toFingerprint: "fingerprint_settings_456",
         timestamp: now + 6000, // 3000ms after Profile navigation, well outside window
-        packageName: "com.test.namedapp"
+        packageName: "com.test.namedapp",
       });
 
       // Current screen should be SettingsScreen
       expect(manager.getCurrentScreen()).toBe("SettingsScreen");
     });
   });
-
 });
 
 // getInstanceForSession() constructs unbound managers on the process-wide
@@ -1300,7 +1319,7 @@ describe("NavigationGraphManager - Multi-session isolation", () => {
 class ThrowingEdgeTraversalCoverageRepo extends TestCoverageRepository {
   constructor(
     private readonly injectedTimer: Timer,
-    db?: Kysely<Database>
+    db?: Kysely<Database>,
   ) {
     super(injectedTimer, db);
   }
@@ -1323,7 +1342,7 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
   async function countNodes(screenName?: string): Promise<number> {
     let q = db
       .selectFrom("navigation_nodes")
-      .select(eb => eb.fn.countAll<number>().as("count"))
+      .select((eb) => eb.fn.countAll<number>().as("count"))
       .where("app_id", "=", APP_ID);
     if (screenName !== undefined) {
       q = q.where("screen_name", "=", screenName);
@@ -1335,7 +1354,7 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
   async function countEdges(): Promise<number> {
     const row = await db
       .selectFrom("navigation_edges")
-      .select(eb => eb.fn.countAll<number>().as("count"))
+      .select((eb) => eb.fn.countAll<number>().as("count"))
       .where("app_id", "=", APP_ID)
       .executeTakeFirst();
     return Number(row?.count ?? 0);
@@ -1344,14 +1363,12 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
   async function countEdgeCoverageRows(): Promise<number> {
     const row = await db
       .selectFrom("test_edge_coverage")
-      .select(eb => eb.fn.countAll<number>().as("count"))
+      .select((eb) => eb.fn.countAll<number>().as("count"))
       .executeTakeFirst();
     return Number(row?.count ?? 0);
   }
 
-  async function sessionTotals(
-    sessionId: number
-  ): Promise<{ nodes: number; edges: number }> {
+  async function sessionTotals(sessionId: number): Promise<{ nodes: number; edges: number }> {
     const row = await db
       .selectFrom("test_coverage_sessions")
       .select(["total_nodes_visited", "total_edges_traversed"])
@@ -1370,7 +1387,7 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
     TelemetryRecorder.resetInstance();
     telemetrySpy = spyOn(
       TelemetryRecorder.getInstance(),
-      "recordNavigationEvent"
+      "recordNavigationEvent",
     ).mockResolvedValue(undefined);
   });
 
@@ -1398,9 +1415,7 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
     expect(await countNodes("Screen2")).toBe(1);
     expect(await countEdges()).toBe(1);
     // Two node visits + one edge traversal recorded for the session.
-    const nodeCoverage = await coverage.getCoveredNodes(
-      manager.getActiveTestSession()!.id
-    );
+    const nodeCoverage = await coverage.getCoveredNodes(manager.getActiveTestSession()!.id);
     expect(nodeCoverage.length).toBe(2);
     expect(await countEdgeCoverageRows()).toBe(1);
 
@@ -1431,9 +1446,9 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
     });
 
     // Second event creates an edge, so recordEdgeTraversal fires and throws.
-    await expect(
-      manager.recordNavigationEvent(createEvent("Screen2", 2000))
-    ).rejects.toThrow("injected recordEdgeTraversal failure");
+    await expect(manager.recordNavigationEvent(createEvent("Screen2", 2000))).rejects.toThrow(
+      "injected recordEdgeTraversal failure",
+    );
 
     // Zero new node/edge/coverage rows persisted for the failed event.
     expect(await countNodes()).toBe(nodesBefore);
@@ -1512,8 +1527,8 @@ describe("NavigationGraphManager - recordNavigationEvent transaction (#2791)", (
     const timeout = new Promise((_resolve, reject) =>
       defaultTimer.setTimeout(
         () => reject(new Error("deadlock: concurrent writers did not complete")),
-        2000
-      )
+        2000,
+      ),
     );
 
     await Promise.race([work, timeout]);
@@ -1575,7 +1590,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
     TelemetryRecorder.resetInstance();
     telemetrySpy = spyOn(
       TelemetryRecorder.getInstance(),
-      "recordNavigationEvent"
+      "recordNavigationEvent",
     ).mockResolvedValue(undefined);
   });
 
@@ -1589,7 +1604,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
   async function countNodes(db: Kysely<Database>): Promise<number> {
     const row = await db
       .selectFrom("navigation_nodes")
-      .select(eb => eb.fn.countAll<number>().as("count"))
+      .select((eb) => eb.fn.countAll<number>().as("count"))
       .where("app_id", "=", APP_ID)
       .executeTakeFirst();
     return Number(row?.count ?? 0);
@@ -1598,7 +1613,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
   async function countNodeCoverage(db: Kysely<Database>): Promise<number> {
     const row = await db
       .selectFrom("test_node_coverage")
-      .select(eb => eb.fn.countAll<number>().as("count"))
+      .select((eb) => eb.fn.countAll<number>().as("count"))
       .executeTakeFirst();
     return Number(row?.count ?? 0);
   }
@@ -1610,7 +1625,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
     await manager.setCurrentApp(APP_ID);
 
     await expect(
-      manager.recordNavigationEvent(createEvent("Screen1", 1000))
+      manager.recordNavigationEvent(createEvent("Screen1", 1000)),
     ).rejects.toBeInstanceOf(ActionableError);
   });
 
@@ -1620,9 +1635,9 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
     const manager = NavigationGraphManager.createForTesting(navRepo, coverage);
     await manager.setCurrentApp(APP_ID);
 
-    await expect(
-      manager.recordNavigationEvent(createEvent("Screen1", 1000))
-    ).rejects.toThrow(/different database connections/i);
+    await expect(manager.recordNavigationEvent(createEvent("Screen1", 1000))).rejects.toThrow(
+      /different database connections/i,
+    );
   });
 
   test("guard fires before the transaction opens — the navigation write is not applied", async () => {
@@ -1662,7 +1677,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
     await manager.startTestSession("session-guard");
 
     await expect(
-      manager.recordNavigationEvent(createEvent("Screen1", 1000))
+      manager.recordNavigationEvent(createEvent("Screen1", 1000)),
     ).rejects.toBeInstanceOf(ActionableError);
 
     // No coverage row leaked onto the navigation connection; the session row stays
@@ -1713,7 +1728,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
       home.id,
       "fp_home",
       JSON.stringify({ layout: "home" }),
-      1000
+      1000,
     );
     return navRepo;
   }
@@ -1741,7 +1756,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
         toFingerprint: "fp_home",
         timestamp: 900000,
         packageName: APP_ID,
-      })
+      }),
     ).rejects.toBeInstanceOf(ActionableError);
 
     // The node-visit increment never applied (the transaction never opened); no
@@ -1765,7 +1780,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
         toFingerprint: "fp_home",
         timestamp: 900000,
         packageName: APP_ID,
-      })
+      }),
     ).rejects.toThrow(/different database connections/i);
   });
 
@@ -1798,7 +1813,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
         toFingerprint: "fp_home",
         timestamp: 900000,
         packageName: APP_ID,
-      })
+      }),
     ).rejects.toBeInstanceOf(ActionableError);
 
     // No coverage row leaked onto the navigation connection and the visit increment
@@ -1820,7 +1835,7 @@ describe("NavigationGraphManager - shared-connection guard (#2968)", () => {
 describe("NavigationGraphManager - shared two-repo transaction helper (#3075)", () => {
   const managerSource = readFileSync(
     join(import.meta.dir, "../../../src/features/navigation/NavigationGraphManager.ts"),
-    "utf8"
+    "utf8",
   );
 
   test("assertSharedConnection is invoked from exactly one place (the shared helper)", () => {
@@ -1850,7 +1865,7 @@ describe("NavigationGraphManager - shared two-repo transaction helper (#3075)", 
       await manager.setCurrentApp("com.test.msg");
 
       let caught: unknown;
-      await manager.recordNavigationEvent(createEvent("Screen1", 1000)).catch(e => {
+      await manager.recordNavigationEvent(createEvent("Screen1", 1000)).catch((e) => {
         caught = e;
       });
 
@@ -1902,7 +1917,7 @@ function extractRunBothReposCallbackBodies(source: string): string[] {
 describe("NavigationGraphManager - side-effects-outside-fn guard (#3129)", () => {
   const managerSource = readFileSync(
     join(import.meta.dir, "../../../src/features/navigation/NavigationGraphManager.ts"),
-    "utf8"
+    "utf8",
   );
 
   // Known post-commit side effects that MUST stay OUTSIDE the transaction callback
@@ -1912,7 +1927,7 @@ describe("NavigationGraphManager - side-effects-outside-fn guard (#3129)", () =>
     "this.notifyGraphUpdated(",
     "TelemetryRecorder",
     "this.activeNavigation =",
-    "this.currentScreen ="
+    "this.currentScreen =",
   ];
 
   test("the source has exactly two helper callbacks to scan", () => {
@@ -1936,7 +1951,7 @@ describe("NavigationGraphManager - side-effects-outside-fn guard (#3129)", () =>
     const bodies = extractRunBothReposCallbackBodies(managerSource);
     expect(bodies.length).toBeGreaterThan(0);
     const mutated = bodies[0] + "\n        this.notifyGraphUpdated();\n";
-    const tripped = FORBIDDEN_SIDE_EFFECTS.some(s => mutated.includes(s));
+    const tripped = FORBIDDEN_SIDE_EFFECTS.some((s) => mutated.includes(s));
     expect(tripped).toBe(true);
   });
 
@@ -1962,7 +1977,7 @@ describe("NavigationGraphManager - side-effects-outside-fn guard (#3129)", () =>
 class ThrowingNodeVisitCoverageRepo extends TestCoverageRepository {
   constructor(
     private readonly injectedTimer: Timer,
-    db?: Kysely<Database>
+    db?: Kysely<Database>,
   ) {
     super(injectedTimer, db);
   }
@@ -1987,7 +2002,7 @@ class ThrowingNodeVisitCoverageRepo extends TestCoverageRepository {
 class ThrowingLinkPromoteRepo extends NavigationRepository {
   constructor(
     private readonly appId: string,
-    db?: Kysely<Database>
+    db?: Kysely<Database>,
   ) {
     super(db);
   }
@@ -1999,7 +2014,7 @@ class ThrowingLinkPromoteRepo extends NavigationRepository {
   override async promoteSuggestion(
     _suggestionId: number,
     nodeId: number,
-    timestamp: number
+    timestamp: number,
   ): Promise<never> {
     // Create the fingerprint first (a real write on the transaction), then throw as
     // if the suggestion-link UPDATE failed.
@@ -2017,7 +2032,7 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
   async function countNodes(screenName?: string): Promise<number> {
     let q = db
       .selectFrom("navigation_nodes")
-      .select(eb => eb.fn.countAll<number>().as("count"))
+      .select((eb) => eb.fn.countAll<number>().as("count"))
       .where("app_id", "=", APP_ID);
     if (screenName !== undefined) {
       q = q.where("screen_name", "=", screenName);
@@ -2029,7 +2044,7 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
   async function countFingerprints(): Promise<number> {
     const row = await db
       .selectFrom("navigation_node_fingerprints")
-      .select(eb => eb.fn.countAll<number>().as("count"))
+      .select((eb) => eb.fn.countAll<number>().as("count"))
       .where("app_id", "=", APP_ID)
       .executeTakeFirst();
     return Number(row?.count ?? 0);
@@ -2044,7 +2059,7 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
     // resolve the real getDatabase() and trip the unit-test DB guard (#3067).
     telemetrySpy = spyOn(
       TelemetryRecorder.getInstance(),
-      "recordNavigationEvent"
+      "recordNavigationEvent",
     ).mockResolvedValue(undefined);
   });
 
@@ -2072,7 +2087,7 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
       packageName: APP_ID,
     });
     const suggestions = await manager.getSuggestions();
-    const suggestion = suggestions.find(s => s.fingerprintHash === "fp_settings");
+    const suggestion = suggestions.find((s) => s.fingerprintHash === "fp_settings");
     expect(suggestion).toBeDefined();
     return suggestion!.id;
   }
@@ -2088,7 +2103,7 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
     // The promoted fingerprint now points at a named node; the suggestion is gone
     // from the unpromoted list.
     const remaining = await manager.getSuggestions();
-    expect(remaining.find(s => s.fingerprintHash === "fp_settings")).toBeUndefined();
+    expect(remaining.find((s) => s.fingerprintHash === "fp_settings")).toBeUndefined();
   });
 
   test("rolls back the created node when the suggestion link fails mid-sequence", async () => {
@@ -2109,9 +2124,9 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
     // node first, then repository.promoteSuggestion throws "Suggestion not found"
     // during the multi-write promotion. Without a transaction the node would be
     // left orphaned; the transaction must roll it back.
-    await expect(
-      manager.promoteSuggestion(999999, "OrphanScreen")
-    ).rejects.toThrow(/Suggestion not found/i);
+    await expect(manager.promoteSuggestion(999999, "OrphanScreen")).rejects.toThrow(
+      /Suggestion not found/i,
+    );
 
     // Zero new nodes/fingerprints persisted for the failed promotion.
     expect(await countNodes("OrphanScreen")).toBe(0);
@@ -2136,9 +2151,9 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
       notifyCount++;
     });
 
-    await expect(
-      manager.promoteSuggestion(42, "OrphanScreen")
-    ).rejects.toThrow(/injected suggestion-link failure/);
+    await expect(manager.promoteSuggestion(42, "OrphanScreen")).rejects.toThrow(
+      /injected suggestion-link failure/,
+    );
 
     // Both writes rolled back together — no orphan node, no orphan fingerprint.
     expect(await countNodes("OrphanScreen")).toBe(0);
@@ -2191,7 +2206,7 @@ describe("NavigationGraphManager - promoteSuggestion transaction (#2968)", () =>
 class ConditionalTouchAppRepo extends NavigationRepository {
   constructor(
     private readonly control: { throwOnTouch: boolean },
-    db?: Kysely<Database>
+    db?: Kysely<Database>,
   ) {
     super(db);
   }
@@ -2226,7 +2241,7 @@ describe("NavigationGraphManager - recordHierarchyNavigation Case-1 transaction 
   async function countNodeCoverageRows(): Promise<number> {
     const row = await db
       .selectFrom("test_node_coverage")
-      .select(eb => eb.fn.countAll<number>().as("count"))
+      .select((eb) => eb.fn.countAll<number>().as("count"))
       .executeTakeFirst();
     return Number(row?.count ?? 0);
   }
@@ -2317,7 +2332,7 @@ describe("NavigationGraphManager - recordHierarchyNavigation Case-1 transaction 
         toFingerprint: "fp_home",
         timestamp: 8000,
         packageName: APP_ID,
-      })
+      }),
     ).rejects.toThrow(/injected recordNodeVisit failure/);
 
     // updateNodeVisit's increment is rolled back; coverage rows/counters unchanged.
@@ -2351,7 +2366,7 @@ describe("NavigationGraphManager - recordHierarchyNavigation Case-1 transaction 
         toFingerprint: "fp_home",
         timestamp: 8000, // Case 1 (existing-node match)
         packageName: APP_ID,
-      })
+      }),
     ).rejects.toThrow(/injected touchApp failure/);
 
     // updateNodeVisit ran first inside the transaction; touchApp's throw rolls it back.

@@ -27,13 +27,13 @@ sender packetizer public API.
 
 The public-surface probe had these results:
 
-| Symbol | Result | Consequence |
-| --- | --- | --- |
-| `H264RtpPayload` | Exported; receive-side `deSerialize` only | It can consume existing RTP, not create outbound RTP from Annex-B. |
-| `useH264` | Exported | It describes the negotiated codec; it does not packetize frames. |
-| `PictureLossIndication`, `GenericNack` | Exported | RTCP packet types, not capture-source recovery. |
-| `NackHandler` | Not exported by either public entrypoint | It cannot be a supported replacement seam. |
-| `JitterBufferBase`, `JitterBufferCallback`, `JitterBufferTransformer` | Exported only by the documented `werift/nonstandard` entrypoint | They are receiver utilities, not a sender-side H.264 packetizer. |
+| Symbol                                                                | Result                                                          | Consequence                                                        |
+| --------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `H264RtpPayload`                                                      | Exported; receive-side `deSerialize` only                       | It can consume existing RTP, not create outbound RTP from Annex-B. |
+| `useH264`                                                             | Exported                                                        | It describes the negotiated codec; it does not packetize frames.   |
+| `PictureLossIndication`, `GenericNack`                                | Exported                                                        | RTCP packet types, not capture-source recovery.                    |
+| `NackHandler`                                                         | Not exported by either public entrypoint                        | It cannot be a supported replacement seam.                         |
+| `JitterBufferBase`, `JitterBufferCallback`, `JitterBufferTransformer` | Exported only by the documented `werift/nonstandard` entrypoint | They are receiver utilities, not a sender-side H.264 packetizer.   |
 
 `NackHandler` is a non-public implementation detail in werift's receiver
 package. The jitter utilities are public through the explicitly nonstandard
@@ -79,15 +79,15 @@ and Chrome. See
 
 ## Responsibility map
 
-| AutoMobile responsibility | Existing implementation | werift equivalent | Must remain? |
-| --- | --- | --- | --- |
-| Arbitrary-chunk Annex-B parsing | `VideoServerStreamParser` and `H264AnnexBParser` | None | Yes |
-| Access-unit assembly | `H264AccessUnitAssembler` | None | Yes |
-| Single-NAL and FU-A packetization | `packetizeNalUnit` | None | Yes |
-| RTP sequence number, marker bit, and 90 kHz timestamp creation | `RtpH264TrackWriter` | Sender normalizes packets after `MediaStreamTrack.writeRtp`; it does not create them | Yes |
-| SPS/PPS cache and IDR re-injection | `RtpH264TrackWriter` | None | Yes |
-| Incoming PLI dispatch | werift sender `onPictureLossIndication` | Already used by `WebRtcPublisher` | The subscription and local recovery policy remain |
-| Requesting an encoder IDR | `onKeyFrameRequest` and capture-source command channel | None | Yes |
+| AutoMobile responsibility                                      | Existing implementation                                | werift equivalent                                                                    | Must remain?                                      |
+| -------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------- |
+| Arbitrary-chunk Annex-B parsing                                | `VideoServerStreamParser` and `H264AnnexBParser`       | None                                                                                 | Yes                                               |
+| Access-unit assembly                                           | `H264AccessUnitAssembler`                              | None                                                                                 | Yes                                               |
+| Single-NAL and FU-A packetization                              | `packetizeNalUnit`                                     | None                                                                                 | Yes                                               |
+| RTP sequence number, marker bit, and 90 kHz timestamp creation | `RtpH264TrackWriter`                                   | Sender normalizes packets after `MediaStreamTrack.writeRtp`; it does not create them | Yes                                               |
+| SPS/PPS cache and IDR re-injection                             | `RtpH264TrackWriter`                                   | None                                                                                 | Yes                                               |
+| Incoming PLI dispatch                                          | werift sender `onPictureLossIndication`                | Already used by `WebRtcPublisher`                                                    | The subscription and local recovery policy remain |
+| Requesting an encoder IDR                                      | `onKeyFrameRequest` and capture-source command channel | None                                                                                 | Yes                                               |
 
 The PLI observation is important: AutoMobile is already using werift at the
 appropriate WebRTC boundary. Its sender dispatches an incoming
@@ -101,12 +101,12 @@ signalled for a keyframe mid-stream.
 
 This pre-#4291 snapshot counts the exclusively publisher-side H.264 surface:
 
-| File | Lines | Replaceable by public werift sender API |
-| --- | ---: | --- |
-| `src/features/webrtc/h264.ts` | 267 | 0 |
-| `src/features/webrtc/RtpH264TrackWriter.ts` | 216 | 0 |
-| `src/features/webrtc/VideoServerStreamParser.ts` | 176 | 0 |
-| **Total** | **659** | **0** |
+| File                                             |   Lines | Replaceable by public werift sender API |
+| ------------------------------------------------ | ------: | --------------------------------------- |
+| `src/features/webrtc/h264.ts`                    |     267 | 0                                       |
+| `src/features/webrtc/RtpH264TrackWriter.ts`      |     216 | 0                                       |
+| `src/features/webrtc/VideoServerStreamParser.ts` |     176 | 0                                       |
+| **Total**                                        | **659** | **0**                                   |
 
 No follow-up implementation issue should be filed. After #4291 merges, refresh
 the table against `main`, retain this no-go unless werift gains a documented

@@ -17,7 +17,7 @@ import { readFileSync } from "node:fs";
  */
 describe("bunfig.toml test preload tripwire (#3084)", () => {
   const parsed = Bun.TOML.parse(
-    readFileSync(new URL("../../bunfig.toml", import.meta.url), "utf8")
+    readFileSync(new URL("../../bunfig.toml", import.meta.url), "utf8"),
   ) as { test?: { preload?: string[] } };
 
   test("[test].preload is a non-empty array", () => {

@@ -18,16 +18,16 @@ daemon client can follow them without reading any Compose code.
 A client that both renders a device and controls it assembles its picture from
 several sources that update independently:
 
-| Source | Carries | Updates |
-| --- | --- | --- |
-| observation stream `screenshot_update` | pixels, reported screen size, `captureSequence`, `coordinateSpace`, `nativeScale`, device `frameContext` | continuously while subscribed |
-| observation stream `hierarchy_update` | element tree with `bounds`, `captureSequence`, `coordinateSpace`, `nativeScale`, device `frameContext` | continuously, usually debounced client-side |
-| live mirror relay (optional) | decoded video frames | at the mirror's frame rate |
-| daemon connection state | transport liveness | on connect/disconnect |
-| device selection | which device the user chose | on user action |
+| Source                                 | Carries                                                                                                  | Updates                                     |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| observation stream `screenshot_update` | pixels, reported screen size, `captureSequence`, `coordinateSpace`, `nativeScale`, device `frameContext` | continuously while subscribed               |
+| observation stream `hierarchy_update`  | element tree with `bounds`, `captureSequence`, `coordinateSpace`, `nativeScale`, device `frameContext`   | continuously, usually debounced client-side |
+| live mirror relay (optional)           | decoded video frames                                                                                     | at the mirror's frame rate                  |
+| daemon connection state                | transport liveness                                                                                       | on connect/disconnect                       |
+| device selection                       | which device the user chose                                                                              | on user action                              |
 
 A click is mapped with one source's geometry and dispatched against another's
-device id, so a client that checks these sources *individually at click time*
+device id, so a client that checks these sources _individually at click time_
 accumulates one check per discovered disagreement — and two disagreements cannot
 be checked for at all by comparing what the sources report:
 
@@ -65,7 +65,7 @@ DeviceFrameSnapshot(
 the screenshot's and hierarchy's sequences, which share one counter domain. It is
 guaranteed monotonic non-decreasing for the lifetime of a session, which is what
 the refresh policy's "strictly greater sequence" condition relies on. The live
-mirror's frames are counted in a *different* domain (per mirror connection), so
+mirror's frames are counted in a _different_ domain (per mirror connection), so
 they are deliberately excluded: folding them in with a max would make `sequence`
 jump while a mirror is connected and fall back when it clears. The mirror's
 provenance is carried separately in `liveFrameSequence`.
@@ -86,22 +86,22 @@ A snapshot is produced only when all of the following hold. Each is a rule of a
 pure function of its inputs plus the current client clock, so it is reproducible
 and unit-testable without a device.
 
-| Rule | Why |
-| --- | --- |
-| The client opted into control | Inspector-only hosts (e.g. an IDE plugin) never enable it |
-| Real device data, not mock data | Nothing to actuate otherwise |
-| A device is explicitly selected | A null selection would let the daemon pick a device the user never chose |
-| The transport can carry daemon input | Not every connection exposes `input/*` |
-| The observation stream is connected | A dead stream means the on-screen mirror is frozen |
-| A screenshot **and** a hierarchy have been applied | Mapping needs both |
-| Every source's device id equals the selection | After a device switch the previous device's frame lingers |
-| `screenshot.captureSequence == hierarchy.captureSequence` | **Shared capture identity** — this is what catches the equal-aspect resolution change |
-| `screenshot.frameContext == hierarchy.frameContext`, both non-null | **Device capture identity** — this catches same-size navigation between request and pixel capture |
-| Both messages carry a `captureSequence` at all | Older daemons do not stamp one; control fails closed rather than guessing |
-| `now - screenshot.receivedAt <= 5000 ms` | The daemon may stop pushing without disconnecting |
-| `now - liveFrame.receivedAt <= 1000 ms` (when a live frame is displayed) | **Recency** — this is what catches the stalled mirror |
+| Rule                                                                                                                                                                         | Why                                                                                                                                                                                        |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The client opted into control                                                                                                                                                | Inspector-only hosts (e.g. an IDE plugin) never enable it                                                                                                                                  |
+| Real device data, not mock data                                                                                                                                              | Nothing to actuate otherwise                                                                                                                                                               |
+| A device is explicitly selected                                                                                                                                              | A null selection would let the daemon pick a device the user never chose                                                                                                                   |
+| The transport can carry daemon input                                                                                                                                         | Not every connection exposes `input/*`                                                                                                                                                     |
+| The observation stream is connected                                                                                                                                          | A dead stream means the on-screen mirror is frozen                                                                                                                                         |
+| A screenshot **and** a hierarchy have been applied                                                                                                                           | Mapping needs both                                                                                                                                                                         |
+| Every source's device id equals the selection                                                                                                                                | After a device switch the previous device's frame lingers                                                                                                                                  |
+| `screenshot.captureSequence == hierarchy.captureSequence`                                                                                                                    | **Shared capture identity** — this is what catches the equal-aspect resolution change                                                                                                      |
+| `screenshot.frameContext == hierarchy.frameContext`, both non-null                                                                                                           | **Device capture identity** — this catches same-size navigation between request and pixel capture                                                                                          |
+| Both messages carry a `captureSequence` at all                                                                                                                               | Older daemons do not stamp one; control fails closed rather than guessing                                                                                                                  |
+| `now - screenshot.receivedAt <= 5000 ms`                                                                                                                                     | The daemon may stop pushing without disconnecting                                                                                                                                          |
+| `now - liveFrame.receivedAt <= 1000 ms` (when a live frame is displayed)                                                                                                     | **Recency** — this is what catches the stalled mirror                                                                                                                                      |
 | Displayed **screenshot** and mapping bounds agree — **exactly** (rotation-tolerant) when both messages declare `coordinateSpace: "px"`, **in aspect** (±5%) when they do not | One unit means absolute dimensions are comparable; a legacy frame reports iOS pixels against point-space bounds and cannot be — see [Coordinate space](#coordinate-space-canonical-pixels) |
-| Displayed **live mirror frame** matches the mapping bounds EXACTLY | See below — an aspect check would accept a scale change |
+| Displayed **live mirror frame** matches the mapping bounds EXACTLY                                                                                                           | See below — an aspect check would accept a scale change                                                                                                                                    |
 
 ### Coordinate space: canonical pixels
 
@@ -152,7 +152,7 @@ and land in the wrong physical place. So a client must:
   or `screenshot_update` declares a different space or `nativeScale` — retire it exactly like a
   stale one and drop to inspector behavior until a fresh, agreed frame arrives.
   Both messages are checked independently, and a move into (or out of) an
-  *unrecognized* space counts as a change like any other.
+  _unrecognized_ space counts as a change like any other.
 
 **Check the declaration when the message ARRIVES, not when your frame state
 catches up.** The daemon starts converting input under the new scale metadata the
@@ -179,13 +179,13 @@ two messages describe the same captured device state" — a fact, not an inferen
 
 That verification is the load-bearing part. A capture client's declared
 `screenWidth`/`screenHeight` are read from a screen-dimension cache derived from
-the last hierarchy it processed, so they are a *claim*, not a measurement: when
+the last hierarchy it processed, so they are a _claim_, not a measurement: when
 the device resolution changes, a screenshot can carry fresh 720x1560 pixels while
 the cache — and the claim — is still the previous 1080x2340. Echoing "the newest
 hierarchy pushed for this device" onto such a frame would stamp the stale
 geometry's id onto new pixels and let a client pair them, reintroducing the exact
 mis-scaled tap one level down. So the daemon measures the frame's header and
-refuses to stamp on mismatch. It also publishes the *measured* dimensions, so a
+refuses to stamp on mismatch. It also publishes the _measured_ dimensions, so a
 client falling back to them maps through the pixels it is actually rendering.
 
 ### Device capture identity
@@ -211,7 +211,7 @@ publishes `frameContext`.
 
 The identity source is monotonic for the daemon process's lifetime and is never
 reset, so an id cannot be reused after a device reconnect and collide with a
-pre-drop hierarchy a client still holds. On connection loss the device's *current*
+pre-drop hierarchy a client still holds. On connection loss the device's _current_
 id is dropped, so screenshots arriving before the first post-reconnect hierarchy
 carry none.
 
@@ -224,13 +224,13 @@ Two things that look like they would work, and do not:
 
 - **An elapsed-time window between the two messages.** After an aspect-preserving
   resolution change the new screenshot and the not-yet-applied older hierarchy are
-  *milliseconds* apart, so any window wide enough for normal streaming also admits
+  _milliseconds_ apart, so any window wide enough for normal streaming also admits
   the mis-scaled pair. Worse, the two `timestamp` fields are not even from one
   clock: a hierarchy's originates on the **device** (its own wall clock, forwarded
   unchanged) while a screenshot's is stamped by the **daemon**, so their difference
   is dominated by clock skew. Treat `timestamp` as display-only.
 - **Comparing absolute dimensions.** Even under canonical pixels, where the
-  comparison *is* exact, two captures of different content at the same resolution
+  comparison _is_ exact, two captures of different content at the same resolution
   are dimensionally identical — and that is the ordinary case. In the legacy space
   it is weaker still: iOS reports screen size in pixels against hierarchy bounds in
   logical points, a uniform scale indistinguishable from a uniform resolution
@@ -286,14 +286,14 @@ already subscribed to. Do not poll, and do not issue a separate `observe` call.*
 
 Expressed as snapshot transitions:
 
-| Event | Transition | What the client renders |
-| --- | --- | --- |
-| Input forwarded successfully | `Idle -> AwaitingSnapshot`, recording the dispatched `captureSequence` | The **retained** pre-input snapshot, unchanged and still clickable — it is the best available truth. A screenshot-only update in this interval carries a `captureSequence` the retained hierarchy does not match, so it yields no snapshot and does not replace what is on screen |
-| Input not dispatched (off-screen point, a drag below the [swipe threshold](screen-control-mapping.md#drag-to-swipe-policy), a keystroke the [keyboard policy](screen-control-mapping.md#keyboard-forwarding-policy) declined, or the bounded queue rejected it) | no transition | Unchanged; nothing reached the device, so there is nothing to wait for |
-| First snapshot from a strictly greater **capture** | `AwaitingSnapshot -> Settled` | The new snapshot |
-| No superseding snapshot within 3000 ms | `AwaitingSnapshot -> Settled` | The retained snapshot is **released** and the view falls back to current state. Retention is bounded: if screenshots keep arriving but hierarchy updates stall, nothing ever pairs, and holding the pre-input frame past this point would pin the view to it indefinitely. The freshness bound above independently retires the stale frame and drops control |
-| Input failed or was rejected | `-> Settled` immediately | Unchanged state plus the daemon's actionable error |
-| Device switch, stream disconnect, mode change | `-> Idle` | A pending wait is dropped; an input from the previous context never settles one in the new context |
+| Event                                                                                                                                                                                                                                                           | Transition                                                             | What the client renders                                                                                                                                                                                                                                                                                                                                      |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Input forwarded successfully                                                                                                                                                                                                                                    | `Idle -> AwaitingSnapshot`, recording the dispatched `captureSequence` | The **retained** pre-input snapshot, unchanged and still clickable — it is the best available truth. A screenshot-only update in this interval carries a `captureSequence` the retained hierarchy does not match, so it yields no snapshot and does not replace what is on screen                                                                            |
+| Input not dispatched (off-screen point, a drag below the [swipe threshold](screen-control-mapping.md#drag-to-swipe-policy), a keystroke the [keyboard policy](screen-control-mapping.md#keyboard-forwarding-policy) declined, or the bounded queue rejected it) | no transition                                                          | Unchanged; nothing reached the device, so there is nothing to wait for                                                                                                                                                                                                                                                                                       |
+| First snapshot from a strictly greater **capture**                                                                                                                                                                                                              | `AwaitingSnapshot -> Settled`                                          | The new snapshot                                                                                                                                                                                                                                                                                                                                             |
+| No superseding snapshot within 3000 ms                                                                                                                                                                                                                          | `AwaitingSnapshot -> Settled`                                          | The retained snapshot is **released** and the view falls back to current state. Retention is bounded: if screenshots keep arriving but hierarchy updates stall, nothing ever pairs, and holding the pre-input frame past this point would pin the view to it indefinitely. The freshness bound above independently retires the stale frame and drops control |
+| Input failed or was rejected                                                                                                                                                                                                                                    | `-> Settled` immediately                                               | Unchanged state plus the daemon's actionable error                                                                                                                                                                                                                                                                                                           |
+| Device switch, stream disconnect, mode change                                                                                                                                                                                                                   | `-> Idle`                                                              | A pending wait is dropped; an input from the previous context never settles one in the new context                                                                                                                                                                                                                                                           |
 
 Two consequences worth stating explicitly:
 
@@ -305,7 +305,7 @@ Two consequences worth stating explicitly:
   frame still belonging to the pre-input capture.
 
 - **The retained snapshot owns its pixels.** While awaiting, the client renders the
-  retained snapshot's *bytes and dimensions* as well as its tree. Pulling the bytes
+  retained snapshot's _bytes and dimensions_ as well as its tree. Pulling the bytes
   from newest-independent state would put new pixels on screen against the clicked
   snapshot's old hierarchy — the half-updated frame this policy exists to prevent.
 - **A failed input clears nothing.** It did not change the device, so no rendered
@@ -330,15 +330,15 @@ does not pair or echo `frameContext`. It is not a reference implementation for
 this protocol until [#4596](https://github.com/kaeawc/auto-mobile/issues/4596)
 lands.
 
-| Concern | Type | Module |
-| --- | --- | --- |
-| Daemon capture identity | `captureSequence` on `hierarchy_update` / `screenshot_update` | `src/daemon/deviceDataStreamSocketServer.ts` |
-| Snapshot + source provenance | `DeviceFrameSnapshot`, `ScreenshotFrameFacts`, `HierarchyFrameFacts`, `LiveFrameFacts` | `desktop-domain` |
-| Availability rules | `DeviceControlPolicy` | `desktop-domain` |
-| Refresh transitions | `PostInputRefreshTracker` | `desktop-domain` |
-| Drag-to-swipe rules | `DeviceDragGesturePolicy` | `desktop-domain` |
-| Keyboard/text/button rules | `DeviceKeyboardInputPolicy` | `desktop-domain` |
-| Dispatch, ordering, error gating, reset | `DeviceControlSession` | `desktop-core` |
+| Concern                                 | Type                                                                                   | Module                                       |
+| --------------------------------------- | -------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Daemon capture identity                 | `captureSequence` on `hierarchy_update` / `screenshot_update`                          | `src/daemon/deviceDataStreamSocketServer.ts` |
+| Snapshot + source provenance            | `DeviceFrameSnapshot`, `ScreenshotFrameFacts`, `HierarchyFrameFacts`, `LiveFrameFacts` | `desktop-domain`                             |
+| Availability rules                      | `DeviceControlPolicy`                                                                  | `desktop-domain`                             |
+| Refresh transitions                     | `PostInputRefreshTracker`                                                              | `desktop-domain`                             |
+| Drag-to-swipe rules                     | `DeviceDragGesturePolicy`                                                              | `desktop-domain`                             |
+| Keyboard/text/button rules              | `DeviceKeyboardInputPolicy`                                                            | `desktop-domain`                             |
+| Dispatch, ordering, error gating, reset | `DeviceControlSession`                                                                 | `desktop-core`                               |
 
 All of them are Compose-free with the clock injected, so they are unit tested with
 fakes and no device, socket or real timer.

@@ -17,35 +17,38 @@ describe("MCP Server Initialization", () => {
     }
   });
 
-  test("should handle initialize endpoint request", async function() {
+  test("should handle initialize endpoint request", async function () {
     const { client } = fixture.getContext();
 
     // Send initialize request
     const initializeResponseSchema = z.object({
       capabilities: z.object({
         resources: z.object({}),
-        tools: z.object({})
+        tools: z.object({}),
       }),
       serverInfo: z.object({
         name: z.string(),
-        version: z.string()
-      })
+        version: z.string(),
+      }),
     });
 
-    const result = await client.request({
-      method: "initialize",
-      params: {
-        protocolVersion: "2024-11-05",
-        capabilities: {
-          resources: {},
-          tools: {}
+    const result = await client.request(
+      {
+        method: "initialize",
+        params: {
+          protocolVersion: "2024-11-05",
+          capabilities: {
+            resources: {},
+            tools: {},
+          },
+          clientInfo: {
+            name: "test-client",
+            version: "0.0.1",
+          },
         },
-        clientInfo: {
-          name: "test-client",
-          version: "0.0.1"
-        }
-      }
-    }, initializeResponseSchema);
+      },
+      initializeResponseSchema,
+    );
 
     // Verify initialize response structure
     expect(typeof result).toBe("object");
@@ -60,5 +63,4 @@ describe("MCP Server Initialization", () => {
     expect(result.serverInfo).toHaveProperty("name", "AutoMobile");
     expect(result.serverInfo).toHaveProperty("version", getMcpServerVersion());
   });
-
 });

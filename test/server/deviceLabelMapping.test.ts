@@ -15,7 +15,11 @@ import { buildDeviceLabelMap, getDeviceLabelMap } from "../../src/server/deviceL
  * helper but never exercise the real typed-slot read — this suite closes that gap.
  */
 describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)", () => {
-  const androidA: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
+  const androidA: BootedDevice = {
+    name: "Pixel A",
+    deviceId: "emulator-5554",
+    platform: "android",
+  };
   let sessionManager: SessionManager;
 
   beforeEach(async () => {
@@ -23,7 +27,13 @@ describe("deviceLabelMapping ↔ SessionManager.deviceLabels slot (issue #2973)"
     sessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA]);
-    const pool = new DevicePool(sessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
     await pool.initializeWithDevices([androidA]);
     DaemonState.getInstance().initialize(sessionManager, pool);
   });

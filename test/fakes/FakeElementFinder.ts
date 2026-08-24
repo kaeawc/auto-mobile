@@ -19,7 +19,12 @@ export class FakeElementFinder implements ElementFinder {
   nextIsElementFocused: boolean = false;
   nextValidateElementText: boolean = true;
 
-  lastFindByTextArgs?: { text: string; container?: any; partialMatch?: boolean; caseSensitive?: boolean };
+  lastFindByTextArgs?: {
+    text: string;
+    container?: any;
+    partialMatch?: boolean;
+    caseSensitive?: boolean;
+  };
   lastFindByResourceIdArgs?: { resourceId: string; container?: any; partialMatch?: boolean };
 
   findElementsByText(
@@ -27,7 +32,7 @@ export class FakeElementFinder implements ElementFinder {
     text: string,
     container?: { elementId?: string; text?: string } | null,
     partialMatch?: boolean,
-    caseSensitive?: boolean
+    caseSensitive?: boolean,
   ): Element[] {
     this.lastFindByTextArgs = { text, container, partialMatch, caseSensitive };
     return this.nextElementsByText;
@@ -38,7 +43,7 @@ export class FakeElementFinder implements ElementFinder {
     text: string,
     container?: { elementId?: string; text?: string } | null,
     partialMatch?: boolean,
-    caseSensitive?: boolean
+    caseSensitive?: boolean,
   ): Element | null {
     this.lastFindByTextArgs = { text, container, partialMatch, caseSensitive };
     return this.nextElementByText;
@@ -48,7 +53,7 @@ export class FakeElementFinder implements ElementFinder {
     _viewHierarchy: ViewHierarchyResult,
     resourceId: string,
     container?: { elementId?: string; text?: string } | null,
-    partialMatch?: boolean
+    partialMatch?: boolean,
   ): Element[] {
     this.lastFindByResourceIdArgs = { resourceId, container, partialMatch };
     return this.nextElementsByResourceId;
@@ -58,7 +63,7 @@ export class FakeElementFinder implements ElementFinder {
     _viewHierarchy: ViewHierarchyResult,
     resourceId: string,
     container?: { elementId?: string; text?: string } | null,
-    partialMatch?: boolean
+    partialMatch?: boolean,
   ): Element | null {
     this.lastFindByResourceIdArgs = { resourceId, container, partialMatch };
     return this.nextElementByResourceId;
@@ -66,21 +71,21 @@ export class FakeElementFinder implements ElementFinder {
 
   findContainerNode(
     _viewHierarchy: ViewHierarchyResult,
-    _container: { elementId?: string; text?: string }
+    _container: { elementId?: string; text?: string },
   ): ViewHierarchyNode | null {
     return this.nextContainerNode;
   }
 
   hasContainerElement(
     _viewHierarchy: ViewHierarchyResult,
-    _container?: { elementId?: string; text?: string }
+    _container?: { elementId?: string; text?: string },
   ): boolean {
     return this.nextHasContainer;
   }
 
   findElementByIndex(
     _viewHierarchy: ViewHierarchyResult,
-    _index: number
+    _index: number,
   ): { element: Element; text?: string } | null {
     return this.nextElementByIndex;
   }
@@ -115,7 +120,7 @@ export class FakeElementFinder implements ElementFinder {
 
   validateElementText(
     _foundElement: { element: Element; text?: string },
-    _expectedText?: string
+    _expectedText?: string,
   ): boolean {
     return this.nextValidateElementText;
   }

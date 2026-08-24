@@ -22,7 +22,7 @@ export class FakeViewHierarchy implements ViewHierarchy {
     _perf?: any,
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
-    _signal?: AbortSignal
+    _signal?: AbortSignal,
   ): Promise<ViewHierarchyResult> {
     if (this.shouldFail && this.failureError) {
       throw this.failureError;
@@ -42,9 +42,9 @@ export class FakeViewHierarchy implements ViewHierarchy {
   getScreenIdentity(applicationId?: string): ScreenIdentity | undefined {
     const identity = this.configuredScreenIdentity;
     if (
-      applicationId
-      && identity?.components.bundleId
-      && identity.components.bundleId !== applicationId
+      applicationId &&
+      identity?.components.bundleId &&
+      identity.components.bundleId !== applicationId
     ) {
       return undefined;
     }
@@ -72,7 +72,7 @@ export class FakeViewHierarchy implements ViewHierarchy {
     viewHierarchy: any,
     _screenWidth: number,
     _screenHeight: number,
-    _margin?: number
+    _margin?: number,
   ): any {
     return viewHierarchy;
   }

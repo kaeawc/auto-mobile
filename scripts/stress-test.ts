@@ -2,7 +2,7 @@ import {
   createStressHarness,
   parseStressArgs,
   resolveStressConfig,
-  runStressOperations
+  runStressOperations,
 } from "./memory/stress-harness";
 
 async function main(): Promise<void> {
@@ -17,7 +17,7 @@ async function main(): Promise<void> {
       await runStressOperations(harness, {
         ...runConfig,
         iterations: warmupIterations,
-        gcEvery: 0
+        gcEvery: 0,
       });
     }
 

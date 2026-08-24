@@ -37,9 +37,9 @@ async function resolveDeviceId(): Promise<string> {
   const serial = stdout
     .split("\n")
     .slice(1)
-    .map(line => line.trim())
-    .filter(line => line.endsWith("\tdevice"))
-    .map(line => line.split("\t")[0])[0];
+    .map((line) => line.trim())
+    .filter((line) => line.endsWith("\tdevice"))
+    .map((line) => line.split("\t")[0])[0];
   if (!serial) {
     throw new Error(`No booted Android device found in \`adb devices\`:\n${stdout}`);
   }
@@ -48,7 +48,7 @@ async function resolveDeviceId(): Promise<string> {
 
 async function countAppProcesses(deviceId: string): Promise<number> {
   const { stdout } = await execFileAsync("adb", ["-s", deviceId, "shell", "ps", "-A"]);
-  return stdout.split("\n").filter(line => line.includes("automobile.video")).length;
+  return stdout.split("\n").filter((line) => line.includes("automobile.video")).length;
 }
 
 function nalTypeCounts(chunks: Buffer[]): Map<number, number> {
@@ -78,7 +78,7 @@ describeIntegration("PersistentEncoderH264Source on-device capture (#3776)", () 
     if (!resolved) {
       throw new Error(
         "automobile-video.jar not found. Build it with `./gradlew :video-server:d8Dex` " +
-          "or set AUTOMOBILE_VIDEO_SERVER_JAR."
+          "or set AUTOMOBILE_VIDEO_SERVER_JAR.",
       );
     }
     jarPath = resolved;
@@ -89,14 +89,14 @@ describeIntegration("PersistentEncoderH264Source on-device capture (#3776)", () 
   }
 
   async function capture(
-    overrides: Record<string, unknown> = {}
+    overrides: Record<string, unknown> = {},
   ): Promise<{ chunks: Buffer[]; errors: Error[] }> {
     const chunks: Buffer[] = [];
     const errors: Error[] = [];
     const source = new PersistentEncoderH264Source({
       device: makeDevice(),
-      onData: chunk => chunks.push(chunk),
-      onError: error => errors.push(error),
+      onData: (chunk) => chunks.push(chunk),
+      onError: (error) => errors.push(error),
       jarPath,
       quality: "low",
       ...overrides,

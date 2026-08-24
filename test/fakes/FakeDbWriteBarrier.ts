@@ -49,9 +49,15 @@ export class FakeDbWriteBarrier implements DbWriteBarrier {
     this.trackExistingCalls += 1;
     if (this.draining) {
       // Not counted while draining (issue #2885); never rejects, safe to `void`.
-      return work.then(() => undefined, () => undefined);
+      return work.then(
+        () => undefined,
+        () => undefined,
+      );
     }
     this.trackedExisting.push("tracked");
-    return work.then(value => value as T | undefined, () => undefined);
+    return work.then(
+      (value) => value as T | undefined,
+      () => undefined,
+    );
   }
 }

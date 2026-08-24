@@ -12,8 +12,8 @@ import { getSocketPath } from "../../src/daemon/socketServer/index";
 describe("daemon socket paths", () => {
   test("publishes all default socket paths", () => {
     expect(getDaemonSocketPathsByName()).toEqual({
-      "control": SOCKET_PATH,
-      "appearance": path.join(os.homedir(), ".auto-mobile", "appearance.sock"),
+      control: SOCKET_PATH,
+      appearance: path.join(os.homedir(), ".auto-mobile", "appearance.sock"),
       "device-snapshot": path.join(os.homedir(), ".auto-mobile", "device-snapshot.sock"),
       "failures-push": path.join(os.homedir(), ".auto-mobile", "failures-push.sock"),
       "failures-stream": path.join(os.homedir(), ".auto-mobile", "failures-stream.sock"),
@@ -43,8 +43,11 @@ describe("daemon socket paths", () => {
     const published = getDaemonSocketPathsByName();
     const auxiliaryNames = Object.keys(AUXILIARY_SOCKET_CONFIGS_BY_NAME).sort();
 
-    expect(Object.keys(published).filter(name => name !== "control").sort())
-      .toEqual(auxiliaryNames);
+    expect(
+      Object.keys(published)
+        .filter((name) => name !== "control")
+        .sort(),
+    ).toEqual(auxiliaryNames);
 
     for (const [name, config] of Object.entries(AUXILIARY_SOCKET_CONFIGS_BY_NAME)) {
       expect(path.basename(getSocketPath(config))).toBe(`${name}.sock`);

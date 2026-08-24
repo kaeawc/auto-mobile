@@ -35,7 +35,7 @@ async function advanceTimeAndWait(timer: FakeTimer, ms: number): Promise<void> {
     const chunk = Math.min(step, remaining) || remaining;
     timer.advanceTime(chunk);
     for (let i = 0; i < 4; i += 1) {
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
     }
     remaining -= chunk;
   } while (remaining > 0);
@@ -108,7 +108,7 @@ describe("PerformanceMonitor", () => {
         Missed Vsync: 2
         Slow UI thread: 1
         Frame deadline missed: 3
-      `
+      `,
     );
 
     // pidof response
@@ -117,7 +117,7 @@ describe("PerformanceMonitor", () => {
     // /proc/stat response
     adb.setCommandResult(
       "shell cat /proc/12345/stat",
-      "12345 (app) S 1 12345 12345 0 -1 4194560 1234 0 0 0 500 200 0 0 20 0 1 0 12345 123456789 12345 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0"
+      "12345 (app) S 1 12345 12345 0 -1 4194560 1234 0 0 0 500 200 0 0 20 0 1 0 12345 123456789 12345 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0",
     );
 
     // uptime response
@@ -141,7 +141,7 @@ describe("PerformanceMonitor", () => {
                  Unknown:                                    4000
 
                TOTAL PSS:   102400            TOTAL RSS:   150000       TOTAL SWAP (KB):    2048
-      `
+      `,
     );
   }
 
@@ -286,7 +286,7 @@ describe("PerformanceMonitor", () => {
       // guard must drop the second while the first is still in flight.
       fakeTimer.advanceTime(PerformanceMonitor.TICK_INTERVAL_MS * 2);
       for (let i = 0; i < 4; i += 1) {
-        await new Promise(resolve => setImmediate(resolve));
+        await new Promise((resolve) => setImmediate(resolve));
       }
 
       // Exactly one tick ran to completion — not two. (Negative control: the
@@ -466,7 +466,7 @@ describe("PerformanceMonitor", () => {
           Missed Vsync: 3
           Slow UI thread: 1
           Frame deadline missed: 1
-        `
+        `,
       );
 
       // Second tick - should report sum for this interval: 3 + 1 + 1 = 5
@@ -488,7 +488,10 @@ describe("PerformanceMonitor", () => {
     });
 
     it("should handle missing gfxinfo data gracefully", async () => {
-      fakeAdbClient.setCommandResult("shell dumpsys gfxinfo com.example.app reset", "No data available");
+      fakeAdbClient.setCommandResult(
+        "shell dumpsys gfxinfo com.example.app reset",
+        "No data available",
+      );
 
       monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
       monitor.start();
@@ -512,7 +515,7 @@ describe("PerformanceMonitor", () => {
           Missed Vsync: 0
           Slow UI thread: 0
           Frame deadline missed: 0
-        `
+        `,
       );
 
       monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
@@ -543,7 +546,7 @@ describe("PerformanceMonitor", () => {
     it("should handle ADB errors gracefully", async () => {
       fakeAdbClient.setCommandError(
         "shell dumpsys gfxinfo com.example.app reset",
-        new Error("ADB connection failed")
+        new Error("ADB connection failed"),
       );
 
       monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
@@ -589,18 +592,30 @@ describe("PerformanceMonitor", () => {
     it("should push data for each monitored device", async () => {
       fakeAdbClient.setCommandResult(
         "shell dumpsys gfxinfo com.app1 reset",
-        "Total frames rendered: 10\n50th percentile: 10ms"
+        "Total frames rendered: 10\n50th percentile: 10ms",
       );
       fakeAdbClient.setCommandResult(
         "shell dumpsys gfxinfo com.app2 reset",
-        "Total frames rendered: 10\n50th percentile: 12ms"
+        "Total frames rendered: 10\n50th percentile: 12ms",
       );
       fakeAdbClient.setCommandResult("shell pidof com.app1", "111");
       fakeAdbClient.setCommandResult("shell pidof com.app2", "222");
-      fakeAdbClient.setCommandResult("shell cat /proc/111/stat", "111 (app) S 0 0 0 0 0 0 0 0 0 0 100 50 0 0 20 0 1 0 0 0 0 0");
-      fakeAdbClient.setCommandResult("shell cat /proc/222/stat", "222 (app) S 0 0 0 0 0 0 0 0 0 0 200 100 0 0 20 0 1 0 0 0 0 0");
-      fakeAdbClient.setCommandResult("shell dumpsys meminfo com.app1 | grep \"TOTAL PSS\"", "TOTAL PSS: 50000");
-      fakeAdbClient.setCommandResult("shell dumpsys meminfo com.app2 | grep \"TOTAL PSS\"", "TOTAL PSS: 60000");
+      fakeAdbClient.setCommandResult(
+        "shell cat /proc/111/stat",
+        "111 (app) S 0 0 0 0 0 0 0 0 0 0 100 50 0 0 20 0 1 0 0 0 0 0",
+      );
+      fakeAdbClient.setCommandResult(
+        "shell cat /proc/222/stat",
+        "222 (app) S 0 0 0 0 0 0 0 0 0 0 200 100 0 0 20 0 1 0 0 0 0 0",
+      );
+      fakeAdbClient.setCommandResult(
+        'shell dumpsys meminfo com.app1 | grep "TOTAL PSS"',
+        "TOTAL PSS: 50000",
+      );
+      fakeAdbClient.setCommandResult(
+        'shell dumpsys meminfo com.app2 | grep "TOTAL PSS"',
+        "TOTAL PSS: 60000",
+      );
 
       monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
       monitor.start();
@@ -612,8 +627,8 @@ describe("PerformanceMonitor", () => {
       expect(fakePusher.getPushCount()).toBe(2);
 
       const allData = fakePusher.getPushedData();
-      const device1Data = allData.find(d => d.deviceId === "device-1");
-      const device2Data = allData.find(d => d.deviceId === "device-2");
+      const device1Data = allData.find((d) => d.deviceId === "device-1");
+      const device2Data = allData.find((d) => d.deviceId === "device-2");
 
       expect(device1Data).toBeDefined();
       expect(device2Data).toBeDefined();
@@ -632,7 +647,7 @@ describe("PerformanceMonitor", () => {
         undefined,
         undefined,
         undefined,
-        buffer
+        buffer,
       );
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
@@ -649,8 +664,13 @@ describe("PerformanceMonitor", () => {
       expect(snap.frameTimeMs).toEqual({ p50: 8.5, p90: 12.3, p95: 15.7, p99: 22.1 });
       // The App Summary breakdown comes from the same meminfo pass as TOTAL PSS.
       expect(snap.memoryBreakdownMb).toEqual({
-        javaHeap: 20, nativeHeap: 10, code: 8, stack: 0.5,
-        graphics: 4, privateOther: 2, system: 1,
+        javaHeap: 20,
+        nativeHeap: 10,
+        code: 8,
+        stack: 0.5,
+        graphics: 4,
+        privateOther: 2,
+        system: 1,
       });
     });
 
@@ -663,7 +683,7 @@ describe("PerformanceMonitor", () => {
         undefined,
         undefined,
         undefined,
-        buffer
+        buffer,
       );
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
@@ -693,7 +713,7 @@ describe("PerformanceMonitor", () => {
         undefined,
         undefined,
         undefined,
-        buffer
+        buffer,
       );
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
@@ -721,7 +741,7 @@ describe("PerformanceMonitor", () => {
         undefined,
         undefined,
         undefined,
-        buffer
+        buffer,
       );
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
@@ -750,7 +770,7 @@ describe("PerformanceMonitor", () => {
           Missed Vsync: 2
           Slow UI thread: 1
           Frame deadline missed: 3
-        `
+        `,
       );
       monitor = new PerformanceMonitor(
         fakeTimer,
@@ -759,7 +779,7 @@ describe("PerformanceMonitor", () => {
         undefined,
         undefined,
         undefined,
-        buffer
+        buffer,
       );
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
@@ -785,7 +805,7 @@ describe("PerformanceMonitor", () => {
           Missed Vsync: 2
           Slow UI thread: 1
           Frame deadline missed: 3
-        `
+        `,
       );
       monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter);
       monitor.start();
@@ -807,11 +827,21 @@ describe("PerformanceMonitor", () => {
 
     it("clears the buffer when the monitored package changes", async () => {
       const buffer = new PerfWindowBuffer();
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
+        undefined,
+        buffer,
+      );
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 2);
-      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBeGreaterThanOrEqual(1);
+      expect(
+        buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount,
+      ).toBeGreaterThanOrEqual(1);
 
       // Switching the monitored package must drop app A's samples so the next
       // snapshot cannot attribute them to app B.
@@ -821,11 +851,21 @@ describe("PerformanceMonitor", () => {
 
     it("clears the buffer when monitoring stops", async () => {
       const buffer = new PerfWindowBuffer();
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
+        undefined,
+        buffer,
+      );
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 2);
-      expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBeGreaterThanOrEqual(1);
+      expect(
+        buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount,
+      ).toBeGreaterThanOrEqual(1);
 
       monitor.stopMonitoring("device-1");
       expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBe(0);
@@ -837,9 +877,21 @@ describe("PerformanceMonitor", () => {
       // Fresh SDK sample (receivedAt 0; first tick fires at now=500, within TTL).
       // Distinctive fps=42 vs the dumpsys default (60) proves the source used.
       sdkStore.ingest("device-1", "com.example.app", {
-        fps: 42, frameTimeMs: 23.8, jankFrames: 3, receivedAt: 0,
+        fps: 42,
+        frameTimeMs: 23.8,
+        jankFrames: 3,
+        receivedAt: 0,
       });
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer, sdkStore);
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
+        undefined,
+        buffer,
+        sdkStore,
+      );
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -856,9 +908,21 @@ describe("PerformanceMonitor", () => {
       const sdkStore = new SdkFrameMetricsStore();
       // receivedAt far in the past: at the first tick (now=500) this is > TTL old.
       sdkStore.ingest("device-1", "com.example.app", {
-        fps: 42, frameTimeMs: 23.8, jankFrames: 3, receivedAt: -3000,
+        fps: 42,
+        frameTimeMs: 23.8,
+        jankFrames: 3,
+        receivedAt: -3000,
       });
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer, sdkStore);
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
+        undefined,
+        buffer,
+        sdkStore,
+      );
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -871,13 +935,25 @@ describe("PerformanceMonitor", () => {
     it("re-primes the first dumpsys sample after an SDK interval", async () => {
       const buffer = new PerfWindowBuffer();
       const sdkStore = new SdkFrameMetricsStore();
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer, sdkStore);
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
+        undefined,
+        buffer,
+        sdkStore,
+      );
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
       sdkStore.ingest("device-1", "com.example.app", {
-        fps: 42, frameTimeMs: 23.8, jankFrames: 3, receivedAt: fakeTimer.now(),
+        fps: 42,
+        frameTimeMs: 23.8,
+        jankFrames: 3,
+        receivedAt: fakeTimer.now(),
       });
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
       expect(buffer.snapshot("device-1", fakeTimer.now(), 60000).sampleCount).toBe(2);
@@ -896,7 +972,15 @@ describe("PerformanceMonitor", () => {
       const buffer = new PerfWindowBuffer();
       const gfxCommand = "shell dumpsys gfxinfo com.example.app reset";
       fakeAdbClient.setCommandError(gfxCommand, new Error("ADB connection failed"));
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
+        undefined,
+        buffer,
+      );
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
 
@@ -933,7 +1017,15 @@ describe("PerformanceMonitor", () => {
         { stdout: "Total frames rendered: 0\n" },
         { stdout: "Total frames rendered: 0\n" },
       ]);
-      monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, undefined, undefined, undefined, buffer);
+      monitor = new PerformanceMonitor(
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
+        undefined,
+        buffer,
+      );
       monitor.start();
       monitor.startMonitoring("device-1", "com.example.app");
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS * 5);
@@ -989,28 +1081,58 @@ class FakeSimCtl implements SimCtl {
 
   // Implement other SimCtl methods as no-ops for testing
   setDevice(): void {}
-  async isAvailable(): Promise<boolean> { return true; }
-  async isSimulatorRunning(): Promise<boolean> { return false; }
-  async startSimulator(): Promise<any> { return {}; }
+  async isAvailable(): Promise<boolean> {
+    return true;
+  }
+  async isSimulatorRunning(): Promise<boolean> {
+    return false;
+  }
+  async startSimulator(): Promise<any> {
+    return {};
+  }
   async killSimulator(): Promise<void> {}
-  async waitForSimulatorReady(): Promise<any> { return {}; }
-  async listSimulatorImages(): Promise<any[]> { return []; }
-  async getBootedSimulators(): Promise<any[]> { return []; }
-  async getDeviceInfo(): Promise<any> { return null; }
-  async bootSimulator(): Promise<any> { return {}; }
-  async getDeviceTypes(): Promise<any[]> { return []; }
-  async getRuntimes(): Promise<any[]> { return []; }
-  async createSimulator(): Promise<string> { return ""; }
+  async waitForSimulatorReady(): Promise<any> {
+    return {};
+  }
+  async listSimulatorImages(): Promise<any[]> {
+    return [];
+  }
+  async getBootedSimulators(): Promise<any[]> {
+    return [];
+  }
+  async getDeviceInfo(): Promise<any> {
+    return null;
+  }
+  async bootSimulator(): Promise<any> {
+    return {};
+  }
+  async getDeviceTypes(): Promise<any[]> {
+    return [];
+  }
+  async getRuntimes(): Promise<any[]> {
+    return [];
+  }
+  async createSimulator(): Promise<string> {
+    return "";
+  }
   async deleteSimulator(): Promise<void> {}
-  async listApps(): Promise<any[]> { return []; }
-  async launchApp(): Promise<any> { return { success: true }; }
+  async listApps(): Promise<any[]> {
+    return [];
+  }
+  async launchApp(): Promise<any> {
+    return { success: true };
+  }
   async terminateApp(): Promise<void> {}
   async installApp(): Promise<void> {}
   async uninstallApp(): Promise<void> {}
-  async getScreenSize(): Promise<any> { return { width: 390, height: 844 }; }
+  async getScreenSize(): Promise<any> {
+    return { width: 390, height: 844 };
+  }
   async setAppearance(): Promise<void> {}
   async openSimulatorApp(): Promise<void> {}
-  async pushNotification(): Promise<{ success: boolean; error?: string }> { return { success: true }; }
+  async pushNotification(): Promise<{ success: boolean; error?: string }> {
+    return { success: true };
+  }
 }
 
 /**
@@ -1065,8 +1187,7 @@ function iosSimPsLine(opts: {
   return `mobile ${opts.pid} ${opts.cpu}  2.3  1234567 ${opts.rssKb}   ??  Ss   10:00AM   1:23.45 ${command}`;
 }
 
-const IOS_PS_HEADER =
-  "USER     PID %CPU %MEM      VSZ    RSS   TT  STAT STARTED      TIME COMMAND";
+const IOS_PS_HEADER = "USER     PID %CPU %MEM      VSZ    RSS   TT  STAT STARTED      TIME COMMAND";
 
 describe("PerformanceMonitor iOS", () => {
   let fakeTimer: FakeTimer;
@@ -1101,10 +1222,16 @@ describe("PerformanceMonitor iOS", () => {
     const fakeExec = createFakeExecFileAsync({
       stdout: `${IOS_PS_HEADER}
 root       1  0.0  0.0   407056   1632   ??  Ss   Mon09AM   0:01.23 /sbin/launchd
-${iosSimPsLine({ pid: 12345, cpu: 15.5, rssKb: 89012, deviceId: "ios-device-1", bundleId: "com.example.iosapp" })}`
+${iosSimPsLine({ pid: 12345, cpu: 15.5, rssKb: 89012, deviceId: "ios-device-1", bundleId: "com.example.iosapp" })}`,
     });
 
-    monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, fakeSimCtlFactory, fakeExec);
+    monitor = new PerformanceMonitor(
+      fakeTimer,
+      fakeAdbFactory,
+      serverGetter,
+      fakeSimCtlFactory,
+      fakeExec,
+    );
     monitor.start();
     monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
 
@@ -1121,10 +1248,16 @@ ${iosSimPsLine({ pid: 12345, cpu: 15.5, rssKb: 89012, deviceId: "ios-device-1", 
     // Set up fake ps aux response on the host
     const fakeExec = createFakeExecFileAsync({
       stdout: `${IOS_PS_HEADER}
-${iosSimPsLine({ pid: 12345, cpu: 5.0, rssKb: 102400, deviceId: "ios-device-1", bundleId: "com.example.iosapp" })}`
+${iosSimPsLine({ pid: 12345, cpu: 5.0, rssKb: 102400, deviceId: "ios-device-1", bundleId: "com.example.iosapp" })}`,
     });
 
-    monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, fakeSimCtlFactory, fakeExec);
+    monitor = new PerformanceMonitor(
+      fakeTimer,
+      fakeAdbFactory,
+      serverGetter,
+      fakeSimCtlFactory,
+      fakeExec,
+    );
     monitor.start();
     monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
 
@@ -1139,10 +1272,22 @@ ${iosSimPsLine({ pid: 12345, cpu: 5.0, rssKb: 102400, deviceId: "ios-device-1", 
 
   it("should return null FPS/frame time for iOS (not available)", async () => {
     const fakeExec = createFakeExecFileAsync({
-      stdout: iosSimPsLine({ pid: 12345, cpu: 5.0, rssKb: 102400, deviceId: "ios-device-1", bundleId: "com.example.iosapp" })
+      stdout: iosSimPsLine({
+        pid: 12345,
+        cpu: 5.0,
+        rssKb: 102400,
+        deviceId: "ios-device-1",
+        bundleId: "com.example.iosapp",
+      }),
     });
 
-    monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, fakeSimCtlFactory, fakeExec);
+    monitor = new PerformanceMonitor(
+      fakeTimer,
+      fakeAdbFactory,
+      serverGetter,
+      fakeSimCtlFactory,
+      fakeExec,
+    );
     monitor.start();
     monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
 
@@ -1161,10 +1306,16 @@ ${iosSimPsLine({ pid: 12345, cpu: 5.0, rssKb: 102400, deviceId: "ios-device-1", 
     // ps aux returns output but doesn't include our bundle ID
     const fakeExec = createFakeExecFileAsync({
       stdout: `USER     PID %CPU %MEM      VSZ    RSS   TT  STAT STARTED      TIME COMMAND
-root       1  0.0  0.0   407056   1632   ??  Ss   Mon09AM   0:01.23 /sbin/launchd`
+root       1  0.0  0.0   407056   1632   ??  Ss   Mon09AM   0:01.23 /sbin/launchd`,
     });
 
-    monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, fakeSimCtlFactory, fakeExec);
+    monitor = new PerformanceMonitor(
+      fakeTimer,
+      fakeAdbFactory,
+      serverGetter,
+      fakeSimCtlFactory,
+      fakeExec,
+    );
     monitor.start();
     monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
 
@@ -1178,10 +1329,16 @@ root       1  0.0  0.0   407056   1632   ??  Ss   Mon09AM   0:01.23 /sbin/launch
 
   it("should handle exec errors gracefully", async () => {
     const fakeExec = createFakeExecFileAsync({
-      errorToThrow: new Error("Command failed")
+      errorToThrow: new Error("Command failed"),
     });
 
-    monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, fakeSimCtlFactory, fakeExec);
+    monitor = new PerformanceMonitor(
+      fakeTimer,
+      fakeAdbFactory,
+      serverGetter,
+      fakeSimCtlFactory,
+      fakeExec,
+    );
     monitor.start();
     monitor.startMonitoring("ios-device-1", "com.example.iosapp", "ios");
 
@@ -1203,10 +1360,16 @@ root       1  0.0  0.0   407056   1632   ??  Ss   Mon09AM   0:01.23 /sbin/launch
     const fakeExec = createFakeExecFileAsync({
       stdout: `${IOS_PS_HEADER}
 ${iosSimPsLine({ pid: 111, cpu: 11.0, rssKb: 51200, deviceId: udidA, bundleId })}
-${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId })}`
+${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId })}`,
     });
 
-    monitor = new PerformanceMonitor(fakeTimer, fakeAdbFactory, serverGetter, fakeSimCtlFactory, fakeExec);
+    monitor = new PerformanceMonitor(
+      fakeTimer,
+      fakeAdbFactory,
+      serverGetter,
+      fakeSimCtlFactory,
+      fakeExec,
+    );
     monitor.start();
     monitor.startMonitoring(udidA, bundleId, "ios");
     monitor.startMonitoring(udidB, bundleId, "ios");
@@ -1215,8 +1378,8 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
     await advanceTimeAndWait(fakeTimer, PerformanceMonitor.SLOW_INTERVAL_MS);
 
     const allData = fakePusher.getPushedData();
-    const dataA = allData.find(d => d.deviceId === udidA);
-    const dataB = allData.find(d => d.deviceId === udidB);
+    const dataA = allData.find((d) => d.deviceId === udidA);
+    const dataB = allData.find((d) => d.deviceId === udidB);
 
     expect(dataA).toBeDefined();
     expect(dataB).toBeDefined();
@@ -1236,8 +1399,11 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
 
     it("emits baseline telemetry on first sample", async () => {
       monitor = new PerformanceMonitor(
-        fakeTimer, fakeAdbFactory, serverGetter,
-        undefined, undefined,
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
         () => fakeTelemetry,
       );
       monitor.startMonitoring("emulator-5554", "com.example.app", "android");
@@ -1253,8 +1419,11 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
 
     it("does not emit telemetry when health unchanged", async () => {
       monitor = new PerformanceMonitor(
-        fakeTimer, fakeAdbFactory, serverGetter,
-        undefined, undefined,
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
         () => fakeTelemetry,
       );
       monitor.startMonitoring("emulator-5554", "com.example.app", "android");
@@ -1271,8 +1440,11 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
 
     it("emits telemetry when metric crosses threshold", async () => {
       monitor = new PerformanceMonitor(
-        fakeTimer, fakeAdbFactory, serverGetter,
-        undefined, undefined,
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
         () => fakeTelemetry,
       );
       monitor.startMonitoring("emulator-5554", "com.example.app", "android");
@@ -1294,7 +1466,7 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
           Missed Vsync: 20
           Slow UI thread: 15
           Frame deadline missed: 25
-        `
+        `,
       );
 
       await advanceTimeAndWait(fakeTimer, PerformanceMonitor.TICK_INTERVAL_MS);
@@ -1305,8 +1477,11 @@ ${iosSimPsLine({ pid: 222, cpu: 22.0, rssKb: 204800, deviceId: udidB, bundleId }
 
     it("sets deviceId context before emitting", async () => {
       monitor = new PerformanceMonitor(
-        fakeTimer, fakeAdbFactory, serverGetter,
-        undefined, undefined,
+        fakeTimer,
+        fakeAdbFactory,
+        serverGetter,
+        undefined,
+        undefined,
         () => fakeTelemetry,
       );
       monitor.startMonitoring("emulator-5554", "com.example.app", "android");

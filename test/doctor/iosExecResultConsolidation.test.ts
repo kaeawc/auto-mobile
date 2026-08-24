@@ -7,14 +7,11 @@ import { join } from "node:path";
 // Buffer→string coercion the canonical factory now owns (as of #3197). One
 // canonical primitive per concern (CLAUDE.md).
 describe("ios doctor createExecResult consolidation (#3200)", () => {
-  const source = readFileSync(
-    join(import.meta.dir, "../../src/doctor/checks/ios.ts"),
-    "utf8"
-  );
+  const source = readFileSync(join(import.meta.dir, "../../src/doctor/checks/ios.ts"), "utf8");
 
   it("imports the canonical createExecResult from utils/execResult", () => {
     expect(source).toMatch(
-      /import\s*\{[^}]*\bcreateExecResult\b[^}]*\}\s*from\s*["'][^"']*utils\/execResult["']/
+      /import\s*\{[^}]*\bcreateExecResult\b[^}]*\}\s*from\s*["'][^"']*utils\/execResult["']/,
     );
   });
 

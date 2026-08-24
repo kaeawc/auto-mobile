@@ -22,10 +22,7 @@ export interface RecordStorageEventInput {
  * shaped values; the normalizer folds them into a single canonical vocabulary so
  * that a `storage_events` row is platform-independent (issue #3173).
  */
-export type PartialStorageEvent = Omit<
-  RecordStorageEventInput,
-  "valueType" | "changeType"
-> & {
+export type PartialStorageEvent = Omit<RecordStorageEventInput, "valueType" | "changeType"> & {
   valueType?: string | null;
   changeType?: string | null;
 };
@@ -65,7 +62,7 @@ const retentionState = createEventRetentionState();
 
 export async function recordStorageEvent(
   rawInput: RecordStorageEventInput,
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): Promise<void> {
   const d = getDb(db);
 
@@ -80,7 +77,7 @@ export async function recordStorageEvent(
     !previousValueSupplied && input.key !== null && input.deviceId !== null;
 
   if (shouldLookupPreviousValue && !d.isTransaction) {
-    await d.transaction().execute(trx => insertStorageEventWithPreviousValue(input, trx, true));
+    await d.transaction().execute((trx) => insertStorageEventWithPreviousValue(input, trx, true));
   } else {
     await insertStorageEventWithPreviousValue(input, d, shouldLookupPreviousValue);
   }
@@ -91,7 +88,7 @@ export async function recordStorageEvent(
 async function insertStorageEventWithPreviousValue(
   input: RecordStorageEventInput,
   d: Kysely<Database>,
-  shouldLookupPreviousValue: boolean
+  shouldLookupPreviousValue: boolean,
 ): Promise<void> {
   // Look up the previous value for this key only when the caller did not supply
   // one. `!== undefined` (not `?? null`) is deliberate: a caller that passes an
@@ -146,7 +143,7 @@ async function insertStorageEventWithPreviousValue(
 
 export async function getStorageEvents(
   query: { deviceId?: string; sessionId?: string; sinceTimestamp?: number; limit?: number },
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): Promise<RecordStorageEventInput[]> {
   let q = getDb(db).selectFrom("storage_events").selectAll();
 
@@ -163,7 +160,7 @@ export async function getStorageEvents(
   q = q.orderBy("timestamp", "desc").limit(query.limit ?? 100);
 
   const rows = await q.execute();
-  return rows.map(r => ({
+  return rows.map((r) => ({
     deviceId: r.device_id,
     timestamp: r.timestamp,
     applicationId: r.application_id,
@@ -180,7 +177,7 @@ export async function getStorageEvents(
 export async function cleanupIfNeeded(
   db?: Kysely<Database>,
   maxRows?: number,
-  checkInterval?: number
+  checkInterval?: number,
 ): Promise<void> {
   await cleanupEventTable("storage_events", retentionState, db, maxRows, checkInterval);
 }

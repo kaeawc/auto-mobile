@@ -49,7 +49,7 @@ const CODESIGN = "codesign";
 const SPCTL = "spctl";
 
 const defaultExec: CodesignExec = (file, args) =>
-  new Promise<CodesignExecOutput>(resolve => {
+  new Promise<CodesignExecOutput>((resolve) => {
     execFile(file, [...args], { maxBuffer: 16 * 1024 * 1024 }, (error, stdout, stderr) => {
       const out = String(stdout);
       const err = String(stderr);
@@ -57,9 +57,10 @@ const defaultExec: CodesignExec = (file, args) =>
         // execFile surfaces the process exit code on `error.code` when it is a
         // number; a string there is a spawn error (e.g. ENOENT) which we map to
         // a non-zero sentinel so the caller treats it as "did not verify".
-        const code = typeof (error as { code?: unknown }).code === "number"
-          ? (error as { code: number }).code
-          : 1;
+        const code =
+          typeof (error as { code?: unknown }).code === "number"
+            ? (error as { code: number }).code
+            : 1;
         resolve({ code, stdout: out, stderr: err });
         return;
       }

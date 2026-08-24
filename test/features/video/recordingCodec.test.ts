@@ -43,7 +43,11 @@ const FTYP = box("ftyp", Buffer.from("isomiso2", "latin1"));
 
 describe("parseMp4VideoCodec", () => {
   test("maps an avc1 sample entry to h264", () => {
-    const mp4 = Buffer.concat([FTYP, moov(trak(sampleEntry("avc1"))), box("mdat", Buffer.alloc(8))]);
+    const mp4 = Buffer.concat([
+      FTYP,
+      moov(trak(sampleEntry("avc1"))),
+      box("mdat", Buffer.alloc(8)),
+    ]);
     expect(parseMp4VideoCodec(mp4)).toBe("h264");
   });
 
@@ -52,7 +56,11 @@ describe("parseMp4VideoCodec", () => {
   });
 
   test("maps hvc1 (simctl default) to hevc", () => {
-    const mp4 = Buffer.concat([FTYP, moov(trak(sampleEntry("hvc1"))), box("mdat", Buffer.alloc(8))]);
+    const mp4 = Buffer.concat([
+      FTYP,
+      moov(trak(sampleEntry("hvc1"))),
+      box("mdat", Buffer.alloc(8)),
+    ]);
     expect(parseMp4VideoCodec(mp4)).toBe("hevc");
   });
 
@@ -94,7 +102,11 @@ describe("defaultRecordingCodecProbe", () => {
 
   test("reads the codec from a finalized file (moov before mdat)", async () => {
     const filePath = path.join(tempDir, "faststart.mp4");
-    const mp4 = Buffer.concat([FTYP, moov(trak(sampleEntry("hvc1"))), box("mdat", Buffer.alloc(64))]);
+    const mp4 = Buffer.concat([
+      FTYP,
+      moov(trak(sampleEntry("hvc1"))),
+      box("mdat", Buffer.alloc(64)),
+    ]);
     await fsPromises.writeFile(filePath, mp4);
     expect(await defaultRecordingCodecProbe.codec(filePath)).toBe("hevc");
   });
@@ -117,6 +129,8 @@ describe("defaultRecordingCodecProbe", () => {
   });
 
   test("returns undefined when the file does not exist rather than throwing", async () => {
-    expect(await defaultRecordingCodecProbe.codec(path.join(tempDir, "missing.mp4"))).toBeUndefined();
+    expect(
+      await defaultRecordingCodecProbe.codec(path.join(tempDir, "missing.mp4")),
+    ).toBeUndefined();
   });
 });

@@ -89,7 +89,8 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
 
     // Allow override via environment variable
     const envInterval = process.env.AUTOMOBILE_WORK_PROFILE_POLL_INTERVAL_MS;
-    this.pollIntervalMs = options.pollIntervalMs ??
+    this.pollIntervalMs =
+      options.pollIntervalMs ??
       (envInterval ? parseInt(envInterval, 10) : DEFAULT_POLL_INTERVAL_MS);
   }
 
@@ -125,14 +126,18 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
     const existing = this.profileStates.get(userId);
     if (existing) {
       existing.hasAccessibilityService = hasService;
-      logger.debug(`[WORK_PROFILE_MONITOR] Updated profile ${userId} hasAccessibilityService=${hasService}`);
+      logger.debug(
+        `[WORK_PROFILE_MONITOR] Updated profile ${userId} hasAccessibilityService=${hasService}`,
+      );
     } else {
       this.profileStates.set(userId, {
         userId,
         hasAccessibilityService: hasService,
-        lastRefreshMs: 0
+        lastRefreshMs: 0,
       });
-      logger.debug(`[WORK_PROFILE_MONITOR] Added profile ${userId} hasAccessibilityService=${hasService}`);
+      logger.debug(
+        `[WORK_PROFILE_MONITOR] Added profile ${userId} hasAccessibilityService=${hasService}`,
+      );
     }
   }
 
@@ -154,7 +159,7 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
         `shell pm list packages --user ${userId}`,
         undefined,
         undefined,
-        true
+        true,
       );
 
       const packages = this.parsePackageList(result.stdout);
@@ -167,12 +172,14 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
           userId,
           pkg.packageName,
           pkg.isSystem,
-          timestampMs
+          timestampMs,
         );
       }
 
       state.lastRefreshMs = timestampMs;
-      logger.info(`[WORK_PROFILE_MONITOR] Refreshed ${packages.length} packages for user ${userId}`);
+      logger.info(
+        `[WORK_PROFILE_MONITOR] Refreshed ${packages.length} packages for user ${userId}`,
+      );
     } catch (error) {
       logger.warn(`[WORK_PROFILE_MONITOR] Failed to refresh packages for user ${userId}: ${error}`);
     }
@@ -209,8 +216,9 @@ export class DefaultWorkProfileMonitor implements WorkProfileMonitor {
    * Poll all profiles that don't have accessibility service
    */
   private async pollStaleProfiles(): Promise<void> {
-    const profilesToRefresh = Array.from(this.profileStates.values())
-      .filter(state => !state.hasAccessibilityService);
+    const profilesToRefresh = Array.from(this.profileStates.values()).filter(
+      (state) => !state.hasAccessibilityService,
+    );
 
     if (profilesToRefresh.length === 0) {
       logger.debug("[WORK_PROFILE_MONITOR] No stale profiles to refresh");

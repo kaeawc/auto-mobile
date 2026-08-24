@@ -38,7 +38,11 @@ export class PerDeviceInstalledAppsCacheWriteCoordinator implements InstalledApp
     return true;
   }
 
-  async commitRebuild(deviceId: string, generation: number, write: () => Promise<void>): Promise<boolean> {
+  async commitRebuild(
+    deviceId: string,
+    generation: number,
+    write: () => Promise<void>,
+  ): Promise<boolean> {
     return this.enqueue(deviceId, async () => {
       if ((this.generations.get(deviceId) ?? 0) !== generation) {
         return false;

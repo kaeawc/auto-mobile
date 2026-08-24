@@ -11,7 +11,7 @@ import { stringifyToolResponse } from "../../src/utils/toolUtils";
 describe("stringifyToolResponse compact-json default", () => {
   const sample = {
     screenSize: { width: 1080, height: 2400 },
-    elements: { clickable: [{ "view-id": "a", "bounds": { left: 0, top: 0, right: 1, bottom: 1 } }] },
+    elements: { clickable: [{ "view-id": "a", bounds: { left: 0, top: 0, right: 1, bottom: 1 } }] },
   };
 
   test("single line, no indentation, but same data", () => {

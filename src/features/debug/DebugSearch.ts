@@ -1,4 +1,7 @@
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -73,7 +76,7 @@ export class DebugSearch {
     timer: Timer = defaultTimer,
     parser: ElementParser = new DefaultElementParser(),
     textMatcher: TextMatcher = new DefaultTextMatcher(),
-    finder: ElementFinder = new DefaultElementFinder()
+    finder: ElementFinder = new DefaultElementFinder(),
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -96,7 +99,9 @@ export class DebugSearch {
     const includeNearMisses = options.includeNearMisses !== false;
     const maxNearMisses = options.maxNearMisses || 10;
 
-    logger.info(`[DebugSearch] Starting search - text: "${options.text}", resourceId: "${options.resourceId}"`);
+    logger.info(
+      `[DebugSearch] Starting search - text: "${options.text}", resourceId: "${options.resourceId}"`,
+    );
 
     // Get current view hierarchy
     const perf = new NoOpPerformanceTracker();
@@ -110,11 +115,11 @@ export class DebugSearch {
           resourceId: options.resourceId,
           container: options.container,
           partialMatch,
-          caseSensitive
+          caseSensitive,
         },
         matches: [],
         totalElements: 0,
-        timestamp: startTime
+        timestamp: startTime,
       };
     }
 
@@ -123,7 +128,11 @@ export class DebugSearch {
     let totalElements = 0;
 
     // Create text matcher
-    const matchesText = this.textMatcher.createTextMatcher(options.text || "", partialMatch, caseSensitive);
+    const matchesText = this.textMatcher.createTextMatcher(
+      options.text || "",
+      partialMatch,
+      caseSensitive,
+    );
 
     // Traverse the hierarchy and find all matches
     const rootNodes = this.parser.extractRootNodes(searchHierarchy);
@@ -133,7 +142,9 @@ export class DebugSearch {
     if (options.container) {
       containerNode = this.finder.findContainerNode(searchHierarchy, options.container);
       if (!containerNode) {
-        logger.warn(`[DebugSearch] Container "${options.container.elementId || options.container.text}" not found`);
+        logger.warn(
+          `[DebugSearch] Container "${options.container.elementId || options.container.text}" not found`,
+        );
       }
     }
 
@@ -145,14 +156,16 @@ export class DebugSearch {
         const props = this.parser.extractNodeProperties(node);
         const element = this.parser.parseNodeBounds(node);
 
-        if (!element) {return;}
+        if (!element) {
+          return;
+        }
 
         const elementInfo: Partial<DebugSearchMatch> = {
           className: props.class || props.className,
           resourceId: props["resource-id"],
           clickable: props.clickable === "true" || props.clickable === true,
           enabled: props.enabled !== "false" && props.enabled !== false,
-          visible: boundsArea(element.bounds) > 0
+          visible: boundsArea(element.bounds) > 0,
         };
 
         // Check for text match
@@ -165,14 +178,14 @@ export class DebugSearch {
                 matchedProperty: "text",
                 matchedValue: props.text,
                 isExactMatch: props.text === options.text,
-                ...elementInfo
+                ...elementInfo,
               } as DebugSearchMatch);
             } else if (includeNearMisses && this.isSimilar(props.text, options.text)) {
               nearMisses.push({
                 element,
                 property: "text",
                 value: props.text,
-                reason: `Similar but didn't match: "${props.text}" vs "${options.text}"`
+                reason: `Similar but didn't match: "${props.text}" vs "${options.text}"`,
               });
             }
           }
@@ -185,27 +198,30 @@ export class DebugSearch {
                 matchedProperty: "content-desc",
                 matchedValue: props["content-desc"],
                 isExactMatch: props["content-desc"] === options.text,
-                ...elementInfo
+                ...elementInfo,
               } as DebugSearchMatch);
             } else if (includeNearMisses && this.isSimilar(props["content-desc"], options.text)) {
               nearMisses.push({
                 element,
                 property: "content-desc",
                 value: props["content-desc"],
-                reason: `Similar but didn't match: "${props["content-desc"]}" vs "${options.text}"`
+                reason: `Similar but didn't match: "${props["content-desc"]}" vs "${options.text}"`,
               });
             }
           }
 
           // Check iOS accessibility label
-          if (props["ios-accessibility-label"] && typeof props["ios-accessibility-label"] === "string") {
+          if (
+            props["ios-accessibility-label"] &&
+            typeof props["ios-accessibility-label"] === "string"
+          ) {
             if (matchesText(props["ios-accessibility-label"])) {
               matches.push({
                 element,
                 matchedProperty: "ios-accessibility-label",
                 matchedValue: props["ios-accessibility-label"],
                 isExactMatch: props["ios-accessibility-label"] === options.text,
-                ...elementInfo
+                ...elementInfo,
               } as DebugSearchMatch);
             }
           }
@@ -215,7 +231,8 @@ export class DebugSearch {
         if (options.resourceId) {
           const nodeResourceId = props["resource-id"];
           if (nodeResourceId) {
-            const idMatches = nodeResourceId.includes(options.resourceId) ||
+            const idMatches =
+              nodeResourceId.includes(options.resourceId) ||
               nodeResourceId.endsWith(`:id/${options.resourceId}`);
 
             if (idMatches) {
@@ -223,16 +240,17 @@ export class DebugSearch {
                 element,
                 matchedProperty: "resource-id",
                 matchedValue: nodeResourceId,
-                isExactMatch: nodeResourceId === options.resourceId ||
+                isExactMatch:
+                  nodeResourceId === options.resourceId ||
                   nodeResourceId.endsWith(`:id/${options.resourceId}`),
-                ...elementInfo
+                ...elementInfo,
               } as DebugSearchMatch);
             } else if (includeNearMisses && this.isSimilar(nodeResourceId, options.resourceId)) {
               nearMisses.push({
                 element,
                 property: "resource-id",
                 value: nodeResourceId,
-                reason: `Similar resource ID: "${nodeResourceId}" vs "${options.resourceId}"`
+                reason: `Similar resource ID: "${nodeResourceId}" vs "${options.resourceId}"`,
               });
             }
           }
@@ -259,19 +277,21 @@ export class DebugSearch {
         resourceId: options.resourceId,
         container: options.container,
         partialMatch,
-        caseSensitive
+        caseSensitive,
       },
       matches,
       selectedMatch,
       totalElements,
-      timestamp: startTime
+      timestamp: startTime,
     };
 
     if (includeNearMisses && nearMisses.length > 0) {
       result.nearMisses = nearMisses.slice(0, maxNearMisses);
     }
 
-    logger.info(`[DebugSearch] Found ${matches.length} matches, ${nearMisses.length} near-misses out of ${totalElements} elements`);
+    logger.info(
+      `[DebugSearch] Found ${matches.length} matches, ${nearMisses.length} near-misses out of ${totalElements} elements`,
+    );
 
     return result;
   }
@@ -280,7 +300,9 @@ export class DebugSearch {
    * Check if two strings are similar (for near-miss detection)
    */
   private isSimilar(a: string, b: string): boolean {
-    if (!a || !b) {return false;}
+    if (!a || !b) {
+      return false;
+    }
     const aLower = a.toLowerCase();
     const bLower = b.toLowerCase();
 
@@ -292,8 +314,10 @@ export class DebugSearch {
 
       // If the shorter string is at least 50% of the longer and they share a common prefix/suffix
       if (shorter.length >= longer.length * 0.5) {
-        if (longer.startsWith(shorter.substring(0, 3)) ||
-            longer.endsWith(shorter.substring(shorter.length - 3))) {
+        if (
+          longer.startsWith(shorter.substring(0, 3)) ||
+          longer.endsWith(shorter.substring(shorter.length - 3))
+        ) {
           return true;
         }
       }

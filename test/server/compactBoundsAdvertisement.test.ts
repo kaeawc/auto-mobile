@@ -24,7 +24,10 @@ describe("advertiseBoundsForCompact (#2990)", () => {
         stack.push(...node);
       } else if (node && typeof node === "object") {
         const obj = node as Record<string, unknown>;
-        if (typeof obj.description === "string" && obj.description.startsWith(BOUNDS_UNION_DESCRIPTION_PREFIX)) {
+        if (
+          typeof obj.description === "string" &&
+          obj.description.startsWith(BOUNDS_UNION_DESCRIPTION_PREFIX)
+        ) {
           return obj;
         }
         stack.push(...Object.values(obj));
@@ -38,8 +41,8 @@ describe("advertiseBoundsForCompact (#2990)", () => {
     const bounds = findBounds(out);
     expect(Array.isArray(bounds.anyOf)).toBe(true);
     const arms = bounds.anyOf as Array<Record<string, unknown>>;
-    expect(arms.some(a => a.type === "array")).toBe(true); // tuple arm present
-    expect(arms.some(a => a.type === "object")).toBe(true);
+    expect(arms.some((a) => a.type === "array")).toBe(true); // tuple arm present
+    expect(arms.some((a) => a.type === "object")).toBe(true);
   });
 
   test("compact OFF: the tuple arm is dropped, object arm advertised", () => {

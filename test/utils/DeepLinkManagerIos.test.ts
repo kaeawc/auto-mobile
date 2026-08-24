@@ -33,9 +33,11 @@ function execResult(stdout: string): ExecResult {
  * that need it. DeepLinkManager itself uses the typed AppBundleMetadataClient
  * for code-signing metadata rather than sending that data through this executor.
  */
-function fakeHostExec(
-  routes: Array<{ match: string; stdout?: string; throws?: Error }>
-): { exec: HostExec; plist: PlistReader; calls: string[] } {
+function fakeHostExec(routes: Array<{ match: string; stdout?: string; throws?: Error }>): {
+  exec: HostExec;
+  plist: PlistReader;
+  calls: string[];
+} {
   const calls: string[] = [];
   const exec: HostExec = async (file: string, args: string[], stdin?: string) => {
     const command = [file, ...args].join(" ");
@@ -51,13 +53,15 @@ function fakeHostExec(
     return execResult("");
   };
   const plist: PlistReader = {
-    readJsonFile: async path => {
+    readJsonFile: async (path) => {
       const command = `plutil -convert json -o - -- ${path}`;
-      const route = routes.find(candidate => command.includes(candidate.match));
-      if (route?.throws) {throw route.throws;}
+      const route = routes.find((candidate) => command.includes(candidate.match));
+      if (route?.throws) {
+        throw route.throws;
+      }
       return JSON.parse(route?.stdout ?? "{}");
     },
-    readJsonBytes: async bytes => JSON.parse(bytes.toString("utf8")),
+    readJsonBytes: async (bytes) => JSON.parse(bytes.toString("utf8")),
     readXmlFile: async () => "",
     readXmlBytes: async () => "",
     extractRawFile: async () => "",
@@ -75,7 +79,7 @@ describe("DeepLinkManager iOS", () => {
     const appPath = "/sim/Containers/Bundle/Application/ABC/MyApp.app";
     simctl.setCommandArgsResult(
       ["get_app_container", SIM_UDID, "com.example.myapp", "app"],
-      appPath
+      appPath,
     );
 
     const infoPlist = JSON.stringify({
@@ -88,7 +92,14 @@ describe("DeepLinkManager iOS", () => {
       { match: "plutil -convert json", stdout: infoPlist },
     ]);
 
-    const manager = new DeepLinkManager(iosDevice, null, simctl as any, exec, plist, fakeMetadata());
+    const manager = new DeepLinkManager(
+      iosDevice,
+      null,
+      simctl as any,
+      exec,
+      plist,
+      fakeMetadata(),
+    );
     const result = await manager.getDeepLinks("com.example.myapp");
 
     expect(result.success).toBe(true);
@@ -103,12 +114,14 @@ describe("DeepLinkManager iOS", () => {
 
     // get_app_container routes through simctl (xcrun simctl), not host exec.
     const simctlCalls = simctl.getMethodCalls("executeCommandArgs");
-    expect(simctlCalls.some(c => {
-      const args = c.args as string[];
-      return args[0] === "get_app_container" && args[3] === "app";
-    })).toBe(true);
+    expect(
+      simctlCalls.some((c) => {
+        const args = c.args as string[];
+        return args[0] === "get_app_container" && args[3] === "app";
+      }),
+    ).toBe(true);
     expect(calls).toHaveLength(0);
-    expect(simctlCalls.every(c => !String(c.command).includes("plutil"))).toBe(true);
+    expect(simctlCalls.every((c) => !String(c.command).includes("plutil"))).toBe(true);
   });
 
   test("returns universal-link hosts from associated-domains entitlement", async () => {
@@ -116,7 +129,7 @@ describe("DeepLinkManager iOS", () => {
     const appPath = "/sim/MyApp.app";
     simctl.setCommandArgsResult(
       ["get_app_container", SIM_UDID, "com.example.myapp", "app"],
-      appPath
+      appPath,
     );
 
     const infoPlist = JSON.stringify({
@@ -134,7 +147,14 @@ describe("DeepLinkManager iOS", () => {
       { match: "plutil -convert json -o - -- /sim/MyApp.app/Info.plist", stdout: infoPlist },
     ]);
 
-    const manager = new DeepLinkManager(iosDevice, null, simctl as any, exec, plist, fakeMetadata(JSON.parse(entitlements)));
+    const manager = new DeepLinkManager(
+      iosDevice,
+      null,
+      simctl as any,
+      exec,
+      plist,
+      fakeMetadata(JSON.parse(entitlements)),
+    );
     const result = await manager.getDeepLinks("com.example.myapp");
 
     expect(result.success).toBe(true);
@@ -152,14 +172,19 @@ describe("DeepLinkManager iOS", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandArgsResult(
       ["get_app_container", SIM_UDID, "com.example.myapp", "app"],
-      "/sim/MyApp.app"
+      "/sim/MyApp.app",
     );
     const infoPlist = JSON.stringify({ CFBundleURLTypes: [{ CFBundleURLSchemes: ["myapp"] }] });
-    const { exec, plist } = fakeHostExec([
-      { match: "plutil -convert json", stdout: infoPlist },
-    ]);
+    const { exec, plist } = fakeHostExec([{ match: "plutil -convert json", stdout: infoPlist }]);
 
-    const manager = new DeepLinkManager(iosDevice, null, simctl as any, exec, plist, fakeMetadata());
+    const manager = new DeepLinkManager(
+      iosDevice,
+      null,
+      simctl as any,
+      exec,
+      plist,
+      fakeMetadata(),
+    );
     const result = await manager.getDeepLinks("com.example.myapp");
 
     expect(result.success).toBe(true);
@@ -171,12 +196,14 @@ describe("DeepLinkManager iOS", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandArgsResult(
       ["get_app_container", SIM_UDID, "com.example.myapp", "app"],
-      "/sim/MyApp.app"
+      "/sim/MyApp.app",
     );
     const infoPlist = JSON.stringify({ CFBundleURLTypes: [{ CFBundleURLSchemes: ["myapp"] }] });
     const { exec, plist } = fakeHostExec([{ match: "plutil -convert json", stdout: infoPlist }]);
     const metadata: AppBundleMetadata = {
-      readEntitlements: async () => { throw new Error("codesign is unavailable"); },
+      readEntitlements: async () => {
+        throw new Error("codesign is unavailable");
+      },
     };
     const manager = new DeepLinkManager(iosDevice, null, simctl as any, exec, plist, metadata);
 
@@ -191,7 +218,14 @@ describe("DeepLinkManager iOS", () => {
     // get_app_container ... app returns empty (FakeSimCtlClient default for app variant)
     const { exec, plist } = fakeHostExec([]);
 
-    const manager = new DeepLinkManager(iosDevice, null, simctl as any, exec, plist, fakeMetadata());
+    const manager = new DeepLinkManager(
+      iosDevice,
+      null,
+      simctl as any,
+      exec,
+      plist,
+      fakeMetadata(),
+    );
     const result = await manager.getDeepLinks("com.example.notinstalled");
 
     expect(result.success).toBe(false);
@@ -203,13 +237,20 @@ describe("DeepLinkManager iOS", () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandArgsResult(
       ["get_app_container", SIM_UDID, "com.example.myapp", "app"],
-      "/sim/MyApp.app"
+      "/sim/MyApp.app",
     );
     const { exec, plist } = fakeHostExec([
       { match: "plutil -convert json", stdout: "<<<not json>>>" },
     ]);
 
-    const manager = new DeepLinkManager(iosDevice, null, simctl as any, exec, plist, fakeMetadata());
+    const manager = new DeepLinkManager(
+      iosDevice,
+      null,
+      simctl as any,
+      exec,
+      plist,
+      fakeMetadata(),
+    );
     const result = await manager.getDeepLinks("com.example.myapp");
 
     expect(result.success).toBe(false);
@@ -226,7 +267,14 @@ describe("DeepLinkManager iOS", () => {
       deviceId: PHYSICAL_UDID,
     };
 
-    const manager = new DeepLinkManager(physicalDevice, null, simctl as any, exec, plist, fakeMetadata());
+    const manager = new DeepLinkManager(
+      physicalDevice,
+      null,
+      simctl as any,
+      exec,
+      plist,
+      fakeMetadata(),
+    );
     const result = await manager.getDeepLinks("com.example.myapp");
 
     expect(result.success).toBe(false);

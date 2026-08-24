@@ -44,7 +44,13 @@ describe("flattenTopLevelUnion", () => {
     const schema = {
       anyOf: [
         { type: "object", properties: { text: textDef, timeout: { type: "number" } } },
-        { type: "object", properties: { text: { type: "string", description: "from branch 2" }, id: { type: "string" } } },
+        {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "from branch 2" },
+            id: { type: "string" },
+          },
+        },
       ],
     };
     const result = flattenTopLevelUnion(schema);
@@ -79,9 +85,7 @@ describe("flattenTopLevelUnion", () => {
   test("preserves $schema if present", () => {
     const schema = {
       $schema: "https://json-schema.org/draft/2020-12/schema",
-      anyOf: [
-        { type: "object", properties: { a: { type: "string" } } },
-      ],
+      anyOf: [{ type: "object", properties: { a: { type: "string" } } }],
     };
     const result = flattenTopLevelUnion(schema);
     expect(result.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
@@ -93,12 +97,12 @@ describe("flattenTopLevelUnion", () => {
         node: {
           type: "object",
           properties: {
-            child: { "$ref": "#/$defs/node" },
+            child: { $ref: "#/$defs/node" },
           },
         },
       },
       anyOf: [
-        { type: "object", properties: { node: { "$ref": "#/$defs/node" } } },
+        { type: "object", properties: { node: { $ref: "#/$defs/node" } } },
         { type: "object", properties: { artifact: { type: "object" } } },
       ],
     };
@@ -106,15 +110,12 @@ describe("flattenTopLevelUnion", () => {
     const result = flattenTopLevelUnion(schema);
 
     expect(result.$defs).toEqual(schema.$defs);
-    expect((result.properties as any).node).toEqual({ "$ref": "#/$defs/node" });
+    expect((result.properties as any).node).toEqual({ $ref: "#/$defs/node" });
   });
 
   test("handles empty properties in branches", () => {
     const schema = {
-      anyOf: [
-        { type: "object" },
-        { type: "object", properties: { x: { type: "string" } } },
-      ],
+      anyOf: [{ type: "object" }, { type: "object", properties: { x: { type: "string" } } }],
     };
     const result = flattenTopLevelUnion(schema);
     expect(result.type).toBe("object");

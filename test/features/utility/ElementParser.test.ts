@@ -8,7 +8,7 @@ describe("DefaultElementParser", () => {
     left,
     top,
     right,
-    bottom
+    bottom,
   });
 
   describe("extractNodeProperties", () => {
@@ -115,10 +115,7 @@ describe("DefaultElementParser", () => {
     test("traverses children via 'node' property", () => {
       const tree = {
         $: { text: "root" },
-        node: [
-          { $: { text: "child1" } },
-          { $: { text: "child2" } },
-        ],
+        node: [{ $: { text: "child1" } }, { $: { text: "child2" } }],
       };
 
       const visited: Array<{ text: string; depth: number }> = [];
@@ -136,10 +133,7 @@ describe("DefaultElementParser", () => {
     test("traverses children via 'children' property", () => {
       const tree = {
         text: "root",
-        children: [
-          { text: "child1" },
-          { text: "child2" },
-        ],
+        children: [{ text: "child1" }, { text: "child2" }],
       };
 
       const visited: Array<{ text: string; depth: number }> = [];
@@ -157,12 +151,16 @@ describe("DefaultElementParser", () => {
     test("traverses nested hierarchy", () => {
       const tree = {
         $: { text: "level0" },
-        node: [{
-          $: { text: "level1" },
-          node: [{
-            $: { text: "level2" },
-          }],
-        }],
+        node: [
+          {
+            $: { text: "level1" },
+            node: [
+              {
+                $: { text: "level2" },
+              },
+            ],
+          },
+        ],
       };
 
       const depths: number[] = [];
@@ -177,7 +175,7 @@ describe("DefaultElementParser", () => {
       };
 
       const visited: string[] = [];
-      parser.traverseNode(tree, node => {
+      parser.traverseNode(tree, (node) => {
         visited.push(node.$?.text || "");
       });
 
@@ -215,10 +213,7 @@ describe("DefaultElementParser", () => {
     test("extracts array of root nodes", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
-          node: [
-            { $: { text: "root1" } },
-            { $: { text: "root2" } },
-          ] as any,
+          node: [{ $: { text: "root1" } }, { $: { text: "root2" } }] as any,
         },
       };
       const roots = parser.extractRootNodes(viewHierarchy);
@@ -257,10 +252,7 @@ describe("DefaultElementParser", () => {
     test("filters out windows without hierarchy", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: { node: { $: {} } },
-        windows: [
-          { windowLayer: 0, hierarchy: { $: { text: "win0" } } },
-          { windowLayer: 1 },
-        ],
+        windows: [{ windowLayer: 0, hierarchy: { $: { text: "win0" } } }, { windowLayer: 1 }],
       };
       const groups = parser.extractWindowRootGroups(viewHierarchy);
       expect(groups).toHaveLength(1);
@@ -323,7 +315,12 @@ describe("DefaultElementParser", () => {
     test("extracts content-desc as text", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
-          node: { $: { "content-desc": "Close button", "bounds": { left: 0, top: 0, right: 100, bottom: 50 } } },
+          node: {
+            $: {
+              "content-desc": "Close button",
+              bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+            },
+          },
         },
       };
       const result = parser.flattenViewHierarchy(viewHierarchy);

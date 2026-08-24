@@ -74,7 +74,7 @@ export class ExecutionTracker {
       transportSessionId,
       sessionUuid,
       startTime: this.timer.now(),
-      abortController: new AbortController()
+      abortController: new AbortController(),
     };
 
     this.executions.set(id, execution);
@@ -131,7 +131,10 @@ export class ExecutionTracker {
   /**
    * @param reason Why the Streamable HTTP session (or equivalent) ended — logged for diagnostics.
    */
-  async cancelSessionExecutions(sessionId: string, reason: string = "unspecified"): Promise<number> {
+  async cancelSessionExecutions(
+    sessionId: string,
+    reason: string = "unspecified",
+  ): Promise<number> {
     return this.cancelExecutionsForKey(sessionId, this.sessionExecutions, "sessionId", reason);
   }
 
@@ -162,13 +165,7 @@ export class ExecutionTracker {
       ...(this.sessionUuidExecutions.get(sessionUuid) ?? []),
       ...(this.autolockSessionExecutions.get(sessionUuid) ?? []),
     ]);
-    return this.cancelExecutionIds(
-      executionIds,
-      "deviceSessionUuid",
-      sessionUuid,
-      reason,
-      options,
-    );
+    return this.cancelExecutionIds(executionIds, "deviceSessionUuid", sessionUuid, reason, options);
   }
 
   async waitForDeviceSessionExecutionsToEnd(
@@ -178,7 +175,7 @@ export class ExecutionTracker {
     if (!this.hasActiveDeviceSessionExecutions(sessionUuid)) {
       return true;
     }
-    return await new Promise<boolean>(resolve => {
+    return await new Promise<boolean>((resolve) => {
       let settled = false;
       const timeout: { handle?: NodeJS.Timeout } = {};
       const finish = (drained: boolean): void => {
@@ -204,8 +201,10 @@ export class ExecutionTracker {
   }
 
   private hasActiveDeviceSessionExecutions(sessionUuid: string): boolean {
-    return this.hasActiveSessionUuidExecutions(sessionUuid)
-      || this.hasActiveAutolockSessionExecutions(sessionUuid);
+    return (
+      this.hasActiveSessionUuidExecutions(sessionUuid) ||
+      this.hasActiveAutolockSessionExecutions(sessionUuid)
+    );
   }
 
   hasActiveSessionUuidExecutions(sessionUuid: string, query?: ActiveExecutionQuery): boolean {
@@ -244,7 +243,11 @@ export class ExecutionTracker {
     }
 
     if (options.sessionUuid) {
-      return this.hasActiveToolExecutionForKey(toolName, this.sessionUuidExecutions, options.sessionUuid);
+      return this.hasActiveToolExecutionForKey(
+        toolName,
+        this.sessionUuidExecutions,
+        options.sessionUuid,
+      );
     }
 
     if (options.sessionId) {
@@ -297,18 +300,20 @@ export class ExecutionTracker {
     if (query?.startedAtOrBefore === undefined && query?.excludeExecutionId === undefined) {
       return true;
     }
-    return Array.from(executions).some(executionId => {
+    return Array.from(executions).some((executionId) => {
       const execution = this.executions.get(executionId);
-      return execution !== undefined
-        && executionId !== query?.excludeExecutionId
-        && (query?.startedAtOrBefore === undefined || execution.startTime <= query.startedAtOrBefore);
+      return (
+        execution !== undefined &&
+        executionId !== query?.excludeExecutionId &&
+        (query?.startedAtOrBefore === undefined || execution.startTime <= query.startedAtOrBefore)
+      );
     });
   }
 
   private hasActiveToolExecutionForKey(
     toolName: string,
     executionMap: Map<string, Set<string>>,
-    key: string
+    key: string,
   ): boolean {
     const executions = executionMap.get(key);
     if (!executions || executions.size === 0) {
@@ -332,13 +337,7 @@ export class ExecutionTracker {
     cancelReason: string = "unspecified",
     options: ExecutionCancellationOptions = {},
   ): Promise<number> {
-    return this.cancelExecutionIds(
-      executionMap.get(key),
-      label,
-      key,
-      cancelReason,
-      options,
-    );
+    return this.cancelExecutionIds(executionMap.get(key), label, key, cancelReason, options);
   }
 
   private async cancelExecutionIds(
@@ -366,7 +365,8 @@ export class ExecutionTracker {
         // authoritative `cancelReason` is set synchronously with the counted cancellation
         // regardless of how the runtime surfaces `signal.reason` (issue #3909). The same
         // Error instance is passed to abort() so consumers reading the signal still match.
-        const reasonError = deviceLostErrorFromCancellationReason(cancelReason) ?? new Error(cancelReason);
+        const reasonError =
+          deviceLostErrorFromCancellationReason(cancelReason) ?? new Error(cancelReason);
         execution.cancelReason = reasonError;
         if (isDeviceLostError(reasonError)) {
           rememberDeviceLossAbort(execution.abortController.signal, reasonError);
@@ -377,7 +377,7 @@ export class ExecutionTracker {
       }
       cancelled++;
       logger.info(
-        `[ExecutionTracker] Cancelled execution ${executionId} for ${label}=${key} (tool=${execution.toolName}, reason=${cancelReason})`
+        `[ExecutionTracker] Cancelled execution ${executionId} for ${label}=${key} (tool=${execution.toolName}, reason=${cancelReason})`,
       );
     }
 

@@ -10,7 +10,7 @@ import { isIosSimulatorDevice } from "./IosSimulatorPermissions";
 import {
   IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS,
   iosNotifyutilRegisteredSetReadPostCommand,
-  parseNotifyutilState
+  parseNotifyutilState,
 } from "../../utils/ios-cmdline-tools/notifyutil";
 
 export interface BiometricAuthOptions {
@@ -38,19 +38,19 @@ export class BiometricAuth extends BaseVisualChange {
     enrollment: "com.apple.BiometricKit.enrollmentChanged",
     fingerTouch: {
       match: "com.apple.BiometricKit_Sim.fingerTouch.match",
-      nomatch: "com.apple.BiometricKit_Sim.fingerTouch.nomatch"
+      nomatch: "com.apple.BiometricKit_Sim.fingerTouch.nomatch",
     },
     pearl: {
       match: "com.apple.BiometricKit_Sim.pearl.match",
-      nomatch: "com.apple.BiometricKit_Sim.pearl.nomatch"
-    }
+      nomatch: "com.apple.BiometricKit_Sim.pearl.nomatch",
+    },
   } as const;
 
   constructor(
     device: BootedDevice,
     adb: AdbClient | null = null,
     timer: Timer = defaultTimer,
-    private simctl: BiometricSimctl | null = null
+    private simctl: BiometricSimctl | null = null,
   ) {
     super(device, adb, timer);
     this.device = device;
@@ -58,7 +58,7 @@ export class BiometricAuth extends BaseVisualChange {
 
   async execute(
     options: BiometricAuthOptions,
-    progress?: ProgressCallback
+    progress?: ProgressCallback,
   ): Promise<BiometricAuthResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("biometricAuth");
@@ -74,7 +74,7 @@ export class BiometricAuth extends BaseVisualChange {
       perf.end();
       return this.unsupported(
         options,
-        "Biometric authentication is only supported on Android and iOS Simulator devices"
+        "Biometric authentication is only supported on Android and iOS Simulator devices",
       );
     }
 
@@ -89,14 +89,17 @@ export class BiometricAuth extends BaseVisualChange {
         fingerprintId: options.fingerprintId,
         errorCode: options.errorCode,
         supported: false,
-        error: "Face biometric modality is not supported. Only 'any' and 'fingerprint' are supported on Android emulators."
+        error:
+          "Face biometric modality is not supported. Only 'any' and 'fingerprint' are supported on Android emulators.",
       };
     }
 
     // Send SDK override broadcast (works on emulators and physical devices)
     const broadcastOk = await this.sendSdkOverrideBroadcast(options);
     if (!broadcastOk) {
-      logger.warn("SDK override broadcast failed; app may not have AutoMobileBiometrics integrated");
+      logger.warn(
+        "SDK override broadcast failed; app may not have AutoMobileBiometrics integrated",
+      );
     }
 
     // Check if device is an emulator
@@ -113,7 +116,7 @@ export class BiometricAuth extends BaseVisualChange {
           errorCode: options.errorCode,
           supported: "partial",
           error:
-            "SDK override broadcast failed; verify the app has AutoMobileBiometrics integrated and ADB is connected."
+            "SDK override broadcast failed; verify the app has AutoMobileBiometrics integrated and ADB is connected.",
         };
       }
       return {
@@ -125,7 +128,7 @@ export class BiometricAuth extends BaseVisualChange {
         supported: "partial",
         message:
           "SDK override broadcast sent. Emulator emu finger commands are not available on physical devices. " +
-          "Ensure the app integrates AutoMobileBiometrics.consumeOverride() in its BiometricPrompt.AuthenticationCallback."
+          "Ensure the app integrates AutoMobileBiometrics.consumeOverride() in its BiometricPrompt.AuthenticationCallback.",
       };
     }
 
@@ -138,14 +141,14 @@ export class BiometricAuth extends BaseVisualChange {
         fingerprintId: options.fingerprintId,
         errorCode: options.errorCode,
         supported: false,
-        error: "This emulator does not support 'emu finger' commands"
+        error: "This emulator does not support 'emu finger' commands",
       };
     }
 
     return this.observedInteraction(
       async () => {
         const result = await perf.track("executeBiometricAction", () =>
-          this.executeBiometricAction(options)
+          this.executeBiometricAction(options),
         );
         return result;
       },
@@ -153,8 +156,8 @@ export class BiometricAuth extends BaseVisualChange {
         changeExpected: false,
         timeoutMs: 5000,
         progress,
-        perf
-      }
+        perf,
+      },
     );
   }
 
@@ -174,7 +177,7 @@ export class BiometricAuth extends BaseVisualChange {
       return this.unsupported(
         options,
         "iOS biometric simulation is only available on the iOS Simulator. " +
-          "There is no public API to inject a biometric result on a physical iOS device."
+          "There is no public API to inject a biometric result on a physical iOS device.",
       );
     }
 
@@ -186,7 +189,7 @@ export class BiometricAuth extends BaseVisualChange {
         fingerprintId: options.fingerprintId,
         errorCode: options.errorCode,
         supported: "partial",
-        error: `iOS Simulator biometrics support only 'match' and 'fail'; '${options.action}' has no simctl equivalent.`
+        error: `iOS Simulator biometrics support only 'match' and 'fail'; '${options.action}' has no simctl equivalent.`,
       };
     }
 
@@ -209,7 +212,7 @@ export class BiometricAuth extends BaseVisualChange {
       // Ensure biometry is enrolled before attempting a match.
       const enrollmentResult = await simctl.executeCommand(
         iosNotifyutilRegisteredSetReadPostCommand(udid, keys.enrollment, "1"),
-        IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS
+        IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS,
       );
       if (enrollmentResult.stderr && enrollmentResult.stderr.trim().length > 0) {
         return {
@@ -219,7 +222,7 @@ export class BiometricAuth extends BaseVisualChange {
           fingerprintId: options.fingerprintId,
           errorCode: options.errorCode,
           supported: true,
-          error: `notifyutil failed: ${enrollmentResult.stderr.trim()}`
+          error: `notifyutil failed: ${enrollmentResult.stderr.trim()}`,
         };
       }
       if (parseNotifyutilState(enrollmentResult.stdout ?? "") !== true) {
@@ -230,7 +233,8 @@ export class BiometricAuth extends BaseVisualChange {
           fingerprintId: options.fingerprintId,
           errorCode: options.errorCode,
           supported: true,
-          error: "iOS biometric enrollment did not verify: notifyutil did not read back enrolled state."
+          error:
+            "iOS biometric enrollment did not verify: notifyutil did not read back enrolled state.",
         };
       }
 
@@ -244,7 +248,7 @@ export class BiometricAuth extends BaseVisualChange {
             fingerprintId: options.fingerprintId,
             errorCode: options.errorCode,
             supported: true,
-            error: `notifyutil failed: ${res.stderr.trim()}`
+            error: `notifyutil failed: ${res.stderr.trim()}`,
           };
         }
       }
@@ -256,7 +260,7 @@ export class BiometricAuth extends BaseVisualChange {
         fingerprintId: options.fingerprintId,
         errorCode: options.errorCode,
         supported: true,
-        message: `Posted ${targets.join(", ")} to simulator ${udid} (${options.action})`
+        message: `Posted ${targets.join(", ")} to simulator ${udid} (${options.action})`,
       };
     } catch (error) {
       return {
@@ -266,7 +270,7 @@ export class BiometricAuth extends BaseVisualChange {
         fingerprintId: options.fingerprintId,
         errorCode: options.errorCode,
         supported: true,
-        error: `Failed to post iOS biometric notification: ${errorMessage(error)}`
+        error: `Failed to post iOS biometric notification: ${errorMessage(error)}`,
       };
     }
   }
@@ -279,7 +283,7 @@ export class BiometricAuth extends BaseVisualChange {
       fingerprintId: options.fingerprintId,
       errorCode: options.errorCode,
       supported: false,
-      error: msg
+      error: msg,
     };
   }
 
@@ -294,7 +298,7 @@ export class BiometricAuth extends BaseVisualChange {
       if (options.action === "error" && options.errorCode === undefined) {
         logger.warn(
           "action 'error' sent without errorCode; app will receive BiometricResult.Error(-1) " +
-          "which is not a valid BiometricPrompt.ERROR_* constant (valid values start at 1)"
+            "which is not a valid BiometricPrompt.ERROR_* constant (valid values start at 1)",
         );
       }
 
@@ -321,10 +325,14 @@ export class BiometricAuth extends BaseVisualChange {
   /** Map MCP action name to the string expected by AutoMobileBiometrics broadcast receiver. */
   private actionToSdkResult(action: BiometricAuthOptions["action"]): string {
     switch (action) {
-      case "match":  return "SUCCESS";
-      case "fail":   return "FAILURE";
-      case "cancel": return "CANCEL";
-      case "error":  return "ERROR";
+      case "match":
+        return "SUCCESS";
+      case "fail":
+        return "FAILURE";
+      case "cancel":
+        return "CANCEL";
+      case "error":
+        return "ERROR";
     }
   }
 
@@ -362,7 +370,9 @@ export class BiometricAuth extends BaseVisualChange {
    * For cancel: touch unenrolled ID 2 → onAuthenticationFailed (override converts to cancel)
    * For error:  touch enrolled ID 1   → onAuthenticationSucceeded (override converts to error)
    */
-  private async executeBiometricAction(options: BiometricAuthOptions): Promise<BiometricAuthResult> {
+  private async executeBiometricAction(
+    options: BiometricAuthOptions,
+  ): Promise<BiometricAuthResult> {
     const modality: "any" | "fingerprint" | "face" = options.modality ?? "any";
 
     // Determine fingerprint ID
@@ -370,7 +380,7 @@ export class BiometricAuth extends BaseVisualChange {
     if (fingerprintId === undefined) {
       // match and error use enrolled ID 1 to reliably trigger the success callback;
       // fail and cancel use unenrolled ID 2.
-      fingerprintId = (options.action === "match" || options.action === "error") ? 1 : 2;
+      fingerprintId = options.action === "match" || options.action === "error" ? 1 : 2;
     }
 
     try {
@@ -384,7 +394,7 @@ export class BiometricAuth extends BaseVisualChange {
           fingerprintId,
           errorCode: options.errorCode,
           supported: true,
-          error: `emu finger touch failed: ${touchResult.stderr}`
+          error: `emu finger touch failed: ${touchResult.stderr}`,
         };
       }
 
@@ -400,7 +410,7 @@ export class BiometricAuth extends BaseVisualChange {
           fingerprintId,
           errorCode: options.errorCode,
           supported: true,
-          error: `emu finger remove failed: ${removeResult.stderr}`
+          error: `emu finger remove failed: ${removeResult.stderr}`,
         };
       }
 
@@ -414,7 +424,7 @@ export class BiometricAuth extends BaseVisualChange {
         fingerprintId,
         errorCode: options.errorCode,
         supported: true,
-        error: `Failed to execute emu finger commands: ${errorMessage(error)}`
+        error: `Failed to execute emu finger commands: ${errorMessage(error)}`,
       };
     }
   }
@@ -422,7 +432,7 @@ export class BiometricAuth extends BaseVisualChange {
   private buildSuccessResult(
     options: BiometricAuthOptions,
     modality: "any" | "fingerprint" | "face",
-    fingerprintId: number
+    fingerprintId: number,
   ): BiometricAuthResult {
     const base = {
       success: true,
@@ -430,31 +440,31 @@ export class BiometricAuth extends BaseVisualChange {
       modality,
       fingerprintId,
       errorCode: options.errorCode,
-      supported: true as const
+      supported: true as const,
     };
 
     switch (options.action) {
       case "fail":
         return {
           ...base,
-          message: `Simulated biometric ${options.action} with fingerprint ID ${fingerprintId}. Note: Some emulators may not differentiate between enrolled and non-enrolled fingerprint IDs.`
+          message: `Simulated biometric ${options.action} with fingerprint ID ${fingerprintId}. Note: Some emulators may not differentiate between enrolled and non-enrolled fingerprint IDs.`,
         };
       case "cancel":
         return {
           ...base,
-          message: `Biometric cancellation dispatched (fingerprint ID ${fingerprintId}).`
+          message: `Biometric cancellation dispatched (fingerprint ID ${fingerprintId}).`,
         };
       case "error":
         return {
           ...base,
           message:
             `SDK override broadcast sent with ERROR (errorCode=${options.errorCode ?? -1}) and emu finger touch ${fingerprintId} fired. ` +
-            `App must call AutoMobileBiometrics.consumeOverride() in its BiometricPrompt.AuthenticationCallback.`
+            `App must call AutoMobileBiometrics.consumeOverride() in its BiometricPrompt.AuthenticationCallback.`,
         };
       default:
         return {
           ...base,
-          message: `Successfully simulated biometric ${options.action} with fingerprint ID ${fingerprintId}`
+          message: `Successfully simulated biometric ${options.action} with fingerprint ID ${fingerprintId}`,
         };
     }
   }

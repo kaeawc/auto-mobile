@@ -65,7 +65,7 @@ export class AndroidH264Source implements H264CaptureSource {
     this.timer = options.timer ?? defaultTimer;
     this.segmentTimeLimitSeconds = Math.min(
       options.segmentTimeLimitSeconds ?? ANDROID_SCREENRECORD_MAX_SECONDS,
-      ANDROID_SCREENRECORD_MAX_SECONDS
+      ANDROID_SCREENRECORD_MAX_SECONDS,
     );
     this.segmentRotateMs = options.segmentRotateMs ?? ANDROID_STREAM_SEGMENT_ROTATE_MS;
   }
@@ -124,7 +124,9 @@ export class AndroidH264Source implements H264CaptureSource {
       return false;
     }
     this.lastForcedKeyFrameMs = now;
-    logger.info(`[AndroidH264Source] keyframe requested; rotating segment ${this.segmentCount} to emit a fresh IDR`);
+    logger.info(
+      `[AndroidH264Source] keyframe requested; rotating segment ${this.segmentCount} to emit a fresh IDR`,
+    );
     // Terminating triggers the exit handler, which starts the next segment.
     process.kill("SIGINT");
     return true;
@@ -164,7 +166,7 @@ export class AndroidH264Source implements H264CaptureSource {
     args.push("-");
 
     logger.info(
-      `[AndroidH264Source] starting screenrecord segment ${this.segmentCount + 1}: ${args.join(" ")}`
+      `[AndroidH264Source] starting screenrecord segment ${this.segmentCount + 1}: ${args.join(" ")}`,
     );
 
     const process = await adb.spawn(args);
@@ -210,7 +212,7 @@ export class AndroidH264Source implements H264CaptureSource {
   private handleSegmentExit(
     process: AdbProcess,
     code: number | null,
-    signal: NodeJS.Signals | null
+    signal: NodeJS.Signals | null,
   ): void {
     if (this.current !== process) {
       // A superseded segment (already rotated away from) — ignore.
@@ -230,7 +232,7 @@ export class AndroidH264Source implements H264CaptureSource {
     const isExpectedRotation = signal === "SIGINT" || code === 0;
     if (!isExpectedRotation) {
       logger.warn(
-        `[AndroidH264Source] screenrecord failed (code=${code}, signal=${signal}); not rotating`
+        `[AndroidH264Source] screenrecord failed (code=${code}, signal=${signal}); not rotating`,
       );
       this.running = false;
       this.options.onError?.(new Error(`screenrecord exited with code ${code}`));
@@ -238,9 +240,9 @@ export class AndroidH264Source implements H264CaptureSource {
     }
 
     logger.info(
-      `[AndroidH264Source] segment ${this.segmentCount} ended (code=${code}, signal=${signal}); rotating`
+      `[AndroidH264Source] segment ${this.segmentCount} ended (code=${code}, signal=${signal}); rotating`,
     );
-    void this.startSegment().catch(error => {
+    void this.startSegment().catch((error) => {
       logger.warn(`[AndroidH264Source] failed to start next segment: ${error}`);
       this.running = false;
       this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
@@ -267,7 +269,9 @@ export class AndroidH264Source implements H264CaptureSource {
     }
   }
 
-  private async captureSize(adb: ReturnType<AdbClientFactory["create"]>): Promise<{ width: number; height: number }> {
+  private async captureSize(
+    adb: ReturnType<AdbClientFactory["create"]>,
+  ): Promise<{ width: number; height: number }> {
     if (this.options.size) {
       return this.options.size;
     }
@@ -279,7 +283,10 @@ export class AndroidH264Source implements H264CaptureSource {
       const match = /Physical size:\s*(\d+)x(\d+)/.exec(stdout);
       if (match) {
         this.resolvedSize = capToLevel42(
-          capToQualityPreset({ width: Number(match[1]), height: Number(match[2]) }, this.options.quality)
+          capToQualityPreset(
+            { width: Number(match[1]), height: Number(match[2]) },
+            this.options.quality,
+          ),
         );
         return this.resolvedSize;
       }
@@ -315,7 +322,7 @@ const QUALITY_PRESET_MAX_LONG_SIDE: Record<"low" | "medium" | "high", number> = 
  */
 export function capToQualityPreset(
   size: { width: number; height: number },
-  quality: "low" | "medium" | "high" | undefined
+  quality: "low" | "medium" | "high" | undefined,
 ): { width: number; height: number } {
   if (!quality) {
     return size;
@@ -333,7 +340,10 @@ export function capToQualityPreset(
 }
 
 function capToLevel42(size: { width: number; height: number }): { width: number; height: number } {
-  const scale = Math.min(1, Math.sqrt((WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME * 256) / (size.width * size.height)));
+  const scale = Math.min(
+    1,
+    Math.sqrt((WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME * 256) / (size.width * size.height)),
+  );
   let width = Math.max(2, Math.floor((size.width * scale) / 2) * 2);
   let height = Math.max(2, Math.floor((size.height * scale) / 2) * 2);
   while (h264MacroblocksPerFrame(width, height) > WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME) {

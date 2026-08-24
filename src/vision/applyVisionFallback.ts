@@ -18,7 +18,7 @@ export async function getVisionEnrichedError(
   visionConfig: VisionFallbackConfig,
   baseError: string,
   signal?: AbortSignal,
-  visionAnalyzer?: VisionAnalyzer
+  visionAnalyzer?: VisionAnalyzer,
 ): Promise<string> {
   if (!visionConfig.enabled) {
     return baseError;
@@ -38,10 +38,14 @@ export async function getVisionEnrichedError(
     const visionResult = await analyzer.analyzeAndSuggest(
       screenshotPath,
       viewHierarchy,
-      searchCriteria
+      searchCriteria,
     );
 
-    if (visionResult.confidence === "high" && visionResult.navigationSteps && visionResult.navigationSteps.length > 0) {
+    if (
+      visionResult.confidence === "high" &&
+      visionResult.navigationSteps &&
+      visionResult.navigationSteps.length > 0
+    ) {
       const stepsText = visionResult.navigationSteps
         .map((step, i) => `${i + 1}. ${step.description}`)
         .join("\n");
@@ -53,7 +57,7 @@ export async function getVisionEnrichedError(
 
     if (visionResult.alternativeSelectors && visionResult.alternativeSelectors.length > 0) {
       const suggestions = visionResult.alternativeSelectors
-        .map(alt => `- ${alt.type}: "${alt.value}" (${alt.reasoning})`)
+        .map((alt) => `- ${alt.type}: "${alt.value}" (${alt.reasoning})`)
         .join("\n");
       return (
         `Element not found. AI suggests trying:\n${suggestions}\n\n` +

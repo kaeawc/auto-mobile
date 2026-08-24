@@ -5,13 +5,13 @@ import {
   createStressHarness,
   parseStressArgs,
   resolveStressConfig,
-  runStressOperations
+  runStressOperations,
 } from "./memory/stress-harness";
 import {
   buildLeakReport,
   parseMemoryLeakArgs,
   writeHeapSnapshotSafe,
-  type HeapSnapshotDeps
+  type HeapSnapshotDeps,
 } from "./memory/memory-leak-report";
 
 // Heap snapshots and forced GC use Node/Bun built-ins only — the legacy
@@ -19,16 +19,16 @@ import {
 // to compile against Node 26 / V8 headers and broke `bun install`.
 const snapshotDeps: HeapSnapshotDeps = {
   writeHeapSnapshot,
-  mkdir: dir => fs.promises.mkdir(dir, { recursive: true }),
+  mkdir: (dir) => fs.promises.mkdir(dir, { recursive: true }),
   now: () => Date.now(),
-  logger: console
+  logger: console,
 };
 
 async function main(): Promise<void> {
   if (typeof global.gc !== "function") {
     console.warn(
       "[memory-leaks] global.gc is unavailable; run with --expose-gc " +
-      "(e.g. `bun --expose-gc scripts/detect-memory-leaks.ts`) for accurate heap measurements."
+        "(e.g. `bun --expose-gc scripts/detect-memory-leaks.ts`) for accurate heap measurements.",
     );
   }
 
@@ -46,7 +46,7 @@ async function main(): Promise<void> {
       await runStressOperations(harness, {
         ...runConfig,
         iterations: warmupIterations,
-        gcEvery: 0
+        gcEvery: 0,
       });
     }
 
@@ -71,13 +71,13 @@ async function main(): Promise<void> {
         operations: runConfig.operations,
         heapGrowthLimitMb: leakArgs.heapGrowthLimitMb,
         warmupIterations,
-        gcEvery: runConfig.gcEvery
+        gcEvery: runConfig.gcEvery,
       },
       heapGrowthLimitBytes,
       durationMs: runResult.durationMs,
       operationCounts: runResult.operationCounts,
       heapUsedStart: startUsage.heapUsed,
-      heapUsedEnd: endUsage.heapUsed
+      heapUsedEnd: endUsage.heapUsed,
     });
 
     if (leakArgs.outputPath) {
@@ -87,7 +87,7 @@ async function main(): Promise<void> {
 
     console.log("[memory-leaks] Stress run complete.");
     console.log(
-      `[memory-leaks] Heap growth: ${(report.results.effectiveGrowthBytes / (1024 * 1024)).toFixed(2)} MB`
+      `[memory-leaks] Heap growth: ${(report.results.effectiveGrowthBytes / (1024 * 1024)).toFixed(2)} MB`,
     );
 
     if (!report.passed && leakArgs.failOnLeak) {

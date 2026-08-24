@@ -41,7 +41,7 @@ export function iosMajorVersionFromSimctlListDevices(json: string, udid: string)
   }
   const devices = (parsed as { devices?: Record<string, Array<{ udid?: string }>> }).devices ?? {};
   for (const [runtimeId, deviceList] of Object.entries(devices)) {
-    if (Array.isArray(deviceList) && deviceList.some(device => device?.udid === udid)) {
+    if (Array.isArray(deviceList) && deviceList.some((device) => device?.udid === udid)) {
       const match = runtimeId.match(/iOS[-_](\d+)/i);
       // Keep scanning: a udid should appear under exactly one runtime, but if an
       // earlier-iterated runtime id carries no iOS version token, later runtimes
@@ -78,7 +78,7 @@ export function iosMajorVersionFromDevicectlDetails(json: string): number | null
     "osVersionNumber",
     "osVersion",
     "productVersion",
-    "operatingSystemVersion"
+    "operatingSystemVersion",
   ];
 
   const walk = (node: unknown): number | null => {

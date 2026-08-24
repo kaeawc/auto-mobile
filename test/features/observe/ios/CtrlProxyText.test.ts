@@ -3,7 +3,7 @@ import { CtrlProxyText } from "../../../../src/features/observe/ios/CtrlProxyTex
 import { createIosDelegateHarness } from "../../../helpers/iosDelegateHarness";
 
 describe("CtrlProxyText requestAppendText", () => {
-  const flush = (): Promise<void> => new Promise<void>(resolve => setImmediate(resolve));
+  const flush = (): Promise<void> => new Promise<void>((resolve) => setImmediate(resolve));
 
   test("sends the append command and resolves its normalized result", async () => {
     const harness = createIosDelegateHarness({ supportedCommands: ["request_append_text"] });
@@ -18,7 +18,12 @@ describe("CtrlProxyText requestAppendText", () => {
 
   test("includes a frame context when supplied", async () => {
     const harness = createIosDelegateHarness({ supportedCommands: ["request_append_text"] });
-    const pending = new CtrlProxyText(harness.context).requestAppendText("a", 5000, undefined, "ios:7");
+    const pending = new CtrlProxyText(harness.context).requestAppendText(
+      "a",
+      5000,
+      undefined,
+      "ios:7",
+    );
     await flush();
 
     expect(harness.sentMessages[0]).toMatchObject({
@@ -44,7 +49,7 @@ describe("CtrlProxyText requestAppendText", () => {
 
   test("waits for a stale runner handshake before choosing the compatibility command", async () => {
     const harness = createIosDelegateHarness();
-    const handshake = new Promise<string[]>(resolve => {
+    const handshake = new Promise<string[]>((resolve) => {
       harness.timer.setTimeout(() => resolve(["request_set_text"]), 50);
     });
     const text = new CtrlProxyText({

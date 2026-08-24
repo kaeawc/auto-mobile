@@ -36,7 +36,7 @@ describe("PlanExecutor — tapOn tapDebug in debug.steps", () => {
         message: "ok",
         element: { bounds: { left: 0, top: 0, right: 1, bottom: 1 } },
         tapDebug: sampleTapDebug,
-      })
+      }),
     );
     ToolRegistry.register("tapOn", "Mock tapOn", tapOnSchema, tapOnHandler);
     (ToolRegistry.getTool("tapOn") as { requiresDevice: boolean }).requiresDevice = true;
@@ -52,15 +52,10 @@ describe("PlanExecutor — tapOn tapDebug in debug.steps", () => {
       steps: [{ tool: "tapOn", params: { text: "Go" } }],
     };
 
-    const result = await planExecutor.executePlan(
-      plan,
-      0,
-      "android",
-      "emulator-5554"
-    );
+    const result = await planExecutor.executePlan(plan, 0, "android", "emulator-5554");
 
     expect(result.success).toBe(true);
-    const tapStep = result.debug?.steps.find(s => s.step.includes(": tapOn"));
+    const tapStep = result.debug?.steps.find((s) => s.step.includes(": tapOn"));
     expect(tapStep?.details?.tapDebug).toEqual(sampleTapDebug);
   });
 
@@ -70,7 +65,7 @@ describe("PlanExecutor — tapOn tapDebug in debug.steps", () => {
         success: false,
         error: "not found",
         tapDebug: sampleTapDebug,
-      })
+      }),
     );
     ToolRegistry.register("tapOn", "Mock tapOn fail", tapOnSchema, tapOnHandler);
     (ToolRegistry.getTool("tapOn") as { requiresDevice: boolean }).requiresDevice = true;
@@ -80,15 +75,10 @@ describe("PlanExecutor — tapOn tapDebug in debug.steps", () => {
       steps: [{ tool: "tapOn", params: { text: "Missing" } }],
     };
 
-    const result = await planExecutor.executePlan(
-      plan,
-      0,
-      "android",
-      "emulator-5554"
-    );
+    const result = await planExecutor.executePlan(plan, 0, "android", "emulator-5554");
 
     expect(result.success).toBe(false);
-    const tapStep = result.debug?.steps.find(s => s.step.includes(": tapOn"));
+    const tapStep = result.debug?.steps.find((s) => s.step.includes(": tapOn"));
     expect(tapStep?.status).toBe("failed");
     expect(tapStep?.details?.tapDebug).toEqual(sampleTapDebug);
   });

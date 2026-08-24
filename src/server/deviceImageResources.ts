@@ -19,7 +19,7 @@ import {
 // Resource URIs
 export const DEVICE_IMAGE_RESOURCE_URIS = {
   ALL_IMAGES: "automobile:devices/images",
-  PLATFORM_TEMPLATE: "automobile:devices/images/{platform}"
+  PLATFORM_TEMPLATE: "automobile:devices/images/{platform}",
 } as const;
 
 // Device image info for resource response
@@ -96,7 +96,7 @@ export interface DeviceImagesResourceContent {
   totalCount: number;
   androidCount: number;
   iosCount: number;
-  lastUpdated: string;  // ISO 8601
+  lastUpdated: string; // ISO 8601
   catalogComplete: boolean;
   catalogObservations: Partial<Record<Platform, ProvisioningCatalogObservation>>;
   provisioningCatalog: ProvisioningCatalog;
@@ -116,7 +116,7 @@ interface DeviceImageResourcesDependencies {
  * production wiring passes real implementations, tests pass fakes.
  */
 export function createDeviceImageResourcesHandler(
-  deps?: Partial<DeviceImageResourcesDependencies>
+  deps?: Partial<DeviceImageResourcesDependencies>,
 ): {
   getAllDeviceImages: () => Promise<ResourceContent>;
   getDeviceImagesByPlatform: (params: Record<string, string>) => Promise<ResourceContent>;
@@ -128,7 +128,9 @@ export function createDeviceImageResourcesHandler(
   // client in those partial fakes; production construction always includes it.
   const simctl = deps?.simctl ?? (deps ? undefined : new SimCtlClient());
 
-  const getDeviceImagesForPlatformsImpl = async (platforms: Platform[]): Promise<DeviceImagesResourceContent> => {
+  const getDeviceImagesForPlatformsImpl = async (
+    platforms: Platform[],
+  ): Promise<DeviceImagesResourceContent> => {
     const images: DeviceImageInfo[] = [];
     const provisioningCatalog: ProvisioningCatalog = {
       runtimes: [],
@@ -143,13 +145,11 @@ export function createDeviceImageResourcesHandler(
     if (platforms.includes("android")) {
       catalogObservations.android = await buildAndroidProvisioningCatalog(
         avdManager,
-        provisioningCatalog
+        provisioningCatalog,
       );
     }
 
-    const iosCount = platforms.includes("ios")
-      ? await appendIosImages(deviceManager, images)
-      : 0;
+    const iosCount = platforms.includes("ios") ? await appendIosImages(deviceManager, images) : 0;
     if (platforms.includes("ios")) {
       catalogObservations.ios = await buildIosProvisioningCatalog(simctl, provisioningCatalog);
     }
@@ -159,10 +159,12 @@ export function createDeviceImageResourcesHandler(
       androidCount,
       iosCount,
       lastUpdated: new Date().toISOString(),
-      catalogComplete: platforms.every(platform => catalogObservations[platform]?.catalogComplete === true),
+      catalogComplete: platforms.every(
+        (platform) => catalogObservations[platform]?.catalogComplete === true,
+      ),
       catalogObservations,
       provisioningCatalog,
-      images
+      images,
     };
   };
 
@@ -171,11 +173,13 @@ export function createDeviceImageResourcesHandler(
     return {
       uri: DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES,
       mimeType: "application/json",
-      text: JSON.stringify(result, null, 2)
+      text: JSON.stringify(result, null, 2),
     };
   };
 
-  const getDeviceImagesByPlatformImpl = async (params: Record<string, string>): Promise<ResourceContent> => {
+  const getDeviceImagesByPlatformImpl = async (
+    params: Record<string, string>,
+  ): Promise<ResourceContent> => {
     const platform = params.platform;
 
     // Validate platform parameter
@@ -183,9 +187,13 @@ export function createDeviceImageResourcesHandler(
       return {
         uri: `automobile:devices/images/${platform}`,
         mimeType: "application/json",
-        text: JSON.stringify({
-          error: `Invalid platform: ${platform}. Must be 'android' or 'ios'.`
-        }, null, 2)
+        text: JSON.stringify(
+          {
+            error: `Invalid platform: ${platform}. Must be 'android' or 'ios'.`,
+          },
+          null,
+          2,
+        ),
       };
     }
 
@@ -193,28 +201,28 @@ export function createDeviceImageResourcesHandler(
     return {
       uri: `automobile:devices/images/${platform}`,
       mimeType: "application/json",
-      text: JSON.stringify(result, null, 2)
+      text: JSON.stringify(result, null, 2),
     };
   };
 
   return {
     getAllDeviceImages: getAllDeviceImagesImpl,
     getDeviceImagesByPlatform: getDeviceImagesByPlatformImpl,
-    getDeviceImagesForPlatforms: getDeviceImagesForPlatformsImpl
+    getDeviceImagesForPlatforms: getDeviceImagesForPlatformsImpl,
   };
 }
 
 async function appendAndroidImages(
   deviceManager: PlatformDeviceManager,
   avdManager: AvdManager,
-  images: DeviceImageInfo[]
+  images: DeviceImageInfo[],
 ): Promise<number> {
   try {
     const [androidDevices, avdInfoList] = await Promise.all([
       deviceManager.listDeviceImages("android"),
       readAvdInfo(avdManager),
     ]);
-    const avdInfoByName = new Map(avdInfoList.map(avd => [avd.name, avd]));
+    const avdInfoByName = new Map(avdInfoList.map((avd) => [avd.name, avd]));
     for (const device of androidDevices) {
       images.push(toDeviceImageInfo(device, avdInfoByName.get(device.name)));
     }
@@ -236,7 +244,7 @@ async function readAvdInfo(avdManager: AvdManager): Promise<AvdInfo[]> {
 
 async function appendIosImages(
   deviceManager: PlatformDeviceManager,
-  images: DeviceImageInfo[]
+  images: DeviceImageInfo[],
 ): Promise<number> {
   try {
     const iosDevices = await deviceManager.listDeviceImages("ios");
@@ -252,7 +260,7 @@ async function appendIosImages(
 
 async function buildAndroidProvisioningCatalog(
   avdManager: AvdManager,
-  catalog: ProvisioningCatalog
+  catalog: ProvisioningCatalog,
 ): Promise<ProvisioningCatalogObservation> {
   try {
     const [availableSystemImages, installedSystemImages, profiles] = await Promise.all([
@@ -261,8 +269,10 @@ async function buildAndroidProvisioningCatalog(
       avdManager.listDevices(),
     ]);
     const systemImages = new Map(
-      [...availableSystemImages, ...installedSystemImages]
-        .map(image => [image.packageName, image])
+      [...availableSystemImages, ...installedSystemImages].map((image) => [
+        image.packageName,
+        image,
+      ]),
     );
     appendAndroidProvisioningCatalog(catalog, [...systemImages.values()], profiles);
     return { catalogComplete: true };
@@ -274,7 +284,7 @@ async function buildAndroidProvisioningCatalog(
 
 async function buildIosProvisioningCatalog(
   simctl: Pick<SimCtlClient, "getDeviceTypesChecked" | "getRuntimesChecked"> | undefined,
-  catalog: ProvisioningCatalog
+  catalog: ProvisioningCatalog,
 ): Promise<ProvisioningCatalogObservation> {
   if (!simctl) {
     return {
@@ -301,7 +311,7 @@ async function buildIosProvisioningCatalog(
 
 function failedCatalogObservation(
   platform: "Android" | "iOS",
-  error: unknown
+  error: unknown,
 ): ProvisioningCatalogObservation {
   return {
     catalogComplete: false,
@@ -315,7 +325,7 @@ function failedCatalogObservation(
 function appendAndroidProvisioningCatalog(
   catalog: ProvisioningCatalog,
   systemImages: SystemImage[],
-  profiles: DeviceProfile[]
+  profiles: DeviceProfile[],
 ): void {
   for (const image of systemImages) {
     catalog.runtimes.push({
@@ -356,7 +366,7 @@ function appendAndroidProvisioningCatalog(
 function appendIosProvisioningCatalog(
   catalog: ProvisioningCatalog,
   runtimes: AppleDeviceRuntime[],
-  deviceTypes: AppleDeviceType[]
+  deviceTypes: AppleDeviceType[],
 ): void {
   for (const runtime of runtimes) {
     catalog.runtimes.push({
@@ -398,7 +408,7 @@ function toDeviceImageInfo(device: DeviceInfo, avdInfo?: AvdInfo): DeviceImageIn
     deviceType: device.deviceType,
     runtime: device.runtime,
     model: device.model,
-    architecture: device.architecture
+    architecture: device.architecture,
   };
 }
 
@@ -413,7 +423,7 @@ export function registerDeviceImageResources(): void {
     "Device Images",
     "List of all available device images (AVDs and simulators) that can be used to start devices.",
     "application/json",
-    handler.getAllDeviceImages
+    handler.getAllDeviceImages,
   );
 
   // Register the platform-specific template
@@ -422,7 +432,7 @@ export function registerDeviceImageResources(): void {
     "Platform-specific Device Images",
     "List of available device images for a specific platform (android or ios).",
     "application/json",
-    handler.getDeviceImagesByPlatform
+    handler.getDeviceImagesByPlatform,
   );
 
   logger.info("[DeviceImageResources] Registered device image resources");
@@ -432,6 +442,6 @@ export async function notifyDeviceImageResourcesUpdated(): Promise<void> {
   await ResourceRegistry.notifyResourcesUpdated([
     DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES,
     `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/android`,
-    `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/ios`
+    `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/ios`,
   ]);
 }

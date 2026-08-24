@@ -1,5 +1,8 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, PostNotificationResult } from "../../models";
 import { Window } from "../observe/Window";
@@ -31,7 +34,8 @@ export interface PostNotificationOptions {
 }
 
 const NOTIFICATION_ACTION = "dev.jasonpearson.automobile.sdk.NOTIFICATION_POST";
-const NOTIFICATION_RECEIVER = "dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver";
+const NOTIFICATION_RECEIVER =
+  "dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver";
 const SDK_RESULT_SUCCESS = 1;
 const DEVICE_IMAGE_DIR = "/sdcard/Download/automobile";
 export const ANDROID_PACKAGE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/;
@@ -47,11 +51,14 @@ export class PostNotification {
     device: BootedDevice,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
     window: WindowInterface | null = null,
-    simctl: SimCtlClient | null = null
+    simctl: SimCtlClient | null = null,
   ) {
     this.device = device;
     // Detect if the argument is a factory (has create method) or an executor
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
+    if (
+      adbFactoryOrExecutor &&
+      typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function"
+    ) {
       this.adbFactory = adbFactoryOrExecutor as AdbClientFactory;
       this.adb = this.adbFactory.create(device);
     } else if (adbFactoryOrExecutor) {
@@ -67,7 +74,10 @@ export class PostNotification {
     this.simctl = simctl || new SimCtlClient(device);
   }
 
-  async execute(options: PostNotificationOptions, signal?: AbortSignal): Promise<PostNotificationResult> {
+  async execute(
+    options: PostNotificationOptions,
+    signal?: AbortSignal,
+  ): Promise<PostNotificationResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("postNotification");
 
@@ -81,14 +91,14 @@ export class PostNotification {
           return {
             success: false,
             supported: false,
-            error: `postNotification is not supported on platform: ${this.device.platform}`
+            error: `postNotification is not supported on platform: ${this.device.platform}`,
           };
       }
     } catch (error) {
       return {
         success: false,
         supported: false,
-        error: `Failed to post notification: ${errorMessage(error)}`
+        error: `Failed to post notification: ${errorMessage(error)}`,
       };
     } finally {
       perf.end();
@@ -102,7 +112,7 @@ export class PostNotification {
       return {
         success: false,
         supported: false,
-        error: "appId (bundle identifier) is required to post a notification on iOS."
+        error: "appId (bundle identifier) is required to post a notification on iOS.",
       };
     }
 
@@ -112,22 +122,27 @@ export class PostNotification {
         success: false,
         supported: false,
         appId: bundleId,
-        error: "postNotification on iOS is only supported on simulators (simctl push); physical iOS devices are not supported."
+        error:
+          "postNotification on iOS is only supported on simulators (simctl push); physical iOS devices are not supported.",
       };
     }
 
     const warnings: string[] = [];
     if (options.imageType === "bigPicture" || options.imagePath) {
-      warnings.push("bigPicture/image attachments are not supported via simctl push and were ignored.");
+      warnings.push(
+        "bigPicture/image attachments are not supported via simctl push and were ignored.",
+      );
     }
     if (options.actions && options.actions.length > 0) {
-      warnings.push("action buttons require a pre-registered UNNotificationCategory and were ignored.");
+      warnings.push(
+        "action buttons require a pre-registered UNNotificationCategory and were ignored.",
+      );
     }
     const warning = warnings.join(" ") || undefined;
 
     const aps: Record<string, unknown> = {
       alert: { title: options.title, body: options.body },
-      sound: "default"
+      sound: "default",
     };
     if (options.channelId) {
       aps.category = options.channelId; // reuse channelId as the APNs category
@@ -141,7 +156,7 @@ export class PostNotification {
         supported: true,
         appId: bundleId,
         error: "APNs payload exceeds the 4096-byte simctl push limit.",
-        warning
+        warning,
       };
     }
 
@@ -152,7 +167,7 @@ export class PostNotification {
         supported: true,
         appId: bundleId,
         error: result.error ?? "simctl push failed.",
-        warning
+        warning,
       };
     }
     return {
@@ -161,12 +176,15 @@ export class PostNotification {
       method: "simctlPush",
       appId: bundleId,
       channelId: options.channelId,
-      warning
+      warning,
     };
   }
 
   /** Android: post a local notification through the AutoMobile SDK BroadcastReceiver. */
-  private async executeAndroid(options: PostNotificationOptions, signal?: AbortSignal): Promise<PostNotificationResult> {
+  private async executeAndroid(
+    options: PostNotificationOptions,
+    signal?: AbortSignal,
+  ): Promise<PostNotificationResult> {
     try {
       const imageType = options.imageType ?? "normal";
 
@@ -177,7 +195,7 @@ export class PostNotification {
             success: false,
             supported: false,
             imageType,
-            error: "imagePath is required for bigPicture imageType notifications."
+            error: "imagePath is required for bigPicture imageType notifications.",
           };
         }
 
@@ -187,7 +205,7 @@ export class PostNotification {
             success: false,
             supported: false,
             imageType,
-            error: prepared.error
+            error: prepared.error,
           };
         }
         imagePath = prepared.devicePath;
@@ -196,17 +214,17 @@ export class PostNotification {
       const sdkResult = await this.trySdkPost(
         {
           ...options,
-          imagePath
+          imagePath,
         },
         imageType,
-        signal
+        signal,
       );
       return sdkResult;
     } catch (error) {
       return {
         success: false,
         supported: false,
-        error: `Failed to post notification: ${errorMessage(error)}`
+        error: `Failed to post notification: ${errorMessage(error)}`,
       };
     }
   }
@@ -214,7 +232,7 @@ export class PostNotification {
   private async trySdkPost(
     options: PostNotificationOptions,
     imageType: "normal" | "bigPicture",
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<PostNotificationResult> {
     const appId = options.appId ?? (await this.getLiveActiveAppId());
     if (!appId) {
@@ -222,7 +240,7 @@ export class PostNotification {
         success: false,
         supported: false,
         imageType,
-        error: "Unable to determine the active app for SDK notifications."
+        error: "Unable to determine the active app for SDK notifications.",
       };
     }
     if (!ANDROID_PACKAGE_NAME_PATTERN.test(appId)) {
@@ -230,14 +248,15 @@ export class PostNotification {
         success: false,
         supported: false,
         imageType,
-        error: "Invalid Android appId. Provide an Android package name such as com.example.app."
+        error: "Invalid Android appId. Provide an Android package name such as com.example.app.",
       };
     }
 
     const style = imageType === "bigPicture" ? "bigPicture" : "default";
     const extras = this.buildBroadcastExtras(options, style);
     const component = `${appId}/${NOTIFICATION_RECEIVER}`;
-    const command = `shell am broadcast -n ${component} -a ${NOTIFICATION_ACTION} ${extras.join(" ")}`.trim();
+    const command =
+      `shell am broadcast -n ${component} -a ${NOTIFICATION_ACTION} ${extras.join(" ")}`.trim();
 
     try {
       const result = await this.adb.executeCommand(command, undefined, undefined, true, signal);
@@ -249,7 +268,7 @@ export class PostNotification {
           supported: false,
           imageType,
           appId,
-          error: "AutoMobile notification receiver not found in the target app."
+          error: "AutoMobile notification receiver not found in the target app.",
         };
       }
 
@@ -261,7 +280,7 @@ export class PostNotification {
           method: "sdk",
           imageType,
           appId,
-          channelId: options.channelId
+          channelId: options.channelId,
         };
       }
 
@@ -272,9 +291,10 @@ export class PostNotification {
         imageType,
         appId,
         channelId: options.channelId,
-        error: resultCode === null
-          ? "SDK notification broadcast did not return a result code."
-          : "SDK notification receiver reported a failure."
+        error:
+          resultCode === null
+            ? "SDK notification broadcast did not return a result code."
+            : "SDK notification receiver reported a failure.",
       };
     } catch (error) {
       logger.warn(`[PostNotification] SDK broadcast failed: ${error}`);
@@ -285,14 +305,14 @@ export class PostNotification {
         imageType,
         appId,
         channelId: options.channelId,
-        error: `SDK notification broadcast failed: ${errorMessage(error)}`
+        error: `SDK notification broadcast failed: ${errorMessage(error)}`,
       };
     }
   }
 
   private buildBroadcastExtras(
     options: PostNotificationOptions,
-    style: "default" | "bigPicture"
+    style: "default" | "bigPicture",
   ): string[] {
     const extras: string[] = [];
 
@@ -304,15 +324,21 @@ export class PostNotification {
     }
 
     if (options.imagePath) {
-      extras.push(`--es ${AutoMobileNotificationExtras.imagePath} ${quoteForShell(options.imagePath)}`);
+      extras.push(
+        `--es ${AutoMobileNotificationExtras.imagePath} ${quoteForShell(options.imagePath)}`,
+      );
     }
 
     if (options.actions && options.actions.length > 0) {
-      extras.push(`--es ${AutoMobileNotificationExtras.actions} ${quoteForShell(JSON.stringify(options.actions))}`);
+      extras.push(
+        `--es ${AutoMobileNotificationExtras.actions} ${quoteForShell(JSON.stringify(options.actions))}`,
+      );
     }
 
     if (options.channelId) {
-      extras.push(`--es ${AutoMobileNotificationExtras.channelId} ${quoteForShell(options.channelId)}`);
+      extras.push(
+        `--es ${AutoMobileNotificationExtras.channelId} ${quoteForShell(options.channelId)}`,
+      );
     }
 
     return extras;
@@ -340,13 +366,13 @@ export class PostNotification {
 
   private async prepareDeviceImagePath(
     imagePath: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<{ success: true; devicePath: string } | { success: false; error: string }> {
     const trimmed = imagePath.trim();
     if (trimmed.startsWith("data:") || trimmed.startsWith("base64:")) {
       return {
         success: false,
-        error: "Base64 image payloads are not supported. Provide a host file path instead."
+        error: "Base64 image payloads are not supported. Provide a host file path instead.",
       };
     }
 
@@ -354,7 +380,7 @@ export class PostNotification {
     if (!sourcePath) {
       return {
         success: false,
-        error: "imagePath must be a valid host file path."
+        error: "imagePath must be a valid host file path.",
       };
     }
 
@@ -364,14 +390,14 @@ export class PostNotification {
     } catch (error) {
       return {
         success: false,
-        error: `Image file not found at ${sourcePath}`
+        error: `Image file not found at ${sourcePath}`,
       };
     }
 
     if (!stats.isFile()) {
       return {
         success: false,
-        error: `Image path is not a file: ${sourcePath}`
+        error: `Image path is not a file: ${sourcePath}`,
       };
     }
 
@@ -379,13 +405,25 @@ export class PostNotification {
     const devicePath = `${DEVICE_IMAGE_DIR}/${fileName}`;
 
     try {
-      await this.adb.executeCommand(`shell mkdir -p ${DEVICE_IMAGE_DIR}`, undefined, undefined, true, signal);
-      await this.adb.executeCommand(`push ${quoteForAdbArg(sourcePath)} ${quoteForAdbArg(devicePath)}`, undefined, undefined, true, signal);
+      await this.adb.executeCommand(
+        `shell mkdir -p ${DEVICE_IMAGE_DIR}`,
+        undefined,
+        undefined,
+        true,
+        signal,
+      );
+      await this.adb.executeCommand(
+        `push ${quoteForAdbArg(sourcePath)} ${quoteForAdbArg(devicePath)}`,
+        undefined,
+        undefined,
+        true,
+        signal,
+      );
       return { success: true, devicePath };
     } catch (error) {
       return {
         success: false,
-        error: `Failed to push image to device: ${errorMessage(error)}`
+        error: `Failed to push image to device: ${errorMessage(error)}`,
       };
     }
   }
@@ -423,7 +461,7 @@ const quoteForShell = (value: string): string => {
 };
 
 const quoteForAdbArg = (value: string): string => {
-  const escaped = value.replace(/\\/g, "\\\\").replace(/\"/g, "\\\"");
+  const escaped = value.replace(/\\/g, "\\\\").replace(/\"/g, '\\"');
   return `"${escaped}"`;
 };
 
@@ -433,5 +471,5 @@ const AutoMobileNotificationExtras = {
   style: "style",
   imagePath: "image_path",
   actions: "actions_json",
-  channelId: "channel_id"
+  channelId: "channel_id",
 };

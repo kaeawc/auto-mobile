@@ -171,19 +171,19 @@ export class BulletinBoardAuthorizationReader implements IosNotificationAuthoriz
 export function defaultBulletinBoardReader(): IosNotificationAuthorizationReader {
   const plist = new PlistClient();
   return new BulletinBoardAuthorizationReader({
-    plutilToXml: path => plist.readXmlFile(path),
-    writeTemp: async buf => {
+    plutilToXml: (path) => plist.readXmlFile(path),
+    writeTemp: async (buf) => {
       const { promises: fs } = await import("fs");
       const dir = await fs.mkdtemp(path.join(os.tmpdir(), "automobile-bb-"));
       const file = path.join(dir, "blob.bplist");
       await fs.writeFile(file, buf);
       return file;
     },
-    rmTemp: async file => {
+    rmTemp: async (file) => {
       const { promises: fs } = await import("fs");
       await fs.rm(path.dirname(file), { recursive: true, force: true });
     },
-    deviceDataRoot: udid =>
+    deviceDataRoot: (udid) =>
       path.join(os.homedir(), "Library/Developer/CoreSimulator/Devices", udid),
   });
 }

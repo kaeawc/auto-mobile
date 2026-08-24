@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
-import { NotificationPolicy, type NotificationPolicyAccessState } from "../../../src/features/utility/NotificationPolicy";
+import {
+  NotificationPolicy,
+  type NotificationPolicyAccessState,
+} from "../../../src/features/utility/NotificationPolicy";
 import type { IosNotificationAuthorizationReader } from "../../../src/features/utility/ios/IosNotificationAuthorizationReader";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
@@ -16,7 +19,7 @@ describe("NotificationPolicy", () => {
     const client = adbFactory.getFakeClient();
     client.setCommandResult(
       "shell dumpsys notification",
-      "  mPolicyAccess={0=[com.example.app, com.other.app]}\n"
+      "  mPolicyAccess={0=[com.example.app, com.other.app]}\n",
     );
 
     const notificationPolicy = new NotificationPolicy(androidDevice, { adbFactory });
@@ -33,10 +36,7 @@ describe("NotificationPolicy", () => {
   test("reports Android notification policy access as false when policy list excludes app", async () => {
     const adbFactory = new FakeAdbClientFactory();
     const client = adbFactory.getFakeClient();
-    client.setCommandResult(
-      "shell dumpsys notification",
-      "  mPolicyAccess={0=[com.other.app]}\n"
-    );
+    client.setCommandResult("shell dumpsys notification", "  mPolicyAccess={0=[com.other.app]}\n");
 
     const notificationPolicy = new NotificationPolicy(androidDevice, { adbFactory });
     const result = await notificationPolicy.getPolicy("com.example.app");
@@ -61,7 +61,9 @@ describe("NotificationPolicy", () => {
       allowed: true,
       method: "android_cmd_notification",
     });
-    expect(client.wasCommandExecuted("shell cmd notification allow_dnd 'com.example.app'")).toBe(true);
+    expect(client.wasCommandExecuted("shell cmd notification allow_dnd 'com.example.app'")).toBe(
+      true,
+    );
   });
 
   test("reports iOS notification policy as unsupported", async () => {

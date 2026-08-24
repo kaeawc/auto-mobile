@@ -6,16 +6,22 @@ import { DefaultElementParser } from "../utility/ElementParser";
 import { FlattenedElementEntry, IdentifyMediaViews } from "./IdentifyMediaViews";
 
 export interface ObserveElementCollector {
-  collect(viewHierarchy: ViewHierarchyResult, platform: "android" | "ios"): ObserveResult["elements"];
+  collect(
+    viewHierarchy: ViewHierarchyResult,
+    platform: "android" | "ios",
+  ): ObserveResult["elements"];
 }
 
 export class DefaultObserveElementCollector implements ObserveElementCollector {
   constructor(
     private readonly parser: ElementParser = new DefaultElementParser(),
-    private readonly mediaClassifier: IdentifyMediaViews = new IdentifyMediaViews(parser)
+    private readonly mediaClassifier: IdentifyMediaViews = new IdentifyMediaViews(parser),
   ) {}
 
-  collect(viewHierarchy: ViewHierarchyResult, platform: "android" | "ios"): ObserveResult["elements"] {
+  collect(
+    viewHierarchy: ViewHierarchyResult,
+    platform: "android" | "ios",
+  ): ObserveResult["elements"] {
     const clickable: Element[] = [];
     const scrollable: Element[] = [];
     const flattenedEntries: FlattenedElementEntry[] = [];
@@ -23,7 +29,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
 
     const rootNodes = [
       ...this.parser.extractRootNodes(viewHierarchy),
-      ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first")
+      ...this.parser.extractWindowRootNodes(viewHierarchy, "topmost-first"),
     ];
 
     for (const rootNode of rootNodes) {
@@ -31,13 +37,13 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
         clickable,
         scrollable,
         flattenedEntries,
-        nextIndex: () => currentIndex++
+        nextIndex: () => currentIndex++,
       });
     }
 
     const text = flattenedEntries
-      .filter(entry => typeof entry.text === "string" && entry.text.trim().length > 0)
-      .map(entry => entry.element);
+      .filter((entry) => typeof entry.text === "string" && entry.text.trim().length > 0)
+      .map((entry) => entry.element);
     const media = this.mediaClassifier.classify(viewHierarchy, platform, flattenedEntries);
 
     return { clickable, scrollable, text, media };
@@ -50,7 +56,7 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
       scrollable: Element[];
       flattenedEntries: FlattenedElementEntry[];
       nextIndex: () => number;
-    }
+    },
   ): void {
     this.parser.traverseNode(rootNode, (node: ViewHierarchyNode, depth: number) => {
       const parsedNode = this.parser.parseNodeBounds(node);
@@ -71,9 +77,8 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
         element: parsedNode,
         index: collections.nextIndex(),
         depth,
-        text: accessibilityText
+        text: accessibilityText,
       });
     });
   }
-
 }

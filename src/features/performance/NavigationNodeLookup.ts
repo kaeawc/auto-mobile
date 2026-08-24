@@ -14,7 +14,7 @@ export class NavigationNodeLookup {
   constructor(
     repository?: NavigationRepository,
     cacheMaxAgeMs: number = 60000, // 1 minute default
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
   ) {
     this.repository = repository ?? new NavigationRepository();
     this.cache = new TTLCache(timer, { ttlMs: cacheMaxAgeMs });

@@ -25,7 +25,7 @@ export class CtrlProxyText extends SharedTextDelegate {
     text: string,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker,
-    frameContext?: string
+    frameContext?: string,
   ): Promise<BaseResult> {
     // Older released runners predate request_append_text, but their untargeted
     // request_set_text path already uses XCUITest typeText at the focused caret.
@@ -34,7 +34,8 @@ export class CtrlProxyText extends SharedTextDelegate {
     if (
       supportedCommands === null ||
       (supportedCommands !== undefined && !supportedCommands.includes("request_append_text")) ||
-      (supportedCommands === undefined && this.context.isCommandSupported?.("request_append_text") === false)
+      (supportedCommands === undefined &&
+        this.context.isCommandSupported?.("request_append_text") === false)
     ) {
       return this.requestSetText(text, { timeoutMs, perf, frameContext });
     }
@@ -65,7 +66,7 @@ export class CtrlProxyText extends SharedTextDelegate {
   override async requestClearText(
     resourceId?: string,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<BaseResult> {
     const params: Record<string, unknown> = {};
     if (resourceId) {

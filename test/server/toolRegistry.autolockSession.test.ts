@@ -25,8 +25,16 @@ function setAutolock(enabled: boolean): void {
 }
 
 describe("ToolRegistry autolock session enforcement", () => {
-  const androidA: BootedDevice = { name: "Pixel A", deviceId: "emulator-5554", platform: "android" };
-  const androidB: BootedDevice = { name: "Pixel B", deviceId: "emulator-5556", platform: "android" };
+  const androidA: BootedDevice = {
+    name: "Pixel A",
+    deviceId: "emulator-5554",
+    platform: "android",
+  };
+  const androidB: BootedDevice = {
+    name: "Pixel B",
+    deviceId: "emulator-5556",
+    platform: "android",
+  };
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
@@ -67,7 +75,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     const tool = registerTool("autolockMultiAndroid");
 
     await expect(tool.handler({ platform: "android" })).rejects.toThrow(
-      "Device pool autolock is enabled and multiple devices are available."
+      "Device pool autolock is enabled and multiple devices are available.",
     );
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
   });
@@ -123,7 +131,7 @@ describe("ToolRegistry autolock session enforcement", () => {
     const tool = registerTool("autolockEitherPlatform");
 
     await expect(tool.handler({})).rejects.toThrow(
-      "Device pool autolock is enabled and multiple devices are available."
+      "Device pool autolock is enabled and multiple devices are available.",
     );
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
   });
@@ -148,18 +156,29 @@ describe("ToolRegistry autolock session enforcement", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
-    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
     await pool.initializeWithDevices([androidA, androidB]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     const sessionId = await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1");
 
     let handledDevice: BootedDevice | undefined;
     let handledArgs: Record<string, unknown> | undefined;
-    ToolRegistry.registerDeviceAware("implicitAutolockSession", "implicitAutolockSession", schema, async (device, args) => {
-      handledDevice = device;
-      handledArgs = args;
-      return { success: true };
-    });
+    ToolRegistry.registerDeviceAware(
+      "implicitAutolockSession",
+      "implicitAutolockSession",
+      schema,
+      async (device, args) => {
+        handledDevice = device;
+        handledArgs = args;
+        return { success: true };
+      },
+    );
     const tool = ToolRegistry.getTool("implicitAutolockSession")!;
 
     const response = await tool.handler({
@@ -182,18 +201,29 @@ describe("ToolRegistry autolock session enforcement", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
-    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
     await pool.initializeWithDevices([androidA, androidB]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     const sessionId = await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1");
 
     let handledDevice: BootedDevice | undefined;
     let handledArgs: Record<string, unknown> | undefined;
-    ToolRegistry.registerDeviceAware("implicitAutolockWithDeviceId", "implicitAutolockWithDeviceId", schema, async (device, args) => {
-      handledDevice = device;
-      handledArgs = args;
-      return { success: true };
-    });
+    ToolRegistry.registerDeviceAware(
+      "implicitAutolockWithDeviceId",
+      "implicitAutolockWithDeviceId",
+      schema,
+      async (device, args) => {
+        handledDevice = device;
+        handledArgs = args;
+        return { success: true };
+      },
+    );
     const tool = ToolRegistry.getTool("implicitAutolockWithDeviceId")!;
 
     const response = await tool.handler({
@@ -216,7 +246,13 @@ describe("ToolRegistry autolock session enforcement", () => {
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
     const fakeDeviceUtils = new FakeDeviceUtils();
     fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
-    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
     await pool.initializeWithDevices([androidA, androidB]);
     DaemonState.getInstance().initialize(daemonSessionManager, pool);
     await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1");
@@ -224,10 +260,12 @@ describe("ToolRegistry autolock session enforcement", () => {
 
     const tool = registerTool("implicitAutolockDifferentDeviceId");
 
-    await expect(tool.handler({
-      platform: "android",
-      deviceId: androidB.deviceId,
-      __mcpSessionId: "mcp-session-1",
-    })).rejects.toThrow("Device 'emulator-5556' is locked to another session.");
+    await expect(
+      tool.handler({
+        platform: "android",
+        deviceId: androidB.deviceId,
+        __mcpSessionId: "mcp-session-1",
+      }),
+    ).rejects.toThrow("Device 'emulator-5556' is locked to another session.");
   });
 });

@@ -239,7 +239,11 @@ export class FakeSimCtlClient implements FakeSimCtlClientContract {
     this.pushNotificationResult = result;
   }
 
-  async pushNotification(deviceId: string, bundleId: string, payloadJson: string): Promise<{ success: boolean; error?: string }> {
+  async pushNotification(
+    deviceId: string,
+    bundleId: string,
+    payloadJson: string,
+  ): Promise<{ success: boolean; error?: string }> {
     this.recordCall("pushNotification", { deviceId, bundleId, payloadJson });
     return this.pushNotificationResult;
   }

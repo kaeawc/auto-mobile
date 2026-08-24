@@ -9,12 +9,15 @@ import { FakeScrollAccessibilityService } from "../../../fakes/FakeScrollAccessi
 import { FakeElementGeometry } from "../../../fakes/FakeElementGeometry";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import type { BootedDevice, Element, ObserveResult } from "../../../../src/models";
-import type { OverlayCandidate, SwipeOnResolvedOptions } from "../../../../src/features/action/swipeon/types";
+import type {
+  OverlayCandidate,
+  SwipeOnResolvedOptions,
+} from "../../../../src/features/action/swipeon/types";
 
 const DEVICE: BootedDevice = {
   name: "test-device",
   platform: "android",
-  deviceId: "device-1"
+  deviceId: "device-1",
 };
 
 const SCREEN_SIZE = { width: 400, height: 900 };
@@ -24,21 +27,21 @@ const makeObserveResult = (hierarchyId: number = 0): ObserveResult => ({
   screenSize: SCREEN_SIZE,
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   viewHierarchy: {
-    hierarchy: { node: { $: { _id: String(hierarchyId) } } }
-  }
+    hierarchy: { node: { $: { _id: String(hierarchyId) } } },
+  },
 });
 
 const CONTAINER_ELEMENT: Element = {
-  "bounds": { left: 0, top: 0, right: 400, bottom: 900 },
+  bounds: { left: 0, top: 0, right: 400, bottom: 900 },
   "resource-id": "test:id/list",
-  "scrollable": true
+  scrollable: true,
 } as unknown as Element;
 
 const TARGET_ELEMENT: Element = {
-  "bounds": { left: 10, top: 200, right: 390, bottom: 250 },
+  bounds: { left: 10, top: 200, right: 390, bottom: 250 },
   "resource-id": "test:id/target",
-  "text": "Skills",
-  "scrollable": false
+  text: "Skills",
+  scrollable: false,
 } as unknown as Element;
 
 function makeScrollUntilVisible({
@@ -49,7 +52,7 @@ function makeScrollUntilVisible({
   observeResults,
   talkBackExecutor,
   getDuration,
-  overlayDetector
+  overlayDetector,
 }: {
   accessibilityDetector: FakeAccessibilityDetector;
   finder: FakeElementFinder;
@@ -65,7 +68,7 @@ function makeScrollUntilVisible({
   const fakeObserveScreen = {
     execute: async () => observeResults[Math.min(callIdx, observeResults.length - 1)],
     getMostRecentCachedObserveResult: async () =>
-      observeResults[Math.min(callIdx, observeResults.length - 1)]
+      observeResults[Math.min(callIdx, observeResults.length - 1)],
   };
 
   const fakeGeometry = new FakeElementGeometry();
@@ -94,13 +97,13 @@ function makeScrollUntilVisible({
     getDuration: getDuration ?? (() => 300),
     resolveBoomerangConfig: () => undefined,
     buildPredictionArgs: () => ({}),
-    observedInteraction
+    observedInteraction,
   });
 }
 
 const BASE_OPTIONS: SwipeOnResolvedOptions = {
   direction: "up",
-  lookFor: { text: "Skills" }
+  lookFor: { text: "Skills" },
 };
 
 describe("ScrollUntilVisible overshoot recovery", () => {
@@ -140,7 +143,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       accessibilityService,
       // [0]=initial, [1]=same fingerprint (forward end), [2]=different (reverse finds element)
       observeResults: [sameObs, sameObs, makeObserveResult(1)],
-      talkBackExecutor
+      talkBackExecutor,
     });
 
     const result = await suv.execute(BASE_OPTIONS);
@@ -162,12 +165,10 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       timer,
       accessibilityService,
       observeResults: [sameObs, sameObs, sameObs, sameObs, sameObs, sameObs, sameObs, sameObs],
-      talkBackExecutor
+      talkBackExecutor,
     });
 
-    await expect(suv.execute(BASE_OPTIONS)).rejects.toThrow(
-      /Scroll reached end of container/
-    );
+    await expect(suv.execute(BASE_OPTIONS)).rejects.toThrow(/Scroll reached end of container/);
   });
 
   test("element found in forward direction without entering reverse mode", async () => {
@@ -189,9 +190,9 @@ describe("ScrollUntilVisible overshoot recovery", () => {
         makeObserveResult(0),
         makeObserveResult(1),
         makeObserveResult(2),
-        makeObserveResult(3)
+        makeObserveResult(3),
       ],
-      talkBackExecutor
+      talkBackExecutor,
     });
 
     const result = await suv.execute(BASE_OPTIONS);
@@ -200,7 +201,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
 
     // Verify that executeSwipeGesture was never called with the reversed direction ("down")
     const allDirections = talkBackExecutor.getDirections();
-    expect(allDirections.every(d => d === "up")).toBe(true);
+    expect(allDirections.every((d) => d === "up")).toBe(true);
   });
 
   test("switches to opposite direction after forward end-of-list", async () => {
@@ -220,7 +221,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       timer,
       accessibilityService,
       observeResults: [sameObs, sameObs, makeObserveResult(1)],
-      talkBackExecutor
+      talkBackExecutor,
     });
 
     await suv.execute(BASE_OPTIONS);
@@ -248,13 +249,15 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     const fakeObserveScreen = {
       execute: async () => {
         executeCallCount++;
-        if (executeCallCount === 1) {return obs0;} // initial observe
+        if (executeCallCount === 1) {
+          return obs0;
+        } // initial observe
         // Idle polls: first sees obs2settled (different from obs1mid → sleep),
         // second also sees obs2settled (same → settled)
         return obs2settled;
       },
       getMostRecentCachedObserveResult: async () => obs0,
-      appendRawViewHierarchy: async () => {}
+      appendRawViewHierarchy: async () => {},
     };
 
     const fakeGeometry = new FakeElementGeometry();
@@ -276,7 +279,10 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     };
 
     // observedInteraction: always returns obs1mid as the post-swipe observation
-    const observedInteraction = async (action: (obs: ObserveResult) => Promise<any>, _opts: any) => {
+    const observedInteraction = async (
+      action: (obs: ObserveResult) => Promise<any>,
+      _opts: any,
+    ) => {
       const result = await action(obs0);
       return { ...result, observation: obs1mid };
     };
@@ -295,7 +301,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       getDuration: () => 300,
       resolveBoomerangConfig: () => undefined,
       buildPredictionArgs: () => ({}),
-      observedInteraction
+      observedInteraction,
     });
 
     const result = await suv.execute(BASE_OPTIONS);
@@ -327,9 +333,9 @@ describe("ScrollUntilVisible overshoot recovery", () => {
         makeObserveResult(0),
         makeObserveResult(1),
         makeObserveResult(2),
-        makeObserveResult(3)
+        makeObserveResult(3),
       ],
-      talkBackExecutor
+      talkBackExecutor,
     });
 
     const result = await suv.execute(BASE_OPTIONS);
@@ -365,7 +371,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       accessibilityService,
       observeResults: [sameObs, sameObs, makeObserveResult(1)],
       talkBackExecutor,
-      getDuration
+      getDuration,
     });
 
     // Use fast speed to verify it gets overridden to slow in reverse mode
@@ -380,14 +386,14 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     finder.nextScrollableContainer = CONTAINER_ELEMENT;
 
     let findCount = 0;
-    finder.findElementByText = (_h: any, _t: any) => ++findCount >= 2 ? TARGET_ELEMENT : null;
+    finder.findElementByText = (_h: any, _t: any) => (++findCount >= 2 ? TARGET_ELEMENT : null);
 
     const overlayDetector = new FakeOverlayDetector();
     const candidate: OverlayCandidate = {
       bounds: { left: 0, top: 0, right: 400, bottom: 200 },
       overlapBounds: { left: 0, top: 0, right: 400, bottom: 200 },
       coverage: 80000,
-      zOrder: { windowRank: 1, nodeOrder: 0 }
+      zOrder: { windowRank: 1, nodeOrder: 0 },
     };
     overlayDetector.candidates = [candidate];
     overlayDetector.safeCoords = { startX: 50, startY: 600, endX: 50, endY: 300 };
@@ -399,7 +405,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       accessibilityService,
       observeResults: [makeObserveResult(0), makeObserveResult(1), makeObserveResult(2)],
       talkBackExecutor,
-      overlayDetector
+      overlayDetector,
     });
 
     const result = await suv.execute(BASE_OPTIONS);
@@ -413,7 +419,7 @@ describe("ScrollUntilVisible overshoot recovery", () => {
     finder.nextScrollableContainer = CONTAINER_ELEMENT;
 
     let findCount = 0;
-    finder.findElementByText = (_h: any, _t: any) => ++findCount >= 3 ? TARGET_ELEMENT : null;
+    finder.findElementByText = (_h: any, _t: any) => (++findCount >= 3 ? TARGET_ELEMENT : null);
 
     talkBackExecutor.setFailureResult({ success: false, error: "gesture rejected" });
 
@@ -422,8 +428,13 @@ describe("ScrollUntilVisible overshoot recovery", () => {
       finder,
       timer,
       accessibilityService,
-      observeResults: [makeObserveResult(0), makeObserveResult(1), makeObserveResult(2), makeObserveResult(3)],
-      talkBackExecutor
+      observeResults: [
+        makeObserveResult(0),
+        makeObserveResult(1),
+        makeObserveResult(2),
+        makeObserveResult(3),
+      ],
+      talkBackExecutor,
     });
 
     const result = await suv.execute(BASE_OPTIONS);

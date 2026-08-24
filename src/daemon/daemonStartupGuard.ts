@@ -10,10 +10,7 @@ import {
   isIncompleteExtractionError,
 } from "../db/migrationDependencyIntegrity";
 import { DAEMON_STARTUP_TIMEOUT_MS } from "./constants";
-import {
-  StartupFailureTracker,
-  DefaultStartupFailureTracker,
-} from "./DaemonStartupFailureTracker";
+import { StartupFailureTracker, DefaultStartupFailureTracker } from "./DaemonStartupFailureTracker";
 
 /**
  * Cap the backoff strictly below the manager's startup timeout. The daemon
@@ -41,17 +38,19 @@ export const MAX_STARTUP_BACKOFF_MS = Math.max(1000, DAEMON_STARTUP_TIMEOUT_MS -
 export async function handleFatalDatabaseStartupFailure(
   error: unknown,
   tracker: StartupFailureTracker,
-  timer: Timer = defaultTimer
+  timer: Timer = defaultTimer,
 ): Promise<never> {
   const kind = classifyDatabaseFailure(error);
   const recentFailures = tracker.recordFailure(kind, timer.now());
   // Tag an incomplete-extraction failure with its distinct code so log-based
   // alerting can count it without regex-matching prose, and so the process can
   // exit with a distinct, recoverable code (issue #2833).
-  const failureLabel = isIncompleteExtractionError(error) ? `${kind}/${INCOMPLETE_EXTRACTION_CODE}` : kind;
+  const failureLabel = isIncompleteExtractionError(error)
+    ? `${kind}/${INCOMPLETE_EXTRACTION_CODE}`
+    : kind;
   logger.error(
     `Fatal: database initialization failed (${failureLabel}; ${recentFailures} recent failure(s)); ` +
-      `daemon cannot serve queries and will exit for a clean restart: ${describeUnknownError(error)}`
+      `daemon cannot serve queries and will exit for a clean restart: ${describeUnknownError(error)}`,
   );
 
   if (kind === "permanent" && recentFailures > 1) {
@@ -61,7 +60,7 @@ export async function handleFatalDatabaseStartupFailure(
       maxDelayMs: MAX_STARTUP_BACKOFF_MS,
     }).delayForAttempt(recentFailures - 1);
     logger.error(
-      `Database initialization has failed ${recentFailures} times; backing off ${backoffMs}ms before exit to avoid a restart hot-loop.`
+      `Database initialization has failed ${recentFailures} times; backing off ${backoffMs}ms before exit to avoid a restart hot-loop.`,
     );
     await timer.sleep(backoffMs);
   }
@@ -105,7 +104,7 @@ export function resolveDaemonStartupExitCode(error: unknown): number {
 export async function guardDatabaseStartup(
   work: () => Promise<void>,
   tracker: StartupFailureTracker = new DefaultStartupFailureTracker(),
-  timer: Timer = defaultTimer
+  timer: Timer = defaultTimer,
 ): Promise<void> {
   try {
     await work();

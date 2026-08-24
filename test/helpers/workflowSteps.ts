@@ -43,6 +43,7 @@ export interface WorkflowConcurrency {
 /** A job's own configuration, minus its steps. */
 export interface WorkflowJob {
   "timeout-minutes"?: number;
+  needs?: string | string[];
   /** Set when the job delegates to a reusable workflow. */
   uses?: string;
   if?: string | boolean;
@@ -96,25 +97,25 @@ export function loadJobs(workflowRelativePath: string): Record<string, WorkflowJ
 
 /** Every step of every job in a workflow, paired with its job id. */
 export function loadAllJobSteps(
-  workflowRelativePath: string
+  workflowRelativePath: string,
 ): { jobId: string; step: WorkflowStep }[] {
   const document = loadWorkflow(workflowRelativePath);
   return Object.entries(document.jobs ?? {}).flatMap(([jobId, job]) =>
-    (job?.steps ?? []).map(step => ({ jobId, step }))
+    (job?.steps ?? []).map((step) => ({ jobId, step })),
   );
 }
 
 export function stepNamed(steps: WorkflowStep[], name: string): WorkflowStep | undefined {
-  return steps.find(step => step.name === name);
+  return steps.find((step) => step.name === name);
 }
 
 export function indexOfNamed(steps: WorkflowStep[], name: string): number {
-  return steps.findIndex(step => step.name === name);
+  return steps.findIndex((step) => step.name === name);
 }
 
 /** Index of the first step invoking `uses`, for the unnamed `- uses:` steps. */
 export function indexOfUses(steps: WorkflowStep[], uses: string): number {
-  return steps.findIndex(step => step.uses === uses);
+  return steps.findIndex((step) => step.uses === uses);
 }
 
 /**
@@ -122,7 +123,7 @@ export function indexOfUses(steps: WorkflowStep[], uses: string): number {
  * `wait` accepts either a single id or a list, so normalize before comparing.
  */
 export function indexOfWaitOn(steps: WorkflowStep[], id: string): number {
-  return steps.findIndex(step => {
+  return steps.findIndex((step) => {
     if (step.wait === undefined) {
       return false;
     }

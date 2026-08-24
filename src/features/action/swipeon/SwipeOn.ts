@@ -10,7 +10,7 @@ import {
   SwipeOnOptions,
   SwipeOnResult,
   ScrollableCandidate,
-  ViewHierarchyResult
+  ViewHierarchyResult,
 } from "../../../models";
 import { AdbClient } from "../../../utils/android-cmdline-tools/AdbClient";
 import type { ElementFinder } from "../../../utils/interfaces/ElementFinder";
@@ -20,15 +20,27 @@ import { DefaultElementGeometry } from "../../utility/ElementGeometry";
 import { DefaultElementParser } from "../../utility/ElementParser";
 import { ExecuteGesture } from "../ExecuteGesture";
 import { logger } from "../../../utils/logger";
-import { createGlobalPerformanceTracker, PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
+import {
+  createGlobalPerformanceTracker,
+  PerformanceTracker,
+  NoOpPerformanceTracker,
+} from "../../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../../observe/android";
 import { buildElementSearchDebugContext } from "../../../utils/DebugContextBuilder";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { resolveSwipeDirection } from "../../../utils/swipeOnUtils";
 import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
 import { accessibilityDetector as defaultAccessibilityDetector } from "../../../utils/AccessibilityDetector";
-import { DEFAULT_VISION_CONFIG, getVisionEnrichedError, type VisionFallbackConfig, type VisionAnalyzer } from "../../../vision/index";
-import { TakeScreenshotCapturer, type ScreenshotCapturer } from "../../navigation/SelectionStateTracker";
+import {
+  DEFAULT_VISION_CONFIG,
+  getVisionEnrichedError,
+  type VisionFallbackConfig,
+  type VisionAnalyzer,
+} from "../../../vision/index";
+import {
+  TakeScreenshotCapturer,
+  type ScreenshotCapturer,
+} from "../../navigation/SelectionStateTracker";
 
 import {
   GestureExecutor,
@@ -36,7 +48,7 @@ import {
   SwipeOnResolvedOptions,
   BoomerangConfig,
   VoiceOverSwipeRunner,
-  AutoTargetSelectorService
+  AutoTargetSelectorService,
 } from "./types";
 import { OverlayDetector } from "./OverlayDetector";
 import { AutoTargetSelector } from "./AutoTargetSelector";
@@ -71,7 +83,7 @@ export class SwipeOn extends BaseVisualChange {
   constructor(
     device: BootedDevice,
     adb: AdbClient | null = null,
-    dependencies: SwipeOnDependencies = {}
+    dependencies: SwipeOnDependencies = {},
   ) {
     super(device, adb);
     this.executeGesture = dependencies.executeGesture ?? new ExecuteGesture(device, adb);
@@ -82,7 +94,8 @@ export class SwipeOn extends BaseVisualChange {
     this.accessibilityDetector = dependencies.accessibilityDetector || defaultAccessibilityDetector;
     const featureFlags = dependencies.featureFlags ?? FeatureFlagService.getInstance();
     this.visionConfig = dependencies.visionConfig ?? DEFAULT_VISION_CONFIG;
-    this.screenshotCapturer = dependencies.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
+    this.screenshotCapturer =
+      dependencies.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);
     this.visionAnalyzer = dependencies.visionAnalyzer;
     if (dependencies.observeScreen) {
       this.observeScreen = dependencies.observeScreen as unknown as ObserveScreen;
@@ -98,17 +111,19 @@ export class SwipeOn extends BaseVisualChange {
       this.accessibilityDetector,
       this.adb,
       this.timer,
-      featureFlags
+      featureFlags,
     );
     const iosVoiceOverDetector = dependencies.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
-    this.voiceOverExecutor = dependencies.voiceOverExecutor ?? new VoiceOverSwipeExecutor(
-      device,
-      this.executeGesture,
-      IOSCtrlProxyClient.getInstance(device),
-      iosVoiceOverDetector,
-      this.timer,
-      featureFlags
-    );
+    this.voiceOverExecutor =
+      dependencies.voiceOverExecutor ??
+      new VoiceOverSwipeExecutor(
+        device,
+        this.executeGesture,
+        IOSCtrlProxyClient.getInstance(device),
+        iosVoiceOverDetector,
+        this.timer,
+        featureFlags,
+      );
     this.scrollUntilVisible = new ScrollUntilVisible({
       device,
       finder: this.finder,
@@ -125,13 +140,13 @@ export class SwipeOn extends BaseVisualChange {
       getDuration: this.getDuration.bind(this),
       resolveBoomerangConfig: this.resolveBoomerangConfig.bind(this),
       buildPredictionArgs: this.buildPredictionArgs.bind(this),
-      observedInteraction: this.observedInteraction.bind(this)
+      observedInteraction: this.observedInteraction.bind(this),
     });
   }
 
   private createErrorResult(
     error: string,
-    extras: { warning?: string; scrollableCandidates?: ScrollableCandidate[] } = {}
+    extras: { warning?: string; scrollableCandidates?: ScrollableCandidate[] } = {},
   ): SwipeOnResult {
     return {
       success: false,
@@ -143,7 +158,7 @@ export class SwipeOn extends BaseVisualChange {
       y1: 0,
       x2: 0,
       y2: 0,
-      duration: 0
+      duration: 0,
     };
   }
 
@@ -175,10 +190,15 @@ export class SwipeOn extends BaseVisualChange {
         elementId: scrollable["resource-id"],
         text: scrollable.text,
         contentDesc: scrollable["content-desc"],
-        className: scrollable.class
+        className: scrollable.class,
       };
 
-      if (!candidate.elementId && !candidate.text && !candidate.contentDesc && !candidate.className) {
+      if (
+        !candidate.elementId &&
+        !candidate.text &&
+        !candidate.contentDesc &&
+        !candidate.className
+      ) {
         continue;
       }
 
@@ -212,10 +232,12 @@ export class SwipeOn extends BaseVisualChange {
 
     const normalizedOptions: SwipeOnResolvedOptions = {
       ...options,
-      direction: resolvedDirection.direction as SwipeDirection
+      direction: resolvedDirection.direction as SwipeDirection,
     };
 
-    logger.info(`[SwipeOn] execute: direction=${normalizedOptions.direction}, lookFor=${JSON.stringify(normalizedOptions.lookFor)}, container=${JSON.stringify(normalizedOptions.container)}, speed=${normalizedOptions.speed}, autoTarget=${normalizedOptions.autoTarget}`);
+    logger.info(
+      `[SwipeOn] execute: direction=${normalizedOptions.direction}, lookFor=${JSON.stringify(normalizedOptions.lookFor)}, container=${JSON.stringify(normalizedOptions.container)}, speed=${normalizedOptions.speed}, autoTarget=${normalizedOptions.autoTarget}`,
+    );
 
     try {
       // Determine which mode to use
@@ -242,82 +264,92 @@ export class SwipeOn extends BaseVisualChange {
         const autoTargetElement = this.autoTargetSelector.selectAutoTargetScrollable(
           scrollableContext.scrollables,
           screenBounds,
-          normalizedOptions.direction
+          normalizedOptions.direction,
         );
 
         if (!autoTargetElement) {
-          logger.info(`[SwipeOn] Mode: screen swipe (scrollables found but none matched direction=${normalizedOptions.direction})`);
+          logger.info(
+            `[SwipeOn] Mode: screen swipe (scrollables found but none matched direction=${normalizedOptions.direction})`,
+          );
           const result = await this.executeScreenSwipe(normalizedOptions, progress, perf);
           return {
             ...result,
-            warning: "Scrollable containers found but none matched the swipe direction; swiping the screen. Set autoTarget: false to force screen swipes.",
-            scrollableCandidates: scrollableContext.candidates
+            warning:
+              "Scrollable containers found but none matched the swipe direction; swiping the screen. Set autoTarget: false to force screen swipes.",
+            scrollableCandidates: scrollableContext.candidates,
           };
         }
 
         const autoTargetContainer = buildContainerFromElement(autoTargetElement);
         if (!autoTargetContainer) {
-          logger.info(`[SwipeOn] Mode: screen swipe (auto-target element has no usable identifier)`);
+          logger.info(
+            `[SwipeOn] Mode: screen swipe (auto-target element has no usable identifier)`,
+          );
           const result = await this.executeScreenSwipe(normalizedOptions, progress, perf);
           return {
             ...result,
-            warning: "Auto-targeted scrollable container lacks a usable identifier; swiping the screen. Provide container.elementId or container.text to target it explicitly.",
-            scrollableCandidates: scrollableContext.candidates
+            warning:
+              "Auto-targeted scrollable container lacks a usable identifier; swiping the screen. Provide container.elementId or container.text to target it explicitly.",
+            scrollableCandidates: scrollableContext.candidates,
           };
         }
 
-        logger.info(`[SwipeOn] Mode: auto-target element swipe (container=${JSON.stringify(autoTargetContainer)})`);
+        logger.info(
+          `[SwipeOn] Mode: auto-target element swipe (container=${JSON.stringify(autoTargetContainer)})`,
+        );
         const autoTargetResult = await this.executeElementSwipe(
           { ...normalizedOptions, container: autoTargetContainer },
           progress,
-          perf
+          perf,
         );
 
         return {
           ...autoTargetResult,
           warning: this.autoTargetSelector.mergeWarnings(
             autoTargetResult.warning,
-            `Auto-targeted scrollable container (${this.autoTargetSelector.describeContainer(autoTargetContainer)}). Set autoTarget: false to force full-screen swipes.`
+            `Auto-targeted scrollable container (${this.autoTargetSelector.describeContainer(autoTargetContainer)}). Set autoTarget: false to force full-screen swipes.`,
           ),
-          scrollableCandidates: scrollableContext.candidates
+          scrollableCandidates: scrollableContext.candidates,
         };
       } else {
         // Container specified = swipe within container
-        logger.info(`[SwipeOn] Mode: element swipe (explicit container=${JSON.stringify(normalizedOptions.container)})`);
+        logger.info(
+          `[SwipeOn] Mode: element swipe (explicit container=${JSON.stringify(normalizedOptions.container)})`,
+        );
         return await this.executeElementSwipe(normalizedOptions, progress, perf);
       }
     } catch (error) {
       perf.end();
 
       // Build debug context if debug mode is enabled and we have search criteria
-      const debugContext = normalizedOptions.lookFor || normalizedOptions.container
-        ? await buildElementSearchDebugContext(
-          this.device,
-          {
-            text: normalizedOptions.lookFor?.text,
-            resourceId: normalizedOptions.lookFor?.elementId || normalizedOptions.container?.elementId,
-            container: normalizedOptions.container
-          }
-        )
-        : undefined;
+      const debugContext =
+        normalizedOptions.lookFor || normalizedOptions.container
+          ? await buildElementSearchDebugContext(this.device, {
+              text: normalizedOptions.lookFor?.text,
+              resourceId:
+                normalizedOptions.lookFor?.elementId || normalizedOptions.container?.elementId,
+              container: normalizedOptions.container,
+            })
+          : undefined;
 
       // Apply vision fallback for element-related errors
       const baseErrorMessage = errorMessage(error);
       let errorMsg = `Failed to perform swipeOn: ${baseErrorMessage}`;
 
       if (this.visionConfig.enabled && (normalizedOptions.lookFor || normalizedOptions.container)) {
-        let searchCriteria: import("../../../vision/VisionTypes").ElementSearchCriteria | null = null;
+        let searchCriteria: import("../../../vision/VisionTypes").ElementSearchCriteria | null =
+          null;
         if (normalizedOptions.lookFor) {
           searchCriteria = {
             text: normalizedOptions.lookFor.text,
             resourceId: normalizedOptions.lookFor.elementId,
-            description: "Target element to scroll to"
+            description: "Target element to scroll to",
           };
         } else if (normalizedOptions.container) {
           searchCriteria = {
             text: normalizedOptions.container.text,
             resourceId: normalizedOptions.container.elementId,
-            description: "Container element for swiping"
+            description: "Container element for swiping",
           };
         }
 
@@ -331,7 +363,7 @@ export class SwipeOn extends BaseVisualChange {
             this.visionConfig,
             errorMsg,
             undefined,
-            this.visionAnalyzer
+            this.visionAnalyzer,
           );
         }
       }
@@ -345,7 +377,7 @@ export class SwipeOn extends BaseVisualChange {
         x2: 0,
         y2: 0,
         duration: 0,
-        ...(debugContext ? { debug: { elementSearch: debugContext } } : {})
+        ...(debugContext ? { debug: { elementSearch: debugContext } } : {}),
       };
     }
   }
@@ -353,7 +385,9 @@ export class SwipeOn extends BaseVisualChange {
   private validateOptions(options: SwipeOnOptions): string | null {
     // Validate container if specified
     if (options.container) {
-      const containerFieldCount = [options.container.elementId, options.container.text].filter(Boolean).length;
+      const containerFieldCount = [options.container.elementId, options.container.text].filter(
+        Boolean,
+      ).length;
       if (containerFieldCount === 0) {
         return "container must specify exactly one of elementId or text";
       }
@@ -364,7 +398,9 @@ export class SwipeOn extends BaseVisualChange {
 
     // If lookFor is specified, validate it
     if (options.lookFor) {
-      const lookForFieldCount = [options.lookFor.elementId, options.lookFor.text].filter(Boolean).length;
+      const lookForFieldCount = [options.lookFor.elementId, options.lookFor.text].filter(
+        Boolean,
+      ).length;
       if (lookForFieldCount !== 1) {
         return "lookFor must specify exactly one of elementId or text";
       }
@@ -374,7 +410,10 @@ export class SwipeOn extends BaseVisualChange {
       return "boomerang cannot be used with lookFor";
     }
 
-    if (!options.boomerang && (options.apexPause !== undefined || options.returnSpeed !== undefined)) {
+    if (
+      !options.boomerang &&
+      (options.apexPause !== undefined || options.returnSpeed !== undefined)
+    ) {
       return "apexPause/returnSpeed require boomerang=true";
     }
 
@@ -400,14 +439,14 @@ export class SwipeOn extends BaseVisualChange {
       boomerang: options.boomerang,
       apexPause: options.apexPause,
       returnSpeed: options.returnSpeed,
-      platform: this.device.platform
+      platform: this.device.platform,
     };
   }
 
   private async executeScreenSwipe(
     options: SwipeOnResolvedOptions,
     progress?: ProgressCallback,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<SwipeOnResult> {
     logger.info(`[SwipeOn] Starting screen swipe: direction=${options.direction}`);
 
@@ -417,50 +456,54 @@ export class SwipeOn extends BaseVisualChange {
           throw new ActionableError("Could not determine screen size");
         }
 
-        const bounds = getScreenBounds(observeResult.screenSize, observeResult.systemInsets, options.includeSystemInsets === true);
+        const bounds = getScreenBounds(
+          observeResult.screenSize,
+          observeResult.systemInsets,
+          options.includeSystemInsets === true,
+        );
 
         const { startX, startY, endX, endY } = this.geometry.getSwipeWithinBounds(
           options.direction,
-          bounds
+          bounds,
         );
 
         const duration = this.getDuration(options);
         const boomerang = this.resolveBoomerangConfig(options);
         const gestureOptions: GestureOptions = {
           duration,
-          scrollMode: options.scrollMode
+          scrollMode: options.scrollMode,
         };
 
         const swipeResult = await perf.track("executeScreenSwipe", () =>
           this.device.platform === "ios"
             ? this.voiceOverExecutor.executeSwipeGesture(
-              Math.floor(startX),
-              Math.floor(startY),
-              Math.floor(endX),
-              Math.floor(endY),
-              options.direction,
-              null, // No container for screen swipe
-              gestureOptions,
-              perf,
-              boomerang
-            )
+                Math.floor(startX),
+                Math.floor(startY),
+                Math.floor(endX),
+                Math.floor(endY),
+                options.direction,
+                null, // No container for screen swipe
+                gestureOptions,
+                perf,
+                boomerang,
+              )
             : this.talkBackExecutor.executeSwipeGesture(
-              Math.floor(startX),
-              Math.floor(startY),
-              Math.floor(endX),
-              Math.floor(endY),
-              options.direction,
-              null, // No container for screen swipe
-              gestureOptions,
-              perf,
-              boomerang
-            )
+                Math.floor(startX),
+                Math.floor(startY),
+                Math.floor(endX),
+                Math.floor(endY),
+                options.direction,
+                null, // No container for screen swipe
+                gestureOptions,
+                perf,
+                boomerang,
+              ),
         );
 
         perf.end();
         return {
           ...swipeResult,
-          targetType: "screen" as const
+          targetType: "screen" as const,
         };
       },
       {
@@ -470,18 +513,20 @@ export class SwipeOn extends BaseVisualChange {
         perf,
         predictionContext: {
           toolName: "swipeOn",
-          toolArgs: this.buildPredictionArgs(options)
-        }
-      }
+          toolArgs: this.buildPredictionArgs(options),
+        },
+      },
     );
   }
 
   private async executeElementSwipe(
     options: SwipeOnResolvedOptions,
     progress?: ProgressCallback,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<SwipeOnResult> {
-    logger.info(`[SwipeOn] Starting element swipe: direction=${options.direction}, container=${JSON.stringify(options.container)}`);
+    logger.info(
+      `[SwipeOn] Starting element swipe: direction=${options.direction}, container=${JSON.stringify(options.container)}`,
+    );
 
     return this.observedInteraction(
       async (observeResult: ObserveResult) => {
@@ -492,47 +537,47 @@ export class SwipeOn extends BaseVisualChange {
 
         // Find the container element
         const element = await perf.track("findElement", () =>
-          this.scrollUntilVisible.findTargetElement(options, viewHierarchy)
+          this.scrollUntilVisible.findTargetElement(options, viewHierarchy),
         );
 
         const { startX, startY, endX, endY, warning } = this.resolveContainerSwipeCoordinates(
           options,
           viewHierarchy,
           element,
-          observeResult
+          observeResult,
         );
 
         const duration = this.getDuration(options);
         const boomerang = this.resolveBoomerangConfig(options);
         const gestureOptions: GestureOptions = {
           duration,
-          scrollMode: options.scrollMode
+          scrollMode: options.scrollMode,
         };
 
         const swipeResult = await perf.track("executeElementSwipe", () =>
           this.device.platform === "ios"
             ? this.voiceOverExecutor.executeSwipeGesture(
-              Math.floor(startX),
-              Math.floor(startY),
-              Math.floor(endX),
-              Math.floor(endY),
-              options.direction,
-              element ?? null, // Use the container element
-              gestureOptions,
-              perf,
-              boomerang
-            )
+                Math.floor(startX),
+                Math.floor(startY),
+                Math.floor(endX),
+                Math.floor(endY),
+                options.direction,
+                element ?? null, // Use the container element
+                gestureOptions,
+                perf,
+                boomerang,
+              )
             : this.talkBackExecutor.executeSwipeGesture(
-              Math.floor(startX),
-              Math.floor(startY),
-              Math.floor(endX),
-              Math.floor(endY),
-              options.direction,
-              element, // Use the container element
-              gestureOptions,
-              perf,
-              boomerang
-            )
+                Math.floor(startX),
+                Math.floor(startY),
+                Math.floor(endX),
+                Math.floor(endY),
+                options.direction,
+                element, // Use the container element
+                gestureOptions,
+                perf,
+                boomerang,
+              ),
         );
 
         perf.end();
@@ -540,14 +585,14 @@ export class SwipeOn extends BaseVisualChange {
           ...swipeResult,
           targetType: "element" as const,
           element,
-          warning
+          warning,
         };
       },
       {
         queryOptions: {
           text: options.container?.text,
           elementId: options.container?.elementId,
-          containerElementId: undefined // No nested container restriction
+          containerElementId: undefined, // No nested container restriction
         },
         changeExpected: false,
         timeoutMs: 500,
@@ -555,9 +600,9 @@ export class SwipeOn extends BaseVisualChange {
         perf,
         predictionContext: {
           toolName: "swipeOn",
-          toolArgs: this.buildPredictionArgs(options)
-        }
-      }
+          toolArgs: this.buildPredictionArgs(options),
+        },
+      },
     );
   }
 
@@ -565,11 +610,15 @@ export class SwipeOn extends BaseVisualChange {
     options: SwipeOnResolvedOptions,
     viewHierarchy: ViewHierarchyResult,
     containerElement: Element,
-    observeResult: ObserveResult
+    observeResult: ObserveResult,
   ): { startX: number; startY: number; endX: number; endY: number; warning?: string } {
     return resolveContainerSwipeCoordinates(
-      this.geometry, this.overlayDetector,
-      options, viewHierarchy, containerElement, observeResult
+      this.geometry,
+      this.overlayDetector,
+      options,
+      viewHierarchy,
+      containerElement,
+      observeResult,
     );
   }
 
@@ -588,7 +637,7 @@ export class SwipeOn extends BaseVisualChange {
 
     return {
       apexPauseMs: options.apexPause ?? SwipeOn.DEFAULT_APEX_PAUSE_MS,
-      returnSpeed: options.returnSpeed ?? SwipeOn.DEFAULT_RETURN_SPEED
+      returnSpeed: options.returnSpeed ?? SwipeOn.DEFAULT_RETURN_SPEED,
     };
   }
 }

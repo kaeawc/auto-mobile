@@ -14,7 +14,7 @@ export class PerceptualHasher {
    */
   static async generatePerceptualHash(
     buffer: Buffer,
-    backend: ImageBackend = resolveImageBackend()
+    backend: ImageBackend = resolveImageBackend(),
   ): Promise<string> {
     try {
       // Decode once to raw RGBA, then reproduce the former jimp pipeline in place:
@@ -35,9 +35,7 @@ export class PerceptualHasher {
           // ITU Rec 709 luminance, truncated exactly as jimp's greyscale does when
           // it writes the float back into a Uint8 buffer (trunc-toward-zero).
           const grey = Math.trunc(
-            0.2126 * raw.data[idx] +
-            0.7152 * raw.data[idx + 1] +
-            0.0722 * raw.data[idx + 2]
+            0.2126 * raw.data[idx] + 0.7152 * raw.data[idx + 1] + 0.0722 * raw.data[idx + 2],
           );
           greys[row * HASH_SIZE + col] = grey;
           sum += grey;

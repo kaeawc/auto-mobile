@@ -47,8 +47,8 @@ export function runRule(rule: PluginRule, code: string, filename = "fixture.ts")
     id: "auto-mobile/test",
     report(diagnostic) {
       const text = diagnostic.messageId
-        ? rule.meta?.messages?.[diagnostic.messageId] ?? diagnostic.messageId
-        : diagnostic.message ?? "";
+        ? (rule.meta?.messages?.[diagnostic.messageId] ?? diagnostic.messageId)
+        : (diagnostic.message ?? "");
       messages.push(text);
     },
   };

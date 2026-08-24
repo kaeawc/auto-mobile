@@ -48,7 +48,8 @@ export function isIosSimulatorUdid(deviceId: string): boolean {
 /** True when the deviceId looks like a physical iOS device UDID (either generation). */
 export function isIosPhysicalUdid(deviceId: string): boolean {
   return (
-    IOS_PHYSICAL_UDID_MODERN_PATTERN.test(deviceId) || IOS_PHYSICAL_UDID_LEGACY_PATTERN.test(deviceId)
+    IOS_PHYSICAL_UDID_MODERN_PATTERN.test(deviceId) ||
+    IOS_PHYSICAL_UDID_LEGACY_PATTERN.test(deviceId)
   );
 }
 

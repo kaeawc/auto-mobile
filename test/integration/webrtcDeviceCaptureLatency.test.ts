@@ -37,7 +37,7 @@ function indexOfRequired(source: string, needle: string): number {
 describe("#4343 device capture latency instrumentation", () => {
   test("marks every capture-to-browser stage, in pipeline order", () => {
     const source = withoutComments(read(INTEGRATION_TEST_PATH));
-    const positions = CAPTURE_STAGES.map(stage => source.indexOf(`timeline.mark("${stage}")`));
+    const positions = CAPTURE_STAGES.map((stage) => source.indexOf(`timeline.mark("${stage}")`));
 
     for (const [index, position] of positions.entries()) {
       expect(`${CAPTURE_STAGES[index]}:${position >= 0}`).toBe(`${CAPTURE_STAGES[index]}:true`);
@@ -54,7 +54,7 @@ describe("#4343 device capture latency instrumentation", () => {
     // capture begins, so the start response cannot stand in for it.
     expect(source).toContain("sourceStarted === true");
     expect(indexOfRequired(source, 'timeline.mark("sourceStarted")')).toBeLessThan(
-      indexOfRequired(source, 'action: "start"')
+      indexOfRequired(source, 'action: "start"'),
     );
   });
 
@@ -67,7 +67,9 @@ describe("#4343 device capture latency instrumentation", () => {
     // declaration (which itself contains `start(chromeBinary()`) sits at the
     // top of the file and would satisfy any ordering check vacuously.
     const startRequestIndex = indexOfRequired(source, 'timeline.mark("startRequest")');
-    expect(indexOfRequired(source, "({ chrome, cdp } = await launchChromeReader(")).toBeLessThan(startRequestIndex);
+    expect(indexOfRequired(source, "({ chrome, cdp } = await launchChromeReader(")).toBeLessThan(
+      startRequestIndex,
+    );
   });
 
   test("writes the latency record from afterAll so a timed-out run still reports", () => {
@@ -97,9 +99,9 @@ describe("#4343 device capture latency instrumentation", () => {
 
     expect(assertions.length).toBeGreaterThan(0);
     expect(
-      assertions.filter(assertion =>
-        /timeline|record|elapsedMs|deltaMs|captureToBrowserMs|latency/.test(assertion)
-      )
+      assertions.filter((assertion) =>
+        /timeline|record|elapsedMs|deltaMs|captureToBrowserMs|latency/.test(assertion),
+      ),
     ).toEqual([]);
   });
 
@@ -203,7 +205,7 @@ describe("#4343 device capture latency instrumentation", () => {
     const integration = read(INTEGRATION_TEST_PATH);
     const encoder = read("src/features/webrtc/PersistentEncoderH264Source.ts");
     const preset = read(
-      "android/video-server/src/main/kotlin/dev/jasonpearson/automobile/video/QualityPreset.kt"
+      "android/video-server/src/main/kotlin/dev/jasonpearson/automobile/video/QualityPreset.kt",
     );
 
     // The lane runs the persistent encoder, which sends `--quality medium`.

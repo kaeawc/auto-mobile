@@ -3,17 +3,20 @@ import { MemoryAudit } from "../../../src/features/memory/MemoryAudit";
 import type { MemoryMetrics } from "../../../src/features/memory/MemoryMetricsCollector";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
-describe("MemoryAudit - Unit Tests", function() {
+describe("MemoryAudit - Unit Tests", function () {
   let audit: MemoryAudit;
 
-  beforeEach(function() {
+  beforeEach(function () {
     // Use FakeAdbClientFactory to avoid starting real adb daemon
     const fakeAdbFactory = new FakeAdbClientFactory();
-    audit = new MemoryAudit({ deviceId: "test-device", name: "test", platform: "android" }, fakeAdbFactory);
+    audit = new MemoryAudit(
+      { deviceId: "test-device", name: "test", platform: "android" },
+      fakeAdbFactory,
+    );
   });
 
-  describe("validateMetrics", function() {
-    test("should pass when all metrics are within thresholds", function() {
+  describe("validateMetrics", function () {
+    test("should pass when all metrics are within thresholds", function () {
       const metrics: MemoryMetrics = {
         preSnapshot: {
           javaHeapMb: 50,
@@ -55,7 +58,7 @@ describe("MemoryAudit - Unit Tests", function() {
       expect(violations.length).toBe(0);
     });
 
-    test("should detect Java heap growth violation", function() {
+    test("should detect Java heap growth violation", function () {
       const metrics: MemoryMetrics = {
         preSnapshot: {
           javaHeapMb: 50,
@@ -102,7 +105,7 @@ describe("MemoryAudit - Unit Tests", function() {
       expect(heapViolation.severity).toBe("critical"); // 100 > 50 * 1.5
     });
 
-    test("should detect native heap growth violation", function() {
+    test("should detect native heap growth violation", function () {
       const metrics: MemoryMetrics = {
         preSnapshot: {
           javaHeapMb: 50,
@@ -149,7 +152,7 @@ describe("MemoryAudit - Unit Tests", function() {
       expect(nativeViolation.severity).toBe("critical"); // 70 > 30 * 1.5
     });
 
-    test("should detect GC count violation", function() {
+    test("should detect GC count violation", function () {
       const metrics: MemoryMetrics = {
         preSnapshot: {
           javaHeapMb: 50,
@@ -196,7 +199,7 @@ describe("MemoryAudit - Unit Tests", function() {
       expect(gcViolation.severity).toBe("critical"); // 25 > 10 * 2
     });
 
-    test("should detect unreachable objects violation", function() {
+    test("should detect unreachable objects violation", function () {
       const metrics: MemoryMetrics = {
         preSnapshot: {
           javaHeapMb: 50,
@@ -244,7 +247,7 @@ describe("MemoryAudit - Unit Tests", function() {
       expect(unreachableViolation.contributionWeight).toBe(0.95); // High weight for leak indicator
     });
 
-    test("should detect baseline anomaly when current exceeds 2x baseline", function() {
+    test("should detect baseline anomaly when current exceeds 2x baseline", function () {
       const metrics: MemoryMetrics = {
         preSnapshot: {
           javaHeapMb: 50,
@@ -302,8 +305,8 @@ describe("MemoryAudit - Unit Tests", function() {
     });
   });
 
-  describe("generateDiagnostics", function() {
-    test("should generate diagnostics with top contributors", function() {
+  describe("generateDiagnostics", function () {
+    test("should generate diagnostics with top contributors", function () {
       const metrics: MemoryMetrics = {
         preSnapshot: {
           javaHeapMb: 50,
@@ -336,9 +339,27 @@ describe("MemoryAudit - Unit Tests", function() {
       };
 
       const violations = [
-        { metric: "javaHeapGrowth", threshold: 50, actual: 100, severity: "critical" as const, contributionWeight: 0.9 },
-        { metric: "nativeHeapGrowth", threshold: 30, actual: 70, severity: "critical" as const, contributionWeight: 0.85 },
-        { metric: "gcCount", threshold: 10, actual: 2, severity: "warning" as const, contributionWeight: 0.3 },
+        {
+          metric: "javaHeapGrowth",
+          threshold: 50,
+          actual: 100,
+          severity: "critical" as const,
+          contributionWeight: 0.9,
+        },
+        {
+          metric: "nativeHeapGrowth",
+          threshold: 30,
+          actual: 70,
+          severity: "critical" as const,
+          contributionWeight: 0.85,
+        },
+        {
+          metric: "gcCount",
+          threshold: 10,
+          actual: 2,
+          severity: "warning" as const,
+          contributionWeight: 0.3,
+        },
       ];
 
       const diagnostics = (audit as any).generateDiagnostics(metrics, violations);
@@ -365,14 +386,26 @@ describe("MemoryAudit - Unit Tests", function() {
       expect(diagnostics).toContain("Count: 500");
     });
 
-    test("renders a non-empty Top contributors section for anomaly-only violations", function() {
+    test("renders a non-empty Top contributors section for anomaly-only violations", function () {
       // javaHeapAnomaly (0.5) and gcCountAnomaly (0.4) are the weights assigned by
       // MemoryAudit.validateMetrics for baseline anomalies. Neither cleared the old
       // `> 0.5` filter, so a baseline-anomaly-only audit rendered an empty section
       // (same defect class as issue #4167).
       const metrics: MemoryMetrics = {
-        preSnapshot: { javaHeapMb: 50, nativeHeapMb: 30, totalPssMb: 100, timestamp: Date.now(), raw: "" },
-        postSnapshot: { javaHeapMb: 65, nativeHeapMb: 32, totalPssMb: 115, timestamp: Date.now(), raw: "" },
+        preSnapshot: {
+          javaHeapMb: 50,
+          nativeHeapMb: 30,
+          totalPssMb: 100,
+          timestamp: Date.now(),
+          raw: "",
+        },
+        postSnapshot: {
+          javaHeapMb: 65,
+          nativeHeapMb: 32,
+          totalPssMb: 115,
+          timestamp: Date.now(),
+          raw: "",
+        },
         javaHeapGrowthMb: 15,
         nativeHeapGrowthMb: 2,
         totalPssGrowthMb: 15,
@@ -382,8 +415,20 @@ describe("MemoryAudit - Unit Tests", function() {
       };
 
       const violations = [
-        { metric: "javaHeapAnomaly", threshold: 40, actual: 65, severity: "warning" as const, contributionWeight: 0.5 },
-        { metric: "gcCountAnomaly", threshold: 2, actual: 3, severity: "warning" as const, contributionWeight: 0.4 },
+        {
+          metric: "javaHeapAnomaly",
+          threshold: 40,
+          actual: 65,
+          severity: "warning" as const,
+          contributionWeight: 0.5,
+        },
+        {
+          metric: "gcCountAnomaly",
+          threshold: 2,
+          actual: 3,
+          severity: "warning" as const,
+          contributionWeight: 0.4,
+        },
       ];
 
       const diagnostics = (audit as any).generateDiagnostics(metrics, violations);
@@ -395,7 +440,7 @@ describe("MemoryAudit - Unit Tests", function() {
       ]);
     });
 
-    test("should return no issues message when no violations", function() {
+    test("should return no issues message when no violations", function () {
       const metrics: MemoryMetrics = {
         preSnapshot: {
           javaHeapMb: 50,

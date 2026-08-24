@@ -73,7 +73,7 @@ export class BaselineManager {
     } catch (error) {
       logger.warn(
         `[BaselineManager] Corrupt violations_json for screen "${screenId}"; ignoring baseline row`,
-        error
+        error,
       );
       return null;
     }
@@ -94,11 +94,11 @@ export class BaselineManager {
         violations_json: violationsJson,
         updated_at: now,
       })
-      .onConflict(oc =>
+      .onConflict((oc) =>
         oc.column("screen_id").doUpdateSet({
           violations_json: violationsJson,
           updated_at: now,
-        })
+        }),
       )
       .execute();
   }
@@ -109,10 +109,7 @@ export class BaselineManager {
   async clearBaseline(screenId: string): Promise<void> {
     const db = this.db;
 
-    await db
-      .deleteFrom("accessibility_baselines")
-      .where("screen_id", "=", screenId)
-      .execute();
+    await db.deleteFrom("accessibility_baselines").where("screen_id", "=", screenId).execute();
   }
 
   /**
@@ -121,10 +118,7 @@ export class BaselineManager {
   async listBaselines(): Promise<BaselineData[]> {
     const db = this.db;
 
-    const results = await db
-      .selectFrom("accessibility_baselines")
-      .selectAll()
-      .execute();
+    const results = await db.selectFrom("accessibility_baselines").selectAll().execute();
 
     const baselines: BaselineData[] = [];
     for (const row of results) {

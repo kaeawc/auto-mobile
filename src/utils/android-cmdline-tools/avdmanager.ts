@@ -95,7 +95,9 @@ export async function installSystemImage(
   dependencies = createDefaultDependencies(),
 ): Promise<{ success: boolean; message: string }> {
   try {
-    const result = await createSdkManagerClient(dependencies).installPackage(packageName, { acceptLicenses: acceptLicense });
+    const result = await createSdkManagerClient(dependencies).installPackage(packageName, {
+      acceptLicenses: acceptLicense,
+    });
     if (result.exitCode === 0) {
       return { success: true, message: `System image ${packageName} installed successfully` };
     }
@@ -108,7 +110,9 @@ export async function installSystemImage(
 }
 
 /** List AVDs through the dedicated avdmanager boundary. */
-export async function listDeviceImages(dependencies = createDefaultDependencies()): Promise<AvdInfo[]> {
+export async function listDeviceImages(
+  dependencies = createDefaultDependencies(),
+): Promise<AvdInfo[]> {
   return createAvdManagerClient(dependencies).listDeviceImages();
 }
 
@@ -131,7 +135,9 @@ export async function deleteAvd(
 }
 
 /** List device profiles through the dedicated avdmanager boundary. */
-export async function listDevices(dependencies = createDefaultDependencies()): Promise<DeviceProfile[]> {
+export async function listDevices(
+  dependencies = createDefaultDependencies(),
+): Promise<DeviceProfile[]> {
   return createAvdManagerClient(dependencies).listDevices();
 }
 
@@ -154,14 +160,27 @@ export function parseSystemImages(
   let currentSection: SdkManagerSection | null = null;
   for (const line of output.split("\n")) {
     const trimmedLine = line.trim();
-    if (trimmedLine.includes("Available Packages:")) {currentSection = "available"; continue;}
-    if (trimmedLine.includes("Installed packages:")) {currentSection = "installed"; continue;}
-    if (trimmedLine.includes("Available Updates:")) {currentSection = null; continue;}
-    if (currentSection !== section || !trimmedLine.startsWith("system-images;")) {continue;}
+    if (trimmedLine.includes("Available Packages:")) {
+      currentSection = "available";
+      continue;
+    }
+    if (trimmedLine.includes("Installed packages:")) {
+      currentSection = "installed";
+      continue;
+    }
+    if (trimmedLine.includes("Available Updates:")) {
+      currentSection = null;
+      continue;
+    }
+    if (currentSection !== section || !trimmedLine.startsWith("system-images;")) {
+      continue;
+    }
     const parts = trimmedLine.split(/\s+/);
     const packageName = parts[0].split("|")[0];
     const packageParts = packageName.split(";");
-    if (packageParts.length < 4) {continue;}
+    if (packageParts.length < 4) {
+      continue;
+    }
     const image: SystemImage = {
       packageName,
       apiLevel: Number.parseInt(packageParts[1].replace("android-", ""), 10),
@@ -169,23 +188,55 @@ export function parseSystemImages(
       abi: packageParts[3],
       versionInfo: parts.slice(1).join(" "),
     };
-    if (!filter || matchesFilter(image, filter)) {images.push(image);}
+    if (!filter || matchesFilter(image, filter)) {
+      images.push(image);
+    }
   }
   return images;
 }
 
 function matchesFilter(image: SystemImage, filter: SystemImageFilter): boolean {
-  return (!filter.apiLevel || image.apiLevel === filter.apiLevel) &&
+  return (
+    (!filter.apiLevel || image.apiLevel === filter.apiLevel) &&
     (!filter.tag || image.tag === filter.tag) &&
-    (!filter.abi || image.abi === filter.abi);
+    (!filter.abi || image.abi === filter.abi)
+  );
 }
 
-export interface SystemImageFilter { apiLevel?: number; tag?: string; abi?: string; }
+export interface SystemImageFilter {
+  apiLevel?: number;
+  tag?: string;
+  abi?: string;
+}
 export type SdkManagerSection = "available" | "installed";
-export interface SystemImage { packageName: string; apiLevel: number; tag: string; abi: string; versionInfo: string; }
-export interface CreateAvdParams { name: string; package: string; device?: string; force?: boolean; path?: string; tag?: string; abi?: string; }
-export interface AvdInfo { name: string; path?: string; target?: string; basedOn?: string; error?: string; }
-export interface DeviceProfile { id: string; name?: string; oem?: string; }
+export interface SystemImage {
+  packageName: string;
+  apiLevel: number;
+  tag: string;
+  abi: string;
+  versionInfo: string;
+}
+export interface CreateAvdParams {
+  name: string;
+  package: string;
+  device?: string;
+  force?: boolean;
+  path?: string;
+  tag?: string;
+  abi?: string;
+}
+export interface AvdInfo {
+  name: string;
+  path?: string;
+  target?: string;
+  basedOn?: string;
+  error?: string;
+}
+export interface DeviceProfile {
+  id: string;
+  name?: string;
+  oem?: string;
+}
 
 export const COMMON_SYSTEM_IMAGES = {
   API_35: {

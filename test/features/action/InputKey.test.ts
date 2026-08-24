@@ -28,7 +28,12 @@ describe("InputKey", () => {
     const fakeAdb = new FakeAdbExecutor();
     // Inject a FakeTimer so `now()` is constant: with the real timer, a 1ms tick between the two
     // `timer.now()` calls in press() intermittently made the forwarded timeout 1233 not 1234 (#4696).
-    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb), undefined, new FakeTimer());
+    const inputKey = new InputKey(
+      androidDevice,
+      createAdbFactory(fakeAdb),
+      undefined,
+      new FakeTimer(),
+    );
 
     const result = await inputKey.press("enter", 1234);
 
@@ -88,7 +93,12 @@ describe("InputKey", () => {
         error: "Stale frame context for input/key; observe a fresh frame before retrying",
       }),
     };
-    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb), validator, new FakeTimer());
+    const inputKey = new InputKey(
+      androidDevice,
+      createAdbFactory(fakeAdb),
+      validator,
+      new FakeTimer(),
+    );
 
     const result = await inputKey.press("enter", 1234, "epoch:2");
 
@@ -110,7 +120,12 @@ describe("InputKey", () => {
         return { success: true };
       },
     };
-    const inputKey = new InputKey(androidDevice, createAdbFactory(fakeAdb), validator, new FakeTimer());
+    const inputKey = new InputKey(
+      androidDevice,
+      createAdbFactory(fakeAdb),
+      validator,
+      new FakeTimer(),
+    );
 
     await inputKey.press("tab", 1234, "epoch:3");
 

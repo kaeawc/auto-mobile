@@ -1,10 +1,14 @@
 import { describe, test } from "bun:test";
 import fc from "fast-check";
-import type { FocusAnchor, NormalizedRegion, ObserveScopeInput } from "../../../../src/models/ObserveScope";
+import type {
+  FocusAnchor,
+  NormalizedRegion,
+  ObserveScopeInput,
+} from "../../../../src/models/ObserveScope";
 import {
   buildObserveScopeConfig,
   readBounds,
-  type ObserveScopeFlags
+  type ObserveScopeFlags,
 } from "../../../../src/features/observe/output/ObserveScopeExperiments";
 
 // Property-based tests. See test/utils/Backoff.property.test.ts for the pinned-seed rationale.
@@ -19,9 +23,15 @@ describe("readBounds (property-based)", () => {
     fc.assert(
       fc.property(coord, coord, coord, coord, (l, t, r, b) => {
         const parsed = readBounds([l, t, r, b]);
-        return parsed !== null && parsed.left === l && parsed.top === t && parsed.right === r && parsed.bottom === b;
+        return (
+          parsed !== null &&
+          parsed.left === l &&
+          parsed.top === t &&
+          parsed.right === r &&
+          parsed.bottom === b
+        );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -31,31 +41,36 @@ describe("readBounds (property-based)", () => {
         const fromObject = readBounds({ left: l, top: t, right: r, bottom: b });
         const fromTuple = readBounds([l, t, r, b]);
         return (
-          fromObject !== null && fromTuple !== null &&
-          fromObject.left === fromTuple.left && fromObject.top === fromTuple.top &&
-          fromObject.right === fromTuple.right && fromObject.bottom === fromTuple.bottom
+          fromObject !== null &&
+          fromTuple !== null &&
+          fromObject.left === fromTuple.left &&
+          fromObject.top === fromTuple.top &&
+          fromObject.right === fromTuple.right &&
+          fromObject.bottom === fromTuple.bottom
         );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("never throws — returns null or a fully numeric bounds — for arbitrary input", () => {
     fc.assert(
-      fc.property(fc.anything(), value => {
+      fc.property(fc.anything(), (value) => {
         const parsed = readBounds(value);
         return (
           parsed === null ||
-          (isNumberField(parsed.left) && isNumberField(parsed.top) &&
-            isNumberField(parsed.right) && isNumberField(parsed.bottom))
+          (isNumberField(parsed.left) &&
+            isNumberField(parsed.top) &&
+            isNumberField(parsed.right) &&
+            isNumberField(parsed.bottom))
         );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("rejects arrays that are not exactly four numbers", () => {
-    const wrongLength = fc.array(coord, { maxLength: 8 }).filter(a => a.length !== 4);
+    const wrongLength = fc.array(coord, { maxLength: 8 }).filter((a) => a.length !== 4);
     const nonNumberInTuple = fc
       .tuple(coord, coord, coord, coord, fc.integer({ min: 0, max: 3 }))
       .map(([a, b, c, d, idx]) => {
@@ -64,14 +79,19 @@ describe("readBounds (property-based)", () => {
         return arr;
       });
     fc.assert(
-      fc.property(fc.oneof(wrongLength, nonNumberInTuple), value => readBounds(value) === null),
-      RUN_OPTIONS
+      fc.property(fc.oneof(wrongLength, nonNumberInTuple), (value) => readBounds(value) === null),
+      RUN_OPTIONS,
     );
   });
 
   test("rejects primitives and objects missing a numeric field", () => {
     const missingField = fc
-      .tuple(fc.integer(), fc.integer(), fc.integer(), fc.constantFrom("left", "top", "right", "bottom"))
+      .tuple(
+        fc.integer(),
+        fc.integer(),
+        fc.integer(),
+        fc.constantFrom("left", "top", "right", "bottom"),
+      )
       .map(([l, t, r, drop]) => {
         const obj: Record<string, unknown> = { left: l, top: t, right: r, bottom: l };
         delete obj[drop];
@@ -79,8 +99,8 @@ describe("readBounds (property-based)", () => {
       });
     const primitive = fc.oneof(fc.string(), fc.integer(), fc.boolean(), fc.constant(null));
     fc.assert(
-      fc.property(fc.oneof(missingField, primitive), value => readBounds(value) === null),
-      RUN_OPTIONS
+      fc.property(fc.oneof(missingField, primitive), (value) => readBounds(value) === null),
+      RUN_OPTIONS,
     );
   });
 });
@@ -88,29 +108,38 @@ describe("readBounds (property-based)", () => {
 const flags: fc.Arbitrary<ObserveScopeFlags> = fc.record({
   focus: fc.boolean(),
   overview: fc.boolean(),
-  region: fc.boolean()
+  region: fc.boolean(),
 });
 
 const focusAnchor: fc.Arbitrary<FocusAnchor> = fc.record(
-  { resourceId: fc.option(fc.string(), { nil: undefined }), text: fc.option(fc.string(), { nil: undefined }) },
-  { requiredKeys: [] }
+  {
+    resourceId: fc.option(fc.string(), { nil: undefined }),
+    text: fc.option(fc.string(), { nil: undefined }),
+  },
+  { requiredKeys: [] },
 );
 const unit = fc.double({ min: 0, max: 1, noNaN: true });
-const region: fc.Arbitrary<NormalizedRegion> = fc.record({ x1: unit, y1: unit, x2: unit, y2: unit });
+const region: fc.Arbitrary<NormalizedRegion> = fc.record({
+  x1: unit,
+  y1: unit,
+  x2: unit,
+  y2: unit,
+});
 
 const scope: fc.Arbitrary<ObserveScopeInput | undefined> = fc.option(
   fc.record(
     {
       focus: fc.oneof(fc.boolean(), focusAnchor),
       region: fc.oneof(fc.boolean(), region),
-      overview: fc.boolean()
+      overview: fc.boolean(),
     },
-    { requiredKeys: [] }
+    { requiredKeys: [] },
   ),
-  { nil: undefined }
+  { nil: undefined },
 );
 
-const requested = (dim: boolean | object | undefined): boolean => dim !== undefined && dim !== false;
+const requested = (dim: boolean | object | undefined): boolean =>
+  dim !== undefined && dim !== false;
 
 describe("buildObserveScopeConfig (property-based)", () => {
   test("each dimension is on iff its flag is enabled AND the call requested it", () => {
@@ -123,17 +152,20 @@ describe("buildObserveScopeConfig (property-based)", () => {
           cfg.overview === (f.overview && s?.overview === true)
         );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("a disabled flag forces its dimension off regardless of the request", () => {
     fc.assert(
       fc.property(flags, scope, (f, s) => {
-        const cfg = buildObserveScopeConfig({ ...f, focus: false, region: false, overview: false }, s);
+        const cfg = buildObserveScopeConfig(
+          { ...f, focus: false, region: false, overview: false },
+          s,
+        );
         return cfg.focus === false && cfg.region === false && cfg.overview === false;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -141,9 +173,11 @@ describe("buildObserveScopeConfig (property-based)", () => {
     fc.assert(
       fc.property(flags, scope, (f, s) => {
         const cfg = buildObserveScopeConfig(f, s);
-        return (!cfg.focus || f.focus) && (!cfg.region || f.region) && (!cfg.overview || f.overview);
+        return (
+          (!cfg.focus || f.focus) && (!cfg.region || f.region) && (!cfg.overview || f.overview)
+        );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -155,7 +189,7 @@ describe("buildObserveScopeConfig (property-based)", () => {
         const expectedBox = s && typeof s.region === "object" ? s.region : undefined;
         return cfg.focusAnchor === expectedAnchor && cfg.regionBox === expectedBox;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

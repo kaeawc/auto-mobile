@@ -1,4 +1,10 @@
-import { UIState, SelectedElement, SelectedElementDetection, ScrollPosition, ModalState } from "../../utils/interfaces/NavigationGraph";
+import {
+  UIState,
+  SelectedElement,
+  SelectedElementDetection,
+  ScrollPosition,
+  ModalState,
+} from "../../utils/interfaces/NavigationGraph";
 import { ObserveResult, ViewHierarchyResult } from "../../models";
 import { SwipeOnOptions } from "../../models";
 import { resolveSwipeDirection } from "../../utils/swipeOnUtils";
@@ -27,7 +33,7 @@ export class UIStateExtractor {
     const selectedElements: SelectedElement[] = [];
     let destinationId: string | undefined;
     const modalStack: ModalState[] = [];
-    const windowsWithHierarchy = viewHierarchy.windows?.filter(window => window.hierarchy) ?? [];
+    const windowsWithHierarchy = viewHierarchy.windows?.filter((window) => window.hierarchy) ?? [];
 
     // Traverse the hierarchy to find selected elements and destination
     this.parser.traverseNode(viewHierarchy.hierarchy, (node, depth) => {
@@ -35,7 +41,11 @@ export class UIStateExtractor {
 
       // Check for destination ID (resource-id like "navigation.HomeDestination")
       const resourceId = this.getAttribute(attrs, ["resource-id", "resourceId"]);
-      if (resourceId && resourceId.startsWith("navigation.") && resourceId.endsWith("Destination")) {
+      if (
+        resourceId &&
+        resourceId.startsWith("navigation.") &&
+        resourceId.endsWith("Destination")
+      ) {
         destinationId = resourceId.replace("navigation.", "");
       }
 
@@ -97,7 +107,7 @@ export class UIStateExtractor {
     return {
       selectedElements,
       destinationId,
-      modalStack: normalizedModalStack.length > 0 ? normalizedModalStack : undefined
+      modalStack: normalizedModalStack.length > 0 ? normalizedModalStack : undefined,
     };
   }
 
@@ -116,11 +126,11 @@ export class UIStateExtractor {
       const selectedElements = this.applySelectedState(accessibilitySelected, {
         method: "accessibility",
         confidence: 1,
-        reason: "selected attribute present in view hierarchy"
+        reason: "selected attribute present in view hierarchy",
       });
       return {
         ...baseState,
-        selectedElements
+        selectedElements,
       };
     }
 
@@ -129,12 +139,12 @@ export class UIStateExtractor {
       if (baseState) {
         return {
           ...baseState,
-          selectedElements: fallbackSelected
+          selectedElements: fallbackSelected,
         };
       }
 
       return {
-        selectedElements: fallbackSelected
+        selectedElements: fallbackSelected,
       };
     }
 
@@ -143,18 +153,20 @@ export class UIStateExtractor {
 
   private applySelectedState(
     selectedElements: SelectedElement[],
-    selectedState: SelectedElementDetection
+    selectedState: SelectedElementDetection,
   ): SelectedElement[] {
-    return selectedElements.map(element => ({
+    return selectedElements.map((element) => ({
       ...element,
-      selectedState: element.selectedState ?? selectedState
+      selectedState: element.selectedState ?? selectedState,
     }));
   }
 
   /**
    * Find text in child nodes (for Compose layouts where text is nested).
    */
-  private findTextInChildren(node: Record<string, any> | Record<string, any>[]): string | undefined {
+  private findTextInChildren(
+    node: Record<string, any> | Record<string, any>[],
+  ): string | undefined {
     if (Array.isArray(node)) {
       for (const child of node) {
         const attrs = this.parser.extractNodeProperties(child);
@@ -182,10 +194,7 @@ export class UIStateExtractor {
     return undefined;
   }
 
-  private getAttribute(
-    attrs: Record<string, any>,
-    keys: string[]
-  ): string | undefined {
+  private getAttribute(attrs: Record<string, any>, keys: string[]): string | undefined {
     for (const key of keys) {
       const value = attrs[key];
       if (typeof value === "string" && value !== "") {
@@ -199,7 +208,7 @@ export class UIStateExtractor {
     modalStack: ModalState[],
     attrs: Record<string, any>,
     depth: number,
-    context?: { windowId?: number; windowType?: string }
+    context?: { windowId?: number; windowType?: string },
   ): void {
     const className = this.getAttribute(attrs, ["class", "className"]);
     if (!className) {
@@ -220,7 +229,7 @@ export class UIStateExtractor {
       identifier: modalId,
       layer: depth,
       windowId,
-      windowType
+      windowType,
     });
   }
 
@@ -229,7 +238,7 @@ export class UIStateExtractor {
     contextWindowId: number | undefined,
     modalType: ModalState["type"],
     modalId: string | undefined,
-    className: string
+    className: string,
   ): number | undefined {
     const attrWindowId = this.getAttribute(attrs, ["window-id", "windowId", "window_id"]);
     const parsed = attrWindowId ? Number(attrWindowId) : NaN;
@@ -247,9 +256,11 @@ export class UIStateExtractor {
 
   private getWindowType(
     attrs: Record<string, any>,
-    contextWindowType: string | undefined
+    contextWindowType: string | undefined,
   ): string | undefined {
-    return this.getAttribute(attrs, ["window-type", "windowType", "window_type"]) ?? contextWindowType;
+    return (
+      this.getAttribute(attrs, ["window-type", "windowType", "window_type"]) ?? contextWindowType
+    );
   }
 
   private classifyModalType(className: string): ModalState["type"] | null {
@@ -273,7 +284,15 @@ export class UIStateExtractor {
   }
 
   private getModalIdentifier(attrs: Record<string, any>, className: string): string | undefined {
-    return this.getAttribute(attrs, ["resource-id", "resourceId", "content-desc", "contentDesc", "text"]) ?? className;
+    return (
+      this.getAttribute(attrs, [
+        "resource-id",
+        "resourceId",
+        "content-desc",
+        "contentDesc",
+        "text",
+      ]) ?? className
+    );
   }
 
   private hashToId(input: string): number {
@@ -301,7 +320,7 @@ export class UIStateExtractor {
       .sort((a, b) => a.layer - b.layer)
       .map((modal, index) => ({
         ...modal,
-        layer: index
+        layer: index,
       }));
   }
 
@@ -323,16 +342,16 @@ export class UIStateExtractor {
     const scrollPosition: ScrollPosition = {
       targetElement: {
         text: options.lookFor.text,
-        resourceId: options.lookFor.elementId
+        resourceId: options.lookFor.elementId,
       },
-      direction: resolvedDirection.direction
+      direction: resolvedDirection.direction,
     };
 
     // Add container information if specified
     if (options.container) {
       scrollPosition.container = {
         text: options.container.text,
-        resourceId: options.container.elementId
+        resourceId: options.container.elementId,
       };
     }
 

@@ -9,20 +9,28 @@ export enum WebSocketState {
   CONNECTING = 0,
   OPEN = 1,
   CLOSING = 2,
-  CLOSED = 3
+  CLOSED = 3,
 }
 
 /**
  * Fake WebSocket implementation for testing
  * Allows simulating instant connection failures without waiting for timeout
  */
-export class FakeWebSocket extends EventEmitter implements Pick<WebSocket, "readyState" | "send" | "close"> {
+export class FakeWebSocket
+  extends EventEmitter
+  implements Pick<WebSocket, "readyState" | "send" | "close">
+{
   public readyState: WebSocketState = WebSocketState.CONNECTING;
-  private failureMode: "instant" | "timeout" | "none" = "none";
+  private failureMode: "instant" | "timeout" | "none";
   private connectTimeoutMs: number = 0;
   private timer: Timer;
 
-  constructor(url: string, failureMode: "instant" | "timeout" | "none" = "none", connectTimeoutMs: number = 0, timer: Timer = defaultTimer) {
+  constructor(
+    url: string,
+    failureMode: "instant" | "timeout" | "none" = "none",
+    connectTimeoutMs: number = 0,
+    timer: Timer = defaultTimer,
+  ) {
     super();
     this.failureMode = failureMode;
     this.connectTimeoutMs = connectTimeoutMs;
@@ -96,7 +104,9 @@ export class FakeWebSocket extends EventEmitter implements Pick<WebSocket, "read
  * Factory function that creates FakeWebSockets configured to fail instantly
  * This is useful for testing connection failure scenarios without waiting for timeouts
  */
-export function createInstantFailureWebSocketFactory(timer?: Timer): (url: string) => FakeWebSocket {
+export function createInstantFailureWebSocketFactory(
+  timer?: Timer,
+): (url: string) => FakeWebSocket {
   return (url: string) => new FakeWebSocket(url, "instant", 0, timer);
 }
 
@@ -114,7 +124,7 @@ export function createSuccessWebSocketFactory(timer?: Timer): (url: string) => F
  */
 export function createNthAttemptSuccessWebSocketFactory(
   successOnAttempt: number,
-  timer?: Timer
+  timer?: Timer,
 ): (url: string) => FakeWebSocket {
   let attempt = 0;
   return (url: string) => {

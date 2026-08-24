@@ -9,9 +9,7 @@ function readSource(): string {
 }
 
 function extractMethodBody(source: string, methodName: string): string {
-  const marker = methodName === "launchApp"
-    ? "public async launchApp("
-    : `async ${methodName}(`;
+  const marker = methodName === "launchApp" ? "public async launchApp(" : `async ${methodName}(`;
   const signatureIndex = source.indexOf(marker);
   if (signatureIndex === -1) {
     throw new Error(`Method ${methodName} not found in ${DEVICE_APP_MANAGER}`);
@@ -59,7 +57,7 @@ describe("DeviceAppManager launch precondition drift guard (issue #3123)", () =>
       const body = extractMethodBody(source, methodName);
       expect(
         body,
-        `${methodName} must use getLaunchPrecondition so non-darwin guards cannot drift.`
+        `${methodName} must use getLaunchPrecondition so non-darwin guards cannot drift.`,
       ).toContain("this.getLaunchPrecondition()");
     }
   });
@@ -67,8 +65,9 @@ describe("DeviceAppManager launch precondition drift guard (issue #3123)", () =>
   test("launch entry points do not duplicate platform guard reads", () => {
     for (const methodName of ["launchApp", "launchWithPayloadUrl"]) {
       const body = extractMethodBody(source, methodName);
-      expect(body, `${methodName} must not read the platform gate directly.`)
-        .not.toContain("this.deps.platform()");
+      expect(body, `${methodName} must not read the platform gate directly.`).not.toContain(
+        "this.deps.platform()",
+      );
     }
   });
 });

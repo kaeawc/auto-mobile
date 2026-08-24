@@ -13,7 +13,7 @@ function tapEdge(args: Record<string, any>, to = "B"): NavigationEdge {
     to,
     timestamp: 1,
     edgeType: "tool",
-    interaction: { toolName: "tapOn", args, timestamp: 1 }
+    interaction: { toolName: "tapOn", args, timestamp: 1 },
   };
 }
 
@@ -23,7 +23,7 @@ function swipeEdge(args: Record<string, any>, to = "B"): NavigationEdge {
     to,
     timestamp: 1,
     edgeType: "tool",
-    interaction: { toolName: "swipeOn", args, timestamp: 1 }
+    interaction: { toolName: "swipeOn", args, timestamp: 1 },
   };
 }
 
@@ -32,7 +32,7 @@ function interactable(overrides: Partial<Interactable>): Interactable {
     element: {} as Element,
     clickable: false,
     scrollable: false,
-    ...overrides
+    ...overrides,
   };
 }
 
@@ -53,13 +53,17 @@ describe("EdgeMatchIndex", () => {
     test("matches by element id against the interactable resource id", () => {
       const edge = tapEdge({ elementId: "com.app:id/ok" });
       const index = new EdgeMatchIndex([edge]);
-      expect(index.findMatch(interactable({ resourceId: "com.app:id/ok", clickable: true }))).toBe(edge);
+      expect(index.findMatch(interactable({ resourceId: "com.app:id/ok", clickable: true }))).toBe(
+        edge,
+      );
     });
 
     test("supports the legacy `id` arg alias", () => {
       const edge = tapEdge({ id: "com.app:id/ok" });
       const index = new EdgeMatchIndex([edge]);
-      expect(index.findMatch(interactable({ resourceId: "com.app:id/ok", clickable: true }))).toBe(edge);
+      expect(index.findMatch(interactable({ resourceId: "com.app:id/ok", clickable: true }))).toBe(
+        edge,
+      );
     });
 
     test("does not match a tapOn edge when the interactable is not clickable", () => {
@@ -85,13 +89,17 @@ describe("EdgeMatchIndex", () => {
     test("matches by container resource id", () => {
       const edge = swipeEdge({ container: { resourceId: "com.app:id/list" } });
       const index = new EdgeMatchIndex([edge]);
-      expect(index.findMatch(interactable({ resourceId: "com.app:id/list", scrollable: true }))).toBe(edge);
+      expect(
+        index.findMatch(interactable({ resourceId: "com.app:id/list", scrollable: true })),
+      ).toBe(edge);
     });
 
     test("matches by container content-desc", () => {
       const edge = swipeEdge({ container: { contentDesc: "Scrollable feed" } });
       const index = new EdgeMatchIndex([edge]);
-      expect(index.findMatch(interactable({ contentDesc: "Scrollable feed", scrollable: true }))).toBe(edge);
+      expect(
+        index.findMatch(interactable({ contentDesc: "Scrollable feed", scrollable: true })),
+      ).toBe(edge);
     });
 
     test("reads the container from uiState.scrollPosition when args.container is absent", () => {
@@ -104,8 +112,8 @@ describe("EdgeMatchIndex", () => {
           toolName: "swipeOn",
           args: {},
           timestamp: 1,
-          uiState: { scrollPosition: { container: { text: "List" } } } as any
-        }
+          uiState: { scrollPosition: { container: { text: "List" } } } as any,
+        },
       };
       const index = new EdgeMatchIndex([edge]);
       expect(index.findMatch(interactable({ text: "List", scrollable: true }))).toBe(edge);
@@ -140,7 +148,7 @@ describe("EdgeMatchIndex", () => {
       const edge1 = tapEdge({ text: "OK" }, "Second");
       const index = new EdgeMatchIndex([edge0, edge1]);
       const match = index.findMatch(
-        interactable({ text: "OK", resourceId: "com.app:id/ok", clickable: true })
+        interactable({ text: "OK", resourceId: "com.app:id/ok", clickable: true }),
       );
       expect(match).toBe(edge0);
     });
@@ -165,7 +173,7 @@ describe("EdgeMatchIndex", () => {
       to: "B",
       timestamp: 1,
       edgeType: "tool",
-      interaction: { toolName: "inputText", args: { text: "Submit" }, timestamp: 1 }
+      interaction: { toolName: "inputText", args: { text: "Submit" }, timestamp: 1 },
     };
     const index = new EdgeMatchIndex([edge]);
     expect(index.findMatch(interactable({ text: "Submit", clickable: true }))).toBeUndefined();

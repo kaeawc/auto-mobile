@@ -17,7 +17,11 @@ const selectorValue = fc.record({ elementId: optionalString, text: optionalStrin
 // `ParsePayload` — is all `validateElementIdTextSelector` actually touches.
 const makeCtx = () => {
   const issues: Array<{ message: string }> = [];
-  const ctx = { addIssue: (issue: { message: string }) => { issues.push(issue); } } as unknown as z.RefinementCtx;
+  const ctx = {
+    addIssue: (issue: { message: string }) => {
+      issues.push(issue);
+    },
+  } as unknown as z.RefinementCtx;
   return { ctx, issues };
 };
 
@@ -27,24 +31,24 @@ describe("validateElementIdTextSelector (property-based)", () => {
   // is defined, regardless of whether its value is truthy.
   test("addIssue fires exactly once when both or neither of elementId/text are defined", () => {
     fc.assert(
-      fc.property(selectorValue, value => {
+      fc.property(selectorValue, (value) => {
         const { ctx, issues } = makeCtx();
         validateElementIdTextSelector(value, ctx);
         const bothOrNeither = (value.elementId !== undefined) === (value.text !== undefined);
         return bothOrNeither ? issues.length === 1 : issues.length === 0;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("never throws for any presence/absence combination", () => {
     fc.assert(
-      fc.property(selectorValue, value => {
+      fc.property(selectorValue, (value) => {
         const { ctx } = makeCtx();
         validateElementIdTextSelector(value, ctx);
         return true;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -66,7 +70,7 @@ describe("validateElementIdTextSelector (property-based)", () => {
         const expected = message === undefined ? DEFAULT_MESSAGE : message;
         return issues.length === 1 && issues[0].message === expected;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

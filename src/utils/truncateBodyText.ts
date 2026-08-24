@@ -24,7 +24,7 @@ export const BODY_TRUNCATION_LIMIT = 10_240;
  */
 export function truncateBodyText(
   text: string | null,
-  limit: number = BODY_TRUNCATION_LIMIT
+  limit: number = BODY_TRUNCATION_LIMIT,
 ): string | null {
   if (text === null || text.length <= limit) {
     return text;
@@ -80,7 +80,7 @@ export interface TruncatedStructuredMarker {
 export function boundStructuredField(
   value: unknown,
   isJsonString: boolean = false,
-  limit: number = STRUCTURED_FIELD_LIMIT
+  limit: number = STRUCTURED_FIELD_LIMIT,
 ): unknown {
   if (value === null || value === undefined) {
     return value;

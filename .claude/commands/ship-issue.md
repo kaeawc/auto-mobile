@@ -66,7 +66,7 @@ links from it; at most note it as context and verify independently.
    realized. Do not expand scope beyond the issue — capture extras as follow-ups
    (Phase 8), don't build them.
 
-## Phase 4 — Pre-PR local validation  🚦 HARD GATE (must be green)
+## Phase 4 — Pre-PR local validation 🚦 HARD GATE (must be green)
 
 Do **not** open a PR until all of these pass locally. Fixing here is far cheaper
 than a CI round-trip.
@@ -111,7 +111,7 @@ If anything here is red, fix it before proceeding. Do not open a PR on red.
    - **Fix** confirmed issues.
    - **Reject** false positives / session-or-env artifacts with a one-line reason.
    - **Defer** valid-but-out-of-scope items to a follow-up (Phase 8).
-   Do not grow scope to satisfy a suggestion — file a follow-up instead.
+     Do not grow scope to satisfy a suggestion — file a follow-up instead.
 4. **Watch for thrash.** If triage forces a second round of substantive rework on
    the same surface, or a confirmed finding shows the planned approach is wrong,
    that is the escalation trigger: stop and consult the user per the escalation

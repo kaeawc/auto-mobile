@@ -8,7 +8,7 @@ export function resolveContainerSwipeCoordinates(
   options: SwipeOnResolvedOptions,
   viewHierarchy: ViewHierarchyResult,
   containerElement: Element,
-  observeResult: ObserveResult
+  observeResult: ObserveResult,
 ): { startX: number; startY: number; endX: number; endY: number; warning?: string } {
   // Apply system insets to container bounds when includeSystemInsets is false (default)
   let effectiveBounds = containerElement.bounds;
@@ -17,32 +17,39 @@ export function resolveContainerSwipeCoordinates(
     effectiveBounds = {
       left: Math.max(containerElement.bounds.left, insets.left),
       top: Math.max(containerElement.bounds.top, insets.top),
-      right: Math.min(containerElement.bounds.right, (observeResult.screenSize?.width ?? containerElement.bounds.right) - insets.right),
-      bottom: Math.min(containerElement.bounds.bottom, (observeResult.screenSize?.height ?? containerElement.bounds.bottom) - insets.bottom)
+      right: Math.min(
+        containerElement.bounds.right,
+        (observeResult.screenSize?.width ?? containerElement.bounds.right) - insets.right,
+      ),
+      bottom: Math.min(
+        containerElement.bounds.bottom,
+        (observeResult.screenSize?.height ?? containerElement.bounds.bottom) - insets.bottom,
+      ),
     };
   }
 
-  const defaultSwipe = geometry.getSwipeWithinBounds(
-    options.direction,
-    effectiveBounds
-  );
+  const defaultSwipe = geometry.getSwipeWithinBounds(options.direction, effectiveBounds);
 
-  const overlayCandidates = overlayDetector.collectOverlayCandidates(viewHierarchy, options.container, containerElement);
+  const overlayCandidates = overlayDetector.collectOverlayCandidates(
+    viewHierarchy,
+    options.container,
+    containerElement,
+  );
   if (overlayCandidates.length === 0) {
     return defaultSwipe;
   }
 
-  const allOverlayBounds = overlayCandidates.map(overlay => overlay.overlapBounds);
+  const allOverlayBounds = overlayCandidates.map((overlay) => overlay.overlapBounds);
   const safeSwipe = overlayDetector.computeSafeSwipeCoordinates(
     options.direction,
     effectiveBounds,
-    allOverlayBounds
+    allOverlayBounds,
   );
 
   if (!safeSwipe) {
     return {
       ...defaultSwipe,
-      warning: "No unobstructed swipe area found; using container bounds."
+      warning: "No unobstructed swipe area found; using container bounds.",
     };
   }
 

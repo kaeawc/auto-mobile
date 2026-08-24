@@ -1,8 +1,5 @@
 import type { VideoRecordingConfig, VideoRecordingConfigInput } from "../models";
-import type {
-  ConfigSocketRequest,
-  ConfigSocketResponse,
-} from "./socketServer/index";
+import type { ConfigSocketRequest, ConfigSocketResponse } from "./socketServer/index";
 
 export interface VideoRecordingSocketRequest extends ConfigSocketRequest<
   "video_recording_request",

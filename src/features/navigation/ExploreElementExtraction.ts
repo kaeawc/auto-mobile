@@ -8,7 +8,7 @@ import type { TrackedElement } from "./ExploreTypes";
  */
 export function extractNavigationElements(
   viewHierarchy: ViewHierarchyResult,
-  elementParser: ElementParser
+  elementParser: ElementParser,
 ): Element[] {
   const flatElements = elementParser.flattenViewHierarchy(viewHierarchy);
   const navigationElements: Element[] = [];
@@ -42,9 +42,7 @@ export function enrichElementWithChildProperties(element: Element): Element {
 
   // For Compose elements, text and className might be on child nodes
   if (element.node) {
-    const children = Array.isArray(element.node)
-      ? element.node
-      : [element.node];
+    const children = Array.isArray(element.node) ? element.node : [element.node];
 
     for (const child of children) {
       // Extract text from first child with text
@@ -72,7 +70,7 @@ export function enrichElementWithChildProperties(element: Element): Element {
  */
 export function extractScrollableContainers(
   viewHierarchy: ViewHierarchyResult,
-  elementParser: ElementParser
+  elementParser: ElementParser,
 ): Element[] {
   const flatElements = elementParser.flattenViewHierarchy(viewHierarchy);
   const scrollableContainers: Element[] = [];
@@ -153,7 +151,7 @@ export function isNavigationCandidate(element: Element): boolean {
  */
 export function extractAllElements(
   viewHierarchy: ViewHierarchyResult,
-  elementParser: ElementParser
+  elementParser: ElementParser,
 ): Element[] {
   const flatElements = elementParser.flattenViewHierarchy(viewHierarchy);
   return flatElements.map(({ element }) => element);
@@ -187,9 +185,9 @@ export function getElementKey(element: Element): string {
 export function filterUnexhaustedElements(
   elements: Element[],
   exploredElements: Map<string, TrackedElement>,
-  currentScreen: string | null
+  currentScreen: string | null,
 ): Element[] {
-  return elements.filter(element => {
+  return elements.filter((element) => {
     const elementKey = getElementKey(element);
     const tracked = exploredElements.get(elementKey);
 

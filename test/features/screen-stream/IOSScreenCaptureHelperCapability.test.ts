@@ -11,9 +11,10 @@ import {
   type DecodedEncodedVideo,
 } from "../../../src/features/screen-stream";
 
-function withFakeSpawner(
-  target: CaptureTarget = { kind: "simulator", windowID: 1 }
-): { fake: FakeChildProcess; helper: IOSScreenCaptureHelper } {
+function withFakeSpawner(target: CaptureTarget = { kind: "simulator", windowID: 1 }): {
+  fake: FakeChildProcess;
+  helper: IOSScreenCaptureHelper;
+} {
   const fake = new FakeChildProcess();
   const helper = new IOSScreenCaptureHelper({
     binaryPath: "/fake/screen-capture-helper",
@@ -24,15 +25,20 @@ function withFakeSpawner(
 }
 
 function flush(): Promise<void> {
-  return new Promise(resolve => setImmediate(resolve));
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 const goldenKeyframeRecordHex: string = (() => {
   const golden = JSON.parse(
-    readFileSync(new URL("../../fixtures/encoded-h264-golden-vectors.json", import.meta.url), "utf8")
+    readFileSync(
+      new URL("../../fixtures/encoded-h264-golden-vectors.json", import.meta.url),
+      "utf8",
+    ),
   ) as { records: Array<{ name: string; recordHex: string }> };
-  const record = golden.records.find(r => r.name === "keyframe");
-  if (record === undefined) {throw new Error("keyframe golden record missing");}
+  const record = golden.records.find((r) => r.name === "keyframe");
+  if (record === undefined) {
+    throw new Error("keyframe golden record missing");
+  }
   return record.recordHex;
 })();
 
@@ -41,8 +47,8 @@ describe("IOSScreenCaptureHelper capability handshake (issue #4787)", () => {
     const { fake, helper } = withFakeSpawner();
     const capabilities: string[] = [];
     const stderr: string[] = [];
-    helper.on("capability", token => capabilities.push(token));
-    helper.on("stderr", line => stderr.push(line));
+    helper.on("capability", (token) => capabilities.push(token));
+    helper.on("stderr", (line) => stderr.push(line));
     helper.start();
 
     fake.stderr.push(Buffer.from(`${CAPTURE_CAPABILITY_PREFIX} ${ENCODED_VIDEO_CAPABILITY}\n`));
@@ -81,7 +87,7 @@ describe("IOSScreenCaptureHelper capability handshake (issue #4787)", () => {
     const { fake, helper } = withFakeSpawner();
     const video: DecodedEncodedVideo[] = [];
     const frames: number[] = [];
-    helper.on("encodedVideo", v => video.push(v));
+    helper.on("encodedVideo", (v) => video.push(v));
     helper.on("frame", () => frames.push(1));
     helper.start();
 

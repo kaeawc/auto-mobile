@@ -11,25 +11,25 @@ import {
   createGlobalPerformanceTracker,
   processTimingData,
   setMaxPerfTimingSizeBytes,
-  getMaxPerfTimingSizeBytes
+  getMaxPerfTimingSizeBytes,
 } from "../../src/utils/PerformanceTracker";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-describe("PerformanceTracker", function() {
-  describe("PerformanceTracker (enabled)", function() {
+describe("PerformanceTracker", function () {
+  describe("PerformanceTracker (enabled)", function () {
     let tracker: PerformanceTracker;
     let fakeTimer: FakeTimer;
 
-    beforeEach(function() {
+    beforeEach(function () {
       fakeTimer = new FakeTimer();
       tracker = new DefaultPerformanceTracker(fakeTimer);
     });
 
-    test("should be enabled", function() {
+    test("should be enabled", function () {
       expect(tracker.isEnabled()).toBe(true);
     });
 
-    test("should track a simple operation", async function() {
+    test("should track a simple operation", async function () {
       const resultPromise = tracker.track("simpleOp", async () => {
         await fakeTimer.sleep(10);
         return "result";
@@ -44,7 +44,7 @@ describe("PerformanceTracker", function() {
       expect(timings[0].durationMs).toBe(10);
     });
 
-    test("should return function result from track", async function() {
+    test("should return function result from track", async function () {
       const result = await tracker.track("returnTest", async () => {
         return "hello world";
       });
@@ -52,7 +52,7 @@ describe("PerformanceTracker", function() {
       expect(result).toBe("hello world");
     });
 
-    test("should track serial operations as array", async function() {
+    test("should track serial operations as array", async function () {
       tracker.serial("serialBlock");
 
       await trackWithDelay(fakeTimer, tracker, "step1", 5);
@@ -76,7 +76,7 @@ describe("PerformanceTracker", function() {
       expect(children[2].name).toBe("step3");
     });
 
-    test("should track parallel operations as object", async function() {
+    test("should track parallel operations as object", async function () {
       tracker.parallel("parallelBlock");
 
       const opA = tracker.track("opA", async () => {
@@ -108,7 +108,7 @@ describe("PerformanceTracker", function() {
       expect(children).toHaveProperty("opC");
     });
 
-    test("should handle nested serial and parallel blocks", async function() {
+    test("should handle nested serial and parallel blocks", async function () {
       tracker.serial("outer");
 
       await trackWithDelay(fakeTimer, tracker, "first", 2);
@@ -148,7 +148,7 @@ describe("PerformanceTracker", function() {
       expect(outerChildren[2].name).toBe("last");
     });
 
-    test("should auto-close unclosed blocks on getTimings", async function() {
+    test("should auto-close unclosed blocks on getTimings", async function () {
       tracker.serial("unclosed");
       await trackWithDelay(fakeTimer, tracker, "op", 1);
       // Don't call end()
@@ -159,58 +159,58 @@ describe("PerformanceTracker", function() {
     });
   });
 
-  describe("NoOpPerformanceTracker", function() {
+  describe("NoOpPerformanceTracker", function () {
     let tracker: PerformanceTracker;
 
-    beforeEach(function() {
+    beforeEach(function () {
       tracker = new NoOpPerformanceTracker();
     });
 
-    test("should be disabled", function() {
+    test("should be disabled", function () {
       expect(tracker.isEnabled()).toBe(false);
     });
 
-    test("should return null from getTimings", function() {
+    test("should return null from getTimings", function () {
       expect(tracker.getTimings()).toBeNull();
     });
 
-    test("should execute function without tracking", async function() {
+    test("should execute function without tracking", async function () {
       const result = await tracker.track("ignored", async () => "value");
       expect(result).toBe("value");
     });
 
-    test("should return self from all methods for chaining", function() {
+    test("should return self from all methods for chaining", function () {
       expect(tracker.serial("x")).toBe(tracker);
       expect(tracker.parallel("x")).toBe(tracker);
       expect(tracker.end()).toBe(tracker);
     });
   });
 
-  describe("createPerformanceTracker factory", function() {
-    test("should create PerformanceTracker when enabled is true", function() {
+  describe("createPerformanceTracker factory", function () {
+    test("should create PerformanceTracker when enabled is true", function () {
       const tracker = createPerformanceTracker(true);
       expect(tracker).toBeInstanceOf(DefaultPerformanceTracker);
       expect(tracker.isEnabled()).toBe(true);
     });
 
-    test("should create NoOpPerformanceTracker when enabled is false", function() {
+    test("should create NoOpPerformanceTracker when enabled is false", function () {
       const tracker = createPerformanceTracker(false);
       expect(tracker).toBeInstanceOf(NoOpPerformanceTracker);
       expect(tracker.isEnabled()).toBe(false);
     });
   });
 
-  describe("Global debug-perf state", function() {
-    beforeEach(function() {
+  describe("Global debug-perf state", function () {
+    beforeEach(function () {
       // Reset state before each test
       setDebugPerfEnabled(false);
     });
 
-    test("should default to false", function() {
+    test("should default to false", function () {
       expect(isDebugPerfEnabled()).toBe(false);
     });
 
-    test("should be settable", function() {
+    test("should be settable", function () {
       setDebugPerfEnabled(true);
       expect(isDebugPerfEnabled()).toBe(true);
 
@@ -218,7 +218,7 @@ describe("PerformanceTracker", function() {
       expect(isDebugPerfEnabled()).toBe(false);
     });
 
-    test("should create appropriate tracker based on global state", function() {
+    test("should create appropriate tracker based on global state", function () {
       setDebugPerfEnabled(false);
       let tracker = createGlobalPerformanceTracker();
       expect(tracker.isEnabled()).toBe(false);
@@ -229,8 +229,8 @@ describe("PerformanceTracker", function() {
     });
   });
 
-  describe("PerformanceTracker interface", function() {
-    test("should be implementable as a fake for testing", async function() {
+  describe("PerformanceTracker interface", function () {
+    test("should be implementable as a fake for testing", async function () {
       // Example fake implementation for testing
       class FakePerformanceTracker implements PerformanceTracker {
         public calls: { method: string; name: string }[] = [];
@@ -273,34 +273,34 @@ describe("PerformanceTracker", function() {
       expect(fake.calls).toEqual([
         { method: "serial", name: "test" },
         { method: "track", name: "op" },
-        { method: "end", name: "" }
+        { method: "end", name: "" },
       ]);
     });
   });
 
-  describe("processTimingData", function() {
+  describe("processTimingData", function () {
     const originalLimit = getMaxPerfTimingSizeBytes();
 
-    beforeEach(function() {
+    beforeEach(function () {
       // Reset to default for tests
       setMaxPerfTimingSizeBytes(50 * 1024); // 50KB
     });
 
-    afterEach(function() {
+    afterEach(function () {
       // Restore original limit
       setMaxPerfTimingSizeBytes(originalLimit);
     });
 
-    test("should return null for null input", function() {
+    test("should return null for null input", function () {
       const result = processTimingData(null);
       expect(result).toBeNull();
     });
 
-    test("should filter out 0ms timings from array", function() {
+    test("should filter out 0ms timings from array", function () {
       const timings: TimingEntry[] = [
         { name: "op1", durationMs: 10 },
         { name: "op2", durationMs: 0 },
-        { name: "op3", durationMs: 5 }
+        { name: "op3", durationMs: 5 },
       ];
 
       const result = processTimingData(timings);
@@ -312,11 +312,11 @@ describe("PerformanceTracker", function() {
       expect(result!.truncated).toBeUndefined();
     });
 
-    test("should filter out 0ms timings from object", function() {
+    test("should filter out 0ms timings from object", function () {
       const timings: Record<string, TimingEntry> = {
         op1: { name: "op1", durationMs: 10 },
         op2: { name: "op2", durationMs: 0 },
-        op3: { name: "op3", durationMs: 5 }
+        op3: { name: "op3", durationMs: 5 },
       };
 
       const result = processTimingData(timings);
@@ -327,7 +327,7 @@ describe("PerformanceTracker", function() {
       expect(result!.truncated).toBeUndefined();
     });
 
-    test("should filter out 0ms timings recursively", function() {
+    test("should filter out 0ms timings recursively", function () {
       const timings: TimingEntry[] = [
         {
           name: "parent",
@@ -335,9 +335,9 @@ describe("PerformanceTracker", function() {
           children: [
             { name: "child1", durationMs: 10 },
             { name: "child2", durationMs: 0 },
-            { name: "child3", durationMs: 5 }
-          ]
-        }
+            { name: "child3", durationMs: 5 },
+          ],
+        },
       ];
 
       const result = processTimingData(timings);
@@ -350,27 +350,25 @@ describe("PerformanceTracker", function() {
       expect(children[1].name).toBe("child3");
     });
 
-    test("should return null when all timings are 0ms", function() {
+    test("should return null when all timings are 0ms", function () {
       const timings: TimingEntry[] = [
         { name: "op1", durationMs: 0 },
-        { name: "op2", durationMs: 0 }
+        { name: "op2", durationMs: 0 },
       ];
 
       const result = processTimingData(timings);
       expect(result).toBeNull();
     });
 
-    test("should not truncate when under size limit", function() {
-      const timings: TimingEntry[] = [
-        { name: "small", durationMs: 10 }
-      ];
+    test("should not truncate when under size limit", function () {
+      const timings: TimingEntry[] = [{ name: "small", durationMs: 10 }];
 
       const result = processTimingData(timings);
       expect(result).not.toBeNull();
       expect(result!.truncated).toBeUndefined();
     });
 
-    test("should truncate by removing smallest timings when over size limit", function() {
+    test("should truncate by removing smallest timings when over size limit", function () {
       // Set a very small limit to force truncation
       setMaxPerfTimingSizeBytes(200);
 
@@ -381,7 +379,7 @@ describe("PerformanceTracker", function() {
         { name: "medium", durationMs: 50 },
         { name: "small1", durationMs: 10 },
         { name: "small2", durationMs: 5 },
-        { name: "small3", durationMs: 1 }
+        { name: "small3", durationMs: 1 },
       ];
 
       const result = processTimingData(timings);
@@ -393,11 +391,11 @@ describe("PerformanceTracker", function() {
       expect(data.length).toBeLessThan(timings.length);
 
       // Check that remaining entries are the largest ones
-      const remainingDurations = data.map(e => e.durationMs);
+      const remainingDurations = data.map((e) => e.durationMs);
       expect(Math.max(...remainingDurations)).toBeGreaterThan(50);
     });
 
-    test("should truncate a cloned copy without mutating source timings", function() {
+    test("should truncate a cloned copy without mutating source timings", function () {
       setMaxPerfTimingSizeBytes(200);
       const timings: TimingEntry[] = [
         { name: "large1", durationMs: 100 },
@@ -405,24 +403,24 @@ describe("PerformanceTracker", function() {
         { name: "medium", durationMs: 50 },
         { name: "small1", durationMs: 10 },
         { name: "small2", durationMs: 5 },
-        { name: "small3", durationMs: 1 }
+        { name: "small3", durationMs: 1 },
       ];
-      const originalNames = timings.map(entry => entry.name);
+      const originalNames = timings.map((entry) => entry.name);
 
       const result = processTimingData(timings);
 
       expect(result).not.toBeNull();
       expect(result!.truncated).toBe(true);
       expect(result!.data).not.toBe(timings);
-      expect(timings.map(entry => entry.name)).toEqual(originalNames);
+      expect(timings.map((entry) => entry.name)).toEqual(originalNames);
     });
 
-    test("should set truncated flag when truncation occurs", function() {
+    test("should set truncated flag when truncation occurs", function () {
       setMaxPerfTimingSizeBytes(100);
 
       const timings: TimingEntry[] = Array.from({ length: 20 }, (_, i) => ({
         name: `operation-${i}`,
-        durationMs: i + 1
+        durationMs: i + 1,
       }));
 
       const result = processTimingData(timings);
@@ -430,7 +428,7 @@ describe("PerformanceTracker", function() {
       expect(result!.truncated).toBe(true);
     });
 
-    test("should respect configured size limit", function() {
+    test("should respect configured size limit", function () {
       const customLimit = 500;
       setMaxPerfTimingSizeBytes(customLimit);
 
@@ -439,7 +437,7 @@ describe("PerformanceTracker", function() {
       // Create large timing data
       const timings: TimingEntry[] = Array.from({ length: 50 }, (_, i) => ({
         name: `operation-with-a-long-name-${i}`,
-        durationMs: i + 1
+        durationMs: i + 1,
       }));
 
       const result = processTimingData(timings);
@@ -450,15 +448,13 @@ describe("PerformanceTracker", function() {
       expect(resultSize).toBeLessThanOrEqual(customLimit);
     });
 
-    test("should remove parent entries that have no children after filtering", function() {
+    test("should remove parent entries that have no children after filtering", function () {
       const timings: TimingEntry[] = [
         {
           name: "parent",
           durationMs: 10,
-          children: [
-            { name: "child", durationMs: 0 }
-          ]
-        }
+          children: [{ name: "child", durationMs: 0 }],
+        },
       ];
 
       const result = processTimingData(timings);
@@ -466,16 +462,16 @@ describe("PerformanceTracker", function() {
       expect(result).toBeNull();
     });
 
-    test("should keep parent entries that still have children after filtering", function() {
+    test("should keep parent entries that still have children after filtering", function () {
       const timings: TimingEntry[] = [
         {
           name: "parent",
           durationMs: 15,
           children: [
             { name: "child1", durationMs: 0 },
-            { name: "child2", durationMs: 5 }
-          ]
-        }
+            { name: "child2", durationMs: 5 },
+          ],
+        },
       ];
 
       const result = processTimingData(timings);
@@ -493,7 +489,7 @@ async function trackWithDelay(
   timer: FakeTimer,
   tracker: PerformanceTracker,
   name: string,
-  ms: number
+  ms: number,
 ): Promise<void> {
   const promise = tracker.track(name, async () => {
     await timer.sleep(ms);

@@ -144,7 +144,7 @@ describe("McpCallRecorder", () => {
       "__mcpSessionId",
       "__lockNamespace",
       "__internalNoDiff",
-    ])("strips the internal routing param %p from a recorded step", internalParam => {
+    ])("strips the internal routing param %p from a recorded step", (internalParam) => {
       const recorder = new McpCallRecorder();
       recorder.start();
 
@@ -216,8 +216,14 @@ describe("stripInternalParams", () => {
 describe("PLAN_RELEVANT_TOOLS", () => {
   test("excludes infrastructure tools", () => {
     const excluded = [
-      "listDevices", "startDevice", "killDevice", "setActiveDevice",
-      "installApp", "startTestRecording", "exportPlan", "executePlan",
+      "listDevices",
+      "startDevice",
+      "killDevice",
+      "setActiveDevice",
+      "installApp",
+      "startTestRecording",
+      "exportPlan",
+      "executePlan",
       "screenshot",
     ];
     for (const tool of excluded) {

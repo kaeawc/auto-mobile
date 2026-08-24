@@ -22,7 +22,7 @@ export class TcpHostPortAvailabilityChecker implements HostPortAvailabilityCheck
   private static readonly CONNECT_TIMEOUT_MS = 1000;
 
   public isAvailable(host: string, port: number): Promise<boolean> {
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       const socket = createConnection({ host, port });
       let settled = false;
 
@@ -38,7 +38,7 @@ export class TcpHostPortAvailabilityChecker implements HostPortAvailabilityCheck
       socket.setTimeout(TcpHostPortAvailabilityChecker.CONNECT_TIMEOUT_MS);
       socket.once("connect", () => finish(false));
       socket.once("timeout", () => finish(false));
-      socket.once("error", error => {
+      socket.once("error", (error) => {
         const code = (error as NodeJS.ErrnoException).code;
         finish(code === "ECONNREFUSED");
       });

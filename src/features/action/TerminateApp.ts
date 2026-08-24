@@ -20,7 +20,10 @@ import { IOSCtrlProxyClient } from "../observe/ios";
  * the `DeviceAppUninstaller`/`DeviceAppLauncher` injection in the sibling tools.
  */
 export interface DeviceAppTerminator {
-  terminateApp(deviceUdid: string, bundleId: string): Promise<{ wasInstalled: boolean; wasRunning: boolean }>;
+  terminateApp(
+    deviceUdid: string,
+    bundleId: string,
+  ): Promise<{ wasInstalled: boolean; wasRunning: boolean }>;
 }
 
 export class TerminateApp extends BaseVisualChange {
@@ -40,7 +43,7 @@ export class TerminateApp extends BaseVisualChange {
     adb: AdbClient | null = null,
     simctl: SimCtlClient | null = null,
     timer: Timer = defaultTimer,
-    deviceTerminator: DeviceAppTerminator | null = null
+    deviceTerminator: DeviceAppTerminator | null = null,
   ) {
     super(device, adb, timer);
     this.device = device;
@@ -60,7 +63,7 @@ export class TerminateApp extends BaseVisualChange {
       skipObservation?: boolean;
       skipUiStability?: boolean;
       userId?: number;
-    }
+    },
   ): Promise<TerminateAppResult> {
     if (this.device.platform === "ios") {
       return this.executeiOS(packageName, options);
@@ -72,7 +75,12 @@ export class TerminateApp extends BaseVisualChange {
     const terminateLogic = async (): Promise<TerminateAppResult> => {
       // Auto-detect target user if not specified
       const targetUserId = await perf.track("detectTargetUser", async () => {
-        return (await new AndroidUserTargetResolver(this.adb).resolve({ packageName, explicitUserId: options?.userId })).userId;
+        return (
+          await new AndroidUserTargetResolver(this.adb).resolve({
+            packageName,
+            explicitUserId: options?.userId,
+          })
+        ).userId;
       });
 
       // Check if app is installed
@@ -81,14 +89,19 @@ export class TerminateApp extends BaseVisualChange {
           const a11y = AndroidCtrlProxyClient.getInstance(this.device);
           const result = await a11y.requestInstalledPackages(true, undefined, 3000);
           if (result.success && result.userId === targetUserId) {
-            return result.packages.some(p => p.packageName === packageName);
+            return result.packages.some((p) => p.packageName === packageName);
           }
         } catch {
           // fall through
         }
         try {
           const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${packageName} | grep -c ${packageName}`;
-          const isInstalledOutput = await this.adb.executeCommand(isInstalledCmd, undefined, undefined, true);
+          const isInstalledOutput = await this.adb.executeCommand(
+            isInstalledCmd,
+            undefined,
+            undefined,
+            true,
+          );
           return parseInt(isInstalledOutput.trim(), 10) > 0;
         } catch (error) {
           // Both the CtrlProxy call and this shell fallback failed; treating the
@@ -105,7 +118,7 @@ export class TerminateApp extends BaseVisualChange {
           wasInstalled: false,
           wasRunning: false,
           wasForeground: false,
-          userId: targetUserId
+          userId: targetUserId,
         };
       }
 
@@ -119,16 +132,18 @@ export class TerminateApp extends BaseVisualChange {
           wasInstalled: true,
           wasRunning: false,
           wasForeground: false,
-          userId: targetUserId
+          userId: targetUserId,
         };
       }
 
       // Check if app is in foreground using getForegroundApp (which returns user context)
       const isForeground = await perf.track("checkForeground", async () => {
         const foregroundApp = await this.adb.getForegroundApp();
-        return foregroundApp !== null &&
-               foregroundApp.packageName === packageName &&
-               foregroundApp.userId === targetUserId;
+        return (
+          foregroundApp !== null &&
+          foregroundApp.packageName === packageName &&
+          foregroundApp.userId === targetUserId
+        );
       });
 
       await perf.track("forceStop", async () => {
@@ -141,7 +156,7 @@ export class TerminateApp extends BaseVisualChange {
         wasInstalled: true,
         wasRunning: true,
         wasForeground: isForeground,
-        userId: targetUserId
+        userId: targetUserId,
       };
     };
 
@@ -154,15 +169,12 @@ export class TerminateApp extends BaseVisualChange {
       return result;
     }
 
-    return this.observedInteraction(
-      terminateLogic,
-      {
-        changeExpected: false,
-        progress: options?.progress,
-        skipUiStability: options?.skipUiStability,
-        perf
-      }
-    );
+    return this.observedInteraction(terminateLogic, {
+      changeExpected: false,
+      progress: options?.progress,
+      skipUiStability: options?.skipUiStability,
+      perf,
+    });
   }
 
   private async executeiOS(
@@ -171,7 +183,7 @@ export class TerminateApp extends BaseVisualChange {
       progress?: ProgressCallback;
       skipObservation?: boolean;
       skipUiStability?: boolean;
-    }
+    },
   ): Promise<TerminateAppResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("terminateApp");
@@ -184,7 +196,9 @@ export class TerminateApp extends BaseVisualChange {
     const terminateLogic = async (): Promise<TerminateAppResult> => {
       const result = await terminateTransport();
       if (result.success) {
-        IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(bundleId);
+        IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(
+          bundleId,
+        );
       }
       return result;
     };
@@ -202,15 +216,12 @@ export class TerminateApp extends BaseVisualChange {
       return result;
     }
 
-    return this.observedInteraction(
-      terminateLogic,
-      {
-        changeExpected: false,
-        progress: options?.progress,
-        skipUiStability: options?.skipUiStability,
-        perf
-      }
-    );
+    return this.observedInteraction(terminateLogic, {
+      changeExpected: false,
+      progress: options?.progress,
+      skipUiStability: options?.skipUiStability,
+      perf,
+    });
   }
 
   /**
@@ -220,10 +231,12 @@ export class TerminateApp extends BaseVisualChange {
    */
   private async terminateSimulator(
     bundleId: string,
-    perf: ReturnType<typeof createGlobalPerformanceTracker>
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
   ): Promise<TerminateAppResult> {
-    const installedApps = await perf.track("checkInstalled", () => this.simctl.listApps(this.device.deviceId));
-    const wasInstalled = installedApps.some(app => this.getBundleId(app) === bundleId);
+    const installedApps = await perf.track("checkInstalled", () =>
+      this.simctl.listApps(this.device.deviceId),
+    );
+    const wasInstalled = installedApps.some((app) => this.getBundleId(app) === bundleId);
 
     if (!wasInstalled) {
       return {
@@ -231,7 +244,7 @@ export class TerminateApp extends BaseVisualChange {
         packageName: bundleId,
         wasInstalled: false,
         wasRunning: false,
-        wasForeground: false
+        wasForeground: false,
       };
     }
 
@@ -239,7 +252,9 @@ export class TerminateApp extends BaseVisualChange {
     let errorMsg: string | undefined;
 
     try {
-      await perf.track("terminateApp", () => this.simctl.terminateApp(bundleId, this.device.deviceId));
+      await perf.track("terminateApp", () =>
+        this.simctl.terminateApp(bundleId, this.device.deviceId),
+      );
     } catch (error) {
       const message = errorMessage(error);
       // Shared already-gone matcher (issue #3076): a simctl "found nothing to
@@ -261,7 +276,7 @@ export class TerminateApp extends BaseVisualChange {
       wasInstalled: true,
       wasRunning,
       wasForeground: false,
-      ...(errorMsg ? { error: errorMsg } : {})
+      ...(errorMsg ? { error: errorMsg } : {}),
     };
   }
 
@@ -275,26 +290,28 @@ export class TerminateApp extends BaseVisualChange {
    */
   private async terminatePhysicalDevice(
     bundleId: string,
-    perf: ReturnType<typeof createGlobalPerformanceTracker>
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
   ): Promise<TerminateAppResult> {
     try {
-      const { wasInstalled, wasRunning } = await perf.track(
-        "terminateApp",
-        () => this.deviceTerminator.terminateApp(this.device.deviceId, bundleId)
+      const { wasInstalled, wasRunning } = await perf.track("terminateApp", () =>
+        this.deviceTerminator.terminateApp(this.device.deviceId, bundleId),
       );
       return {
         success: true,
         packageName: bundleId,
         wasInstalled,
         wasRunning,
-        wasForeground: false
+        wasForeground: false,
       };
     } catch (error) {
       const message = errorMessage(error);
       // Return a typed failure (matching the simulator path) instead of throwing,
       // but log first so the trace survives even when the client only sees the
       // summarized error (CLAUDE.md error-handling convention #2).
-      logger.warn(`[TerminateApp] Physical iOS terminate failed for ${bundleId}: ${message}`, error);
+      logger.warn(
+        `[TerminateApp] Physical iOS terminate failed for ${bundleId}: ${message}`,
+        error,
+      );
       // Omit wasInstalled/wasRunning: install state is unknown at throw time (a
       // devicectl failure can occur after the app was confirmed installed), so
       // reporting them as `false` would assert a fact we never established.
@@ -302,7 +319,7 @@ export class TerminateApp extends BaseVisualChange {
         success: false,
         packageName: bundleId,
         wasForeground: false,
-        error: message
+        error: message,
       };
     }
   }

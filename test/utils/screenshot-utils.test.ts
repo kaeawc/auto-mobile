@@ -7,42 +7,41 @@ import os from "os";
 import { Jimp, rgbaToInt } from "jimp";
 import { FakeTimer } from "../fakes/FakeTimer";
 
-
 async function createTestImage(
   width: number,
   height: number,
   color: { r: number; g: number; b: number },
-  mime: "image/png" | "image/jpeg" = "image/png"
+  mime: "image/png" | "image/jpeg" = "image/png",
 ): Promise<Buffer> {
   const image = new Jimp({ width, height, color: rgbaToInt(color.r, color.g, color.b, 255) });
   return image.getBuffer(mime);
 }
 
-describe("ScreenshotUtils", function() {
+describe("ScreenshotUtils", function () {
   let testDir: string;
   let fakeTimer: FakeTimer;
 
-  beforeEach(async function() {
+  beforeEach(async function () {
     testDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "test-screenshots-"));
     fakeTimer = new FakeTimer();
   });
 
-  afterEach(async function() {
+  afterEach(async function () {
     // Clean up test directory
     await fsPromises.rm(testDir, { recursive: true, force: true });
   });
 
-  describe("Image Format Detection", function() {
-    test("should detect PNG buffers correctly", function() {
-      const pngHeader = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
-      const notPng = Buffer.from([0xFF, 0xD8, 0xFF, 0xE0]); // JPEG header
+  describe("Image Format Detection", function () {
+    test("should detect PNG buffers correctly", function () {
+      const pngHeader = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+      const notPng = Buffer.from([0xff, 0xd8, 0xff, 0xe0]); // JPEG header
 
       expect(ScreenshotUtils.isPngBuffer(pngHeader)).toBe(true);
       expect(ScreenshotUtils.isPngBuffer(notPng)).toBe(false);
       expect(ScreenshotUtils.isPngBuffer(Buffer.alloc(4))).toBe(false);
     });
 
-    test("should convert non-PNG images to PNG", async function() {
+    test("should convert non-PNG images to PNG", async function () {
       // Create a simple test image
       const testImage = await createTestImage(100, 100, { r: 255, g: 0, b: 0 }, "image/jpeg");
 
@@ -51,8 +50,8 @@ describe("ScreenshotUtils", function() {
     });
   });
 
-  describe("Image Dimensions", function() {
-    test("should get image dimensions correctly", async function() {
+  describe("Image Dimensions", function () {
+    test("should get image dimensions correctly", async function () {
       const testImage = await createTestImage(200, 150, { r: 0, g: 255, b: 0 });
 
       const dimensions = await ScreenshotUtils.getImageDimensions(testImage);
@@ -60,7 +59,7 @@ describe("ScreenshotUtils", function() {
       expect(dimensions.height).toBe(150);
     });
 
-    test("should resize images correctly", async function() {
+    test("should resize images correctly", async function () {
       const testImage = await createTestImage(400, 300, { r: 0, g: 0, b: 255 });
 
       const resizedBuffer = await ScreenshotUtils.resizeImageIfNeeded(testImage, 200, 150);
@@ -70,7 +69,7 @@ describe("ScreenshotUtils", function() {
       expect(dimensions.height).toBe(150);
     });
 
-    test("should not resize images that already match target dimensions", async function() {
+    test("should not resize images that already match target dimensions", async function () {
       const testImage = await createTestImage(100, 100, { r: 128, g: 128, b: 128 });
 
       const result = await ScreenshotUtils.resizeImageIfNeeded(testImage, 100, 100);
@@ -78,12 +77,12 @@ describe("ScreenshotUtils", function() {
     });
   });
 
-  describe("Image Comparison", function() {
+  describe("Image Comparison", function () {
     let identicalImage1: Buffer;
     let identicalImage2: Buffer;
     let differentImage: Buffer;
 
-    beforeEach(async function() {
+    beforeEach(async function () {
       // Create identical images
       identicalImage1 = await createTestImage(100, 100, { r: 255, g: 255, b: 255 });
 
@@ -93,7 +92,7 @@ describe("ScreenshotUtils", function() {
       differentImage = await createTestImage(100, 100, { r: 0, g: 0, b: 0 });
     });
 
-    test("should detect identical images with 100% similarity", async function() {
+    test("should detect identical images with 100% similarity", async function () {
       const result = await ScreenshotUtils.compareImages(identicalImage1, identicalImage2);
 
       expect(result.similarity).toBe(100);
@@ -101,7 +100,7 @@ describe("ScreenshotUtils", function() {
       expect(result.totalPixels).toBe(10000); // 100x100
     });
 
-    test("should detect completely different images with low similarity", async function() {
+    test("should detect completely different images with low similarity", async function () {
       const result = await ScreenshotUtils.compareImages(identicalImage1, differentImage);
 
       expect(result.similarity).toBeLessThan(50);
@@ -109,7 +108,7 @@ describe("ScreenshotUtils", function() {
       expect(result.totalPixels).toBe(10000);
     });
 
-    test("should handle comparison of different sized images", async function() {
+    test("should handle comparison of different sized images", async function () {
       const largeImage = await createTestImage(200, 200, { r: 255, g: 255, b: 255 });
 
       const result = await ScreenshotUtils.compareImages(identicalImage1, largeImage);
@@ -118,7 +117,7 @@ describe("ScreenshotUtils", function() {
       expect(result.totalPixels).toBe(10000); // Should use smaller dimensions
     });
 
-    test("should handle invalid images gracefully", async function() {
+    test("should handle invalid images gracefully", async function () {
       const invalidBuffer = Buffer.from("not an image");
 
       const result = await ScreenshotUtils.compareImages(identicalImage1, invalidBuffer);
@@ -129,8 +128,8 @@ describe("ScreenshotUtils", function() {
     });
   });
 
-  describe("File Operations", function() {
-    test("should get screenshot files from directory", async function() {
+  describe("File Operations", function () {
+    test("should get screenshot files from directory", async function () {
       // Create test files
       await fsPromises.writeFile(path.join(testDir, "screenshot1.png"), Buffer.alloc(10));
       await fsPromises.writeFile(path.join(testDir, "screenshot2.webp"), Buffer.alloc(10));
@@ -139,20 +138,24 @@ describe("ScreenshotUtils", function() {
       const files = await ScreenshotUtils.getScreenshotFiles(testDir);
 
       expect(files).toHaveLength(2);
-      expect(files.some(f => f.endsWith("screenshot1.png"))).toBe(true);
-      expect(files.some(f => f.endsWith("screenshot2.webp"))).toBe(true);
-      expect(files.some(f => f.endsWith("not-screenshot.txt"))).toBe(false);
+      expect(files.some((f) => f.endsWith("screenshot1.png"))).toBe(true);
+      expect(files.some((f) => f.endsWith("screenshot2.webp"))).toBe(true);
+      expect(files.some((f) => f.endsWith("not-screenshot.txt"))).toBe(false);
     });
 
-    test("should return empty array for non-existent directory", async function() {
+    test("should return empty array for non-existent directory", async function () {
       const files = await ScreenshotUtils.getScreenshotFiles("/non/existent/path");
       expect(files).toHaveLength(0);
     });
 
-    test("should extract timestamp from filename correctly", function() {
-      const timestamp1 = ScreenshotUtils.extractTimestampFromFilename("/path/to/screenshot_1234567890.png");
+    test("should extract timestamp from filename correctly", function () {
+      const timestamp1 = ScreenshotUtils.extractTimestampFromFilename(
+        "/path/to/screenshot_1234567890.png",
+      );
       const timestamp2 = ScreenshotUtils.extractTimestampFromFilename("hierarchy_9876543210.json");
-      const legacyTimestamp = ScreenshotUtils.extractTimestampFromFilename("old_format_hash_789.webp");
+      const legacyTimestamp = ScreenshotUtils.extractTimestampFromFilename(
+        "old_format_hash_789.webp",
+      );
 
       expect(timestamp1).toBe("1234567890");
       expect(timestamp2).toBe("9876543210");
@@ -164,7 +167,7 @@ describe("ScreenshotUtils", function() {
       }).toThrow("Unable to extract timestamp from filename");
     });
 
-    test("should generate image hash correctly", function() {
+    test("should generate image hash correctly", function () {
       const buffer = Buffer.from("test image data");
       const hash = ScreenshotUtils.generateImageHash(buffer);
 
@@ -174,8 +177,8 @@ describe("ScreenshotUtils", function() {
     });
   });
 
-  describe("Fuzzy Matching", function() {
-    test("should find similar screenshots within tolerance", async function() {
+  describe("Fuzzy Matching", function () {
+    test("should find similar screenshots within tolerance", async function () {
       // Create test images
       const baseImage = await createTestImage(50, 50, { r: 100, g: 150, b: 200 });
 
@@ -187,7 +190,7 @@ describe("ScreenshotUtils", function() {
         baseImage,
         testDir,
         DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT,
-        5
+        5,
       );
 
       expect(result.matchFound).toBe(true);
@@ -195,7 +198,7 @@ describe("ScreenshotUtils", function() {
       expect(result.filePath).toContain(testFilename);
     });
 
-    test("should not find matches when no similar screenshots exist", async function() {
+    test("should not find matches when no similar screenshots exist", async function () {
       const targetImage = await createTestImage(50, 50, { r: 255, g: 0, b: 0 });
 
       const differentImage = await createTestImage(50, 50, { r: 0, g: 255, b: 0 });
@@ -208,7 +211,7 @@ describe("ScreenshotUtils", function() {
         targetImage,
         testDir,
         DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT,
-        5
+        5,
       );
 
       expect(result.matchFound).toBe(false);
@@ -216,14 +219,14 @@ describe("ScreenshotUtils", function() {
       expect(result.filePath).toBe("");
     });
 
-    test("should handle empty cache directory", async function() {
+    test("should handle empty cache directory", async function () {
       const testImage = await createTestImage(50, 50, { r: 128, g: 128, b: 128 });
 
       const result = await ScreenshotUtils.findSimilarScreenshots(
         testImage,
         testDir,
         DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT,
-        5
+        5,
       );
 
       expect(result.matchFound).toBe(false);
@@ -231,7 +234,7 @@ describe("ScreenshotUtils", function() {
       expect(result.filePath).toBe("");
     });
 
-    test("should limit the number of comparisons", async function() {
+    test("should limit the number of comparisons", async function () {
       const testImage = await createTestImage(30, 30, { r: 64, g: 64, b: 64 });
 
       // Create 10 different screenshot files
@@ -246,7 +249,7 @@ describe("ScreenshotUtils", function() {
         testImage,
         testDir,
         DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT,
-        3 // Limit to 3 comparisons
+        3, // Limit to 3 comparisons
       );
 
       // Should find a match (since we're comparing identical images)
@@ -255,8 +258,8 @@ describe("ScreenshotUtils", function() {
     });
   });
 
-  describe("Error Handling", function() {
-    test("should handle image conversion errors gracefully", async function() {
+  describe("Error Handling", function () {
+    test("should handle image conversion errors gracefully", async function () {
       const invalidBuffer = Buffer.from("definitely not an image");
 
       try {
@@ -268,7 +271,7 @@ describe("ScreenshotUtils", function() {
       }
     });
 
-    test("should handle dimension errors gracefully", async function() {
+    test("should handle dimension errors gracefully", async function () {
       const invalidBuffer = Buffer.from("not an image");
 
       try {
@@ -280,7 +283,7 @@ describe("ScreenshotUtils", function() {
       }
     });
 
-    test("should handle resize errors gracefully", async function() {
+    test("should handle resize errors gracefully", async function () {
       const invalidBuffer = Buffer.from("not an image");
 
       try {

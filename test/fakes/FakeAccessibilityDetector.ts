@@ -1,4 +1,7 @@
-import type { AccessibilityDetector, AccessibilityService } from "../../src/utils/interfaces/AccessibilityDetector";
+import type {
+  AccessibilityDetector,
+  AccessibilityService,
+} from "../../src/utils/interfaces/AccessibilityDetector";
 import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 
@@ -7,7 +10,8 @@ import type { FeatureFlagService } from "../../src/features/featureFlags/Feature
  * Allows configuring detection results without real device interaction
  */
 export class FakeAccessibilityDetector implements AccessibilityDetector {
-  private detectionResults: Map<string, { enabled: boolean; service: AccessibilityService }> = new Map();
+  private detectionResults: Map<string, { enabled: boolean; service: AccessibilityService }> =
+    new Map();
   private defaultResult: { enabled: boolean; service: AccessibilityService } = {
     enabled: false,
     service: "unknown",
@@ -26,7 +30,11 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   /**
    * Configure the detection result for a specific device
    */
-  setDetectionResult(deviceId: string, enabled: boolean, service: AccessibilityService = "talkback"): void {
+  setDetectionResult(
+    deviceId: string,
+    enabled: boolean,
+    service: AccessibilityService = "talkback",
+  ): void {
     this.detectionResults.set(deviceId, { enabled, service });
   }
 
@@ -101,7 +109,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   async isAccessibilityEnabled(
     deviceId: string,
     _adb: AdbExecutor,
-    _featureFlags?: FeatureFlagService
+    _featureFlags?: FeatureFlagService,
   ): Promise<boolean> {
     this.detectionCallCount++;
     const result = this.detectionResults.get(deviceId) || this.defaultResult;
@@ -111,7 +119,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
   async detectMethod(
     deviceId: string,
     adb: AdbExecutor,
-    featureFlags?: FeatureFlagService
+    featureFlags?: FeatureFlagService,
   ): Promise<AccessibilityService> {
     this.detectMethodAdbArgs.push(adb);
     this.detectMethodFeatureFlagsArgs.push(featureFlags);

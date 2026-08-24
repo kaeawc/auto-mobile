@@ -123,11 +123,9 @@ const LIFECYCLE_OVERRIDE_ENV_KEYS = [
   DAEMON_LAUNCH_CWD_ENV,
 ] as const;
 
-export function createFileBackedDbHarness(
-  deps: FileBackedDbHarnessDeps = {}
-): FileBackedDbHarness {
-  const mkdtemp = deps.mkdtemp ?? (fullPrefix => fsMkdtemp(fullPrefix));
-  const removeTempDir = deps.removeTempDir ?? (dir => removeTempDbDir(dir));
+export function createFileBackedDbHarness(deps: FileBackedDbHarnessDeps = {}): FileBackedDbHarness {
+  const mkdtemp = deps.mkdtemp ?? ((fullPrefix) => fsMkdtemp(fullPrefix));
+  const removeTempDir = deps.removeTempDir ?? ((dir) => removeTempDbDir(dir));
   // `importFreshDatabaseModule` already returns `Promise<FreshDatabaseModule>`, so
   // no cast is needed now that the surface is non-generic.
   const importModule = deps.importDatabaseModule ?? importFreshDatabaseModule;

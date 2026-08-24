@@ -44,7 +44,9 @@ function createHarness(): Harness {
     device: { deviceId: "emulator-5554", platform: "android" } as never,
     adb: {} as never,
     getCachedHierarchy: () => cached,
-    setCachedHierarchy: h => { cached = h; },
+    setCachedHierarchy: (h) => {
+      cached = h;
+    },
     getLastWebSocketTimeout: () => 0,
     setLastWebSocketTimeout: () => {},
   };
@@ -57,13 +59,16 @@ function createHarness(): Harness {
   // The tree content and its conversion are not under test — return a minimal
   // converted result so we can assert only the receipt-time metadata on it.
   const convertSpy = spyOn(hierarchy, "convertToViewHierarchyResult").mockImplementation(
-    (h: AccessibilityHierarchy) => ({ hierarchy: { node: { $: {} } }, updatedAt: h.updatedAt } as ViewHierarchyResult)
+    (h: AccessibilityHierarchy) =>
+      ({ hierarchy: { node: { $: {} } }, updatedAt: h.updatedAt }) as ViewHierarchyResult,
   );
 
   return {
     hierarchy,
     timer,
-    setCached: h => { cached = h; },
+    setCached: (h) => {
+      cached = h;
+    },
     restore: () => {
       managerSpy.mockRestore();
       convertSpy.mockRestore();
@@ -89,7 +94,10 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     // authored `updatedAt` is skewed 25s behind the host clock.
     const deviceUpdatedAt = h.timer.now() - DEVICE_SKEW_MS;
     const syncSpy = spyOn(h.hierarchy, "requestHierarchySync").mockResolvedValue({
-      hierarchy: { updatedAt: deviceUpdatedAt, packageName: "com.test.app" } as AccessibilityHierarchy,
+      hierarchy: {
+        updatedAt: deviceUpdatedAt,
+        packageName: "com.test.app",
+      } as AccessibilityHierarchy,
     });
 
     const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
@@ -107,7 +115,10 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     const receivedAt = h.timer.now() - 300; // host domain: cached 300ms ago
     const deviceUpdatedAt = h.timer.now() - DEVICE_SKEW_MS; // device domain, skewed
     h.setCached({
-      hierarchy: { updatedAt: deviceUpdatedAt, packageName: "com.test.app" } as AccessibilityHierarchy,
+      hierarchy: {
+        updatedAt: deviceUpdatedAt,
+        packageName: "com.test.app",
+      } as AccessibilityHierarchy,
       receivedAt,
       fresh: true,
     });

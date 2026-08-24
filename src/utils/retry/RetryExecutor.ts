@@ -67,7 +67,7 @@ export interface RetryExecutor {
    */
   execute<T>(
     operation: (attempt: number) => Promise<T>,
-    options?: RetryOptions
+    options?: RetryOptions,
   ): Promise<RetryResult<T>>;
 
   /**
@@ -77,16 +77,15 @@ export interface RetryExecutor {
    * @returns The operation result
    * @throws The final error if all attempts fail
    */
-  executeOrThrow<T>(
-    operation: (attempt: number) => Promise<T>,
-    options?: RetryOptions
-  ): Promise<T>;
+  executeOrThrow<T>(operation: (attempt: number) => Promise<T>, options?: RetryOptions): Promise<T>;
 }
 
 /**
  * Default retry options.
  */
-export const DEFAULT_RETRY_OPTIONS: Required<Omit<RetryOptions, "signal" | "shouldRetry" | "onRetry">> = {
+export const DEFAULT_RETRY_OPTIONS: Required<
+  Omit<RetryOptions, "signal" | "shouldRetry" | "onRetry">
+> = {
   maxAttempts: 3,
   delays: 1000,
 };
@@ -99,7 +98,7 @@ export class DefaultRetryExecutor implements RetryExecutor {
 
   async execute<T>(
     operation: (attempt: number) => Promise<T>,
-    options?: RetryOptions
+    options?: RetryOptions,
   ): Promise<RetryResult<T>> {
     const maxAttempts = options?.maxAttempts ?? DEFAULT_RETRY_OPTIONS.maxAttempts;
     const delays = options?.delays ?? DEFAULT_RETRY_OPTIONS.delays;
@@ -152,7 +151,7 @@ export class DefaultRetryExecutor implements RetryExecutor {
             if (signal) {
               const aborted = await Promise.race([
                 this.timer.sleep(delay).then(() => false),
-                new Promise<boolean>(resolve => {
+                new Promise<boolean>((resolve) => {
                   if (signal.aborted) {
                     resolve(true);
                     return;
@@ -186,7 +185,7 @@ export class DefaultRetryExecutor implements RetryExecutor {
 
   async executeOrThrow<T>(
     operation: (attempt: number) => Promise<T>,
-    options?: RetryOptions
+    options?: RetryOptions,
   ): Promise<T> {
     const result = await this.execute(operation, options);
     if (!result.success) {

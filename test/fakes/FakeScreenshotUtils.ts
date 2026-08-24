@@ -9,21 +9,36 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
   private cachedScreenshots: Map<string, { buffer: Buffer; hash: string }> = new Map();
   private perceptualHashes: Map<string, string> = new Map();
   private pngDetectionResult: boolean = true;
-  private convertToPngResult: Buffer = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+  private convertToPngResult: Buffer = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+  ]);
   private imageDimensions: { width: number; height: number } = { width: 1080, height: 2400 };
   private resizeImageResult: Buffer | null = null;
-  private compareImagesResult: { similarity: number; pixelDifference: number; totalPixels: number } = {
+  private compareImagesResult: {
+    similarity: number;
+    pixelDifference: number;
+    totalPixels: number;
+  } = {
     similarity: 100,
     pixelDifference: 0,
-    totalPixels: 2592000 // 1080 * 2400
+    totalPixels: 2592000, // 1080 * 2400
   };
   private screenshotFiles: string[] = [];
-  private batchCompareResult: Array<{ filePath: string; similarity: number; matchFound: boolean }> = [];
-  private optimizedBatchCompareResult: Array<{ filePath: string; similarity: number; matchFound: boolean }> = [];
-  private findSimilarScreenshotsResult: { filePath: string; similarity: number; matchFound: boolean } = {
+  private batchCompareResult: Array<{ filePath: string; similarity: number; matchFound: boolean }> =
+    [];
+  private optimizedBatchCompareResult: Array<{
+    filePath: string;
+    similarity: number;
+    matchFound: boolean;
+  }> = [];
+  private findSimilarScreenshotsResult: {
+    filePath: string;
+    similarity: number;
+    matchFound: boolean;
+  } = {
     filePath: "",
     similarity: 0,
-    matchFound: false
+    matchFound: false,
   };
   private extractTimestampResult: string = "1234567890";
   private generateImageHashResult: string = "abcdef0123456789abcdef0123456789";
@@ -76,7 +91,11 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
   /**
    * Configure comparison result
    */
-  setCompareImagesResult(result: { similarity: number; pixelDifference: number; totalPixels: number }): void {
+  setCompareImagesResult(result: {
+    similarity: number;
+    pixelDifference: number;
+    totalPixels: number;
+  }): void {
     this.compareImagesResult = result;
   }
 
@@ -90,21 +109,29 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
   /**
    * Configure batch compare result
    */
-  setBatchCompareResult(result: Array<{ filePath: string; similarity: number; matchFound: boolean }>): void {
+  setBatchCompareResult(
+    result: Array<{ filePath: string; similarity: number; matchFound: boolean }>,
+  ): void {
     this.batchCompareResult = result;
   }
 
   /**
    * Configure optimized batch compare result
    */
-  setOptimizedBatchCompareResult(result: Array<{ filePath: string; similarity: number; matchFound: boolean }>): void {
+  setOptimizedBatchCompareResult(
+    result: Array<{ filePath: string; similarity: number; matchFound: boolean }>,
+  ): void {
     this.optimizedBatchCompareResult = result;
   }
 
   /**
    * Configure find similar screenshots result
    */
-  setFindSimilarScreenshotsResult(result: { filePath: string; similarity: number; matchFound: boolean }): void {
+  setFindSimilarScreenshotsResult(result: {
+    filePath: string;
+    similarity: number;
+    matchFound: boolean;
+  }): void {
     this.findSimilarScreenshotsResult = result;
   }
 
@@ -173,7 +200,7 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
     // Default behavior: return a fake buffer and hash
     return {
       buffer: Buffer.from("fake screenshot data"),
-      hash: "1111111111111111111111111111111111111111111111111111111111111111"
+      hash: "1111111111111111111111111111111111111111111111111111111111111111",
     };
   }
 
@@ -190,7 +217,10 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
   }
 
   calculateHammingDistance(hash1: string, hash2: string): number {
-    this.recordCall("calculateHammingDistance", { hash1Length: hash1.length, hash2Length: hash2.length });
+    this.recordCall("calculateHammingDistance", {
+      hash1Length: hash1.length,
+      hash2Length: hash2.length,
+    });
     if (hash1.length !== hash2.length) {
       return Math.max(hash1.length, hash2.length);
     }
@@ -204,7 +234,10 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
   }
 
   getPerceptualSimilarity(hash1: string, hash2: string): number {
-    this.recordCall("getPerceptualSimilarity", { hash1Length: hash1.length, hash2Length: hash2.length });
+    this.recordCall("getPerceptualSimilarity", {
+      hash1Length: hash1.length,
+      hash2Length: hash2.length,
+    });
     const distance = this.calculateHammingDistance(hash1, hash2);
     const maxDistance = Math.max(hash1.length, hash2.length);
     return ((maxDistance - distance) / maxDistance) * 100;
@@ -228,9 +261,13 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
   async resizeImageIfNeeded(
     buffer: Buffer,
     targetWidth: number,
-    targetHeight: number
+    targetHeight: number,
   ): Promise<Buffer> {
-    this.recordCall("resizeImageIfNeeded", { bufferLength: buffer.length, targetWidth, targetHeight });
+    this.recordCall("resizeImageIfNeeded", {
+      bufferLength: buffer.length,
+      targetWidth,
+      targetHeight,
+    });
     if (this.resizeImageResult) {
       return this.resizeImageResult;
     }
@@ -242,13 +279,18 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
     buffer1: Buffer,
     buffer2: Buffer,
     threshold: number = 0.1,
-    fastMode: boolean = false
-  ): Promise<{ similarity: number; pixelDifference: number; totalPixels: number; filePath?: string }> {
+    fastMode: boolean = false,
+  ): Promise<{
+    similarity: number;
+    pixelDifference: number;
+    totalPixels: number;
+    filePath?: string;
+  }> {
     this.recordCall("compareImages", {
       buffer1Length: buffer1.length,
       buffer2Length: buffer2.length,
       threshold,
-      fastMode
+      fastMode,
     });
     return this.compareImagesResult;
   }
@@ -262,13 +304,13 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
     targetBuffer: Buffer,
     screenshotPaths: string[],
     tolerancePercent: number = 0.2,
-    fastMode: boolean = true
+    fastMode: boolean = true,
   ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>> {
     this.recordCall("batchCompareScreenshots", {
       targetBufferLength: targetBuffer.length,
       screenshotPathsCount: screenshotPaths.length,
       tolerancePercent,
-      fastMode
+      fastMode,
     });
     return this.batchCompareResult;
   }
@@ -277,13 +319,13 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
     targetBuffer: Buffer,
     screenshotPaths: string[],
     tolerancePercent: number = 0.2,
-    fastMode: boolean = true
+    fastMode: boolean = true,
   ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>> {
     this.recordCall("optimizedBatchCompareScreenshots", {
       targetBufferLength: targetBuffer.length,
       screenshotPathsCount: screenshotPaths.length,
       tolerancePercent,
-      fastMode
+      fastMode,
     });
     return this.optimizedBatchCompareResult;
   }
@@ -292,13 +334,13 @@ export class FakeScreenshotUtils implements ScreenshotUtils {
     targetBuffer: Buffer,
     cacheDir: string,
     tolerancePercent: number = 0.2,
-    maxComparisons: number = 10
+    maxComparisons: number = 10,
   ): Promise<{ filePath: string; similarity: number; matchFound: boolean }> {
     this.recordCall("findSimilarScreenshots", {
       targetBufferLength: targetBuffer.length,
       cacheDir,
       tolerancePercent,
-      maxComparisons
+      maxComparisons,
     });
     return this.findSimilarScreenshotsResult;
   }

@@ -40,10 +40,10 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
   /**
    * Simulate a client connection and subscription
    */
-  simulateSubscription(options: {
-    deviceSessionUuid?: string | null;
-    packageName?: string;
-  }): { socket: FakeSocket; subscriptionId: string } {
+  simulateSubscription(options: { deviceSessionUuid?: string | null; packageName?: string }): {
+    socket: FakeSocket;
+    subscriptionId: string;
+  } {
     const socket = new FakeSocket();
 
     // Create subscription directly using protected members
@@ -84,7 +84,9 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
     lastActivity: number;
   } | null {
     const subscriber = this.subscribers.get(subscriptionId);
-    if (!subscriber) {return null;}
+    if (!subscriber) {
+      return null;
+    }
     return {
       deviceSessionUuid: subscriber.filter.deviceSessionUuid,
       packageName: subscriber.filter.packageName,
@@ -190,8 +192,14 @@ describe("PerformancePushSocketServer", () => {
       nodeId: null,
       screenName: null,
       metrics: {
-        fps: 60, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: null,
-        ttffMs: null, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 60,
+        frameTimeMs: 16,
+        jankFrames: 0,
+        touchLatencyMs: null,
+        ttffMs: null,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       },
       thresholds: DEFAULT_THRESHOLDS,
       health: "healthy",
@@ -219,8 +227,14 @@ describe("PerformancePushSocketServer", () => {
       nodeId: null,
       screenName: null,
       metrics: {
-        fps: 60, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: null,
-        ttffMs: null, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 60,
+        frameTimeMs: 16,
+        jankFrames: 0,
+        touchLatencyMs: null,
+        ttffMs: null,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       },
       thresholds: DEFAULT_THRESHOLDS,
       health: "healthy",
@@ -241,8 +255,14 @@ describe("PerformancePushSocketServer", () => {
       nodeId: null,
       screenName: null,
       metrics: {
-        fps: 60, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: null,
-        ttffMs: null, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 60,
+        frameTimeMs: 16,
+        jankFrames: 0,
+        touchLatencyMs: null,
+        ttffMs: null,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       },
       thresholds: DEFAULT_THRESHOLDS,
       health: "healthy",
@@ -272,8 +292,14 @@ describe("PerformancePushSocketServer", () => {
       nodeId: null,
       screenName: null,
       metrics: {
-        fps: 60, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: null,
-        ttffMs: null, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 60,
+        frameTimeMs: 16,
+        jankFrames: 0,
+        touchLatencyMs: null,
+        ttffMs: null,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       },
       thresholds: DEFAULT_THRESHOLDS,
       health: "healthy",
@@ -319,114 +345,226 @@ describe("PerformancePushSocketServer", () => {
   describe("calculateHealth", () => {
     it("returns healthy when all metrics are good", () => {
       const metrics = {
-        fps: 60, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: 50,
-        ttffMs: 300, ttiMs: 500, cpuUsagePercent: 20, memoryUsageMb: 100,
+        fps: 60,
+        frameTimeMs: 16,
+        jankFrames: 0,
+        touchLatencyMs: 50,
+        ttffMs: 300,
+        ttiMs: 500,
+        cpuUsagePercent: 20,
+        memoryUsageMb: 100,
       };
-      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe("healthy");
+      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe(
+        "healthy",
+      );
     });
 
     it("returns warning when fps is below warning threshold", () => {
       const metrics = {
-        fps: 50, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: null,
-        ttffMs: null, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 50,
+        frameTimeMs: 16,
+        jankFrames: 0,
+        touchLatencyMs: null,
+        ttffMs: null,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       };
-      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe("warning");
+      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe(
+        "warning",
+      );
     });
 
     it("returns critical when fps is below critical threshold", () => {
       const metrics = {
-        fps: 40, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: null,
-        ttffMs: null, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 40,
+        frameTimeMs: 16,
+        jankFrames: 0,
+        touchLatencyMs: null,
+        ttffMs: null,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       };
-      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe("critical");
+      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe(
+        "critical",
+      );
     });
 
     it("returns warning when frame time exceeds warning threshold", () => {
       const metrics = {
-        fps: 60, frameTimeMs: 25, jankFrames: 0, touchLatencyMs: null,
-        ttffMs: null, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 60,
+        frameTimeMs: 25,
+        jankFrames: 0,
+        touchLatencyMs: null,
+        ttffMs: null,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       };
-      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe("warning");
+      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe(
+        "warning",
+      );
     });
 
     it("returns critical when frame time exceeds critical threshold", () => {
       const metrics = {
-        fps: 60, frameTimeMs: 40, jankFrames: 0, touchLatencyMs: null,
-        ttffMs: null, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 60,
+        frameTimeMs: 40,
+        jankFrames: 0,
+        touchLatencyMs: null,
+        ttffMs: null,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       };
-      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe("critical");
+      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe(
+        "critical",
+      );
     });
 
     it("returns warning when touch latency is high", () => {
       const metrics = {
-        fps: 60, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: 150,
-        ttffMs: null, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 60,
+        frameTimeMs: 16,
+        jankFrames: 0,
+        touchLatencyMs: 150,
+        ttffMs: null,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       };
-      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe("warning");
+      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe(
+        "warning",
+      );
     });
 
     it("returns critical when touch latency is very high", () => {
       const metrics = {
-        fps: 60, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: 250,
-        ttffMs: null, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 60,
+        frameTimeMs: 16,
+        jankFrames: 0,
+        touchLatencyMs: 250,
+        ttffMs: null,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       };
-      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe("critical");
+      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe(
+        "critical",
+      );
     });
 
     it("returns warning when jank frames exceed warning threshold", () => {
       const metrics = {
-        fps: 60, frameTimeMs: 16, jankFrames: 7, touchLatencyMs: null,
-        ttffMs: null, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 60,
+        frameTimeMs: 16,
+        jankFrames: 7,
+        touchLatencyMs: null,
+        ttffMs: null,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       };
-      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe("warning");
+      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe(
+        "warning",
+      );
     });
 
     it("returns critical when jank frames exceed critical threshold", () => {
       const metrics = {
-        fps: 60, frameTimeMs: 16, jankFrames: 15, touchLatencyMs: null,
-        ttffMs: null, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 60,
+        frameTimeMs: 16,
+        jankFrames: 15,
+        touchLatencyMs: null,
+        ttffMs: null,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       };
-      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe("critical");
+      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe(
+        "critical",
+      );
     });
 
     it("returns warning when TTFF exceeds warning threshold", () => {
       const metrics = {
-        fps: 60, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: null,
-        ttffMs: 600, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 60,
+        frameTimeMs: 16,
+        jankFrames: 0,
+        touchLatencyMs: null,
+        ttffMs: 600,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       };
-      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe("warning");
+      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe(
+        "warning",
+      );
     });
 
     it("returns critical when TTFF exceeds critical threshold", () => {
       const metrics = {
-        fps: 60, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: null,
-        ttffMs: 1200, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 60,
+        frameTimeMs: 16,
+        jankFrames: 0,
+        touchLatencyMs: null,
+        ttffMs: 1200,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       };
-      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe("critical");
+      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe(
+        "critical",
+      );
     });
 
     it("returns warning when TTI exceeds warning threshold", () => {
       const metrics = {
-        fps: 60, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: null,
-        ttffMs: null, ttiMs: 800, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 60,
+        frameTimeMs: 16,
+        jankFrames: 0,
+        touchLatencyMs: null,
+        ttffMs: null,
+        ttiMs: 800,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       };
-      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe("warning");
+      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe(
+        "warning",
+      );
     });
 
     it("returns critical when TTI exceeds critical threshold", () => {
       const metrics = {
-        fps: 60, frameTimeMs: 16, jankFrames: 0, touchLatencyMs: null,
-        ttffMs: null, ttiMs: 1600, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: 60,
+        frameTimeMs: 16,
+        jankFrames: 0,
+        touchLatencyMs: null,
+        ttffMs: null,
+        ttiMs: 1600,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       };
-      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe("critical");
+      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe(
+        "critical",
+      );
     });
 
     it("handles all null metrics as healthy", () => {
       const metrics = {
-        fps: null, frameTimeMs: null, jankFrames: null, touchLatencyMs: null,
-        ttffMs: null, ttiMs: null, cpuUsagePercent: null, memoryUsageMb: null,
+        fps: null,
+        frameTimeMs: null,
+        jankFrames: null,
+        touchLatencyMs: null,
+        ttffMs: null,
+        ttiMs: null,
+        cpuUsagePercent: null,
+        memoryUsageMb: null,
       };
-      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe("healthy");
+      expect(PerformancePushSocketServer.calculateHealth(metrics, DEFAULT_THRESHOLDS)).toBe(
+        "healthy",
+      );
     });
   });
 });

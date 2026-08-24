@@ -56,19 +56,17 @@ describe("CriticalSectionCoordinator.awaitBarrier", () => {
     const arrivals: Array<{ deviceId: string; at: number }> = [];
     const passes: Array<{ deviceId: string; at: number }> = [];
 
-    const promises = ["device-1", "device-2", "device-3"].map(
-      async (deviceId, index) => {
-        await wait(index * 10); // stagger arrivals
-        arrivals.push({ deviceId, at: Date.now() });
-        await coordinator.awaitBarrier("sync", deviceId, 3);
-        passes.push({ deviceId, at: Date.now() });
-      }
-    );
+    const promises = ["device-1", "device-2", "device-3"].map(async (deviceId, index) => {
+      await wait(index * 10); // stagger arrivals
+      arrivals.push({ deviceId, at: Date.now() });
+      await coordinator.awaitBarrier("sync", deviceId, 3);
+      passes.push({ deviceId, at: Date.now() });
+    });
 
     await Promise.all(promises);
 
     expect(passes.length).toBe(3);
-    const lastArrival = Math.max(...arrivals.map(a => a.at));
+    const lastArrival = Math.max(...arrivals.map((a) => a.at));
     // No device passes the barrier before the last one arrives.
     for (const p of passes) {
       expect(p.at).toBeGreaterThanOrEqual(lastArrival);
@@ -88,8 +86,8 @@ describe("CriticalSectionCoordinator.awaitBarrier", () => {
     await Promise.all([deviceWork("device-1"), deviceWork("device-2")]);
 
     // Both start before either ends — proof there is no mutual exclusion.
-    const starts = log.filter(e => e.event === "start").map(e => e.time);
-    const ends = log.filter(e => e.event === "end").map(e => e.time);
+    const starts = log.filter((e) => e.event === "start").map((e) => e.time);
+    const ends = log.filter((e) => e.event === "end").map((e) => e.time);
     expect(starts.length).toBe(2);
     expect(Math.max(...starts)).toBeLessThanOrEqual(Math.min(...ends));
   });
@@ -99,7 +97,7 @@ describe("CriticalSectionCoordinator.awaitBarrier", () => {
     const promise = coordinator.awaitBarrier("missing", "device-1", 2, 100);
     fakeTimer.advanceTime(100);
     await expect(promise).rejects.toThrow(
-      /Timeout waiting for critical section "missing"\. 1\/2 devices arrived after 100ms/
+      /Timeout waiting for critical section "missing"\. 1\/2 devices arrived after 100ms/,
     );
   });
 });

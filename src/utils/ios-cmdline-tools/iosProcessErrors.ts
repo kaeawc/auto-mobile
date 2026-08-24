@@ -22,7 +22,9 @@
  */
 export const isProcessAlreadyGoneError = (message: string): boolean => {
   const normalized = message.toLowerCase();
-  return normalized.includes("no such process")            // ESRCH strerror
-    || normalized.includes("found nothing to terminate")   // simctl "nothing to kill"
-    || /process (?:is )?not running/.test(normalized);      // process-scoped, not device-scoped
+  return (
+    normalized.includes("no such process") || // ESRCH strerror
+    normalized.includes("found nothing to terminate") || // simctl "nothing to kill"
+    /process (?:is )?not running/.test(normalized)
+  ); // process-scoped, not device-scoped
 };

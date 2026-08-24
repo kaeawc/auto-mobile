@@ -1,8 +1,4 @@
-import type {
-  AnrEvent,
-  CrashDeviceInfo,
-  CrashEvent,
-} from "../../../utils/interfaces/CrashMonitor";
+import type { AnrEvent, CrashDeviceInfo, CrashEvent } from "../../../utils/interfaces/CrashMonitor";
 
 export interface SdkCrashPayload {
   timestamp: number;

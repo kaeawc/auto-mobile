@@ -58,12 +58,15 @@ export class PerformanceStreamSocketServer extends RequestResponseSocketServer<
   PerformanceStreamSocketRequest,
   PerformanceStreamSocketResponse
 > {
-  constructor(socketPath: string = getSocketPath(PERFORMANCE_STREAM_SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(
+    socketPath: string = getSocketPath(PERFORMANCE_STREAM_SOCKET_CONFIG),
+    timer: Timer = defaultTimer,
+  ) {
     super(socketPath, timer, "PerformanceStream");
   }
 
   protected async handleRequest(
-    request: PerformanceStreamSocketRequest
+    request: PerformanceStreamSocketRequest,
   ): Promise<PerformanceStreamSocketResponse> {
     if (request.command !== "poll") {
       throw new Error(`Unsupported performance stream command: ${String(request.command)}`);
@@ -96,7 +99,10 @@ export class PerformanceStreamSocketServer extends RequestResponseSocketServer<
     };
   }
 
-  protected createErrorResponse(_id: string | undefined, error: string): PerformanceStreamSocketResponse {
+  protected createErrorResponse(
+    _id: string | undefined,
+    error: string,
+  ): PerformanceStreamSocketResponse {
     return {
       success: false,
       error,

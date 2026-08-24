@@ -1,4 +1,7 @@
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { ActiveWindowInfo } from "../../models/ActiveWindowInfo";
 import { logger } from "../../utils/logger";
@@ -136,7 +139,7 @@ export class Window implements WindowInterface {
    */
   async getActive(
     forceRefresh: boolean = false,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<ActiveWindowInfo> {
     // Return cached value if available and not forcing refresh
     if (!forceRefresh && this.cachedActiveWindow) {
@@ -157,7 +160,7 @@ export class Window implements WindowInterface {
 
     try {
       const { stdout } = await perf.track("adbDumpsysWindowWindows", () =>
-        this.adb.executeCommand(`shell "dumpsys window windows"`)
+        this.adb.executeCommand(`shell "dumpsys window windows"`),
       );
 
       // Detect API level for parsing strategy
@@ -213,7 +216,7 @@ export class Window implements WindowInterface {
       if (!packageName || !activityName) {
         const sample = stdout.trim().slice(0, 200);
         logger.warn(
-          `[WINDOW] Failed to parse active window from dumpsys output. Sample: ${sample || "<empty>"}`
+          `[WINDOW] Failed to parse active window from dumpsys output. Sample: ${sample || "<empty>"}`,
         );
       }
 
@@ -223,7 +226,7 @@ export class Window implements WindowInterface {
       return {
         appId: "",
         activityName: "",
-        layoutSeqSum: 0
+        layoutSeqSum: 0,
       };
     }
   }
@@ -231,7 +234,10 @@ export class Window implements WindowInterface {
   /**
    * Parse mCurrentFocus/mFocusedApp from simpler `dumpsys window` output (API 25 fallback)
    */
-  private async parseActiveWindowFromDumpsysWindow(): Promise<{ appId: string; activityName: string } | null> {
+  private async parseActiveWindowFromDumpsysWindow(): Promise<{
+    appId: string;
+    activityName: string;
+  } | null> {
     try {
       const { stdout } = await this.adb.executeCommand(`shell "dumpsys window"`);
       return parseDumpsysWindowFocus(stdout);
@@ -246,9 +252,7 @@ export class Window implements WindowInterface {
    * @param perf - Optional performance tracker
    * @returns Promise with activity name hash
    */
-  async getActiveHash(
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
-  ): Promise<string> {
+  async getActiveHash(perf: PerformanceTracker = new NoOpPerformanceTracker()): Promise<string> {
     logger.info("[WINDOW] Getting hash of active window");
     // Always force refresh when getting hash to ensure it reflects current state
     const activeWindow = await this.getActive(true, perf);
@@ -261,13 +265,15 @@ export class Window implements WindowInterface {
  * Parse active window from dumpsys window windows output for API 26+ (modern format).
  * Uses 5-pattern fallback chain: imeControlTarget → Pop-Up → visible app → BASE_APPLICATION → visible+BASE_APPLICATION.
  */
-export function parseActiveWindowModern(stdout: string): { appId: string; activityName: string } | null {
+export function parseActiveWindowModern(
+  stdout: string,
+): { appId: string; activityName: string } | null {
   let packageName = "";
   let activityName = "";
 
   // First try to get from imeControlTarget (original approach)
   const imeControlMatch = stdout.match(
-    /imeControlTarget.*?Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}/
+    /imeControlTarget.*?Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}/,
   );
 
   if (imeControlMatch && imeControlMatch.length >= 3) {
@@ -276,17 +282,19 @@ export function parseActiveWindowModern(stdout: string): { appId: string; activi
   } else {
     // Handle Pop-Up Window case
     const popupControlMatch = stdout.match(
-      /imeControlTarget.*?Window\{([0-9a-f]+)\s+u\d+\s+Pop-Up Window\}/i
+      /imeControlTarget.*?Window\{([0-9a-f]+)\s+u\d+\s+Pop-Up Window\}/i,
     );
 
     if (popupControlMatch) {
       const hexRef = popupControlMatch[1];
-      const windowRegex = new RegExp(`Window #\\d+ Window\\{${hexRef} u\\d+ Pop-Up Window\\}:([\\s\\S]*?)(?=Window #\\d+|$)`);
+      const windowRegex = new RegExp(
+        `Window #\\d+ Window\\{${hexRef} u\\d+ Pop-Up Window\\}:([\\s\\S]*?)(?=Window #\\d+|$)`,
+      );
       const windowMatch = stdout.match(windowRegex);
 
       if (windowMatch) {
         const activityRecordMatch = windowMatch[1].match(
-          /mActivityRecord=ActivityRecord\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)(?:\s+t\d+)?\}/
+          /mActivityRecord=ActivityRecord\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)(?:\s+t\d+)?\}/,
         );
 
         if (activityRecordMatch && activityRecordMatch.length >= 3) {
@@ -299,11 +307,16 @@ export function parseActiveWindowModern(stdout: string): { appId: string; activi
     // If still no match, try fallback approaches
     if (!packageName || !activityName) {
       const visibleAppMatches = stdout.matchAll(
-        /Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}:[\s\S]*?mViewVisibility=0x0[\s\S]*?isOnScreen=true[\s\S]*?isVisible=true/gs
+        /Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}:[\s\S]*?mViewVisibility=0x0[\s\S]*?isOnScreen=true[\s\S]*?isVisible=true/gs,
       );
 
       for (const match of visibleAppMatches) {
-        if (match[1] && match[2] && !match[1].includes("android.systemui") && !match[1].includes("nexuslauncher")) {
+        if (
+          match[1] &&
+          match[2] &&
+          !match[1].includes("android.systemui") &&
+          !match[1].includes("nexuslauncher")
+        ) {
           packageName = match[1];
           activityName = match[2];
           break;
@@ -312,7 +325,7 @@ export function parseActiveWindowModern(stdout: string): { appId: string; activi
 
       if (!packageName || !activityName) {
         const anyAppMatch = stdout.match(
-          /Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}:[\s\S]*?ty=BASE_APPLICATION/
+          /Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}:[\s\S]*?ty=BASE_APPLICATION/,
         );
         if (anyAppMatch && anyAppMatch.length >= 3) {
           packageName = anyAppMatch[1];
@@ -322,7 +335,8 @@ export function parseActiveWindowModern(stdout: string): { appId: string; activi
     }
 
     if (!packageName || !activityName) {
-      const visibleAppRegex = /Window #\d+ Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}:[\s\S]*?ty=BASE_APPLICATION[\s\S]*?isOnScreen=true[\s\S]*?isVisible=true/gs;
+      const visibleAppRegex =
+        /Window #\d+ Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}:[\s\S]*?ty=BASE_APPLICATION[\s\S]*?isOnScreen=true[\s\S]*?isVisible=true/gs;
       const visibleMatch = visibleAppRegex.exec(stdout);
 
       if (visibleMatch && visibleMatch.length >= 3) {
@@ -342,9 +356,12 @@ export function parseActiveWindowModern(stdout: string): { appId: string; activi
  * Parse active window from dumpsys window windows output for API 25 and below (legacy format).
  * Looks for Window blocks with ty=1 (BASE_APPLICATION equivalent) and isReadyForDisplay()=true.
  */
-export function parseActiveWindowLegacy(stdout: string): { appId: string; activityName: string } | null {
+export function parseActiveWindowLegacy(
+  stdout: string,
+): { appId: string; activityName: string } | null {
   // Split into individual window blocks to avoid matching across blocks
-  const blockRegex = /Window #\d+ Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}:([\s\S]*?)(?=Window #\d+|$)/g;
+  const blockRegex =
+    /Window #\d+ Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}:([\s\S]*?)(?=Window #\d+|$)/g;
   const blocks = [...stdout.matchAll(blockRegex)];
 
   for (const block of blocks) {
@@ -352,8 +369,12 @@ export function parseActiveWindowLegacy(stdout: string): { appId: string; activi
     const activity = block[2];
     const content = block[3];
 
-    if (!pkg || !activity) {continue;}
-    if (pkg.includes("android.systemui") || pkg.includes("nexuslauncher")) {continue;}
+    if (!pkg || !activity) {
+      continue;
+    }
+    if (pkg.includes("android.systemui") || pkg.includes("nexuslauncher")) {
+      continue;
+    }
 
     // Check for ty=1 (BASE_APPLICATION on legacy) and isReadyForDisplay()=true within this block
     if (/\bty=1\b/.test(content) && /isReadyForDisplay\(\)=true/.test(content)) {
@@ -367,19 +388,19 @@ export function parseActiveWindowLegacy(stdout: string): { appId: string; activi
 /**
  * Parse mCurrentFocus/mFocusedApp from `dumpsys window` output (simpler format, API 25 fallback).
  */
-export function parseDumpsysWindowFocus(stdout: string): { appId: string; activityName: string } | null {
+export function parseDumpsysWindowFocus(
+  stdout: string,
+): { appId: string; activityName: string } | null {
   // Try mCurrentFocus=Window{...pkg/activity}
   const currentFocusMatch = stdout.match(
-    /mCurrentFocus=Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}/
+    /mCurrentFocus=Window\{[^}]*?\s+u\d+\s+([^\s/]+)\/([^\s}]+)\}/,
   );
   if (currentFocusMatch && currentFocusMatch.length >= 3) {
     return { appId: currentFocusMatch[1], activityName: currentFocusMatch[2] };
   }
 
   // Try mFocusedApp=AppWindowToken{...pkg/activity}
-  const focusedAppMatch = stdout.match(
-    /mFocusedApp=AppWindowToken\{[^}]*?\s+([^\s/]+)\/([^\s}]+)/
-  );
+  const focusedAppMatch = stdout.match(/mFocusedApp=AppWindowToken\{[^}]*?\s+([^\s/]+)\/([^\s}]+)/);
   if (focusedAppMatch && focusedAppMatch.length >= 3) {
     return { appId: focusedAppMatch[1], activityName: focusedAppMatch[2] };
   }

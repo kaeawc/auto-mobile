@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { Window, parseActiveWindowModern, parseActiveWindowLegacy, parseDumpsysWindowFocus } from "../../../src/features/observe/Window";
+import {
+  Window,
+  parseActiveWindowModern,
+  parseActiveWindowLegacy,
+  parseDumpsysWindowFocus,
+} from "../../../src/features/observe/Window";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { ExecResult } from "../../../src/models/ExecResult";
@@ -16,7 +21,7 @@ describe("Window", () => {
     mockDevice = {
       deviceId: "test-device",
       name: "Test Device",
-      platform: "android"
+      platform: "android",
     };
     fakeAdb = new FakeAdbExecutor();
     window = new Window(mockDevice, new FakeAdbClientFactory(fakeAdb));
@@ -44,7 +49,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -65,7 +70,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -88,7 +93,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -109,7 +114,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -130,7 +135,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -154,7 +159,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -186,7 +191,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => "",
         trim: () => "",
-        includes: (str: string) => false
+        includes: (str: string) => false,
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -200,7 +205,7 @@ describe("Window", () => {
       // Read the actual dumpsys output with Pop-Up Window
       const dumpsysOutput = fs.readFileSync(
         path.join(__dirname, "windowDumps", "active-window-with-popup.log"),
-        "utf8"
+        "utf8",
       );
 
       fakeAdb.setDefaultResponse({
@@ -208,7 +213,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -241,7 +246,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -273,7 +278,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -286,7 +291,7 @@ describe("Window", () => {
     test("should parse API 25 dumpsys window windows with ty=1 and isReadyForDisplay()=true", async () => {
       const dumpsysOutput = fs.readFileSync(
         path.join(__dirname, "windowDumps", "api25-window-dump.log"),
-        "utf8"
+        "utf8",
       );
 
       fakeAdb.setAndroidApiLevel(25);
@@ -295,7 +300,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -308,7 +313,7 @@ describe("Window", () => {
     test("should parse real API 26 dumpsys output via legacy parser", async () => {
       const dumpsysOutput = fs.readFileSync(
         path.join(__dirname, "windowDumps", "api26-settings-window-dump.log"),
-        "utf8"
+        "utf8",
       );
 
       fakeAdb.setAndroidApiLevel(26);
@@ -317,7 +322,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -330,7 +335,7 @@ describe("Window", () => {
     test("should parse real API 27 dumpsys output via legacy parser", async () => {
       const dumpsysOutput = fs.readFileSync(
         path.join(__dirname, "windowDumps", "api27-settings-window-dump.log"),
-        "utf8"
+        "utf8",
       );
 
       fakeAdb.setAndroidApiLevel(27);
@@ -339,7 +344,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -352,7 +357,7 @@ describe("Window", () => {
     test("should parse real API 28 dumpsys output via modern parser", async () => {
       const dumpsysOutput = fs.readFileSync(
         path.join(__dirname, "windowDumps", "api28-settings-window-dump.log"),
-        "utf8"
+        "utf8",
       );
 
       fakeAdb.setAndroidApiLevel(28);
@@ -361,7 +366,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -374,7 +379,7 @@ describe("Window", () => {
     test("should parse real API 29 dumpsys output via modern parser", async () => {
       const dumpsysOutput = fs.readFileSync(
         path.join(__dirname, "windowDumps", "api29-settings-window-dump.log"),
-        "utf8"
+        "utf8",
       );
 
       fakeAdb.setAndroidApiLevel(29);
@@ -383,7 +388,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -396,7 +401,7 @@ describe("Window", () => {
     test("should parse real API 30 dumpsys output via modern parser", async () => {
       const dumpsysOutput = fs.readFileSync(
         path.join(__dirname, "windowDumps", "api30-settings-window-dump.log"),
-        "utf8"
+        "utf8",
       );
 
       fakeAdb.setAndroidApiLevel(30);
@@ -405,7 +410,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -418,7 +423,7 @@ describe("Window", () => {
     test("should parse real API 31 dumpsys output via modern parser with imeControlTarget", async () => {
       const dumpsysOutput = fs.readFileSync(
         path.join(__dirname, "windowDumps", "api31-settings-window-dump.log"),
-        "utf8"
+        "utf8",
       );
 
       fakeAdb.setAndroidApiLevel(31);
@@ -427,7 +432,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -440,7 +445,7 @@ describe("Window", () => {
     test("should parse real API 32 dumpsys output via modern parser with imeControlTarget", async () => {
       const dumpsysOutput = fs.readFileSync(
         path.join(__dirname, "windowDumps", "api32-settings-window-dump.log"),
-        "utf8"
+        "utf8",
       );
 
       fakeAdb.setAndroidApiLevel(32);
@@ -449,7 +454,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -462,7 +467,7 @@ describe("Window", () => {
     test("should parse real API 33 dumpsys output via modern parser with imeControlTarget", async () => {
       const dumpsysOutput = fs.readFileSync(
         path.join(__dirname, "windowDumps", "api33-settings-window-dump.log"),
-        "utf8"
+        "utf8",
       );
 
       fakeAdb.setAndroidApiLevel(33);
@@ -471,7 +476,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -484,7 +489,7 @@ describe("Window", () => {
     test("should parse real API 34 dumpsys output via modern parser with imeControlTarget", async () => {
       const dumpsysOutput = fs.readFileSync(
         path.join(__dirname, "windowDumps", "api34-settings-window-dump.log"),
-        "utf8"
+        "utf8",
       );
 
       fakeAdb.setAndroidApiLevel(34);
@@ -493,7 +498,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -506,7 +511,7 @@ describe("Window", () => {
     test("should parse real API 35 dumpsys output via modern parser with imeControlTarget", async () => {
       const dumpsysOutput = fs.readFileSync(
         path.join(__dirname, "windowDumps", "api35-settings-window-dump.log"),
-        "utf8"
+        "utf8",
       );
 
       fakeAdb.setAndroidApiLevel(35);
@@ -515,7 +520,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -528,7 +533,7 @@ describe("Window", () => {
     test("should parse real API 36 dumpsys output via modern parser with imeControlTarget", async () => {
       const dumpsysOutput = fs.readFileSync(
         path.join(__dirname, "windowDumps", "api36-settings-window-dump.log"),
-        "utf8"
+        "utf8",
       );
 
       fakeAdb.setAndroidApiLevel(36);
@@ -537,7 +542,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -566,7 +571,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => windowWindowsOutput,
         trim: () => windowWindowsOutput.trim(),
-        includes: (str: string) => windowWindowsOutput.includes(str)
+        includes: (str: string) => windowWindowsOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -595,14 +600,14 @@ describe("Window", () => {
         stderr: "",
         toString: () => windowWindowsOutput,
         trim: () => windowWindowsOutput.trim(),
-        includes: (str: string) => windowWindowsOutput.includes(str)
+        includes: (str: string) => windowWindowsOutput.includes(str),
       } as ExecResult);
-      fakeAdb.setCommandResponse("dumpsys window\"", {
+      fakeAdb.setCommandResponse('dumpsys window"', {
         stdout: windowOutput,
         stderr: "",
         toString: () => windowOutput,
         trim: () => windowOutput.trim(),
-        includes: (str: string) => windowOutput.includes(str)
+        includes: (str: string) => windowOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -627,14 +632,14 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
-      fakeAdb.setCommandResponse("dumpsys window\"", {
+      fakeAdb.setCommandResponse('dumpsys window"', {
         stdout: windowOutput,
         stderr: "",
         toString: () => windowOutput,
         trim: () => windowOutput.trim(),
-        includes: (str: string) => windowOutput.includes(str)
+        includes: (str: string) => windowOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -655,7 +660,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -685,7 +690,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => dumpsysOutput,
         trim: () => dumpsysOutput.trim(),
-        includes: (str: string) => dumpsysOutput.includes(str)
+        includes: (str: string) => dumpsysOutput.includes(str),
       } as ExecResult);
 
       const result = await window.getActive(true);
@@ -719,7 +724,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => firstState,
         trim: () => firstState.trim(),
-        includes: (str: string) => firstState.includes(str)
+        includes: (str: string) => firstState.includes(str),
       } as ExecResult);
       const firstHash = await window.getActiveHash();
 
@@ -730,7 +735,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => secondState,
         trim: () => secondState.trim(),
-        includes: (str: string) => secondState.includes(str)
+        includes: (str: string) => secondState.includes(str),
       } as ExecResult);
       const secondHash = await window.getActiveHash();
 
@@ -752,7 +757,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => uiState,
         trim: () => uiState.trim(),
-        includes: (str: string) => uiState.includes(str)
+        includes: (str: string) => uiState.includes(str),
       } as ExecResult);
 
       // Get hashes twice
@@ -786,7 +791,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => uiState,
         trim: () => uiState.trim(),
-        includes: (str: string) => uiState.includes(str)
+        includes: (str: string) => uiState.includes(str),
       } as ExecResult);
       const firstHash = await window.getActiveHash();
 
@@ -797,7 +802,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => sameVisibleState,
         trim: () => sameVisibleState.trim(),
-        includes: (str: string) => sameVisibleState.includes(str)
+        includes: (str: string) => sameVisibleState.includes(str),
       } as ExecResult);
       const secondHash = await window.getActiveHash();
 
@@ -825,7 +830,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => firstState,
         trim: () => firstState.trim(),
-        includes: (str: string) => firstState.includes(str)
+        includes: (str: string) => firstState.includes(str),
       } as ExecResult);
       const firstHash = await window.getActiveHash();
 
@@ -836,7 +841,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => secondState,
         trim: () => secondState.trim(),
-        includes: (str: string) => secondState.includes(str)
+        includes: (str: string) => secondState.includes(str),
       } as ExecResult);
       const secondHash = await window.getActiveHash();
 
@@ -855,7 +860,7 @@ describe("Window", () => {
         stderr: "",
         toString: () => uiState,
         trim: () => uiState.trim(),
-        includes: (str: string) => uiState.includes(str)
+        includes: (str: string) => uiState.includes(str),
       } as ExecResult);
 
       const hash = await window.getActiveHash();
@@ -872,7 +877,10 @@ describe("Window", () => {
 
     test("should parse imeControlTarget", () => {
       const stdout = `imeControlTarget in display# 0 Window{abc u0 com.foo/com.foo.Bar}`;
-      expect(parseActiveWindowModern(stdout)).toEqual({ appId: "com.foo", activityName: "com.foo.Bar" });
+      expect(parseActiveWindowModern(stdout)).toEqual({
+        appId: "com.foo",
+        activityName: "com.foo.Bar",
+      });
     });
   });
 
@@ -888,7 +896,10 @@ describe("Window", () => {
     mHasSurface=true isReadyForDisplay()=true
     mLayoutSeq=90
       `;
-      expect(parseActiveWindowLegacy(stdout)).toEqual({ appId: "com.example.app", activityName: "com.example.app.Main" });
+      expect(parseActiveWindowLegacy(stdout)).toEqual({
+        appId: "com.example.app",
+        activityName: "com.example.app.Main",
+      });
     });
 
     test("should skip systemui windows", () => {
@@ -900,7 +911,10 @@ describe("Window", () => {
     mAttrs=WM.LayoutParams{ty=1 fl=#81810100}
     isReadyForDisplay()=true
       `;
-      expect(parseActiveWindowLegacy(stdout)).toEqual({ appId: "com.real.app", activityName: "com.real.app.Main" });
+      expect(parseActiveWindowLegacy(stdout)).toEqual({
+        appId: "com.real.app",
+        activityName: "com.real.app.Main",
+      });
     });
 
     test("should return null when isReadyForDisplay is false", () => {
@@ -920,12 +934,18 @@ describe("Window", () => {
 
     test("should parse mCurrentFocus", () => {
       const stdout = `mCurrentFocus=Window{41e2a458 u0 com.example.app/com.example.app.SomeActivity}`;
-      expect(parseDumpsysWindowFocus(stdout)).toEqual({ appId: "com.example.app", activityName: "com.example.app.SomeActivity" });
+      expect(parseDumpsysWindowFocus(stdout)).toEqual({
+        appId: "com.example.app",
+        activityName: "com.example.app.SomeActivity",
+      });
     });
 
     test("should parse mFocusedApp when mCurrentFocus is missing", () => {
       const stdout = `mFocusedApp=AppWindowToken{41d97f58 token=Token{41d8cd78 ActivityRecord{41d8cb10 u0 com.example.app/com.example.app.SomeActivity t5}}}`;
-      expect(parseDumpsysWindowFocus(stdout)).toEqual({ appId: "com.example.app", activityName: "com.example.app.SomeActivity" });
+      expect(parseDumpsysWindowFocus(stdout)).toEqual({
+        appId: "com.example.app",
+        activityName: "com.example.app.SomeActivity",
+      });
     });
   });
 });

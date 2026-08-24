@@ -8,11 +8,13 @@ Navigate system-level UI and control hardware functions.
 ## Home Screen
 
 Use `homeScreen` to return to the device home screen:
+
 ```
 homeScreen
 ```
 
 Useful for:
+
 - Resetting to a known state
 - Exiting apps
 - Starting fresh navigation
@@ -20,11 +22,13 @@ Useful for:
 ## Recent Apps
 
 Use `recentApps` to open the app switcher:
+
 ```
 recentApps
 ```
 
 From here you can:
+
 - Switch between running apps
 - Close apps by swiping them away
 - See app thumbnails
@@ -32,11 +36,13 @@ From here you can:
 ## Hardware Buttons
 
 Use `pressButton` for hardware button presses:
+
 ```
 pressButton with button: "back"
 ```
 
 Available buttons:
+
 - `home`: Go to home screen
 - `back`: Navigate back
 - `menu`: Open menu (Android)
@@ -48,6 +54,7 @@ Available buttons:
 ## Key Press
 
 Use `pressKey` for specific key codes:
+
 ```
 pressKey with key: "enter"
 ```
@@ -55,6 +62,7 @@ pressKey with key: "enter"
 ## Device Orientation
 
 Use `rotate` to change screen orientation:
+
 ```
 rotate with orientation: "landscape"
 rotate with orientation: "portrait"
@@ -63,11 +71,13 @@ rotate with orientation: "portrait"
 ## Shake Device
 
 Use `shake` to trigger shake gesture:
+
 ```
 shake
 ```
 
 Useful for:
+
 - Triggering shake-to-undo
 - Developer menu access
 - Feedback dialogs
@@ -75,16 +85,19 @@ Useful for:
 ## Common Workflows
 
 **Navigate back through screens:**
+
 ```
 pressButton "back" → observe → pressButton "back" → observe
 ```
 
 **Reset to known state:**
+
 ```
 homeScreen → launchApp
 ```
 
 **Test orientation changes:**
+
 ```
 rotate "landscape" → observe → rotate "portrait" → observe
 ```

@@ -15,6 +15,7 @@ The navigation graph captures:
 ### Nodes
 
 Each node is identified by:
+
 ```typescript
 {
   screenId: string,        // Unique identifier
@@ -28,6 +29,7 @@ Each node is identified by:
 ### Edges
 
 Edges record the method of navigation in terms of UI interaction:
+
 ```typescript
 {
   from: string,           // Source screen ID
@@ -66,10 +68,10 @@ observation is never evicted by the size cap:
 All thresholds are overridable via environment variables (positive integers;
 an invalid value falls back to the default):
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `AUTOMOBILE_NAV_RETENTION_SCREENSHOT_TTL_MS` | `604800000` (7 days) | Max age of a node screenshot before its pointer is cleared. |
-| `AUTOMOBILE_NAV_RETENTION_STRUCTURE_TTL_MS` | `7776000000` (90 days) | Max age of an observation row before it is pruned. |
-| `AUTOMOBILE_NAV_RETENTION_PER_APP_MAX_OBSERVATIONS` | `50000` | Max observation rows kept per app before the LRU cap evicts oldest. |
-| `AUTOMOBILE_NAV_RETENTION_GLOBAL_MAX_OBSERVATIONS` | `500000` | Max observation rows kept across all apps. |
-| `AUTOMOBILE_NAV_RETENTION_INTERVAL_MS` | `21600000` (6 hours) | How often the background retention pass runs. |
+| Variable                                            | Default                | Meaning                                                             |
+| --------------------------------------------------- | ---------------------- | ------------------------------------------------------------------- |
+| `AUTOMOBILE_NAV_RETENTION_SCREENSHOT_TTL_MS`        | `604800000` (7 days)   | Max age of a node screenshot before its pointer is cleared.         |
+| `AUTOMOBILE_NAV_RETENTION_STRUCTURE_TTL_MS`         | `7776000000` (90 days) | Max age of an observation row before it is pruned.                  |
+| `AUTOMOBILE_NAV_RETENTION_PER_APP_MAX_OBSERVATIONS` | `50000`                | Max observation rows kept per app before the LRU cap evicts oldest. |
+| `AUTOMOBILE_NAV_RETENTION_GLOBAL_MAX_OBSERVATIONS`  | `500000`               | Max observation rows kept across all apps.                          |
+| `AUTOMOBILE_NAV_RETENTION_INTERVAL_MS`              | `21600000` (6 hours)   | How often the background retention pass runs.                       |

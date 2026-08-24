@@ -6,17 +6,17 @@ import { SeededRandom } from "../fakes/SeededRandom";
 // against CryptoRandom (and more strongly — it also asserts `pick([])` throws).
 // They were removed to keep the contract the single source of truth.
 
-describe("SeededRandom", function() {
-  test("same seeds produce the same sequence", function() {
+describe("SeededRandom", function () {
+  test("same seeds produce the same sequence", function () {
     const first = new SeededRandom(42);
     const second = new SeededRandom(42);
 
     expect(Array.from({ length: 10 }, () => first.next())).toEqual(
-      Array.from({ length: 10 }, () => second.next())
+      Array.from({ length: 10 }, () => second.next()),
     );
   });
 
-  test("reseed restarts the sequence", function() {
+  test("reseed restarts the sequence", function () {
     const random = new SeededRandom(7);
     const first = random.next();
 
@@ -26,12 +26,12 @@ describe("SeededRandom", function() {
     expect(random.next()).toBe(first);
   });
 
-  test("pick is deterministic for a given seed", function() {
+  test("pick is deterministic for a given seed", function () {
     const items = ["a", "b", "c", "d"];
     expect(new SeededRandom(100).pick(items)).toBe(new SeededRandom(100).pick(items));
   });
 
-  test("degenerate seeds 0, NaN and 1 collapse to the same stream", function() {
+  test("degenerate seeds 0, NaN and 1 collapse to the same stream", function () {
     // normalizeSeed = (Math.floor(seed) >>> 0) || 1, so 0 -> 1, NaN -> 0 -> 1,
     // and 1 -> 1: all three seeds yield an IDENTICAL sequence. Compare full
     // 5-value streams (a single value would be a far weaker check).

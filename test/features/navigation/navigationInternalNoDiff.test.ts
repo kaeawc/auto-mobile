@@ -7,9 +7,7 @@ import { createStructuredToolResponse } from "../../../src/utils/toolUtils";
 import type { BootedDevice } from "../../../src/models";
 import type { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { ScrollPosition } from "../../../src/utils/interfaces/NavigationGraph";
-import type {
-  NavigationGraphService,
-} from "../../../src/features/navigation/NavigationGraphManager";
+import type { NavigationGraphService } from "../../../src/features/navigation/NavigationGraphManager";
 import type { UIStateSetup } from "../../../src/features/navigation/interfaces/UIStateSetup";
 import type { ScreenTransitionWaiter } from "../../../src/features/navigation/interfaces/ScreenTransitionWaiter";
 
@@ -77,8 +75,19 @@ describe("navigation internal no-diff marking (#3087)", () => {
       };
       const navManager = {
         getCurrentScreen: () => "Home",
-        getNode: async () => ({ screenName: "Home", firstSeenAt: 0, lastSeenAt: 0, visitCount: 1, backStackDepth: 0 }),
-        findPath: async () => ({ found: true, path: [edge], startScreen: "Home", targetScreen: "Detail" }),
+        getNode: async () => ({
+          screenName: "Home",
+          firstSeenAt: 0,
+          lastSeenAt: 0,
+          visitCount: 1,
+          backStackDepth: 0,
+        }),
+        findPath: async () => ({
+          found: true,
+          path: [edge],
+          startScreen: "Home",
+          targetScreen: "Detail",
+        }),
         getKnownScreens: async () => ["Home", "Detail"],
       } as unknown as NavigationGraphService;
       const uiStateSetup: UIStateSetup = {
@@ -92,7 +101,11 @@ describe("navigation internal no-diff marking (#3087)", () => {
     }
 
     test("marks the replayed tool call internal without mutating the stored edge args", async () => {
-      const interactionArgs: Record<string, any> = { action: "tap", text: "Open", platform: "android" };
+      const interactionArgs: Record<string, any> = {
+        action: "tap",
+        text: "Open",
+        platform: "android",
+      };
       const before = JSON.stringify(interactionArgs);
       const { navManager, uiStateSetup, screenWaiter } = makeFakes(interactionArgs);
 

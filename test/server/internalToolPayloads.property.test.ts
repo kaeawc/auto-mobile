@@ -16,7 +16,7 @@ const envelope = fc.oneof(
   fc.constant(undefined),
   fc.string(),
   fc.integer(),
-  fc.boolean()
+  fc.boolean(),
 );
 
 describe("narrowInternalToolEnvelope (property-based)", () => {
@@ -26,36 +26,50 @@ describe("narrowInternalToolEnvelope (property-based)", () => {
         const r = narrowInternalToolEnvelope(n, response);
         return r === undefined || typeof r === "object";
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("returns the same envelope by identity iff structuredContent is an object", () => {
     fc.assert(
       fc.property(name, envelope, (n, response) => {
-        const sc = (response as { structuredContent?: unknown } | null | undefined)?.structuredContent;
+        const sc = (response as { structuredContent?: unknown } | null | undefined)
+          ?.structuredContent;
         const valid = !!response && typeof response === "object" && !!sc && typeof sc === "object";
         const r = narrowInternalToolEnvelope(n, response);
         return valid ? r === response : r === undefined;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("null/non-object responses always narrow to undefined", () => {
-    const nonObject = fc.oneof(fc.constant(null), fc.constant(undefined), fc.string(), fc.integer(), fc.boolean());
+    const nonObject = fc.oneof(
+      fc.constant(null),
+      fc.constant(undefined),
+      fc.string(),
+      fc.integer(),
+      fc.boolean(),
+    );
     fc.assert(
-      fc.property(name, nonObject, (n, response) => narrowInternalToolEnvelope(n, response) === undefined),
-      RUN_OPTIONS
+      fc.property(
+        name,
+        nonObject,
+        (n, response) => narrowInternalToolEnvelope(n, response) === undefined,
+      ),
+      RUN_OPTIONS,
     );
   });
 
   test("the result is independent of the tool name", () => {
     fc.assert(
-      fc.property(envelope, response =>
-        narrowInternalToolEnvelope("swipeOn", response) === narrowInternalToolEnvelope("observe", response)
+      fc.property(
+        envelope,
+        (response) =>
+          narrowInternalToolEnvelope("swipeOn", response) ===
+          narrowInternalToolEnvelope("observe", response),
       ),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

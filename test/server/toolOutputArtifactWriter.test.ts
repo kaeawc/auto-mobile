@@ -219,10 +219,12 @@ describe("JsonToolOutputArtifactWriter", () => {
       timer: new FakeTimer(),
     });
 
-    expect(() => writer.writeJsonArtifact({
-      tool: "observe",
-      payload: "ObserveResult",
-      data: { updatedAt: 1 },
-    })).toThrow("Failed to write ObserveResult artifact for observe: disk full");
+    expect(() =>
+      writer.writeJsonArtifact({
+        tool: "observe",
+        payload: "ObserveResult",
+        data: { updatedAt: 1 },
+      }),
+    ).toThrow("Failed to write ObserveResult artifact for observe: disk full");
   });
 });

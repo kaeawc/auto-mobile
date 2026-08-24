@@ -7,19 +7,21 @@ async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promi
   const original = process.platform;
   Object.defineProperty(process, "platform", {
     value: platform,
-    configurable: true
+    configurable: true,
   });
   try {
     return await fn();
   } finally {
     Object.defineProperty(process, "platform", {
       value: original,
-      configurable: true
+      configurable: true,
     });
   }
 }
 
-function makeCheck(overrides: Partial<CheckResult> & Pick<CheckResult, "name" | "status">): CheckResult {
+function makeCheck(
+  overrides: Partial<CheckResult> & Pick<CheckResult, "name" | "status">,
+): CheckResult {
   return {
     message: overrides.status,
     ...overrides,
@@ -41,10 +43,10 @@ function makeReport(overrides: Partial<DoctorReport> = {}): DoctorReport {
 
   const summary: DoctorSummary = overrides.summary ?? {
     total: allChecks.length,
-    passed: allChecks.filter(c => c.status === "pass").length,
-    warnings: allChecks.filter(c => c.status === "warn").length,
-    failed: allChecks.filter(c => c.status === "fail").length,
-    skipped: allChecks.filter(c => c.status === "skip").length,
+    passed: allChecks.filter((c) => c.status === "pass").length,
+    warnings: allChecks.filter((c) => c.status === "warn").length,
+    failed: allChecks.filter((c) => c.status === "fail").length,
+    skipped: allChecks.filter((c) => c.status === "skip").length,
   };
 
   return {
@@ -180,7 +182,9 @@ describe("formatConsoleOutput", () => {
   test("check with value displays value instead of message", () => {
     const report = makeReport({
       system: {
-        checks: [makeCheck({ name: "OS", status: "pass", message: "the message", value: "the-value" })],
+        checks: [
+          makeCheck({ name: "OS", status: "pass", message: "the message", value: "the-value" }),
+        ],
       },
       autoMobile: { checks: [] },
     });
@@ -370,7 +374,9 @@ describe("formatJsonOutput", () => {
         checks: [makeCheck({ name: "OS", status: "pass", message: "darwin", value: "darwin" })],
       },
       android: {
-        checks: [makeCheck({ name: "ADB", status: "warn", message: "old", recommendation: "update" })],
+        checks: [
+          makeCheck({ name: "ADB", status: "warn", message: "old", recommendation: "update" }),
+        ],
       },
       autoMobile: {
         checks: [makeCheck({ name: "Server", status: "pass", message: "running" })],
@@ -416,9 +422,9 @@ describe("runDoctor", () => {
     await withProcessPlatform("linux", async () => {
       const report = await runDoctor({}, fakeDeps());
 
-      expect(report.android?.checks.map(c => c.name)).toEqual(["Android SDK"]);
+      expect(report.android?.checks.map((c) => c.name)).toEqual(["Android SDK"]);
       expect(report.ios).toBeUndefined();
-      expect(report.autoMobile.checks.map(c => c.name)).toEqual(["AutoMobile Daemon"]);
+      expect(report.autoMobile.checks.map((c) => c.name)).toEqual(["AutoMobile Daemon"]);
     });
   });
 
@@ -428,7 +434,7 @@ describe("runDoctor", () => {
 
       expect(report.platform).toBe("linux");
       expect(report.android).toBeUndefined();
-      expect(report.ios?.checks.map(c => c.name)).toEqual(["Xcode"]);
+      expect(report.ios?.checks.map((c) => c.name)).toEqual(["Xcode"]);
     });
   });
 
@@ -437,7 +443,9 @@ describe("runDoctor", () => {
       const report = await runDoctor({ ios: true }, fakeDeps());
 
       expect(report.summary.total).toBe(
-        report.system.checks.length + (report.ios?.checks.length ?? 0) + report.autoMobile.checks.length
+        report.system.checks.length +
+          (report.ios?.checks.length ?? 0) +
+          report.autoMobile.checks.length,
       );
       expect(report.summary.passed).toBe(1);
       expect(report.summary.warnings).toBe(1);
@@ -471,7 +479,11 @@ describe("applyClientBuildIdentity", () => {
         checks: [
           makeCheck({ name: "AutoMobile Daemon Version", status: "pass" }),
           // What the daemon produced by comparing itself to itself:
-          makeCheck({ name: "Daemon Build Identity", status: "pass", message: "Build aaaa (/daemon)" }),
+          makeCheck({
+            name: "Daemon Build Identity",
+            status: "pass",
+            message: "Build aaaa (/daemon)",
+          }),
         ],
       },
     });
@@ -487,13 +499,15 @@ describe("applyClientBuildIdentity", () => {
 
     const result = await applyClientBuildIdentity(report, async () => clientVerdict);
 
-    const entry = result.autoMobile.checks.find(c => c.name === "Daemon Build Identity");
+    const entry = result.autoMobile.checks.find((c) => c.name === "Daemon Build Identity");
     expect(entry?.status).toBe("warn");
     expect(entry?.message).toContain("Build skew");
     // Recounted: one of the three passes became a warn.
     expect(result.summary.warnings).toBe(1);
     expect(result.summary.passed).toBe(2);
-    expect(result.recommendations.some(r => r.includes("Restart the daemon from THIS checkout"))).toBe(true);
+    expect(
+      result.recommendations.some((r) => r.includes("Restart the daemon from THIS checkout")),
+    ).toBe(true);
   });
 
   test("appends the client verdict when the daemon report lacks the check (older daemon)", async () => {
@@ -509,7 +523,9 @@ describe("applyClientBuildIdentity", () => {
 
     const result = await applyClientBuildIdentity(report, async () => clientVerdict);
 
-    expect(result.autoMobile.checks.filter(c => c.name === "Daemon Build Identity")).toHaveLength(1);
+    expect(result.autoMobile.checks.filter((c) => c.name === "Daemon Build Identity")).toHaveLength(
+      1,
+    );
     expect(result.summary.warnings).toBe(1);
   });
 

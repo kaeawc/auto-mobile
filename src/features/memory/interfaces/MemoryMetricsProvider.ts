@@ -1,5 +1,10 @@
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
-import type { MemorySnapshot, GCEvent, UnreachableObjectsInfo, MemoryMetrics } from "../MemoryMetricsCollector";
+import type {
+  MemorySnapshot,
+  GCEvent,
+  UnreachableObjectsInfo,
+  MemoryMetrics,
+} from "../MemoryMetricsCollector";
 
 /**
  * Interface for collecting memory metrics from a device.
@@ -30,7 +35,7 @@ export interface MemoryMetricsProvider {
   captureGCEvents(
     startTimestamp: number,
     endTimestamp: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<GCEvent[]>;
 
   /**
@@ -41,7 +46,7 @@ export interface MemoryMetricsProvider {
    */
   getUnreachableObjects(
     packageName: string,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<UnreachableObjectsInfo | null>;
 
   /**
@@ -61,6 +66,6 @@ export interface MemoryMetricsProvider {
   collectMetrics(
     packageName: string,
     beforeAction: () => Promise<void>,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<MemoryMetrics>;
 }

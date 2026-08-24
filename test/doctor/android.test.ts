@@ -27,8 +27,8 @@ const baseDependencies: AndroidDoctorDependencies = {
     getLogLevel: () => "info",
     enableStdoutLogging: () => {},
     disableStdoutLogging: () => {},
-    close: () => {}
-  }
+    close: () => {},
+  },
 };
 
 describe("Android doctor command line tools check", () => {
@@ -36,18 +36,21 @@ describe("Android doctor command line tools check", () => {
     const homebrewLocation = {
       path: "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest",
       source: "homebrew" as const,
-      available_tools: ["avdmanager", "sdkmanager"]
+      available_tools: ["avdmanager", "sdkmanager"],
     };
 
-    const result = await checkAndroidCommandLineTools({}, {
-      ...baseDependencies,
-      detectAndroidCommandLineTools: async () => [homebrewLocation],
-      getBestAndroidToolsLocation: () => homebrewLocation,
-      getAndroidHomeWithSystemImages: () => ({
-        androidHome: "/Users/test/Library/Android/sdk",
-        systemImagesPath: "/Users/test/Library/Android/sdk/system-images"
-      })
-    });
+    const result = await checkAndroidCommandLineTools(
+      {},
+      {
+        ...baseDependencies,
+        detectAndroidCommandLineTools: async () => [homebrewLocation],
+        getBestAndroidToolsLocation: () => homebrewLocation,
+        getAndroidHomeWithSystemImages: () => ({
+          androidHome: "/Users/test/Library/Android/sdk",
+          systemImagesPath: "/Users/test/Library/Android/sdk/system-images",
+        }),
+      },
+    );
 
     expect(result.status).toBe("warn");
     expect(result.message).toContain("Homebrew cmdline-tools detected");
@@ -57,14 +60,17 @@ describe("Android doctor command line tools check", () => {
     const sdkRootLocation = {
       path: "/Users/test/Library/Android/sdk/cmdline-tools/latest",
       source: "android_sdk_root" as const,
-      available_tools: ["avdmanager", "sdkmanager"]
+      available_tools: ["avdmanager", "sdkmanager"],
     };
 
-    const result = await checkAndroidCommandLineTools({}, {
-      ...baseDependencies,
-      detectAndroidCommandLineTools: async () => [sdkRootLocation],
-      getBestAndroidToolsLocation: () => sdkRootLocation
-    });
+    const result = await checkAndroidCommandLineTools(
+      {},
+      {
+        ...baseDependencies,
+        detectAndroidCommandLineTools: async () => [sdkRootLocation],
+        getBestAndroidToolsLocation: () => sdkRootLocation,
+      },
+    );
 
     expect(result.status).toBe("pass");
     expect(result.message).toContain("detected");
@@ -76,12 +82,15 @@ describe("Android doctor command line tools check", () => {
       source: "android_sdk_root" as const,
       available_tools: ["avdmanager", "sdkmanager"],
     };
-    const result = await checkAndroidCommandLineTools({}, {
-      ...baseDependencies,
-      detectAndroidCommandLineTools: async () => [location],
-      getBestAndroidToolsLocation: () => location,
-      getCmdlineToolsVersion: async () => "8.0",
-    });
+    const result = await checkAndroidCommandLineTools(
+      {},
+      {
+        ...baseDependencies,
+        detectAndroidCommandLineTools: async () => [location],
+        getBestAndroidToolsLocation: () => location,
+        getCmdlineToolsVersion: async () => "8.0",
+      },
+    );
 
     expect(result.status).toBe("warn");
     expect(result.message).toContain("outdated");
@@ -95,12 +104,15 @@ describe("Android doctor command line tools check", () => {
       source: "android_sdk_root" as const,
       available_tools: ["avdmanager", "sdkmanager"],
     };
-    const result = await checkAndroidCommandLineTools({}, {
-      ...baseDependencies,
-      detectAndroidCommandLineTools: async () => [location],
-      getBestAndroidToolsLocation: () => location,
-      getCmdlineToolsVersion: async () => "13.0",
-    });
+    const result = await checkAndroidCommandLineTools(
+      {},
+      {
+        ...baseDependencies,
+        detectAndroidCommandLineTools: async () => [location],
+        getBestAndroidToolsLocation: () => location,
+        getCmdlineToolsVersion: async () => "13.0",
+      },
+    );
 
     expect(result.status).toBe("pass");
     expect(result.message).toContain("13.0");
@@ -175,7 +187,13 @@ describe("checkAdbInstallation", () => {
     const fakeFactory: AdbClientFactory = {
       create: () => ({
         getAdbPathOnly: async () => "/usr/local/bin/adb",
-        executeCommand: async () => ({ stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false }),
+        executeCommand: async () => ({
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        }),
         getBootedAndroidDevices: async () => [],
         isScreenOn: async () => true,
         getWakefulness: async () => "Awake" as const,
@@ -194,8 +212,16 @@ describe("checkAdbInstallation", () => {
   test("fails when ADB is not found", async () => {
     const fakeFactory: AdbClientFactory = {
       create: () => ({
-        getAdbPathOnly: async () => { throw new Error("adb not found in PATH"); },
-        executeCommand: async () => ({ stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false }),
+        getAdbPathOnly: async () => {
+          throw new Error("adb not found in PATH");
+        },
+        executeCommand: async () => ({
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        }),
         getBootedAndroidDevices: async () => [],
         isScreenOn: async () => true,
         getWakefulness: async () => "Awake" as const,
@@ -215,8 +241,16 @@ describe("checkAdbInstallation", () => {
   test("fails with non-Error thrown values", async () => {
     const fakeFactory: AdbClientFactory = {
       create: () => ({
-        getAdbPathOnly: async () => { throw "string error"; },
-        executeCommand: async () => ({ stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false }),
+        getAdbPathOnly: async () => {
+          throw "string error";
+        },
+        executeCommand: async () => ({
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        }),
         getBootedAndroidDevices: async () => [],
         isScreenOn: async () => true,
         getWakefulness: async () => "Awake" as const,
@@ -289,7 +323,9 @@ describe("checkAdbVersion", () => {
     // Use a custom factory that throws a non-Error
     const throwingFactory: AdbClientFactory = {
       create: () => ({
-        executeCommand: async () => { throw "raw string error"; },
+        executeCommand: async () => {
+          throw "raw string error";
+        },
         getBootedAndroidDevices: async () => [],
         isScreenOn: async () => true,
         getWakefulness: async () => "Awake" as const,
@@ -302,7 +338,6 @@ describe("checkAdbVersion", () => {
     expect(result.status).toBe("warn");
     expect(result.message).toContain("raw string error");
   });
-
 });
 
 describe("checkConnectedDevices", () => {
@@ -363,8 +398,16 @@ describe("checkConnectedDevices", () => {
     // Use a custom factory that throws on getBootedAndroidDevices
     const throwingFactory: AdbClientFactory = {
       create: () => ({
-        executeCommand: async () => ({ stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false }),
-        getBootedAndroidDevices: async () => { throw new Error("adb server not running"); },
+        executeCommand: async () => ({
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        }),
+        getBootedAndroidDevices: async () => {
+          throw new Error("adb server not running");
+        },
         isScreenOn: async () => true,
         getWakefulness: async () => "Awake" as const,
         listUsers: async () => [],
@@ -383,8 +426,16 @@ describe("checkConnectedDevices", () => {
   test("warns with non-Error thrown values", async () => {
     const throwingFactory: AdbClientFactory = {
       create: () => ({
-        executeCommand: async () => ({ stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false }),
-        getBootedAndroidDevices: async () => { throw "unexpected failure"; },
+        executeCommand: async () => ({
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        }),
+        getBootedAndroidDevices: async () => {
+          throw "unexpected failure";
+        },
         isScreenOn: async () => true,
         getWakefulness: async () => "Awake" as const,
         listUsers: async () => [],
@@ -402,7 +453,13 @@ describe("checkConnectedDevices", () => {
     const fakeFactory: AdbClientFactory = {
       create: () => ({
         getDeviceStates: async () => [{ deviceId: "emulator-5554", state: "offline" }],
-        executeCommand: async () => ({ stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false }),
+        executeCommand: async () => ({
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        }),
         getBootedAndroidDevices: async () => [],
         isScreenOn: async () => true,
         getWakefulness: async () => "Awake" as const,
@@ -421,7 +478,13 @@ describe("checkConnectedDevices", () => {
     const fakeFactory: AdbClientFactory = {
       create: () => ({
         getDeviceStates: async () => [{ deviceId: "R5CT12345", state: "offline" }],
-        executeCommand: async () => ({ stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false }),
+        executeCommand: async () => ({
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        }),
         getBootedAndroidDevices: async () => [],
         isScreenOn: async () => true,
         getWakefulness: async () => "Awake" as const,
@@ -438,8 +501,16 @@ describe("checkConnectedDevices", () => {
     const fakeFactory: AdbClientFactory = {
       create: () => ({
         getDeviceStates: async () => [{ deviceId: "emulator-5554", state: "offline" }],
-        executeCommand: async () => ({ stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false }),
-        getBootedAndroidDevices: async () => [{ name: "Pixel", platform: "android", deviceId: "emulator-5556" }],
+        executeCommand: async () => ({
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        }),
+        getBootedAndroidDevices: async () => [
+          { name: "Pixel", platform: "android", deviceId: "emulator-5556" },
+        ],
         isScreenOn: async () => true,
         getWakefulness: async () => "Awake" as const,
         listUsers: async () => [],
@@ -456,9 +527,19 @@ describe("checkConnectedDevices", () => {
   test("keeps healthy devices when the auxiliary offline-state probe fails", async () => {
     const fakeFactory: AdbClientFactory = {
       create: () => ({
-        getDeviceStates: async () => { throw new Error("adb state probe unavailable"); },
-        executeCommand: async () => ({ stdout: "", stderr: "", toString: () => "", trim: () => "", includes: () => false }),
-        getBootedAndroidDevices: async () => [{ name: "Pixel", platform: "android", deviceId: "emulator-5556" }],
+        getDeviceStates: async () => {
+          throw new Error("adb state probe unavailable");
+        },
+        executeCommand: async () => ({
+          stdout: "",
+          stderr: "",
+          toString: () => "",
+          trim: () => "",
+          includes: () => false,
+        }),
+        getBootedAndroidDevices: async () => [
+          { name: "Pixel", platform: "android", deviceId: "emulator-5556" },
+        ],
         isScreenOn: async () => true,
         getWakefulness: async () => "Awake" as const,
         listUsers: async () => [],
@@ -474,7 +555,9 @@ describe("checkConnectedDevices", () => {
   test("warns when an AVD has too little configured RAM", async () => {
     const result = await checkAvdMemory({
       listAvds: async () => [{ name: "Tiny" }],
-      readAvdConfig: { readConfig: async () => ({ apiLevel: 36, tag: "google_apis_playstore", ramSizeMb: 1024 }) },
+      readAvdConfig: {
+        readConfig: async () => ({ apiLevel: 36, tag: "google_apis_playstore", ramSizeMb: 1024 }),
+      },
     });
 
     expect(result.status).toBe("warn");
@@ -485,13 +568,18 @@ describe("checkConnectedDevices", () => {
   test("does not warn for low-memory non-Play or legacy AVDs", async () => {
     const result = await checkAvdMemory({
       listAvds: async () => [{ name: "Legacy" }, { name: "Wear" }],
-      readAvdConfig: { readConfig: async name => name === "Legacy"
-        ? { apiLevel: 28, tag: "google_apis", ramSizeMb: 1024 }
-        : { apiLevel: 35, tag: "android-wear", ramSizeMb: 1024 } },
+      readAvdConfig: {
+        readConfig: async (name) =>
+          name === "Legacy"
+            ? { apiLevel: 28, tag: "google_apis", ramSizeMb: 1024 }
+            : { apiLevel: 35, tag: "android-wear", ramSizeMb: 1024 },
+      },
     });
 
     expect(result.status).toBe("pass");
-    expect(result.message).toBe("All applicable modern Play-image AVDs meet the 2048 MB memory minimum.");
+    expect(result.message).toBe(
+      "All applicable modern Play-image AVDs meet the 2048 MB memory minimum.",
+    );
   });
 
   test("does not warn when a non-applicable AVD omits RAM", async () => {
@@ -517,7 +605,9 @@ describe("checkConnectedDevices", () => {
   test("warns when any AVD memory configuration is unverifiable", async () => {
     const result = await checkAvdMemory({
       listAvds: async () => [{ name: "Verified" }, { name: "Missing" }],
-      readAvdConfig: { readConfig: async name => name === "Verified" ? { ramSizeMb: 4096 } : null },
+      readAvdConfig: {
+        readConfig: async (name) => (name === "Verified" ? { ramSizeMb: 4096 } : null),
+      },
     });
 
     expect(result.status).toBe("warn");
@@ -527,7 +617,9 @@ describe("checkConnectedDevices", () => {
 
   test("skips when AVDs cannot be listed", async () => {
     const result = await checkAvdMemory({
-      listAvds: async () => { throw new Error("emulator unavailable"); },
+      listAvds: async () => {
+        throw new Error("emulator unavailable");
+      },
       readAvdConfig: { readConfig: async () => null },
     });
 

@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach, mock } from "bun:test";
-import { NavigationNodeLookup, resetNavigationNodeLookup } from "../../../src/features/performance/NavigationNodeLookup";
+import {
+  NavigationNodeLookup,
+  resetNavigationNodeLookup,
+} from "../../../src/features/performance/NavigationNodeLookup";
 import { NavigationRepository } from "../../../src/db/NavigationRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -62,8 +65,12 @@ describe("NavigationNodeLookup", () => {
 
     it("different app/screen combinations have separate cache entries", async () => {
       mockRepository.getNode = mock(async (appId: string, screenName: string) => {
-        if (appId === "app1" && screenName === "Home") {return { id: 1, screen_name: "Home" };}
-        if (appId === "app2" && screenName === "Home") {return { id: 2, screen_name: "Home" };}
+        if (appId === "app1" && screenName === "Home") {
+          return { id: 1, screen_name: "Home" };
+        }
+        if (appId === "app2" && screenName === "Home") {
+          return { id: 2, screen_name: "Home" };
+        }
         return null;
       });
 

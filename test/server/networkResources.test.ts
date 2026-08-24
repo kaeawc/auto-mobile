@@ -85,7 +85,7 @@ describe("bucketEvents", () => {
 
   it("computes p95 correctly", () => {
     const events = Array.from({ length: 100 }, (_, i) =>
-      makeEvent({ timestamp: 0, durationMs: i + 1 })
+      makeEvent({ timestamp: 0, durationMs: i + 1 }),
     );
 
     const buckets = bucketEvents(events, 60);
@@ -121,10 +121,7 @@ describe("bucketEvents", () => {
 
   it("caps bucket count for sparse time ranges", () => {
     // Two events 10M seconds apart with 1s buckets would create 10M buckets without the cap
-    const events = [
-      makeEvent({ timestamp: 0 }),
-      makeEvent({ timestamp: 10_000_000_000 }),
-    ];
+    const events = [makeEvent({ timestamp: 0 }), makeEvent({ timestamp: 10_000_000_000 })];
 
     const buckets = bucketEvents(events, 1);
     expect(buckets.length).toBeLessThanOrEqual(1000);
@@ -139,7 +136,7 @@ describe("bucketEvents", () => {
 describe("aggregateStatsByHost", () => {
   const PROTOTYPE_HOSTS = ["constructor", "toString", "valueOf", "hasOwnProperty", "__proto__"];
 
-  it.each([...PROTOTYPE_HOSTS, "api.example.com"])("aggregates the %s host", host => {
+  it.each([...PROTOTYPE_HOSTS, "api.example.com"])("aggregates the %s host", (host) => {
     const stats = aggregateStatsByHost([
       makeEvent({ host, durationMs: 100, statusCode: 200 }),
       makeEvent({ host, durationMs: 300, statusCode: 500 }),
@@ -169,11 +166,12 @@ describe("network resource registration", () => {
   it("registers one RFC 6570 query template for traffic filters", () => {
     registerNetworkResources();
 
-    const templates = ResourceRegistry.getAllTemplates()
-      .filter(template => template.uriTemplate.startsWith("automobile:network/traffic"));
+    const templates = ResourceRegistry.getAllTemplates().filter((template) =>
+      template.uriTemplate.startsWith("automobile:network/traffic"),
+    );
 
-    expect(templates.map(template => template.uriTemplate)).toEqual([
-      "automobile:network/traffic{?host,method,statusCode,since,limit,deviceId,bucketSeconds}"
+    expect(templates.map((template) => template.uriTemplate)).toEqual([
+      "automobile:network/traffic{?host,method,statusCode,since,limit,deviceId,bucketSeconds}",
     ]);
   });
 });

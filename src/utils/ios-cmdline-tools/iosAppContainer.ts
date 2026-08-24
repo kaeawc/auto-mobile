@@ -21,7 +21,7 @@ export const IOS_APP_DATA_FOLDERS = ["Documents", "Library", "tmp"];
 export async function terminateAppIfRunning(
   simctl: Pick<SimCtlClient, "terminateApp">,
   deviceId: string,
-  bundleId: string
+  bundleId: string,
 ): Promise<void> {
   try {
     await simctl.terminateApp(bundleId, deviceId);
@@ -38,11 +38,14 @@ export async function terminateAppIfRunning(
 export async function getAppDataContainerPath(
   simctl: Pick<SimCtlClient, "executeCommandArgs">,
   deviceId: string,
-  bundleId: string
+  bundleId: string,
 ): Promise<string | null> {
   try {
     const result = await simctl.executeCommandArgs([
-      "get_app_container", deviceId, bundleId, "data"
+      "get_app_container",
+      deviceId,
+      bundleId,
+      "data",
     ]);
     const containerPath = result.stdout.trim();
     if (!containerPath) {

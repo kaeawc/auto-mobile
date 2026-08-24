@@ -12,16 +12,16 @@ when the docs site was last rebuilt. The three charts below are all re-derived f
 snapshot file at view time, so adding, changing, or re-slicing a chart never requires migrating data.
 
 !!! note "How the daily numbers are derived"
-    GitHub's API reports only the **cumulative** `download_count` per asset — there is no per-day
-    history. Daily figures are recovered by snapshotting the cumulative count each day and diffing
-    consecutive snapshots. **History before the first snapshot is unrecoverable**: the first run
-    seeds day-0 with each release's current cumulative total, and true daily deltas begin the day
-    *after* the first snapshot. A day whose delta is unknowable — the day-0 seed, a missing
-    intermediate snapshot, or a counter reset (asset re-published) — is never invented as a zero;
-    it is excluded from the daily total and the affected stacked segment is drawn faded, so the bar
-    reads as an honest lower bound. npm is different — its API returns true daily counts directly, so
-    its chart is exact from the start. npm daily totals include *all* package downloads (CI, mirrors)
-    and dwarf the asset counts, so npm is charted in its own section on its own axis.
+GitHub's API reports only the **cumulative** `download_count` per asset — there is no per-day
+history. Daily figures are recovered by snapshotting the cumulative count each day and diffing
+consecutive snapshots. **History before the first snapshot is unrecoverable**: the first run
+seeds day-0 with each release's current cumulative total, and true daily deltas begin the day
+_after_ the first snapshot. A day whose delta is unknowable — the day-0 seed, a missing
+intermediate snapshot, or a counter reset (asset re-published) — is never invented as a zero;
+it is excluded from the daily total and the affected stacked segment is drawn faded, so the bar
+reads as an honest lower bound. npm is different — its API returns true daily counts directly, so
+its chart is exact from the start. npm daily totals include _all_ package downloads (CI, mirrors)
+and dwarf the asset counts, so npm is charted in its own section on its own axis.
 
 <div id="dl-metrics" markdown="0">
   <p id="dl-status">Loading download metrics…</p>

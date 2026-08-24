@@ -102,7 +102,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`PRAGMA foreign_keys = OFF`.execute(db);
   try {
     // One transaction so a mid-rebuild failure cannot leave a half-swapped schema.
-    await db.transaction().execute(async trx => {
+    await db.transaction().execute(async (trx) => {
       for (const table of tablesToRebuild) {
         await rebuildTableWithUpdatedAtDefault(trx, table);
       }
@@ -128,7 +128,7 @@ async function updatedAtLacksDefault(db: Kysely<unknown>, table: string): Promis
   const columns = await sql<ColumnInfoRow>`
     SELECT name, dflt_value FROM pragma_table_info(${sql.lit(table)})
   `.execute(db);
-  const updatedAt = columns.rows.find(column => column.name === "updated_at");
+  const updatedAt = columns.rows.find((column) => column.name === "updated_at");
   return updatedAt !== undefined && updatedAt.dflt_value === null;
 }
 
@@ -140,7 +140,7 @@ async function updatedAtLacksDefault(db: Kysely<unknown>, table: string): Promis
  */
 async function rebuildTableWithUpdatedAtDefault(
   trx: Kysely<unknown>,
-  table: string
+  table: string,
 ): Promise<void> {
   const createRow = await sql<SqlRow>`
     SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ${table}
@@ -180,7 +180,7 @@ async function rebuildTableWithUpdatedAtDefault(
   if (originalSequence !== undefined) {
     await sql`DELETE FROM sqlite_sequence WHERE name = ${table}`.execute(trx);
     await sql`INSERT INTO sqlite_sequence (name, seq) VALUES (${table}, ${originalSequence})`.execute(
-      trx
+      trx,
     );
   }
 }
@@ -190,10 +190,7 @@ async function rebuildTableWithUpdatedAtDefault(
  * is not AUTOINCREMENT / has never been inserted into (no sequence row) or the
  * `sqlite_sequence` table does not exist (no AUTOINCREMENT table in the DB).
  */
-async function captureSequence(
-  trx: Kysely<unknown>,
-  table: string
-): Promise<number | undefined> {
+async function captureSequence(trx: Kysely<unknown>, table: string): Promise<number | undefined> {
   const hasSequenceTable = await sql<{ name: string }>`
     SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'
   `.execute(trx);
@@ -217,7 +214,7 @@ async function captureSequence(
 function addUpdatedAtDefault(createSql: string): string {
   return createSql.replace(
     /("updated_at"\s+\w+)(\s+not\s+null)/i,
-    `$1 default ${CORRECTED_DEFAULT}$2`
+    `$1 default ${CORRECTED_DEFAULT}$2`,
   );
 }
 
@@ -232,7 +229,7 @@ function replaceFirstTableName(createSql: string, from: string, to: string): str
   return createSql.replace(
     /^(\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)(?:"([^"]+)"|(\w+))/i,
     (match, prefix: string, quotedName: string | undefined, bareName: string | undefined) =>
-      (quotedName ?? bareName) === from ? `${prefix}"${to}"` : match
+      (quotedName ?? bareName) === from ? `${prefix}"${to}"` : match,
   );
 }
 

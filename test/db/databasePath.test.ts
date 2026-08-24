@@ -20,27 +20,33 @@ describe("database path resolution", () => {
     const launchCwd = path.resolve("/project/auto-mobile");
     process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
 
-    expect(resolveDatabasePathFromEnvironment({
-      AUTOMOBILE_DB_DIR: ".automobile-db",
-    })).toBe(path.join(launchCwd, ".automobile-db", "auto-mobile.db"));
+    expect(
+      resolveDatabasePathFromEnvironment({
+        AUTOMOBILE_DB_DIR: ".automobile-db",
+      }),
+    ).toBe(path.join(launchCwd, ".automobile-db", "auto-mobile.db"));
   });
 
   test("resolves relative AUTOMOBILE_DB_PATH from daemon launch cwd", () => {
     const launchCwd = path.resolve("/project/auto-mobile");
     process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
 
-    expect(resolveDatabasePathFromEnvironment({
-      AUTOMOBILE_DB_PATH: ".state/session.db",
-    })).toBe(path.join(launchCwd, ".state", "session.db"));
+    expect(
+      resolveDatabasePathFromEnvironment({
+        AUTOMOBILE_DB_PATH: ".state/session.db",
+      }),
+    ).toBe(path.join(launchCwd, ".state", "session.db"));
   });
 
   test("leaves absolute AUTOMOBILE_DB_PATH unchanged", () => {
     const dbPath = path.resolve("/tmp/auto-mobile.db");
     process.env[DAEMON_LAUNCH_CWD_ENV] = path.resolve("/project/auto-mobile");
 
-    expect(resolveDatabasePathFromEnvironment({
-      AUTOMOBILE_DB_PATH: dbPath,
-    })).toBe(dbPath);
+    expect(
+      resolveDatabasePathFromEnvironment({
+        AUTOMOBILE_DB_PATH: dbPath,
+      }),
+    ).toBe(dbPath);
   });
 
   // Exercise the resolver end-to-end for every truthy opt-in spelling, not just
@@ -56,20 +62,24 @@ describe("database path resolution", () => {
       // launch cwd set.
       process.env[DAEMON_LAUNCH_CWD_ENV] = path.resolve("/project/auto-mobile");
 
-      expect(resolveDatabasePathFromEnvironment({
-        AUTOMOBILE_DB_PATH: ":memory:",
-        [IN_MEMORY_DB_OPT_IN_ENV]: optIn,
-      })).toBe(":memory:");
+      expect(
+        resolveDatabasePathFromEnvironment({
+          AUTOMOBILE_DB_PATH: ":memory:",
+          [IN_MEMORY_DB_OPT_IN_ENV]: optIn,
+        }),
+      ).toBe(":memory:");
     });
   }
 
   test("passes the `:memory:` sentinel through the legacy AUTO_MOBILE_DB_PATH alias when opted in", () => {
     process.env[DAEMON_LAUNCH_CWD_ENV] = path.resolve("/project/auto-mobile");
 
-    expect(resolveDatabasePathFromEnvironment({
-      AUTO_MOBILE_DB_PATH: ":memory:",
-      [IN_MEMORY_DB_OPT_IN_ENV]: "true",
-    })).toBe(":memory:");
+    expect(
+      resolveDatabasePathFromEnvironment({
+        AUTO_MOBILE_DB_PATH: ":memory:",
+        [IN_MEMORY_DB_OPT_IN_ENV]: "true",
+      }),
+    ).toBe(":memory:");
   });
 
   describe("guards production `:memory:` misuse (issue #3065)", () => {
@@ -78,15 +88,15 @@ describe("database path resolution", () => {
       // migrated-but-empty app connection (migrations run on a separate private
       // in-memory DB), so the first schema-dependent query fails with
       // `no such table`. Fail fast and legibly instead.
-      expect(() =>
-        resolveDatabasePathFromEnvironment({ AUTOMOBILE_DB_PATH: ":memory:" })
-      ).toThrow(ActionableError);
+      expect(() => resolveDatabasePathFromEnvironment({ AUTOMOBILE_DB_PATH: ":memory:" })).toThrow(
+        ActionableError,
+      );
     });
 
     test("rejects the legacy `AUTO_MOBILE_DB_PATH=:memory:` alias without the opt-in flag", () => {
-      expect(() =>
-        resolveDatabasePathFromEnvironment({ AUTO_MOBILE_DB_PATH: ":memory:" })
-      ).toThrow(ActionableError);
+      expect(() => resolveDatabasePathFromEnvironment({ AUTO_MOBILE_DB_PATH: ":memory:" })).toThrow(
+        ActionableError,
+      );
     });
 
     test("rejects `:memory:` when the opt-in flag is present but false-ish", () => {
@@ -95,7 +105,7 @@ describe("database path resolution", () => {
           resolveDatabasePathFromEnvironment({
             AUTOMOBILE_DB_PATH: ":memory:",
             [IN_MEMORY_DB_OPT_IN_ENV]: value,
-          })
+          }),
         ).toThrow(ActionableError);
       }
     });
@@ -124,7 +134,7 @@ describe("database path resolution", () => {
         resolveDatabasePathFromEnvironment({
           AUTOMOBILE_DB_PATH: dbPath,
           [IN_MEMORY_DB_OPT_IN_ENV]: "1",
-        })
+        }),
       ).toBe(dbPath);
     });
   });
@@ -137,7 +147,7 @@ describe("database path resolution", () => {
     test("AUTOMOBILE_DB_PATH wins over AUTOMOBILE_DB_DIR when both are set", () => {
       const resolved = resolveDatabasePathFromEnvironment(
         { AUTOMOBILE_DB_PATH: explicitPath, AUTOMOBILE_DB_DIR: explicitDir },
-        defaultDir
+        defaultDir,
       );
       expect(resolved).toBe(explicitPath);
     });
@@ -145,7 +155,7 @@ describe("database path resolution", () => {
     test("AUTOMOBILE_DB_DIR is used only when AUTOMOBILE_DB_PATH is absent", () => {
       const resolved = resolveDatabasePathFromEnvironment(
         { AUTOMOBILE_DB_DIR: explicitDir },
-        defaultDir
+        defaultDir,
       );
       expect(resolved).toBe(path.join(explicitDir, "auto-mobile.db"));
     });
@@ -153,16 +163,13 @@ describe("database path resolution", () => {
     test("an empty-string AUTOMOBILE_DB_PATH is not treated as set and falls through to AUTOMOBILE_DB_DIR", () => {
       const resolved = resolveDatabasePathFromEnvironment(
         { AUTOMOBILE_DB_PATH: "", AUTOMOBILE_DB_DIR: explicitDir },
-        defaultDir
+        defaultDir,
       );
       expect(resolved).toBe(path.join(explicitDir, "auto-mobile.db"));
     });
 
     test("an empty-string AUTOMOBILE_DB_DIR is not treated as set and falls through to the default dir", () => {
-      const resolved = resolveDatabasePathFromEnvironment(
-        { AUTOMOBILE_DB_DIR: "" },
-        defaultDir
-      );
+      const resolved = resolveDatabasePathFromEnvironment({ AUTOMOBILE_DB_DIR: "" }, defaultDir);
       expect(resolved).toBe(path.join(defaultDir, "auto-mobile.db"));
     });
 
@@ -175,7 +182,7 @@ describe("database path resolution", () => {
       const legacyPath = path.resolve("/legacy/old.db");
       const resolved = resolveDatabasePathFromEnvironment(
         { AUTOMOBILE_DB_PATH: explicitPath, AUTO_MOBILE_DB_PATH: legacyPath },
-        defaultDir
+        defaultDir,
       );
       expect(resolved).toBe(explicitPath);
     });
@@ -183,7 +190,7 @@ describe("database path resolution", () => {
     test("the legacy AUTO_MOBILE_DB_DIR alias is honored when the canonical vars are absent", () => {
       const resolved = resolveDatabasePathFromEnvironment(
         { AUTO_MOBILE_DB_DIR: explicitDir },
-        defaultDir
+        defaultDir,
       );
       expect(resolved).toBe(path.join(explicitDir, "auto-mobile.db"));
     });

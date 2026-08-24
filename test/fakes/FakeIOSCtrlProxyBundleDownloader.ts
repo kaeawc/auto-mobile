@@ -1,7 +1,10 @@
 import * as fs from "fs/promises";
 import * as path from "path";
 import { resolveRunnerChecksum } from "../../src/constants/release";
-import type { Sha256Source, CtrlProxyIosBundleDownloader } from "../../src/utils/IOSCtrlProxyBundleDownloader";
+import type {
+  Sha256Source,
+  CtrlProxyIosBundleDownloader,
+} from "../../src/utils/IOSCtrlProxyBundleDownloader";
 
 export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownloader {
   public downloadedUrls: string[] = [];
@@ -22,7 +25,9 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
     await fs.writeFile(destination, payload);
   }
 
-  public async computeFileSha256(filePath: string): Promise<{ checksum: string; source: Sha256Source }> {
+  public async computeFileSha256(
+    filePath: string,
+  ): Promise<{ checksum: string; source: Sha256Source }> {
     this.checksummedFilePaths.push(filePath);
     if (path.basename(filePath) === "CtrlProxyUITests") {
       return { checksum: this.runnerChecksum, source: this.checksumSource };
@@ -40,13 +45,23 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
     this.extractedPaths.push(extractionRoot);
     const productsDir = path.join(extractionRoot, "Build", "Products", "Debug-iphonesimulator");
     await fs.mkdir(productsDir, { recursive: true });
-    const xctestrunFile = path.join(extractionRoot, "Build", "Products", "CtrlProxyApp_iphonesimulator.xctestrun");
+    const xctestrunFile = path.join(
+      extractionRoot,
+      "Build",
+      "Products",
+      "CtrlProxyApp_iphonesimulator.xctestrun",
+    );
     await fs.writeFile(xctestrunFile, "fake xctestrun");
     await fs.mkdir(path.join(productsDir, "CtrlProxyApp.app"), { recursive: true });
     const runnerDir = path.join(productsDir, "CtrlProxyUITests-Runner.app");
     await fs.mkdir(runnerDir, { recursive: true });
     await fs.writeFile(path.join(runnerDir, "CtrlProxyUITests-Runner"), "fake runner");
-    const xctestBinary = path.join(runnerDir, "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests");
+    const xctestBinary = path.join(
+      runnerDir,
+      "PlugIns",
+      "CtrlProxyUITests.xctest",
+      "CtrlProxyUITests",
+    );
     await fs.mkdir(path.dirname(xctestBinary), { recursive: true });
     await fs.writeFile(xctestBinary, "fake CtrlProxy code");
     await fs.mkdir(path.join(productsDir, "CtrlProxyTests.xctest"), { recursive: true });
@@ -54,13 +69,26 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
     if (this.includeDeviceProducts) {
       const deviceDir = path.join(extractionRoot, "Build", "Products", "Debug-iphoneos");
       await fs.mkdir(deviceDir, { recursive: true });
-      const deviceXctestrun = path.join(extractionRoot, "Build", "Products", "CtrlProxyApp_iphoneos.xctestrun");
+      const deviceXctestrun = path.join(
+        extractionRoot,
+        "Build",
+        "Products",
+        "CtrlProxyApp_iphoneos.xctestrun",
+      );
       await fs.writeFile(deviceXctestrun, "fake device xctestrun");
       await fs.mkdir(path.join(deviceDir, "CtrlProxyApp.app"), { recursive: true });
       const deviceRunnerDir = path.join(deviceDir, "CtrlProxyUITests-Runner.app");
       await fs.mkdir(deviceRunnerDir, { recursive: true });
-      await fs.writeFile(path.join(deviceRunnerDir, "CtrlProxyUITests-Runner"), "fake device runner");
-      const deviceXctestBinary = path.join(deviceRunnerDir, "PlugIns", "CtrlProxyUITests.xctest", "CtrlProxyUITests");
+      await fs.writeFile(
+        path.join(deviceRunnerDir, "CtrlProxyUITests-Runner"),
+        "fake device runner",
+      );
+      const deviceXctestBinary = path.join(
+        deviceRunnerDir,
+        "PlugIns",
+        "CtrlProxyUITests.xctest",
+        "CtrlProxyUITests",
+      );
       await fs.mkdir(path.dirname(deviceXctestBinary), { recursive: true });
       await fs.writeFile(deviceXctestBinary, "fake device CtrlProxy code");
       await fs.mkdir(path.join(deviceDir, "CtrlProxyTests.xctest"), { recursive: true });

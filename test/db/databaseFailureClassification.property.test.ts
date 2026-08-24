@@ -16,7 +16,7 @@ const nonStringCodeValue = fc.oneof(
   fc.boolean(),
   fc.constant(null),
   fc.array(fc.string({ maxLength: 5 }), { maxLength: 3 }),
-  fc.object({ maxDepth: 1 })
+  fc.object({ maxDepth: 1 }),
 );
 const arbitraryCodeValue = fc.oneof(fc.string({ maxLength: 20 }), nonStringCodeValue);
 
@@ -32,7 +32,7 @@ const shallowCauseLike = fc.record(
     code: fc.option(arbitraryCodeValue, { nil: undefined }),
     message: fc.option(fc.string({ maxLength: 30 }), { nil: undefined }),
   },
-  { requiredKeys: [] }
+  { requiredKeys: [] },
 );
 
 // Plain object "error-like" values — no Error prototype at all.
@@ -42,7 +42,7 @@ const plainObjectErrorLike = fc.record(
     message: fc.option(fc.string({ maxLength: 30 }), { nil: undefined }),
     cause: fc.option(fc.oneof(shallowCauseLike, fc.string({ maxLength: 20 })), { nil: undefined }),
   },
-  { requiredKeys: [] }
+  { requiredKeys: [] },
 );
 
 // Real Error instances with a random message and optionally a `.code` and/or
@@ -51,7 +51,7 @@ const errorInstanceLike = fc
   .tuple(
     fc.string({ maxLength: 30 }),
     fc.option(arbitraryCodeValue, { nil: undefined }),
-    fc.option(shallowCauseLike, { nil: undefined })
+    fc.option(shallowCauseLike, { nil: undefined }),
   )
   .map(([message, code, cause]) => {
     const error = new Error(message);
@@ -70,7 +70,7 @@ const primitive = fc.oneof(
   fc.double({ noNaN: true }),
   fc.boolean(),
   fc.constant(null),
-  fc.constant(undefined)
+  fc.constant(undefined),
 );
 
 // The full space of `unknown` inputs the classifiers must survive: Errors,
@@ -79,7 +79,7 @@ const anyErrorLikeInput = fc.oneof(
   primitive,
   errorInstanceLike,
   plainObjectErrorLike,
-  fc.array(primitive, { maxLength: 5 })
+  fc.array(primitive, { maxLength: 5 }),
 );
 
 // Prefixes that classifySqliteError treats as retryable vs constraint. Suffixes
@@ -108,13 +108,13 @@ const triggerSubstring = fc.constantFrom(
   "EAGAIN",
   "resource busy",
   "resource temporarily unavailable",
-  "sqlite_busy"
+  "sqlite_busy",
 );
 const noiseSubstring = fc.string({ maxLength: 20 });
 const messagePart = fc.oneof(noiseSubstring, triggerSubstring);
 const codelessMessage = fc
   .array(messagePart, { minLength: 0, maxLength: 4 })
-  .map(parts => parts.join(" "));
+  .map((parts) => parts.join(" "));
 
 // Error-like values with NO string `.code` reachable (own or one level of
 // `.cause`), so classification must fall back to message-pattern matching.
@@ -123,23 +123,25 @@ const codelessMessage = fc
 // excluded here — a raw string and an Error both flow `codelessMessage`
 // through unmodified.
 const codelessErrorLike = fc.oneof(
-  codelessMessage.map(message => new Error(message)),
-  codelessMessage.map(message => new Error(message, { cause: new Error("wrapped, no code") })),
-  codelessMessage
+  codelessMessage.map((message) => new Error(message)),
+  codelessMessage.map((message) => new Error(message, { cause: new Error("wrapped, no code") })),
+  codelessMessage,
 );
 
 describe("databaseFailureClassification (property-based)", () => {
   test("classifyDatabaseFailure and classifySqliteError never throw and always return a declared literal", () => {
     fc.assert(
-      fc.property(anyErrorLikeInput, input => {
+      fc.property(anyErrorLikeInput, (input) => {
         const dbResult = classifyDatabaseFailure(input);
         const sqliteResult = classifySqliteError(input);
         return (
           (dbResult === "transient" || dbResult === "permanent") &&
-          (sqliteResult === "retryable" || sqliteResult === "constraint" || sqliteResult === "fatal")
+          (sqliteResult === "retryable" ||
+            sqliteResult === "constraint" ||
+            sqliteResult === "fatal")
         );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -157,9 +159,9 @@ describe("databaseFailureClassification (property-based)", () => {
         arbitraryMessage,
         fc.boolean(),
         (prefix, suffix, message, viaCause) =>
-          classifySqliteError(withCode(`${prefix}${suffix}`, message, viaCause)) === "retryable"
+          classifySqliteError(withCode(`${prefix}${suffix}`, message, viaCause)) === "retryable",
       ),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -171,16 +173,20 @@ describe("databaseFailureClassification (property-based)", () => {
         arbitraryMessage,
         fc.boolean(),
         (prefix, suffix, message, viaCause) =>
-          classifySqliteError(withCode(`${prefix}${suffix}`, message, viaCause)) === "constraint"
+          classifySqliteError(withCode(`${prefix}${suffix}`, message, viaCause)) === "constraint",
       ),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("a code found on .cause.code classifies identically to the same code found on the error itself", () => {
     fc.assert(
       fc.property(
-        fc.oneof(retryablePrefix, constraintPrefix, fc.constantFrom("SQLITE_ERROR", "SQLITE_MISUSE")),
+        fc.oneof(
+          retryablePrefix,
+          constraintPrefix,
+          fc.constantFrom("SQLITE_ERROR", "SQLITE_MISUSE"),
+        ),
         codeSuffix,
         arbitraryMessage,
         (prefix, suffix, message) => {
@@ -188,20 +194,20 @@ describe("databaseFailureClassification (property-based)", () => {
           const own = classifySqliteError(withCode(code, message, false));
           const viaCause = classifySqliteError(withCode(code, message, true));
           return own === viaCause;
-        }
+        },
       ),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("with no string code anywhere, classifySqliteError agrees with classifyDatabaseFailure (retryable iff transient, else fatal)", () => {
     fc.assert(
-      fc.property(codelessErrorLike, error => {
+      fc.property(codelessErrorLike, (error) => {
         const dbResult = classifyDatabaseFailure(error);
         const sqliteResult = classifySqliteError(error);
         return dbResult === "transient" ? sqliteResult === "retryable" : sqliteResult === "fatal";
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

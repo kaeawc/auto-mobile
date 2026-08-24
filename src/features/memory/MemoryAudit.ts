@@ -1,4 +1,7 @@
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { BootedDevice } from "../../models";
@@ -55,7 +58,7 @@ export class MemoryAudit {
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    db?: Kysely<Database>
+    db?: Kysely<Database>,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -78,7 +81,7 @@ export class MemoryAudit {
     toolName: string,
     toolArgs: unknown,
     action: () => Promise<void>,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<MemoryAuditResult> {
     logger.info(`[MemoryAudit] Running memory audit for ${packageName} (${toolName})`);
 
@@ -89,23 +92,22 @@ export class MemoryAudit {
     const baseline = await this.baselineManager.getBaseline(
       this.device.deviceId,
       packageName,
-      toolName
+      toolName,
     );
 
     // Get or create thresholds
     const thresholds = await this.thresholdManager.getOrCreateThresholds(
       this.device.deviceId,
       packageName,
-      baseline
+      baseline,
     );
 
     // Validate metrics against thresholds
     const violations = this.validateMetrics(metrics, thresholds, baseline);
 
     // Generate diagnostics
-    const diagnostics = violations.length > 0
-      ? this.generateDiagnostics(metrics, violations)
-      : null;
+    const diagnostics =
+      violations.length > 0 ? this.generateDiagnostics(metrics, violations) : null;
 
     const passed = violations.length === 0;
 
@@ -117,7 +119,7 @@ export class MemoryAudit {
       metrics,
       violations,
       diagnostics,
-      passed
+      passed,
     );
 
     // Update baseline with new metrics (only if passed, to avoid poisoning baseline)
@@ -126,16 +128,12 @@ export class MemoryAudit {
         this.device.deviceId,
         packageName,
         toolName,
-        metrics
+        metrics,
       );
     }
 
     // Update threshold weights based on result
-    await this.thresholdManager.updateThresholdWeight(
-      this.device.deviceId,
-      packageName,
-      passed
-    );
+    await this.thresholdManager.updateThresholdWeight(this.device.deviceId, packageName, passed);
 
     return {
       passed,
@@ -157,7 +155,7 @@ export class MemoryAudit {
       gcDurationThresholdMs: number;
       unreachableObjectsThreshold: number;
     },
-    baseline: any // MemoryBaseline | null
+    baseline: any, // MemoryBaseline | null
   ): MemoryViolation[] {
     const violations: MemoryViolation[] = [];
 
@@ -167,7 +165,10 @@ export class MemoryAudit {
         metric: "javaHeapGrowth",
         threshold: thresholds.heapGrowthThresholdMb,
         actual: metrics.javaHeapGrowthMb,
-        severity: metrics.javaHeapGrowthMb > thresholds.heapGrowthThresholdMb * 1.5 ? "critical" : "warning",
+        severity:
+          metrics.javaHeapGrowthMb > thresholds.heapGrowthThresholdMb * 1.5
+            ? "critical"
+            : "warning",
         contributionWeight: 0.9, // Heap growth is very important
       });
     }
@@ -178,7 +179,10 @@ export class MemoryAudit {
         metric: "nativeHeapGrowth",
         threshold: thresholds.nativeHeapGrowthThresholdMb,
         actual: metrics.nativeHeapGrowthMb,
-        severity: metrics.nativeHeapGrowthMb > thresholds.nativeHeapGrowthThresholdMb * 1.5 ? "critical" : "warning",
+        severity:
+          metrics.nativeHeapGrowthMb > thresholds.nativeHeapGrowthThresholdMb * 1.5
+            ? "critical"
+            : "warning",
         contributionWeight: 0.85, // Native heap leaks are serious
       });
     }
@@ -249,10 +253,7 @@ export class MemoryAudit {
   /**
    * Generate weighted diagnostic output based on violations
    */
-  private generateDiagnostics(
-    metrics: MemoryMetrics,
-    violations: MemoryViolation[]
-  ): string {
+  private generateDiagnostics(metrics: MemoryMetrics, violations: MemoryViolation[]): string {
     if (violations.length === 0) {
       return "No memory issues detected";
     }
@@ -299,9 +300,10 @@ export class MemoryAudit {
     }
 
     // Include raw meminfo for critical heap issues
-    const hasCriticalHeapIssue = topContributors.some(v =>
-      ["javaHeapGrowth", "nativeHeapGrowth", "unreachableObjects"].includes(v.metric) &&
-      v.severity === "critical"
+    const hasCriticalHeapIssue = topContributors.some(
+      (v) =>
+        ["javaHeapGrowth", "nativeHeapGrowth", "unreachableObjects"].includes(v.metric) &&
+        v.severity === "critical",
     );
 
     if (hasCriticalHeapIssue) {
@@ -353,7 +355,7 @@ export class MemoryAudit {
     metrics: MemoryMetrics,
     violations: MemoryViolation[],
     diagnostics: string | null,
-    passed: boolean
+    passed: boolean,
   ): Promise<void> {
     try {
       const now = new Date();
@@ -383,15 +385,11 @@ export class MemoryAudit {
         diagnostics_json: diagnostics,
       };
 
-      await this.db
-        .insertInto("memory_audit_results")
-        .values(auditResult)
-        .execute();
+      await this.db.insertInto("memory_audit_results").values(auditResult).execute();
 
       logger.info(
-        `[MemoryAudit] Stored audit result for ${packageName}/${toolName}: ${passed ? "PASSED" : "FAILED"}`
+        `[MemoryAudit] Stored audit result for ${packageName}/${toolName}: ${passed ? "PASSED" : "FAILED"}`,
       );
-
     } catch (error) {
       logger.error(`[MemoryAudit] Failed to store audit result: ${error}`);
     }

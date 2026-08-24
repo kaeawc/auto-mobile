@@ -21,12 +21,20 @@ describe("TopLevelUnionFlattener module", () => {
       oneOf: [
         {
           type: "object",
-          properties: { kind: { const: "a" }, shared: { type: "string" }, aOnly: { type: "string" } },
+          properties: {
+            kind: { const: "a" },
+            shared: { type: "string" },
+            aOnly: { type: "string" },
+          },
           required: ["kind", "shared", "aOnly"],
         },
         {
           type: "object",
-          properties: { kind: { const: "b" }, shared: { type: "string" }, bOnly: { type: "string" } },
+          properties: {
+            kind: { const: "b" },
+            shared: { type: "string" },
+            bOnly: { type: "string" },
+          },
           required: ["kind", "shared", "bOnly"],
         },
       ],
@@ -53,7 +61,7 @@ describe("TopLevelUnionFlattener module", () => {
       ["__proto__"],
       // Control row: a normal property name must behave identically.
       ["normalProp"],
-    ])("flattens a %s property to its real schema", key => {
+    ])("flattens a %s property to its real schema", (key) => {
       const result = flattenTopLevelUnion({
         anyOf: [
           { type: "object", properties: { [key]: { type: "string" } } },

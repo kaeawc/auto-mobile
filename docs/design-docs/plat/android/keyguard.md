@@ -26,10 +26,10 @@ Measured on `am-api35-ga-arm64` (API 35) with `screen_off_timeout=1800000`
 (30 min) and `sleep_timeout=-1`, both confirmed effective in `dumpsys power`:
 
 | Elapsed | Unlocked (launcher) | Locked (keyguard) |
-|---|---|---|
-| 6s  | `Awake` / `ON`  | `Awake` / `ON`   |
-| 9s  | `Awake` / `ON`  | `Dozing` / `OFF` |
-| 12s | `Awake` / `ON`  | `Asleep` / `OFF` |
+| ------- | ------------------- | ----------------- |
+| 6s      | `Awake` / `ON`      | `Awake` / `ON`    |
+| 9s      | `Awake` / `ON`      | `Dozing` / `OFF`  |
+| 12s     | `Awake` / `ON`      | `Asleep` / `OFF`  |
 
 The practical consequence: **credential entry must be a single, fast, un-observed
 key-event burst.** A per-digit `tapOn` (or any observe/settle loop between digits)
@@ -104,7 +104,7 @@ ready, and the user unlocks it once with the tool to have it remembered.
 Verified during the [#4360](https://github.com/kaeawc/auto-mobile/issues/4360)
 sessions on a secure PIN keyguard:
 
-- **`wm dismiss-keyguard` alone** — dismisses a *swipe* lock, but on a *secure*
+- **`wm dismiss-keyguard` alone** — dismisses a _swipe_ lock, but on a _secure_
   lock it only **raises the bouncer**; it does not unlock. That is exactly why
   the tool follows it with PIN key events.
 - **Accessibility `setText`** — the secure bouncer is not an editable a11y node,

@@ -1,6 +1,5 @@
 import { NavigationEdge, ScrollPosition } from "../../../utils/interfaces/NavigationGraph";
 
-
 /**
  * Interface for setting up UI state before navigation steps.
  * Handles modal stack alignment, tab selection, scroll position, etc.
@@ -24,8 +23,5 @@ export interface UIStateSetup {
    * @param platform - Platform (android/ios)
    * @returns Description of the scroll action performed, or null if skipped
    */
-  setupScrollPosition(
-    scrollPosition: ScrollPosition,
-    platform: string
-  ): Promise<string | null>;
+  setupScrollPosition(scrollPosition: ScrollPosition, platform: string): Promise<string | null>;
 }

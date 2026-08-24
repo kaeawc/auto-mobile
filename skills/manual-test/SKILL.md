@@ -23,7 +23,7 @@ at a time to conserve context; never let two actors drive devices at once.
 2. **Enumerate landed work** in `<START>..origin/main`:
    - Merged PRs: `gh pr list --state merged --search "merged:>=<DATE>" --json number,title,closingIssuesReferences` (or by commit range).
    - Closed issues: `gh issue list --state closed --search "closed:>=<DATE>" --json number,title,labels`.
-   - Map each to a **type**: *bug-fix* (reproduce → confirm fixed) or *feature/spec* (exercise → confirm the output/effect exists).
+   - Map each to a **type**: _bug-fix_ (reproduce → confirm fixed) or _feature/spec_ (exercise → confirm the output/effect exists).
 3. **Scope the changed tool surface** for regression risk:
    `git log --oneline <START>..HEAD | grep -viE "README test count badges|deps"` and
    `git diff --stat <START>..HEAD -- src/`. Map changed non-test source files to the
@@ -82,7 +82,7 @@ at a time to conserve context; never let two actors drive devices at once.
    - **Do NOT set `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH`.** It wants an `.ipa`
      **file**, and `scripts/ios/ctrl-proxy-build-for-testing.sh` produces no `.ipa`
      — only a derived-data tree. The failure mode depends on whether the runner
-     **service is already running and responding**, which is *not* the same as
+     **service is already running and responding**, which is _not_ the same as
      "artifacts are cached". `setup()` short-circuits only on a live health probe
      (`isRunning()`, `src/utils/IOSCtrlProxyManager.ts:988-995`, and the
      `attemptedSetup` reuse at `:966` which also re-probes via `isAvailable()`);
@@ -108,6 +108,7 @@ at a time to conserve context; never let two actors drive devices at once.
      no path env var is needed; only for a non-default location set
      `AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA=<derived-data-root>` (the root — the
      code appends `Build/Products` itself).
+
    - **Set `AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD=true` (or pass
      `--skip-ctrl-proxy-download`) when testing a locally built iOS runner.**
      Landing the build in the default derived-data path is **not** sufficient on
@@ -139,6 +140,7 @@ at a time to conserve context; never let two actors drive devices at once.
      CtrlProxy download/install, so install the freshly built APK on the emulator
      yourself (`adb install -r <fresh apk>`) before starting the daemon, or run the
      Android leg in a separate daemon without the flag.
+
    - **Serve a locally built iOS runner (the reliable procedure).** `SKIP` +
      `IOS_DERIVED_DATA` alone are **not** enough for iOS: they stop the released
      runner from overwriting your build, but they do **not** make the daemon
@@ -147,10 +149,12 @@ at a time to conserve context; never let two actors drive devices at once.
      release-pinned `runnerSha256`
      (`assertRunnerBinaryHash()`, `src/utils/IOSCtrlProxyBuilder.ts`), and a
      locally built runner **always** hashes differently:
+
      ```
      CtrlProxy runner binary SHA256 mismatch (pre-launch) for simulator.
      Expected: <pinned>, Got: <your local build>. Refusing to launch ...
      ```
+
      Two supported ways past this — **prefer the first**:
      1. **First-class local-build mode (recommended).** Set
         `AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true`. The daemon then derives
@@ -164,7 +168,7 @@ at a time to conserve context; never let two actors drive devices at once.
         `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256=<64-hex>` (and
         `AUTOMOBILE_CTRL_PROXY_IOS_RUNNER_SHA256_TARGET=runner|xctest` to pick the
         binary; defaults to the release's target). This keeps the integrity gate
-        active against *your* value. The catch is chicken-and-egg: you learn the
+        active against _your_ value. The catch is chicken-and-egg: you learn the
         SHA only by launching once and reading the `Got:` value from the mismatch
         error, then re-launching with it. An explicit value here **overrides**
         local-build mode, so unset it if you want auto-derivation.
@@ -176,10 +180,11 @@ at a time to conserve context; never let two actors drive devices at once.
      falls through to the launch/guard path above. For local-build mode, start
      **without** the skip flag. If the daemon reuses a runner it did not launch it
      now logs a loud WARN (`Reusing an external CtrlProxy runner this daemon did
-     not launch`) — treat that as a signal to confirm which runner served the call.
+not launch`) — treat that as a signal to confirm which runner served the call.
+
    - **Verify which runner actually served the call** — `grep xctestrun <daemon-log>`
      for the path, and `grep 'need download\|Downloading CtrlProxy bundle' <daemon-log>`
-     to confirm the released bundle did *not* replace your build. Also
+     to confirm the released bundle did _not_ replace your build. Also
      `grep 'Local-build mode' <daemon-log>` to confirm your local runner's derived
      SHA was trusted, and `grep 'Reusing an external CtrlProxy runner' <daemon-log>`
      to catch a stale/foreign runner silently serving.
@@ -222,6 +227,7 @@ Make the target device active and leave the other alone. For **each** checklist 
   device state, navigation) and confirm well-formed output on the fresh runners.
 
 **Known blockers — record, don't fight:**
+
 - iOS **in-app SDK features** (sqlQuery/execute_sql, mockNetwork error-sim, in-app
   highlight) need an SDK-embedded app **installed on the sim** — none ships; BLOCKED
   unless you install one.
@@ -231,6 +237,7 @@ Make the target device active and leave the other alone. For **each** checklist 
 - SDK-flag tools under **multi-worktree daemon churn** (Phase 2).
 
 **Device gotchas:**
+
 - Never `pressButton power` on Android — it sleep-locks the emulator behind a keyguard.
 - `rotate`: test on a landscape-capable screen; iPhone springboard/Settings are
   portrait-locked, which reads as a false "rotate broken".

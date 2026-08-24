@@ -654,7 +654,9 @@ describe("DeviceDataStreamSocketServer", () => {
         }),
       );
 
-      expect(socket.getWrittenMessages<{ type: string; success?: boolean; error?: string }>()).toEqual([
+      expect(
+        socket.getWrittenMessages<{ type: string; success?: boolean; error?: string }>(),
+      ).toEqual([
         {
           id: "sub-unknown-session",
           type: "error",
@@ -2095,7 +2097,7 @@ describe("DeviceDataStreamSocketServer", () => {
       server.pushPerformanceUpdate("emulator-5554", { fps: 60 } as any);
       server.pushStorageUpdate("emulator-5554", { key: "k" } as any);
 
-      const got = frames(socket).filter(f => f.type.endsWith("_update"));
+      const got = frames(socket).filter((f) => f.type.endsWith("_update"));
       expect(got.length).toBe(4);
       for (const f of got) {
         expect(f.deviceId).toBe("emulator-5554");
@@ -2110,10 +2112,16 @@ describe("DeviceDataStreamSocketServer", () => {
       server.pushHierarchyUpdate("device-a", hierarchy);
       server.pushHierarchyUpdate("device-b", hierarchy);
 
-      expect(frames(a.socket).filter(f => f.type === "hierarchy_update").map(f => f.deviceSessionUuid))
-        .toEqual(["session-device-a"]);
-      expect(frames(b.socket).filter(f => f.type === "hierarchy_update").map(f => f.deviceSessionUuid))
-        .toEqual(["session-device-b"]);
+      expect(
+        frames(a.socket)
+          .filter((f) => f.type === "hierarchy_update")
+          .map((f) => f.deviceSessionUuid),
+      ).toEqual(["session-device-a"]);
+      expect(
+        frames(b.socket)
+          .filter((f) => f.type === "hierarchy_update")
+          .map((f) => f.deviceSessionUuid),
+      ).toEqual(["session-device-b"]);
     });
 
     it("yields zero events and stops capture for a stale/retired deviceSessionUuid subscriber (AC4)", () => {
@@ -2131,7 +2139,7 @@ describe("DeviceDataStreamSocketServer", () => {
 
       server.pushHierarchyUpdate("device-a", hierarchy);
 
-      expect(frames(socket).filter(f => f.type === "hierarchy_update")).toHaveLength(0);
+      expect(frames(socket).filter((f) => f.type === "hierarchy_update")).toHaveLength(0);
       expect(server.hasSubscriberForDevice("device-a")).toBe(false);
       expect(server.getScreenshotIntervalMsForDevice("device-a")).toBe(3000);
       // Retired subscriber: hierarchy cadence pauses instead of the 1Hz default (#5472).
@@ -2152,21 +2160,30 @@ describe("DeviceDataStreamSocketServer", () => {
         const a = server.simulateSubscription({ deviceId: "device-a" });
         const b = server.simulateSubscription({ deviceId: "device-b" });
 
-        server.pushNavigationGraphUpdate({ appId: "com.x", nodes: [], edges: [], currentScreen: null }, "device-a");
+        server.pushNavigationGraphUpdate(
+          { appId: "com.x", nodes: [], edges: [], currentScreen: null },
+          "device-a",
+        );
 
-        expect(frames(a.socket).filter(f => f.type === "navigation_update").map(f => f.deviceSessionUuid))
-          .toEqual(["session-device-a"]);
-        expect(frames(b.socket).filter(f => f.type === "navigation_update")).toHaveLength(0);
+        expect(
+          frames(a.socket)
+            .filter((f) => f.type === "navigation_update")
+            .map((f) => f.deviceSessionUuid),
+        ).toEqual(["session-device-a"]);
+        expect(frames(b.socket).filter((f) => f.type === "navigation_update")).toHaveLength(0);
       });
 
       it("reaches only all-device subscribers when provenance is unknown (deviceId null)", () => {
         const scoped = server.simulateSubscription({ deviceId: "device-a" });
         const all = server.simulateSubscription({});
 
-        server.pushNavigationGraphUpdate({ appId: null, nodes: [], edges: [], currentScreen: null }, null);
+        server.pushNavigationGraphUpdate(
+          { appId: null, nodes: [], edges: [], currentScreen: null },
+          null,
+        );
 
-        expect(frames(scoped.socket).filter(f => f.type === "navigation_update")).toHaveLength(0);
-        const allNav = frames(all.socket).filter(f => f.type === "navigation_update");
+        expect(frames(scoped.socket).filter((f) => f.type === "navigation_update")).toHaveLength(0);
+        const allNav = frames(all.socket).filter((f) => f.type === "navigation_update");
         expect(allNav).toHaveLength(1);
         expect(allNav[0].deviceSessionUuid).toBeNull();
       });
@@ -2174,16 +2191,24 @@ describe("DeviceDataStreamSocketServer", () => {
       it("echoes the requester's deviceSessionUuid on an on-demand request response", async () => {
         server.sessionResolver.bind("device-a", "session-device-a");
         server.setOnNavigationGraphRequested(async () => ({
-          appId: "com.x", nodes: [], edges: [], currentScreen: null,
+          appId: "com.x",
+          nodes: [],
+          edges: [],
+          currentScreen: null,
         }));
         const socket = new FakeSocket();
 
         await server.processLineForTest(
           socket,
-          JSON.stringify({ id: "r1", command: "request_navigation_graph", deviceSessionUuid: "session-device-a", appId: "com.x" }),
+          JSON.stringify({
+            id: "r1",
+            command: "request_navigation_graph",
+            deviceSessionUuid: "session-device-a",
+            appId: "com.x",
+          }),
         );
 
-        const nav = frames(socket).filter(f => f.type === "navigation_update");
+        const nav = frames(socket).filter((f) => f.type === "navigation_update");
         expect(nav).toHaveLength(1);
         expect(nav[0].deviceSessionUuid).toBe("session-device-a");
         expect(nav[0].deviceId).toBe("device-a");
@@ -2191,7 +2216,9 @@ describe("DeviceDataStreamSocketServer", () => {
     });
 
     describe("session lifecycle frames (AC5)", () => {
-      const record = (over: Partial<{ deviceSessionUuid: string; deviceId: string; platform: string }> = {}) => ({
+      const record = (
+        over: Partial<{ deviceSessionUuid: string; deviceId: string; platform: string }> = {},
+      ) => ({
         deviceSessionUuid: "session-device-a",
         deviceId: "device-a",
         platform: "android" as const,
@@ -2211,11 +2238,17 @@ describe("DeviceDataStreamSocketServer", () => {
         server.pushDeviceSessionStarted(record());
 
         for (const s of [scoped, all]) {
-          const f = frames(s.socket).filter(x => x.type === "device_session_started");
+          const f = frames(s.socket).filter((x) => x.type === "device_session_started");
           expect(f).toHaveLength(1);
-          expect(f[0]).toMatchObject({ deviceSessionUuid: "session-device-a", deviceId: "device-a", platform: "android" });
+          expect(f[0]).toMatchObject({
+            deviceSessionUuid: "session-device-a",
+            deviceId: "device-a",
+            platform: "android",
+          });
         }
-        expect(frames(other.socket).filter(x => x.type === "device_session_started")).toHaveLength(0);
+        expect(
+          frames(other.socket).filter((x) => x.type === "device_session_started"),
+        ).toHaveLength(0);
       });
 
       it("pushes device_session_ended with the retired identity", () => {
@@ -2227,9 +2260,13 @@ describe("DeviceDataStreamSocketServer", () => {
         server.sessionResolver.retire("device-a");
         server.pushDeviceSessionEnded(record());
 
-        const f = frames(socket).filter(x => x.type === "device_session_ended");
+        const f = frames(socket).filter((x) => x.type === "device_session_ended");
         expect(f).toHaveLength(1);
-        expect(f[0]).toMatchObject({ deviceSessionUuid: "session-device-a", deviceId: "device-a", platform: "android" });
+        expect(f[0]).toMatchObject({
+          deviceSessionUuid: "session-device-a",
+          deviceId: "device-a",
+          platform: "android",
+        });
       });
     });
   });

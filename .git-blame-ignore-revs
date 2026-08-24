@@ -5,6 +5,9 @@
 #
 # Only add commits that are PURE reformatting / whitespace with no logic changes.
 
+# chore: normalize repository formatting
+0ff987259ba28101aeacac06188922183729aae7
+
 # chore(android): reformat Kotlin tree with ktfmt 0.64 (meta/default style)
 ee27580b48ed94298139e974b71d840acf8b85ea
 

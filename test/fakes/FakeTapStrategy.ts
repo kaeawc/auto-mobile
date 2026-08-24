@@ -1,8 +1,5 @@
 import type { TapStrategy } from "../../src/utils/interfaces/TapStrategy";
-import type {
-  ObserveResult,
-  ViewHierarchyResult,
-} from "../../src/models";
+import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
 import type { TapOnElementOptions } from "../../src/models/TapOnElementOptions";
 import type { ViewHierarchy } from "../../src/features/observe/ViewHierarchy";
 
@@ -42,11 +39,11 @@ export class FakeTapStrategy implements TapStrategy {
   }
 
   wasMethodCalled(operationName: string): boolean {
-    return this.executedOperations.some(op => op.includes(operationName));
+    return this.executedOperations.some((op) => op.includes(operationName));
   }
 
   getCallCount(operationName: string): number {
-    return this.executedOperations.filter(op => op.includes(operationName)).length;
+    return this.executedOperations.filter((op) => op.includes(operationName)).length;
   }
 
   clearHistory(): void {
@@ -56,7 +53,7 @@ export class FakeTapStrategy implements TapStrategy {
   prepareViewHierarchyForResponse(
     rawHierarchy: ViewHierarchyResult,
     _viewHierarchy: ViewHierarchy,
-    _screenSize?: ObserveResult["screenSize"]
+    _screenSize?: ObserveResult["screenSize"],
   ): ViewHierarchyResult | null {
     this.executedOperations.push("prepareViewHierarchyForResponse");
     return this.filterReturnsRaw ? null : rawHierarchy;

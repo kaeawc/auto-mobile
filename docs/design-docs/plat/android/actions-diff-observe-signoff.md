@@ -6,7 +6,7 @@ cannot satisfy:
 > Diff output format signed off on first real output before finalizing.
 
 Tracked by **#3051**. The merged plumbing (`--actions-diff-observe`, PR #3034)
-emits, for a non-observe action on an unchanged screen, only the *diff* of the
+emits, for a non-observe action on an unchanged screen, only the _diff_ of the
 post-action observation against the previous one:
 
 ```
@@ -36,10 +36,10 @@ the AutoMobile Playground app (`dev.jasonpearson.automobile.playground`,
 Captured pairs (committed under `test/fixtures/observe/diff/`, post-sanitize form,
 diff-irrelevant heavy fields removed):
 
-| Pair | Interaction |
-|------|-------------|
+| Pair                                    | Interaction                                          |
+| --------------------------------------- | ---------------------------------------------------- |
 | `text-input-empty` → `text-input-typed` | focus a field + type `SignOff3051` (keyboard-stable) |
-| `scroll-before` → `scroll-after` | ~250px content scroll of a stably-identified list |
+| `scroll-before` → `scroll-after`        | ~250px content scroll of a stably-identified list    |
 
 Pinned as executable assertions in
 `test/features/observe/output/diffObserveRealDevice.test.ts`.
@@ -58,7 +58,7 @@ a bag of `AccessibilityNodeInfo` SDK metadata:
   traversal-order index that shifts whenever the tree changes.
 - `AccessibilityNodeInfo.roleDescription` — intermittently present.
 
-These churn between two captures of the *same* screen and are not actionable UI
+These churn between two captures of the _same_ screen and are not actionable UI
 deltas, so they buried the two real changes.
 
 The wire serializer (`stringifyToolResponse`, `src/utils/toolUtils.ts`) strips
@@ -71,7 +71,7 @@ real in both representations; stripping at serialize-time does not fix it.
 **Fix (this PR):** `DIFF_IGNORED_ATTRS = { "extras" }` — `extras` is excluded
 from **both** volatile-prone diff paths (a later follow-up, #3228, added `view-id`
 to this set; the current value in `ObserveResultOutput.ts` is
-`{ "extras", "view-id" }` — see the Follow-ups section): the per-node *changed* comparison
+`{ "extras", "view-id" }` — see the Follow-ups section): the per-node _changed_ comparison
 (`diffAttributes`) and the Element mirror fields (`leanElementForDiff`, so a
 stable focus with only `extras` churn no longer emits a phantom
 `fields.focusedElement`). Phantom entries are never emitted at all (no empty
@@ -91,8 +91,8 @@ the full tree, and the new `EditText` carries its typed text in `added`
   `[resource-id, bounds, text, sibling-index]` NUL-joined (`\x00`). For a node
   with a `resource-id`/`text` it reads fine; for an id-less/text-less node it
   degrades to `bounds + index` — opaque (the consumer can't name what it is) and
-  awkward to display (embedded NUL bytes render blank). So the key is *stable and
-  unique*, not universally *human-legible*.
+  awkward to display (embedded NUL bytes render blank). So the key is _stable and
+  unique_, not universally _human-legible_.
 - **Typing surfaces as remove+add, not a `text` `changed`** (see AC#2).
 
 ### 3. AC#2 (`changed` fires with `{from,to}`) — PARTIAL on real output
@@ -113,17 +113,17 @@ the full tree, and the new `EditText` carries its typed text in `added`
   it off the `added` node (or correlates the removed+added pair by bounds). This
   is the documented content-key limitation (`diffObserveResult.test.ts`: "a
   content-key field change reads as remove+add"), surfaced here on real output.
-- Node `changed` entries that *do* fire are clean `{from,to}` on actionable
+- Node `changed` entries that _do_ fire are clean `{from,to}` on actionable
   attributes (`content-desc`, `bounds`).
 
 > Caveat — **Compose toggle state is not surfaced.** Tapping the Playground
 > `Switch` / `CheckBox` returned success but produced **no** hierarchy delta:
-> their state rides in a *static* `content-desc` ("Switch is off") and no
+> their state rides in a _static_ `content-desc` ("Switch is off") and no
 > `checked`/`selected`/`stateDescription` attribute is extracted. So the
 > classic `checked: false→true` `changed` (well-covered by the synthetic tests)
 > did **not** reproduce on this app. This is a **capture-layer** limitation
 > (what CtrlProxy extracts for Compose toggles), not a diff-format defect, and is
-> orthogonal to the flag. The `focused` state change *is* surfaced, so AC#2's
+> orthogonal to the flag. The `focused` state change _is_ surfaced, so AC#2's
 > "focused" example holds.
 
 ### 4. AC#3 (scroll cascade) — content identity helps, motivates stable IDs
@@ -132,14 +132,14 @@ On a ~250px scroll, content identity (#3053, default on) re-paired **9 shifted
 rows** carrying stable `resource-id`s into compact **bounds-only `changed`**
 deltas instead of remove+add. Churn dropped from **65** (positional-only) to
 **56**. But the re-pair only helps rows with a stable id: of the residual 56
-entries, **~28 are opaque** (id-less *and* text-less — just `bounds + index`),
+entries, **~28 are opaque** (id-less _and_ text-less — just `bounds + index`),
 so an agent can't tell what entered/left the screen. That opacity — not just the
 raw churn count — is the concrete motivation for the stable-node-identity
 follow-up (**#3107**). Not a blocker for an off-by-default flag.
 
 > **#3107 resolution (this data).** The `structuralIdentity` prototype (#3088
-> limitation 1, keyed on `resource-id`/`view-id` only) was *not* the fix for this
-> opacity: those ~28 residual entries are **id-less *and* text-less**, so a
+> limitation 1, keyed on `resource-id`/`view-id` only) was _not_ the fix for this
+> opacity: those ~28 residual entries are **id-less _and_ text-less**, so a
 > structural key is `null` for them and they fall back to positional remove+add
 > regardless. The prototype only collapses in-place edits of nodes that already
 > carry an id — a marginal win over the shipped content-identity diff — while
@@ -157,10 +157,10 @@ improved to roughly `26%`/`59%`). Treat them as the order-of-magnitude result �
 localized is a large win, scroll a smaller-but-real one — not exact current
 values, which drift as the diff/identity layers evolve:
 
-| Pair | diff / full (bytes) | diff / full (tokens) |
-|------|--------------------:|---------------------:|
-| Text entry (localized) | **~1.8%** | **~4.4%** |
-| Scroll (~250px) | ~29% | ~64% |
+| Pair                   | diff / full (bytes) | diff / full (tokens) |
+| ---------------------- | ------------------: | -------------------: |
+| Text entry (localized) |           **~1.8%** |            **~4.4%** |
+| Scroll (~250px)        |                ~29% |                 ~64% |
 
 The localized case comfortably meets the fixture's `<10%` target (98% byte
 reduction), matching the synthetic `android-home.json` measurement. A **scroll is
@@ -178,7 +178,7 @@ What this sign-off does and does not establish:
   `extras` flood is fixed; scroll behavior and its content-identity win are
   quantified.
 - **Bounded / deferred to the capture layer:** full agent-consumability across
-  *all* the interaction states the issue enumerated is not yet reached — real
+  _all_ the interaction states the issue enumerated is not yet reached — real
   toggle state (`checked`/`selected`) is not surfaced by the capture layer (so
   it is synthetic-only here), typing reads as remove+add rather than a `text`
   delta, and id-less nodes carry opaque keys that a scroll exposes in bulk. The

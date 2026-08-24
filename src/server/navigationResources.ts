@@ -9,7 +9,7 @@ import {
   NavigationGraphNodeResourceProvider,
   NavigationGraphHistoryProvider,
   NavigationAppSummary,
-  NavigationAppListProvider
+  NavigationAppListProvider,
 } from "../utils/interfaces/NavigationGraph";
 import { logger } from "../utils/logger";
 import { defaultTimer } from "../utils/SystemTimer";
@@ -45,8 +45,7 @@ export interface NavigationAppsResourceContent {
 
 const GRAPH_RESOURCE_UPDATE_DEBOUNCE_MS = 1000;
 
-type NavigationGraphResourceProvider =
-  NavigationGraphSummaryProvider &
+type NavigationGraphResourceProvider = NavigationGraphSummaryProvider &
   NavigationGraphNodeResourceProvider &
   NavigationGraphHistoryProvider &
   NavigationAppListProvider;
@@ -106,7 +105,7 @@ function getNavigationScreenshotProvider(): NavigationScreenshotResourceProvider
 }
 
 export function setNavigationScreenshotProvider(
-  provider: NavigationScreenshotResourceProvider | null
+  provider: NavigationScreenshotResourceProvider | null,
 ): void {
   navigationScreenshotProvider = provider;
 }
@@ -129,16 +128,20 @@ async function getNavigationGraphResource(appId?: string): Promise<ResourceConte
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify(graph, null, 2)
+      text: JSON.stringify(graph, null, 2),
     };
   } catch (error) {
     logger.error(`[NavigationResources] Failed to get navigation graph: ${error}`);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to retrieve navigation graph: ${error}`
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          error: `Failed to retrieve navigation graph: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -152,16 +155,20 @@ async function getNavigationAppsResource(): Promise<ResourceContent> {
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify(payload, null, 2)
+      text: JSON.stringify(payload, null, 2),
     };
   } catch (error) {
     logger.error(`[NavigationResources] Failed to list apps with navigation graph: ${error}`);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to list apps with navigation graph: ${error}`
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          error: `Failed to list apps with navigation graph: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -171,23 +178,27 @@ async function getNavigationGraphHistoryResource(
   options: {
     cursor?: string;
     limit?: number;
-  } = {}
+  } = {},
 ): Promise<ResourceContent> {
   try {
     const history = await getNavigationGraphProvider().exportGraphHistory(options);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify(history, null, 2)
+      text: JSON.stringify(history, null, 2),
     };
   } catch (error) {
     logger.error(`[NavigationResources] Failed to get navigation history: ${error}`);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Failed to retrieve navigation history: ${error}`
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          error: `Failed to retrieve navigation history: ${error}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 }
@@ -196,13 +207,13 @@ function buildNavigationNodeError(uri: string, error: string): ResourceContent {
   return {
     uri,
     mimeType: "application/json",
-    text: JSON.stringify({ error }, null, 2)
+    text: JSON.stringify({ error }, null, 2),
   };
 }
 
 async function getNavigationNodeByIdResource(
   nodeId: number,
-  appId?: string
+  appId?: string,
 ): Promise<ResourceContent> {
   const uri = appId
     ? `automobile:navigation/nodes/${nodeId}?appId=${encodeURIComponent(appId)}`
@@ -217,7 +228,7 @@ async function getNavigationNodeByIdResource(
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify(nodeResource, null, 2)
+      text: JSON.stringify(nodeResource, null, 2),
     };
   } catch (error) {
     logger.error(`[NavigationResources] Failed to get navigation node ${nodeId}: ${error}`);
@@ -237,11 +248,14 @@ async function getNavigationNodeByScreenResource(screenName: string): Promise<Re
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify(nodeResource, null, 2)
+      text: JSON.stringify(nodeResource, null, 2),
     };
   } catch (error) {
     logger.error(`[NavigationResources] Failed to get navigation node '${screenName}': ${error}`);
-    return buildNavigationNodeError(uri, `Failed to retrieve navigation node '${screenName}': ${error}`);
+    return buildNavigationNodeError(
+      uri,
+      `Failed to retrieve navigation node '${screenName}': ${error}`,
+    );
   }
 }
 
@@ -264,13 +278,13 @@ function parseHistoryParams(params: Record<string, string>): {
 
   return {
     cursor,
-    limit: Math.floor(parsedLimit)
+    limit: Math.floor(parsedLimit),
   };
 }
 
 async function getNavigationNodeScreenshotResource(
   nodeId: number,
-  appId?: string
+  appId?: string,
 ): Promise<ResourceContent> {
   const uri = appId
     ? `automobile:navigation/nodes/${nodeId}/screenshot?appId=${encodeURIComponent(appId)}`
@@ -287,17 +301,20 @@ async function getNavigationNodeScreenshotResource(
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({ error: "No current app set." }, null, 2)
+        text: JSON.stringify({ error: "No current app set." }, null, 2),
       };
     }
 
     // Get the node (scoped to the resolved app) to find its screen name.
-    const nodeResource = await getNavigationGraphProvider().getNodeResourceById(nodeId, resolvedAppId);
+    const nodeResource = await getNavigationGraphProvider().getNodeResourceById(
+      nodeId,
+      resolvedAppId,
+    );
     if (!nodeResource || !nodeResource.node) {
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({ error: `Navigation node ${nodeId} not found.` }, null, 2)
+        text: JSON.stringify({ error: `Navigation node ${nodeId} not found.` }, null, 2),
       };
     }
 
@@ -305,14 +322,14 @@ async function getNavigationNodeScreenshotResource(
     const screenshotManager = getNavigationScreenshotProvider();
     const screenshotPath = await screenshotManager.findExistingScreenshot(
       resolvedAppId,
-      nodeResource.node.screenName
+      nodeResource.node.screenName,
     );
 
     if (!screenshotPath) {
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({ error: `No screenshot available for node ${nodeId}.` }, null, 2)
+        text: JSON.stringify({ error: `No screenshot available for node ${nodeId}.` }, null, 2),
       };
     }
 
@@ -322,7 +339,7 @@ async function getNavigationNodeScreenshotResource(
       return {
         uri,
         mimeType: "application/json",
-        text: JSON.stringify({ error: `Screenshot file not found for node ${nodeId}.` }, null, 2)
+        text: JSON.stringify({ error: `Screenshot file not found for node ${nodeId}.` }, null, 2),
       };
     }
 
@@ -330,21 +347,23 @@ async function getNavigationNodeScreenshotResource(
     return {
       uri,
       mimeType: "image/webp",
-      blob: screenshotData.toString("base64")
+      blob: screenshotData.toString("base64"),
     };
   } catch (error) {
     logger.error(`[NavigationResources] Failed to get screenshot for node ${nodeId}: ${error}`);
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({ error: `Failed to retrieve screenshot: ${error}` }, null, 2)
+      text: JSON.stringify({ error: `Failed to retrieve screenshot: ${error}` }, null, 2),
     };
   }
 }
 
-export function registerNavigationResources(options: {
-  navigationGraph?: NavigationGraphResourceProvider;
-} = {}): void {
+export function registerNavigationResources(
+  options: {
+    navigationGraph?: NavigationGraphResourceProvider;
+  } = {},
+): void {
   if (options.navigationGraph) {
     navigationGraphProvider = options.navigationGraph;
   }
@@ -360,7 +379,7 @@ export function registerNavigationResources(options: {
     "Navigation Apps",
     "Apps that have a persisted navigation graph (appId, displayName, lastUpdated). No connected device required.",
     "application/json",
-    () => getNavigationAppsResource()
+    () => getNavigationAppsResource(),
   );
 
   ResourceRegistry.register(
@@ -368,7 +387,7 @@ export function registerNavigationResources(options: {
     "Navigation Graph",
     "High-level navigation graph for the current app (nodes and edges). Use ?appId= to filter by specific app.",
     "application/json",
-    () => getNavigationGraphResource()
+    () => getNavigationGraphResource(),
   );
 
   ResourceRegistry.registerTemplate(
@@ -376,10 +395,10 @@ export function registerNavigationResources(options: {
     "Navigation Graph (App-Specific)",
     "High-level navigation graph filtered by app ID.",
     "application/json",
-    async params => {
+    async (params) => {
       const appId = params.appId ? decodeURIComponent(params.appId).trim() : undefined;
       return getNavigationGraphResource(appId);
-    }
+    },
   );
 
   ResourceRegistry.register(
@@ -387,7 +406,7 @@ export function registerNavigationResources(options: {
     "Navigation History",
     "Ordered navigation history for the current app (nodes and edges).",
     "application/json",
-    () => getNavigationGraphHistoryResource(NAVIGATION_RESOURCE_URIS.HISTORY)
+    () => getNavigationGraphHistoryResource(NAVIGATION_RESOURCE_URIS.HISTORY),
   );
 
   const historyHandler = async (params: Record<string, string>) => {
@@ -411,7 +430,7 @@ export function registerNavigationResources(options: {
     "Navigation History",
     "Ordered navigation history with pagination support.",
     "application/json",
-    historyHandler
+    historyHandler,
   );
 
   ResourceRegistry.registerTemplate(
@@ -419,7 +438,7 @@ export function registerNavigationResources(options: {
     "Navigation History",
     "Ordered navigation history with pagination support.",
     "application/json",
-    historyHandler
+    historyHandler,
   );
 
   ResourceRegistry.registerTemplate(
@@ -427,7 +446,7 @@ export function registerNavigationResources(options: {
     "Navigation History",
     "Ordered navigation history with pagination support.",
     "application/json",
-    historyHandler
+    historyHandler,
   );
 
   // Registered before NODE_BY_ID: the base template's `([^/&]+)` node-id capture
@@ -437,17 +456,17 @@ export function registerNavigationResources(options: {
     "Navigation Graph Node (App-Specific)",
     "Detailed navigation graph node by node ID, resolved under a specific app ID.",
     "application/json",
-    async params => {
+    async (params) => {
       const nodeId = Number(params.nodeId);
       const appId = params.appId ? decodeURIComponent(params.appId).trim() : undefined;
       if (!Number.isFinite(nodeId)) {
         return buildNavigationNodeError(
           `automobile:navigation/nodes/${params.nodeId}`,
-          `Invalid navigation node id: ${params.nodeId}`
+          `Invalid navigation node id: ${params.nodeId}`,
         );
       }
       return getNavigationNodeByIdResource(nodeId, appId);
-    }
+    },
   );
 
   ResourceRegistry.registerTemplate(
@@ -455,16 +474,16 @@ export function registerNavigationResources(options: {
     "Navigation Graph Node",
     "Detailed navigation graph node by node ID, including relationships.",
     "application/json",
-    async params => {
+    async (params) => {
       const nodeId = Number(params.nodeId);
       if (!Number.isFinite(nodeId)) {
         return buildNavigationNodeError(
           `automobile:navigation/nodes/${params.nodeId}`,
-          `Invalid navigation node id: ${params.nodeId}`
+          `Invalid navigation node id: ${params.nodeId}`,
         );
       }
       return getNavigationNodeByIdResource(nodeId);
-    }
+    },
   );
 
   ResourceRegistry.registerTemplate(
@@ -472,16 +491,16 @@ export function registerNavigationResources(options: {
     "Navigation Graph Node (Screen)",
     "Detailed navigation graph node by screen name, including relationships.",
     "application/json",
-    async params => {
+    async (params) => {
       const screenName = decodeURIComponent(params.screenName ?? "").trim();
       if (!screenName) {
         return buildNavigationNodeError(
           "automobile:navigation/nodes?screen=",
-          "Screen name is required."
+          "Screen name is required.",
         );
       }
       return getNavigationNodeByScreenResource(screenName);
-    }
+    },
   );
 
   // Registered before NODE_SCREENSHOT so the app-scoped variant is matched for
@@ -492,18 +511,18 @@ export function registerNavigationResources(options: {
     "Navigation Node Screenshot (App-Specific)",
     "Screenshot thumbnail for a navigation graph node, resolved under a specific app ID (WebP image).",
     "image/webp",
-    async params => {
+    async (params) => {
       const nodeId = Number(params.nodeId);
       const appId = params.appId ? decodeURIComponent(params.appId).trim() : undefined;
       if (!Number.isFinite(nodeId)) {
         return {
           uri: `automobile:navigation/nodes/${params.nodeId}/screenshot`,
           mimeType: "application/json",
-          text: JSON.stringify({ error: `Invalid node id: ${params.nodeId}` }, null, 2)
+          text: JSON.stringify({ error: `Invalid node id: ${params.nodeId}` }, null, 2),
         };
       }
       return getNavigationNodeScreenshotResource(nodeId, appId);
-    }
+    },
   );
 
   ResourceRegistry.registerTemplate(
@@ -511,17 +530,17 @@ export function registerNavigationResources(options: {
     "Navigation Node Screenshot",
     "Screenshot thumbnail for a navigation graph node (WebP image).",
     "image/webp",
-    async params => {
+    async (params) => {
       const nodeId = Number(params.nodeId);
       if (!Number.isFinite(nodeId)) {
         return {
           uri: `automobile:navigation/nodes/${params.nodeId}/screenshot`,
           mimeType: "application/json",
-          text: JSON.stringify({ error: `Invalid node id: ${params.nodeId}` }, null, 2)
+          text: JSON.stringify({ error: `Invalid node id: ${params.nodeId}` }, null, 2),
         };
       }
       return getNavigationNodeScreenshotResource(nodeId);
-    }
+    },
   );
 
   ResourceRegistry.register(
@@ -538,9 +557,14 @@ export function registerNavigationResources(options: {
           return {
             uri: NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
             mimeType: "application/json",
-            text: JSON.stringify({
-              error: "No current app set. Launch or observe an app first to enable test coverage tracking."
-            }, null, 2)
+            text: JSON.stringify(
+              {
+                error:
+                  "No current app set. Launch or observe an app first to enable test coverage tracking.",
+              },
+              null,
+              2,
+            ),
           };
         }
 
@@ -548,20 +572,26 @@ export function registerNavigationResources(options: {
         return {
           uri: NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
           mimeType: "application/json",
-          text: JSON.stringify(report, null, 2)
+          text: JSON.stringify(report, null, 2),
         };
       } catch (error) {
         logger.error(`[NavigationResources] Failed to generate test coverage report: ${error}`);
         return {
           uri: NAVIGATION_RESOURCE_URIS.TEST_COVERAGE,
           mimeType: "application/json",
-          text: JSON.stringify({
-            error: `Failed to generate test coverage report: ${error}`
-          }, null, 2)
+          text: JSON.stringify(
+            {
+              error: `Failed to generate test coverage report: ${error}`,
+            },
+            null,
+            2,
+          ),
         };
       }
-    }
+    },
   );
 
-  logger.info("[NavigationResources] Registered navigation graph resources including test coverage");
+  logger.info(
+    "[NavigationResources] Registered navigation graph resources including test coverage",
+  );
 }

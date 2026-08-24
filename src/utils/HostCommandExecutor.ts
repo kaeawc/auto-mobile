@@ -2,17 +2,17 @@ import { execFile, spawn, type ChildProcess, type SpawnOptions } from "child_pro
 import { promisify } from "util";
 import type { ExecResult } from "../models";
 import { wrapCommandError } from "./CommandError";
-import { runExecSeam, type ExecRequestOptions, type ExecSeamOptions, type RawExecOutput } from "./ExecSeam";
+import {
+  runExecSeam,
+  type ExecRequestOptions,
+  type ExecSeamOptions,
+  type RawExecOutput,
+} from "./ExecSeam";
 
 export type HostCommandOptions = ExecRequestOptions;
 
 export interface HostCommandExecutor {
-  executeCommand(
-    file: string,
-    args?: string[],
-    options?: HostCommandOptions
-  ): Promise<ExecResult>;
-
+  executeCommand(file: string, args?: string[], options?: HostCommandOptions): Promise<ExecResult>;
 }
 
 /**
@@ -30,7 +30,7 @@ export interface HostProcessExecutor extends HostCommandExecutor {
   executeCommandWithChild(
     file: string,
     args?: string[],
-    options?: HostCommandOptions
+    options?: HostCommandOptions,
   ): StartedHostCommand;
 }
 
@@ -42,14 +42,14 @@ export interface StartedHostCommand {
 export type ExecFileAsync = (
   file: string,
   args: string[],
-  options?: ExecSeamOptions
+  options?: ExecSeamOptions,
 ) => Promise<RawExecOutput>;
 
 export type ExecFileWithChild = (
   file: string,
   args: string[],
   options: ExecSeamOptions | undefined,
-  callback: (error: Error | null, stdout: string | Buffer, stderr: string | Buffer) => void
+  callback: (error: Error | null, stdout: string | Buffer, stderr: string | Buffer) => void,
 ) => ChildProcess;
 
 /** Shared callback-style `execFile` leaf for callers that need its child handle. */
@@ -64,7 +64,7 @@ export const execFileWithChild: ExecFileWithChild = (file, args, options, callba
 export const execFileAsync: ExecFileAsync = async (
   file: string,
   args: string[],
-  options?: ExecSeamOptions
+  options?: ExecSeamOptions,
 ): Promise<RawExecOutput> => {
   return promisify(execFile)(file, args, options);
 };
@@ -75,7 +75,7 @@ export class DefaultHostCommandExecutor implements HostProcessExecutor {
 
   constructor(
     execAsyncFn: ExecFileAsync = execFileAsync,
-    execWithChildFn: ExecFileWithChild = execFileWithChild
+    execWithChildFn: ExecFileWithChild = execFileWithChild,
   ) {
     this.execAsync = execAsyncFn;
     this.execWithChild = execWithChildFn;
@@ -84,13 +84,13 @@ export class DefaultHostCommandExecutor implements HostProcessExecutor {
   async executeCommand(
     file: string,
     args: string[] = [],
-    options: HostCommandOptions = {}
+    options: HostCommandOptions = {},
   ): Promise<ExecResult> {
-    return runExecSeam(
-      execOptions => this.execAsync(file, args, execOptions),
-      options,
-      { command: file, args, cwd: options.cwd }
-    );
+    return runExecSeam((execOptions) => this.execAsync(file, args, execOptions), options, {
+      command: file,
+      args,
+      cwd: options.cwd,
+    });
   }
 
   spawn(file: string, args: string[], options: SpawnOptions = {}): ChildProcess {
@@ -100,28 +100,29 @@ export class DefaultHostCommandExecutor implements HostProcessExecutor {
   executeCommandWithChild(
     file: string,
     args: string[] = [],
-    options: HostCommandOptions = {}
+    options: HostCommandOptions = {},
   ): StartedHostCommand {
     let child: ChildProcess | undefined;
     let startupError: unknown;
     const result = runExecSeam(
-      execOptions => new Promise<RawExecOutput>((resolve, reject) => {
-        try {
-          child = this.execWithChild(file, args, execOptions, (error, stdout, stderr) => {
-            if (error) {
-              Object.assign(error, { stdout, stderr });
-              reject(error);
-              return;
-            }
-            resolve({ stdout, stderr });
-          });
-        } catch (error) {
-          startupError = error;
-          reject(error);
-        }
-      }),
+      (execOptions) =>
+        new Promise<RawExecOutput>((resolve, reject) => {
+          try {
+            child = this.execWithChild(file, args, execOptions, (error, stdout, stderr) => {
+              if (error) {
+                Object.assign(error, { stdout, stderr });
+                reject(error);
+                return;
+              }
+              resolve({ stdout, stderr });
+            });
+          } catch (error) {
+            startupError = error;
+            reject(error);
+          }
+        }),
       options,
-      { command: file, args, cwd: options.cwd }
+      { command: file, args, cwd: options.cwd },
     );
 
     if (!child) {
@@ -130,10 +131,11 @@ export class DefaultHostCommandExecutor implements HostProcessExecutor {
       // that failure for the shared seam; consume its wrapped rejection before
       // surfacing the same actionable error synchronously to the caller.
       void result.catch(() => undefined);
-      throw wrapCommandError(
-        startupError ?? new Error(`Failed to start command: ${file}`),
-        { command: file, args, cwd: options.cwd }
-      );
+      throw wrapCommandError(startupError ?? new Error(`Failed to start command: ${file}`), {
+        command: file,
+        args,
+        cwd: options.cwd,
+      });
     }
     return { child, result };
   }

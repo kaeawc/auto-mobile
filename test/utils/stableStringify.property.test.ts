@@ -28,20 +28,23 @@ const reverseKeys = (value: unknown): unknown => {
 describe("stableStringify (property-based)", () => {
   test("is insensitive to object key ordering", () => {
     fc.assert(
-      fc.property(jsonValue, value => stableStringify(value) === stableStringify(reverseKeys(value))),
-      RUN_OPTIONS
+      fc.property(
+        jsonValue,
+        (value) => stableStringify(value) === stableStringify(reverseKeys(value)),
+      ),
+      RUN_OPTIONS,
     );
   });
 
   test("output is always valid JSON that parses back to an equal canonical form", () => {
     fc.assert(
-      fc.property(jsonValue, value => {
+      fc.property(jsonValue, (value) => {
         const serialized = stableStringify(value);
         // Re-canonicalizing the round-tripped value must be a fixed point: the
         // canonical form is idempotent under parse ∘ stringify.
         return stableStringify(JSON.parse(serialized)) === serialized;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -54,11 +57,11 @@ describe("stableStringify (property-based)", () => {
       fc.integer(),
       fc.double({ noNaN: true, noDefaultInfinity: true }),
       fc.string(),
-      fc.array(fc.oneof(fc.integer(), fc.string(), fc.boolean()))
+      fc.array(fc.oneof(fc.integer(), fc.string(), fc.boolean())),
     );
     fc.assert(
-      fc.property(objectFree, value => stableStringify(value) === JSON.stringify(value)),
-      RUN_OPTIONS
+      fc.property(objectFree, (value) => stableStringify(value) === JSON.stringify(value)),
+      RUN_OPTIONS,
     );
   });
 });

@@ -8,6 +8,7 @@ Interact with the notification shade and system tray.
 ## Open Notification Shade
 
 Pull down the notification shade:
+
 ```
 systemTray with action: "open"
 ```
@@ -15,6 +16,7 @@ systemTray with action: "open"
 ## Close Notification Shade
 
 Collapse the shade (safe no-op if already closed). Prefer this over `pressButton` for deterministic cleanup between tests:
+
 ```
 systemTray with action: "close"
 ```
@@ -22,6 +24,7 @@ systemTray with action: "close"
 ## Find Notification
 
 Search for a specific notification:
+
 ```
 systemTray with action: "find", notification: {title: "New message"}
 systemTray with action: "find", notification: {body: "You have 3 new emails"}
@@ -29,6 +32,7 @@ systemTray with action: "find", notification: {appId: "com.example.app"}
 ```
 
 Search criteria:
+
 - `title`: Notification title text
 - `body`: Notification body text
 - `appId`: Source app package name
@@ -36,6 +40,7 @@ Search criteria:
 ## Tap Notification
 
 Tap on a notification or its action button:
+
 ```
 systemTray with action: "tap", notification: {title: "New message"}
 systemTray with action: "tap", notification: {title: "New message"}, tapActionLabel: "Reply"
@@ -44,6 +49,7 @@ systemTray with action: "tap", notification: {title: "New message"}, tapActionLa
 ## Dismiss Notification
 
 Swipe away a notification:
+
 ```
 systemTray with action: "dismiss", notification: {title: "New message"}
 ```
@@ -51,6 +57,7 @@ systemTray with action: "dismiss", notification: {title: "New message"}
 ## Clear All Notifications
 
 Remove all notifications:
+
 ```
 systemTray with action: "clearAll"
 ```
@@ -58,16 +65,19 @@ systemTray with action: "clearAll"
 ## Common Workflows
 
 **Check and act on notification:**
+
 ```
 systemTray "open" → systemTray "find" → systemTray "tap"
 ```
 
 **Clear notifications before test:**
+
 ```
 systemTray "open" → systemTray "clearAll" → systemTray "close"
 ```
 
 **Verify notification appeared:**
+
 ```
 (trigger notification) → systemTray "open" → systemTray "find"
 ```

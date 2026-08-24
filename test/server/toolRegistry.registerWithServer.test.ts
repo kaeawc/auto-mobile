@@ -26,7 +26,7 @@ class FakeMcpServer {
   }
 
   getRegisteredHandler(name: string): ((args: any, extra: any) => Promise<any>) | undefined {
-    return this.registeredTools.find(t => t.name === name)?.handler;
+    return this.registeredTools.find((t) => t.name === name)?.handler;
   }
 }
 
@@ -47,11 +47,17 @@ describe("ToolRegistry.registerWithServer", () => {
     let receivedProgress: ProgressCallback | undefined;
     let receivedSignal: AbortSignal | undefined;
 
-    ToolRegistry.register("progressTool", "A tool that supports progress", z.object({ input: z.string() }), async (args: any, progress?: ProgressCallback, signal?: AbortSignal) => {
-      receivedProgress = progress;
-      receivedSignal = signal;
-      return { content: [{ type: "text", text: "done" }] };
-    }, { supportsProgress: true });
+    ToolRegistry.register(
+      "progressTool",
+      "A tool that supports progress",
+      z.object({ input: z.string() }),
+      async (args: any, progress?: ProgressCallback, signal?: AbortSignal) => {
+        receivedProgress = progress;
+        receivedSignal = signal;
+        return { content: [{ type: "text", text: "done" }] };
+      },
+      { supportsProgress: true },
+    );
 
     ToolRegistry.registerWithServer(fakeMcpServer as any);
 
@@ -77,10 +83,16 @@ describe("ToolRegistry.registerWithServer", () => {
     let capturedProgress: ProgressCallback | undefined;
     const sentNotifications: any[] = [];
 
-    ToolRegistry.register("notifyTool", "A tool that sends progress", z.object({}), async (_args: any, progress?: ProgressCallback) => {
-      capturedProgress = progress;
-      return { content: [{ type: "text", text: "ok" }] };
-    }, { supportsProgress: true });
+    ToolRegistry.register(
+      "notifyTool",
+      "A tool that sends progress",
+      z.object({}),
+      async (_args: any, progress?: ProgressCallback) => {
+        capturedProgress = progress;
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+      { supportsProgress: true },
+    );
 
     ToolRegistry.registerWithServer(fakeMcpServer as any);
 
@@ -116,10 +128,16 @@ describe("ToolRegistry.registerWithServer", () => {
     let capturedProgress: ProgressCallback | undefined;
     const sentNotifications: any[] = [];
 
-    ToolRegistry.register("noTokenTool", "Tool without client-provided progress token", z.object({}), async (_args: any, progress?: ProgressCallback) => {
-      capturedProgress = progress;
-      return { content: [{ type: "text", text: "ok" }] };
-    }, { supportsProgress: true });
+    ToolRegistry.register(
+      "noTokenTool",
+      "Tool without client-provided progress token",
+      z.object({}),
+      async (_args: any, progress?: ProgressCallback) => {
+        capturedProgress = progress;
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+      { supportsProgress: true },
+    );
 
     ToolRegistry.registerWithServer(fakeMcpServer as any);
 
@@ -151,11 +169,16 @@ describe("ToolRegistry.registerWithServer", () => {
     let receivedProgress: ProgressCallback | undefined = undefined;
     let receivedSignal: AbortSignal | undefined = undefined;
 
-    ToolRegistry.register("simpleTool", "A simple tool without progress", z.object({ value: z.number() }), async (args: any, progress?: ProgressCallback, signal?: AbortSignal) => {
-      receivedProgress = progress;
-      receivedSignal = signal;
-      return { content: [{ type: "text", text: String(args.value) }] };
-    });
+    ToolRegistry.register(
+      "simpleTool",
+      "A simple tool without progress",
+      z.object({ value: z.number() }),
+      async (args: any, progress?: ProgressCallback, signal?: AbortSignal) => {
+        receivedProgress = progress;
+        receivedSignal = signal;
+        return { content: [{ type: "text", text: String(args.value) }] };
+      },
+    );
 
     ToolRegistry.registerWithServer(fakeMcpServer as any);
 
@@ -179,11 +202,17 @@ describe("ToolRegistry.registerWithServer", () => {
   test("keeps output schemas internal instead of advertising them through MCP registration", () => {
     const outputSchema = z.object({ ok: z.boolean() });
 
-    ToolRegistry.register("schemaTool", "Tool with a structured result contract", z.object({}), async () => ({ content: [{ type: "text", text: "ok" }] }), { outputSchema: outputSchema });
+    ToolRegistry.register(
+      "schemaTool",
+      "Tool with a structured result contract",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+      { outputSchema: outputSchema },
+    );
 
     ToolRegistry.registerWithServer(fakeMcpServer as any);
 
-    const registeredTool = fakeMcpServer.registeredTools.find(tool => tool.name === "schemaTool");
+    const registeredTool = fakeMcpServer.registeredTools.find((tool) => tool.name === "schemaTool");
     expect(registeredTool).toBeDefined();
     expect(registeredTool!.config.outputSchema).toBeUndefined();
     expect(ToolRegistry.getTool("schemaTool")?.outputSchema).toBe(outputSchema);
@@ -192,10 +221,16 @@ describe("ToolRegistry.registerWithServer", () => {
   test("progress callback does not throw when sendNotification fails", async () => {
     let capturedProgress: ProgressCallback | undefined;
 
-    ToolRegistry.register("failNotifyTool", "Tool where notification sending fails", z.object({}), async (_args: any, progress?: ProgressCallback) => {
-      capturedProgress = progress;
-      return { content: [{ type: "text", text: "ok" }] };
-    }, { supportsProgress: true });
+    ToolRegistry.register(
+      "failNotifyTool",
+      "Tool where notification sending fails",
+      z.object({}),
+      async (_args: any, progress?: ProgressCallback) => {
+        capturedProgress = progress;
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+      { supportsProgress: true },
+    );
 
     ToolRegistry.registerWithServer(fakeMcpServer as any);
 

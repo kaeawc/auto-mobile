@@ -256,15 +256,11 @@ export async function waitForDeviceReadyOrCancel(
     }, timeoutMs);
     return await Promise.race([readinessPromise, abortPromise]);
   } catch (error) {
-    const failure = await readinessFailureAfterTimeout(
-      controller,
-      settlement,
-      error,
-    );
+    const failure = await readinessFailureAfterTimeout(controller, settlement, error);
     if (handle) {
       logger.warn(
         `[startDevice] readiness failed for ${device.deviceId ?? device.name}; ` +
-        `cancelling boot via handle.kill()`,
+          `cancelling boot via handle.kill()`,
         failure,
       );
       await (cancelOwnedBoot ?? (() => handle.kill()))();

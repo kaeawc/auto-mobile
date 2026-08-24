@@ -25,21 +25,21 @@ scripts/codex-automation-thread-report.sh
 
 On this machine, it reported:
 
-| Automation title | Matching run threads |
-| --- | ---: |
-| `Await PR 2455 feedback` | 167 |
-| `Watch PR 2457 feedback` | 166 |
-| `Monitor PR 2462 feedback` | 167 |
-| `Await feedback on PR 2456` | 167 |
+| Automation title            | Matching run threads |
+| --------------------------- | -------------------: |
+| `Await PR 2455 feedback`    |                  167 |
+| `Watch PR 2457 feedback`    |                  166 |
+| `Monitor PR 2462 feedback`  |                  167 |
+| `Await feedback on PR 2456` |                  167 |
 
 The original creation events were:
 
-| Automation title | Created at | Source thread | Initial user request |
-| --- | --- | --- | --- |
+| Automation title            | Created at           | Source thread                                                                              | Initial user request                       |
+| --------------------------- | -------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------ |
 | `Await feedback on PR 2456` | 2026-06-24T19:39:19Z | `archived_sessions/rollout-2026-06-24T13-57-56-019efafe-ffc1-7dd0-9feb-9a28bf4dd3c3.jsonl` | `read and work to implement gh issue 2441` |
-| `Await PR 2455 feedback` | 2026-06-24T19:39:27Z | `archived_sessions/rollout-2026-06-24T13-58-05-019efaff-2517-72a1-914f-94fb5294cf45.jsonl` | `read and work to implement gh issue 2445` |
-| `Watch PR 2457 feedback` | 2026-06-24T19:39:19Z | `archived_sessions/rollout-2026-06-24T13-58-13-019efaff-440c-7890-a784-1990e4e9c186.jsonl` | `read and work to implement gh issue 2449` |
-| `Monitor PR 2462 feedback` | 2026-06-24T19:39:48Z | `archived_sessions/rollout-2026-06-24T13-58-03-019efaff-1c13-7893-b186-dd062580d588.jsonl` | `read and work to implement gh issue 2444` |
+| `Await PR 2455 feedback`    | 2026-06-24T19:39:27Z | `archived_sessions/rollout-2026-06-24T13-58-05-019efaff-2517-72a1-914f-94fb5294cf45.jsonl` | `read and work to implement gh issue 2445` |
+| `Watch PR 2457 feedback`    | 2026-06-24T19:39:19Z | `archived_sessions/rollout-2026-06-24T13-58-13-019efaff-440c-7890-a784-1990e4e9c186.jsonl` | `read and work to implement gh issue 2449` |
+| `Monitor PR 2462 feedback`  | 2026-06-24T19:39:48Z | `archived_sessions/rollout-2026-06-24T13-58-03-019efaff-1c13-7893-b186-dd062580d588.jsonl` | `read and work to implement gh issue 2444` |
 
 Two of the automations had an initial rejected/duplicate-looking create attempt followed by a successful retry with the scheduler's expected field shape. That is separate from the long-term Recents growth; the main growth came from hourly runs.
 

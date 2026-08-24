@@ -1,4 +1,7 @@
-import { KeyboardHierarchyProvider, KeyboardHierarchyReadOptions } from "../../src/features/action/Keyboard";
+import {
+  KeyboardHierarchyProvider,
+  KeyboardHierarchyReadOptions,
+} from "../../src/features/action/Keyboard";
 import { ViewHierarchyResult } from "../../src/models";
 
 export class FakeKeyboardHierarchyProvider implements KeyboardHierarchyProvider {
@@ -42,7 +45,7 @@ export class FakeKeyboardHierarchyProvider implements KeyboardHierarchyProvider 
 
   async getViewHierarchy(
     _signal?: AbortSignal,
-    options?: KeyboardHierarchyReadOptions
+    options?: KeyboardHierarchyReadOptions,
   ): Promise<ViewHierarchyResult | null> {
     this.callCount += 1;
     this.readOptions.push(options);

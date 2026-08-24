@@ -34,28 +34,25 @@ const makeHierarchy = (children: Record<string, unknown>[]): ViewHierarchyResult
     hierarchy: {
       node: {
         "resource-id": "root",
-        "bounds": flatBounds(0, 0, 200, 200),
-        "node": children,
+        bounds: flatBounds(0, 0, 200, 200),
+        node: children,
       },
     },
     screenWidth: 200,
     screenHeight: 200,
-  } as unknown as ViewHierarchyResult);
+  }) as unknown as ViewHierarchyResult;
 
-const makeObservation = (
-  children: Record<string, unknown>[],
-  updatedAt = 0
-): ObserveResult =>
+const makeObservation = (children: Record<string, unknown>[], updatedAt = 0): ObserveResult =>
   ({
     updatedAt,
     screenSize: { width: 200, height: 200 },
     systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
     activeWindow: { appId: "com.example", activityName: ".Main", layoutSeqSum: 0 },
     viewHierarchy: makeHierarchy(children),
-  } as ObserveResult);
+  }) as ObserveResult;
 
 const node = (props: Record<string, unknown>): Record<string, unknown> => ({
-  "bounds": flatBounds(0, 0, 10, 10),
+  bounds: flatBounds(0, 0, 10, 10),
   ...props,
 });
 
@@ -76,8 +73,8 @@ describe("buildConditionPredicate", () => {
       container: { elementId: "checkout" },
     });
     const observation = makeObservation([
-      node({ "resource-id": "other", "node": [node({ "resource-id": "submit" })] }),
-      node({ "resource-id": "checkout", "node": [] }),
+      node({ "resource-id": "other", node: [node({ "resource-id": "submit" })] }),
+      node({ "resource-id": "checkout", node: [] }),
     ]);
 
     expect(predicate(observation).matched).toBe(false);
@@ -90,14 +87,25 @@ describe("buildConditionPredicate", () => {
 
   test("clickable -> requires the element to be clickable", () => {
     const predicate = buildConditionPredicate(finder, "clickable", { elementId: "btn" });
-    expect(predicate(makeObservation([node({ "resource-id": "btn", "clickable": false })])).matched).toBe(false);
-    expect(predicate(makeObservation([node({ "resource-id": "btn", "clickable": true })])).matched).toBe(true);
+    expect(
+      predicate(makeObservation([node({ "resource-id": "btn", clickable: false })])).matched,
+    ).toBe(false);
+    expect(
+      predicate(makeObservation([node({ "resource-id": "btn", clickable: true })])).matched,
+    ).toBe(true);
   });
 
   test("textEquals -> uses text as the exact expected value", () => {
-    const predicate = buildConditionPredicate(finder, "textEquals", { elementId: "counter", text: "5" });
-    expect(predicate(makeObservation([node({ "resource-id": "counter", "text": "50" })])).matched).toBe(false);
-    expect(predicate(makeObservation([node({ "resource-id": "counter", "text": "5" })])).matched).toBe(true);
+    const predicate = buildConditionPredicate(finder, "textEquals", {
+      elementId: "counter",
+      text: "5",
+    });
+    expect(
+      predicate(makeObservation([node({ "resource-id": "counter", text: "50" })])).matched,
+    ).toBe(false);
+    expect(
+      predicate(makeObservation([node({ "resource-id": "counter", text: "5" })])).matched,
+    ).toBe(true);
   });
 
   test("textEquals -> retains its container scope", () => {
@@ -106,20 +114,31 @@ describe("buildConditionPredicate", () => {
       text: "5",
       container: { elementId: "checkout" },
     });
-    expect(predicate(makeObservation([
-      node({ "resource-id": "other", "node": [node({ "resource-id": "counter", "text": "5" })] }),
-      node({ "resource-id": "checkout", "node": [] }),
-    ])).matched).toBe(false);
+    expect(
+      predicate(
+        makeObservation([
+          node({ "resource-id": "other", node: [node({ "resource-id": "counter", text: "5" })] }),
+          node({ "resource-id": "checkout", node: [] }),
+        ]),
+      ).matched,
+    ).toBe(false);
   });
 
   test("countStable -> settles once the match count repeats", () => {
-    const predicate = buildConditionPredicate(finder, "countStable", { elementId: "row" }, { stableReads: 2 });
+    const predicate = buildConditionPredicate(
+      finder,
+      "countStable",
+      { elementId: "row" },
+      { stableReads: 2 },
+    );
     expect(predicate(makeObservation([node({ "resource-id": "row" })])).matched).toBe(false);
     expect(predicate(makeObservation([node({ "resource-id": "row" })])).matched).toBe(true);
   });
 
   test("textEquals without text is rejected (text is the required expected value)", () => {
-    expect(() => buildConditionPredicate(finder, "textEquals", { elementId: "counter" })).toThrow(/text/);
+    expect(() => buildConditionPredicate(finder, "textEquals", { elementId: "counter" })).toThrow(
+      /text/,
+    );
   });
 });
 
@@ -133,7 +152,7 @@ describe("waitForObservation DSL branch", () => {
     const observeScreen = new FakeObserveScreen();
     observeScreen.setObserveSequence([
       makeObservation([node({ "resource-id": "spinner" })], 10),
-      makeObservation([node({ "resource-id": "submit", "text": "Go" })], 20),
+      makeObservation([node({ "resource-id": "submit", text: "Go" })], 20),
     ]);
 
     const outcome = await waitForObservation(
@@ -141,7 +160,7 @@ describe("waitForObservation DSL branch", () => {
       { for: "appear", elementId: "submit" } as any,
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -157,9 +176,9 @@ describe("waitForObservation DSL branch", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const observeScreen = new FakeObserveScreen();
-    const settled = makeObservation([node({ "resource-id": "content", "text": "done" })], 30);
+    const settled = makeObservation([node({ "resource-id": "content", text: "done" })], 30);
     observeScreen.setObserveSequence([
-      makeObservation([node({ "resource-id": "content", "text": "loading" })], 10),
+      makeObservation([node({ "resource-id": "content", text: "loading" })], 10),
       settled,
       settled,
     ]);
@@ -169,7 +188,7 @@ describe("waitForObservation DSL branch", () => {
       { for: "stable" } as any,
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -185,8 +204,8 @@ describe("waitForObservation DSL branch", () => {
     timer.enableAutoAdvance();
     const observeScreen = new FakeObserveScreen();
     observeScreen.setObserveSequence([
-      makeObservation([node({ "resource-id": "counter", "text": "4" })], 10),
-      makeObservation([node({ "resource-id": "counter", "text": "5" })], 20),
+      makeObservation([node({ "resource-id": "counter", text: "4" })], 10),
+      makeObservation([node({ "resource-id": "counter", text: "5" })], 20),
     ]);
 
     const outcome = await waitForObservation(
@@ -194,7 +213,7 @@ describe("waitForObservation DSL branch", () => {
       { for: "textEquals", elementId: "counter", text: "5" } as any,
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.awaitTimeout).toBe(false);
@@ -205,25 +224,26 @@ describe("waitForObservation DSL branch", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const observeScreen = new FakeObserveScreen();
-    observeScreen.setObserveResult(index => makeObservation([
-      node({ "resource-id": "submit", "text": "Go", "clickable": false }),
-    ], (index + 1) * 10));
+    observeScreen.setObserveResult((index) =>
+      makeObservation(
+        [node({ "resource-id": "submit", text: "Go", clickable: false })],
+        (index + 1) * 10,
+      ),
+    );
 
     const outcome = await waitForObservation(
       observeScreen,
       { for: "clickable", elementId: "submit", timeout: 300 } as any,
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.awaitTimeout).toBe(true);
     expect(outcome.awaitedElement).toBeUndefined();
     expect(outcome.matched).toBe(false);
     expect(outcome.timedOut).toBe(true);
-    expect(outcome.candidates).toEqual([
-      expect.objectContaining({ "resource-id": "submit" }),
-    ]);
+    expect(outcome.candidates).toEqual([expect.objectContaining({ "resource-id": "submit" })]);
     expect(outcome.polls).toBeGreaterThan(1);
   });
 
@@ -240,7 +260,7 @@ describe("waitForObservation DSL branch", () => {
       { for: "stable" } as any,
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.settled).toBe(false);
@@ -266,7 +286,7 @@ describe("waitFor back-compat", () => {
       { elementId: "submit", settled: { quietPeriodMs: 100 } },
       undefined,
       false,
-      timer
+      timer,
     );
 
     expect(outcome.matched).toBe(true);
@@ -324,7 +344,7 @@ describe("waitFor back-compat", () => {
         observeSchema.parse({
           platform: "android",
           waitFor: { ...waitFor, timeout: 1000, timeoutMs: 1000 },
-        })
+        }),
       ).toThrow(/timeout/);
     }
   });
@@ -342,13 +362,13 @@ describe("waitFor back-compat", () => {
       observeSchema.parse({
         platform: "android",
         waitFor: { for: "stable", container: { elementId: "scope" } },
-      })
+      }),
     ).toThrow(/does not support container/);
   });
 
   test("DSL `for: appear` without a selector is rejected", () => {
     expect(() =>
-      observeSchema.parse({ platform: "android", waitFor: { for: "appear" } })
+      observeSchema.parse({ platform: "android", waitFor: { for: "appear" } }),
     ).toThrow();
   });
 
@@ -361,7 +381,7 @@ describe("waitFor back-compat", () => {
       observeSchema.parse({
         platform: "android",
         waitFor: { for: "appear", elementId: "x", activeWindow: { appId: "com.z" } },
-      })
+      }),
     ).toThrow();
   });
 
@@ -370,7 +390,7 @@ describe("waitFor back-compat", () => {
       observeSchema.parse({
         platform: "android",
         waitFor: { for: "appear", elementId: "x", className: "android.widget.Button" },
-      })
+      }),
     ).toThrow();
   });
 });
@@ -381,7 +401,7 @@ describe("waitFor back-compat", () => {
 describe("tool registration", () => {
   test("does not advertise the retired standalone polling tools", () => {
     registerObserveTools();
-    const names = ToolRegistry.getAllTools().map(tool => tool.name);
+    const names = ToolRegistry.getAllTools().map((tool) => tool.name);
     expect(names).not.toContain("settleObserve");
     expect(names).not.toContain("waitForCondition");
   });

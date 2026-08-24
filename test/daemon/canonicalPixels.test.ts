@@ -58,9 +58,7 @@ describe("convertHierarchyToCanonicalPixels", () => {
       bounds: { left: 0, top: 0, right: 390, bottom: 844 },
       node: {
         $: { bounds: { left: 10, top: 20, right: 100, bottom: 60 } },
-        node: [
-          { $: { bounds: { left: 5, top: 5, right: 15, bottom: 25 } } },
-        ],
+        node: [{ $: { bounds: { left: 5, top: 5, right: 15, bottom: 25 } } }],
       },
     },
     screenWidth: 390,
@@ -69,12 +67,26 @@ describe("convertHierarchyToCanonicalPixels", () => {
 
   it("scales element bounds by nativeScale and adopts reported pixel screen dims (iOS 3x)", () => {
     const hierarchy = baseHierarchy();
-    convertHierarchyToCanonicalPixels(hierarchy, { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 });
+    convertHierarchyToCanonicalPixels(hierarchy, {
+      nativeScale: 3,
+      pixelWidth: 1170,
+      pixelHeight: 2532,
+    });
 
     expect(hierarchy.screenWidth).toBe(1170);
     expect(hierarchy.screenHeight).toBe(2532);
-    expect(hierarchy.hierarchy.node!.$["bounds"]).toEqual({ left: 30, top: 60, right: 300, bottom: 180 });
-    expect(hierarchy.hierarchy.node!.node![0].$["bounds"]).toEqual({ left: 15, top: 15, right: 45, bottom: 75 });
+    expect(hierarchy.hierarchy.node!.$["bounds"]).toEqual({
+      left: 30,
+      top: 60,
+      right: 300,
+      bottom: 180,
+    });
+    expect(hierarchy.hierarchy.node!.node![0].$["bounds"]).toEqual({
+      left: 15,
+      top: 15,
+      right: 45,
+      bottom: 75,
+    });
     expect(hierarchy.hierarchy.bounds).toEqual({ left: 0, top: 0, right: 1170, bottom: 2532 });
   });
 
@@ -84,15 +96,33 @@ describe("convertHierarchyToCanonicalPixels", () => {
       screenWidth: 375,
       screenHeight: 812,
     };
-    convertHierarchyToCanonicalPixels(hierarchy, { nativeScale: 2.5, pixelWidth: 938, pixelHeight: 2030 });
+    convertHierarchyToCanonicalPixels(hierarchy, {
+      nativeScale: 2.5,
+      pixelWidth: 938,
+      pixelHeight: 2030,
+    });
     // 375*2.5 = 937.5 -> 938; 812*2.5 = 2030 (integral)
-    expect(hierarchy.hierarchy.node!.$["bounds"]).toEqual({ left: 0, top: 0, right: 938, bottom: 2030 });
+    expect(hierarchy.hierarchy.node!.$["bounds"]).toEqual({
+      left: 0,
+      top: 0,
+      right: 938,
+      bottom: 2030,
+    });
   });
 
   it("leaves element bounds untouched at nativeScale 1 (Android) but still adopts reported screen dims", () => {
     const hierarchy = baseHierarchy();
-    convertHierarchyToCanonicalPixels(hierarchy, { nativeScale: 1, pixelWidth: 390, pixelHeight: 844 });
-    expect(hierarchy.hierarchy.node!.$["bounds"]).toEqual({ left: 10, top: 20, right: 100, bottom: 60 });
+    convertHierarchyToCanonicalPixels(hierarchy, {
+      nativeScale: 1,
+      pixelWidth: 390,
+      pixelHeight: 844,
+    });
+    expect(hierarchy.hierarchy.node!.$["bounds"]).toEqual({
+      left: 10,
+      top: 20,
+      right: 100,
+      bottom: 60,
+    });
     expect(hierarchy.screenWidth).toBe(390);
     expect(hierarchy.screenHeight).toBe(844);
   });
@@ -103,7 +133,11 @@ describe("convertHierarchyToCanonicalPixels", () => {
       screenWidth: 100,
       screenHeight: 200,
     };
-    convertHierarchyToCanonicalPixels(hierarchy, { nativeScale: 3, pixelWidth: 300, pixelHeight: 600 });
+    convertHierarchyToCanonicalPixels(hierarchy, {
+      nativeScale: 3,
+      pixelWidth: 300,
+      pixelHeight: 600,
+    });
     expect(hierarchy.hierarchy.node!.$["bounds"]).toBe("[0,0][100,200]");
   });
 
@@ -116,7 +150,13 @@ describe("convertHierarchyToCanonicalPixels", () => {
     for (const [index, vector] of vectors.entries()) {
       it(`row ${index}: ${vector.pointWidth}x${vector.pointHeight} @ ${vector.scale || "no-metadata"} -> ${vector.expectedPixelWidth}x${vector.expectedPixelHeight}`, () => {
         const hierarchy: ViewHierarchyResult = {
-          hierarchy: { node: { $: { bounds: { left: 0, top: 0, right: vector.pointWidth, bottom: vector.pointHeight } } } },
+          hierarchy: {
+            node: {
+              $: {
+                bounds: { left: 0, top: 0, right: vector.pointWidth, bottom: vector.pointHeight },
+              },
+            },
+          },
           screenWidth: vector.pointWidth,
           screenHeight: vector.pointHeight,
         };
@@ -148,12 +188,20 @@ describe("convertHierarchyToCanonicalPixels", () => {
     // single publish-side integer-pixel quantization: at most 0.5/nativeScale <= 0.5 of a point.
     const vectors = loadCoordinateMappingVectors().iosPointToPixel;
     for (const [index, vector] of vectors.entries()) {
-      if (vector.scale === 0) { continue; }
+      if (vector.scale === 0) {
+        continue;
+      }
       it(`row ${index}: nativeScale ${vector.scale}`, () => {
-        for (const point of [0, 1, vector.pointWidth / 2, vector.pointWidth - 1, vector.pointWidth]) {
+        for (const point of [
+          0,
+          1,
+          vector.pointWidth / 2,
+          vector.pointWidth - 1,
+          vector.pointWidth,
+        ]) {
           const pixels = roundHalfAwayFromZero(point * vector.scale);
           const back = canonicalPixelsToPoints(pixels, vector.scale);
-          expect(Math.abs(back - point)).toBeLessThanOrEqual((0.5 / vector.scale) + 1e-12);
+          expect(Math.abs(back - point)).toBeLessThanOrEqual(0.5 / vector.scale + 1e-12);
         }
       });
     }
@@ -170,26 +218,47 @@ describe("convertHierarchyToCanonicalPixels", () => {
     // node tree was pixels — a self-inconsistent px-stamped message. Convert them all.
     it("converts window bounds, nested window node trees, content-hidden regions, and the focused node", () => {
       const hierarchy: ViewHierarchyResult = {
-        "hierarchy": { node: { $: { bounds: { left: 0, top: 0, right: 10, bottom: 20 } } } },
-        "screenWidth": 390,
-        "screenHeight": 844,
-        "windows": [
+        hierarchy: { node: { $: { bounds: { left: 0, top: 0, right: 10, bottom: 20 } } } },
+        screenWidth: 390,
+        screenHeight: 844,
+        windows: [
           {
             bounds: { left: 0, top: 0, right: 390, bottom: 844 },
             hierarchy: { $: { bounds: { left: 5, top: 5, right: 15, bottom: 25 } } },
           },
         ],
-        "contentHiddenRegions": [
+        contentHiddenRegions: [
           { bounds: { left: 1, top: 2, right: 3, bottom: 4 }, reason: "x", areaPercent: 1 },
         ],
-        "accessibility-focused-element": { $: { bounds: { left: 2, top: 4, right: 6, bottom: 8 } } },
+        "accessibility-focused-element": {
+          $: { bounds: { left: 2, top: 4, right: 6, bottom: 8 } },
+        },
       };
-      convertHierarchyToCanonicalPixels(hierarchy, { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 });
+      convertHierarchyToCanonicalPixels(hierarchy, {
+        nativeScale: 3,
+        pixelWidth: 1170,
+        pixelHeight: 2532,
+      });
 
       expect(hierarchy.windows![0].bounds).toEqual({ left: 0, top: 0, right: 1170, bottom: 2532 });
-      expect(hierarchy.windows![0].hierarchy!.$["bounds"]).toEqual({ left: 15, top: 15, right: 45, bottom: 75 });
-      expect(hierarchy.contentHiddenRegions![0].bounds).toEqual({ left: 3, top: 6, right: 9, bottom: 12 });
-      expect(hierarchy["accessibility-focused-element"]!.$["bounds"]).toEqual({ left: 6, top: 12, right: 18, bottom: 24 });
+      expect(hierarchy.windows![0].hierarchy!.$["bounds"]).toEqual({
+        left: 15,
+        top: 15,
+        right: 45,
+        bottom: 75,
+      });
+      expect(hierarchy.contentHiddenRegions![0].bounds).toEqual({
+        left: 3,
+        top: 6,
+        right: 9,
+        bottom: 12,
+      });
+      expect(hierarchy["accessibility-focused-element"]!.$["bounds"]).toEqual({
+        left: 6,
+        top: 12,
+        right: 18,
+        bottom: 24,
+      });
     });
 
     it("converts the systemInsets alias (no units field) but leaves typed insets alone", () => {
@@ -199,13 +268,27 @@ describe("convertHierarchyToCanonicalPixels", () => {
         screenHeight: 844,
         systemInsets: { top: 47, right: 0, bottom: 34, left: 0 },
         // Typed insets self-describe via `units`, so they are NOT touched by the coordinateSpace stamp.
-        insets: { available: true, source: "ios-sdk-safe-area", units: "points", safeArea: { top: 47, right: 0, bottom: 34, left: 0 } },
+        insets: {
+          available: true,
+          source: "ios-sdk-safe-area",
+          units: "points",
+          safeArea: { top: 47, right: 0, bottom: 34, left: 0 },
+        },
       };
-      convertHierarchyToCanonicalPixels(hierarchy, { nativeScale: 3, pixelWidth: 1170, pixelHeight: 2532 });
+      convertHierarchyToCanonicalPixels(hierarchy, {
+        nativeScale: 3,
+        pixelWidth: 1170,
+        pixelHeight: 2532,
+      });
       // systemInsets follows coordinateSpace -> pixels.
       expect(hierarchy.systemInsets).toEqual({ top: 141, right: 0, bottom: 102, left: 0 });
       // Typed insets untouched (points, self-describing).
-      expect(hierarchy.insets).toEqual({ available: true, source: "ios-sdk-safe-area", units: "points", safeArea: { top: 47, right: 0, bottom: 34, left: 0 } });
+      expect(hierarchy.insets).toEqual({
+        available: true,
+        source: "ios-sdk-safe-area",
+        units: "points",
+        safeArea: { top: 47, right: 0, bottom: 34, left: 0 },
+      });
     });
   });
 });

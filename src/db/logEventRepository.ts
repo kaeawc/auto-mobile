@@ -30,7 +30,7 @@ function toLogRow(input: RecordLogEventInput) {
 
 export async function recordLogEvent(
   input: RecordLogEventInput,
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): Promise<void> {
   await getDb(db).insertInto("log_events").values(toLogRow(input)).execute();
 
@@ -44,7 +44,7 @@ export async function recordLogEvent(
  */
 export async function recordLogEvents(
   inputs: RecordLogEventInput[],
-  db?: Kysely<Database>
+  db?: Kysely<Database>,
 ): Promise<void> {
   if (inputs.length === 0) {
     return;
@@ -55,8 +55,14 @@ export async function recordLogEvents(
 }
 
 export async function getLogEvents(
-  query: { deviceId?: string; sessionId?: string; sinceTimestamp?: number; tag?: string; limit?: number },
-  db?: Kysely<Database>
+  query: {
+    deviceId?: string;
+    sessionId?: string;
+    sinceTimestamp?: number;
+    tag?: string;
+    limit?: number;
+  },
+  db?: Kysely<Database>,
 ): Promise<RecordLogEventInput[]> {
   let q = getDb(db).selectFrom("log_events").selectAll();
 
@@ -76,7 +82,7 @@ export async function getLogEvents(
   q = q.orderBy("timestamp", "desc").limit(query.limit ?? 100);
 
   const rows = await q.execute();
-  return rows.map(r => ({
+  return rows.map((r) => ({
     deviceId: r.device_id,
     timestamp: r.timestamp,
     applicationId: r.application_id,
@@ -92,7 +98,7 @@ export async function cleanupIfNeeded(
   db?: Kysely<Database>,
   maxRows?: number,
   checkInterval?: number,
-  inserted?: number
+  inserted?: number,
 ): Promise<void> {
   await cleanupEventTable("log_events", retentionState, db, maxRows, checkInterval, inserted);
 }

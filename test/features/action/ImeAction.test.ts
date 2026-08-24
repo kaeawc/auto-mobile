@@ -23,7 +23,7 @@ describe("ImeAction", () => {
   const testDevice: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    name: "Test Device"
+    name: "Test Device",
   };
 
   beforeEach(() => {
@@ -39,7 +39,11 @@ describe("ImeAction", () => {
 
     // Set up default fake responses
     fakeWindow.configureCachedActiveWindow(null);
-    fakeWindow.configureActiveWindow({ appId: "com.test.app", activityName: "MainActivity", layoutSeqSum: 123 });
+    fakeWindow.configureActiveWindow({
+      appId: "com.test.app",
+      activityName: "MainActivity",
+      layoutSeqSum: 123,
+    });
 
     // Set up default observe screen responses with valid viewHierarchy
     // Use factory to generate new results on each call for change detection
@@ -48,7 +52,7 @@ describe("ImeAction", () => {
     // Set up default accessibility service response (success)
     fakeA11yService.setHierarchyData({
       packageName: "com.test.app",
-      updatedAt: Date.now()
+      updatedAt: Date.now(),
     });
 
     // Pass fake accessibility service and timer to constructor
@@ -66,7 +70,7 @@ describe("ImeAction", () => {
     stderr: "",
     toString: () => stdout,
     trim: () => stdout.trim(),
-    includes: (searchString: string) => stdout.includes(searchString)
+    includes: (searchString: string) => stdout.includes(searchString),
   });
 
   // Helper function to create mock ObserveResult
@@ -74,7 +78,7 @@ describe("ImeAction", () => {
     timestamp: Date.now(),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { hierarchy: { node: { $: {} } } }
+    viewHierarchy: { hierarchy: { node: { $: {} } } },
   });
 
   describe("execute", () => {
@@ -82,7 +86,7 @@ describe("ImeAction", () => {
       fakeA11yService.clearHistory();
       fakeA11yService.setHierarchyData({
         packageName: "com.test.app",
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       });
       fakeObserveScreen.setObserveResult(() => createObserveResult());
       fakeAdb.clearHistory();
@@ -104,7 +108,7 @@ describe("ImeAction", () => {
       fakeA11yService.clearHistory();
       fakeA11yService.setHierarchyData({
         packageName: "com.test.app",
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       });
       fakeObserveScreen.setObserveResult(() => createObserveResult());
       fakeAdb.clearHistory();
@@ -121,7 +125,7 @@ describe("ImeAction", () => {
       fakeA11yService.clearHistory();
       fakeA11yService.setHierarchyData({
         packageName: "com.test.app",
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       });
       fakeObserveScreen.setObserveResult(() => createObserveResult());
       fakeAdb.clearHistory();
@@ -138,7 +142,7 @@ describe("ImeAction", () => {
       fakeA11yService.clearHistory();
       fakeA11yService.setHierarchyData({
         packageName: "com.test.app",
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       });
       fakeObserveScreen.setObserveResult(() => createObserveResult());
       fakeAdb.clearHistory();
@@ -155,7 +159,7 @@ describe("ImeAction", () => {
       fakeA11yService.clearHistory();
       fakeA11yService.setHierarchyData({
         packageName: "com.test.app",
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       });
       fakeObserveScreen.setObserveResult(() => createObserveResult());
       fakeAdb.clearHistory();
@@ -172,7 +176,7 @@ describe("ImeAction", () => {
       fakeA11yService.clearHistory();
       fakeA11yService.setHierarchyData({
         packageName: "com.test.app",
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       });
       fakeObserveScreen.setObserveResult(() => createObserveResult());
       fakeAdb.clearHistory();
@@ -201,7 +205,7 @@ describe("ImeAction", () => {
     test("should work with progress callback", async () => {
       fakeA11yService.setHierarchyData({
         packageName: "com.test.app",
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       });
       fakeObserveScreen.setObserveResult(() => createObserveResult());
 
@@ -232,7 +236,9 @@ describe("ImeAction", () => {
 
       // Then ADB fallback was used
       const executedCommands = fakeAdb.getExecutedCommands();
-      expect(executedCommands.some(cmd => cmd.includes("shell input keyevent KEYCODE_ENTER"))).toBe(true);
+      expect(
+        executedCommands.some((cmd) => cmd.includes("shell input keyevent KEYCODE_ENTER")),
+      ).toBe(true);
     });
 
     test("should fall back to ADB for multi-key actions when accessibility service fails", async () => {
@@ -252,8 +258,12 @@ describe("ImeAction", () => {
 
       // Then ADB fallback was used with both key events for Shift+Tab
       const executedCommands = fakeAdb.getExecutedCommands();
-      expect(executedCommands.some(cmd => cmd.includes("shell input keyevent KEYCODE_SHIFT_LEFT"))).toBe(true);
-      expect(executedCommands.some(cmd => cmd.includes("shell input keyevent KEYCODE_TAB"))).toBe(true);
+      expect(
+        executedCommands.some((cmd) => cmd.includes("shell input keyevent KEYCODE_SHIFT_LEFT")),
+      ).toBe(true);
+      expect(executedCommands.some((cmd) => cmd.includes("shell input keyevent KEYCODE_TAB"))).toBe(
+        true,
+      );
     });
   });
 
@@ -276,8 +286,8 @@ describe("ImeAction", () => {
       const fakeClient = {
         requestImeAction: async () => ({
           success: true,
-          totalTimeMs: 1
-        })
+          totalTimeMs: 1,
+        }),
       } as unknown as AndroidCtrlProxyClient;
 
       getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
@@ -301,7 +311,7 @@ describe("ImeAction", () => {
     test("should complete quickly via accessibility service", async () => {
       fakeA11yService.setHierarchyData({
         packageName: "com.test.app",
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       });
       fakeObserveScreen.setObserveResult(() => createObserveResult());
 
@@ -329,10 +339,18 @@ describe("ImeAction", () => {
   describe("error handling", () => {
     test("should handle missing view hierarchy gracefully", async () => {
       // Set observe screen to fail
-      fakeObserveScreen.setFailureMode("getMostRecentCachedObserveResult", new Error("Cannot perform action without view hierarchy"));
-      fakeObserveScreen.setFailureMode("execute", new Error("Cannot perform action without view hierarchy"));
+      fakeObserveScreen.setFailureMode(
+        "getMostRecentCachedObserveResult",
+        new Error("Cannot perform action without view hierarchy"),
+      );
+      fakeObserveScreen.setFailureMode(
+        "execute",
+        new Error("Cannot perform action without view hierarchy"),
+      );
 
-      await expect(imeAction.execute("done")).rejects.toThrow("Cannot perform action without view hierarchy");
+      await expect(imeAction.execute("done")).rejects.toThrow(
+        "Cannot perform action without view hierarchy",
+      );
     });
 
     test("should handle observation failure", async () => {
@@ -341,7 +359,7 @@ describe("ImeAction", () => {
 
       fakeA11yService.setHierarchyData({
         packageName: "com.test.app",
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       });
       const observationError = new Error("Failed to observe screen");
       fakeObserveScreen.setFailureMode("execute", observationError);
@@ -370,14 +388,20 @@ describe("ImeAction", () => {
     test("should handle all valid IME actions via accessibility service", async () => {
       fakeObserveScreen.setObserveResult(() => createObserveResult());
 
-      const validActions: Array<"done" | "next" | "search" | "send" | "go" | "previous"> =
-                ["done", "next", "search", "send", "go", "previous"];
+      const validActions: Array<"done" | "next" | "search" | "send" | "go" | "previous"> = [
+        "done",
+        "next",
+        "search",
+        "send",
+        "go",
+        "previous",
+      ];
 
       for (const action of validActions) {
         fakeA11yService.clearHistory();
         fakeA11yService.setHierarchyData({
           packageName: "com.test.app",
-          updatedAt: Date.now()
+          updatedAt: Date.now(),
         });
         fakeAdb.clearHistory();
         const result = await imeAction.execute(action);
@@ -396,13 +420,13 @@ describe("ImeAction", () => {
       // Set up fake to return success for each action
       fakeA11yService.setHierarchyData({
         packageName: "com.test.app",
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
       });
 
       const promises = [
         imeAction.execute("done"),
         imeAction.execute("next"),
-        imeAction.execute("search")
+        imeAction.execute("search"),
       ];
 
       const results = await Promise.all(promises);

@@ -16,11 +16,11 @@ const DENSITY = 1.0;
 function makeFrame(
   arrivedAt: number,
   activeSlots: Array<{ slotId: number; trackingId: number; x: number; y: number }>,
-  releasedSlots: number[] = []
+  releasedSlots: number[] = [],
 ): RawTouchFrame {
   return {
     arrivedAt,
-    activeSlots: activeSlots.map(s => ({ ...s, pressure: 0 })),
+    activeSlots: activeSlots.map((s) => ({ ...s, pressure: 0 })),
     releasedSlots,
   };
 }
@@ -94,7 +94,11 @@ describe("GestureClassifier", () => {
     const tap1 = c.feedFrame(makeFrame(50, [], [0]));
     expect(tap1?.type).toBe("tap");
 
-    c.feedFrame(makeFrame(GESTURE_THRESHOLDS.DOUBLE_TAP_MS + 500, [{ slotId: 0, trackingId: 2, x: 500, y: 500 }]));
+    c.feedFrame(
+      makeFrame(GESTURE_THRESHOLDS.DOUBLE_TAP_MS + 500, [
+        { slotId: 0, trackingId: 2, x: 500, y: 500 },
+      ]),
+    );
     const tap2 = c.feedFrame(makeFrame(GESTURE_THRESHOLDS.DOUBLE_TAP_MS + 550, [], [0]));
     expect(tap2?.type).toBe("tap"); // NOT doubleTap
   });
@@ -169,16 +173,20 @@ describe("GestureClassifier", () => {
 
   test("two fingers diverging → pinch out", () => {
     // Initial: fingers close together (distance ~100px)
-    c.feedFrame(makeFrame(0, [
-      { slotId: 0, trackingId: 1, x: 450, y: 500 },
-      { slotId: 1, trackingId: 2, x: 550, y: 500 },
-    ]));
+    c.feedFrame(
+      makeFrame(0, [
+        { slotId: 0, trackingId: 1, x: 450, y: 500 },
+        { slotId: 1, trackingId: 2, x: 550, y: 500 },
+      ]),
+    );
 
     // Move apart (distance ~400px)
-    c.feedFrame(makeFrame(100, [
-      { slotId: 0, trackingId: 1, x: 300, y: 500 },
-      { slotId: 1, trackingId: 2, x: 700, y: 500 },
-    ]));
+    c.feedFrame(
+      makeFrame(100, [
+        { slotId: 0, trackingId: 1, x: 300, y: 500 },
+        { slotId: 1, trackingId: 2, x: 700, y: 500 },
+      ]),
+    );
 
     // Both fingers lift
     const result = c.feedFrame(makeFrame(200, [], [0, 1]));
@@ -189,16 +197,20 @@ describe("GestureClassifier", () => {
 
   test("two fingers converging → pinch in", () => {
     // Initial: fingers far apart (~400px)
-    c.feedFrame(makeFrame(0, [
-      { slotId: 0, trackingId: 1, x: 300, y: 500 },
-      { slotId: 1, trackingId: 2, x: 700, y: 500 },
-    ]));
+    c.feedFrame(
+      makeFrame(0, [
+        { slotId: 0, trackingId: 1, x: 300, y: 500 },
+        { slotId: 1, trackingId: 2, x: 700, y: 500 },
+      ]),
+    );
 
     // Move together (~100px)
-    c.feedFrame(makeFrame(100, [
-      { slotId: 0, trackingId: 1, x: 450, y: 500 },
-      { slotId: 1, trackingId: 2, x: 550, y: 500 },
-    ]));
+    c.feedFrame(
+      makeFrame(100, [
+        { slotId: 0, trackingId: 1, x: 450, y: 500 },
+        { slotId: 1, trackingId: 2, x: 550, y: 500 },
+      ]),
+    );
 
     const result = c.feedFrame(makeFrame(200, [], [0, 1]));
     expect(result?.type).toBe("pinch");
@@ -208,19 +220,23 @@ describe("GestureClassifier", () => {
 
   test("staggered finger release emits pinch only on final lift", () => {
     // Both fingers down, diverging
-    c.feedFrame(makeFrame(0, [
-      { slotId: 0, trackingId: 1, x: 450, y: 500 },
-      { slotId: 1, trackingId: 2, x: 550, y: 500 },
-    ]));
-    c.feedFrame(makeFrame(100, [
-      { slotId: 0, trackingId: 1, x: 300, y: 500 },
-      { slotId: 1, trackingId: 2, x: 700, y: 500 },
-    ]));
+    c.feedFrame(
+      makeFrame(0, [
+        { slotId: 0, trackingId: 1, x: 450, y: 500 },
+        { slotId: 1, trackingId: 2, x: 550, y: 500 },
+      ]),
+    );
+    c.feedFrame(
+      makeFrame(100, [
+        { slotId: 0, trackingId: 1, x: 300, y: 500 },
+        { slotId: 1, trackingId: 2, x: 700, y: 500 },
+      ]),
+    );
 
     // First finger lifts (slot 0), slot 1 still active
-    const firstRelease = c.feedFrame(makeFrame(200, [
-      { slotId: 1, trackingId: 2, x: 700, y: 500 },
-    ], [0]));
+    const firstRelease = c.feedFrame(
+      makeFrame(200, [{ slotId: 1, trackingId: 2, x: 700, y: 500 }], [0]),
+    );
     expect(firstRelease).toBeNull(); // no pinch yet
 
     // Second finger lifts
@@ -231,14 +247,18 @@ describe("GestureClassifier", () => {
 
   test("two-finger scale change < PINCH_MIN_SCALE_DELTA → no pinch emitted", () => {
     // Barely any movement: distance 100 → 105 (scale ~1.05 < 1.1 threshold)
-    c.feedFrame(makeFrame(0, [
-      { slotId: 0, trackingId: 1, x: 450, y: 500 },
-      { slotId: 1, trackingId: 2, x: 550, y: 500 },
-    ]));
-    c.feedFrame(makeFrame(100, [
-      { slotId: 0, trackingId: 1, x: 448, y: 500 },
-      { slotId: 1, trackingId: 2, x: 553, y: 500 },
-    ]));
+    c.feedFrame(
+      makeFrame(0, [
+        { slotId: 0, trackingId: 1, x: 450, y: 500 },
+        { slotId: 1, trackingId: 2, x: 550, y: 500 },
+      ]),
+    );
+    c.feedFrame(
+      makeFrame(100, [
+        { slotId: 0, trackingId: 1, x: 448, y: 500 },
+        { slotId: 1, trackingId: 2, x: 553, y: 500 },
+      ]),
+    );
 
     const result = c.feedFrame(makeFrame(200, [], [0, 1]));
     expect(result).toBeNull();
@@ -248,14 +268,18 @@ describe("GestureClassifier", () => {
     // initialDist === 0 would make scale = finalDist / 0 = Infinity. The guard
     // must suppress the pinch entirely rather than emit a non-finite scale that
     // would corrupt a recorded plan.
-    c.feedFrame(makeFrame(0, [
-      { slotId: 0, trackingId: 1, x: 500, y: 500 },
-      { slotId: 1, trackingId: 2, x: 500, y: 500 },
-    ]));
-    c.feedFrame(makeFrame(100, [
-      { slotId: 0, trackingId: 1, x: 300, y: 500 },
-      { slotId: 1, trackingId: 2, x: 700, y: 500 },
-    ]));
+    c.feedFrame(
+      makeFrame(0, [
+        { slotId: 0, trackingId: 1, x: 500, y: 500 },
+        { slotId: 1, trackingId: 2, x: 500, y: 500 },
+      ]),
+    );
+    c.feedFrame(
+      makeFrame(100, [
+        { slotId: 0, trackingId: 1, x: 300, y: 500 },
+        { slotId: 1, trackingId: 2, x: 700, y: 500 },
+      ]),
+    );
 
     const result = c.feedFrame(makeFrame(200, [], [0, 1]));
     expect(result).toBeNull();

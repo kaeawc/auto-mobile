@@ -8,7 +8,11 @@ import type { AndroidH264SourceOptions } from "../../../src/features/webrtc/Andr
 import type { PersistentEncoderH264SourceOptions } from "../../../src/features/webrtc/PersistentEncoderH264Source";
 import type { BootedDevice } from "../../../src/models";
 
-const DEVICE: BootedDevice = { deviceId: "emulator-5554", platform: "android", name: "t" } as BootedDevice;
+const DEVICE: BootedDevice = {
+  deviceId: "emulator-5554",
+  platform: "android",
+  name: "t",
+} as BootedDevice;
 
 class FakeSource implements H264CaptureSource {
   started = 0;
@@ -129,7 +133,7 @@ describe("createAndroidH264CaptureSource", () => {
     const persistent = new FakeSource();
     const screenrecord = new FakeSource();
     const deps: AndroidH264CaptureSourceDeps = {
-      createPersistent: options => {
+      createPersistent: (options) => {
         onScreenrecordFallback = options.onScreenrecordFallback;
         return persistent;
       },
@@ -155,7 +159,7 @@ describe("createAndroidH264CaptureSource", () => {
   test("does not wire a screenrecord fallback on the audio-enabled persistent path", () => {
     let captured: PersistentEncoderH264SourceOptions | undefined;
     const deps: AndroidH264CaptureSourceDeps = {
-      createPersistent: options => {
+      createPersistent: (options) => {
         captured = options;
         return new FakeSource();
       },
@@ -164,7 +168,7 @@ describe("createAndroidH264CaptureSource", () => {
     createAndroidH264CaptureSource(
       { ...baseOptions(), audioEnabled: true },
       "/tmp/automobile-video.jar",
-      deps
+      deps,
     );
     expect(captured?.onScreenrecordFallback).toBeUndefined();
   });
@@ -172,7 +176,10 @@ describe("createAndroidH264CaptureSource", () => {
   test("stops the selected source when stop races its startup", async () => {
     let releaseStart: (() => void) | undefined;
     const persistent = new FakeSource(
-      () => new Promise<void>(resolve => { releaseStart = resolve; })
+      () =>
+        new Promise<void>((resolve) => {
+          releaseStart = resolve;
+        }),
     );
     const deps: AndroidH264CaptureSourceDeps = {
       createPersistent: () => persistent,
@@ -192,7 +199,7 @@ describe("createAndroidH264CaptureSource", () => {
   test("forwards the caller's quality and fps to the persistent source", () => {
     let captured: PersistentEncoderH264SourceOptions | undefined;
     const deps: AndroidH264CaptureSourceDeps = {
-      createPersistent: options => {
+      createPersistent: (options) => {
         captured = options;
         return new FakeSource();
       },
@@ -201,7 +208,7 @@ describe("createAndroidH264CaptureSource", () => {
     createAndroidH264CaptureSource(
       { ...baseOptions(), quality: "high", fps: 24 },
       "/tmp/automobile-video.jar",
-      deps
+      deps,
     );
     expect(captured?.quality).toBe("high");
     expect(captured?.fps).toBe(24);
@@ -210,7 +217,7 @@ describe("createAndroidH264CaptureSource", () => {
   test("forwards the caller's quality and fps on the audio-enabled persistent path", () => {
     let captured: PersistentEncoderH264SourceOptions | undefined;
     const deps: AndroidH264CaptureSourceDeps = {
-      createPersistent: options => {
+      createPersistent: (options) => {
         captured = options;
         return new FakeSource();
       },
@@ -219,7 +226,7 @@ describe("createAndroidH264CaptureSource", () => {
     createAndroidH264CaptureSource(
       { ...baseOptions(), audioEnabled: true, quality: "low", fps: 30 },
       "/tmp/automobile-video.jar",
-      deps
+      deps,
     );
     expect(captured?.quality).toBe("low");
     expect(captured?.fps).toBe(30);
@@ -229,7 +236,7 @@ describe("createAndroidH264CaptureSource", () => {
   test("passes the provided jar path to the persistent source", () => {
     let capturedJar: string | undefined;
     const deps: AndroidH264CaptureSourceDeps = {
-      createPersistent: options => {
+      createPersistent: (options) => {
         capturedJar = options.jarPath;
         return new FakeSource();
       },
@@ -242,7 +249,7 @@ describe("createAndroidH264CaptureSource", () => {
   test("audio requires the persistent encoder jar", () => {
     const { deps } = makeDeps({});
     expect(() =>
-      createAndroidH264CaptureSource({ ...baseOptions(), audioEnabled: true }, null, deps)
+      createAndroidH264CaptureSource({ ...baseOptions(), audioEnabled: true }, null, deps),
     ).toThrow(/persistent Android video-server jar/);
   });
 
@@ -256,7 +263,7 @@ describe("createAndroidH264CaptureSource", () => {
     const source = createAndroidH264CaptureSource(
       { ...baseOptions(), audioEnabled: true },
       "/tmp/automobile-video.jar",
-      deps
+      deps,
     );
 
     await expect(source.start()).rejects.toThrow(/remote submix/);

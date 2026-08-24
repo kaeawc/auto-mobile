@@ -17,8 +17,8 @@ export interface TruckFragments {
 const splitSubpaths = (d: string): string[] =>
   d
     .split(/(?=[Mm])/)
-    .map(part => part.trim())
-    .filter(part => part.length > 0);
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
 
 /**
  * Returns the subpath contour at [index] from a path's `d`. A non-first contour that begins with a
@@ -115,8 +115,7 @@ export async function extractTruckFragments(svgText: string): Promise<TruckFragm
   // Solid black silhouette (filled body + filled tires) for the tintable menu-bar mask. Filling
   // the body and tires — rather than just the thin outline strokes — keeps the truck legible once
   // the OS downsizes it to a ~16px status slot and the disconnected tint dims it.
-  const monoFrag =
-    pathEl(bodyFill, "#000000", "nonzero") + pathEl(tireFill, "#000000", "nonzero");
+  const monoFrag = pathEl(bodyFill, "#000000", "nonzero") + pathEl(tireFill, "#000000", "nonzero");
 
   return { colorFrag, monoFrag };
 }

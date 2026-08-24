@@ -5,7 +5,7 @@ import {
   SwipeDirection,
   SwipeOnOptions,
   ViewHierarchyQueryOptions,
-  ViewHierarchyResult
+  ViewHierarchyResult,
 } from "../../../models";
 import { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { SwipeResult } from "../../../models/SwipeResult";
@@ -36,7 +36,7 @@ export interface VoiceOverSwipeRunner {
     containerElement: Element | null,
     gestureOptions?: GestureOptions,
     perf?: PerformanceTracker,
-    boomerang?: BoomerangConfig
+    boomerang?: BoomerangConfig,
   ): Promise<SwipeResult>;
 }
 
@@ -44,7 +44,7 @@ export interface AutoTargetSelectorService {
   selectAutoTargetScrollable(
     scrollables: Element[],
     screenBounds: Element["bounds"] | null,
-    direction: SwipeDirection
+    direction: SwipeDirection,
   ): Element | null;
 
   getScreenBounds(observeResult: ObserveResult): Element["bounds"] | null;
@@ -64,7 +64,7 @@ export interface TalkBackSwipeRunner {
     containerElement: Element | null,
     gestureOptions?: GestureOptions,
     perf?: PerformanceTracker,
-    boomerang?: BoomerangConfig
+    boomerang?: BoomerangConfig,
   ): Promise<SwipeResult>;
 }
 
@@ -72,13 +72,13 @@ export interface OverlayAnalyzer {
   collectOverlayCandidates(
     viewHierarchy: ViewHierarchyResult,
     container: SwipeOnOptions["container"] | undefined,
-    containerElement: Element
+    containerElement: Element,
   ): OverlayCandidate[];
 
   computeSafeSwipeCoordinates(
     direction: SwipeDirection,
     bounds: Element["bounds"],
-    overlayBounds: Element["bounds"][]
+    overlayBounds: Element["bounds"][],
   ): { startX: number; startY: number; endX: number; endY: number; warning?: string } | null;
 }
 
@@ -89,7 +89,7 @@ export interface GestureExecutor {
     x2: number,
     y2: number,
     options?: GestureOptions,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<SwipeResult>;
 }
 
@@ -98,7 +98,7 @@ export interface ScrollAccessibilityService {
     action: string,
     resourceId?: string,
     timeoutMs?: number,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
   ): Promise<{ success: boolean; error?: string; [key: string]: unknown }>;
 
   getAccessibilityHierarchy(
@@ -106,7 +106,7 @@ export interface ScrollAccessibilityService {
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
-    disableAllFiltering?: boolean
+    disableAllFiltering?: boolean,
   ): Promise<ViewHierarchyResult | null>;
 }
 

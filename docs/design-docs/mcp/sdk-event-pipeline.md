@@ -41,18 +41,18 @@ sequenceDiagram
 
 ## Core Components
 
-| Component | Description | Status |
-|-----------|-------------|--------|
-| `SdkEventBuffer` | Thread-safe buffer that flushes on capacity or timer | <kbd>✅ Implemented</kbd> |
-| `SdkEventBroadcaster` | Serializes and delivers event batches cross-process | <kbd>✅ Implemented</kbd> |
-| `EventPersistence` | Disk-first persistence for crash resilience | <kbd>✅ Implemented</kbd> |
-| `DropCounter` | Back-pressure metrics tracking dropped events by reason | <kbd>✅ Implemented</kbd> |
-| `AutoMobileCrashes` | Unhandled crash detection with thread dumps | <kbd>✅ Implemented</kbd> |
-| `AutoMobileFailures` | Handled (non-fatal) exception recording | <kbd>✅ Implemented</kbd> |
-| `BreadcrumbTrail` | Ring buffer of recent actions attached to crash reports | <kbd>✅ Implemented</kbd> |
-| `SessionTracker` | Foreground/background lifecycle session rotation | <kbd>✅ Implemented</kbd> |
-| `SdkContext` | Thread-safe ambient state (session, user, tags) | <kbd>✅ Implemented</kbd> |
-| `AutoMobileAnr` / `AutoMobileHangs` | ANR/hang detection (platform-specific) | <kbd>✅ Implemented</kbd> |
+| Component                           | Description                                             | Status                    |
+| ----------------------------------- | ------------------------------------------------------- | ------------------------- |
+| `SdkEventBuffer`                    | Thread-safe buffer that flushes on capacity or timer    | <kbd>✅ Implemented</kbd> |
+| `SdkEventBroadcaster`               | Serializes and delivers event batches cross-process     | <kbd>✅ Implemented</kbd> |
+| `EventPersistence`                  | Disk-first persistence for crash resilience             | <kbd>✅ Implemented</kbd> |
+| `DropCounter`                       | Back-pressure metrics tracking dropped events by reason | <kbd>✅ Implemented</kbd> |
+| `AutoMobileCrashes`                 | Unhandled crash detection with thread dumps             | <kbd>✅ Implemented</kbd> |
+| `AutoMobileFailures`                | Handled (non-fatal) exception recording                 | <kbd>✅ Implemented</kbd> |
+| `BreadcrumbTrail`                   | Ring buffer of recent actions attached to crash reports | <kbd>✅ Implemented</kbd> |
+| `SessionTracker`                    | Foreground/background lifecycle session rotation        | <kbd>✅ Implemented</kbd> |
+| `SdkContext`                        | Thread-safe ambient state (session, user, tags)         | <kbd>✅ Implemented</kbd> |
+| `AutoMobileAnr` / `AutoMobileHangs` | ANR/hang detection (platform-specific)                  | <kbd>✅ Implemented</kbd> |
 
 ## Disk-First Persistence
 
@@ -66,10 +66,10 @@ Stale batches are cleaned up by `cleanup(maxAgeDays:)` (default 7 days) to preve
 
 `SdkEventBuffer` controls the trade-off between latency and overhead:
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `maxBufferSize` | 50 | Events collected before a forced flush |
-| `flushIntervalMs` | 500 | Periodic flush interval in milliseconds |
+| Parameter         | Default | Description                             |
+| ----------------- | ------- | --------------------------------------- |
+| `maxBufferSize`   | 50      | Events collected before a forced flush  |
+| `flushIntervalMs` | 500     | Periodic flush interval in milliseconds |
 
 When either threshold is reached, the buffer drains into the broadcaster. The buffer is protected by a lock (`ReentrantLock` on Android, `NSLock` on iOS) and supports `isEnabled` toggling at runtime.
 
@@ -77,21 +77,21 @@ When either threshold is reached, the buffer drains into the broadcaster. The bu
 
 `DropCounter` tracks events that could not be delivered, categorized by reason:
 
-| Reason | Trigger |
-|--------|---------|
-| `DISABLED` | Event added while buffer is disabled |
-| `SHUTDOWN` | Event dropped because the buffer was shut down (see note) |
-| `FLUSH_ERROR` | Delivery callback threw an exception |
-| `BUFFER_OVERFLOW` | Buffer at capacity when the event arrived |
-| `FILTERED` | Event removed by a filter/processor before delivery |
-| `DELIVERY_FAILED` | Delivery attempted but did not succeed |
-| `PROCESSOR_ERROR` | An event processor threw (Android only) |
+| Reason            | Trigger                                                   |
+| ----------------- | --------------------------------------------------------- |
+| `DISABLED`        | Event added while buffer is disabled                      |
+| `SHUTDOWN`        | Event dropped because the buffer was shut down (see note) |
+| `FLUSH_ERROR`     | Delivery callback threw an exception                      |
+| `BUFFER_OVERFLOW` | Buffer at capacity when the event arrived                 |
+| `FILTERED`        | Event removed by a filter/processor before delivery       |
+| `DELIVERY_FAILED` | Delivery attempted but did not succeed                    |
+| `PROCESSOR_ERROR` | An event processor threw (Android only)                   |
 
 Android defines all seven reasons (`DropReason.kt`); iOS defines six — it has no
 `processorError` case (`DropCounter.swift`).
 
 **Note on `SHUTDOWN`:** the enum value exists on both platforms, but only Android
-*drops with* `SHUTDOWN` — its `SdkEventBuffer.add()` rejects post-shutdown events
+_drops with_ `SHUTDOWN` — its `SdkEventBuffer.add()` rejects post-shutdown events
 and records the drop. iOS `shutdown()` flushes instead of dropping, so the iOS
 `shutdown` case is defined but not emitted on that path.
 
@@ -172,11 +172,12 @@ Both platforms use injectable timer factories and UUID providers for determinist
 
 `BreadcrumbTrail` is a thread-safe ring buffer that records recent user actions. When full, the oldest breadcrumb is evicted.
 
-| Property | Default |
-|----------|---------|
-| `maxSize` | 100 |
+| Property  | Default |
+| --------- | ------- |
+| `maxSize` | 100     |
 
 Each `Breadcrumb` contains:
+
 - `timestamp` -- when the action occurred
 - `category` -- one of `NAVIGATION`, `TAP`, `LIFECYCLE`, `NETWORK`, `LOG`, `CUSTOM`
 - `message` -- human-readable description
@@ -197,23 +198,23 @@ Thread-safe access is provided via locks. `snapshot()` returns an immutable copy
 
 ## Platform Comparison
 
-| Aspect | Android | iOS |
-|--------|---------|-----|
-| **Language** | Kotlin | Swift |
-| **Thread safety** | `ReentrantLock`, `@Volatile`, `ConcurrentHashMap` | `NSLock`, `@unchecked Sendable` |
-| **Event delivery** | Scoped `Intent` broadcast to accessibility service package | `NotificationCenter` (in-process) + HTTP POST to CtrlProxy (debug) |
-| **Batch size limit** | 100KB per Intent (recursive split) | No hard limit (HTTP POST) |
-| **Crash handler** | `Thread.UncaughtExceptionHandler` | `NSSetUncaughtExceptionHandler` + optional signal handlers |
-| **All-thread dumps** | `Thread.getAllStackTraces()` (50KB cap) | Not available (no public API) |
-| **Signal crash persistence** | N/A | Writes signal number to file via POSIX `write()` |
-| **ANR/Hang detection** | `ApplicationExitInfo` API (retrospective, API 30+) | Watchdog thread with semaphore (real-time) |
-| **Hang threshold** | N/A (system-defined ANR timeout ~5s) | Configurable `hangThresholdMs` (default 2000ms) |
-| **Breadcrumb disk persistence** | Via `EventPersistence` (crash events include breadcrumbs) | Dedicated `writeToDisk()` / `loadFromDisk()` on `BreadcrumbTrail` |
-| **Session timeout** | 30s (configurable via constructor) | 30s (configurable via constructor) |
-| **Timer abstraction** | `ScheduledExecutorService` (injectable) | `TimerScheduling` protocol with `GCDTimer` |
-| **Retry policy** | None (keep on disk for next launch) | Exponential backoff for HTTP delivery |
-| **Handled exceptions** | `AutoMobileFailures` (in-memory ring buffer, 100 max) | `AutoMobileFailures` (in-memory array, 100 max) |
-| **Persistence format** | JSON via `org.json` | JSON via `Codable` + `SdkEventEnvelope` |
+| Aspect                          | Android                                                    | iOS                                                                |
+| ------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------ |
+| **Language**                    | Kotlin                                                     | Swift                                                              |
+| **Thread safety**               | `ReentrantLock`, `@Volatile`, `ConcurrentHashMap`          | `NSLock`, `@unchecked Sendable`                                    |
+| **Event delivery**              | Scoped `Intent` broadcast to accessibility service package | `NotificationCenter` (in-process) + HTTP POST to CtrlProxy (debug) |
+| **Batch size limit**            | 100KB per Intent (recursive split)                         | No hard limit (HTTP POST)                                          |
+| **Crash handler**               | `Thread.UncaughtExceptionHandler`                          | `NSSetUncaughtExceptionHandler` + optional signal handlers         |
+| **All-thread dumps**            | `Thread.getAllStackTraces()` (50KB cap)                    | Not available (no public API)                                      |
+| **Signal crash persistence**    | N/A                                                        | Writes signal number to file via POSIX `write()`                   |
+| **ANR/Hang detection**          | `ApplicationExitInfo` API (retrospective, API 30+)         | Watchdog thread with semaphore (real-time)                         |
+| **Hang threshold**              | N/A (system-defined ANR timeout ~5s)                       | Configurable `hangThresholdMs` (default 2000ms)                    |
+| **Breadcrumb disk persistence** | Via `EventPersistence` (crash events include breadcrumbs)  | Dedicated `writeToDisk()` / `loadFromDisk()` on `BreadcrumbTrail`  |
+| **Session timeout**             | 30s (configurable via constructor)                         | 30s (configurable via constructor)                                 |
+| **Timer abstraction**           | `ScheduledExecutorService` (injectable)                    | `TimerScheduling` protocol with `GCDTimer`                         |
+| **Retry policy**                | None (keep on disk for next launch)                        | Exponential backoff for HTTP delivery                              |
+| **Handled exceptions**          | `AutoMobileFailures` (in-memory ring buffer, 100 max)      | `AutoMobileFailures` (in-memory array, 100 max)                    |
+| **Persistence format**          | JSON via `org.json`                                        | JSON via `Codable` + `SdkEventEnvelope`                            |
 
 ## See Also
 

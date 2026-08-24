@@ -301,15 +301,10 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     });
     const launchedChild = await client.startEmulator(avdName);
     const baselineExitListeners = child.listenerCount("exit");
-    child.stderr!.emit(
-      "data",
-      Buffer.from("token=handoff-secret\nhandoff diagnostic\n"),
-    );
+    child.stderr!.emit("data", Buffer.from("token=handoff-secret\nhandoff diagnostic\n"));
     child.emit("exit", 1, null);
 
-    const readiness = expectRejection(
-      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
-    );
+    const readiness = expectRejection(client.waitForEmulatorReady(avdName, 60_000, launchedChild));
 
     child.stderr!.emit("data", Buffer.from("late handoff diagnostic\n"));
     child.emit("close", 1, null);
@@ -331,9 +326,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     });
     const launchedChild = await client.startEmulator(avdName);
     child.emit("exit", 1, null);
-    const readiness = expectRejection(
-      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
-    );
+    const readiness = expectRejection(client.waitForEmulatorReady(avdName, 60_000, launchedChild));
     child.stderr!.emit(
       "data",
       Buffer.from("qemu_mprotect__osdep: mprotect failed: Permission denied\n"),
@@ -387,9 +380,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     });
     const launchedChild = await client.startEmulator(avdName);
     child.emit("exit", 1, null);
-    const readiness = expectRejection(
-      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
-    );
+    const readiness = expectRejection(client.waitForEmulatorReady(avdName, 60_000, launchedChild));
     let settled = false;
     void readiness.then(() => {
       settled = true;
@@ -456,9 +447,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
     });
     const launchedChild = await client.startEmulator(avdName);
     child.emit("exit", 1, null);
-    const readiness = expectRejection(
-      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
-    );
+    const readiness = expectRejection(client.waitForEmulatorReady(avdName, 60_000, launchedChild));
     child.emit("error", new Error("stdio failed after exit"));
     child.stderr!.emit(
       "data",
@@ -477,9 +466,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
       child.stdout!.emit("data", Buffer.from("Detected GPU type: host\n"));
     });
     const launchedChild = await client.startEmulator(avdName);
-    const readiness = expectRejection(
-      client.waitForEmulatorReady(avdName, 60_000, launchedChild),
-    );
+    const readiness = expectRejection(client.waitForEmulatorReady(avdName, 60_000, launchedChild));
 
     for (let turn = 0; turn < 10 && timer.getPendingTimeoutCount() < 2; turn += 1) {
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -522,9 +509,7 @@ describe("AndroidEmulatorClient launch diagnostics", () => {
       }
       child.stderr!.emit(
         "data",
-        Buffer.from(
-          "Running multiple emulators with the same AVD is an experimental feature.\n",
-        ),
+        Buffer.from("Running multiple emulators with the same AVD is an experimental feature.\n"),
       );
       for (let index = 0; index < 51; index += 1) {
         child.stderr!.emit("data", Buffer.from(`later readiness diagnostic ${index}\n`));

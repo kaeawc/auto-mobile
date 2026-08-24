@@ -51,7 +51,7 @@ function createAndroidClient(): AndroidCtrlProxyClient {
     androidDevice,
     fakeAdb,
     (url: string) => new FakeWebSocket(url, "none", 0, fakeTimer) as unknown as WebSocket,
-    fakeTimer
+    fakeTimer,
   );
 }
 

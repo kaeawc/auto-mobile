@@ -3,7 +3,7 @@ import {
   SwipeDirection,
   SwipeOnOptions,
   ViewHierarchyNode,
-  ViewHierarchyResult
+  ViewHierarchyResult,
 } from "../../../models";
 import type { ElementFinder } from "../../../utils/interfaces/ElementFinder";
 import type { ElementGeometry } from "../../../utils/interfaces/ElementGeometry";
@@ -20,13 +20,13 @@ export class OverlayDetector implements OverlayAnalyzer {
   constructor(
     private readonly finder: ElementFinder,
     private readonly geometry: ElementGeometry,
-    private readonly elementParser: ElementParser
+    private readonly elementParser: ElementParser,
   ) {}
 
   collectOverlayCandidates(
     viewHierarchy: ViewHierarchyResult,
     container: SwipeOnOptions["container"] | undefined,
-    containerElement: Element
+    containerElement: Element,
   ): OverlayCandidate[] {
     const containerSelector = container ?? buildContainerFromElement(containerElement);
     if (!containerSelector) {
@@ -37,9 +37,8 @@ export class OverlayDetector implements OverlayAnalyzer {
     const parser = new DefaultElementParser();
 
     const windowRootGroups = parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
-    const rootGroups = windowRootGroups.length > 0
-      ? windowRootGroups
-      : [parser.extractRootNodes(viewHierarchy)];
+    const rootGroups =
+      windowRootGroups.length > 0 ? windowRootGroups : [parser.extractRootNodes(viewHierarchy)];
     const totalWindows = Math.max(1, rootGroups.length);
 
     const overlays: OverlayCandidate[] = [];
@@ -64,7 +63,15 @@ export class OverlayDetector implements OverlayAnalyzer {
 
           const nodeProperties = parser.extractNodeProperties(node);
 
-          if (this.isContainerNode(node, nodeProperties, containerNode, containerElement, containerBounds)) {
+          if (
+            this.isContainerNode(
+              node,
+              nodeProperties,
+              containerNode,
+              containerElement,
+              containerBounds,
+            )
+          ) {
             insideContainer = true;
             containerDepth = depth;
             return;
@@ -102,7 +109,7 @@ export class OverlayDetector implements OverlayAnalyzer {
             bounds: parsedNode.bounds,
             overlapBounds,
             coverage,
-            zOrder: { windowRank, nodeOrder: currentOrder }
+            zOrder: { windowRank, nodeOrder: currentOrder },
           });
         });
       }
@@ -114,7 +121,7 @@ export class OverlayDetector implements OverlayAnalyzer {
   computeSafeSwipeCoordinates(
     direction: SwipeDirection,
     bounds: Element["bounds"],
-    overlayBounds: Element["bounds"][]
+    overlayBounds: Element["bounds"][],
   ): { startX: number; startY: number; endX: number; endY: number; warning?: string } | null {
     const isVertical = direction === "up" || direction === "down";
     const primaryStart = isVertical ? bounds.top : bounds.left;
@@ -146,17 +153,17 @@ export class OverlayDetector implements OverlayAnalyzer {
 
     const safeBounds = isVertical
       ? {
-        left: bounds.left,
-        right: bounds.right,
-        top: bestCandidate.interval.start,
-        bottom: bestCandidate.interval.end
-      }
+          left: bounds.left,
+          right: bounds.right,
+          top: bestCandidate.interval.start,
+          bottom: bestCandidate.interval.end,
+        }
       : {
-        left: bestCandidate.interval.start,
-        right: bestCandidate.interval.end,
-        top: bounds.top,
-        bottom: bounds.bottom
-      };
+          left: bestCandidate.interval.start,
+          right: bestCandidate.interval.end,
+          top: bounds.top,
+          bottom: bounds.bottom,
+        };
 
     const swipe = this.geometry.getSwipeWithinBounds(direction, safeBounds);
     let { startX, startY, endX, endY } = swipe;
@@ -176,9 +183,10 @@ export class OverlayDetector implements OverlayAnalyzer {
 
     const primaryLength = Math.max(1, primaryEnd - primaryStart);
     const minDistance = Math.max(50, primaryLength * 0.1);
-    const warning = bestCandidate.interval.length < minDistance
-      ? `Swipe area reduced by overlaying elements; safe ${isVertical ? "height" : "width"} is ${Math.round(bestCandidate.interval.length)}px.`
-      : undefined;
+    const warning =
+      bestCandidate.interval.length < minDistance
+        ? `Swipe area reduced by overlaying elements; safe ${isVertical ? "height" : "width"} is ${Math.round(bestCandidate.interval.length)}px.`
+        : undefined;
 
     return { startX, startY, endX, endY, warning };
   }
@@ -186,7 +194,7 @@ export class OverlayDetector implements OverlayAnalyzer {
   private getBlockedIntervalsForX(
     overlayBounds: Element["bounds"][],
     containerBounds: Element["bounds"],
-    x: number
+    x: number,
   ): SwipeInterval[] {
     const intervals: SwipeInterval[] = [];
     for (const overlay of overlayBounds) {
@@ -207,7 +215,7 @@ export class OverlayDetector implements OverlayAnalyzer {
   private getBlockedIntervalsForY(
     overlayBounds: Element["bounds"][],
     containerBounds: Element["bounds"],
-    y: number
+    y: number,
   ): SwipeInterval[] {
     const intervals: SwipeInterval[] = [];
     for (const overlay of overlayBounds) {
@@ -228,7 +236,7 @@ export class OverlayDetector implements OverlayAnalyzer {
   private findLargestGap(
     start: number,
     end: number,
-    blockedIntervals: SwipeInterval[]
+    blockedIntervals: SwipeInterval[],
   ): SwipeInterval | null {
     const merged = this.mergeIntervals(blockedIntervals);
     let cursor = start;
@@ -256,7 +264,7 @@ export class OverlayDetector implements OverlayAnalyzer {
 
   private mergeIntervals(intervals: SwipeInterval[]): SwipeInterval[] {
     const sorted = intervals
-      .filter(interval => interval.end > interval.start)
+      .filter((interval) => interval.end > interval.start)
       .sort((a, b) => a.start - b.start);
 
     const merged: SwipeInterval[] = [];
@@ -279,10 +287,12 @@ export class OverlayDetector implements OverlayAnalyzer {
       return [];
     }
 
-    const candidates = OverlayDetector.CANDIDATE_FRACTIONS.map(fraction =>
-      Math.floor(start + size * fraction)
+    const candidates = OverlayDetector.CANDIDATE_FRACTIONS.map((fraction) =>
+      Math.floor(start + size * fraction),
     );
-    return Array.from(new Set(candidates.filter(candidate => candidate >= start && candidate <= end)));
+    return Array.from(
+      new Set(candidates.filter((candidate) => candidate >= start && candidate <= end)),
+    );
   }
 
   private expandBounds(bounds: Element["bounds"], padding: number): Element["bounds"] {
@@ -290,7 +300,7 @@ export class OverlayDetector implements OverlayAnalyzer {
       left: bounds.left - padding,
       top: bounds.top - padding,
       right: bounds.right + padding,
-      bottom: bounds.bottom + padding
+      bottom: bounds.bottom + padding,
     };
   }
 
@@ -316,7 +326,7 @@ export class OverlayDetector implements OverlayAnalyzer {
     nodeProperties: Record<string, unknown>,
     containerNode: ViewHierarchyNode | null,
     containerElement: Element,
-    containerBounds: Element["bounds"]
+    containerBounds: Element["bounds"],
   ): boolean {
     if (containerNode && node === containerNode) {
       return true;
@@ -337,7 +347,11 @@ export class OverlayDetector implements OverlayAnalyzer {
       return true;
     }
 
-    if (!containerElement["resource-id"] && !containerElement.text && !containerElement["content-desc"]) {
+    if (
+      !containerElement["resource-id"] &&
+      !containerElement.text &&
+      !containerElement["content-desc"]
+    ) {
       const parsedBounds = this.elementParser.parseBounds(node.bounds ?? nodeProperties.bounds);
       if (parsedBounds && boundsEqual(parsedBounds, containerBounds)) {
         return true;
@@ -346,5 +360,4 @@ export class OverlayDetector implements OverlayAnalyzer {
 
     return false;
   }
-
 }

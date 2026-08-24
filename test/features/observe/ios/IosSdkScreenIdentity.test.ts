@@ -5,11 +5,13 @@ const PLAYGROUND_BUNDLE = "dev.jasonpearson.automobile.Playground";
 
 describe("deriveIosSdkScreenIdentity", () => {
   test("includes the SDK route, selected tab, and presentation metadata", () => {
-    expect(deriveIosSdkScreenIdentity("navigation", PLAYGROUND_BUNDLE, {
-      destination: "ScrollPerformanceDemo",
-      arguments: { tab: "Demos" },
-      metadata: { presentation: "sheet" },
-    })).toEqual({
+    expect(
+      deriveIosSdkScreenIdentity("navigation", PLAYGROUND_BUNDLE, {
+        destination: "ScrollPerformanceDemo",
+        arguments: { tab: "Demos" },
+        metadata: { presentation: "sheet" },
+      }),
+    ).toEqual({
       platform: "ios",
       source: "sdk",
       confidence: "high",
@@ -35,10 +37,14 @@ describe("deriveIosSdkScreenIdentity", () => {
       { destination: "ScrollPerformanceDemo", arguments: { tab: "demos" } },
       { destination: "settings", metadata: { type: "tab_switch" } },
     ];
-    const keys = routes.map(route => deriveIosSdkScreenIdentity("navigation", PLAYGROUND_BUNDLE, route)!.key);
+    const keys = routes.map(
+      (route) => deriveIosSdkScreenIdentity("navigation", PLAYGROUND_BUNDLE, route)!.key,
+    );
 
     expect(new Set(keys).size).toBe(4);
-    expect(deriveIosSdkScreenIdentity("navigation", PLAYGROUND_BUNDLE, routes[2])!.key).toBe(keys[2]);
+    expect(deriveIosSdkScreenIdentity("navigation", PLAYGROUND_BUNDLE, routes[2])!.key).toBe(
+      keys[2],
+    );
   });
 
   test("distinguishes destination instances by canonical navigation arguments", () => {
@@ -61,13 +67,19 @@ describe("deriveIosSdkScreenIdentity", () => {
   });
 
   test("omits identity without a bundle or destination", () => {
-    expect(deriveIosSdkScreenIdentity("navigation", undefined, { destination: "Settings" })).toBeUndefined();
-    expect(deriveIosSdkScreenIdentity("navigation", PLAYGROUND_BUNDLE, { destination: "  " })).toBeUndefined();
+    expect(
+      deriveIosSdkScreenIdentity("navigation", undefined, { destination: "Settings" }),
+    ).toBeUndefined();
+    expect(
+      deriveIosSdkScreenIdentity("navigation", PLAYGROUND_BUNDLE, { destination: "  " }),
+    ).toBeUndefined();
   });
 
   test("ignores a destination-shaped payload from a non-navigation SDK event", () => {
-    expect(deriveIosSdkScreenIdentity("custom", PLAYGROUND_BUNDLE, {
-      destination: "Settings",
-    })).toBeUndefined();
+    expect(
+      deriveIosSdkScreenIdentity("custom", PLAYGROUND_BUNDLE, {
+        destination: "Settings",
+      }),
+    ).toBeUndefined();
   });
 });

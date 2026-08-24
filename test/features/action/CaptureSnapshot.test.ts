@@ -25,7 +25,7 @@ describe("CaptureSnapshot", () => {
       deviceId: "emulator-5554",
       name: "Pixel_5",
       platform: "android",
-      isEmulator: true
+      isEmulator: true,
     };
 
     // Create fakes
@@ -42,8 +42,14 @@ describe("CaptureSnapshot", () => {
     captureSnapshot = new CaptureSnapshot(device, fakeAdbFactory, undefined, fakeTimer, store);
 
     // Setup default command results
-    fakeAdb.setCommandResult("shell pm list packages", "package:com.example.app\npackage:com.system.app");
-    fakeAdb.setCommandResult("shell pm list packages -3 com.example.app", "package:com.example.app");
+    fakeAdb.setCommandResult(
+      "shell pm list packages",
+      "package:com.example.app\npackage:com.system.app",
+    );
+    fakeAdb.setCommandResult(
+      "shell pm list packages -3 com.example.app",
+      "package:com.example.app",
+    );
     fakeAdb.setCommandResult("shell pm list packages -3 com.system.app", ""); // system app
     fakeAdb.setCommandResult("shell dumpsys package com.example.app", "flags=0x1234 ALLOW_BACKUP");
     fakeAdb.setCommandResult("shell settings list global", "airplane_mode_on=0");
@@ -75,7 +81,7 @@ describe("CaptureSnapshot", () => {
         snapshotName,
         includeAppData: true,
         includeSettings: false,
-        useVmSnapshot: true
+        useVmSnapshot: true,
       });
 
       expect(result.snapshotType).toBe("vm");
@@ -98,7 +104,7 @@ describe("CaptureSnapshot", () => {
         snapshotName,
         includeAppData: true,
         includeSettings: true,
-        useVmSnapshot: true
+        useVmSnapshot: true,
       });
 
       expect(result.snapshotType).toBe("vm");
@@ -123,7 +129,7 @@ describe("CaptureSnapshot", () => {
         snapshotName,
         includeAppData: true,
         includeSettings: false,
-        useVmSnapshot: true
+        useVmSnapshot: true,
       });
 
       expect(result.manifest.foregroundApp).toBe(foregroundApp);
@@ -141,7 +147,7 @@ describe("CaptureSnapshot", () => {
         snapshotName,
         includeAppData: true,
         includeSettings: false,
-        useVmSnapshot: true
+        useVmSnapshot: true,
       });
 
       expect(result.manifest.foregroundApp).toBeUndefined();
@@ -156,12 +162,14 @@ describe("CaptureSnapshot", () => {
       // Setup VM snapshot command to fail
       fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "", "KO: snapshot failed");
 
-      await expect(captureSnapshot.execute({
-        snapshotName,
-        includeAppData: true,
-        includeSettings: false,
-        useVmSnapshot: true
-      })).rejects.toThrow("Failed to capture VM snapshot");
+      await expect(
+        captureSnapshot.execute({
+          snapshotName,
+          includeAppData: true,
+          includeSettings: false,
+          useVmSnapshot: true,
+        }),
+      ).rejects.toThrow("Failed to capture VM snapshot");
     });
 
     it("should throw error when VM snapshot fails with KO in stdout", async () => {
@@ -173,12 +181,14 @@ describe("CaptureSnapshot", () => {
       // Setup VM snapshot command to fail (KO in stdout)
       fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "KO: snapshot failed");
 
-      await expect(captureSnapshot.execute({
-        snapshotName,
-        includeAppData: true,
-        includeSettings: false,
-        useVmSnapshot: true
-      })).rejects.toThrow("Failed to capture VM snapshot");
+      await expect(
+        captureSnapshot.execute({
+          snapshotName,
+          includeAppData: true,
+          includeSettings: false,
+          useVmSnapshot: true,
+        }),
+      ).rejects.toThrow("Failed to capture VM snapshot");
     });
 
     it("should throw error when VM snapshot returns no OK response", async () => {
@@ -190,12 +200,14 @@ describe("CaptureSnapshot", () => {
       // Setup VM snapshot command with empty output
       fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "", "");
 
-      await expect(captureSnapshot.execute({
-        snapshotName,
-        includeAppData: true,
-        includeSettings: false,
-        useVmSnapshot: true
-      })).rejects.toThrow("no response from emulator");
+      await expect(
+        captureSnapshot.execute({
+          snapshotName,
+          includeAppData: true,
+          includeSettings: false,
+          useVmSnapshot: true,
+        }),
+      ).rejects.toThrow("no response from emulator");
     });
 
     it("should surface offline errors when VM snapshot command fails", async () => {
@@ -205,17 +217,16 @@ describe("CaptureSnapshot", () => {
       fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
       // Setup VM snapshot command to throw offline error
-      fakeAdb.setCommandError(
-        `emu avd snapshot save ${snapshotName}`,
-        new Error("device offline")
-      );
+      fakeAdb.setCommandError(`emu avd snapshot save ${snapshotName}`, new Error("device offline"));
 
-      await expect(captureSnapshot.execute({
-        snapshotName,
-        includeAppData: true,
-        includeSettings: false,
-        useVmSnapshot: true
-      })).rejects.toThrow("offline");
+      await expect(
+        captureSnapshot.execute({
+          snapshotName,
+          includeAppData: true,
+          includeSettings: false,
+          useVmSnapshot: true,
+        }),
+      ).rejects.toThrow("offline");
     });
 
     it("should pass VM snapshot timeout to adb command", async () => {
@@ -233,12 +244,12 @@ describe("CaptureSnapshot", () => {
         includeAppData: true,
         includeSettings: false,
         useVmSnapshot: true,
-        vmSnapshotTimeoutMs
+        vmSnapshotTimeoutMs,
       });
 
-      const call = fakeAdb.getCommandCalls().find(
-        entry => entry.command === `emu avd snapshot save ${snapshotName}`
-      );
+      const call = fakeAdb
+        .getCommandCalls()
+        .find((entry) => entry.command === `emu avd snapshot save ${snapshotName}`);
       expect(call?.timeoutMs).toBe(vmSnapshotTimeoutMs);
     });
 
@@ -250,7 +261,7 @@ describe("CaptureSnapshot", () => {
         deviceId: "ABC123DEF",
         name: "Pixel_5_Physical",
         platform: "android",
-        isEmulator: false
+        isEmulator: false,
       };
 
       const capturePhysical = new CaptureSnapshot(
@@ -258,7 +269,7 @@ describe("CaptureSnapshot", () => {
         fakeAdbFactory,
         undefined,
         fakeTimer,
-        store
+        store,
       );
       fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
 
@@ -273,7 +284,7 @@ describe("CaptureSnapshot", () => {
         includeAppData: true,
         includeSettings: false,
         useVmSnapshot: true,
-        userApps: "current"
+        userApps: "current",
       });
 
       // Should use ADB snapshot for physical device
@@ -300,7 +311,7 @@ describe("CaptureSnapshot", () => {
         includeAppData: true,
         includeSettings: true,
         useVmSnapshot: false,
-        userApps: "current"
+        userApps: "current",
       });
 
       expect(result.manifest.includeSettings).toBe(true);
@@ -319,7 +330,10 @@ describe("CaptureSnapshot", () => {
     it("should handle settings with special characters", async () => {
       const snapshotName = "test-settings-special";
 
-      fakeAdb.setCommandResult("shell settings list global", "some_key=value with spaces\nkey2=value=with=equals");
+      fakeAdb.setCommandResult(
+        "shell settings list global",
+        "some_key=value with spaces\nkey2=value=with=equals",
+      );
       fakeAdb.setCommandResult("shell settings list secure", "");
       fakeAdb.setCommandResult("shell settings list system", "");
 
@@ -337,12 +351,12 @@ describe("CaptureSnapshot", () => {
         includeAppData: true,
         includeSettings: true,
         useVmSnapshot: false,
-        userApps: "current"
+        userApps: "current",
       });
 
       expect(result.manifest.settings?.global).toEqual({
         some_key: "value with spaces",
-        key2: "value=with=equals"
+        key2: "value=with=equals",
       });
     });
 
@@ -367,7 +381,7 @@ describe("CaptureSnapshot", () => {
         includeAppData: true,
         includeSettings: true,
         useVmSnapshot: false,
-        userApps: "current"
+        userApps: "current",
       });
 
       expect(result.manifest.settings?.global).toEqual({});
@@ -392,7 +406,7 @@ describe("CaptureSnapshot", () => {
         includeAppData: true,
         includeSettings: false,
         useVmSnapshot: false,
-        userApps: "current"
+        userApps: "current",
       });
 
       expect(result.manifest.includeSettings).toBe(false);
@@ -412,16 +426,17 @@ describe("CaptureSnapshot", () => {
 
       // Don't create backup file to simulate failure
 
-      await expect(captureSnapshot.execute({
-        snapshotName,
-        includeAppData: true,
-        includeSettings: false,
-        useVmSnapshot: false,
-        userApps: "current",
-        strictBackupMode: true
-      })).rejects.toThrow("App data backup failed");
+      await expect(
+        captureSnapshot.execute({
+          snapshotName,
+          includeAppData: true,
+          includeSettings: false,
+          useVmSnapshot: false,
+          userApps: "current",
+          strictBackupMode: true,
+        }),
+      ).rejects.toThrow("App data backup failed");
     });
-
   });
 
   describe("edge cases", () => {
@@ -436,7 +451,7 @@ describe("CaptureSnapshot", () => {
         includeAppData: true,
         includeSettings: false,
         useVmSnapshot: false,
-        userApps: "current"
+        userApps: "current",
       });
 
       expect(result.manifest.foregroundApp).toBeUndefined();
@@ -456,7 +471,7 @@ describe("CaptureSnapshot", () => {
         includeAppData: true,
         includeSettings: false,
         useVmSnapshot: false,
-        userApps: "all"
+        userApps: "all",
       });
 
       expect(result.manifest.packages).toEqual([]);
@@ -474,7 +489,7 @@ describe("CaptureSnapshot", () => {
         includeAppData: true,
         includeSettings: false,
         useVmSnapshot: false,
-        userApps: "current"
+        userApps: "current",
       });
 
       expect(result.manifest.appDataBackup?.backupMethod).toBe("none");
@@ -484,11 +499,26 @@ describe("CaptureSnapshot", () => {
     it("should handle all apps disallowing backup", async () => {
       const snapshotName = "test-all-disallow-backup";
 
-      fakeAdb.setCommandResult("shell pm list packages", "package:com.example.app1\npackage:com.example.app2");
-      fakeAdb.setCommandResult("shell pm list packages -3 com.example.app1", "package:com.example.app1");
-      fakeAdb.setCommandResult("shell pm list packages -3 com.example.app2", "package:com.example.app2");
-      fakeAdb.setCommandResult("shell dumpsys package com.example.app1", "flags=0x1234 ALLOW_BACKUP=false");
-      fakeAdb.setCommandResult("shell dumpsys package com.example.app2", "flags=0x1234 ALLOW_BACKUP=false");
+      fakeAdb.setCommandResult(
+        "shell pm list packages",
+        "package:com.example.app1\npackage:com.example.app2",
+      );
+      fakeAdb.setCommandResult(
+        "shell pm list packages -3 com.example.app1",
+        "package:com.example.app1",
+      );
+      fakeAdb.setCommandResult(
+        "shell pm list packages -3 com.example.app2",
+        "package:com.example.app2",
+      );
+      fakeAdb.setCommandResult(
+        "shell dumpsys package com.example.app1",
+        "flags=0x1234 ALLOW_BACKUP=false",
+      );
+      fakeAdb.setCommandResult(
+        "shell dumpsys package com.example.app2",
+        "flags=0x1234 ALLOW_BACKUP=false",
+      );
 
       // Mock getForegroundApp
       fakeAdb.setForegroundApp({ packageName: "com.example.app1", userId: 0 });
@@ -498,7 +528,7 @@ describe("CaptureSnapshot", () => {
         includeAppData: true,
         includeSettings: false,
         useVmSnapshot: false,
-        userApps: "all"
+        userApps: "all",
       });
 
       expect(result.manifest.appDataBackup?.backupMethod).toBe("none");
@@ -521,17 +551,14 @@ describe("CaptureSnapshot", () => {
       await fs.writeFile(backupFilePath, "backup data", "utf-8");
 
       // Simulate successful backup
-      fakeAdb.setCommandResult(
-        `backup -f "${backupFilePath}" -noapk com.example.app`,
-        "Success"
-      );
+      fakeAdb.setCommandResult(`backup -f "${backupFilePath}" -noapk com.example.app`, "Success");
 
       const result = await captureSnapshot.execute({
         snapshotName,
         includeAppData: true,
         includeSettings: false,
         useVmSnapshot: false,
-        userApps: "current"
+        userApps: "current",
       });
 
       expect(result.snapshotName).toBe(snapshotName);
@@ -550,13 +577,13 @@ describe("CaptureSnapshot", () => {
       const backupFilePath = store.getBackupFilePath("test-throw");
       fakeAdb.setCommandError(
         `backup -f "${backupFilePath}" -noapk com.example.app`,
-        new Error("adb connection dropped")
+        new Error("adb connection dropped"),
       );
 
       const result = await (captureSnapshot as any).performAdbBackup(
         ["com.example.app"],
         backupFilePath,
-        30000
+        30000,
       );
 
       // Catch path returns a graceful failure, no ReferenceError thrown.
@@ -579,7 +606,7 @@ describe("CaptureSnapshot", () => {
         useVmSnapshot: false,
         userApps: "current",
         strictBackupMode: false,
-        backupTimeoutMs: 30000
+        backupTimeoutMs: 30000,
       });
 
       // A failed backup must pin: adb_backup attempted, package moved to
@@ -606,7 +633,7 @@ describe("CaptureSnapshot", () => {
         useVmSnapshot: false,
         userApps: "current",
         strictBackupMode: false,
-        backupTimeoutMs: 30000
+        backupTimeoutMs: 30000,
       });
 
       const backup = result.manifest.appDataBackup;
@@ -633,12 +660,12 @@ describe("CaptureSnapshot", () => {
         includeAppData: true,
         includeSettings: false,
         useVmSnapshot: false,
-        userApps: "current"
+        userApps: "current",
       });
 
       // Verify backup command was called with only the foreground app
       expect(fakeAdb.wasCommandExecuted("backup -f")).toBe(true);
-      const backupCommand = fakeAdb.getAllCommands().find(cmd => cmd.includes("backup -f"));
+      const backupCommand = fakeAdb.getAllCommands().find((cmd) => cmd.includes("backup -f"));
       expect(backupCommand).toContain("com.example.app");
       expect(backupCommand).not.toContain("com.system.app");
     });
@@ -647,12 +674,26 @@ describe("CaptureSnapshot", () => {
       const snapshotName = "test-all-apps";
 
       // Add more user apps
-      fakeAdb.setCommandResult("shell pm list packages",
-                               "package:com.example.app1\npackage:com.example.app2\npackage:com.system.app");
-      fakeAdb.setCommandResult("shell pm list packages -3 com.example.app1", "package:com.example.app1");
-      fakeAdb.setCommandResult("shell pm list packages -3 com.example.app2", "package:com.example.app2");
-      fakeAdb.setCommandResult("shell dumpsys package com.example.app1", "flags=0x1234 ALLOW_BACKUP");
-      fakeAdb.setCommandResult("shell dumpsys package com.example.app2", "flags=0x1234 ALLOW_BACKUP");
+      fakeAdb.setCommandResult(
+        "shell pm list packages",
+        "package:com.example.app1\npackage:com.example.app2\npackage:com.system.app",
+      );
+      fakeAdb.setCommandResult(
+        "shell pm list packages -3 com.example.app1",
+        "package:com.example.app1",
+      );
+      fakeAdb.setCommandResult(
+        "shell pm list packages -3 com.example.app2",
+        "package:com.example.app2",
+      );
+      fakeAdb.setCommandResult(
+        "shell dumpsys package com.example.app1",
+        "flags=0x1234 ALLOW_BACKUP",
+      );
+      fakeAdb.setCommandResult(
+        "shell dumpsys package com.example.app2",
+        "flags=0x1234 ALLOW_BACKUP",
+      );
 
       // Create dummy backup file
       const backupFilePath = store.getBackupFilePath(snapshotName);
@@ -665,12 +706,12 @@ describe("CaptureSnapshot", () => {
         includeAppData: true,
         includeSettings: false,
         useVmSnapshot: false,
-        userApps: "all"
+        userApps: "all",
       });
 
       // Verify backup command was called with all user apps
       expect(fakeAdb.wasCommandExecuted("backup -f")).toBe(true);
-      const backupCommand = fakeAdb.getAllCommands().find(cmd => cmd.includes("backup -f"));
+      const backupCommand = fakeAdb.getAllCommands().find((cmd) => cmd.includes("backup -f"));
       expect(backupCommand).toContain("com.example.app1");
       expect(backupCommand).toContain("com.example.app2");
     });
@@ -678,14 +719,28 @@ describe("CaptureSnapshot", () => {
     it("should skip apps with android:allowBackup=false", async () => {
       const snapshotName = "test-skip-nobackup";
 
-      fakeAdb.setCommandResult("shell pm list packages",
-                               "package:com.example.app1\npackage:com.example.app2");
-      fakeAdb.setCommandResult("shell pm list packages -3 com.example.app1", "package:com.example.app1");
-      fakeAdb.setCommandResult("shell pm list packages -3 com.example.app2", "package:com.example.app2");
+      fakeAdb.setCommandResult(
+        "shell pm list packages",
+        "package:com.example.app1\npackage:com.example.app2",
+      );
+      fakeAdb.setCommandResult(
+        "shell pm list packages -3 com.example.app1",
+        "package:com.example.app1",
+      );
+      fakeAdb.setCommandResult(
+        "shell pm list packages -3 com.example.app2",
+        "package:com.example.app2",
+      );
 
       // app1 allows backup, app2 doesn't
-      fakeAdb.setCommandResult("shell dumpsys package com.example.app1", "flags=0x1234 ALLOW_BACKUP");
-      fakeAdb.setCommandResult("shell dumpsys package com.example.app2", "flags=0x1234 ALLOW_BACKUP=false");
+      fakeAdb.setCommandResult(
+        "shell dumpsys package com.example.app1",
+        "flags=0x1234 ALLOW_BACKUP",
+      );
+      fakeAdb.setCommandResult(
+        "shell dumpsys package com.example.app2",
+        "flags=0x1234 ALLOW_BACKUP=false",
+      );
 
       // Create dummy backup file
       const backupFilePath = store.getBackupFilePath(snapshotName);
@@ -698,11 +753,11 @@ describe("CaptureSnapshot", () => {
         includeAppData: true,
         includeSettings: false,
         useVmSnapshot: false,
-        userApps: "all"
+        userApps: "all",
       });
 
       // Verify only app1 was backed up
-      const backupCommand = fakeAdb.getAllCommands().find(cmd => cmd.includes("backup -f"));
+      const backupCommand = fakeAdb.getAllCommands().find((cmd) => cmd.includes("backup -f"));
       expect(backupCommand).toContain("com.example.app1");
       expect(backupCommand).not.toContain("com.example.app2");
 
@@ -721,27 +776,24 @@ describe("CaptureSnapshot", () => {
       ["drops a line with no key", "=v", {}],
       ["lets a later duplicate key win", "k=1\nk=2", { k: "2" }],
       ["strips CR from CRLF line endings", "a=1\r\nb=2", { a: "1", b: "2" }],
-      ["skips blank and whitespace-only lines", "a=1\n\n   \nb=2", { a: "1", b: "2" }]
+      ["skips blank and whitespace-only lines", "a=1\n\n   \nb=2", { a: "1", b: "2" }],
     ];
 
-    test.each(grammarCases)(
-      "%s",
-      async (_name, listOutput, expectedGlobal) => {
-        const snapshotName = `grammar-${_name.replace(/\s+/g, "-")}`;
-        fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
-        fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "OK");
-        fakeAdb.setCommandResult("shell settings list global", listOutput);
+    test.each(grammarCases)("%s", async (_name, listOutput, expectedGlobal) => {
+      const snapshotName = `grammar-${_name.replace(/\s+/g, "-")}`;
+      fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
+      fakeAdb.setCommandResult(`emu avd snapshot save ${snapshotName}`, "OK");
+      fakeAdb.setCommandResult("shell settings list global", listOutput);
 
-        const result = await captureSnapshot.execute({
-          snapshotName,
-          includeAppData: false,
-          includeSettings: true,
-          useVmSnapshot: true
-        });
+      const result = await captureSnapshot.execute({
+        snapshotName,
+        includeAppData: false,
+        includeSettings: true,
+        useVmSnapshot: true,
+      });
 
-        expect(result.manifest.settings?.global).toEqual(expectedGlobal);
-      }
-    );
+      expect(result.manifest.settings?.global).toEqual(expectedGlobal);
+    });
   });
 });
 
@@ -819,7 +871,7 @@ describe("CaptureSnapshot (iOS)", () => {
     const appDataPath = store.getAppDataPath(snapshotName, pathOptions);
     const copiedFile = await fs.readFile(
       path.join(appDataPath, bundleId, "Documents", "data.txt"),
-      "utf-8"
+      "utf-8",
     );
     expect(copiedFile).toBe("hello");
   });
@@ -827,12 +879,14 @@ describe("CaptureSnapshot (iOS)", () => {
   it("fails when strictBackupMode is enabled and app data backup fails", async () => {
     const captureSnapshot = makeCapture();
 
-    await expect(captureSnapshot.execute({
-      snapshotName: "strict-backup",
-      includeAppData: true,
-      strictBackupMode: true,
-      appBundleIds: ["com.example.missing"],
-    })).rejects.toThrow("Failed to backup app data");
+    await expect(
+      captureSnapshot.execute({
+        snapshotName: "strict-backup",
+        includeAppData: true,
+        strictBackupMode: true,
+        appBundleIds: ["com.example.missing"],
+      }),
+    ).rejects.toThrow("Failed to backup app data");
   });
 
   it("marks backup as none when no bundle IDs are provided", async () => {
@@ -851,7 +905,7 @@ describe("CaptureSnapshot (iOS)", () => {
   it("captures iOS settings (locale + UI) into the manifest when includeSettings", async () => {
     simctl.setCommandArgsResult(
       ["spawn", device.deviceId, "defaults", "read", ".GlobalPreferences", "AppleLocale"],
-      "nl_BE\n"
+      "nl_BE\n",
     );
     simctl.setCommandArgsResult(["ui", device.deviceId, "appearance"], "dark\n");
     simctl.setCommandArgsResult(["ui", device.deviceId, "content_size"], "large\n");
@@ -869,7 +923,10 @@ describe("CaptureSnapshot (iOS)", () => {
 
     // Manifest survives the round-trip to disk.
     const pathOptions = { platform: "ios", deviceId: device.deviceId } as const;
-    const metadataJson = await fs.readFile(store.getMetadataPath("with-settings", pathOptions), "utf-8");
+    const metadataJson = await fs.readFile(
+      store.getMetadataPath("with-settings", pathOptions),
+      "utf-8",
+    );
     const parsed = JSON.parse(metadataJson) as typeof result.manifest;
     expect(parsed.iosSettings?.values[".GlobalPreferences/AppleLocale"]).toBe("nl_BE");
   });
@@ -887,8 +944,8 @@ describe("CaptureSnapshot (iOS)", () => {
 
     const settingsCommands = simctl
       .getMethodCalls("executeCommandArgs")
-      .map(call => call.args as string[])
-      .filter(args => args.includes("defaults") || args[0] === "ui");
+      .map((call) => call.args as string[])
+      .filter((args) => args.includes("defaults") || args[0] === "ui");
     expect(settingsCommands).toEqual([]);
   });
 });

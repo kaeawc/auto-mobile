@@ -28,8 +28,15 @@ describe("checkDaemonConnectivity", () => {
     },
     {
       name: "reports the daemon recommendation when a running daemon is hung",
-      report: healthReport({ socketConnectable: false, recommendations: ["Remove stale socket", "Restart daemon"] }),
-      expected: { status: "warn", message: "Daemon running but not responding", recommendation: "Remove stale socket; Restart daemon" },
+      report: healthReport({
+        socketConnectable: false,
+        recommendations: ["Remove stale socket", "Restart daemon"],
+      }),
+      expected: {
+        status: "warn",
+        message: "Daemon running but not responding",
+        recommendation: "Remove stale socket; Restart daemon",
+      },
     },
     {
       name: "falls back to the restart recommendation when a hung daemon gives none",

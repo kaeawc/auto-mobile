@@ -59,16 +59,32 @@ describe("normalizeStorageEvent (#3173)", () => {
 
 describe("recordStorageEvent persists canonical value_type (#3173)", () => {
   let db: Kysely<Database>;
-  beforeEach(async () => { db = await createTestDatabase(); });
-  afterEach(async () => { await db.destroy(); });
+  beforeEach(async () => {
+    db = await createTestDatabase();
+  });
+  afterEach(async () => {
+    await db.destroy();
+  });
 
   test("Android STRING and iOS string persist the same token", async () => {
-    await recordStorageEvent({
-      ...base, deviceId: "android", valueType: "STRING", changeType: "modify",
-    }, db);
-    await recordStorageEvent({
-      ...base, deviceId: "ios", valueType: "string", changeType: "modify",
-    }, db);
+    await recordStorageEvent(
+      {
+        ...base,
+        deviceId: "android",
+        valueType: "STRING",
+        changeType: "modify",
+      },
+      db,
+    );
+    await recordStorageEvent(
+      {
+        ...base,
+        deviceId: "ios",
+        valueType: "string",
+        changeType: "modify",
+      },
+      db,
+    );
 
     const android = await getStorageEvents({ deviceId: "android", limit: 1 }, db);
     const ios = await getStorageEvents({ deviceId: "ios", limit: 1 }, db);
@@ -78,9 +94,16 @@ describe("recordStorageEvent persists canonical value_type (#3173)", () => {
   });
 
   test("null valueType lands as canonical unknown, not NULL", async () => {
-    await recordStorageEvent({
-      ...base, deviceId: "d2", value: null, valueType: null, changeType: "modify",
-    }, db);
+    await recordStorageEvent(
+      {
+        ...base,
+        deviceId: "d2",
+        value: null,
+        valueType: null,
+        changeType: "modify",
+      },
+      db,
+    );
     const rows = await getStorageEvents({ deviceId: "d2", limit: 1 }, db);
     expect(rows[0].valueType).toBe("unknown");
   });

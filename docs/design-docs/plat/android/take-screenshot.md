@@ -17,10 +17,10 @@ takeScreenshot({
   reason: "element-not-found",
   context: {
     action: "tapOn",
-    text: "Login"
+    text: "Login",
   },
-  preferReuse: true
-})
+  preferReuse: true,
+});
 ```
 
 Key semantics:

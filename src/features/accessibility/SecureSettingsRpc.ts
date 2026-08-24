@@ -28,7 +28,11 @@ export interface SecureSettingsGetResult {
  * real `AdbClient` into the static singleton map (issue #4179).
  */
 export interface SecureSettingsRpc {
-  put(key: string, value: string | null, valueType?: SettingsValueType): Promise<SecureSettingsPutResult>;
+  put(
+    key: string,
+    value: string | null,
+    valueType?: SettingsValueType,
+  ): Promise<SecureSettingsPutResult>;
   get(key: string): Promise<SecureSettingsGetResult>;
 }
 
@@ -39,7 +43,11 @@ export interface SecureSettingsRpc {
 export class CtrlProxySecureSettingsRpc implements SecureSettingsRpc {
   constructor(private readonly device: BootedDevice) {}
 
-  async put(key: string, value: string | null, valueType?: SettingsValueType): Promise<SecureSettingsPutResult> {
+  async put(
+    key: string,
+    value: string | null,
+    valueType?: SettingsValueType,
+  ): Promise<SecureSettingsPutResult> {
     const client = AndroidCtrlProxyClient.getInstance(this.device);
     const result = await client.requestSettingsPut("secure", key, value, valueType);
     return { success: result.success };

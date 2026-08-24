@@ -36,17 +36,17 @@ pass/fail event based on the daemon's response.
 
 ## `@AutoMobileTest` parameters
 
-| Parameter | Type | Default | Description |
-|---|---|---|---|
-| `plan` | `String` | `""` | Path to the YAML plan relative to `src/test/resources/`. Required unless `prompt` is set. |
-| `prompt` | `String` | `""` | Natural-language description used by the AI agent to generate a plan at runtime. Requires `aiAssistance = true`. |
-| `appId` | `String` | `""` | Android package name. Required for `cleanupAfter` and useful for `terminateApp` steps. |
-| `aiAssistance` | `Boolean` | `true` | When `true`, the AI agent attempts to recover from failures. Set `false` in CI or when plans are stable. |
-| `maxRetries` | `Int` | `0` | Number of automatic retry attempts before AI intervention. |
-| `timeoutMs` | `Long` | `30_000` | Maximum wall-clock time (ms) the runner waits for the daemon to respond for this test. |
-| `device` | `String` | `"auto"` | Target a specific device serial, or `"auto"` to let the daemon pick from the available pool. |
-| `cleanupAfter` | `Boolean` | `true` | Terminate the app after the test completes (requires `appId`). |
-| `clearAppData` | `Boolean` | `false` | Clear app data in addition to terminating (requires `appId`). |
+| Parameter      | Type      | Default  | Description                                                                                                      |
+| -------------- | --------- | -------- | ---------------------------------------------------------------------------------------------------------------- |
+| `plan`         | `String`  | `""`     | Path to the YAML plan relative to `src/test/resources/`. Required unless `prompt` is set.                        |
+| `prompt`       | `String`  | `""`     | Natural-language description used by the AI agent to generate a plan at runtime. Requires `aiAssistance = true`. |
+| `appId`        | `String`  | `""`     | Android package name. Required for `cleanupAfter` and useful for `terminateApp` steps.                           |
+| `aiAssistance` | `Boolean` | `true`   | When `true`, the AI agent attempts to recover from failures. Set `false` in CI or when plans are stable.         |
+| `maxRetries`   | `Int`     | `0`      | Number of automatic retry attempts before AI intervention.                                                       |
+| `timeoutMs`    | `Long`    | `30_000` | Maximum wall-clock time (ms) the runner waits for the daemon to respond for this test.                           |
+| `device`       | `String`  | `"auto"` | Target a specific device serial, or `"auto"` to let the daemon pick from the available pool.                     |
+| `cleanupAfter` | `Boolean` | `true`   | Terminate the app after the test completes (requires `appId`).                                                   |
+| `clearAppData` | `Boolean` | `false`  | Clear app data in addition to terminating (requires `appId`).                                                    |
 
 ### Choosing `aiAssistance`
 
@@ -84,13 +84,13 @@ A minimal plan:
 
 ```yaml
 ---
-name: launch-app                                        # (1) plan identifier (no spaces)
-description: Launch the app and verify it starts        # (2) human-readable description
+name: launch-app # (1) plan identifier (no spaces)
+description: Launch the app and verify it starts # (2) human-readable description
 steps:
-  - tool: launchApp                                     # (3) tool name (camelCase)
+  - tool: launchApp # (3) tool name (camelCase)
     appId: com.example.app
     clearAppData: true
-    label: Launch the app with clean state              # (4) optional label shown in logs
+    label: Launch the app with clean state # (4) optional label shown in logs
 
   - tool: observe
     label: Verify app UI renders without crashing
@@ -114,7 +114,7 @@ Starts an app by package name. Optionally clears app data first.
 ```yaml
 - tool: launchApp
   appId: com.example.app
-  clearAppData: true       # clears data before launching (default: false)
+  clearAppData: true # clears data before launching (default: false)
   label: Launch the app
 ```
 
@@ -141,8 +141,8 @@ To wait for a specific element before proceeding, use `waitFor` with either `ele
 ```yaml
 - tool: observe
   waitFor:
-    text: "Welcome"          # wait until this text is visible
-    timeout: 10000           # optional, ms (default: 5000)
+    text: "Welcome" # wait until this text is visible
+    timeout: 10000 # optional, ms (default: 5000)
 
 - tool: observe
   waitFor:
@@ -184,8 +184,8 @@ If some builds skip the dialog, a single linear plan cannot express OR; keep CI 
 startup path or split tests.
 
 !!! warning "`waitFor` requires `text` or `elementId`"
-    Providing only `timeout` in `waitFor` is a validation error. You must include either `text`
-    or `elementId` alongside `timeout`. To observe without waiting, omit `waitFor` entirely.
+Providing only `timeout` in `waitFor` is a validation error. You must include either `text`
+or `elementId` alongside `timeout`. To observe without waiting, omit `waitFor` entirely.
 
 ### `tapOn`
 
@@ -198,7 +198,7 @@ Taps an element identified by text or resource ID.
 
 - tool: tapOn
   elementId: "com.example.app:id/submit_button"
-  action: tap                # tap | doubleTap | longPress
+  action: tap # tap | doubleTap | longPress
 ```
 
 ### `inputText`
@@ -217,11 +217,11 @@ Presses a hardware or soft button. All button names are **lowercase**.
 
 ```yaml
 - tool: pressButton
-  button: home      # home | back | menu | power | volume_up | volume_down | recent
+  button: home # home | back | menu | power | volume_up | volume_down | recent
 ```
 
 !!! warning "Button values are lowercase"
-    Using `HOME`, `BACK`, etc. (uppercase) is a validation error. Use lowercase: `home`, `back`.
+Using `HOME`, `BACK`, etc. (uppercase) is a validation error. Use lowercase: `home`, `back`.
 
 ### `terminateApp`
 
@@ -239,7 +239,7 @@ Swipes in a direction within an element or the screen.
 
 ```yaml
 - tool: swipeOn
-  direction: up      # up | down | left | right
+  direction: up # up | down | left | right
   label: Scroll down the list
 ```
 
@@ -267,11 +267,11 @@ single step. Use this for multi-field forms.
       value: "user@example.com"
     - selector:
         text: "Password"
-      value: "${TEST_PASSWORD}"  # resolved from environment at runtime
-      sensitive: true            # skips value verification for this field
+      value: "${TEST_PASSWORD}" # resolved from environment at runtime
+      sensitive: true # skips value verification for this field
     - selector:
         elementId: "com.example.app:id/remember_me"
-      selected: true             # sets a checkbox or toggle
+      selected: true # sets a checkbox or toggle
 ```
 
 Pass secrets via environment variables rather than hardcoding them in plan files. The daemon
@@ -444,12 +444,12 @@ parallel when multiple devices are present.
 
 Plans are validated against a JSON schema before execution. Common validation errors:
 
-| Error | Cause | Fix |
-|---|---|---|
-| `Missing required property 'tool'` | A step is missing the `tool` key | Add `tool: <toolName>` to the step |
-| `Invalid option: expected one of "home"\|"back"\|...` | Uppercase `button` value | Change to lowercase: `home`, `back`, `menu` |
-| `Invalid input: expected string, received undefined` in `waitFor` | `waitFor` with only `timeout` | Add `text: "..."` or `elementId: "..."` |
-| `Unknown property 'foo'` | Misspelled or legacy field name | Check the [MCP Tools](../../../mcp/tools.md) reference |
+| Error                                                             | Cause                            | Fix                                                    |
+| ----------------------------------------------------------------- | -------------------------------- | ------------------------------------------------------ |
+| `Missing required property 'tool'`                                | A step is missing the `tool` key | Add `tool: <toolName>` to the step                     |
+| `Invalid option: expected one of "home"\|"back"\|...`             | Uppercase `button` value         | Change to lowercase: `home`, `back`, `menu`            |
+| `Invalid input: expected string, received undefined` in `waitFor` | `waitFor` with only `timeout`    | Add `text: "..."` or `elementId: "..."`                |
+| `Unknown property 'foo'`                                          | Misspelled or legacy field name  | Check the [MCP Tools](../../../mcp/tools.md) reference |
 
 ## Debugging a failing test
 
@@ -471,13 +471,13 @@ app/build/reports/tests/testDebugUnitTest/index.html  # HTML report
 
 **Common failure patterns:**
 
-| Symptom | Likely cause |
-|---|---|
-| Step fails with `element not found` | Wrong `text` or `elementId`; try `observe` first and inspect the hierarchy |
+| Symptom                               | Likely cause                                                                                                                                                                                                                                                         |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Step fails with `element not found`   | Wrong `text` or `elementId`; try `observe` first and inspect the hierarchy                                                                                                                                                                                           |
 | `observe waitFor timed out after …ms` | Wrong condition for the **current** screen (e.g. waiting for **`mainBG`** while a **server picker** dialog is focused), or transition slower than **`timeout`** — inspect **`failureObservation.viewHierarchy`**; fix **`waitFor`** target or increase **`timeout`** |
-| `terminateApp` fails immediately | App APK not installed; run `adb install` before tests |
-| All steps fail with connection error | Daemon not running; start with `auto-mobile --daemon-mode &` |
-| Plan fails validation before running | Schema error; see the [Plan validation](#plan-validation) table above |
+| `terminateApp` fails immediately      | App APK not installed; run `adb install` before tests                                                                                                                                                                                                                |
+| All steps fail with connection error  | Daemon not running; start with `auto-mobile --daemon-mode &`                                                                                                                                                                                                         |
+| Plan fails validation before running  | Schema error; see the [Plan validation](#plan-validation) table above                                                                                                                                                                                                |
 
 ## See also
 

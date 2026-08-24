@@ -46,7 +46,9 @@ export function getMcpRecorder(): McpCallRecorder | null {
 }
 
 export function getMcpRecordingStatus(timer: Timer = defaultTimer): McpRecordingStatus | null {
-  if (!activeSession) {return null;}
+  if (!activeSession) {
+    return null;
+  }
   return {
     recording: activeSession.recorder.isRecording(),
     startedAt: new Date(activeSession.startedAt).toISOString(),
@@ -92,7 +94,7 @@ const formatPlanName = (planName?: string, timer: Timer = defaultTimer): string 
 
 export function stopMcpRecording(
   planName?: string,
-  timer: Timer = defaultTimer
+  timer: Timer = defaultTimer,
 ): McpRecordingStopResult {
   const session = activeSession;
   if (!session) {
@@ -107,7 +109,7 @@ export function stopMcpRecording(
     activeSession = null;
     throw new Error(
       "No MCP tool calls were recorded. Ensure plan-relevant tools were called during the recording. " +
-      "Call recordSteps with action: \"begin\" to start a new session."
+        'Call recordSteps with action: "begin" to start a new session.',
     );
   }
 

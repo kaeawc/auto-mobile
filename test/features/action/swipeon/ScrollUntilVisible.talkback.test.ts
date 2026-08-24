@@ -9,13 +9,16 @@ import { FakeScrollAccessibilityService } from "../../../fakes/FakeScrollAccessi
 import { FakeElementGeometry } from "../../../fakes/FakeElementGeometry";
 import { FakeAdbClient } from "../../../fakes/FakeAdbClient";
 import type { BootedDevice, Element, ObserveResult } from "../../../../src/models";
-import type { SwipeOnResolvedOptions, VoiceOverSwipeRunner } from "../../../../src/features/action/swipeon/types";
+import type {
+  SwipeOnResolvedOptions,
+  VoiceOverSwipeRunner,
+} from "../../../../src/features/action/swipeon/types";
 import type { FeatureFlagService } from "../../../../src/features/featureFlags/FeatureFlagService";
 
 const DEVICE: BootedDevice = {
   name: "test-device",
   platform: "android",
-  deviceId: "device-1"
+  deviceId: "device-1",
 };
 
 const SCREEN_SIZE = { width: 400, height: 900 };
@@ -25,21 +28,21 @@ const makeObserveResult = (hierarchyId: number = 0): ObserveResult => ({
   screenSize: SCREEN_SIZE,
   systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   viewHierarchy: {
-    hierarchy: { node: { $: { _id: String(hierarchyId) } } }
-  }
+    hierarchy: { node: { $: { _id: String(hierarchyId) } } },
+  },
 });
 
 const CONTAINER_ELEMENT: Element = {
-  "bounds": { left: 0, top: 0, right: 400, bottom: 900 },
+  bounds: { left: 0, top: 0, right: 400, bottom: 900 },
   "resource-id": "test:id/list",
-  "scrollable": true
+  scrollable: true,
 } as unknown as Element;
 
 const TARGET_ELEMENT: Element = {
-  "bounds": { left: 10, top: 200, right: 390, bottom: 250 },
+  bounds: { left: 10, top: 200, right: 390, bottom: 250 },
   "resource-id": "test:id/target",
-  "text": "Target Item",
-  "scrollable": false
+  text: "Target Item",
+  scrollable: false,
 } as unknown as Element;
 
 function makeScrollUntilVisible({
@@ -51,7 +54,7 @@ function makeScrollUntilVisible({
   talkBackExecutor,
   featureFlags,
   device = DEVICE,
-  voiceOverExecutor
+  voiceOverExecutor,
 }: {
   accessibilityDetector: FakeAccessibilityDetector;
   finder: FakeElementFinder;
@@ -68,7 +71,7 @@ function makeScrollUntilVisible({
   const fakeObserveScreen = {
     execute: async () => observeResults[Math.min(callIdx, observeResults.length - 1)],
     getMostRecentCachedObserveResult: async () =>
-      observeResults[Math.min(callIdx, observeResults.length - 1)]
+      observeResults[Math.min(callIdx, observeResults.length - 1)],
   };
 
   const fakeGeometry = new FakeElementGeometry();
@@ -100,13 +103,13 @@ function makeScrollUntilVisible({
     getDuration: () => 300,
     resolveBoomerangConfig: () => undefined,
     buildPredictionArgs: () => ({}),
-    observedInteraction
+    observedInteraction,
   });
 }
 
 const BASE_OPTIONS: SwipeOnResolvedOptions = {
   direction: "up",
-  lookFor: { text: "Target Item" }
+  lookFor: { text: "Target Item" },
 };
 
 describe("ScrollUntilVisible TalkBack focus behavior", () => {
@@ -140,7 +143,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0)],
-        talkBackExecutor
+        talkBackExecutor,
       });
 
       const result = await suv.execute({ ...BASE_OPTIONS, focusTarget: true });
@@ -164,7 +167,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0), makeObserveResult(1), makeObserveResult(2)],
-        talkBackExecutor
+        talkBackExecutor,
       });
 
       const result = await suv.execute({ ...BASE_OPTIONS, focusTarget: true });
@@ -189,7 +192,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0)],
-        talkBackExecutor
+        talkBackExecutor,
       });
 
       await suv.execute({ ...BASE_OPTIONS });
@@ -214,7 +217,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
         accessibilityService,
         observeResults: [makeObserveResult(0)],
         talkBackExecutor,
-        featureFlags: sentinelFlags
+        featureFlags: sentinelFlags,
       });
 
       await suv.execute({ ...BASE_OPTIONS });
@@ -233,7 +236,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0)],
-        talkBackExecutor
+        talkBackExecutor,
       });
 
       const result = await suv.execute(BASE_OPTIONS);
@@ -253,7 +256,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0)],
-        talkBackExecutor
+        talkBackExecutor,
       });
 
       const result = await suv.execute({ ...BASE_OPTIONS, focusTarget: true });
@@ -264,7 +267,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
       expect(accessibilityService.requestActionCalls).toContainEqual({
         action: "focus",
         resourceId: "test:id/target",
-        timeoutMs: 5000
+        timeoutMs: 5000,
       });
     });
 
@@ -282,7 +285,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0), makeObserveResult(1), makeObserveResult(2)],
-        talkBackExecutor
+        talkBackExecutor,
       });
 
       const result = await suv.execute({ ...BASE_OPTIONS, focusTarget: true });
@@ -293,7 +296,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
       expect(accessibilityService.requestActionCalls).toContainEqual({
         action: "focus",
         resourceId: "test:id/target",
-        timeoutMs: 5000
+        timeoutMs: 5000,
       });
     });
 
@@ -311,7 +314,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0), makeObserveResult(1), makeObserveResult(2)],
-        talkBackExecutor
+        talkBackExecutor,
       });
 
       const result = await suv.execute(BASE_OPTIONS);
@@ -337,21 +340,23 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
           makeObserveResult(0),
           makeObserveResult(1),
           makeObserveResult(2),
-          makeObserveResult(3)
+          makeObserveResult(3),
         ],
-        talkBackExecutor
+        talkBackExecutor,
       });
 
       await suv.execute({ ...BASE_OPTIONS, focusTarget: true });
 
-      expect(accessibilityService.requestActionCalls.some(c => c.action === "clear_focus")).toBe(false);
+      expect(accessibilityService.requestActionCalls.some((c) => c.action === "clear_focus")).toBe(
+        false,
+      );
     });
 
     test("skips focus if found element has no resource-id", async () => {
       const elementWithoutId: Element = {
         bounds: { left: 10, top: 200, right: 390, bottom: 250 },
         text: "Target Item",
-        scrollable: false
+        scrollable: false,
       } as unknown as Element;
 
       finder.nextScrollableContainer = CONTAINER_ELEMENT;
@@ -363,7 +368,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0)],
-        talkBackExecutor
+        talkBackExecutor,
       });
 
       // Should succeed but not call requestAction since there's no resource-id to focus
@@ -385,7 +390,7 @@ describe("ScrollUntilVisible TalkBack focus behavior", () => {
         timer,
         accessibilityService,
         observeResults: [makeObserveResult(0)],
-        talkBackExecutor
+        talkBackExecutor,
       });
 
       const result = await suv.execute({ ...BASE_OPTIONS, focusTarget: true });
@@ -415,9 +420,9 @@ describe("ScrollUntilVisible VoiceOver behavior", () => {
           y1,
           x2,
           y2,
-          duration: gestureOptions?.duration ?? 300
+          duration: gestureOptions?.duration ?? 300,
         };
-      }
+      },
     };
 
     const suv = makeScrollUntilVisible({
@@ -428,7 +433,7 @@ describe("ScrollUntilVisible VoiceOver behavior", () => {
       observeResults: [makeObserveResult(0)],
       talkBackExecutor,
       device: { name: "ios-device", platform: "ios", deviceId: "ios-1" },
-      voiceOverExecutor
+      voiceOverExecutor,
     });
 
     const result = await suv.execute(BASE_OPTIONS);
@@ -470,12 +475,10 @@ describe("ScrollUntilVisible end-of-list detection", () => {
       timer,
       accessibilityService,
       observeResults: [sameObs, sameObs, sameObs, sameObs, sameObs],
-      talkBackExecutor
+      talkBackExecutor,
     });
 
-    await expect(suv.execute(BASE_OPTIONS)).rejects.toThrow(
-      /Scroll reached end of container/
-    );
+    await expect(suv.execute(BASE_OPTIONS)).rejects.toThrow(/Scroll reached end of container/);
   });
 
   test("continues scrolling when hierarchy changes between iterations", async () => {
@@ -497,9 +500,9 @@ describe("ScrollUntilVisible end-of-list detection", () => {
         makeObserveResult(1),
         makeObserveResult(2),
         makeObserveResult(3),
-        makeObserveResult(4)
+        makeObserveResult(4),
       ],
-      talkBackExecutor
+      talkBackExecutor,
     });
 
     const result = await suv.execute(BASE_OPTIONS);
@@ -526,7 +529,7 @@ describe("ScrollUntilVisible end-of-list detection", () => {
       timer,
       accessibilityService,
       observeResults: [sameA, sameA, makeObserveResult(30), makeObserveResult(40)],
-      talkBackExecutor
+      talkBackExecutor,
     });
 
     // Should not throw — hierarchy changes during reverse reset the unchanged counter

@@ -35,8 +35,8 @@ describe("typecheck baseline burndown", () => {
       "src/utils/plan/PlanExecutor.ts:",
     ];
 
-    expect(forbiddenSignatures.filter(signature => baseline.includes(signature))).toEqual([]);
-    expect(filesExpectedClean.filter(filePrefix => baseline.includes(filePrefix))).toEqual([]);
+    expect(forbiddenSignatures.filter((signature) => baseline.includes(signature))).toEqual([]);
+    expect(filesExpectedClean.filter((filePrefix) => baseline.includes(filePrefix))).toEqual([]);
   });
 
   test("iOS barrel keeps the CtrlProxyHierarchy delegate runtime export", () => {

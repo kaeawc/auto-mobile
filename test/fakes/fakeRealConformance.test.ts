@@ -34,7 +34,7 @@ function exportedFakeClassesWithoutContracts(fileName: string): Array<{
     readFileSync(path.join(FAKES_DIR, fileName), "utf8"),
     ts.ScriptTarget.Latest,
     false,
-    ts.ScriptKind.TS
+    ts.ScriptKind.TS,
   );
   const aliases = new Map<string, ts.TypeNode>();
   for (const statement of source.statements) {
@@ -53,11 +53,12 @@ function exportedFakeClassesWithoutContracts(fileName: string): Array<{
       continue;
     }
     const isExported = statement.modifiers?.some(
-      modifier => modifier.kind === ts.SyntaxKind.ExportKeyword
+      (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
     );
-    const hasContract = statement.heritageClauses?.some(
-      clause => clause.token === ts.SyntaxKind.ImplementsKeyword
-    ) ?? false;
+    const hasContract =
+      statement.heritageClauses?.some(
+        (clause) => clause.token === ts.SyntaxKind.ImplementsKeyword,
+      ) ?? false;
     if (isExported && statement.name.text.startsWith("Fake")) {
       const contractTypes: string[] = [];
       const visitedAliases = new Set<string>();
@@ -73,10 +74,7 @@ function exportedFakeClassesWithoutContracts(fileName: string): Array<{
         if (ts.isTypeReferenceNode(node)) {
           visitTypeName(node.typeName.getText(source));
         }
-        if (
-          ts.isExpressionWithTypeArguments(node) &&
-          ts.isIdentifier(node.expression)
-        ) {
+        if (ts.isExpressionWithTypeArguments(node) && ts.isIdentifier(node.expression)) {
           visitTypeName(node.expression.text);
         }
         ts.forEachChild(node, visit);
@@ -103,24 +101,22 @@ function exportedFakeClassesWithoutContracts(fileName: string): Array<{
 describe("fake contract conformance (#4439)", () => {
   test("every exported fake declares its compile-time contract", () => {
     const classes = readdirSync(FAKES_DIR)
-      .filter(fileName => fileName.endsWith(".ts") && !fileName.endsWith(".test.ts"))
+      .filter((fileName) => fileName.endsWith(".ts") && !fileName.endsWith(".test.ts"))
       .flatMap(exportedFakeClassesWithoutContracts)
       .sort((left, right) => left.name.localeCompare(right.name));
     const missing = classes
-      .filter(fakeClass => !fakeClass.hasContract)
-      .map(fakeClass => fakeClass.name);
-    const expectedClasses = classes.filter(fakeClass =>
-      Object.hasOwn(EXPECTED_CONTRACT_TYPES, fakeClass.name)
+      .filter((fakeClass) => !fakeClass.hasContract)
+      .map((fakeClass) => fakeClass.name);
+    const expectedClasses = classes.filter((fakeClass) =>
+      Object.hasOwn(EXPECTED_CONTRACT_TYPES, fakeClass.name),
     );
 
     expect(missing).toEqual([]);
-    expect(expectedClasses.map(fakeClass => fakeClass.name)).toEqual(
-      Object.keys(EXPECTED_CONTRACT_TYPES).sort()
+    expect(expectedClasses.map((fakeClass) => fakeClass.name)).toEqual(
+      Object.keys(EXPECTED_CONTRACT_TYPES).sort(),
     );
     for (const fakeClass of expectedClasses) {
-      expect(fakeClass.contractTypes).toContain(
-        EXPECTED_CONTRACT_TYPES[fakeClass.name]!
-      );
+      expect(fakeClass.contractTypes).toContain(EXPECTED_CONTRACT_TYPES[fakeClass.name]!);
     }
   });
 });

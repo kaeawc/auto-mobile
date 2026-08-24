@@ -34,30 +34,30 @@ const DIRECT_KEY_CODES: Record<string, string> = {
   ".": "KEYCODE_PERIOD",
   "/": "KEYCODE_SLASH",
   "`": "KEYCODE_GRAVE",
-  "@": "KEYCODE_AT"
+  "@": "KEYCODE_AT",
 };
 
 const SHIFTED_KEY_CODES: Record<string, string> = {
   "!": "KEYCODE_1",
   "#": "KEYCODE_3",
-  "$": "KEYCODE_4",
+  $: "KEYCODE_4",
   "%": "KEYCODE_5",
   "^": "KEYCODE_6",
   "&": "KEYCODE_7",
   "*": "KEYCODE_8",
   "(": "KEYCODE_9",
   ")": "KEYCODE_0",
-  "_": "KEYCODE_MINUS",
+  _: "KEYCODE_MINUS",
   "+": "KEYCODE_EQUALS",
   "{": "KEYCODE_LEFT_BRACKET",
   "}": "KEYCODE_RIGHT_BRACKET",
   "|": "KEYCODE_BACKSLASH",
   ":": "KEYCODE_SEMICOLON",
-  "\"": "KEYCODE_APOSTROPHE",
+  '"': "KEYCODE_APOSTROPHE",
   "<": "KEYCODE_COMMA",
   ">": "KEYCODE_PERIOD",
   "?": "KEYCODE_SLASH",
-  "~": "KEYCODE_GRAVE"
+  "~": "KEYCODE_GRAVE",
 };
 
 function shiftedPlan(baseKeyCode: string, supportsKeyCombination: boolean): KeyEventPlan | null {
@@ -93,7 +93,10 @@ export function asciiKeyEventNeedsKeyCombination(char: string): boolean {
  * @returns The plan, or `null` when the character cannot be typed as a key event
  *   (non-ASCII, or a shifted character on a device without keycombination).
  */
-export function buildAsciiKeyEventPlan(char: string, supportsKeyCombination: boolean): KeyEventPlan | null {
+export function buildAsciiKeyEventPlan(
+  char: string,
+  supportsKeyCombination: boolean,
+): KeyEventPlan | null {
   if (/^[a-z]$/.test(char)) {
     return { commands: [`shell input keyevent KEYCODE_${char.toUpperCase()}`] };
   }

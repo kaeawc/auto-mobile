@@ -4,17 +4,17 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("device_snapshots")
     .ifNotExists()
-    .addColumn("snapshot_name", "text", col => col.primaryKey())
-    .addColumn("device_id", "text", col => col.notNull())
-    .addColumn("device_name", "text", col => col.notNull())
-    .addColumn("platform", "text", col => col.notNull())
-    .addColumn("snapshot_type", "text", col => col.notNull())
-    .addColumn("include_app_data", "integer", col => col.notNull())
-    .addColumn("include_settings", "integer", col => col.notNull())
-    .addColumn("created_at", "text", col => col.notNull())
-    .addColumn("last_accessed_at", "text", col => col.notNull())
-    .addColumn("size_bytes", "integer", col => col.notNull().defaultTo(0))
-    .addColumn("manifest_json", "text", col => col.notNull())
+    .addColumn("snapshot_name", "text", (col) => col.primaryKey())
+    .addColumn("device_id", "text", (col) => col.notNull())
+    .addColumn("device_name", "text", (col) => col.notNull())
+    .addColumn("platform", "text", (col) => col.notNull())
+    .addColumn("snapshot_type", "text", (col) => col.notNull())
+    .addColumn("include_app_data", "integer", (col) => col.notNull())
+    .addColumn("include_settings", "integer", (col) => col.notNull())
+    .addColumn("created_at", "text", (col) => col.notNull())
+    .addColumn("last_accessed_at", "text", (col) => col.notNull())
+    .addColumn("size_bytes", "integer", (col) => col.notNull().defaultTo(0))
+    .addColumn("manifest_json", "text", (col) => col.notNull())
     .execute();
 
   await db.schema
@@ -41,12 +41,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("device_snapshot_configs")
     .ifNotExists()
-    .addColumn("key", "text", col => col.primaryKey())
-    .addColumn("config_json", "text", col => col.notNull())
-    .addColumn("updated_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
+    .addColumn("key", "text", (col) => col.primaryKey())
+    .addColumn("config_json", "text", (col) => col.notNull())
+    .addColumn("updated_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 }
 

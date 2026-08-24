@@ -52,12 +52,12 @@ selectors are returned regardless of confidence when present.
 // not as a positional argument.
 const tapTool = new TapOnElement(device, adb, {
   visionConfig: {
-    enabled: true,              // Enable vision fallback
-    provider: 'claude',         // Only Claude supported currently
-    confidenceThreshold: 'high', // Reserved for future gating
-    maxCostUsd: 1.0,            // Warning threshold (does not block)
-    cacheResults: true,         // Cache to avoid repeated calls
-    cacheTtlMinutes: 60         // Cache for 60 minutes
+    enabled: true, // Enable vision fallback
+    provider: "claude", // Only Claude supported currently
+    confidenceThreshold: "high", // Reserved for future gating
+    maxCostUsd: 1.0, // Warning threshold (does not block)
+    cacheResults: true, // Cache to avoid repeated calls
+    cacheTtlMinutes: 60, // Cache for 60 minutes
   },
 });
 ```
@@ -67,6 +67,7 @@ const tapTool = new TapOnElement(device, adb, {
 ### Example Scenarios
 
 **Element Text Changed**:
+
 ```yaml
 Input: tapOn({ text: "Login" })
 
@@ -80,6 +81,7 @@ Element not found. AI suggests trying:
 ```
 
 **Element Requires Navigation**:
+
 ```yaml
 Input: tapOn({ text: "Advanced Settings" })
 
@@ -91,6 +93,7 @@ Element not found, but AI suggests these steps:
 ```
 
 **Element Doesn't Exist**:
+
 ```yaml
 Input: tapOn({ text: "Nonexistent Button" })
 
@@ -104,16 +107,19 @@ Element not found. The current screen shows a login form with
 ### Cost and Performance
 
 **Typical costs per failed search**:
+
 - Input tokens: Screenshot + view hierarchy + prompt (~5,000-10,000 tokens)
 - Output tokens: Analysis response (~500-1,000 tokens)
 - **Cost**: $0.02-0.05 per vision fallback call
 
 **Performance**:
+
 - Screenshot capture: ~100-200ms
 - Claude API call: ~2-5 seconds
 - **Total**: ~2-5 seconds (only when traditional methods fail)
 
 **Caching**:
+
 - Cache key: Screenshot path + search criteria (text/resourceId)
 - TTL: 60 minutes (configurable)
 - Benefit: Instant response for repeated failures
@@ -131,12 +137,14 @@ Get an API key at: https://console.anthropic.com/
 ### Limitations
 
 **Current Limitations**:
+
 1. **Not universal**: Integrated into `tapOn`, `swipeOn`, `pinchOn`, and `dragAndDrop`, but not yet other tools (e.g. `scrollUntil`)
 2. **Android only**: iOS screenshot capture not implemented
 3. **No auto-retry**: Suggestions are informational - user must manually retry with suggested selectors
 4. **Not in MCP**: Requires custom TapOnElement construction, not available via MCP server by default
 
 **When Vision Fallback Won't Help**:
+
 - Element truly doesn't exist on screen
 - Screenshot quality is poor
 - Custom/non-standard UI elements
@@ -171,6 +179,7 @@ When implemented, add a **Tier 1** local model layer before Claude:
   - Optional Set-of-Mark preprocessing
 
 **Expected Distribution**:
+
 - 80% resolved by Tier 1 (local models find alternative selectors)
 - 15% resolved by Tier 2 (Claude provides navigation)
 - 5% genuine failures (element truly doesn't exist)
@@ -184,15 +193,15 @@ export interface VisionFallbackConfig {
   // Tier 1: Local models
   tier1: {
     enabled: boolean;
-    models: Array<'florence2' | 'paddleocr'>;
-    confidenceThreshold: number;  // 0-1
+    models: Array<"florence2" | "paddleocr">;
+    confidenceThreshold: number; // 0-1
     timeoutMs: number;
   };
 
   // Tier 2: Claude vision API
   tier2: {
     enabled: boolean;
-    useSoM: boolean;  // Set-of-Mark preprocessing
+    useSoM: boolean; // Set-of-Mark preprocessing
     confidenceThreshold: "high" | "medium" | "low";
     maxCostUsd: number;
   };
@@ -205,12 +214,14 @@ export interface VisionFallbackConfig {
 ### Local Model Integration
 
 **Florence-2** for OCR + object detection:
+
 - Extract all text with bounding boxes
 - Detect UI elements (buttons, inputs, menus)
 - Generate element descriptions
 - ONNX runtime with CUDA/CPU execution
 
 **PaddleOCR** as fallback:
+
 - Deep text extraction for complex/multi-language cases
 - Layout analysis (text, title, list, table, figure)
 - Used when Florence-2 confidence < 0.7

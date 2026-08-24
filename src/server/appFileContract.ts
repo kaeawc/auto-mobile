@@ -10,7 +10,7 @@ export const APP_FILE_CONTAINERS = [
   "externalFiles",
 ] as const;
 
-export type AppFileContainer = typeof APP_FILE_CONTAINERS[number];
+export type AppFileContainer = (typeof APP_FILE_CONTAINERS)[number];
 
 export const APP_FILE_RESOURCE_TEMPLATES = {
   CONTAINER: "automobile:devices/{deviceId}/apps/{appId}/files/{container}",
@@ -91,7 +91,7 @@ export interface AppFileReadResult {
 const appFileContainerSchema = z.enum(APP_FILE_CONTAINERS);
 
 function countDefined(values: unknown[]): number {
-  return values.filter(value => value !== undefined).length;
+  return values.filter((value) => value !== undefined).length;
 }
 
 export function normalizeAppFileRelativePath(path: string): string {
@@ -100,9 +100,11 @@ export function normalizeAppFileRelativePath(path: string): string {
   if (
     normalized.length === 0 ||
     normalized.startsWith("/") ||
-    segments.some(segment => segment.length === 0 || segment === "." || segment === "..")
+    segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")
   ) {
-    throw new Error("destinationPath must be a non-empty relative path without '.' or '..' segments");
+    throw new Error(
+      "destinationPath must be a non-empty relative path without '.' or '..' segments",
+    );
   }
   return normalized;
 }
@@ -118,58 +120,60 @@ const putAppFileBaseSchema = z.object({
 
 export const putAppFileSchema = withAppIdAliases(
   addDeviceTargetingToSchema(putAppFileBaseSchema).superRefine((args, ctx) => {
-  if (countDefined([args.sourcePath, args.contentText, args.contentBase64]) !== 1) {
-    ctx.addIssue({
-      code: "custom",
-      message: "Provide exactly one content source: sourcePath, contentText, or contentBase64.",
-      path: ["sourcePath"],
-    });
-  }
-
-  try {
-    normalizeAppFileRelativePath(args.destinationPath);
-  } catch (error) {
-    ctx.addIssue({
-      code: "custom",
-      message: error instanceof Error ? error.message : "destinationPath must be a safe relative path",
-      path: ["destinationPath"],
-    });
-  }
-
-  if (args.contentBase64 !== undefined) {
-    try {
-      const decoded = Buffer.from(args.contentBase64, "base64");
-      const canonical = decoded.toString("base64");
-      const unpadded = canonical.replace(/=+$/, "");
-      if (args.contentBase64 !== canonical && args.contentBase64 !== unpadded) {
-        throw new Error("round-trip mismatch");
-      }
-      // An empty ("") or all-padding ("====") payload round-trips cleanly but
-      // decodes to zero bytes, silently writing an empty file to the device.
-      // Reject it so the caller must send real content (#4183 A4).
-      if (decoded.length === 0) {
-        throw new Error("empty payload");
-      }
-    } catch {
+    if (countDefined([args.sourcePath, args.contentText, args.contentBase64]) !== 1) {
       ctx.addIssue({
         code: "custom",
-        message: "contentBase64 must be valid, non-empty base64.",
-        path: ["contentBase64"],
+        message: "Provide exactly one content source: sourcePath, contentText, or contentBase64.",
+        path: ["sourcePath"],
       });
     }
-  }
-  })
+
+    try {
+      normalizeAppFileRelativePath(args.destinationPath);
+    } catch (error) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          error instanceof Error ? error.message : "destinationPath must be a safe relative path",
+        path: ["destinationPath"],
+      });
+    }
+
+    if (args.contentBase64 !== undefined) {
+      try {
+        const decoded = Buffer.from(args.contentBase64, "base64");
+        const canonical = decoded.toString("base64");
+        const unpadded = canonical.replace(/=+$/, "");
+        if (args.contentBase64 !== canonical && args.contentBase64 !== unpadded) {
+          throw new Error("round-trip mismatch");
+        }
+        // An empty ("") or all-padding ("====") payload round-trips cleanly but
+        // decodes to zero bytes, silently writing an empty file to the device.
+        // Reject it so the caller must send real content (#4183 A4).
+        if (decoded.length === 0) {
+          throw new Error("empty payload");
+        }
+      } catch {
+        ctx.addIssue({
+          code: "custom",
+          message: "contentBase64 must be valid, non-empty base64.",
+          path: ["contentBase64"],
+        });
+      }
+    }
+  }),
 );
 
 function encodePathSegments(path: string): string {
   return normalizeAppFileRelativePath(path)
     .split("/")
-    .map(segment => encodeURIComponent(segment))
+    .map((segment) => encodeURIComponent(segment))
     .join("/");
 }
 
 export function buildAppFileResourceUri(parts: AppFileResourceParts): string {
-  const base = `automobile:devices/${encodeURIComponent(parts.deviceId)}` +
+  const base =
+    `automobile:devices/${encodeURIComponent(parts.deviceId)}` +
     `/apps/${encodeURIComponent(parts.appId)}` +
     `/files/${encodeURIComponent(parts.container)}`;
   return parts.path === undefined ? base : `${base}/${encodePathSegments(parts.path)}`;
@@ -185,6 +189,8 @@ export function parseAppFileResourceParams(params: Record<string, string>): AppF
     deviceId: decodeURIComponent(params.deviceId),
     appId: decodeURIComponent(params.appId),
     container: container as AppFileContainer,
-    ...(params.path !== undefined ? { path: normalizeAppFileRelativePath(decodeURIComponent(params.path)) } : {}),
+    ...(params.path !== undefined
+      ? { path: normalizeAppFileRelativePath(decodeURIComponent(params.path)) }
+      : {}),
   };
 }

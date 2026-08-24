@@ -41,7 +41,7 @@ async function parse(stdout: string): Promise<BackStackInfo> {
 // rather than one hand-picked one.
 const CAPTURES = fs
   .readdirSync(CAPTURE_DIR)
-  .filter(f => f.endsWith(".log"))
+  .filter((f) => f.endsWith(".log"))
   .sort();
 
 describe("GetBackStack CRLF tolerance (issue #4333)", () => {

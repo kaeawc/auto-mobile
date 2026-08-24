@@ -1,49 +1,62 @@
 import { describe, test, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
-import { convertToResponseEntry, buildTestRunResponse, parseTestRunParams, buildTestRunUri } from "../../src/server/testRunResources";
+import {
+  convertToResponseEntry,
+  buildTestRunResponse,
+  parseTestRunParams,
+  buildTestRunUri,
+} from "../../src/server/testRunResources";
 import { TestExecutionRepository, type TestRun } from "../../src/db/testExecutionRepository";
 import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely } from "kysely";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
-import type { Database as DatabaseSchema, NewTestExecution, NewTestExecutionStep, NewTestExecutionScreen } from "../../src/db/types";
+import type {
+  Database as DatabaseSchema,
+  NewTestExecution,
+  NewTestExecutionStep,
+  NewTestExecutionScreen,
+} from "../../src/db/types";
 import { runMigrations } from "../../src/db/migrator";
 import { createTestDatabase } from "../db/testDbHelper";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("testRunResources", () => {
   test("exposes step details in test run resource entries", () => {
-    const entry = convertToResponseEntry({
-      id: 1,
-      testClass: "com.example.LoginTest",
-      testMethod: "testLogin",
-      status: "passed",
-      startTime: 1000,
-      durationMs: 500,
-      deviceId: "sim-1",
-      deviceName: "iPhone",
-      platform: "ios",
-      errorMessage: null,
-      videoPath: null,
-      snapshotPath: null,
-      screensVisited: [],
-      steps: [
-        {
-          id: 10,
-          stepIndex: 0,
-          action: "tapOn",
-          target: 'text="Not Now"',
-          status: "skipped",
-          durationMs: 250,
-          screenName: null,
-          screenshotPath: null,
-          errorMessage: "element not found",
-          details: {
-            device: "device-a",
-            trackIndex: 0,
-            optional: true,
+    const entry = convertToResponseEntry(
+      {
+        id: 1,
+        testClass: "com.example.LoginTest",
+        testMethod: "testLogin",
+        status: "passed",
+        startTime: 1000,
+        durationMs: 500,
+        deviceId: "sim-1",
+        deviceName: "iPhone",
+        platform: "ios",
+        errorMessage: null,
+        videoPath: null,
+        snapshotPath: null,
+        screensVisited: [],
+        steps: [
+          {
+            id: 10,
+            stepIndex: 0,
+            action: "tapOn",
+            target: 'text="Not Now"',
+            status: "skipped",
+            durationMs: 250,
+            screenName: null,
+            screenshotPath: null,
+            errorMessage: "element not found",
+            details: {
+              device: "device-a",
+              trackIndex: 0,
+              optional: true,
+            },
           },
-        },
-      ],
-    } as TestRun, 1);
+        ],
+      } as TestRun,
+      1,
+    );
 
     expect(entry.steps[0].details).toEqual({
       device: "device-a",
@@ -144,9 +157,18 @@ describe("TestRunResources - Database Schema", () => {
 
   beforeEach(async () => {
     // Clear test data in correct order for foreign key constraints
-    await db.deleteFrom("test_execution_screens").execute().catch(() => {});
-    await db.deleteFrom("test_execution_steps").execute().catch(() => {});
-    await db.deleteFrom("test_executions").execute().catch(() => {});
+    await db
+      .deleteFrom("test_execution_screens")
+      .execute()
+      .catch(() => {});
+    await db
+      .deleteFrom("test_execution_steps")
+      .execute()
+      .catch(() => {});
+    await db
+      .deleteFrom("test_executions")
+      .execute()
+      .catch(() => {});
   });
 
   describe("test_executions table", () => {
@@ -303,8 +325,18 @@ describe("TestRunResources - Database Schema", () => {
 
       const now = Date.now();
       const screens: NewTestExecutionScreen[] = [
-        { execution_id: executionId, screen_name: "LoginScreen", visit_order: 0, timestamp: now - 1000 },
-        { execution_id: executionId, screen_name: "HomeScreen", visit_order: 1, timestamp: now - 500 },
+        {
+          execution_id: executionId,
+          screen_name: "LoginScreen",
+          visit_order: 0,
+          timestamp: now - 1000,
+        },
+        {
+          execution_id: executionId,
+          screen_name: "HomeScreen",
+          visit_order: 1,
+          timestamp: now - 500,
+        },
         { execution_id: executionId, screen_name: "ProfileScreen", visit_order: 2, timestamp: now },
       ];
 
@@ -318,7 +350,7 @@ describe("TestRunResources - Database Schema", () => {
         .execute();
 
       expect(storedScreens).toHaveLength(3);
-      expect(storedScreens.map(s => s.screen_name)).toEqual([
+      expect(storedScreens.map((s) => s.screen_name)).toEqual([
         "LoginScreen",
         "HomeScreen",
         "ProfileScreen",

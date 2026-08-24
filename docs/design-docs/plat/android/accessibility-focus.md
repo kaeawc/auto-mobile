@@ -15,7 +15,7 @@ explicit focus-control tool.
 ## Goal
 
 Deliberately place or clear the **TalkBack accessibility-focus cursor** (the green
-focus rectangle, distinct from input focus) on a chosen element. This is the *write*
+focus rectangle, distinct from input focus) on a chosen element. This is the _write_
 counterpart to the already-shipping `requestCurrentFocus` / `requestTraversalOrder`
 read paths and is a building block for accessibility audits and deterministic
 TalkBack navigation.
@@ -65,10 +65,10 @@ end to end.
 
 ## Platform support
 
-| Platform | Screen Reader | Status |
-|----------|---------------|--------|
-| Android | TalkBack | <kbd>✅ Implemented</kbd> |
-| iOS | VoiceOver | <kbd>❌ Not Implemented</kbd> — tool errors with an Android-only message |
+| Platform | Screen Reader | Status                                                                   |
+| -------- | ------------- | ------------------------------------------------------------------------ |
+| Android  | TalkBack      | <kbd>✅ Implemented</kbd>                                                |
+| iOS      | VoiceOver     | <kbd>❌ Not Implemented</kbd> — tool errors with an Android-only message |
 
 ## Manual test plan
 

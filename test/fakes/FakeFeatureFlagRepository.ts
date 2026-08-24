@@ -1,5 +1,12 @@
-import type { FeatureFlagConfig, FeatureFlagDefinition, FeatureFlagKey } from "../../src/features/featureFlags/FeatureFlagDefinitions";
-import type { FeatureFlagRecord, FeatureFlagRepository } from "../../src/features/featureFlags/FeatureFlagRepository";
+import type {
+  FeatureFlagConfig,
+  FeatureFlagDefinition,
+  FeatureFlagKey,
+} from "../../src/features/featureFlags/FeatureFlagDefinitions";
+import type {
+  FeatureFlagRecord,
+  FeatureFlagRepository,
+} from "../../src/features/featureFlags/FeatureFlagRepository";
 
 export class FakeFeatureFlagRepository implements FeatureFlagRepository {
   private readonly flags = new Map<FeatureFlagKey, FeatureFlagRecord>();
@@ -22,7 +29,11 @@ export class FakeFeatureFlagRepository implements FeatureFlagRepository {
     return Array.from(this.flags.values());
   }
 
-  async upsertFlag(key: FeatureFlagKey, enabled: boolean, config?: FeatureFlagConfig | null): Promise<void> {
+  async upsertFlag(
+    key: FeatureFlagKey,
+    enabled: boolean,
+    config?: FeatureFlagConfig | null,
+  ): Promise<void> {
     this.flags.set(key, {
       key,
       enabled,

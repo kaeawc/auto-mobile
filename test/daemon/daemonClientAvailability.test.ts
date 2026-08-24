@@ -23,14 +23,16 @@ describe("DaemonClient.isAvailable", () => {
 
   afterEach(async () => {
     if (server) {
-      await new Promise<void>(resolve => server!.close(() => resolve()));
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
       server = null;
     }
     for (const dir of tempDirs) {
       try {
         const { rmSync } = require("node:fs");
         rmSync(dir, { recursive: true, force: true });
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     tempDirs.length = 0;
   });
@@ -38,7 +40,7 @@ describe("DaemonClient.isAvailable", () => {
   test("returns true when server is listening", async () => {
     const socketPath = createTempSocketPath();
     server = createServer();
-    await new Promise<void>(resolve => server!.listen(socketPath, resolve));
+    await new Promise<void>((resolve) => server!.listen(socketPath, resolve));
 
     const result = await DaemonClient.isAvailable(socketPath);
     expect(result).toBe(true);
@@ -52,12 +54,15 @@ describe("DaemonClient.isAvailable", () => {
 
   // On Unix, a regular file at the socket path is detected as non-socket and rejected.
   // On Windows, named pipes don't leave stale files, so this scenario doesn't apply.
-  (isWindows ? test.skip : test)("returns false when socket file exists but is not a socket", async () => {
-    const socketPath = createTempSocketPath();
-    const { writeFileSync } = require("node:fs");
-    writeFileSync(socketPath, "not a socket");
+  (isWindows ? test.skip : test)(
+    "returns false when socket file exists but is not a socket",
+    async () => {
+      const socketPath = createTempSocketPath();
+      const { writeFileSync } = require("node:fs");
+      writeFileSync(socketPath, "not a socket");
 
-    const result = await DaemonClient.isAvailable(socketPath);
-    expect(result).toBe(false);
-  });
+      const result = await DaemonClient.isAvailable(socketPath);
+      expect(result).toBe(false);
+    },
+  );
 });

@@ -29,7 +29,7 @@ describe("YamlPlanSerializer", () => {
             optional: true,
             result: { success: true },
           }) + "\n",
-          "utf-8"
+          "utf-8",
         );
 
         const result = await serializer.exportPlanFromLogs(tempDir, "Optional Export", outputPath);
@@ -174,9 +174,7 @@ describe("YamlPlanSerializer", () => {
     test("throws for invalid YAML syntax", () => {
       const badYaml = "name: Test\nsteps:\n  - tool: tapOn\n    params: {invalid: [}";
 
-      expect(() => serializer.importPlanFromYaml(badYaml)).toThrow(
-        "Failed to parse plan YAML"
-      );
+      expect(() => serializer.importPlanFromYaml(badYaml)).toThrow("Failed to parse plan YAML");
     });
 
     test("throws when name is missing", () => {
@@ -271,9 +269,7 @@ describe("YamlPlanSerializer", () => {
           createdAt: "2024-01-01T00:00:00.000Z",
           version: "1.0.0",
         },
-        steps: [
-          { tool: "tapOn", params: { text: "Login" }, label: "Click login button" },
-        ],
+        steps: [{ tool: "tapOn", params: { text: "Login" }, label: "Click login button" }],
       });
 
       const plan = serializer.importPlanFromYaml(yamlContent);

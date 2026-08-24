@@ -102,7 +102,9 @@ describe("DefaultTextMatcher", () => {
     });
 
     test("matches curly double quotes against straight quotes", () => {
-      expect(matcher.partialTextMatch('Allow "Reminders"', "Allow \u201CReminders\u201D")).toBe(true);
+      expect(matcher.partialTextMatch('Allow "Reminders"', "Allow \u201CReminders\u201D")).toBe(
+        true,
+      );
     });
 
     test("matches em dash against hyphen", () => {
@@ -147,9 +149,9 @@ describe("DefaultTextMatcher", () => {
     });
 
     test("normalizes dashes", () => {
-      expect(normalizeQuotes("a\u2013b")).toBe("a-b");  // en dash
-      expect(normalizeQuotes("a\u2014b")).toBe("a-b");  // em dash
-      expect(normalizeQuotes("a\u2010b")).toBe("a-b");  // hyphen
+      expect(normalizeQuotes("a\u2013b")).toBe("a-b"); // en dash
+      expect(normalizeQuotes("a\u2014b")).toBe("a-b"); // em dash
+      expect(normalizeQuotes("a\u2010b")).toBe("a-b"); // hyphen
     });
 
     test("normalizes ellipsis", () => {

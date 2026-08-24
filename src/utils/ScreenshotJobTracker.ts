@@ -79,33 +79,32 @@ export class ScreenshotJobTracker {
     if (options.queueAfterPending) {
       return true;
     }
-    return options.coalesceWithPending === true &&
-      existingJobs.some(entry => !entry.abortController.signal.aborted);
+    return (
+      options.coalesceWithPending === true &&
+      existingJobs.some((entry) => !entry.abortController.signal.aborted)
+    );
   }
 
   static startJob(
     deviceId: string,
     runner: (signal: AbortSignal) => Promise<ScreenshotResult>,
-    options: ScreenshotJobOptions = {}
+    options: ScreenshotJobOptions = {},
   ): ScreenshotJobHandle {
     const existingJobs = ScreenshotJobTracker.jobs.get(deviceId) ?? [];
     if (options.coalesceWithPending) {
       const existing = [...existingJobs]
         .reverse()
-        .find(entry => entry.allowsCoalescing && !entry.abortController.signal.aborted);
+        .find((entry) => entry.allowsCoalescing && !entry.abortController.signal.aborted);
       if (existing && !existing.abortController.signal.aborted) {
         return {
           jobId: existing.jobId,
           promise: existing.promise,
-          signal: existing.abortController.signal
+          signal: existing.abortController.signal,
         };
       }
     }
 
-    const queueAfterPending = ScreenshotJobTracker.shouldQueueAfterPending(
-      options,
-      existingJobs,
-    );
+    const queueAfterPending = ScreenshotJobTracker.shouldQueueAfterPending(options, existingJobs);
     if (!queueAfterPending) {
       ScreenshotJobTracker.cancelJob(deviceId);
     }
@@ -131,7 +130,7 @@ export class ScreenshotJobTracker {
     const jobId = createTimestampedId(
       "screenshot",
       ScreenshotJobTracker.timer,
-      ScreenshotJobTracker.idGenerator
+      ScreenshotJobTracker.idGenerator,
     );
     const promise = Promise.resolve()
       .then(async () => {
@@ -146,18 +145,18 @@ export class ScreenshotJobTracker {
         }
         return runner(abortController.signal);
       })
-      .catch(error => {
+      .catch((error) => {
         const message = errorMessage(error);
         return { success: false, error: message };
       })
-      .then(async result => {
+      .then(async (result) => {
         const isLatest = ScreenshotJobTracker.isLatest(deviceId, jobId);
         const completion: ScreenshotJobCompletion = {
           deviceId,
           jobId,
           result,
           aborted: abortController.signal.aborted,
-          isLatest
+          isLatest,
         };
         if (options.onComplete) {
           try {
@@ -175,7 +174,7 @@ export class ScreenshotJobTracker {
       abortController,
       startedAt: ScreenshotJobTracker.timer.now(),
       allowsCoalescing: !options.queueAfterPending,
-      cleanupParentSignal
+      cleanupParentSignal,
     };
 
     existingJobs.push(entry);
@@ -190,7 +189,7 @@ export class ScreenshotJobTracker {
         cleanupParentSignal?.();
         return;
       }
-      const entryIndex = current.findIndex(candidate => candidate.jobId === jobId);
+      const entryIndex = current.findIndex((candidate) => candidate.jobId === jobId);
       if (entryIndex !== -1) {
         current.splice(entryIndex, 1);
       }
@@ -204,7 +203,7 @@ export class ScreenshotJobTracker {
     return {
       jobId,
       promise,
-      signal: abortController.signal
+      signal: abortController.signal,
     };
   }
 
@@ -244,14 +243,17 @@ export class ScreenshotJobTracker {
     return latestDeviceId;
   }
 
-  static async waitForCompletion(deviceId: string, timeoutMs: number): Promise<ScreenshotResult | null> {
+  static async waitForCompletion(
+    deviceId: string,
+    timeoutMs: number,
+  ): Promise<ScreenshotResult | null> {
     const entry = ScreenshotJobTracker.jobs.get(deviceId)?.at(-1);
     if (!entry) {
       return null;
     }
 
     let timeoutId: NodeJS.Timeout | undefined;
-    const timeoutPromise = new Promise<null>(resolve => {
+    const timeoutPromise = new Promise<null>((resolve) => {
       timeoutId = ScreenshotJobTracker.timer.setTimeout(() => resolve(null), timeoutMs);
     });
 

@@ -21,7 +21,7 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
 
   constructor(
     ffmpegBackend: VideoCaptureBackend = new FfmpegVideoProcessingBackend(),
-    platformBackend: VideoCaptureBackend = new PlatformVideoCaptureBackend()
+    platformBackend: VideoCaptureBackend = new PlatformVideoCaptureBackend(),
   ) {
     this.ffmpegBackend = ffmpegBackend;
     this.platformBackend = platformBackend;
@@ -82,7 +82,7 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
         process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE === "true";
       if (useFfmpegPipe) {
         logger.info(
-          "[VideoCapture] Android: using exec-out screenrecord → ffmpeg (AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE)"
+          "[VideoCapture] Android: using exec-out screenrecord → ffmpeg (AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE)",
         );
         return this.ffmpegBackend;
       }

@@ -1,6 +1,12 @@
 import { mkdirSync, readdirSync } from "node:fs";
 import path from "path";
-import { readdirAsync, readFileAsync, statAsync, unlinkAsync, writeFileAsync } from "../../../utils/io";
+import {
+  readdirAsync,
+  readFileAsync,
+  statAsync,
+  unlinkAsync,
+  writeFileAsync,
+} from "../../../utils/io";
 import { logger } from "../../../utils/logger";
 import { getTempDir, TEMP_SUBDIRS } from "../../../utils/tempDir";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
@@ -38,9 +44,10 @@ export function normalizeCachedObserveResult(parsed: unknown): ObserveResult {
   if (Array.isArray(legacy)) {
     const truncated = record.layoutWarningsTruncated;
     const total = typeof truncated === "number" ? truncated : undefined;
-    record.layoutWarnings = total !== undefined
-      ? { scope: "truncated", total, warnings: legacy }
-      : { scope: "full", warnings: legacy };
+    record.layoutWarnings =
+      total !== undefined
+        ? { scope: "truncated", total, warnings: legacy }
+        : { scope: "full", warnings: legacy };
     delete record.layoutWarningsTruncated;
   }
   return parsed as ObserveResult;
@@ -81,11 +88,15 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     const timestamp = this.timer.now();
     const cacheKey = `${deviceId}:${timestamp}`;
     try {
-      logger.debug(`[OBSERVE_CACHE] Caching observe result for device ${deviceId} with timestamp ${timestamp}`);
+      logger.debug(
+        `[OBSERVE_CACHE] Caching observe result for device ${deviceId} with timestamp ${timestamp}`,
+      );
       await this.pendingDiskCleanup;
       this.cache.set(cacheKey, { timestamp, deviceId, observeResult: result });
       await this.saveObserveResultToDisk(cacheKey, result);
-      logger.debug(`[OBSERVE_CACHE] Successfully cached observe result, in-memory cache size: ${this.cache.size}`);
+      logger.debug(
+        `[OBSERVE_CACHE] Successfully cached observe result, in-memory cache size: ${this.cache.size}`,
+      );
     } catch (error) {
       logger.warn(`[OBSERVE_CACHE] Error caching observe result: ${error}`);
     }
@@ -127,7 +138,10 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
    * the latest insertion wins when wall-clock resolution collides with two
    * adjacent puts.
    */
-  private collectLiveMostRecent(deviceId?: string, verboseLog: boolean = false): ObserveResultCacheEntry | undefined {
+  private collectLiveMostRecent(
+    deviceId?: string,
+    verboseLog: boolean = false,
+  ): ObserveResultCacheEntry | undefined {
     if (this.cache.size === 0) {
       return undefined;
     }
@@ -141,7 +155,9 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       if (age >= OBSERVE_RESULT_CACHE_TTL_MS) {
         expiredKeys.push(key);
         if (verboseLog) {
-          logger.debug(`[OBSERVE_CACHE] Removing expired cache entry: ${key} (age: ${age}ms > TTL: ${OBSERVE_RESULT_CACHE_TTL_MS}ms)`);
+          logger.debug(
+            `[OBSERVE_CACHE] Removing expired cache entry: ${key} (age: ${age}ms > TTL: ${OBSERVE_RESULT_CACHE_TTL_MS}ms)`,
+          );
         }
         continue;
       }
@@ -166,7 +182,9 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
 
   private checkInMemory(deviceId: string): ObserveResult | undefined {
     const cacheSize = this.cache.size;
-    logger.debug(`[OBSERVE_CACHE] Checking in-memory cache for device ${deviceId}, size: ${cacheSize}`);
+    logger.debug(
+      `[OBSERVE_CACHE] Checking in-memory cache for device ${deviceId}, size: ${cacheSize}`,
+    );
     if (cacheSize === 0) {
       logger.debug("[OBSERVE_CACHE] In-memory cache is empty");
       return undefined;
@@ -175,7 +193,9 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     const entry = this.collectLiveMostRecent(deviceId, true);
     if (entry) {
       const age = this.timer.now() - entry.timestamp;
-      logger.debug(`[OBSERVE_CACHE] Found most recent in-memory result for device ${deviceId} (age: ${age}ms)`);
+      logger.debug(
+        `[OBSERVE_CACHE] Found most recent in-memory result for device ${deviceId} (age: ${age}ms)`,
+      );
       return entry.observeResult;
     }
 
@@ -188,7 +208,9 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     try {
       const devicePrefix = `observe_${this.sanitizeDeviceId(deviceId)}_`;
       const files = await readdirAsync(this.cacheDir);
-      const jsonFiles = files.filter(file => file.endsWith(".json") && file.startsWith(devicePrefix));
+      const jsonFiles = files.filter(
+        (file) => file.endsWith(".json") && file.startsWith(devicePrefix),
+      );
 
       if (jsonFiles.length === 0) {
         logger.debug("[OBSERVE_CACHE] No observe result files found in disk cache");
@@ -208,7 +230,9 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
             mostRecentFile = { path: filePath, mtime: stats.mtime.getTime() };
           }
         } else {
-          logger.debug(`[OBSERVE_CACHE] Disk cache file expired: ${file} (age: ${age}ms > TTL: ${OBSERVE_RESULT_CACHE_TTL_MS}ms)`);
+          logger.debug(
+            `[OBSERVE_CACHE] Disk cache file expired: ${file} (age: ${age}ms > TTL: ${OBSERVE_RESULT_CACHE_TTL_MS}ms)`,
+          );
         }
       }
 
@@ -238,7 +262,10 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     }
   }
 
-  private async saveObserveResultToDisk(cacheKey: string, observeResult: ObserveResult): Promise<void> {
+  private async saveObserveResultToDisk(
+    cacheKey: string,
+    observeResult: ObserveResult,
+  ): Promise<void> {
     try {
       const filename = `observe_${cacheKey.replace(/:/g, "_")}.json`;
       const filePath = path.join(this.cacheDir, filename);
@@ -255,11 +282,15 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
 
   private deleteDiskFilesForDevice(deviceId: string): void {
     const devicePrefix = `observe_${this.sanitizeDeviceId(deviceId)}_`;
-    this.deleteDiskFilesMatching(filename => filename.endsWith(".json") && filename.startsWith(devicePrefix));
+    this.deleteDiskFilesMatching(
+      (filename) => filename.endsWith(".json") && filename.startsWith(devicePrefix),
+    );
   }
 
   private deleteAllDiskFiles(): void {
-    this.deleteDiskFilesMatching(filename => filename.endsWith(".json") && filename.startsWith("observe_"));
+    this.deleteDiskFilesMatching(
+      (filename) => filename.endsWith(".json") && filename.startsWith("observe_"),
+    );
   }
 
   private deleteDiskFilesMatching(predicate: (filename: string) => boolean): void {
@@ -280,13 +311,13 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     }
 
     const cleanup = Promise.all(
-      matches.map(async file => {
+      matches.map(async (file) => {
         try {
           await unlinkAsync(path.join(this.cacheDir, file));
         } catch (error) {
           logger.warn(`[OBSERVE_CACHE] Failed to delete cache file ${file}: ${error}`);
         }
-      })
+      }),
     ).then(() => {});
     this.pendingDiskCleanup = this.pendingDiskCleanup.then(() => cleanup);
   }

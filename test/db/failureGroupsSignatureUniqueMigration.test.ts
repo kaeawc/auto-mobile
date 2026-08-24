@@ -147,12 +147,24 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
     // now points at the keeper.
     const occurrences = await db.selectFrom("failure_occurrences").selectAll().execute();
     expect(occurrences).toHaveLength(4);
-    expect(occurrences.every(o => o.group_id === "A")).toBe(true);
+    expect(occurrences.every((o) => o.group_id === "A")).toBe(true);
   });
 
   test("repoints failure_notifications so zero rows reference a non-existent group", async () => {
-    await seedGroup({ id: "A", signature: "sig-x", firstOccurrence: 100, totalCount: 1, uniqueSessions: 1 });
-    await seedGroup({ id: "B", signature: "sig-x", firstOccurrence: 200, totalCount: 1, uniqueSessions: 1 });
+    await seedGroup({
+      id: "A",
+      signature: "sig-x",
+      firstOccurrence: 100,
+      totalCount: 1,
+      uniqueSessions: 1,
+    });
+    await seedGroup({
+      id: "B",
+      signature: "sig-x",
+      firstOccurrence: 200,
+      totalCount: 1,
+      uniqueSessions: 1,
+    });
     await seedOccurrence("occ-a1", "A", "s1");
     await seedOccurrence("occ-b1", "B", "s2");
     await seedNotification("occ-a1", "A");
@@ -164,7 +176,7 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
     expect(notifications).toHaveLength(2);
     // No notification may reference a deleted group id.
     const liveGroupIds = new Set(
-      (await db.selectFrom("failure_groups").select("id").execute()).map(g => g.id)
+      (await db.selectFrom("failure_groups").select("id").execute()).map((g) => g.id),
     );
     for (const n of notifications) {
       expect(liveGroupIds.has(n.group_id)).toBe(true);
@@ -173,8 +185,20 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
 
   test("uses a deterministic keeper tiebreak (min id) when first_occurrence ties", async () => {
     // Same first_occurrence — keeper must be the min id ("aaa").
-    await seedGroup({ id: "bbb", signature: "sig-tie", firstOccurrence: 500, totalCount: 1, uniqueSessions: 1 });
-    await seedGroup({ id: "aaa", signature: "sig-tie", firstOccurrence: 500, totalCount: 1, uniqueSessions: 1 });
+    await seedGroup({
+      id: "bbb",
+      signature: "sig-tie",
+      firstOccurrence: 500,
+      totalCount: 1,
+      uniqueSessions: 1,
+    });
+    await seedGroup({
+      id: "aaa",
+      signature: "sig-tie",
+      firstOccurrence: 500,
+      totalCount: 1,
+      uniqueSessions: 1,
+    });
     await seedOccurrence("occ-1", "aaa", "s1");
     await seedOccurrence("occ-2", "bbb", "s1");
 
@@ -186,12 +210,24 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
   });
 
   test("enforces uniqueness after migration (duplicate-signature insert throws)", async () => {
-    await seedGroup({ id: "A", signature: "sig-x", firstOccurrence: 100, totalCount: 1, uniqueSessions: 1 });
+    await seedGroup({
+      id: "A",
+      signature: "sig-x",
+      firstOccurrence: 100,
+      totalCount: 1,
+      uniqueSessions: 1,
+    });
 
     await uniqueUp(db as unknown as Kysely<unknown>);
 
     await expect(
-      seedGroup({ id: "C", signature: "sig-x", firstOccurrence: 300, totalCount: 1, uniqueSessions: 1 })
+      seedGroup({
+        id: "C",
+        signature: "sig-x",
+        firstOccurrence: 300,
+        totalCount: 1,
+        uniqueSessions: 1,
+      }),
     ).rejects.toThrow(/UNIQUE constraint failed/);
   });
 
@@ -202,19 +238,43 @@ describe("2026_07_01_000_failure_groups_signature_unique migration", () => {
     await uniqueUp(db as unknown as Kysely<unknown>);
 
     // Unique index is present and enforcing.
-    await seedGroup({ id: "A", signature: "sig-only", firstOccurrence: 1, totalCount: 1, uniqueSessions: 1 });
+    await seedGroup({
+      id: "A",
+      signature: "sig-only",
+      firstOccurrence: 1,
+      totalCount: 1,
+      uniqueSessions: 1,
+    });
     await expect(
-      seedGroup({ id: "B", signature: "sig-only", firstOccurrence: 2, totalCount: 1, uniqueSessions: 1 })
+      seedGroup({
+        id: "B",
+        signature: "sig-only",
+        firstOccurrence: 2,
+        totalCount: 1,
+        uniqueSessions: 1,
+      }),
     ).rejects.toThrow(/UNIQUE constraint failed/);
   });
 
   test("down() restores the non-unique index so duplicate signatures are allowed again", async () => {
-    await seedGroup({ id: "A", signature: "sig-x", firstOccurrence: 100, totalCount: 1, uniqueSessions: 1 });
+    await seedGroup({
+      id: "A",
+      signature: "sig-x",
+      firstOccurrence: 100,
+      totalCount: 1,
+      uniqueSessions: 1,
+    });
     await uniqueUp(db as unknown as Kysely<unknown>);
     await uniqueDown(db as unknown as Kysely<unknown>);
 
     // After down, a duplicate signature must be insertable again.
-    await seedGroup({ id: "B", signature: "sig-x", firstOccurrence: 200, totalCount: 1, uniqueSessions: 1 });
+    await seedGroup({
+      id: "B",
+      signature: "sig-x",
+      firstOccurrence: 200,
+      totalCount: 1,
+      uniqueSessions: 1,
+    });
     const groups = await db.selectFrom("failure_groups").selectAll().execute();
     expect(groups).toHaveLength(2);
   });

@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  BODY_TRUNCATION_LIMIT,
-  truncateBodyText,
-} from "../../src/utils/truncateBodyText";
+import { BODY_TRUNCATION_LIMIT, truncateBodyText } from "../../src/utils/truncateBodyText";
 
 describe("truncateBodyText", () => {
   test("null stays null", () => {

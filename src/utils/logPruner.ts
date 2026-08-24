@@ -72,16 +72,21 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
     entries = await readdirAsync(opts.dir);
   } catch (error) {
     // Startup log pruning is best-effort; an unreadable directory only skips cleanup.
-    opts.logger?.debug(`log pruning skipped because the log directory could not be read: ${error}`, error);
+    opts.logger?.debug(
+      `log pruning skipped because the log directory could not be read: ${error}`,
+      error,
+    );
     return;
   }
-  const logFiles = entries.filter(f => f.endsWith(".log"));
+  const logFiles = entries.filter((f) => f.endsWith(".log"));
 
   // (a) Cap this process's own files (exact-PID match — never a peer's).
-  const ownFiles = logFiles.filter(f => isOwnedBy(f, opts.ownPrefix)).sort();
+  const ownFiles = logFiles.filter((f) => isOwnedBy(f, opts.ownPrefix)).sort();
   if (ownFiles.length > opts.maxOwnFiles) {
     for (const file of ownFiles.slice(0, ownFiles.length - opts.maxOwnFiles)) {
-      await unlinkAsync(path.join(opts.dir, file)).catch(() => { /* best effort */ });
+      await unlinkAsync(path.join(opts.dir, file)).catch(() => {
+        /* best effort */
+      });
     }
   }
 
@@ -101,7 +106,9 @@ export async function pruneLogFiles(opts: LogPruneOptions): Promise<void> {
     try {
       const stats = await statAsync(full);
       if (now - stats.mtimeMs > opts.abandonedMaxAgeMs) {
-        await unlinkAsync(full).catch(() => { /* best effort */ });
+        await unlinkAsync(full).catch(() => {
+          /* best effort */
+        });
       }
     } catch {
       // Another process may have removed it concurrently — ignore.

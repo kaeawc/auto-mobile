@@ -37,7 +37,7 @@ function makeFakeDb(opts: { execThrows?: boolean } = {}): { db: BunDatabase; exe
 }
 
 const optimizeCount = (execs: string[]): number =>
-  execs.filter(s => s.includes("PRAGMA optimize")).length;
+  execs.filter((s) => s.includes("PRAGMA optimize")).length;
 
 describe("periodic PRAGMA optimize (#3497)", () => {
   test("fires on the interval and repeats", () => {
@@ -62,7 +62,7 @@ describe("periodic PRAGMA optimize (#3497)", () => {
       new BunSqliteConnectionState(db, undefined, { timer }, 1000);
 
       expect(() => timer.advanceTime(1000)).not.toThrow();
-      const logged = debugSpy.mock.calls.map(c => String(c[0])).join("\n");
+      const logged = debugSpy.mock.calls.map((c) => String(c[0])).join("\n");
       expect(logged).toContain("periodic PRAGMA optimize failed");
     } finally {
       debugSpy.mockRestore();

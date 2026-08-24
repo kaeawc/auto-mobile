@@ -18,9 +18,7 @@ afterEach(() => {
 function createHarness() {
   isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
   const fakeClient = new FakeDaemonClient({
-    daemonMethodResults: new Map<string, any>([
-      ["tools/list", { tools: [] }],
-    ]),
+    daemonMethodResults: new Map<string, any>([["tools/list", { tools: [] }]]),
   });
   const fakeManager = new FakeDaemonManager();
   fakeManager.statusResult = {

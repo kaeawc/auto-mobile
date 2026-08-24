@@ -13,9 +13,9 @@ import { runExclusiveResetTest } from "./resetTestSerialLock";
 function deferred<T = void>(): {
   promise: Promise<T>;
   resolve: (value: T | PromiseLike<T>) => void;
-  } {
+} {
   let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>(res => {
+  const promise = new Promise<T>((res) => {
     resolve = res;
   });
   return { promise, resolve };
@@ -29,7 +29,7 @@ function deferred<T = void>(): {
  */
 async function flush(): Promise<void> {
   for (let i = 0; i < 10; i += 1) {
-    await new Promise(resolve => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
   }
 }
 
@@ -77,7 +77,7 @@ describe("runExclusiveResetTest", () => {
       runExclusiveResetTest(async () => {
         ran.push("throwing");
         throw new Error("boom");
-      })
+      }),
     ).rejects.toThrow("boom");
 
     // If the throwing body did not release, this await would hang forever.

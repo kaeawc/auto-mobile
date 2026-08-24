@@ -35,18 +35,18 @@ flowchart TB
 
 ## Storage Locations
 
-| Path | Purpose |
-|------|---------|
-| `~/.auto-mobile/auto-mobile.db` | SQLite database for metadata |
-| `~/.automobile/snapshots/` | Device state snapshot payloads |
-| `~/.auto-mobile/*.sock` | Unix sockets for configuration |
+| Path                            | Purpose                        |
+| ------------------------------- | ------------------------------ |
+| `~/.auto-mobile/auto-mobile.db` | SQLite database for metadata   |
+| `~/.automobile/snapshots/`      | Device state snapshot payloads |
+| `~/.auto-mobile/*.sock`         | Unix sockets for configuration |
 
 ## Topics
 
-| Document | Description |
-|----------|-------------|
-| [Database Migrations](migrations.md) | Schema management with Kysely |
-| [Device Snapshots](snapshots.md) | Capture and restore device state |
+| Document                                    | Description                          |
+| ------------------------------------------- | ------------------------------------ |
+| [Database Migrations](migrations.md)        | Schema management with Kysely        |
+| [Device Snapshots](snapshots.md)            | Capture and restore device state     |
 | [Appearance Sync](../observe/appearance.md) | Host/device appearance configuration |
 
 ## Database Schema
@@ -78,9 +78,9 @@ See [Database Migrations](migrations.md) for details on adding new migrations.
 
 Device snapshots use a hybrid approach:
 
-| Snapshot Type | Metadata | Payload |
-|---------------|----------|---------|
-| VM Snapshot | SQLite | Emulator AVD directory |
-| ADB Snapshot | SQLite | `~/.automobile/snapshots/` |
+| Snapshot Type | Metadata | Payload                    |
+| ------------- | -------- | -------------------------- |
+| VM Snapshot   | SQLite   | Emulator AVD directory     |
+| ADB Snapshot  | SQLite   | `~/.automobile/snapshots/` |
 
 See [Device Snapshots](snapshots.md) for capture/restore workflows.

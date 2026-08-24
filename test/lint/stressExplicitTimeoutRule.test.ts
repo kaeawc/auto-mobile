@@ -10,7 +10,7 @@ function lintSnippet(code: string): string[] {
 }
 
 function matches(messages: string[], fragment: string): boolean {
-  return messages.some(message => message.includes(fragment));
+  return messages.some((message) => message.includes(fragment));
 }
 
 describe("auto-mobile/stress-explicit-timeout", () => {

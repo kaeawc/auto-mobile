@@ -10,17 +10,17 @@ import type { IdGenerator } from "../../src/utils/IdGenerator";
  */
 export const runIdGeneratorContract = (
   description: string,
-  makeIdGenerator: () => IdGenerator
+  makeIdGenerator: () => IdGenerator,
 ): void => {
-  describe(`IdGenerator contract: ${description}`, function() {
-    test("emits a non-empty id", function() {
+  describe(`IdGenerator contract: ${description}`, function () {
+    test("emits a non-empty id", function () {
       const id = makeIdGenerator().next();
 
       expect(typeof id).toBe("string");
       expect(id.length).toBeGreaterThan(0);
     });
 
-    test("never repeats an id across many successive calls", function() {
+    test("never repeats an id across many successive calls", function () {
       const generator = makeIdGenerator();
       const seen = new Set<string>();
 

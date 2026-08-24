@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   parsePlist,
   buildPlist,
-  injectUITestEnvironment
+  injectUITestEnvironment,
 } from "../../../src/utils/ios-cmdline-tools/XctestrunPlist";
 
 /**
@@ -57,16 +57,16 @@ function expectDict(value: unknown): Map<string, unknown> {
   return value as Map<string, unknown>;
 }
 
-describe("XctestrunPlist", function() {
-  describe("parsePlist / buildPlist round-trip (EC2)", function() {
-    test("parses dicts as ordered Maps and preserves scalar types", async function() {
+describe("XctestrunPlist", function () {
+  describe("parsePlist / buildPlist round-trip (EC2)", function () {
+    test("parses dicts as ordered Maps and preserves scalar types", async function () {
       const root = expectDict(await parsePlist(SAMPLE_XCTESTRUN));
 
       // Top-level key order preserved
       expect([...root.keys()]).toEqual([
         "CtrlProxyTests",
         "CtrlProxyUITests",
-        "__xctestrun_metadata__"
+        "__xctestrun_metadata__",
       ]);
 
       const uiTarget = expectDict(root.get("CtrlProxyUITests"));
@@ -78,7 +78,7 @@ describe("XctestrunPlist", function() {
       expect(metadata.get("FormatVersion")).toBe(1);
     });
 
-    test("round-trips losslessly through buildPlist -> parsePlist", async function() {
+    test("round-trips losslessly through buildPlist -> parsePlist", async function () {
       const root = await parsePlist(SAMPLE_XCTESTRUN);
       const rebuilt = buildPlist(root);
 
@@ -91,34 +91,32 @@ describe("XctestrunPlist", function() {
       const env = expectDict(uiTarget.get("EnvironmentVariables"));
       expect([...env.entries()]).toEqual([
         ["OS_ACTIVITY_DT_MODE", "YES"],
-        ["TERM", "dumb"]
+        ["TERM", "dumb"],
       ]);
       expect(uiTarget.get("IsUITestBundle")).toBe(true);
     });
 
-    test("escapes XML-special characters in string values", async function() {
-      const root = new Map<string, unknown>([
-        ["weird", "a & b < c > d \"q\""]
-      ]);
+    test("escapes XML-special characters in string values", async function () {
+      const root = new Map<string, unknown>([["weird", 'a & b < c > d "q"']]);
       const xml = buildPlist(root);
       expect(xml).toContain("a &amp; b &lt; c &gt; d");
       const reparsed = expectDict(await parsePlist(xml));
-      expect(reparsed.get("weird")).toBe("a & b < c > d \"q\"");
+      expect(reparsed.get("weird")).toBe('a & b < c > d "q"');
     });
   });
 
-  describe("injectUITestEnvironment (EC1)", function() {
-    test("injects into UI-test target only, preserving existing entries", async function() {
+  describe("injectUITestEnvironment (EC1)", function () {
+    test("injects into UI-test target only, preserving existing entries", async function () {
       const root = expectDict(await parsePlist(SAMPLE_XCTESTRUN));
       const count = injectUITestEnvironment(root, {
         CTRL_PROXY_IOS_PORT: "8767",
-        AUTOMOBILE_DEVICE_ID: "SIM-UUID"
+        AUTOMOBILE_DEVICE_ID: "SIM-UUID",
       });
 
       expect(count).toBe(1);
 
       const uiEnv = expectDict(
-        expectDict(root.get("CtrlProxyUITests")).get("EnvironmentVariables")
+        expectDict(root.get("CtrlProxyUITests")).get("EnvironmentVariables"),
       );
       // Existing entries preserved
       expect(uiEnv.get("OS_ACTIVITY_DT_MODE")).toBe("YES");
@@ -129,35 +127,33 @@ describe("XctestrunPlist", function() {
 
       // The non-UI (unit) target is left untouched
       const unitEnv = expectDict(
-        expectDict(root.get("CtrlProxyTests")).get("EnvironmentVariables")
+        expectDict(root.get("CtrlProxyTests")).get("EnvironmentVariables"),
       );
       expect(unitEnv.has("CTRL_PROXY_IOS_PORT")).toBe(false);
     });
 
-    test("overwrites an existing key on the UI-test target", async function() {
+    test("overwrites an existing key on the UI-test target", async function () {
       const root = expectDict(await parsePlist(SAMPLE_XCTESTRUN));
       injectUITestEnvironment(root, { TERM: "xterm" });
       const uiEnv = expectDict(
-        expectDict(root.get("CtrlProxyUITests")).get("EnvironmentVariables")
+        expectDict(root.get("CtrlProxyUITests")).get("EnvironmentVariables"),
       );
       expect(uiEnv.get("TERM")).toBe("xterm");
     });
 
-    test("creates EnvironmentVariables when the UI-test target lacks one", async function() {
+    test("creates EnvironmentVariables when the UI-test target lacks one", async function () {
       const root = new Map<string, unknown>([
-        ["UITarget", new Map<string, unknown>([["IsUITestBundle", true]])]
+        ["UITarget", new Map<string, unknown>([["IsUITestBundle", true]])],
       ]);
       const count = injectUITestEnvironment(root, { CTRL_PROXY_IOS_PORT: "9000" });
       expect(count).toBe(1);
-      const env = expectDict(
-        expectDict(root.get("UITarget")).get("EnvironmentVariables")
-      );
+      const env = expectDict(expectDict(root.get("UITarget")).get("EnvironmentVariables"));
       expect(env.get("CTRL_PROXY_IOS_PORT")).toBe("9000");
     });
 
-    test("returns 0 when there is no UI-test bundle", async function() {
+    test("returns 0 when there is no UI-test bundle", async function () {
       const root = new Map<string, unknown>([
-        ["UnitTarget", new Map<string, unknown>([["IsUITestBundle", false]])]
+        ["UnitTarget", new Map<string, unknown>([["IsUITestBundle", false]])],
       ]);
       expect(injectUITestEnvironment(root, { X: "1" })).toBe(0);
     });

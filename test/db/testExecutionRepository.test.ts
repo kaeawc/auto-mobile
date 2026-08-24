@@ -66,7 +66,7 @@ describe("TestExecutionRepository", () => {
           deviceType: "emulator",
           status: "failed",
           errorMessage: "AssertionError: expected true",
-        })
+        }),
       );
 
       const runs = await repo.getTestRuns();
@@ -146,7 +146,7 @@ describe("TestExecutionRepository", () => {
               },
             }),
           ],
-        })
+        }),
       );
 
       const runs = await repo.getTestRuns();
@@ -166,7 +166,7 @@ describe("TestExecutionRepository", () => {
             { screenName: "LoginScreen", timestamp: 1000 },
             { screenName: "HomeScreen", timestamp: 2000 },
           ],
-        })
+        }),
       );
 
       const runs = await repo.getTestRuns();
@@ -191,9 +191,9 @@ describe("TestExecutionRepository", () => {
         END
       `.execute(db);
 
-      await expect(
-        repo.recordExecution(makeExecution({ steps: [makeStep()] }))
-      ).rejects.toThrow("injected step insert failure");
+      await expect(repo.recordExecution(makeExecution({ steps: [makeStep()] }))).rejects.toThrow(
+        "injected step insert failure",
+      );
 
       const row = await db
         .selectFrom("test_executions")
@@ -216,8 +216,8 @@ describe("TestExecutionRepository", () => {
           makeExecution({
             steps: [makeStep()],
             screensVisited: [{ screenName: "LoginScreen", timestamp: 1000 }],
-          })
-        )
+          }),
+        ),
       ).rejects.toThrow("injected screen insert failure");
 
       const executionRow = await db
@@ -235,13 +235,13 @@ describe("TestExecutionRepository", () => {
     test("runs on an enclosing transaction executor without opening a nested transaction", async () => {
       let executionId = 0;
 
-      await db.transaction().execute(async trx => {
+      await db.transaction().execute(async (trx) => {
         const boundRepo = new TestExecutionRepository(timer, trx);
         executionId = await boundRepo.recordExecution(
           makeExecution({
             steps: [makeStep()],
             screensVisited: [{ screenName: "LoginScreen", timestamp: 1000 }],
-          })
+          }),
         );
       });
 
@@ -301,7 +301,7 @@ describe("TestExecutionRepository", () => {
                 { screenName: `Screen${i}A`, timestamp: 1000 + i },
                 { screenName: `Screen${i}B`, timestamp: 2000 + i },
               ],
-            })
+            }),
           );
         }
 
@@ -309,7 +309,7 @@ describe("TestExecutionRepository", () => {
         const runs = await instrumentedRepo.getTestRuns({ limit: 5 });
 
         expect(runs).toHaveLength(5);
-        expect(runs[0].steps.map(step => step.stepIndex)).toEqual([0, 1]);
+        expect(runs[0].steps.map((step) => step.stepIndex)).toEqual([0, 1]);
         expect(runs[0].screensVisited).toEqual(["Screen4A", "Screen4B"]);
         expect(instrumented.queryCount()).toBe(3);
       } finally {
@@ -328,9 +328,15 @@ describe("TestExecutionRepository", () => {
         const runs = await instrumentedRepo.getTestRuns({ limit: executionCount });
 
         expect(runs).toHaveLength(executionCount);
-        expect(instrumented.queryCount()).toBe(1 + 2 * Math.ceil(executionCount / SQLITE_MAX_BOUND_PARAMETERS));
-        for (const id of [SQLITE_MAX_BOUND_PARAMETERS - 1, SQLITE_MAX_BOUND_PARAMETERS, SQLITE_MAX_BOUND_PARAMETERS + 1]) {
-          const run = runs.find(item => item.id === id);
+        expect(instrumented.queryCount()).toBe(
+          1 + 2 * Math.ceil(executionCount / SQLITE_MAX_BOUND_PARAMETERS),
+        );
+        for (const id of [
+          SQLITE_MAX_BOUND_PARAMETERS - 1,
+          SQLITE_MAX_BOUND_PARAMETERS,
+          SQLITE_MAX_BOUND_PARAMETERS + 1,
+        ]) {
+          const run = runs.find((item) => item.id === id);
           expect(run?.steps).toHaveLength(1);
           expect(run?.steps[0]).toMatchObject({
             action: `action-${id}`,
@@ -375,8 +381,12 @@ describe("TestExecutionRepository", () => {
     });
 
     test("combines testClass and testMethod filters", async () => {
-      await repo.recordExecution(makeExecution({ testClass: "LoginTest", testMethod: "testLogin" }));
-      await repo.recordExecution(makeExecution({ testClass: "LoginTest", testMethod: "testLogout" }));
+      await repo.recordExecution(
+        makeExecution({ testClass: "LoginTest", testMethod: "testLogin" }),
+      );
+      await repo.recordExecution(
+        makeExecution({ testClass: "LoginTest", testMethod: "testLogout" }),
+      );
       await repo.recordExecution(makeExecution({ testClass: "HomeTest", testMethod: "testLogin" }));
 
       const runs = await repo.getTestRuns({ testClass: "LoginTest", testMethod: "testLogin" });
@@ -449,7 +459,7 @@ describe("TestExecutionRepository", () => {
           durationMs: 1000,
           status: "passed",
           timestamp: 5000,
-        })
+        }),
       );
       await repo.recordExecution(
         makeExecution({
@@ -458,7 +468,7 @@ describe("TestExecutionRepository", () => {
           durationMs: 2000,
           status: "passed",
           timestamp: 6000,
-        })
+        }),
       );
 
       const stats = await repo.getTimingStats({});
@@ -475,13 +485,31 @@ describe("TestExecutionRepository", () => {
 
     test("computes counts for different statuses", async () => {
       await repo.recordExecution(
-        makeExecution({ testClass: "T", testMethod: "m", status: "passed", durationMs: 100, timestamp: 1000 })
+        makeExecution({
+          testClass: "T",
+          testMethod: "m",
+          status: "passed",
+          durationMs: 100,
+          timestamp: 1000,
+        }),
       );
       await repo.recordExecution(
-        makeExecution({ testClass: "T", testMethod: "m", status: "failed", durationMs: 200, timestamp: 2000 })
+        makeExecution({
+          testClass: "T",
+          testMethod: "m",
+          status: "failed",
+          durationMs: 200,
+          timestamp: 2000,
+        }),
       );
       await repo.recordExecution(
-        makeExecution({ testClass: "T", testMethod: "m", status: "skipped", durationMs: 50, timestamp: 3000 })
+        makeExecution({
+          testClass: "T",
+          testMethod: "m",
+          status: "skipped",
+          durationMs: 50,
+          timestamp: 3000,
+        }),
       );
 
       const stats = await repo.getTimingStats({});
@@ -494,17 +522,27 @@ describe("TestExecutionRepository", () => {
 
     test("groups different test methods separately", async () => {
       await repo.recordExecution(
-        makeExecution({ testClass: "LoginTest", testMethod: "testLogin", durationMs: 100, timestamp: 1000 })
+        makeExecution({
+          testClass: "LoginTest",
+          testMethod: "testLogin",
+          durationMs: 100,
+          timestamp: 1000,
+        }),
       );
       await repo.recordExecution(
-        makeExecution({ testClass: "LoginTest", testMethod: "testLogout", durationMs: 200, timestamp: 2000 })
+        makeExecution({
+          testClass: "LoginTest",
+          testMethod: "testLogout",
+          durationMs: 200,
+          timestamp: 2000,
+        }),
       );
 
       const stats = await repo.getTimingStats({});
       expect(stats).toHaveLength(2);
 
-      const loginStats = stats.find(s => s.testMethod === "testLogin");
-      const logoutStats = stats.find(s => s.testMethod === "testLogout");
+      const loginStats = stats.find((s) => s.testMethod === "testLogin");
+      const logoutStats = stats.find((s) => s.testMethod === "testLogout");
       expect(loginStats).toBeDefined();
       expect(logoutStats).toBeDefined();
       expect(loginStats!.averageDurationMs).toBe(100);
@@ -520,13 +558,13 @@ describe("TestExecutionRepository", () => {
       // Values: 100, 200, 300 => avg=200, variance = ((100-200)^2 + (200-200)^2 + (300-200)^2)/3 = 20000/3
       // stdDev = sqrt(6666.67) ~= 81.65 -> rounded to 82
       await repo.recordExecution(
-        makeExecution({ testClass: "T", testMethod: "m", durationMs: 100, timestamp: 1000 })
+        makeExecution({ testClass: "T", testMethod: "m", durationMs: 100, timestamp: 1000 }),
       );
       await repo.recordExecution(
-        makeExecution({ testClass: "T", testMethod: "m", durationMs: 200, timestamp: 2000 })
+        makeExecution({ testClass: "T", testMethod: "m", durationMs: 200, timestamp: 2000 }),
       );
       await repo.recordExecution(
-        makeExecution({ testClass: "T", testMethod: "m", durationMs: 300, timestamp: 3000 })
+        makeExecution({ testClass: "T", testMethod: "m", durationMs: 300, timestamp: 3000 }),
       );
 
       const stats = await repo.getTimingStats({});
@@ -541,10 +579,20 @@ describe("TestExecutionRepository", () => {
   describe("getTimingStats with filters", () => {
     test("filters by testClass", async () => {
       await repo.recordExecution(
-        makeExecution({ testClass: "LoginTest", testMethod: "testLogin", durationMs: 100, timestamp: 1000 })
+        makeExecution({
+          testClass: "LoginTest",
+          testMethod: "testLogin",
+          durationMs: 100,
+          timestamp: 1000,
+        }),
       );
       await repo.recordExecution(
-        makeExecution({ testClass: "HomeTest", testMethod: "testHome", durationMs: 200, timestamp: 2000 })
+        makeExecution({
+          testClass: "HomeTest",
+          testMethod: "testHome",
+          durationMs: 200,
+          timestamp: 2000,
+        }),
       );
 
       const stats = await repo.getTimingStats({ testClass: "LoginTest" });
@@ -554,10 +602,10 @@ describe("TestExecutionRepository", () => {
 
     test("filters by testMethod", async () => {
       await repo.recordExecution(
-        makeExecution({ testClass: "T", testMethod: "testA", durationMs: 100, timestamp: 1000 })
+        makeExecution({ testClass: "T", testMethod: "testA", durationMs: 100, timestamp: 1000 }),
       );
       await repo.recordExecution(
-        makeExecution({ testClass: "T", testMethod: "testB", durationMs: 200, timestamp: 2000 })
+        makeExecution({ testClass: "T", testMethod: "testB", durationMs: 200, timestamp: 2000 }),
       );
 
       const stats = await repo.getTimingStats({ testMethod: "testA" });
@@ -570,10 +618,20 @@ describe("TestExecutionRepository", () => {
       timer.setCurrentTime(10 * oneDayMs);
 
       await repo.recordExecution(
-        makeExecution({ testClass: "T", testMethod: "m", durationMs: 100, timestamp: 2 * oneDayMs })
+        makeExecution({
+          testClass: "T",
+          testMethod: "m",
+          durationMs: 100,
+          timestamp: 2 * oneDayMs,
+        }),
       );
       await repo.recordExecution(
-        makeExecution({ testClass: "T", testMethod: "m", durationMs: 200, timestamp: 9 * oneDayMs })
+        makeExecution({
+          testClass: "T",
+          testMethod: "m",
+          durationMs: 200,
+          timestamp: 9 * oneDayMs,
+        }),
       );
 
       // Lookback 3 days from day 10 = cutoff at day 7, only the day-9 execution is included
@@ -585,10 +643,22 @@ describe("TestExecutionRepository", () => {
 
     test("filters by deviceId", async () => {
       await repo.recordExecution(
-        makeExecution({ testClass: "T", testMethod: "m", deviceId: "d-1", durationMs: 100, timestamp: 1000 })
+        makeExecution({
+          testClass: "T",
+          testMethod: "m",
+          deviceId: "d-1",
+          durationMs: 100,
+          timestamp: 1000,
+        }),
       );
       await repo.recordExecution(
-        makeExecution({ testClass: "T", testMethod: "m", deviceId: "d-2", durationMs: 200, timestamp: 2000 })
+        makeExecution({
+          testClass: "T",
+          testMethod: "m",
+          deviceId: "d-2",
+          durationMs: 200,
+          timestamp: 2000,
+        }),
       );
 
       const stats = await repo.getTimingStats({ deviceId: "d-1" });
@@ -598,13 +668,13 @@ describe("TestExecutionRepository", () => {
 
     test("respects limit", async () => {
       await repo.recordExecution(
-        makeExecution({ testClass: "A", testMethod: "m1", durationMs: 100, timestamp: 1000 })
+        makeExecution({ testClass: "A", testMethod: "m1", durationMs: 100, timestamp: 1000 }),
       );
       await repo.recordExecution(
-        makeExecution({ testClass: "B", testMethod: "m2", durationMs: 200, timestamp: 2000 })
+        makeExecution({ testClass: "B", testMethod: "m2", durationMs: 200, timestamp: 2000 }),
       );
       await repo.recordExecution(
-        makeExecution({ testClass: "C", testMethod: "m3", durationMs: 300, timestamp: 3000 })
+        makeExecution({ testClass: "C", testMethod: "m3", durationMs: 300, timestamp: 3000 }),
       );
 
       const stats = await repo.getTimingStats({ limit: 2 });
@@ -613,13 +683,13 @@ describe("TestExecutionRepository", () => {
 
     test("respects minSamples filter", async () => {
       await repo.recordExecution(
-        makeExecution({ testClass: "A", testMethod: "m1", durationMs: 100, timestamp: 1000 })
+        makeExecution({ testClass: "A", testMethod: "m1", durationMs: 100, timestamp: 1000 }),
       );
       await repo.recordExecution(
-        makeExecution({ testClass: "B", testMethod: "m2", durationMs: 200, timestamp: 2000 })
+        makeExecution({ testClass: "B", testMethod: "m2", durationMs: 200, timestamp: 2000 }),
       );
       await repo.recordExecution(
-        makeExecution({ testClass: "B", testMethod: "m2", durationMs: 250, timestamp: 3000 })
+        makeExecution({ testClass: "B", testMethod: "m2", durationMs: 250, timestamp: 3000 }),
       );
 
       const stats = await repo.getTimingStats({ minSamples: 2 });
@@ -660,57 +730,63 @@ async function seedTestExecutions(db: Kysely<Database>, count: number): Promise<
   for (const chunk of chunkArray(ids, 200)) {
     await db
       .insertInto("test_executions")
-      .values(chunk.map(id => ({
-        id,
-        test_class: `Class${id}`,
-        test_method: `method${id}`,
-        duration_ms: id,
-        status: "passed" as const,
-        timestamp: id,
-        device_id: null,
-        device_name: null,
-        device_platform: "android" as const,
-        device_type: "emulator" as const,
-        app_version: null,
-        git_commit: null,
-        target_sdk: null,
-        jdk_version: null,
-        jvm_target: null,
-        gradle_version: null,
-        is_ci: null,
-        session_uuid: null,
-        error_message: null,
-        video_path: null,
-        snapshot_path: null,
-      })))
+      .values(
+        chunk.map((id) => ({
+          id,
+          test_class: `Class${id}`,
+          test_method: `method${id}`,
+          duration_ms: id,
+          status: "passed" as const,
+          timestamp: id,
+          device_id: null,
+          device_name: null,
+          device_platform: "android" as const,
+          device_type: "emulator" as const,
+          app_version: null,
+          git_commit: null,
+          target_sdk: null,
+          jdk_version: null,
+          jvm_target: null,
+          gradle_version: null,
+          is_ci: null,
+          session_uuid: null,
+          error_message: null,
+          video_path: null,
+          snapshot_path: null,
+        })),
+      )
       .execute();
 
     await db
       .insertInto("test_execution_steps")
-      .values(chunk.map(id => ({
-        id,
-        execution_id: id,
-        step_index: 0,
-        action: `action-${id}`,
-        target: `target-${id}`,
-        status: "completed" as const,
-        duration_ms: id,
-        screen_name: `Screen ${id}`,
-        screenshot_path: null,
-        error_message: null,
-        details_json: null,
-      })))
+      .values(
+        chunk.map((id) => ({
+          id,
+          execution_id: id,
+          step_index: 0,
+          action: `action-${id}`,
+          target: `target-${id}`,
+          status: "completed" as const,
+          duration_ms: id,
+          screen_name: `Screen ${id}`,
+          screenshot_path: null,
+          error_message: null,
+          details_json: null,
+        })),
+      )
       .execute();
 
     await db
       .insertInto("test_execution_screens")
-      .values(chunk.map(id => ({
-        id,
-        execution_id: id,
-        screen_name: `Screen ${id}`,
-        visit_order: 0,
-        timestamp: id,
-      })))
+      .values(
+        chunk.map((id) => ({
+          id,
+          execution_id: id,
+          screen_name: `Screen ${id}`,
+          visit_order: 0,
+          timestamp: id,
+        })),
+      )
       .execute();
   }
 }
@@ -752,7 +828,13 @@ describe("TestExecutionRepository retention (#3440)", () => {
       .select("timestamp")
       .orderBy("timestamp", "asc")
       .execute();
-    expect(rows.map(r => Number(r.timestamp))).toEqual([base + 8, base + 9, base + 10, base + 11, base + 12]);
+    expect(rows.map((r) => Number(r.timestamp))).toEqual([
+      base + 8,
+      base + 9,
+      base + 10,
+      base + 11,
+      base + 12,
+    ]);
   });
 
   test("pruneToRowCap under the cap deletes nothing (count(*) gate short-circuits)", async () => {
@@ -776,7 +858,13 @@ describe("TestExecutionRepository retention (#3440)", () => {
     const stale = timer.now() - 200 * MS_PER_DAY;
     await db
       .insertInto("test_executions")
-      .values({ test_class: "C", test_method: "m", duration_ms: 1, status: "passed", timestamp: stale })
+      .values({
+        test_class: "C",
+        test_method: "m",
+        duration_ms: 1,
+        status: "passed",
+        timestamp: stale,
+      })
       .execute();
     expect(await db.selectFrom("test_executions").selectAll().execute()).toHaveLength(1);
 
@@ -786,6 +874,6 @@ describe("TestExecutionRepository retention (#3440)", () => {
     await repo.recordExecution(makeExecution({ timestamp: fresh }));
 
     const rows = await db.selectFrom("test_executions").select("timestamp").execute();
-    expect(rows.map(r => Number(r.timestamp))).toEqual([fresh]);
+    expect(rows.map((r) => Number(r.timestamp))).toEqual([fresh]);
   });
 });

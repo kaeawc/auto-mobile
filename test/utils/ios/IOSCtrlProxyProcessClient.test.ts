@@ -1,11 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { IOSCtrlProxyProcessClient } from "../../../src/utils/ios/IOSCtrlProxyProcessClient";
-import type { HostCommandExecutor, HostCommandOptions } from "../../../src/utils/HostCommandExecutor";
+import type {
+  HostCommandExecutor,
+  HostCommandOptions,
+} from "../../../src/utils/HostCommandExecutor";
 import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
 function result(stdout = "", stderr = "") {
-  return { stdout, stderr, toString: () => stdout, trim: () => stdout.trim(), includes: (text: string) => stdout.includes(text) };
+  return {
+    stdout,
+    stderr,
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (text: string) => stdout.includes(text),
+  };
 }
 
 describe("IOSCtrlProxyProcessClient", () => {
@@ -28,7 +37,12 @@ describe("IOSCtrlProxyProcessClient", () => {
   test("uses argv for PID lookup and preserves device identity validation", async () => {
     const host = new FakeHostCommandExecutor();
     host.setCommandResponse("pgrep -x xcodebuild", result("42\n"));
-    host.setCommandResponse("ps -p 42 -o ppid= -o args=", result("2 xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun -destination platform=iOS Simulator,id=DEVICE-1 -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService"));
+    host.setCommandResponse(
+      "ps -p 42 -o ppid= -o args=",
+      result(
+        "2 xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun -destination platform=iOS Simulator,id=DEVICE-1 -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
+      ),
+    );
     host.setCommandResponse("ps eww -p 42 -o command=", result("AUTOMOBILE_DEVICE_ID=DEVICE-1"));
     const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
 
@@ -42,7 +56,10 @@ describe("IOSCtrlProxyProcessClient", () => {
   test("does not identify a recycled PID as a CtrlProxy runner", async () => {
     const host = new FakeHostCommandExecutor();
     host.setCommandResponse("kill -0 42", result());
-    host.setCommandResponse("ps -p 42 -o ppid= -o args=", result("1 xcodebuild test -destination id=DEVICE-1"));
+    host.setCommandResponse(
+      "ps -p 42 -o ppid= -o args=",
+      result("1 xcodebuild test -destination id=DEVICE-1"),
+    );
     const client = new IOSCtrlProxyProcessClient(host, new FakeTimer());
 
     await expect(client.isOwnedRunnerAlive(42, "DEVICE-1")).resolves.toBe(false);
@@ -55,14 +72,23 @@ describe("IOSCtrlProxyProcessClient", () => {
     host.setCommandResponse("ps -axo pid=,ppid=", result("42 1\n43 42\n"));
     host.setCommandResponse("kill -0 42", result());
     host.setCommandResponse("kill -0 43", result());
-    const client = new IOSCtrlProxyProcessClient(host, timer, { releaseAttempts: 1, releaseGraceMs: 1 });
+    const client = new IOSCtrlProxyProcessClient(host, timer, {
+      releaseAttempts: 1,
+      releaseGraceMs: 1,
+    });
 
     await client.terminateProcessTree(42);
 
-    expect(host.getExecutedCommands()).toEqual(expect.arrayContaining([
-      "kill -TERM -- -42", "kill -TERM 43", "kill -TERM 42",
-      "kill -KILL -- -42", "kill -KILL 43", "kill -KILL 42",
-    ]));
+    expect(host.getExecutedCommands()).toEqual(
+      expect.arrayContaining([
+        "kill -TERM -- -42",
+        "kill -TERM 43",
+        "kill -TERM 42",
+        "kill -KILL -- -42",
+        "kill -KILL 43",
+        "kill -KILL 42",
+      ]),
+    );
   });
 
   test("propagates deadline expiry while waiting for a process tree to exit", async () => {
@@ -79,10 +105,13 @@ describe("IOSCtrlProxyProcessClient", () => {
         return result();
       },
     };
-    const client = new IOSCtrlProxyProcessClient(host, timer, { releaseAttempts: 1, releaseGraceMs: 1 });
+    const client = new IOSCtrlProxyProcessClient(host, timer, {
+      releaseAttempts: 1,
+      releaseGraceMs: 1,
+    });
 
     await expect(client.terminateProcessTree(42, 100)).rejects.toThrow(
-      "Startup CtrlProxy runner sweep deadline elapsed"
+      "Startup CtrlProxy runner sweep deadline elapsed",
     );
   });
 

@@ -24,7 +24,10 @@ import { serverConfig } from "../../src/utils/ServerConfig";
 describe("stripToolResultStructuredContent", () => {
   test("EC-A: drops structuredContent for a 'flag' reason (schema tool, gate on), keeps content text", () => {
     const payload = { success: true, message: "done", nested: { a: 1 } };
-    const response = stripToolResultStructuredContent(createStructuredToolResponse(payload), "flag");
+    const response = stripToolResultStructuredContent(
+      createStructuredToolResponse(payload),
+      "flag",
+    );
 
     expect("structuredContent" in response).toBe(false);
     expect(response.content[0].type).toBe("text");
@@ -33,13 +36,19 @@ describe("stripToolResultStructuredContent", () => {
   });
 
   test("EC-B: preserves structuredContent for a null reason (schema tool, gate off)", () => {
-    const response = stripToolResultStructuredContent(createStructuredToolResponse({ success: true }), null);
+    const response = stripToolResultStructuredContent(
+      createStructuredToolResponse({ success: true }),
+      null,
+    );
     expect(response.structuredContent).toEqual({ success: true });
   });
 
   test("EC-2759: drops structuredContent for a 'no-schema' reason, keeping the text block", () => {
     const payload = { success: true, viewHierarchy: { node: [] } };
-    const response = stripToolResultStructuredContent(createStructuredToolResponse(payload), "no-schema");
+    const response = stripToolResultStructuredContent(
+      createStructuredToolResponse(payload),
+      "no-schema",
+    );
     expect("structuredContent" in response).toBe(false);
     // Text block is preserved — the model-facing surface is intact.
     expect(JSON.parse(response.content[0].text)).toEqual(payload);
@@ -49,7 +58,7 @@ describe("stripToolResultStructuredContent", () => {
     // e.g. exportPlan/recordSteps: declare an outputSchema, bypass finalizeToolResponse.
     const response = stripToolResultStructuredContent(
       createStructuredToolResponse({ success: true, plan: "steps:\n  - tapOn: {}" }),
-      "flag"
+      "flag",
     );
     expect("structuredContent" in response).toBe(false);
     expect(JSON.parse(response.content[0].text).plan).toBe("steps:\n  - tapOn: {}");
@@ -78,12 +87,16 @@ describe("stripToolResultStructuredContent", () => {
  */
 describe("responseCarriesStructuredContent", () => {
   test("true only when an envelope actually carries structuredContent", () => {
-    expect(responseCarriesStructuredContent(createStructuredToolResponse({ success: true }))).toBe(true);
+    expect(responseCarriesStructuredContent(createStructuredToolResponse({ success: true }))).toBe(
+      true,
+    );
     expect(responseCarriesStructuredContent({ structuredContent: { a: 1 } })).toBe(true);
   });
 
   test("false for envelopes without the field, primitives, and null/undefined", () => {
-    expect(responseCarriesStructuredContent({ content: [{ type: "text", text: "hi" }] })).toBe(false);
+    expect(responseCarriesStructuredContent({ content: [{ type: "text", text: "hi" }] })).toBe(
+      false,
+    );
     expect(responseCarriesStructuredContent({})).toBe(false);
     expect(responseCarriesStructuredContent(null)).toBe(false);
     expect(responseCarriesStructuredContent(undefined)).toBe(false);
@@ -157,7 +170,7 @@ describe("structuredContentOmissionReason", () => {
         const reason = structuredContentOmissionReason(hasSchema, flag);
         const response = stripToolResultStructuredContent(
           createStructuredToolResponse({ success: true }),
-          reason
+          reason,
         );
         const kept = "structuredContent" in response;
         expect(kept).toBe(reason === null);

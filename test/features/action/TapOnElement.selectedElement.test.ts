@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type {
-  Element,
-  ElementSelectionResult,
-  TapOnElementResult
-} from "../../../src/models";
+import type { Element, ElementSelectionResult, TapOnElementResult } from "../../../src/models";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -18,8 +14,8 @@ const createTapOnElement = (platform: "android" | "ios" = "android"): TapOnEleme
     } as any,
     new FakeAdbClient() as any,
     {
-      timer: new FakeTimer()
-    }
+      timer: new FakeTimer(),
+    },
   );
 };
 
@@ -36,7 +32,10 @@ describe("TapOnElement selectedElement metadata", () => {
     });
     const hierarchy = {
       hierarchy: {
-        node: [{ ...duplicateOwner, children: [] }, { ...owner, children: [] }],
+        node: [
+          { ...duplicateOwner, children: [] },
+          { ...owner, children: [] },
+        ],
       },
     };
 
@@ -87,7 +86,10 @@ describe("TapOnElement selectedElement metadata", () => {
     });
     const hierarchy = {
       hierarchy: {
-        node: [{ ...duplicateOwner, children: [] }, { ...owner, children: [] }],
+        node: [
+          { ...duplicateOwner, children: [] },
+          { ...owner, children: [] },
+        ],
       },
     };
 
@@ -97,16 +99,16 @@ describe("TapOnElement selectedElement metadata", () => {
   test("populates selection metadata and computes bounds centers", () => {
     const tapOnElement = createTapOnElement();
     const element: Element = {
-      "text": "Sarah's Channel",
+      text: "Sarah's Channel",
       "resource-id": "com.example:id/channel_item",
-      "class": "android.widget.TextView",
-      "bounds": { left: 50, top: 200, right: 350, bottom: 280 }
+      class: "android.widget.TextView",
+      bounds: { left: 50, top: 200, right: 350, bottom: 280 },
     };
     const selection: ElementSelectionResult = {
       element,
       indexInMatches: 3,
       totalMatches: 10,
-      strategy: "random"
+      strategy: "random",
     };
 
     const selectedElement = (tapOnElement as any).buildSelectedElementMetadata(selection);
@@ -120,11 +122,11 @@ describe("TapOnElement selectedElement metadata", () => {
         right: 350,
         bottom: 280,
         centerX: 200,
-        centerY: 240
+        centerY: 240,
       },
       indexInMatches: 3,
       totalMatches: 10,
-      selectionStrategy: "random"
+      selectionStrategy: "random",
     });
   });
 
@@ -134,30 +136,30 @@ describe("TapOnElement selectedElement metadata", () => {
       {
         label: "text",
         element: {
-          "text": "Channel",
+          text: "Channel",
           "resource-id": "com.example:id/channel_text",
-          "class": "android.widget.TextView",
-          "bounds": { left: 0, top: 0, right: 100, bottom: 40 }
-        }
+          class: "android.widget.TextView",
+          bounds: { left: 0, top: 0, right: 100, bottom: 40 },
+        },
       },
       {
         label: "button",
         element: {
-          "text": "Submit",
+          text: "Submit",
           "resource-id": "com.example:id/submit_button",
-          "class": "android.widget.Button",
-          "bounds": { left: 10, top: 50, right: 210, bottom: 130 }
-        }
+          class: "android.widget.Button",
+          bounds: { left: 10, top: 50, right: 210, bottom: 130 },
+        },
       },
       {
         label: "list item",
         element: {
-          "text": "Item 7",
+          text: "Item 7",
           "resource-id": "com.example:id/list_item",
-          "class": "android.widget.LinearLayout",
-          "bounds": { left: 12, top: 140, right: 312, bottom: 220 }
-        }
-      }
+          class: "android.widget.LinearLayout",
+          bounds: { left: 12, top: 140, right: 312, bottom: 220 },
+        },
+      },
     ];
 
     for (const entry of cases) {
@@ -165,7 +167,7 @@ describe("TapOnElement selectedElement metadata", () => {
         element: entry.element,
         indexInMatches: 0,
         totalMatches: 1,
-        strategy: "first"
+        strategy: "first",
       };
 
       const selectedElement = (tapOnElement as any).buildSelectedElementMetadata(selection);
@@ -176,31 +178,31 @@ describe("TapOnElement selectedElement metadata", () => {
       expect(selectedElement.totalMatches).toBe(1);
       expect(selectedElement.indexInMatches).toBe(0);
       expect(selectedElement.bounds.centerX).toBe(
-        Math.floor((entry.element.bounds.left + entry.element.bounds.right) / 2)
+        Math.floor((entry.element.bounds.left + entry.element.bounds.right) / 2),
       );
       expect(selectedElement.bounds.centerY).toBe(
-        Math.floor((entry.element.bounds.top + entry.element.bounds.bottom) / 2)
+        Math.floor((entry.element.bounds.top + entry.element.bounds.bottom) / 2),
       );
     }
   });
 
   test("tapOn response matches TapOnElementResult interface", () => {
     const element = ResultFaker.element({
-      "text": "Profile",
+      text: "Profile",
       "resource-id": "com.example:id/profile_tab",
-      "bounds": { left: 0, top: 0, right: 80, bottom: 40 }
+      bounds: { left: 0, top: 0, right: 80, bottom: 40 },
     });
     const selectedElement = ResultFaker.tapOnSelectedElement(element, {
       indexInMatches: 1,
       totalMatches: 4,
-      selectionStrategy: "random"
+      selectionStrategy: "random",
     });
 
     const response: TapOnElementResult = {
       success: true,
       action: "tap",
       element,
-      selectedElement
+      selectedElement,
     };
 
     expect(response.selectedElement?.selectionStrategy).toBe("random");

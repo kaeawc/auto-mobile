@@ -15,10 +15,10 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("device_locks")
     .ifNotExists()
-    .addColumn("device_id", "text", col => col.primaryKey())
-    .addColumn("lock_type", "text", col => col.notNull())
+    .addColumn("device_id", "text", (col) => col.primaryKey())
+    .addColumn("lock_type", "text", (col) => col.notNull())
     .addColumn("lock_credential", "text")
-    .addColumn("updated_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+    .addColumn("updated_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 }
 

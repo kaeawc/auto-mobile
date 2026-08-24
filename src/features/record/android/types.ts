@@ -30,13 +30,7 @@ export interface RawTouchFrame {
 // Gesture types (output of GestureClassifier / GetEventReader)
 // ---------------------------------------------------------------------------
 
-type GestureEventType =
-  | "tap"
-  | "doubleTap"
-  | "longPress"
-  | "swipe"
-  | "pinch"
-  | "pressButton";
+type GestureEventType = "tap" | "doubleTap" | "longPress" | "swipe" | "pinch" | "pressButton";
 
 export interface GestureEvent {
   type: GestureEventType;
@@ -84,10 +78,7 @@ export const GESTURE_THRESHOLDS = {
  * Start receives the callback so the emitter can call it when a gesture occurs.
  */
 export interface GestureEmitter {
-  start(
-    onGesture: (event: GestureEvent) => void,
-    onError?: (err: Error) => void
-  ): void;
+  start(onGesture: (event: GestureEvent) => void, onError?: (err: Error) => void): void;
   stop(): void;
 }
 
@@ -96,7 +87,5 @@ export interface GestureEmitter {
  */
 export interface A11ySource {
   ensureConnected(): Promise<boolean>;
-  onInteraction(
-    listener: (event: { type: string; [key: string]: unknown }) => void
-  ): () => void;
+  onInteraction(listener: (event: { type: string; [key: string]: unknown }) => void): () => void;
 }

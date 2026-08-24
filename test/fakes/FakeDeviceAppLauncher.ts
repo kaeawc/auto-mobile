@@ -26,9 +26,13 @@ export class FakeDeviceAppLauncher implements DeviceAppLauncher {
   async launchApp(
     deviceUdid: string,
     bundleId: string,
-    options: { terminateExisting?: boolean } = {}
+    options: { terminateExisting?: boolean } = {},
   ): Promise<{ success: boolean; pid?: number; error?: string }> {
-    this.launchCalls.push({ deviceUdid, bundleId, terminateExisting: options.terminateExisting ?? false });
+    this.launchCalls.push({
+      deviceUdid,
+      bundleId,
+      terminateExisting: options.terminateExisting ?? false,
+    });
     return this.launchResult;
   }
 }

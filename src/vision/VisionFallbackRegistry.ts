@@ -20,7 +20,7 @@ import { stableStringify } from "../utils/stableStringify";
 
 export type VisionFallbackFactory = (config: VisionFallbackConfig) => VisionFallback;
 
-const defaultFactory: VisionFallbackFactory = config => new VisionFallback(config);
+const defaultFactory: VisionFallbackFactory = (config) => new VisionFallback(config);
 
 /**
  * Distinct configs in a single process are few (config is effectively static

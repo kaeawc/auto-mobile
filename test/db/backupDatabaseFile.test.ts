@@ -36,7 +36,7 @@ describe("backupDatabaseFile", () => {
     await backupDatabaseFile(db, dbPath);
 
     // VACUUM INTO writes exactly one snapshot file — no -wal/-shm sidecars.
-    const backups = readdirSync(dir).filter(f => f.includes(".corrupt-backup-"));
+    const backups = readdirSync(dir).filter((f) => f.includes(".corrupt-backup-"));
     expect(backups.length).toBe(1);
     expect(backups[0]).toContain(String(process.pid));
 

@@ -55,7 +55,7 @@ export function topKByDescending<T>(items: T[], k: number, value: (item: T) => n
     }
   }
 
-  return top.map(entry => entry.item);
+  return top.map((entry) => entry.item);
 }
 
 /**
@@ -70,9 +70,9 @@ export function topKByDescending<T>(items: T[], k: number, value: (item: T) => n
 export function stitchBatchResults(
   screenshotPaths: string[],
   preciseResults: SimilarScreenshotResult[],
-  stage1Results: Array<{ filePath: string; perceptualSimilarity: number } | null>
+  stage1Results: Array<{ filePath: string; perceptualSimilarity: number } | null>,
 ): SimilarScreenshotResult[] {
-  const preciseByPath = new Map(preciseResults.map(result => [result.filePath, result]));
+  const preciseByPath = new Map(preciseResults.map((result) => [result.filePath, result]));
   const stage1ByPath = new Map<string, number>();
   for (const result of stage1Results) {
     if (result) {
@@ -80,7 +80,7 @@ export function stitchBatchResults(
     }
   }
 
-  return screenshotPaths.map(filePath => {
+  return screenshotPaths.map((filePath) => {
     const preciseResult = preciseByPath.get(filePath);
     if (preciseResult) {
       return preciseResult;
@@ -90,7 +90,7 @@ export function stitchBatchResults(
     return {
       filePath,
       similarity: stage1ByPath.get(filePath) || 0,
-      matchFound: false
+      matchFound: false,
     };
   });
 }
@@ -109,30 +109,37 @@ export class ScreenshotMatcher {
     screenshotPaths: string[],
     tolerancePercent: number = DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT,
     fastMode: boolean = true,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
   ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>> {
     const batchStart = timer.now();
     const minSimilarity = 100 - tolerancePercent;
 
-    logger.info(`Starting batch comparison of ${screenshotPaths.length} screenshots (fast mode: ${fastMode})`);
+    logger.info(
+      `Starting batch comparison of ${screenshotPaths.length} screenshots (fast mode: ${fastMode})`,
+    );
 
     try {
-      const comparisonPromises = screenshotPaths.map(async filePath => {
+      const comparisonPromises = screenshotPaths.map(async (filePath) => {
         try {
           const cachedBuffer = await readFileAsync(filePath);
-          const comparisonResult = await ScreenshotComparator.compareImages(targetBuffer, cachedBuffer, 0.1, fastMode);
+          const comparisonResult = await ScreenshotComparator.compareImages(
+            targetBuffer,
+            cachedBuffer,
+            0.1,
+            fastMode,
+          );
 
           return {
             filePath,
             similarity: comparisonResult.similarity,
-            matchFound: comparisonResult.similarity >= minSimilarity
+            matchFound: comparisonResult.similarity >= minSimilarity,
           };
         } catch (error) {
           logger.debug(`Failed to compare ${path.basename(filePath)}: ${(error as Error).message}`);
           return {
             filePath,
             similarity: 0,
-            matchFound: false
+            matchFound: false,
           };
         }
       });
@@ -140,8 +147,10 @@ export class ScreenshotMatcher {
       const results = await Promise.all(comparisonPromises);
       const batchTime = timer.now() - batchStart;
 
-      const matches = results.filter(r => r.matchFound);
-      logger.info(`Batch comparison completed in ${batchTime}ms: ${matches.length}/${results.length} matches found`);
+      const matches = results.filter((r) => r.matchFound);
+      logger.info(
+        `Batch comparison completed in ${batchTime}ms: ${matches.length}/${results.length} matches found`,
+      );
 
       return results;
     } catch (error) {
@@ -164,12 +173,14 @@ export class ScreenshotMatcher {
     screenshotPaths: string[],
     tolerancePercent: number = DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT,
     fastMode: boolean = true,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
   ): Promise<Array<{ filePath: string; similarity: number; matchFound: boolean }>> {
     const batchStart = timer.now();
     const minSimilarity = 100 - tolerancePercent;
 
-    logger.info(`Starting optimized two-stage batch comparison of ${screenshotPaths.length} screenshots`);
+    logger.info(
+      `Starting optimized two-stage batch comparison of ${screenshotPaths.length} screenshots`,
+    );
 
     try {
       // Stage 1: Fast perceptual hash filtering
@@ -178,64 +189,74 @@ export class ScreenshotMatcher {
 
       // Load all screenshots and their perceptual hashes in parallel
       const stage1Results = await Promise.all(
-        screenshotPaths.map(async filePath => {
+        screenshotPaths.map(async (filePath) => {
           try {
             const { buffer, hash } = await ScreenshotCache.getCachedScreenshot(filePath);
-            const perceptualSimilarity = PerceptualHasher.getPerceptualSimilarity(targetPerceptualHash, hash);
+            const perceptualSimilarity = PerceptualHasher.getPerceptualSimilarity(
+              targetPerceptualHash,
+              hash,
+            );
 
             return {
               filePath,
               buffer,
               perceptualSimilarity,
-              isCandidate: perceptualSimilarity >= (minSimilarity - 10) // 10% buffer for perceptual hash
+              isCandidate: perceptualSimilarity >= minSimilarity - 10, // 10% buffer for perceptual hash
             };
           } catch (error) {
-            logger.debug(`Failed to process ${path.basename(filePath)}: ${(error as Error).message}`);
+            logger.debug(
+              `Failed to process ${path.basename(filePath)}: ${(error as Error).message}`,
+            );
             return null;
           }
-        })
+        }),
       );
 
-      const candidates = stage1Results
-        .filter((result): result is NonNullable<typeof result> => result !== null && result.isCandidate);
+      const candidates = stage1Results.filter(
+        (result): result is NonNullable<typeof result> => result !== null && result.isCandidate,
+      );
 
       const stage1Time = timer.now() - batchStart;
-      logger.info(`Stage 1 (perceptual hash) completed in ${stage1Time}ms: ${candidates.length}/${screenshotPaths.length} candidates selected`);
+      logger.info(
+        `Stage 1 (perceptual hash) completed in ${stage1Time}ms: ${candidates.length}/${screenshotPaths.length} candidates selected`,
+      );
 
       if (candidates.length === 0) {
-        return screenshotPaths.map(filePath => ({
+        return screenshotPaths.map((filePath) => ({
           filePath,
           similarity: 0,
-          matchFound: false
+          matchFound: false,
         }));
       }
 
       // Stage 2: Precise pixel comparison for candidates only
       const stage2Start = timer.now();
       const preciseResults = await Promise.all(
-        candidates.map(async candidate => {
+        candidates.map(async (candidate) => {
           try {
             const comparisonResult = await ScreenshotComparator.compareImages(
               targetBuffer,
               candidate.buffer,
               0.1,
-              fastMode
+              fastMode,
             );
 
             return {
               filePath: candidate.filePath,
               similarity: comparisonResult.similarity,
-              matchFound: comparisonResult.similarity >= minSimilarity
+              matchFound: comparisonResult.similarity >= minSimilarity,
             };
           } catch (error) {
-            logger.debug(`Stage 2 failed for ${path.basename(candidate.filePath)}: ${(error as Error).message}`);
+            logger.debug(
+              `Stage 2 failed for ${path.basename(candidate.filePath)}: ${(error as Error).message}`,
+            );
             return {
               filePath: candidate.filePath,
               similarity: 0,
-              matchFound: false
+              matchFound: false,
             };
           }
-        })
+        }),
       );
 
       // Fill in results for non-candidates (indexed lookup, not O(n^2) .find())
@@ -243,15 +264,21 @@ export class ScreenshotMatcher {
 
       const stage2Time = timer.now() - stage2Start;
       const totalTime = timer.now() - batchStart;
-      const matches = finalResults.filter(r => r.matchFound);
+      const matches = finalResults.filter((r) => r.matchFound);
 
-      logger.info(`Stage 2 (pixel comparison) completed in ${stage2Time}ms for ${candidates.length} candidates`);
-      logger.info(`Optimized batch comparison completed in ${totalTime}ms: ${matches.length}/${screenshotPaths.length} matches found`);
+      logger.info(
+        `Stage 2 (pixel comparison) completed in ${stage2Time}ms for ${candidates.length} candidates`,
+      );
+      logger.info(
+        `Optimized batch comparison completed in ${totalTime}ms: ${matches.length}/${screenshotPaths.length} matches found`,
+      );
 
       return finalResults;
     } catch (error) {
       const totalTime = timer.now() - batchStart;
-      logger.warn(`Optimized batch comparison failed after ${totalTime}ms: ${(error as Error).message}`);
+      logger.warn(
+        `Optimized batch comparison failed after ${totalTime}ms: ${(error as Error).message}`,
+      );
       return [];
     }
   }
@@ -269,12 +296,14 @@ export class ScreenshotMatcher {
     cacheDir: string,
     tolerancePercent: number = DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT,
     maxComparisons: number = 10,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
   ): Promise<SimilarScreenshotResult> {
     const searchStart = timer.now();
     const minSimilarity = 100 - tolerancePercent;
 
-    logger.info(`Searching for screenshots with ≥${minSimilarity}% similarity (tolerance: ${tolerancePercent}%) in ${cacheDir}`);
+    logger.info(
+      `Searching for screenshots with ≥${minSimilarity}% similarity (tolerance: ${tolerancePercent}%) in ${cacheDir}`,
+    );
 
     try {
       const screenshotFiles = await ScreenshotCache.getScreenshotFiles(cacheDir);
@@ -284,27 +313,29 @@ export class ScreenshotMatcher {
         return {
           filePath: "",
           similarity: 0,
-          matchFound: false
+          matchFound: false,
         };
       }
 
       // Take the newest maxComparisons files. Only k << n are needed, so select
       // the top-k by mtime in a single pass instead of a full O(n log n) sort.
       const filesWithStats = await Promise.all(
-        screenshotFiles.map(async filePath => {
+        screenshotFiles.map(async (filePath) => {
           const stats = await fsPromises.stat(filePath);
           return { filePath, mtime: stats.mtime.getTime() };
-        })
+        }),
       );
 
-      const filesToCheck = topKByDescending(filesWithStats, maxComparisons, f => f.mtime);
+      const filesToCheck = topKByDescending(filesWithStats, maxComparisons, (f) => f.mtime);
 
-      logger.info(`Comparing against ${filesToCheck.length} most recent screenshots (max: ${maxComparisons})`);
+      logger.info(
+        `Comparing against ${filesToCheck.length} most recent screenshots (max: ${maxComparisons})`,
+      );
 
       let bestMatch: SimilarScreenshotResult = {
         filePath: "",
         similarity: 0,
-        matchFound: false
+        matchFound: false,
       };
 
       for (const { filePath } of filesToCheck) {
@@ -312,34 +343,49 @@ export class ScreenshotMatcher {
           logger.debug(`Comparing against: ${path.basename(filePath)}`);
 
           const cachedBuffer = await readFileAsync(filePath);
-          const comparisonResult = await ScreenshotComparator.compareImages(targetBuffer, cachedBuffer, 0.1, true);
+          const comparisonResult = await ScreenshotComparator.compareImages(
+            targetBuffer,
+            cachedBuffer,
+            0.1,
+            true,
+          );
 
-          logger.info(`${path.basename(filePath)}: ${comparisonResult.similarity.toFixed(2)}% similarity (${comparisonResult.pixelDifference}/${comparisonResult.totalPixels} different pixels)`);
+          logger.info(
+            `${path.basename(filePath)}: ${comparisonResult.similarity.toFixed(2)}% similarity (${comparisonResult.pixelDifference}/${comparisonResult.totalPixels} different pixels)`,
+          );
 
           if (comparisonResult.similarity > bestMatch.similarity) {
             bestMatch = {
               filePath,
               similarity: comparisonResult.similarity,
-              matchFound: comparisonResult.similarity >= minSimilarity
+              matchFound: comparisonResult.similarity >= minSimilarity,
             };
           }
 
           // If we found a match within tolerance, we can stop searching
           if (comparisonResult.similarity >= minSimilarity) {
-            logger.info(`✓ Found matching screenshot: ${path.basename(filePath)} (${comparisonResult.similarity.toFixed(2)}% similarity)`);
+            logger.info(
+              `✓ Found matching screenshot: ${path.basename(filePath)} (${comparisonResult.similarity.toFixed(2)}% similarity)`,
+            );
             break;
           }
         } catch (error) {
-          logger.warn(`Failed to compare against ${path.basename(filePath)}: ${(error as Error).message}`);
+          logger.warn(
+            `Failed to compare against ${path.basename(filePath)}: ${(error as Error).message}`,
+          );
         }
       }
 
       const searchTime = timer.now() - searchStart;
 
       if (bestMatch.matchFound) {
-        logger.info(`Screenshot search completed in ${searchTime}ms: Found match with ${bestMatch.similarity.toFixed(2)}% similarity`);
+        logger.info(
+          `Screenshot search completed in ${searchTime}ms: Found match with ${bestMatch.similarity.toFixed(2)}% similarity`,
+        );
       } else {
-        logger.info(`Screenshot search completed in ${searchTime}ms: No match found (best: ${bestMatch.similarity.toFixed(2)}%)`);
+        logger.info(
+          `Screenshot search completed in ${searchTime}ms: No match found (best: ${bestMatch.similarity.toFixed(2)}%)`,
+        );
       }
 
       return bestMatch;
@@ -350,7 +396,7 @@ export class ScreenshotMatcher {
       return {
         filePath: "",
         similarity: 0,
-        matchFound: false
+        matchFound: false,
       };
     }
   }

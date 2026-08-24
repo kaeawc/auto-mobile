@@ -1,30 +1,39 @@
 import { describe, expect, test } from "bun:test";
 import { CtrlProxyHierarchy } from "../../../../src/features/observe/ios/CtrlProxyHierarchy";
-import type { CtrlProxyNode, HierarchyDelegateContext } from "../../../../src/features/observe/ios/types";
+import type {
+  CtrlProxyNode,
+  HierarchyDelegateContext,
+} from "../../../../src/features/observe/ios/types";
 
 const stubContext = {} as HierarchyDelegateContext;
 
 function findFirstNodeWith(
   node: any,
-  predicate: (attrs: Record<string, string>) => boolean
+  predicate: (attrs: Record<string, string>) => boolean,
 ): any | null {
-  if (node?.$ && predicate(node.$)) {return node;}
+  if (node?.$ && predicate(node.$)) {
+    return node;
+  }
   for (const child of node?.node ?? []) {
     const hit = findFirstNodeWith(child, predicate);
-    if (hit) {return hit;}
+    if (hit) {
+      return hit;
+    }
   }
   return null;
 }
 
-function countNodesWith(
-  node: any,
-  predicate: (attrs: Record<string, string>) => boolean
-): number {
-  if (!node) {return 0;}
+function countNodesWith(node: any, predicate: (attrs: Record<string, string>) => boolean): number {
+  if (!node) {
+    return 0;
+  }
   const current = node.$ && predicate(node.$) ? 1 : 0;
-  return current + (node.node ?? []).reduce(
-    (count: number, child: any) => count + countNodesWith(child, predicate),
-    0
+  return (
+    current +
+    (node.node ?? []).reduce(
+      (count: number, child: any) => count + countNodesWith(child, predicate),
+      0,
+    )
   );
 }
 
@@ -40,11 +49,13 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
   const subject = new CtrlProxyHierarchy(stubContext);
 
   test("preserves compact semantic-link metadata from the iOS runner", () => {
-    const result = subject.convertToViewHierarchyResult(makeHierarchy({
-      text: "Terms of Service",
-      role: "link",
-      "semantic-links": [{ text: "Terms of Service", occurrence: 0 }],
-    }));
+    const result = subject.convertToViewHierarchyResult(
+      makeHierarchy({
+        text: "Terms of Service",
+        role: "link",
+        "semantic-links": [{ text: "Terms of Service", occurrence: 0 }],
+      }),
+    );
 
     expect((result.hierarchy.node as any).$["semantic-links"]).toEqual([
       { text: "Terms of Service", occurrence: 0 },
@@ -79,7 +90,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
     const searchBar = findFirstNodeWith(
       result.hierarchy.node,
-      attrs => attrs["class"] === "UISearchBar"
+      (attrs) => attrs["class"] === "UISearchBar",
     );
 
     expect(searchBar).not.toBeNull();
@@ -105,7 +116,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
     const tf = findFirstNodeWith(
       result.hierarchy.node,
-      attrs => attrs["class"] === "UITextField"
+      (attrs) => attrs["class"] === "UITextField",
     );
 
     expect(tf).not.toBeNull();
@@ -126,10 +137,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     };
 
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
-    const label = findFirstNodeWith(
-      result.hierarchy.node,
-      attrs => attrs["class"] === "UILabel"
-    );
+    const label = findFirstNodeWith(result.hierarchy.node, (attrs) => attrs["class"] === "UILabel");
 
     expect(label).not.toBeNull();
     expect(label.$["value"]).toBeUndefined();
@@ -167,9 +175,11 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
 
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
 
-    expect(countNodesWith(result.hierarchy.node, attrs => attrs["class"] === "UIWindow")).toBe(0);
-    expect(countNodesWith(result.hierarchy.node, attrs => attrs["class"] === "UIView")).toBe(0);
-    expect(findFirstNodeWith(result.hierarchy.node, attrs => attrs["text"] === "New Reminder")).not.toBeNull();
+    expect(countNodesWith(result.hierarchy.node, (attrs) => attrs["class"] === "UIWindow")).toBe(0);
+    expect(countNodesWith(result.hierarchy.node, (attrs) => attrs["class"] === "UIView")).toBe(0);
+    expect(
+      findFirstNodeWith(result.hierarchy.node, (attrs) => attrs["text"] === "New Reminder"),
+    ).not.toBeNull();
   });
 
   test("preserves structural wrapper with a non-generated view-id", () => {
@@ -195,7 +205,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
     const wrapper = findFirstNodeWith(
       result.hierarchy.node,
-      attrs => attrs["view-id"] === "custom-container-id"
+      (attrs) => attrs["view-id"] === "custom-container-id",
     );
 
     expect(wrapper).not.toBeNull();
@@ -225,7 +235,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
     const wrapper = findFirstNodeWith(
       result.hierarchy.node,
-      attrs => attrs["class"] === "UIView" && attrs["accessibility-focused"] === "true"
+      (attrs) => attrs["class"] === "UIView" && attrs["accessibility-focused"] === "true",
     );
 
     expect(wrapper).not.toBeNull();
@@ -247,7 +257,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     };
 
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
-    const label = findFirstNodeWith(result.hierarchy.node, attrs => attrs["text"] === "Child");
+    const label = findFirstNodeWith(result.hierarchy.node, (attrs) => attrs["text"] === "Child");
 
     expect(label).not.toBeNull();
     expect(label.$["accessibility-focused"]).toBeUndefined();
@@ -286,7 +296,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
 
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
 
-    expect(countNodesWith(result.hierarchy.node, attrs => attrs["text"] === "Dictate")).toBe(1);
+    expect(countNodesWith(result.hierarchy.node, (attrs) => attrs["text"] === "Dictate")).toBe(1);
   });
 
   test("preserves focused duplicate Dictate noise leaf", () => {
@@ -323,11 +333,13 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
 
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
 
-    expect(countNodesWith(result.hierarchy.node, attrs => attrs["text"] === "Dictate")).toBe(2);
-    expect(findFirstNodeWith(
-      result.hierarchy.node,
-      attrs => attrs["text"] === "Dictate" && attrs["focused"] === "true"
-    )).not.toBeNull();
+    expect(countNodesWith(result.hierarchy.node, (attrs) => attrs["text"] === "Dictate")).toBe(2);
+    expect(
+      findFirstNodeWith(
+        result.hierarchy.node,
+        (attrs) => attrs["text"] === "Dictate" && attrs["focused"] === "true",
+      ),
+    ).not.toBeNull();
   });
 
   test("preserves accessibility-focused duplicate Dictate noise leaf", () => {
@@ -364,11 +376,13 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
 
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
 
-    expect(countNodesWith(result.hierarchy.node, attrs => attrs["text"] === "Dictate")).toBe(2);
-    expect(findFirstNodeWith(
-      result.hierarchy.node,
-      attrs => attrs["text"] === "Dictate" && attrs["accessibility-focused"] === "true"
-    )).not.toBeNull();
+    expect(countNodesWith(result.hierarchy.node, (attrs) => attrs["text"] === "Dictate")).toBe(2);
+    expect(
+      findFirstNodeWith(
+        result.hierarchy.node,
+        (attrs) => attrs["text"] === "Dictate" && attrs["accessibility-focused"] === "true",
+      ),
+    ).not.toBeNull();
   });
 
   test("dedupes exact duplicate action-sheet scrollbar leaves", () => {
@@ -405,11 +419,15 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
 
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
 
-    expect(countNodesWith(
-      result.hierarchy.node,
-      attrs => attrs["text"] === "Vertical scroll bar, 1 page"
-    )).toBe(1);
-    expect(findFirstNodeWith(result.hierarchy.node, attrs => attrs["text"] === "Discard Changes")).not.toBeNull();
+    expect(
+      countNodesWith(
+        result.hierarchy.node,
+        (attrs) => attrs["text"] === "Vertical scroll bar, 1 page",
+      ),
+    ).toBe(1);
+    expect(
+      findFirstNodeWith(result.hierarchy.node, (attrs) => attrs["text"] === "Discard Changes"),
+    ).not.toBeNull();
   });
 
   test("preserves role and custom actions", () => {
@@ -428,7 +446,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     };
 
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
-    const field = findFirstNodeWith(result.hierarchy.node, attrs => attrs["text"] === "Title");
+    const field = findFirstNodeWith(result.hierarchy.node, (attrs) => attrs["text"] === "Title");
 
     expect(field).not.toBeNull();
     expect(field.$["role"]).toBe("textbox");
@@ -451,7 +469,10 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     };
 
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
-    const heading = findFirstNodeWith(result.hierarchy.node, attrs => attrs["text"] === "Entries");
+    const heading = findFirstNodeWith(
+      result.hierarchy.node,
+      (attrs) => attrs["text"] === "Entries",
+    );
 
     expect(heading).not.toBeNull();
     expect(heading.$["role"]).toBe("heading");
@@ -481,7 +502,10 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     };
 
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
-    const button = findFirstNodeWith(result.hierarchy.node, attrs => attrs["class"] === "UIButton");
+    const button = findFirstNodeWith(
+      result.hierarchy.node,
+      (attrs) => attrs["class"] === "UIButton",
+    );
 
     expect(button).not.toBeNull();
     expect(button.$["text"]).toBe("New Reminder");
@@ -516,7 +540,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
     const label = findFirstNodeWith(
       result.hierarchy.node,
-      attrs => attrs["resource-id"] === "button-title-label"
+      (attrs) => attrs["resource-id"] === "button-title-label",
     );
 
     expect(label).not.toBeNull();
@@ -550,7 +574,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
     const label = findFirstNodeWith(
       result.hierarchy.node,
-      attrs => attrs["class"] === "UILabel" && attrs["text"] === "Options"
+      (attrs) => attrs["class"] === "UILabel" && attrs["text"] === "Options",
     );
 
     expect(label).not.toBeNull();
@@ -582,7 +606,10 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     };
 
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
-    const button = findFirstNodeWith(result.hierarchy.node, attrs => attrs["class"] === "UIButton");
+    const button = findFirstNodeWith(
+      result.hierarchy.node,
+      (attrs) => attrs["class"] === "UIButton",
+    );
 
     expect(button).not.toBeNull();
     expect(button.node).toBeUndefined();
@@ -613,7 +640,7 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     };
 
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
-    const link = findFirstNodeWith(result.hierarchy.node, attrs => attrs["class"] === "UILink");
+    const link = findFirstNodeWith(result.hierarchy.node, (attrs) => attrs["class"] === "UILink");
 
     expect(link).not.toBeNull();
     expect(link.$["text"]).toBe("Privacy");
@@ -647,7 +674,10 @@ describe("CtrlProxyHierarchy.convertToViewHierarchyResult", () => {
     };
 
     const result = subject.convertToViewHierarchyResult(makeHierarchy(root));
-    const button = findFirstNodeWith(result.hierarchy.node, attrs => attrs["class"] === "UIButton");
+    const button = findFirstNodeWith(
+      result.hierarchy.node,
+      (attrs) => attrs["class"] === "UIButton",
+    );
 
     expect(button).not.toBeNull();
     expect(button.node).toHaveLength(1);

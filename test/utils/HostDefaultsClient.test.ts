@@ -23,7 +23,7 @@ interface RecordedCall {
 }
 
 function recordingExecutor(
-  respond: (file: string, args: string[]) => ExecResult | Promise<ExecResult>
+  respond: (file: string, args: string[]) => ExecResult | Promise<ExecResult>,
 ): { executor: HostCommandExecutor; calls: RecordedCall[] } {
   const calls: RecordedCall[] = [];
   const executor: HostCommandExecutor = {
@@ -36,7 +36,8 @@ function recordingExecutor(
 }
 
 function deps(
-  overrides: Partial<HostDefaultsClientDependencies> & Pick<HostDefaultsClientDependencies, "executor">
+  overrides: Partial<HostDefaultsClientDependencies> &
+    Pick<HostDefaultsClientDependencies, "executor">,
 ): HostDefaultsClientDependencies {
   return {
     platform: "darwin",
@@ -48,9 +49,15 @@ function deps(
 describe("HostDefaultsClient", () => {
   test("reports macOS support only on darwin", () => {
     const { executor } = recordingExecutor(() => execResult(""));
-    expect(new DefaultHostDefaultsClient(deps({ executor, platform: "darwin" })).isSupported()).toBe(true);
-    expect(new DefaultHostDefaultsClient(deps({ executor, platform: "linux" })).isSupported()).toBe(false);
-    expect(new DefaultHostDefaultsClient(deps({ executor, platform: "win32" })).isSupported()).toBe(false);
+    expect(
+      new DefaultHostDefaultsClient(deps({ executor, platform: "darwin" })).isSupported(),
+    ).toBe(true);
+    expect(new DefaultHostDefaultsClient(deps({ executor, platform: "linux" })).isSupported()).toBe(
+      false,
+    );
+    expect(new DefaultHostDefaultsClient(deps({ executor, platform: "win32" })).isSupported()).toBe(
+      false,
+    );
   });
 
   test("returns the trimmed dark value via argv against the global domain", async () => {
@@ -84,11 +91,11 @@ describe("HostDefaultsClient", () => {
       },
     };
     const client = new DefaultHostDefaultsClient(
-      deps({ executor, logger: { debug: (message: string) => messages.push(message) } })
+      deps({ executor, logger: { debug: (message: string) => messages.push(message) } }),
     );
 
     expect(await client.readGlobal("AppleInterfaceStyle")).toBeNull();
-    expect(messages.some(message => message.includes("AppleInterfaceStyle"))).toBe(true);
+    expect(messages.some((message) => message.includes("AppleInterfaceStyle"))).toBe(true);
   });
 
   test("does not execute anything on non-macOS hosts", async () => {

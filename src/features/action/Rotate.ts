@@ -9,18 +9,14 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 
 export class Rotate extends BaseVisualChange {
-  constructor(
-    device: BootedDevice,
-    adb: AdbClient | null = null,
-    timer: Timer = defaultTimer
-  ) {
+  constructor(device: BootedDevice, adb: AdbClient | null = null, timer: Timer = defaultTimer) {
     super(device, adb, timer);
   }
 
   /**
-     * Get the current device orientation
-     * @returns Promise with current orientation ("portrait" or "landscape")
-     */
+   * Get the current device orientation
+   * @returns Promise with current orientation ("portrait" or "landscape")
+   */
   private async readSystemSetting(key: string): Promise<string | null> {
     try {
       const a11y = AndroidCtrlProxyClient.getInstance(this.device);
@@ -34,7 +30,7 @@ export class Rotate extends BaseVisualChange {
     try {
       const result = await this.adb.executeCommand(`shell settings get system ${key}`);
       const out = result.stdout.trim();
-      return (!out || out === "null") ? null : out;
+      return !out || out === "null" ? null : out;
     } catch (error) {
       logger.warn(`Failed to read system setting ${key}: ${error}`);
       return null;
@@ -54,13 +50,13 @@ export class Rotate extends BaseVisualChange {
     // Convert numeric value to orientation string
     // 0 = portrait, 1 = landscape (90°), 2 = reverse portrait (180°), 3 = reverse landscape (270°)
     // For simplicity, we'll treat 0,2 as portrait and 1,3 as landscape
-    return (userRotation === 0 || userRotation === 2) ? "portrait" : "landscape";
+    return userRotation === 0 || userRotation === 2 ? "portrait" : "landscape";
   }
 
   /**
-     * Check if orientation is locked
-     * @returns Promise with boolean indicating if auto-rotation is disabled
-     */
+   * Check if orientation is locked
+   * @returns Promise with boolean indicating if auto-rotation is disabled
+   */
   async isOrientationLocked(): Promise<boolean> {
     const val = await this.readSystemSetting("accelerometer_rotation");
     if (val === null) {
@@ -87,7 +83,7 @@ export class Rotate extends BaseVisualChange {
 
   async execute(
     orientation: "portrait" | "landscape",
-    progress?: ProgressCallback
+    progress?: ProgressCallback,
   ): Promise<RotateResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("rotate");
@@ -105,14 +101,14 @@ export class Rotate extends BaseVisualChange {
   private async executeIosRotation(
     orientation: "portrait" | "landscape",
     progress: ProgressCallback | undefined,
-    perf: ReturnType<typeof createGlobalPerformanceTracker>
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
   ): Promise<RotateResult> {
     return this.observedInteraction(
       async () => {
         try {
           const client = IOSCtrlProxyClient.getInstance(this.device);
           const result = await perf.track("iOSRotation", () =>
-            client.requestRotate(orientation, 5000, perf)
+            client.requestRotate(orientation, 5000, perf),
           );
 
           if (!result.success) {
@@ -120,7 +116,7 @@ export class Rotate extends BaseVisualChange {
               success: false,
               orientation,
               value: orientation === "portrait" ? 0 : 1,
-              error: result.error ?? "Failed to rotate iOS device"
+              error: result.error ?? "Failed to rotate iOS device",
             };
           }
 
@@ -134,7 +130,7 @@ export class Rotate extends BaseVisualChange {
             orientationLockHandled: false,
             message: result.rotationPerformed
               ? `Successfully rotated from ${result.previousOrientation} to ${result.currentOrientation}`
-              : `Device is already in ${orientation} orientation`
+              : `Device is already in ${orientation} orientation`,
           };
         } catch (error) {
           throw new Error(`Failed to rotate iOS device: ${error}`);
@@ -145,27 +141,23 @@ export class Rotate extends BaseVisualChange {
         timeoutMs: 5000,
         progress,
         perf,
-        skipUiStability: true
-      }
+        skipUiStability: true,
+      },
     );
   }
 
   private async executeAndroidRotation(
     orientation: "portrait" | "landscape",
     progress: ProgressCallback | undefined,
-    perf: ReturnType<typeof createGlobalPerformanceTracker>
+    perf: ReturnType<typeof createGlobalPerformanceTracker>,
   ): Promise<RotateResult> {
     return this.observedInteraction(
       async () => {
-
         const value = orientation === "portrait" ? 0 : 1;
 
         // Run getCurrentOrientation and isOrientationLocked in parallel
         const [currentOrientation, isLocked] = await perf.track("getOrientationState", () =>
-          Promise.all([
-            this.getCurrentOrientation(),
-            this.isOrientationLocked()
-          ])
+          Promise.all([this.getCurrentOrientation(), this.isOrientationLocked()]),
         );
 
         // Check if device is already in the desired orientation
@@ -178,14 +170,13 @@ export class Rotate extends BaseVisualChange {
             previousOrientation: currentOrientation,
             rotationPerformed: false,
             orientationLockHandled: false,
-            message: `Device is already in ${orientation} orientation`
+            message: `Device is already in ${orientation} orientation`,
           };
         }
 
         let orientationUnlocked = false;
 
         try {
-
           // If orientation is locked, unlock it temporarily
           if (isLocked) {
             logger.info("Orientation is locked, temporarily unlocking for rotation");
@@ -197,13 +188,11 @@ export class Rotate extends BaseVisualChange {
             Promise.all([
               this.writeSystemSetting("accelerometer_rotation", "0"),
               this.writeSystemSetting("user_rotation", String(value)),
-            ])
+            ]),
           );
 
           // Wait for rotation to complete (also serves as verification)
-          await perf.track("waitForRotation", () =>
-            this.awaitIdle.waitForRotation(value)
-          );
+          await perf.track("waitForRotation", () => this.awaitIdle.waitForRotation(value));
 
           // Note: We skip explicit verification since waitForRotation already confirms
           // the rotation completed successfully by polling dumpsys window
@@ -216,7 +205,7 @@ export class Rotate extends BaseVisualChange {
             previousOrientation: currentOrientation,
             rotationPerformed: true,
             orientationLockHandled: orientationUnlocked,
-            message: `Successfully rotated from ${currentOrientation} to ${orientation}`
+            message: `Successfully rotated from ${currentOrientation} to ${orientation}`,
           };
         } catch (error) {
           // Restore orientation lock if we unlocked it
@@ -237,7 +226,7 @@ export class Rotate extends BaseVisualChange {
             previousOrientation: currentOrientation,
             rotationPerformed: false,
             orientationLockHandled: orientationUnlocked,
-            error: `Failed to change device orientation: ${error}`
+            error: `Failed to change device orientation: ${error}`,
           };
         }
       },
@@ -248,8 +237,8 @@ export class Rotate extends BaseVisualChange {
         perf,
         // Skip gfxinfo-based UI stability tracking for rotation - it incorrectly
         // detects rotation animation as "unstable UI" and can cause 5+ second waits
-        skipUiStability: true
-      }
+        skipUiStability: true,
+      },
     );
   }
 }

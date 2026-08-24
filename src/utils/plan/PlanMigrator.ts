@@ -22,8 +22,10 @@ export const parseVersion = (version: string | undefined): number[] | null => {
   // Strip it before parsing — otherwise the SHA's hex digits corrupt the patch
   // number and a `.dirty` suffix parses to NaN (→ always-outdated). Migration
   // only cares about the release portion.
-  const numericParts = releaseVersion(version).split(".").map(part => parseInt(part.replace(/\D/g, ""), 10));
-  if (numericParts.some(part => Number.isNaN(part))) {
+  const numericParts = releaseVersion(version)
+    .split(".")
+    .map((part) => parseInt(part.replace(/\D/g, ""), 10));
+  if (numericParts.some((part) => Number.isNaN(part))) {
     return null;
   }
   return numericParts.slice(0, 3);
@@ -53,15 +55,14 @@ const isRecord = (value: unknown): value is Record<string, any> => {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 };
 
-const recordWarning = (
-  warnings: MigrationWarning[],
-  message: string,
-  stepIndex?: number
-): void => {
+const recordWarning = (warnings: MigrationWarning[], message: string, stepIndex?: number): void => {
   warnings.push(stepIndex === undefined ? { message } : { message, stepIndex });
 };
 
-const ensureMetadata = (plan: Record<string, any>, warnings: MigrationWarning[]): Record<string, any> => {
+const ensureMetadata = (
+  plan: Record<string, any>,
+  warnings: MigrationWarning[],
+): Record<string, any> => {
   if (!isRecord(plan.metadata)) {
     if (plan.metadata !== undefined) {
       recordWarning(warnings, "Plan metadata was not an object; resetting to defaults.");
@@ -127,7 +128,7 @@ const migratePlanFields = (plan: Record<string, any>, warnings: MigrationWarning
 
   if (typeof plan.mcpVersion !== "string" || !plan.mcpVersion) {
     plan.mcpVersion = "unknown";
-    recordWarning(warnings, "Defaulted missing mcpVersion to \"unknown\".");
+    recordWarning(warnings, 'Defaulted missing mcpVersion to "unknown".');
     changed = true;
   }
 
@@ -149,7 +150,7 @@ const migratePlanFields = (plan: Record<string, any>, warnings: MigrationWarning
 const migrateStepFields = (
   step: Record<string, any>,
   stepIndex: number,
-  warnings: MigrationWarning[]
+  warnings: MigrationWarning[],
 ): boolean => {
   let changed = false;
 
@@ -216,7 +217,11 @@ const migrateStepFields = (
     recordWarning(warnings, "Renamed scroll to swipeOn.", stepIndex);
     if (!mergedParams.gestureType) {
       mergedParams.gestureType = "scrollTowardsDirection";
-      recordWarning(warnings, "Defaulted gestureType=scrollTowardsDirection for scroll migration.", stepIndex);
+      recordWarning(
+        warnings,
+        "Defaulted gestureType=scrollTowardsDirection for scroll migration.",
+        stepIndex,
+      );
     }
     changed = true;
   }
@@ -273,7 +278,7 @@ const migrateStepFields = (
         recordWarning(
           warnings,
           "Wrapped legacy tapOn { elementId|text|textAny } under { selector: { ... } } for v0.0.30+ schema.",
-          stepIndex
+          stepIndex,
         );
         changed = true;
       }
@@ -317,7 +322,8 @@ const migrateStepFields = (
     }
     if (mergedParams.duration !== undefined) {
       if (!mergedParams.speed && typeof mergedParams.duration === "number") {
-        mergedParams.speed = mergedParams.duration >= 800 ? "slow" : mergedParams.duration <= 250 ? "fast" : "normal";
+        mergedParams.speed =
+          mergedParams.duration >= 800 ? "slow" : mergedParams.duration <= 250 ? "fast" : "normal";
         recordWarning(warnings, "Mapped swipe duration to speed.", stepIndex);
       }
       delete mergedParams.duration;
@@ -332,8 +338,14 @@ const migrateStepFields = (
   }
 
   if (normalizedTool === "systemTray") {
-    const notification = isRecord(mergedParams.notification) ? mergedParams.notification : undefined;
-    if (notification && typeof notification.timeout === "number" && mergedParams.awaitTimeout === undefined) {
+    const notification = isRecord(mergedParams.notification)
+      ? mergedParams.notification
+      : undefined;
+    if (
+      notification &&
+      typeof notification.timeout === "number" &&
+      mergedParams.awaitTimeout === undefined
+    ) {
       mergedParams.awaitTimeout = notification.timeout;
       delete notification.timeout;
       recordWarning(warnings, "Moved notification.timeout to awaitTimeout.", stepIndex);
@@ -354,7 +366,9 @@ const migrateStepFields = (
   return changed;
 };
 
-export const migratePlan = (rawPlan: unknown): { plan: Record<string, any>; report: PlanMigrationReport } => {
+export const migratePlan = (
+  rawPlan: unknown,
+): { plan: Record<string, any>; report: PlanMigrationReport } => {
   if (!isRecord(rawPlan)) {
     throw new Error("Plan is not a valid object");
   }
@@ -362,7 +376,12 @@ export const migratePlan = (rawPlan: unknown): { plan: Record<string, any>; repo
   const warnings: MigrationWarning[] = [];
   const plan = rawPlan;
   const targetVersion = getMcpServerVersion();
-  const originalVersion = typeof plan.mcpVersion === "string" ? plan.mcpVersion : typeof plan.metadata?.mcpVersion === "string" ? plan.metadata.mcpVersion : "unknown";
+  const originalVersion =
+    typeof plan.mcpVersion === "string"
+      ? plan.mcpVersion
+      : typeof plan.metadata?.mcpVersion === "string"
+        ? plan.metadata.mcpVersion
+        : "unknown";
   const outdated = isOlderVersion(originalVersion, targetVersion);
 
   let migrated = false;
@@ -398,7 +417,7 @@ export const migratePlan = (rawPlan: unknown): { plan: Record<string, any>; repo
       originalVersion,
       targetVersion,
       migrated,
-      outdated
-    }
+      outdated,
+    },
   };
 };

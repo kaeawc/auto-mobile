@@ -166,7 +166,7 @@ export async function down(db) {
         },
         () => {
           gen1Settled = true;
-        }
+        },
       );
 
       // No fixed wall-clock wait: this bounded loop early-exits the moment a
@@ -198,10 +198,7 @@ export async function down(db) {
       const database = db.getDatabase();
       const probeRows = await database.selectFrom("probe").selectAll().execute();
       expect(probeRows).toHaveLength(1);
-      const historyRows = await database
-        .selectFrom("kysely_migration")
-        .select("name")
-        .execute();
+      const historyRows = await database.selectFrom("kysely_migration").select("name").execute();
       expect(historyRows.map((row: { name: string }) => row.name)).toEqual([
         "0001_slow_writing_migration",
       ]);

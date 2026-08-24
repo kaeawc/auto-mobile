@@ -7,7 +7,7 @@ import {
   SwipeDirection,
   SwipeOnOptions,
   SwipeOnResult,
-  ViewHierarchyResult
+  ViewHierarchyResult,
 } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
@@ -20,17 +20,28 @@ import { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/Adb
 import type { FeatureFlagService } from "../../featureFlags/FeatureFlagService";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { Timer } from "../../../utils/SystemTimer";
-import { SwipeOnResolvedOptions, BoomerangConfig, TalkBackSwipeRunner, VoiceOverSwipeRunner, OverlayAnalyzer, ScrollAccessibilityService } from "./types";
+import {
+  SwipeOnResolvedOptions,
+  BoomerangConfig,
+  TalkBackSwipeRunner,
+  VoiceOverSwipeRunner,
+  OverlayAnalyzer,
+  ScrollAccessibilityService,
+} from "./types";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import { exponentialBackoff } from "../../../utils/Backoff";
 
 function oppositeDirection(dir: SwipeDirection): SwipeDirection {
   switch (dir) {
-    case "up":    return "down";
-    case "down":  return "up";
-    case "left":  return "right";
-    case "right": return "left";
+    case "up":
+      return "down";
+    case "down":
+      return "up";
+    case "left":
+      return "right";
+    case "right":
+      return "left";
   }
 }
 
@@ -67,7 +78,7 @@ interface ScrollUntilVisibleDependencies {
         toolName: string;
         toolArgs: Record<string, unknown>;
       };
-    }
+    },
   ) => Promise<T & { observation?: ObserveResult }>;
 }
 
@@ -79,22 +90,28 @@ export class ScrollUntilVisible {
   async execute(
     options: SwipeOnResolvedOptions,
     progress?: unknown,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<SwipeOnResult> {
-    logger.info(`[SwipeOn] Starting scroll-until-visible: direction=${options.direction}, lookFor=${JSON.stringify(options.lookFor)}`);
+    logger.info(
+      `[SwipeOn] Starting scroll-until-visible: direction=${options.direction}, lookFor=${JSON.stringify(options.lookFor)}`,
+    );
 
     // Get initial observation
-    let lastObservation = await perf.track("initialObserve", () => this.deps.observeScreen.execute());
+    let lastObservation = await perf.track("initialObserve", () =>
+      this.deps.observeScreen.execute(),
+    );
     if (!lastObservation.viewHierarchy || !lastObservation.screenSize) {
       throw new Error("Failed to get initial observation for scrolling until visible.");
     }
 
     // Find the scrollable container
     const containerElement = await perf.track("findContainer", () =>
-      this.findScrollableContainer(options, lastObservation)
+      this.findScrollableContainer(options, lastObservation),
     );
 
-    logger.info(`[SwipeOn] Using container: bounds=${JSON.stringify(containerElement.bounds)}, scrollable=${containerElement.scrollable}`);
+    logger.info(
+      `[SwipeOn] Using container: bounds=${JSON.stringify(containerElement.bounds)}, scrollable=${containerElement.scrollable}`,
+    );
 
     // Calculate container height as percentage of screen height
     const containerHeight = containerElement.bounds.bottom - containerElement.bounds.top;
@@ -106,12 +123,16 @@ export class ScrollUntilVisible {
     if (heightPercentage >= 80) {
       if (!effectiveSpeed || effectiveSpeed === "fast") {
         effectiveSpeed = "normal";
-        logger.info(`[SwipeOn] Container is ${heightPercentage.toFixed(1)}% of screen height, limiting lookFor speed to "normal"`);
+        logger.info(
+          `[SwipeOn] Container is ${heightPercentage.toFixed(1)}% of screen height, limiting lookFor speed to "normal"`,
+        );
       }
     } else {
       if (!effectiveSpeed || effectiveSpeed === "normal" || effectiveSpeed === "fast") {
         effectiveSpeed = "slow";
-        logger.info(`[SwipeOn] Container is ${heightPercentage.toFixed(1)}% of screen height, limiting lookFor speed to "slow"`);
+        logger.info(
+          `[SwipeOn] Container is ${heightPercentage.toFixed(1)}% of screen height, limiting lookFor speed to "slow"`,
+        );
       }
     }
 
@@ -143,23 +164,31 @@ export class ScrollUntilVisible {
       const accessibilityService = await this.deps.accessibilityDetector.detectMethod(
         this.deps.device.deviceId,
         this.deps.adb,
-        this.deps.featureFlags
+        this.deps.featureFlags,
       );
       return accessibilityService === "talkback";
     });
 
     // First check if element is already visible within the container bounds
     foundElement = await perf.track("initialSearch", () =>
-      this.findElementInHierarchy(options.lookFor!, lastObservation.viewHierarchy!, options.container)
+      this.findElementInHierarchy(
+        options.lookFor!,
+        lastObservation.viewHierarchy!,
+        options.container,
+      ),
     );
 
     if (foundElement && !this.isElementWithinContainer(foundElement, containerElement.bounds)) {
-      logger.info(`[SwipeOn] Found ${target} initially but it is outside container bounds (element center y=${Math.floor((foundElement.bounds.top + foundElement.bounds.bottom) / 2)}, container=${JSON.stringify(containerElement.bounds)}), will scroll`);
+      logger.info(
+        `[SwipeOn] Found ${target} initially but it is outside container bounds (element center y=${Math.floor((foundElement.bounds.top + foundElement.bounds.bottom) / 2)}, container=${JSON.stringify(containerElement.bounds)}), will scroll`,
+      );
       foundElement = null;
     }
 
     if (foundElement) {
-      logger.info(`[SwipeOn] Element already visible at bounds=${JSON.stringify(foundElement.bounds)}, no scrolling needed`);
+      logger.info(
+        `[SwipeOn] Element already visible at bounds=${JSON.stringify(foundElement.bounds)}, no scrolling needed`,
+      );
 
       // Set accessibility focus on found element if requested
       if (isTalkBackEnabled && options.focusTarget) {
@@ -179,7 +208,7 @@ export class ScrollUntilVisible {
         x2: 0,
         y2: 0,
         duration: 0,
-        observation: lastObservation
+        observation: lastObservation,
       };
     }
 
@@ -187,7 +216,7 @@ export class ScrollUntilVisible {
       options,
       lastObservation.viewHierarchy!,
       containerElement,
-      lastObservation
+      lastObservation,
     );
     const swipeWarning = swipeCoordinates.warning;
 
@@ -200,41 +229,58 @@ export class ScrollUntilVisible {
       reverseBounds = {
         left: Math.max(containerElement.bounds.left, insets.left),
         top: Math.max(containerElement.bounds.top, insets.top),
-        right: Math.min(containerElement.bounds.right, (lastObservation.screenSize?.width ?? containerElement.bounds.right) - insets.right),
-        bottom: Math.min(containerElement.bounds.bottom, (lastObservation.screenSize?.height ?? containerElement.bounds.bottom) - insets.bottom)
+        right: Math.min(
+          containerElement.bounds.right,
+          (lastObservation.screenSize?.width ?? containerElement.bounds.right) - insets.right,
+        ),
+        bottom: Math.min(
+          containerElement.bounds.bottom,
+          (lastObservation.screenSize?.height ?? containerElement.bounds.bottom) - insets.bottom,
+        ),
       };
     }
     const reverseSwipeCoords = this.computeHalfScreenReverseCoords(reverseDirection, reverseBounds);
     const reverseOptions = { ...lookForOptions, speed: "slow" as const };
-    logger.info(`[SwipeOn] Forward swipe: direction=${options.direction}, coords=(${Math.floor(swipeCoordinates.startX)},${Math.floor(swipeCoordinates.startY)})→(${Math.floor(swipeCoordinates.endX)},${Math.floor(swipeCoordinates.endY)})`);
-    logger.info(`[SwipeOn] Reverse swipe: direction=${reverseDirection}, coords=(${Math.floor(reverseSwipeCoords.startX)},${Math.floor(reverseSwipeCoords.startY)})→(${Math.floor(reverseSwipeCoords.endX)},${Math.floor(reverseSwipeCoords.endY)}), bounds=${JSON.stringify(reverseBounds)}`);
+    logger.info(
+      `[SwipeOn] Forward swipe: direction=${options.direction}, coords=(${Math.floor(swipeCoordinates.startX)},${Math.floor(swipeCoordinates.startY)})→(${Math.floor(swipeCoordinates.endX)},${Math.floor(swipeCoordinates.endY)})`,
+    );
+    logger.info(
+      `[SwipeOn] Reverse swipe: direction=${reverseDirection}, coords=(${Math.floor(reverseSwipeCoords.startX)},${Math.floor(reverseSwipeCoords.startY)})→(${Math.floor(reverseSwipeCoords.endX)},${Math.floor(reverseSwipeCoords.endY)}), bounds=${JSON.stringify(reverseBounds)}`,
+    );
 
     // Scroll until element is found
     while (this.deps.timer.now() - startTime < maxTime) {
       scrollIteration++;
-      logger.info(`[SwipeOn] Iteration ${scrollIteration}: elapsed=${this.deps.timer.now() - startTime}ms, reverseMode=${reverseMode}, unchangedScrollCount=${unchangedScrollCount}/${maxUnchangedScrolls}`);
+      logger.info(
+        `[SwipeOn] Iteration ${scrollIteration}: elapsed=${this.deps.timer.now() - startTime}ms, reverseMode=${reverseMode}, unchangedScrollCount=${unchangedScrollCount}/${maxUnchangedScrolls}`,
+      );
 
       // Perform scroll
       const activeCoords = reverseMode ? reverseSwipeCoords : swipeCoordinates;
       const activeDirection = reverseMode ? reverseDirection : options.direction;
       const activeDuration = this.deps.getDuration(reverseMode ? reverseOptions : lookForOptions);
       const { startX, startY, endX, endY } = activeCoords;
-      logger.info(`[SwipeOn] Swipe: direction=${activeDirection}, coords=(${Math.floor(startX)},${Math.floor(startY)})→(${Math.floor(endX)},${Math.floor(endY)}), duration=${activeDuration}ms`);
+      logger.info(
+        `[SwipeOn] Swipe: direction=${activeDirection}, coords=(${Math.floor(startX)},${Math.floor(startY)})→(${Math.floor(endX)},${Math.floor(endY)}), duration=${activeDuration}ms`,
+      );
 
       const boomerang = this.deps.resolveBoomerangConfig(options);
       const gestureOptions: GestureOptions = {
         duration: activeDuration,
-        scrollMode: options.scrollMode
+        scrollMode: options.scrollMode,
       };
 
       // Execute swipe with observedInteraction
       const swipeResult = await this.deps.observedInteraction(
         async () => {
-          const swipeRunner = this.deps.device.platform === "ios"
-            ? this.deps.voiceOverExecutor
-            : this.deps.talkBackExecutor;
+          const swipeRunner =
+            this.deps.device.platform === "ios"
+              ? this.deps.voiceOverExecutor
+              : this.deps.talkBackExecutor;
           if (!swipeRunner) {
-            throw new Error("VoiceOver swipe runner is not configured for iOS scroll-until-visible");
+            throw new Error(
+              "VoiceOver swipe runner is not configured for iOS scroll-until-visible",
+            );
           }
           return await swipeRunner.executeSwipeGesture(
             Math.floor(startX),
@@ -245,7 +291,7 @@ export class ScrollUntilVisible {
             containerElement,
             gestureOptions,
             perf,
-            boomerang
+            boomerang,
           );
         },
         {
@@ -256,9 +302,9 @@ export class ScrollUntilVisible {
           skipPreviousObserve: scrollIteration > 1,
           predictionContext: {
             toolName: "swipeOn",
-            toolArgs: this.deps.buildPredictionArgs(options)
-          }
-        }
+            toolArgs: this.deps.buildPredictionArgs(options),
+          },
+        },
       );
 
       if (!swipeResult.success && this.deps.device.platform === "ios") {
@@ -268,7 +314,7 @@ export class ScrollUntilVisible {
           targetType: "screen",
           found: false,
           scrollIterations: scrollIteration,
-          elapsedMs: this.deps.timer.now() - startTime
+          elapsedMs: this.deps.timer.now() - startTime,
         };
       }
 
@@ -288,7 +334,7 @@ export class ScrollUntilVisible {
       if (postSwipeFingerprint === lastFingerprint) {
         logger.warn(
           `[SwipeOn] iter=${scrollIteration} post-swipe fingerprint matches pre-swipe — ` +
-          `observation may be stale (cache hit) or swipe had no visible effect`
+            `observation may be stale (cache hit) or swipe had no visible effect`,
         );
       }
 
@@ -306,11 +352,15 @@ export class ScrollUntilVisible {
       // Check if hierarchy changed (detect scroll end)
       const currentFingerprint = this.computeHierarchyFingerprint(lastObservation.viewHierarchy!);
       const fingerprintChanged = currentFingerprint !== lastFingerprint;
-      logger.info(`[SwipeOn] Iteration ${scrollIteration}: hierarchy ${fingerprintChanged ? "changed" : "UNCHANGED"} (fingerprint[0:40]="${currentFingerprint.slice(0, 40)}")`);
+      logger.info(
+        `[SwipeOn] Iteration ${scrollIteration}: hierarchy ${fingerprintChanged ? "changed" : "UNCHANGED"} (fingerprint[0:40]="${currentFingerprint.slice(0, 40)}")`,
+      );
 
       if (!fingerprintChanged) {
         unchangedScrollCount++;
-        logger.info(`[SwipeOn] Iteration ${scrollIteration}: unchanged count now ${unchangedScrollCount}/${maxUnchangedScrolls}`);
+        logger.info(
+          `[SwipeOn] Iteration ${scrollIteration}: unchanged count now ${unchangedScrollCount}/${maxUnchangedScrolls}`,
+        );
 
         if (unchangedScrollCount >= maxUnchangedScrolls) {
           if (reverseMode) {
@@ -319,13 +369,15 @@ export class ScrollUntilVisible {
             const elapsed = this.deps.timer.now() - startTime;
             throw new ActionableError(
               `Scroll reached end of container (no change after ${maxUnchangedScrolls} scrolls). ` +
-              `${target} not found after ${scrollIteration} iterations (${elapsed}ms).`
+                `${target} not found after ${scrollIteration} iterations (${elapsed}ms).`,
             );
           }
           // Switch to reverse half-screen recovery
           reverseMode = true;
           unchangedScrollCount = 0;
-          logger.info(`[SwipeOn] Reached end in forward direction without finding ${target}, switching to reverse half-screen recovery`);
+          logger.info(
+            `[SwipeOn] Reached end in forward direction without finding ${target}, switching to reverse half-screen recovery`,
+          );
         }
       } else {
         unchangedScrollCount = 0;
@@ -338,17 +390,21 @@ export class ScrollUntilVisible {
       foundElement = await this.findElementInHierarchy(
         options.lookFor!,
         lastObservation.viewHierarchy!,
-        options.container
+        options.container,
       );
 
       if (foundElement && !this.isElementWithinContainer(foundElement, containerElement.bounds)) {
-        logger.info(`[SwipeOn] Found ${target} but it is outside container bounds (element center y=${Math.floor((foundElement.bounds.top + foundElement.bounds.bottom) / 2)}, container=${JSON.stringify(containerElement.bounds)}), continuing scroll`);
+        logger.info(
+          `[SwipeOn] Found ${target} but it is outside container bounds (element center y=${Math.floor((foundElement.bounds.top + foundElement.bounds.bottom) / 2)}, container=${JSON.stringify(containerElement.bounds)}), continuing scroll`,
+        );
         foundElement = null;
       }
 
       if (foundElement) {
         const elapsed = this.deps.timer.now() - startTime;
-        logger.info(`[SwipeOn] Found ${target} after ${scrollIteration} iterations (${elapsed}ms), reverseMode=${reverseMode}, bounds=${JSON.stringify(foundElement.bounds)}`);
+        logger.info(
+          `[SwipeOn] Found ${target} after ${scrollIteration} iterations (${elapsed}ms), reverseMode=${reverseMode}, bounds=${JSON.stringify(foundElement.bounds)}`,
+        );
         break;
       }
       logger.info(`[SwipeOn] Iteration ${scrollIteration}: ${target} not yet found`);
@@ -358,7 +414,7 @@ export class ScrollUntilVisible {
       perf.end();
       const elapsed = this.deps.timer.now() - startTime;
       throw new ActionableError(
-        `${target} not found after scrolling for ${elapsed}ms (${scrollIteration} iterations, timeout=${maxTime}ms).`
+        `${target} not found after scrolling for ${elapsed}ms (${scrollIteration} iterations, timeout=${maxTime}ms).`,
       );
     }
 
@@ -381,14 +437,14 @@ export class ScrollUntilVisible {
       x2: 0,
       y2: 0,
       duration: 0,
-      warning: swipeWarning
+      warning: swipeWarning,
     };
   }
 
   async findTargetElement(
     options: SwipeOnOptions,
     viewHierarchy: ViewHierarchyResult,
-    attempt: number = 0
+    attempt: number = 0,
   ): Promise<Element> {
     let element: Element | null = null;
 
@@ -402,13 +458,13 @@ export class ScrollUntilVisible {
         options.container.text,
         undefined,
         true,
-        false
+        false,
       );
     } else if (options.container.elementId) {
       element = this.deps.finder.findElementByResourceId(
         viewHierarchy,
         options.container.elementId,
-        undefined
+        undefined,
       );
     } else {
       throw new ActionableError("Container must specify either text or elementId");
@@ -418,7 +474,7 @@ export class ScrollUntilVisible {
     if (!element && attempt < ScrollUntilVisible.MAX_ATTEMPTS) {
       const delayNextAttempt = exponentialBackoff({
         initialDelayMs: 10,
-        maxDelayMs: 1000
+        maxDelayMs: 1000,
       }).delayForAttempt(attempt + 1);
       await this.deps.timer.sleep(delayNextAttempt);
 
@@ -428,18 +484,20 @@ export class ScrollUntilVisible {
         case "android":
           const queryOptions = {
             query: options.container.text || options.container.elementId || "",
-            containerElementId: undefined
+            containerElementId: undefined,
           };
           latestViewHierarchy = await this.deps.accessibilityService.getAccessibilityHierarchy(
             queryOptions,
             undefined,
             undefined,
             undefined,
-            serverConfig.isRawElementSearchEnabled()
+            serverConfig.isRawElementSearchEnabled(),
           );
           break;
         case "ios":
-          latestViewHierarchy = await IOSCtrlProxyClient.getInstance(this.deps.device).getAccessibilityHierarchy() ?? undefined;
+          latestViewHierarchy =
+            (await IOSCtrlProxyClient.getInstance(this.deps.device).getAccessibilityHierarchy()) ??
+            undefined;
           break;
         default:
           throw new ActionableError(`Unsupported platform: ${this.deps.device.platform}`);
@@ -453,9 +511,13 @@ export class ScrollUntilVisible {
 
     if (!element) {
       if (options.container.text) {
-        throw new ActionableError(`Element not found with provided text '${options.container.text}'`);
+        throw new ActionableError(
+          `Element not found with provided text '${options.container.text}'`,
+        );
       } else {
-        throw new ActionableError(`Element not found with provided elementId '${options.container.elementId}'`);
+        throw new ActionableError(
+          `Element not found with provided elementId '${options.container.elementId}'`,
+        );
       }
     }
 
@@ -464,7 +526,7 @@ export class ScrollUntilVisible {
 
   async findScrollableContainer(
     options: SwipeOnOptions,
-    observeResult: ObserveResult
+    observeResult: ObserveResult,
   ): Promise<Element> {
     let element: Element | null = null;
     const viewHierarchy = observeResult.viewHierarchy!;
@@ -473,7 +535,7 @@ export class ScrollUntilVisible {
     if (options.container?.elementId) {
       element = this.deps.finder.findElementByResourceId(
         viewHierarchy,
-        options.container.elementId
+        options.container.elementId,
       );
     } else if (options.container?.text) {
       element = this.deps.finder.findElementByText(
@@ -481,7 +543,7 @@ export class ScrollUntilVisible {
         options.container.text,
         undefined,
         true,
-        false
+        false,
       );
     }
 
@@ -501,7 +563,7 @@ export class ScrollUntilVisible {
 
       element = {
         bounds: getScreenBounds(screenSize, observeResult.systemInsets),
-        scrollable: true
+        scrollable: true,
       } as Element;
     }
 
@@ -511,7 +573,7 @@ export class ScrollUntilVisible {
   async findElementInHierarchy(
     lookFor: { text?: string; elementId?: string },
     viewHierarchy: ViewHierarchyResult,
-    container?: { elementId?: string; text?: string }
+    container?: { elementId?: string; text?: string },
   ): Promise<Element | null> {
     if (lookFor.text) {
       return this.deps.finder.findElementByText(
@@ -519,14 +581,14 @@ export class ScrollUntilVisible {
         lookFor.text,
         container,
         true,
-        false
+        false,
       );
     } else if (lookFor.elementId) {
       return this.deps.finder.findElementByResourceId(
         viewHierarchy,
         lookFor.elementId,
         container,
-        true
+        true,
       );
     }
     return null;
@@ -542,7 +604,7 @@ export class ScrollUntilVisible {
 
   private async setAccessibilityFocusOnElement(
     element: Element,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
   ): Promise<void> {
     try {
       await perf.track("setAccessibilityFocus", async () => {
@@ -562,7 +624,7 @@ export class ScrollUntilVisible {
 
   private isElementWithinContainer(
     element: Element,
-    containerBounds: { top: number; bottom: number; left: number; right: number }
+    containerBounds: { top: number; bottom: number; left: number; right: number },
   ): boolean {
     const centerY = (element.bounds.top + element.bounds.bottom) / 2;
     const centerX = (element.bounds.left + element.bounds.right) / 2;
@@ -576,7 +638,7 @@ export class ScrollUntilVisible {
 
   private computeHalfScreenReverseCoords(
     reverseDir: SwipeDirection,
-    effectiveBounds: { left: number; top: number; right: number; bottom: number }
+    effectiveBounds: { left: number; top: number; right: number; bottom: number },
   ): { startX: number; startY: number; endX: number; endY: number } {
     const cx = (effectiveBounds.left + effectiveBounds.right) / 2;
     const cy = (effectiveBounds.top + effectiveBounds.bottom) / 2;
@@ -585,21 +647,43 @@ export class ScrollUntilVisible {
 
     switch (reverseDir) {
       case "down":
-        return { startX: cx, startY: effectiveBounds.top + h * 0.25, endX: cx, endY: effectiveBounds.top + h * 0.75 };
+        return {
+          startX: cx,
+          startY: effectiveBounds.top + h * 0.25,
+          endX: cx,
+          endY: effectiveBounds.top + h * 0.75,
+        };
       case "up":
-        return { startX: cx, startY: effectiveBounds.bottom - h * 0.25, endX: cx, endY: effectiveBounds.top + h * 0.25 };
+        return {
+          startX: cx,
+          startY: effectiveBounds.bottom - h * 0.25,
+          endX: cx,
+          endY: effectiveBounds.top + h * 0.25,
+        };
       case "right":
-        return { startX: effectiveBounds.left + w * 0.25, startY: cy, endX: effectiveBounds.left + w * 0.75, endY: cy };
+        return {
+          startX: effectiveBounds.left + w * 0.25,
+          startY: cy,
+          endX: effectiveBounds.left + w * 0.75,
+          endY: cy,
+        };
       case "left":
-        return { startX: effectiveBounds.right - w * 0.25, startY: cy, endX: effectiveBounds.left + w * 0.25, endY: cy };
+        return {
+          startX: effectiveBounds.right - w * 0.25,
+          startY: cy,
+          endX: effectiveBounds.left + w * 0.25,
+          endY: cy,
+        };
     }
   }
 
   private async waitForScrollIdle(
     currentObservation: ObserveResult,
-    maxWaitMs: number
+    maxWaitMs: number,
   ): Promise<ObserveResult> {
-    if (!currentObservation.viewHierarchy) {return currentObservation;}
+    if (!currentObservation.viewHierarchy) {
+      return currentObservation;
+    }
     const startTime = this.deps.timer.now();
     const pollIntervalMs = 150;
     let previousFingerprint = this.computeHierarchyFingerprint(currentObservation.viewHierarchy);
@@ -607,13 +691,19 @@ export class ScrollUntilVisible {
 
     while (this.deps.timer.now() - startTime < maxWaitMs) {
       const newObservation = await this.deps.observeScreen.execute();
-      if (!newObservation.viewHierarchy) {break;}
+      if (!newObservation.viewHierarchy) {
+        break;
+      }
       const newFingerprint = this.computeHierarchyFingerprint(newObservation.viewHierarchy);
       if (newFingerprint === previousFingerprint) {
-        logger.info(`[SwipeOn] Scroll settled after ${this.deps.timer.now() - startTime}ms idle check`);
+        logger.info(
+          `[SwipeOn] Scroll settled after ${this.deps.timer.now() - startTime}ms idle check`,
+        );
         return newObservation;
       }
-      logger.info(`[SwipeOn] Scroll still settling (elapsed=${this.deps.timer.now() - startTime}ms), retrying in ${pollIntervalMs}ms`);
+      logger.info(
+        `[SwipeOn] Scroll still settling (elapsed=${this.deps.timer.now() - startTime}ms), retrying in ${pollIntervalMs}ms`,
+      );
       previousFingerprint = newFingerprint;
       latestObservation = newObservation;
       await this.deps.timer.sleep(pollIntervalMs);
@@ -627,11 +717,15 @@ export class ScrollUntilVisible {
     options: SwipeOnResolvedOptions,
     viewHierarchy: ViewHierarchyResult,
     containerElement: Element,
-    observeResult: ObserveResult
+    observeResult: ObserveResult,
   ): { startX: number; startY: number; endX: number; endY: number; warning?: string } {
     return resolveContainerSwipeCoordinates(
-      this.deps.geometry, this.deps.overlayDetector,
-      options, viewHierarchy, containerElement, observeResult
+      this.deps.geometry,
+      this.deps.overlayDetector,
+      options,
+      viewHierarchy,
+      containerElement,
+      observeResult,
     );
   }
 }

@@ -118,7 +118,7 @@ class BunSqliteDriver implements Driver {
       this.#config.database,
       this.#config.beforeQuery,
       this.#config.retry,
-      this.#config.optimizeIntervalMs
+      this.#config.optimizeIntervalMs,
     );
   }
 
@@ -129,7 +129,10 @@ class BunSqliteDriver implements Driver {
     return new BunSqliteConnectionLease(this.#connectionState);
   }
 
-  async beginTransaction(connection: DatabaseConnection, _settings: TransactionSettings): Promise<void> {
+  async beginTransaction(
+    connection: DatabaseConnection,
+    _settings: TransactionSettings,
+  ): Promise<void> {
     await this.#lease(connection).beginTransaction();
   }
 
@@ -183,7 +186,7 @@ export class BunSqliteConnectionState {
     database: BunDatabase | (() => BunDatabase),
     beforeQuery?: () => Promise<void>,
     retry?: BunSqliteRetryConfig,
-    optimizeIntervalMs?: number
+    optimizeIntervalMs?: number,
   ) {
     this.#databaseSource = database;
     this.#db = typeof database === "function" ? null : database;
@@ -196,7 +199,7 @@ export class BunSqliteConnectionState {
     if (optimizeIntervalMs && optimizeIntervalMs > 0) {
       this.#optimizeTimer = this.#timer.setInterval(
         () => this.#runPeriodicOptimize(),
-        optimizeIntervalMs
+        optimizeIntervalMs,
       );
       // A background maintenance tick must never keep the process alive.
       // FakeTimer handles have no unref, hence the optional call.
@@ -283,7 +286,7 @@ export class BunSqliteConnectionState {
           const delayMs = this.#retryDelayMs(attempt);
           logger.warn(
             `SQLite busy/locked (attempt ${attempt}/${this.#maxRetryAttempts}); ` +
-              `retrying in ${delayMs}ms: ${sql}`
+              `retrying in ${delayMs}ms: ${sql}`,
           );
           await this.#timer.sleep(delayMs);
         }
@@ -373,9 +376,9 @@ export class BunSqliteConnectionState {
             rows: [],
             numAffectedRows: BigInt(writeResult.changes),
             insertId:
-                writeResult.lastInsertRowid !== undefined
-                  ? BigInt(writeResult.lastInsertRowid)
-                  : undefined,
+              writeResult.lastInsertRowid !== undefined
+                ? BigInt(writeResult.lastInsertRowid)
+                : undefined,
           };
           if (schemaChanging) {
             this.#clearStatementCache();
@@ -392,17 +395,17 @@ export class BunSqliteConnectionState {
       // JSON.stringify(parameters) throws on BigInt — which would mask the real
       // SqliteError with a TypeError from the error reporter itself.
       const params = JSON.stringify(parameters, (_key, value) =>
-        typeof value === "bigint" ? value.toString() : value
+        typeof value === "bigint" ? value.toString() : value,
       );
-        // Preserve the original SqliteError (code/stack) via `cause` so future
-        // BUSY/constraint-aware retries and describeUnknownError (which recurses
-        // into `.cause`) can reach it. ActionableError drops `cause`, so use a
-        // plain Error here. Keep the original error text inline too: the
-        // `#beforeQuery` migration gate above runs inside this try, so its
-        // "startup migrations failed" throw is caught and rewrapped here — and
-        // databaseLazyPath.test.ts asserts that text via `.message`. The inline
-        // `${error}` is BigInt-safe (unlike JSON.stringify) since it goes
-        // through toString().
+      // Preserve the original SqliteError (code/stack) via `cause` so future
+      // BUSY/constraint-aware retries and describeUnknownError (which recurses
+      // into `.cause`) can reach it. ActionableError drops `cause`, so use a
+      // plain Error here. Keep the original error text inline too: the
+      // `#beforeQuery` migration gate above runs inside this try, so its
+      // "startup migrations failed" throw is caught and rewrapped here — and
+      // databaseLazyPath.test.ts asserts that text via `.message`. The inline
+      // `${error}` is BigInt-safe (unlike JSON.stringify) since it goes
+      // through toString().
       throw new Error(`Query failed: ${error}\nSQL: ${sql}\nParameters: ${params}`, {
         cause: error,
       });
@@ -447,9 +450,7 @@ export class BunSqliteConnectionState {
   #getDatabase(): BunDatabase {
     if (!this.#db) {
       this.#db =
-        typeof this.#databaseSource === "function"
-          ? this.#databaseSource()
-          : this.#databaseSource;
+        typeof this.#databaseSource === "function" ? this.#databaseSource() : this.#databaseSource;
     }
 
     return this.#db;
@@ -572,7 +573,7 @@ export class BunSqliteConnectionState {
   }
 
   async #waitForStateChange(): Promise<void> {
-    await new Promise<void>(resolve => {
+    await new Promise<void>((resolve) => {
       this.#waiters.push(resolve);
     });
   }

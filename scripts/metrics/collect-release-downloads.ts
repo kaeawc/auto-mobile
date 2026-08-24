@@ -60,7 +60,7 @@ interface GithubRelease {
 /** Build the auth headers, preferring an env token so CI is not rate-limited. */
 function githubHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
-    "Accept": "application/vnd.github+json",
+    Accept: "application/vnd.github+json",
     "X-GitHub-Api-Version": "2022-11-28",
     "User-Agent": "auto-mobile-download-metrics",
   };
@@ -108,12 +108,12 @@ async function fetchGithubReleasesPage(url: string, page: number): Promise<Githu
     // 4xx (auth/not-found) is not transient — fail fast without retrying.
     if (response.status < 500) {
       throw new ActionableError(
-        `GitHub releases request failed (page ${page}): ${response.status} ${response.statusText}`
+        `GitHub releases request failed (page ${page}): ${response.status} ${response.statusText}`,
       );
     }
     // 5xx is transient: retry, remembering the last status for the final error.
     lastError = new ActionableError(
-      `GitHub releases request failed (page ${page}): ${response.status} ${response.statusText}`
+      `GitHub releases request failed (page ${page}): ${response.status} ${response.statusText}`,
     );
     if (attempt < GITHUB_FETCH_ATTEMPTS) {
       await sleep(GITHUB_RETRY_BASE_MS * attempt);
@@ -181,19 +181,19 @@ async function fetchNpmDailyCounts(): Promise<NpmDayCount[]> {
       return [];
     }
     throw new ActionableError(
-      `npm download range request failed: ${response.status} ${response.statusText}`
+      `npm download range request failed: ${response.status} ${response.statusText}`,
     );
   }
   const body = (await response.json()) as { downloads?: NpmDayCount[] };
-  return (body.downloads ?? []).map(entry => ({ day: entry.day, downloads: entry.downloads }));
+  return (body.downloads ?? []).map((entry) => ({ day: entry.day, downloads: entry.downloads }));
 }
 
 const realSources: DownloadSources = { fetchGithubAssetCounts, fetchNpmDailyCounts };
 
 /** Real filesystem seam backed by `node:fs/promises` for the CLI. */
 const realFiles: FileStore = {
-  readFile: filePath => readFile(filePath, "utf8"),
-  mkdir: async dir => {
+  readFile: (filePath) => readFile(filePath, "utf8"),
+  mkdir: async (dir) => {
     await mkdir(dir, { recursive: true });
   },
   writeFile: (filePath, data) => writeFile(filePath, data, "utf8"),
@@ -208,7 +208,7 @@ export async function collect(
   sources: DownloadSources,
   files: FileStore,
   dataFile: string,
-  now: Date
+  now: Date,
 ): Promise<{ date: string; wrote: boolean }> {
   // Fetch the two independent sources without coupling their failure modes: a
   // transient npm outage must not discard GitHub counts we already have.
@@ -247,12 +247,12 @@ export async function collect(
   if (npmResult.status === "fulfilled") {
     npm = excludeIncompleteNpmDay(npmResult.value, now);
   } else {
-    const priorToday = existing.find(snapshot => snapshot.date === date);
+    const priorToday = existing.find((snapshot) => snapshot.date === date);
     npm = priorToday?.npm ?? [];
     process.stderr.write(
       `WARN: npm download fetch failed for ${date}; ` +
         `${priorToday ? "reusing the existing same-date npm counts" : "writing GitHub-only snapshot"}. ` +
-        `${String(npmResult.reason)}\n`
+        `${String(npmResult.reason)}\n`,
     );
   }
 
@@ -269,7 +269,7 @@ export async function collect(
 async function main(): Promise<void> {
   const result = await collect(realSources, realFiles, DATA_FILE, new Date());
   process.stdout.write(
-    `Wrote snapshot for ${result.date} to ${path.relative(REPO_ROOT, DATA_FILE)}\n`
+    `Wrote snapshot for ${result.date} to ${path.relative(REPO_ROOT, DATA_FILE)}\n`,
   );
 }
 

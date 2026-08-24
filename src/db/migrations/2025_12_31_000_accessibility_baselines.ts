@@ -5,13 +5,11 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await db.schema
     .createTable("accessibility_baselines")
     .ifNotExists()
-    .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
-    .addColumn("screen_id", "text", col => col.notNull().unique())
-    .addColumn("violations_json", "text", col => col.notNull()) // JSON blob of WcagViolation[]
-    .addColumn("created_at", "text", col =>
-      col.notNull().defaultTo(sql`(datetime('now'))`)
-    )
-    .addColumn("updated_at", "text", col => col.notNull().defaultTo(sql`(datetime('now'))`))
+    .addColumn("id", "integer", (col) => col.primaryKey().autoIncrement())
+    .addColumn("screen_id", "text", (col) => col.notNull().unique())
+    .addColumn("violations_json", "text", (col) => col.notNull()) // JSON blob of WcagViolation[]
+    .addColumn("created_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
+    .addColumn("updated_at", "text", (col) => col.notNull().defaultTo(sql`(datetime('now'))`))
     .execute();
 
   // Create index on screen_id for fast lookups

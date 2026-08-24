@@ -27,7 +27,11 @@ function createFakeDaemonState() {
   };
 }
 
-function sendRequest(socketPath: string, method: string, params: Record<string, unknown> = {}): Promise<DaemonResponse> {
+function sendRequest(
+  socketPath: string,
+  method: string,
+  params: Record<string, unknown> = {},
+): Promise<DaemonResponse> {
   return sendSocketRequest(socketPath, method, params);
 }
 
@@ -45,7 +49,7 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       "http://localhost:0/mcp",
       createFakeDaemonState(),
       fakeTimer,
-      null
+      null,
     );
     await server.start();
   });
@@ -118,13 +122,15 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
         ios: { xcTestService: { expectedSha256: string; url: string } };
       };
       expect(result.releaseVersion).toBe("0.0.18");
-      expect(result.android.ctrlProxy.url).toBe("https://mirror.test/am/0.0.18/control-proxy-debug.apk");
+      expect(result.android.ctrlProxy.url).toBe(
+        "https://mirror.test/am/0.0.18/control-proxy-debug.apk",
+      );
       expect(result.android.ctrlProxy.expectedSha256).toBe(
-        "fd3c8d9f0b8542eaad56c78b18cf8e5666367b04ae8c4af74d8aa6dd1c8d1834"
+        "fd3c8d9f0b8542eaad56c78b18cf8e5666367b04ae8c4af74d8aa6dd1c8d1834",
       );
       expect(result.ios.xcTestService.url).toBe("https://mirror.test/am/0.0.18/control-proxy.ipa");
       expect(result.ios.xcTestService.expectedSha256).toBe(
-        "2a5eec63bce2f9dfc227c0732fcce67378305e945604d5eedd0e3df48e37fd39"
+        "2a5eec63bce2f9dfc227c0732fcce67378305e945604d5eedd0e3df48e37fd39",
       );
     } finally {
       if (prevVersion === undefined) {
@@ -169,17 +175,17 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       deviceId: "emulator-5554",
       platform: "android",
       isEmulator: true,
-      name: "Pixel"
+      name: "Pixel",
     };
     const platformSpy = spyOn(PlatformDeviceManagerFactory, "getInstance").mockReturnValue({
-      getBootedDevices: async () => [device]
+      getBootedDevices: async () => [device],
     } as any);
     const ctrlProxySpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
       ensureCompatibleVersion: async () => ({
         status: "skipped",
         expectedSha256: "",
-        acceptedPreinstalled: true
-      })
+        acceptedPreinstalled: true,
+      }),
     } as any);
 
     try {
@@ -189,7 +195,11 @@ describe("UnixSocketServer ide/status and ide/updateService handlers", () => {
       });
 
       expect(response.success).toBe(true);
-      const result = response.result as { success: boolean; message: string; status: { status: string } };
+      const result = response.result as {
+        success: boolean;
+        message: string;
+        status: { status: string };
+      };
       expect(result.success).toBe(false);
       expect(result.message).toContain("Accessibility service skipped");
       expect(result.status.status).toBe("skipped");

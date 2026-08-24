@@ -78,9 +78,9 @@ describe("waitForDeviceReadyOrCancel", () => {
     const failure = new Error("readiness timeout");
     deviceManager.setWaitForDeviceReadyError(failure);
 
-    await expect(
-      waitForDeviceReadyOrCancel(deviceManager, iosImage, null, 30_000),
-    ).rejects.toThrow("readiness timeout");
+    await expect(waitForDeviceReadyOrCancel(deviceManager, iosImage, null, 30_000)).rejects.toThrow(
+      "readiness timeout",
+    );
   });
 
   it("preserves real Android diagnostics when the wrapper deadline aborts readiness", async () => {
@@ -111,7 +111,7 @@ describe("waitForDeviceReadyOrCancel", () => {
     const controller = new AbortController();
     const { handle, killed } = spyHandle();
     let resolveReadiness!: () => void;
-    const pendingReadiness = new Promise<void>(resolve => {
+    const pendingReadiness = new Promise<void>((resolve) => {
       resolveReadiness = resolve;
     });
     deviceManager.waitForDeviceReady = async () => {
@@ -141,7 +141,7 @@ describe("waitForDeviceReadyOrCancel", () => {
     const deviceManager = new FakeDeviceUtils();
     const controller = new AbortController();
     let resolveReadiness!: () => void;
-    const pendingReadiness = new Promise<void>(resolve => {
+    const pendingReadiness = new Promise<void>((resolve) => {
       resolveReadiness = resolve;
     });
     deviceManager.waitForDeviceReady = async () => {

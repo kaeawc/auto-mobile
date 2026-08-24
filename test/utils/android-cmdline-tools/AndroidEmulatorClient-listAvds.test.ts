@@ -34,7 +34,13 @@ describe("AndroidEmulatorClient listAvds", () => {
       const execAsync = async (_command: string): Promise<ExecResult> => {
         throw new Error("emulator: command not found");
       };
-      const client = new AndroidEmulatorClient(execAsync, null, new FakeTimer(), undefined, noAvdConfigReader);
+      const client = new AndroidEmulatorClient(
+        execAsync,
+        null,
+        new FakeTimer(),
+        undefined,
+        noAvdConfigReader,
+      );
       (client as any).ensureEmulatorPath = async () => "emulator";
 
       await expect(client.listAvds()).rejects.toThrow("Android emulator not found");
@@ -167,8 +173,15 @@ describe("AndroidEmulatorClient listAvds", () => {
       const execAsync = async (): Promise<ExecResult> => {
         throw new Error("spawn /usr/local/lib/android/sdk/emulator/emulator ENOENT");
       };
-      const client = new AndroidEmulatorClient(execAsync, null, new FakeTimer(), undefined, noAvdConfigReader);
-      (client as any).ensureEmulatorPath = async () => "/usr/local/lib/android/sdk/emulator/emulator";
+      const client = new AndroidEmulatorClient(
+        execAsync,
+        null,
+        new FakeTimer(),
+        undefined,
+        noAvdConfigReader,
+      );
+      (client as any).ensureEmulatorPath = async () =>
+        "/usr/local/lib/android/sdk/emulator/emulator";
 
       let message = "";
       try {
@@ -200,7 +213,13 @@ describe("AndroidEmulatorClient listAvds", () => {
   test("returns AVDs when emulator command succeeds", async () => {
     const execAsync = async (_command: string): Promise<ExecResult> =>
       createExecResult("Pixel_9\nPixel_Tablet\n");
-    const client = new AndroidEmulatorClient(execAsync, null, new FakeTimer(), undefined, noAvdConfigReader);
+    const client = new AndroidEmulatorClient(
+      execAsync,
+      null,
+      new FakeTimer(),
+      undefined,
+      noAvdConfigReader,
+    );
     (client as any).ensureEmulatorPath = async () => "emulator";
 
     await expect(client.listAvds()).resolves.toEqual([

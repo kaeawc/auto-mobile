@@ -66,7 +66,7 @@ const buildPlanFromSteps = (
   steps: PlanStep[],
   session: RecordingSession,
   planName: string,
-  stoppedAt: number
+  stoppedAt: number,
 ): { plan: Plan; stepCount: number } => {
   if (steps.length === 0) {
     throw new Error("No recorded interactions were captured.");
@@ -113,16 +113,18 @@ const formatPlanName = (planName?: string): string => {
 export async function startTestRecording(
   device: BootedDevice,
   timer: Timer = defaultTimer,
-  idGenerator: IdGenerator = defaultIdGenerator
+  idGenerator: IdGenerator = defaultIdGenerator,
 ): Promise<TestRecordingStartResult> {
   if (activeRecording) {
     if (activeRecording.deviceId !== device.deviceId) {
       throw new Error(
         `Recording already active on device ${activeRecording.deviceId} (${activeRecording.recordingId}). ` +
-        `Stop the existing recording before starting a new one on ${device.deviceId}.`
+          `Stop the existing recording before starting a new one on ${device.deviceId}.`,
       );
     }
-    logger.info(`[TestRecording] Recording already active (${activeRecording.recordingId}), returning existing session`);
+    logger.info(
+      `[TestRecording] Recording already active (${activeRecording.recordingId}), returning existing session`,
+    );
     return {
       recordingId: activeRecording.recordingId,
       startedAt: new Date(activeRecording.startedAt).toISOString(),
@@ -132,7 +134,9 @@ export async function startTestRecording(
   }
 
   if (device.platform !== "android") {
-    throw new Error(`Test recording is only supported on Android right now (got ${device.platform}).`);
+    throw new Error(
+      `Test recording is only supported on Android right now (got ${device.platform}).`,
+    );
   }
 
   const recordingId = idGenerator.next();
@@ -164,7 +168,7 @@ export async function startTestRecording(
 export async function stopTestRecording(
   recordingId?: string,
   planName?: string,
-  timer: Timer = defaultTimer
+  timer: Timer = defaultTimer,
 ): Promise<TestRecordingStopResult> {
   const session = activeRecording;
   if (!session) {
@@ -173,7 +177,7 @@ export async function stopTestRecording(
 
   if (recordingId && recordingId !== session.recordingId) {
     throw new Error(
-      `Recording ID ${recordingId} does not match active recording ${session.recordingId}.`
+      `Recording ID ${recordingId} does not match active recording ${session.recordingId}.`,
     );
   }
 

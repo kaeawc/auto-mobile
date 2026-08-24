@@ -137,9 +137,9 @@ describe("proxy server session ownership errors", () => {
       await expect(client.listTools()).rejects.toThrow(ownershipLoss);
       await expect(client.listResources()).rejects.toThrow(ownershipLoss);
       await expect(client.listResourceTemplates()).rejects.toThrow(ownershipLoss);
-      await expect(
-        client.readResource({ uri: "automobile:devices/booted" }),
-      ).rejects.toThrow(ownershipLoss);
+      await expect(client.readResource({ uri: "automobile:devices/booted" })).rejects.toThrow(
+        ownershipLoss,
+      );
     } finally {
       await client.close();
       await server.close();

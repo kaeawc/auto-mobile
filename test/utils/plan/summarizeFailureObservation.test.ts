@@ -15,11 +15,11 @@ describe("summarizeObserveResultForFailure", () => {
       elements: {
         clickable: [
           { text: "  Sign in  ", resourceId: "com.example.app:id/go" },
-          { text: "Cancel", resourceId: undefined }
+          { text: "Cancel", resourceId: undefined },
         ],
         text: [{ text: "Welcome", resourceId: "" }],
-        scrollable: []
-      }
+        scrollable: [],
+      },
     };
 
     const s = summarizeObserveResultForFailure(raw as Record<string, unknown>);

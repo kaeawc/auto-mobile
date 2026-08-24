@@ -100,8 +100,7 @@ const RULE_EXEMPTIONS: Readonly<Record<string, ReadonlySet<FileBackedDbAntiPatte
 
 // A raw cache-busted dynamic import whose specifier targets `database`/`database.ts`
 // followed by a `?` query string (any quote style, incl. template literals).
-const RAW_CACHE_BUSTED_IMPORT =
-  /\bimport\s*\(\s*(['"`])(?:(?!\1)[\s\S])*?database(?:\.ts)?\?/;
+const RAW_CACHE_BUSTED_IMPORT = /\bimport\s*\(\s*(['"`])(?:(?!\1)[\s\S])*?database(?:\.ts)?\?/;
 
 // The exact deleted helper-name family. `removeTempDbDir` (the canonical bounded
 // remover) contains no "Retry" and never matches.
@@ -119,7 +118,8 @@ const QUOTED_TRANSIENT_LOCK_CODE = /["'](?:EBUSY|EPERM|ENOTEMPTY)["']/;
 // would leave it one edit away from false-positiving on `tempDbDir.test.ts` (the
 // bounded remover's own test), which already holds the quoted lock codes and
 // could grow a real `rm` + poll case.
-const MANUAL_RETRY_LOOP = /\bfor\s*\(\s*let\s+attempt\b|\bwhile\s*\([^)]*\b(?:attempt|retr|backoff)/i;
+const MANUAL_RETRY_LOOP =
+  /\bfor\s*\(\s*let\s+attempt\b|\bwhile\s*\([^)]*\b(?:attempt|retr|backoff)/i;
 
 // An actual filesystem removal call (not the canonical `removeTempDbDir`).
 const FS_REMOVAL_CALL = /\brm(?:Sync)?\s*\(/;
@@ -161,7 +161,7 @@ function isExempt(fileName: string, rule: FileBackedDbAntiPatternRule): boolean 
  */
 export function findFileBackedDbAntiPatterns(
   fileName: string,
-  source: string
+  source: string,
 ): FileBackedDbAntiPatternViolation[] {
   const violations: FileBackedDbAntiPatternViolation[] = [];
 
@@ -172,7 +172,7 @@ export function findFileBackedDbAntiPatterns(
       rule: "raw-cache-busted-import",
       line: firstMatchLine(source, RAW_CACHE_BUSTED_IMPORT),
       message:
-        "raw cache-busted `import(\".../database.ts?…\")`; import a fresh module " +
+        'raw cache-busted `import(".../database.ts?…")`; import a fresh module ' +
         "via `importFreshDatabaseModule()` (freshDatabaseModule.ts) or the " +
         "`createFileBackedDbHarness()` harness instead.",
     });

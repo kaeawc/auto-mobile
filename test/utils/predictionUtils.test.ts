@@ -6,18 +6,16 @@ describe("predictionUtils", () => {
     const first = normalizeToolArgs({
       z: 1,
       nested: { beta: true, alpha: false },
-      a: 2
+      a: 2,
     });
     const second = normalizeToolArgs({
       a: 2,
       nested: { alpha: false, beta: true },
-      z: 1
+      z: 1,
     });
 
     expect(first).toBe(second);
-    expect(first).toBe(
-      '{"a":2,"nested":{"alpha":false,"beta":true},"z":1}'
-    );
+    expect(first).toBe('{"a":2,"nested":{"alpha":false,"beta":true},"z":1}');
   });
 
   test("strips deviceId so per-device calls share one prediction key", () => {
@@ -55,8 +53,9 @@ describe("predictionUtils", () => {
   });
 
   test("preserves keys whose names merely resemble the strip-keys", () => {
-    expect(normalizeToolArgs({ device: "a", session: "b", x: 1 }))
-      .toBe('{"device":"a","session":"b","x":1}');
+    expect(normalizeToolArgs({ device: "a", session: "b", x: 1 })).toBe(
+      '{"device":"a","session":"b","x":1}',
+    );
   });
 
   test("produces different keys for genuinely different tool args", () => {

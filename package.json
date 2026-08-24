@@ -2,6 +2,41 @@
   "name": "@kaeawc/auto-mobile",
   "version": "0.0.62",
   "description": "Mobile device interaction automation via MCP",
+  "keywords": [
+    "adb",
+    "android",
+    "auto-mobile",
+    "automation",
+    "bridge",
+    "debug",
+    "mcp",
+    "mobile",
+    "ui-testing"
+  ],
+  "homepage": "https://kaeawc.github.io/auto-mobile/",
+  "license": "Apache-2.0",
+  "author": "Jason Pearson",
+  "contributors": [
+    {
+      "name": "Jason Pearson",
+      "email": "jason.d.pearson@gmail.com"
+    }
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kaeawc/auto-mobile.git"
+  },
+  "bin": {
+    "auto-mobile": "dist/src/index.js"
+  },
+  "files": [
+    "dist",
+    "schemas"
+  ],
+  "main": "dist/src/index.js",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "test": "bun test --isolate",
     "test:windows": "bun test",
@@ -66,46 +101,6 @@
     "turbo:typecheck": "turbo run typecheck",
     "turbo:gate": "turbo run lint build typecheck --output-logs=errors-only",
     "loop": "bash scripts/validate-loop.sh"
-  },
-  "packageManager": "bun@1.3.14",
-  "engines": {
-    "bun": ">=1.3.14"
-  },
-  "keywords": [
-    "adb",
-    "android",
-    "auto-mobile",
-    "automation",
-    "bridge",
-    "debug",
-    "mcp",
-    "mobile",
-    "ui-testing"
-  ],
-  "files": [
-    "dist",
-    "schemas"
-  ],
-  "main": "dist/src/index.js",
-  "bin": {
-    "auto-mobile": "dist/src/index.js"
-  },
-  "author": "Jason Pearson",
-  "license": "Apache-2.0",
-  "contributors": [
-    {
-      "name": "Jason Pearson",
-      "email": "jason.d.pearson@gmail.com"
-    }
-  ],
-  "homepage": "https://kaeawc.github.io/auto-mobile/",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/kaeawc/auto-mobile.git"
-  },
-  "mcpName": "dev.jasonpearson/auto-mobile",
-  "publishConfig": {
-    "access": "public"
   },
   "dependencies": {
     "@borewit/text-codec": "0.2.2",
@@ -175,46 +170,6 @@
     "xmlbuilder": "11.0.1",
     "zod": "3.25.76"
   },
-  "//overrides": {
-    "lodash": "CVE-2025-13465: prototype pollution in _.unset and _.omit",
-    "tar": "CVE-2026-26960 (GHSA-83g3-92jg-28cx): Arbitrary file read/write via hardlink target escape through symlink chain",
-    "hono": "GHSA-gq3j-xvxp-8hrf: timing comparison hardening in basicAuth and bearerAuth",
-    "qs": "CVE-2026-2391 (GHSA-w7fw-mjwx-w883): arrayLimit bypass in comma parsing allows denial of service"
-  },
-  "overrides": {
-    "lodash": "^4.17.23",
-    "tar": "^7.5.8",
-    "hono": "^4.11.10",
-    "qs": "^6.14.2",
-    "@ts-morph/common": {
-      "minimatch": "3.1.5"
-    }
-  },
-  "optionalDependencies": {
-    "@img/sharp-darwin-arm64": "0.35.3",
-    "@img/sharp-darwin-x64": "0.35.3",
-    "@img/sharp-libvips-darwin-arm64": "1.3.2",
-    "@img/sharp-libvips-darwin-x64": "1.3.2",
-    "@img/sharp-libvips-linux-arm": "1.3.2",
-    "@img/sharp-libvips-linux-arm64": "1.3.2",
-    "@img/sharp-libvips-linux-ppc64": "1.3.2",
-    "@img/sharp-libvips-linux-riscv64": "1.3.2",
-    "@img/sharp-libvips-linux-s390x": "1.3.2",
-    "@img/sharp-libvips-linux-x64": "1.3.2",
-    "@img/sharp-libvips-linuxmusl-arm64": "1.3.2",
-    "@img/sharp-libvips-linuxmusl-x64": "1.3.2",
-    "@img/sharp-linux-arm": "0.35.3",
-    "@img/sharp-linux-arm64": "0.35.3",
-    "@img/sharp-linux-ppc64": "0.35.3",
-    "@img/sharp-linux-riscv64": "0.35.3",
-    "@img/sharp-linux-s390x": "0.35.3",
-    "@img/sharp-linux-x64": "0.35.3",
-    "@img/sharp-linuxmusl-arm64": "0.35.3",
-    "@img/sharp-linuxmusl-x64": "0.35.3",
-    "@img/sharp-win32-arm64": "0.35.3",
-    "@img/sharp-win32-ia32": "0.35.3",
-    "@img/sharp-win32-x64": "0.35.3"
-  },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.117.1",
     "@faker-js/faker": "^10.2.0",
@@ -249,9 +204,54 @@
     "ws": "^8.19.0",
     "xml2js": "^0.6.2"
   },
+  "optionalDependencies": {
+    "@img/sharp-darwin-arm64": "0.35.3",
+    "@img/sharp-darwin-x64": "0.35.3",
+    "@img/sharp-libvips-darwin-arm64": "1.3.2",
+    "@img/sharp-libvips-darwin-x64": "1.3.2",
+    "@img/sharp-libvips-linux-arm": "1.3.2",
+    "@img/sharp-libvips-linux-arm64": "1.3.2",
+    "@img/sharp-libvips-linux-ppc64": "1.3.2",
+    "@img/sharp-libvips-linux-riscv64": "1.3.2",
+    "@img/sharp-libvips-linux-s390x": "1.3.2",
+    "@img/sharp-libvips-linux-x64": "1.3.2",
+    "@img/sharp-libvips-linuxmusl-arm64": "1.3.2",
+    "@img/sharp-libvips-linuxmusl-x64": "1.3.2",
+    "@img/sharp-linux-arm": "0.35.3",
+    "@img/sharp-linux-arm64": "0.35.3",
+    "@img/sharp-linux-ppc64": "0.35.3",
+    "@img/sharp-linux-riscv64": "0.35.3",
+    "@img/sharp-linux-s390x": "0.35.3",
+    "@img/sharp-linux-x64": "0.35.3",
+    "@img/sharp-linuxmusl-arm64": "0.35.3",
+    "@img/sharp-linuxmusl-x64": "0.35.3",
+    "@img/sharp-win32-arm64": "0.35.3",
+    "@img/sharp-win32-ia32": "0.35.3",
+    "@img/sharp-win32-x64": "0.35.3"
+  },
   "bundledDependencies": [
     "@jimp/diff",
     "@jimp/js-png",
     "parse-bmfont-xml"
-  ]
+  ],
+  "overrides": {
+    "@ts-morph/common": {
+      "minimatch": "3.1.5"
+    },
+    "hono": "^4.11.10",
+    "lodash": "^4.17.23",
+    "qs": "^6.14.2",
+    "tar": "^7.5.8"
+  },
+  "engines": {
+    "bun": ">=1.3.14"
+  },
+  "packageManager": "bun@1.3.14",
+  "//overrides": {
+    "lodash": "CVE-2025-13465: prototype pollution in _.unset and _.omit",
+    "tar": "CVE-2026-26960 (GHSA-83g3-92jg-28cx): Arbitrary file read/write via hardlink target escape through symlink chain",
+    "hono": "GHSA-gq3j-xvxp-8hrf: timing comparison hardening in basicAuth and bearerAuth",
+    "qs": "CVE-2026-2391 (GHSA-w7fw-mjwx-w883): arrayLimit bypass in comma parsing allows denial of service"
+  },
+  "mcpName": "dev.jasonpearson/auto-mobile"
 }

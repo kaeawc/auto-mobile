@@ -16,8 +16,12 @@ import { storageTelemetryInputFromWire } from "../../../../src/features/observe/
  */
 describe("Android storage_changed wire → ingest → DB (#3000)", () => {
   let db: Kysely<Database>;
-  beforeEach(async () => { db = await createTestDatabase(); });
-  afterEach(async () => { await db.destroy(); });
+  beforeEach(async () => {
+    db = await createTestDatabase();
+  });
+  afterEach(async () => {
+    await db.destroy();
+  });
 
   // Mirrors the exact JSON the runner emits for a STRING modify (see
   // StorageChangeWireEncoder.kt): note `previousValue` quoted, `eventTimestamp`
@@ -37,13 +41,26 @@ describe("Android storage_changed wire → ingest → DB (#3000)", () => {
 
   test("runner-supplied previousValue is stored verbatim, beating a competing prior row", async () => {
     // A stale telemetry row the auto-lookup WOULD have found.
-    await recordStorageEvent({
-      deviceId: "d1", timestamp: 1000, applicationId: null, sessionId: null,
-      fileName: "prefs.xml", key: "theme", value: "STALE", valueType: "STRING", changeType: "add",
-    }, db);
+    await recordStorageEvent(
+      {
+        deviceId: "d1",
+        timestamp: 1000,
+        applicationId: null,
+        sessionId: null,
+        fileName: "prefs.xml",
+        key: "theme",
+        value: "STALE",
+        valueType: "STRING",
+        changeType: "add",
+      },
+      db,
+    );
 
     const message = JSON.parse(modifyWire);
-    const input = storageTelemetryInputFromWire(message, message.eventTimestamp ?? message.timestamp);
+    const input = storageTelemetryInputFromWire(
+      message,
+      message.eventTimestamp ?? message.timestamp,
+    );
     // The ingest sets device context on the recorder; here we record directly with a deviceId.
     await recordStorageEvent({ deviceId: "d1", sessionId: null, ...input }, db);
 
@@ -71,7 +88,10 @@ describe("Android storage_changed wire → ingest → DB (#3000)", () => {
     });
 
     const message = JSON.parse(removeWire);
-    const input = storageTelemetryInputFromWire(message, message.eventTimestamp ?? message.timestamp);
+    const input = storageTelemetryInputFromWire(
+      message,
+      message.eventTimestamp ?? message.timestamp,
+    );
     await recordStorageEvent({ deviceId: "d1", sessionId: null, ...input }, db);
 
     const events = await getStorageEvents({ deviceId: "d1", limit: 10 }, db);
@@ -80,19 +100,38 @@ describe("Android storage_changed wire → ingest → DB (#3000)", () => {
   });
 
   test("legacy runner (no previousValue field) falls through to the DB auto-lookup", async () => {
-    await recordStorageEvent({
-      deviceId: "d1", timestamp: 1000, applicationId: null, sessionId: null,
-      fileName: "prefs.xml", key: "theme", value: "from-lookup", valueType: "STRING", changeType: "add",
-    }, db);
+    await recordStorageEvent(
+      {
+        deviceId: "d1",
+        timestamp: 1000,
+        applicationId: null,
+        sessionId: null,
+        fileName: "prefs.xml",
+        key: "theme",
+        value: "from-lookup",
+        valueType: "STRING",
+        changeType: "add",
+      },
+      db,
+    );
 
     // No previousValue key at all — the pre-#3000 wire shape.
     const legacyWire = JSON.stringify({
-      type: "storage_changed", timestamp: 999, packageName: "com.example",
-      fileName: "prefs.xml", key: "theme", value: "new", valueType: "STRING",
-      eventTimestamp: 3000, sequenceNumber: 5,
+      type: "storage_changed",
+      timestamp: 999,
+      packageName: "com.example",
+      fileName: "prefs.xml",
+      key: "theme",
+      value: "new",
+      valueType: "STRING",
+      eventTimestamp: 3000,
+      sequenceNumber: 5,
     });
     const message = JSON.parse(legacyWire);
-    const input = storageTelemetryInputFromWire(message, message.eventTimestamp ?? message.timestamp);
+    const input = storageTelemetryInputFromWire(
+      message,
+      message.eventTimestamp ?? message.timestamp,
+    );
     // Field must be absent so the repository performs the auto-lookup.
     expect("previousValue" in input).toBe(false);
     await recordStorageEvent({ deviceId: "d1", sessionId: null, ...input }, db);

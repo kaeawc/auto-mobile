@@ -1,6 +1,9 @@
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { ConfigSocketServer, getSocketPath } from "./socketServer/index";
-import { getDeviceSnapshotConfig, updateDeviceSnapshotConfig } from "../server/deviceSnapshotManager";
+import {
+  getDeviceSnapshotConfig,
+  updateDeviceSnapshotConfig,
+} from "../server/deviceSnapshotManager";
 import { DEVICE_SNAPSHOT_SOCKET_CONFIG } from "./daemonFiles";
 import type { DeviceSnapshotConfig, DeviceSnapshotConfigInput } from "../models";
 
@@ -31,7 +34,7 @@ export class DeviceSnapshotSocketServer extends ConfigSocketServer<
   constructor(
     socketPath: string = getSocketPath(DEVICE_SNAPSHOT_SOCKET_CONFIG),
     timer: Timer = defaultTimer,
-    dependencies: DeviceSnapshotSocketServerDependencies = defaultDependencies
+    dependencies: DeviceSnapshotSocketServerDependencies = defaultDependencies,
   ) {
     super({
       socketPath,
@@ -41,7 +44,7 @@ export class DeviceSnapshotSocketServer extends ConfigSocketServer<
       evictedKey: "evictedSnapshotNames",
       methodLabel: "device snapshot",
       getConfig: dependencies.getConfig,
-      updateConfig: async update => {
+      updateConfig: async (update) => {
         const { config, evictedSnapshotNames } = await dependencies.updateConfig(update);
         return { config, evictedItems: evictedSnapshotNames };
       },

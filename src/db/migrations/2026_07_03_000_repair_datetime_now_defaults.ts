@@ -105,7 +105,7 @@ export async function up(db: Kysely<unknown>): Promise<void> {
   await sql`PRAGMA foreign_keys = OFF`.execute(db);
   try {
     // One transaction so a mid-rebuild failure cannot leave a half-swapped schema.
-    await db.transaction().execute(async trx => {
+    await db.transaction().execute(async (trx) => {
       await rebuildAndRepair(trx, brokenTables);
     });
   } finally {
@@ -136,7 +136,11 @@ async function findTablesWithBrokenDefaults(db: Kysely<unknown>): Promise<string
     const columns = await sql<ColumnInfoRow>`
       SELECT dflt_value FROM pragma_table_info(${sql.lit(table)})
     `.execute(db);
-    if (columns.rows.some(column => column.dflt_value !== null && column.dflt_value in BROKEN_DEFAULTS)) {
+    if (
+      columns.rows.some(
+        (column) => column.dflt_value !== null && column.dflt_value in BROKEN_DEFAULTS,
+      )
+    ) {
       broken.push(table);
     }
   }
@@ -152,7 +156,7 @@ async function rebuildAndRepair(trx: Kysely<unknown>, tables: string[]): Promise
     `.execute(trx);
 
     const brokenColumns = columns.rows.filter(
-      column => column.dflt_value !== null && column.dflt_value in BROKEN_DEFAULTS
+      (column) => column.dflt_value !== null && column.dflt_value in BROKEN_DEFAULTS,
     );
     if (brokenColumns.length === 0) {
       continue;
@@ -181,7 +185,7 @@ async function rebuildAndRepair(trx: Kysely<unknown>, tables: string[]): Promise
  */
 async function rebuildTableWithCorrectedDefaults(
   trx: Kysely<unknown>,
-  table: string
+  table: string,
 ): Promise<void> {
   const createRow = await sql<SqlRow>`
     SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ${table}
@@ -227,7 +231,7 @@ async function rebuildTableWithCorrectedDefaults(
   if (originalSequence !== undefined) {
     await sql`DELETE FROM sqlite_sequence WHERE name = ${table}`.execute(trx);
     await sql`INSERT INTO sqlite_sequence (name, seq) VALUES (${table}, ${originalSequence})`.execute(
-      trx
+      trx,
     );
   }
 }
@@ -237,10 +241,7 @@ async function rebuildTableWithCorrectedDefaults(
  * is not AUTOINCREMENT / has never been inserted into (no sequence row) or the
  * `sqlite_sequence` table does not exist (no AUTOINCREMENT table in the DB).
  */
-async function captureSequence(
-  trx: Kysely<unknown>,
-  table: string
-): Promise<number | undefined> {
+async function captureSequence(trx: Kysely<unknown>, table: string): Promise<number | undefined> {
   const hasSequenceTable = await sql<NamedRow>`
     SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sqlite_sequence'
   `.execute(trx);
@@ -267,7 +268,7 @@ function replaceFirstTableName(createSql: string, from: string, to: string): str
   return createSql.replace(
     /^(\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)(?:"([^"]+)"|(\w+))/i,
     (match, prefix: string, quotedName: string | undefined, bareName: string | undefined) =>
-      (quotedName ?? bareName) === from ? `${prefix}"${to}"` : match
+      (quotedName ?? bareName) === from ? `${prefix}"${to}"` : match,
   );
 }
 

@@ -10,15 +10,15 @@ export interface ElementParser {
   extractRootNodes(viewHierarchy: ViewHierarchyResult): ViewHierarchyNode[];
   extractWindowRootGroups(
     viewHierarchy: ViewHierarchyResult,
-    order?: WindowSearchOrder
+    order?: WindowSearchOrder,
   ): ViewHierarchyNode[][];
   extractWindowRootNodes(
     viewHierarchy: ViewHierarchyResult,
-    order?: WindowSearchOrder
+    order?: WindowSearchOrder,
   ): ViewHierarchyNode[];
   traverseNode(node: any, callback: (node: any, depth: number) => void, depth?: number): void;
   flattenViewHierarchy(
     viewHierarchy: ViewHierarchyResult,
-    options?: { includeWindows?: boolean; windowOrder?: WindowSearchOrder }
+    options?: { includeWindows?: boolean; windowOrder?: WindowSearchOrder },
   ): Array<{ element: Element; index: number; depth: number; text?: string }>;
 }

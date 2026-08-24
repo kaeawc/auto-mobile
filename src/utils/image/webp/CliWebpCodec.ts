@@ -8,9 +8,11 @@ export interface CliWebpEncodeOptions {
 }
 
 export function isWebpBuffer(buffer: Buffer): boolean {
-  return buffer.length >= 12 &&
+  return (
+    buffer.length >= 12 &&
     buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
-    buffer.subarray(8, 12).toString("ascii") === "WEBP";
+    buffer.subarray(8, 12).toString("ascii") === "WEBP"
+  );
 }
 
 /**
@@ -20,15 +22,15 @@ export function isWebpBuffer(buffer: Buffer): boolean {
  * resolves and executes the libwebp tools.
  */
 export class CliWebpCodec {
-  constructor(
-    private readonly binaryResolver: WebpBinaryProvider = new WebpBinaryResolver()
-  ) {}
+  constructor(private readonly binaryResolver: WebpBinaryProvider = new WebpBinaryResolver()) {}
 
   async encode(pngBuffer: Buffer, options: CliWebpEncodeOptions = {}): Promise<Buffer> {
     const args = [...buildCwebpOptionArgs(options), "-o", "-", "--", "-"];
     const output = await this.binaryResolver.runCwebp(args, pngBuffer);
     if (!isWebpBuffer(output)) {
-      throw new ActionableError("cwebp did not produce a WebP RIFF buffer. Set AUTOMOBILE_CWEBP_PATH to a working cwebp binary.");
+      throw new ActionableError(
+        "cwebp did not produce a WebP RIFF buffer. Set AUTOMOBILE_CWEBP_PATH to a working cwebp binary.",
+      );
     }
     return output;
   }

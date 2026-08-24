@@ -52,7 +52,9 @@ export function detectBunVersion(): string | undefined {
  *   Bun arm. A function (not a value) is required because passing `undefined` to
  *   a defaulted value parameter would re-trigger the default.
  */
-export function checkRuntime(detectVersion: () => string | undefined = detectBunVersion): CheckResult {
+export function checkRuntime(
+  detectVersion: () => string | undefined = detectBunVersion,
+): CheckResult {
   const bunVersion = detectVersion();
 
   if (bunVersion) {
@@ -78,9 +80,5 @@ export function checkRuntime(detectVersion: () => string | undefined = detectBun
  * Run all system checks
  */
 export function runSystemChecks(): CheckResult[] {
-  return [
-    checkOperatingSystem(),
-    checkArchitecture(),
-    checkRuntime(),
-  ];
+  return [checkOperatingSystem(), checkArchitecture(), checkRuntime()];
 }

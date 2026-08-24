@@ -3,20 +3,24 @@ import type { NavigationEdge, NavigationNode } from "../../../src/db/types";
 import { TestCoverageAnalyzer } from "../../../src/features/navigation/TestCoverageAnalyzer";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-type CoverageAnalysis = Awaited<ReturnType<FakeCoverageRepository["getAggregatedCoverageAnalysis"]>>;
+type CoverageAnalysis = Awaited<
+  ReturnType<FakeCoverageRepository["getAggregatedCoverageAnalysis"]>
+>;
 
 class FakeCoverageRepository {
   getAnalysisCallCount = 0;
 
-  constructor(private readonly analysis: {
-    totalNodes: number;
-    coveredNodes: number;
-    uncoveredNodes: NavigationNode[];
-    totalEdges: number;
-    coveredEdges: number;
-    uncoveredEdges: NavigationEdge[];
-    coveragePercentage: number;
-  }) {}
+  constructor(
+    private readonly analysis: {
+      totalNodes: number;
+      coveredNodes: number;
+      uncoveredNodes: NavigationNode[];
+      totalEdges: number;
+      coveredEdges: number;
+      uncoveredEdges: NavigationEdge[];
+      coveragePercentage: number;
+    },
+  ) {}
 
   async getAggregatedCoverageAnalysis(_appId: string): Promise<typeof this.analysis> {
     this.getAnalysisCallCount++;
@@ -30,7 +34,7 @@ class FakeNavigationRepository {
 
   constructor(
     private readonly nodes: NavigationNode[],
-    private readonly edges: NavigationEdge[]
+    private readonly edges: NavigationEdge[],
   ) {}
 
   async getNodes(_appId: string): Promise<NavigationNode[]> {
@@ -104,7 +108,7 @@ function analyzerFor(
   analysis: CoverageAnalysis,
   nodes: NavigationNode[],
   edges: NavigationEdge[],
-  timer = new FakeTimer()
+  timer = new FakeTimer(),
 ): {
   analyzer: TestCoverageAnalyzer;
   coverageRepository: FakeCoverageRepository;
@@ -132,12 +136,12 @@ describe("TestCoverageAnalyzer", () => {
       node(1, "Home", 10),
       node(2, "Search", 6),
       node(3, "Details", 8),
-      node(4, "Settings", 2)
+      node(4, "Settings", 2),
     );
     const edges = new NoRepeatedScanEdges(
       edge(10, "Home", "Search"),
       edge(11, "Search", "Details"),
-      edge(12, "Home", "Settings")
+      edge(12, "Home", "Settings"),
     );
     const analysis = {
       totalNodes: nodes.length,
@@ -154,7 +158,7 @@ describe("TestCoverageAnalyzer", () => {
       analysis,
       nodes,
       edges,
-      timer
+      timer,
     );
 
     const report = await analyzer.generateReport("com.example.app");
@@ -166,9 +170,9 @@ describe("TestCoverageAnalyzer", () => {
     expect(nodes.iterationCount).toBe(1);
     expect(edges.iterationCount).toBe(1);
     expect(report.criticalGaps).toHaveLength(2);
-    expect(report.criticalGaps.map(gap => gap.id)).toEqual([11, 3]);
-    const nodeGap = report.criticalGaps.find(gap => gap.type === "node");
-    const edgeGap = report.criticalGaps.find(gap => gap.type === "edge");
+    expect(report.criticalGaps.map((gap) => gap.id)).toEqual([11, 3]);
+    const nodeGap = report.criticalGaps.find((gap) => gap.type === "node");
+    const edgeGap = report.criticalGaps.find((gap) => gap.type === "edge");
     expect(nodeGap).toMatchObject({
       type: "node",
       id: 3,
@@ -192,14 +196,16 @@ describe("TestCoverageAnalyzer", () => {
     expect(report.suggestedScenarios).toEqual([
       {
         title: "Cover Critical Screens",
-        description: "Test 1 frequently-accessed screen(s) that currently have no coverage. These are shallow in the navigation tree and likely part of core user journeys.",
+        description:
+          "Test 1 frequently-accessed screen(s) that currently have no coverage. These are shallow in the navigation tree and likely part of core user journeys.",
         priority: "high",
         targetScreens: ["Details"],
         estimatedCoverageImprovement: 50,
       },
       {
         title: "Test Critical User Journeys",
-        description: "Test 1 common navigation path(s) between screens. These transitions are frequently used but not covered by tests.",
+        description:
+          "Test 1 common navigation path(s) between screens. These transitions are frequently used but not covered by tests.",
         priority: "high",
         targetScreens: ["Search", "Details"],
         estimatedCoverageImprovement: 50,
@@ -262,8 +268,8 @@ describe("TestCoverageAnalyzer", () => {
 
     const report = await analyzer.generateReport("com.example.app");
 
-    const cycleGap = report.criticalGaps.find(gap => gap.screenName === "CycleA");
-    const unreachableGap = report.criticalGaps.find(gap => gap.screenName === "Unreachable");
+    const cycleGap = report.criticalGaps.find((gap) => gap.screenName === "CycleA");
+    const unreachableGap = report.criticalGaps.find((gap) => gap.screenName === "Unreachable");
     expect(cycleGap?.criticalityScore).toBeCloseTo(50.505, 3);
     expect(cycleGap?.recommendation).toContain("deep in navigation tree");
     expect(unreachableGap?.criticalityScore).toBeCloseTo(20.505, 3);
@@ -277,7 +283,7 @@ describe("TestCoverageAnalyzer", () => {
     const { analyzer: noEntryAnalyzer } = analyzerFor(
       noEntryAnalysis,
       nodes.slice(0, 2),
-      edges.slice(0, 2)
+      edges.slice(0, 2),
     );
 
     const noEntryReport = await noEntryAnalyzer.generateReport("com.example.app");

@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  runStartupPrologue,
-  type StartupPrologueSteps,
-} from "../../src/daemon/startupPrologue";
+import { runStartupPrologue, type StartupPrologueSteps } from "../../src/daemon/startupPrologue";
 
 /**
  * Fake prologue steps that record the exact order their methods run in, with no
@@ -69,7 +66,7 @@ describe("runStartupPrologue", () => {
         initializeDatabase: async () => {
           calls.push("initializeDatabase");
         },
-      })
+      }),
     ).rejects.toBe(failure);
 
     // The DB is never touched if we could not publish the owned path first.

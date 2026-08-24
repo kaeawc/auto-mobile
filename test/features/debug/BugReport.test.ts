@@ -18,16 +18,19 @@ describe("BugReport", () => {
     deviceId: "test-device",
     platform: "android",
     isEmulator: true,
-    name: "Test Device"
+    name: "Test Device",
   };
 
   const makeBounds = (left: number, top: number, right: number, bottom: number): ElementBounds => ({
-    left, top, right, bottom
+    left,
+    top,
+    right,
+    bottom,
   });
 
   const makeElement = (overrides: Partial<Element> = {}): Element => ({
     bounds: makeBounds(0, 0, 100, 100),
-    ...overrides
+    ...overrides,
   });
 
   const setup = () => {
@@ -40,8 +43,7 @@ describe("BugReport", () => {
     return { bugReport, elementParser, viewHierarchy, adbFactory, timer };
   };
 
-  const executeReport = (bugReport: BugReport) =>
-    bugReport.execute();
+  const executeReport = (bugReport: BugReport) => bugReport.execute();
 
   afterEach(() => {
     if (originalLaunchCwd === undefined) {
@@ -62,7 +64,7 @@ describe("BugReport", () => {
       elementParser.nextFlattenedElements = [
         { element: makeElement(), index: 0, depth: 0 },
         { element: makeElement(), index: 1, depth: 0 },
-        { element: makeElement(), index: 2, depth: 1 }
+        { element: makeElement(), index: 2, depth: 1 },
       ];
       elementParser.nextRootNodes = [{ $: {} }];
 
@@ -75,14 +77,12 @@ describe("BugReport", () => {
       // Root with 2 children = 3 traversed nodes
       const rootNode = {
         $: {},
-        node: [{ $: {} }, { $: {} }]
+        node: [{ $: {} }, { $: {} }],
       };
       viewHierarchy.configureHierarchy({ hierarchy: { node: rootNode } });
       elementParser.nextRootNodes = [rootNode];
       // Only 1 element has valid bounds
-      elementParser.nextFlattenedElements = [
-        { element: makeElement(), index: 0, depth: 0 }
-      ];
+      elementParser.nextFlattenedElements = [{ element: makeElement(), index: 0, depth: 0 }];
 
       const result = await executeReport(bugReport);
       expect(result.viewHierarchy.filteredNodeCount).toBe(2);
@@ -97,15 +97,15 @@ describe("BugReport", () => {
         {
           element: makeElement({
             bounds,
-            "clickable": true,
+            clickable: true,
             "resource-id": "btn1",
-            "text": "Click me",
+            text: "Click me",
             "content-desc": "Button",
-            "class": "android.widget.Button"
+            class: "android.widget.Button",
           }),
           index: 0,
-          depth: 0
-        }
+          depth: 0,
+        },
       ];
 
       const result = await executeReport(bugReport);
@@ -119,9 +119,9 @@ describe("BugReport", () => {
       viewHierarchy.configureHierarchy({ hierarchy: { node: {} } });
       elementParser.nextRootNodes = [{ $: {} }];
       elementParser.nextFlattenedElements = Array.from({ length: 60 }, (_, i) => ({
-        element: makeElement({ "clickable": true, "resource-id": `btn${i}` }),
+        element: makeElement({ clickable: true, "resource-id": `btn${i}` }),
         index: i,
-        depth: 0
+        depth: 0,
       }));
 
       const result = await executeReport(bugReport);
@@ -147,16 +147,16 @@ describe("BugReport", () => {
       elementParser.nextFlattenedElements = [
         {
           element: makeElement({
-            "clickable": true,
+            clickable: true,
             "resource-id": "com.app:id/submit",
-            "text": "raw text",
+            text: "raw text",
             "content-desc": "Submit button",
-            "class": "android.widget.Button"
+            class: "android.widget.Button",
           }),
           index: 0,
           depth: 0,
-          text: "overridden text"
-        }
+          text: "overridden text",
+        },
       ];
 
       const result = await executeReport(bugReport);
@@ -175,8 +175,8 @@ describe("BugReport", () => {
         {
           element: makeElement({ clickable: true, text: "element text" }),
           index: 0,
-          depth: 0
-        }
+          depth: 0,
+        },
       ];
 
       const result = await executeReport(bugReport);
@@ -188,9 +188,9 @@ describe("BugReport", () => {
       viewHierarchy.configureHierarchy({ hierarchy: { node: {} } });
       elementParser.nextRootNodes = [{ $: {} }];
       elementParser.nextFlattenedElements = [
-        { element: makeElement({ "clickable": false, "resource-id": "label" }), index: 0, depth: 0 },
-        { element: makeElement({ "clickable": true, "resource-id": "button" }), index: 1, depth: 0 },
-        { element: makeElement({ "resource-id": "text" }), index: 2, depth: 0 }
+        { element: makeElement({ clickable: false, "resource-id": "label" }), index: 0, depth: 0 },
+        { element: makeElement({ clickable: true, "resource-id": "button" }), index: 1, depth: 0 },
+        { element: makeElement({ "resource-id": "text" }), index: 2, depth: 0 },
       ];
 
       const result = await executeReport(bugReport);
@@ -204,15 +204,15 @@ describe("BugReport", () => {
       elementParser.nextRootNodes = [{ $: {} }];
       elementParser.nextFlattenedElements = [
         {
-          element: makeElement({ "clickable": "true" as any, "resource-id": "string-clickable" }),
+          element: makeElement({ clickable: "true" as any, "resource-id": "string-clickable" }),
           index: 0,
-          depth: 0
+          depth: 0,
         },
         {
-          element: makeElement({ "clickable": true, "resource-id": "bool-clickable" }),
+          element: makeElement({ clickable: true, "resource-id": "bool-clickable" }),
           index: 1,
-          depth: 0
-        }
+          depth: 0,
+        },
       ];
 
       const result = await executeReport(bugReport);
@@ -226,13 +226,11 @@ describe("BugReport", () => {
       // Hierarchy uses "children" instead of "node"
       const rootNode = {
         $: {},
-        children: [{ $: {} }, { $: {} }]
+        children: [{ $: {} }, { $: {} }],
       };
       viewHierarchy.configureHierarchy({ hierarchy: { node: rootNode } });
       elementParser.nextRootNodes = [rootNode];
-      elementParser.nextFlattenedElements = [
-        { element: makeElement(), index: 0, depth: 0 }
-      ];
+      elementParser.nextFlattenedElements = [{ element: makeElement(), index: 0, depth: 0 }];
 
       const result = await executeReport(bugReport);
       // 3 traversed (root + 2 children), 1 flattened = 2 filtered
@@ -245,10 +243,10 @@ describe("BugReport", () => {
       elementParser.nextRootNodes = [{ $: {} }];
       elementParser.nextFlattenedElements = [
         {
-          element: makeElement({ "clickable": true, "className": "android.widget.TextView" }),
+          element: makeElement({ clickable: true, className: "android.widget.TextView" }),
           index: 0,
-          depth: 0
-        }
+          depth: 0,
+        },
       ];
 
       const result = await executeReport(bugReport);
@@ -265,15 +263,14 @@ describe("BugReport", () => {
 
       await bugReport.execute({ logcatLines: 0 });
 
-      const logcatCommands = adbFactory.getFakeClient().getCommandCalls()
-        .map(c => c.command)
-        .filter(command => command.includes("logcat"));
+      const logcatCommands = adbFactory
+        .getFakeClient()
+        .getCommandCalls()
+        .map((c) => c.command)
+        .filter((command) => command.includes("logcat"));
       // Assert the exact commands, not a per-element predicate over a possibly
       // empty list — an empty array would satisfy a `for...of` loop vacuously.
-      expect(logcatCommands).toEqual([
-        "shell logcat -d -t 0 *:E",
-        "shell logcat -d -t 0 *:W",
-      ]);
+      expect(logcatCommands).toEqual(["shell logcat -d -t 0 *:E", "shell logcat -d -t 0 *:W"]);
     });
   });
 

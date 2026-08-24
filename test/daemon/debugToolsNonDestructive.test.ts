@@ -74,7 +74,7 @@ describe("daemon health probes are non-destructive", () => {
       await getDaemonHealthReport(undefined, { socketPath, pidFilePath });
       expect(isAvailable).toHaveBeenCalledWith(
         socketPath,
-        expect.objectContaining({ skipStaleCleanup: true })
+        expect.objectContaining({ skipStaleCleanup: true }),
       );
     } finally {
       isAvailable.mockRestore();
@@ -107,7 +107,7 @@ describe("daemon health probes are non-destructive", () => {
       await runSocketDiagnostics(undefined, { socketPath });
       expect(isAvailable).toHaveBeenCalledWith(
         socketPath,
-        expect.objectContaining({ skipStaleCleanup: true })
+        expect.objectContaining({ skipStaleCleanup: true }),
       );
     } finally {
       isAvailable.mockRestore();

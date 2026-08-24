@@ -31,15 +31,17 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
     this.getMigrationsError = dependencies.getMigrationsError ?? getMigrationsError;
     this.getDatabasePath = dependencies.getDatabasePath ?? getDatabasePath;
     this.timeoutMs = dependencies.timeoutMs ?? DATABASE_HEALTH_PROBE_TIMEOUT_MS;
-    this.sqliteBusyTimeoutMs = dependencies.sqliteBusyTimeoutMs ?? DATABASE_HEALTH_PROBE_BUSY_TIMEOUT_MS;
+    this.sqliteBusyTimeoutMs =
+      dependencies.sqliteBusyTimeoutMs ?? DATABASE_HEALTH_PROBE_BUSY_TIMEOUT_MS;
     this.executeSelectOne =
-      dependencies.executeSelectOne
-      ?? (() => executeSqliteSelectOneInWorker(
-        this.getDatabasePath(),
-        this.sqliteBusyTimeoutMs,
-        this.timeoutMs,
-        this.timer
-      ));
+      dependencies.executeSelectOne ??
+      (() =>
+        executeSqliteSelectOneInWorker(
+          this.getDatabasePath(),
+          this.sqliteBusyTimeoutMs,
+          this.timeoutMs,
+          this.timer,
+        ));
   }
 
   async check(): Promise<void> {
@@ -73,9 +75,10 @@ function executeSqliteSelectOneInWorker(
   dbPath: string,
   sqliteBusyTimeoutMs: number,
   timeoutMs: number,
-  timer: Timer
+  timer: Timer,
 ): Promise<void> {
-  const worker = new Worker(`
+  const worker = new Worker(
+    `
     const { parentPort, workerData } = require("node:worker_threads");
     try {
       const { Database } = require("bun:sqlite");
@@ -94,10 +97,12 @@ function executeSqliteSelectOneInWorker(
         stack: error instanceof Error ? error.stack : undefined,
       });
     }
-  `, {
-    eval: true,
-    workerData: { dbPath, sqliteBusyTimeoutMs },
-  });
+  `,
+    {
+      eval: true,
+      workerData: { dbPath, sqliteBusyTimeoutMs },
+    },
+  );
 
   return new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -129,11 +134,11 @@ function executeSqliteSelectOneInWorker(
       }
       finish(() => reject(error));
     });
-    worker.once("error", error => {
+    worker.once("error", (error) => {
       void worker.terminate();
       finish(() => reject(error));
     });
-    worker.once("exit", code => {
+    worker.once("exit", (code) => {
       if (code !== 0) {
         finish(() => reject(new Error(`Database health probe worker exited with code ${code}`)));
       }

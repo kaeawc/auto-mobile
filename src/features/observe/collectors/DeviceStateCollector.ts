@@ -53,7 +53,7 @@ export class DeviceStateCollector {
   async collectBackStack(
     result: ObserveResult,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<void> {
     const { backStack, timer } = this.opts;
     try {
@@ -66,7 +66,7 @@ export class DeviceStateCollector {
       appendObserveError(result, {
         phase: "backStack",
         message: "Failed to retrieve back stack information",
-        cause: String(error)
+        cause: String(error),
       });
     }
   }
@@ -85,7 +85,7 @@ export class DeviceStateCollector {
       appendObserveError(result, {
         phase: "activeWindow",
         message: "Failed to retrieve active window information",
-        cause: String(error)
+        cause: String(error),
       });
     }
   }

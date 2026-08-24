@@ -24,19 +24,30 @@ export interface NavigationGraphSummaryExporter {
  */
 export function convertSummaryToStreamData(summary: {
   appId: string | null;
-  nodes: Array<{ id: number; screenName: string; visitCount: number; screenshotPath?: string | null }>;
-  edges: Array<{ id: number; from: string; to: string; toolName: string | null; traversalCount: number }>;
+  nodes: Array<{
+    id: number;
+    screenName: string;
+    visitCount: number;
+    screenshotPath?: string | null;
+  }>;
+  edges: Array<{
+    id: number;
+    from: string;
+    to: string;
+    toolName: string | null;
+    traversalCount: number;
+  }>;
   currentScreen: string | null;
 }): NavigationGraphStreamData {
   return {
     appId: summary.appId,
-    nodes: summary.nodes.map(node => ({
+    nodes: summary.nodes.map((node) => ({
       id: node.id,
       screenName: node.screenName,
       visitCount: node.visitCount,
       screenshotPath: node.screenshotPath,
     })),
-    edges: summary.edges.map(edge => ({
+    edges: summary.edges.map((edge) => ({
       id: edge.id,
       from: edge.from,
       to: edge.to,
@@ -61,7 +72,7 @@ export function convertSummaryToStreamData(summary: {
  * request id — a contract existing clients already decode.
  */
 export function createNavigationGraphRequestHandler(
-  exporter: NavigationGraphSummaryExporter
+  exporter: NavigationGraphSummaryExporter,
 ): OnNavigationGraphRequestedCallback {
   return async (appId?: string | null) => {
     try {

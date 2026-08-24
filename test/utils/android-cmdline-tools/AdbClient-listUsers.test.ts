@@ -12,7 +12,7 @@ function execResult(stdout: string): ExecResult {
     stderr: "",
     toString: () => stdout,
     trim: () => stdout.trim(),
-    includes: search => stdout.includes(search),
+    includes: (search) => stdout.includes(search),
   };
 }
 
@@ -28,7 +28,8 @@ interface ListUsersCase {
 const cases: ListUsersCase[] = [
   {
     name: "parses a primary user from structured dumpsys output",
-    outcomes: [`Current user: 0
+    outcomes: [
+      `Current user: 0
 
 Users:
   UserInfo{0:null:4c13} serialNo=0 isPrimary=true
@@ -36,13 +37,15 @@ Users:
     Flags: 19475 (ADMIN|FULL|INITIALIZED|MAIN|PRIMARY|SYSTEM)
     State: RUNNING_UNLOCKED
 
-  Owner name: Owner`],
+  Owner name: Owner`,
+    ],
     expectedUsers: [owner],
     expectedCommandFragments: ["shell dumpsys user"],
   },
   {
     name: "parses a running work profile from structured dumpsys output",
-    outcomes: [`Current user: 0
+    outcomes: [
+      `Current user: 0
 
 Users:
   UserInfo{0:null:4c13} serialNo=0 isPrimary=true
@@ -54,53 +57,66 @@ Users:
     Flags: 48 (MANAGED_PROFILE)
     State: RUNNING_UNLOCKED
 
-  Owner name: Owner`],
+  Owner name: Owner`,
+    ],
     expectedUsers: [owner, workProfile],
     expectedCommandFragments: ["shell dumpsys user"],
   },
   {
     name: "marks a shutdown secondary user as not running",
-    outcomes: [`Users:
+    outcomes: [
+      `Users:
   UserInfo{0:null:4c13} serialNo=0 isPrimary=true
     State: RUNNING_UNLOCKED
 
   UserInfo{10:Secondary User:0} serialNo=10 isPrimary=false
     State: SHUTDOWN
 
-  Owner name: Owner`],
+  Owner name: Owner`,
+    ],
     expectedUsers: [owner, { userId: 10, name: "Secondary User", flags: 0, running: false }],
     expectedCommandFragments: ["shell dumpsys user"],
   },
   {
     name: "treats a locked user as running",
-    outcomes: [`Users:
+    outcomes: [
+      `Users:
   UserInfo{0:null:4c13} serialNo=0 isPrimary=true
     State: RUNNING_LOCKED
 
-  Owner name: Owner`],
+  Owner name: Owner`,
+    ],
     expectedUsers: [owner],
     expectedCommandFragments: ["shell dumpsys user"],
   },
   {
     name: "uses a user-ID fallback name when dumpsys omits it",
-    outcomes: [`Users:
+    outcomes: [
+      `Users:
   UserInfo{10:null:30} serialNo=10 isPrimary=false
-    State: RUNNING_UNLOCKED`],
+    State: RUNNING_UNLOCKED`,
+    ],
     expectedUsers: [{ userId: 10, name: "User 10", flags: 0x30, running: true }],
     expectedCommandFragments: ["shell dumpsys user"],
   },
   {
     name: "falls back to pm output when dumpsys has no users",
-    outcomes: ["Invalid output", `Users:
+    outcomes: [
+      "Invalid output",
+      `Users:
 \tUserInfo{0:Owner:4c13} running
-\tUserInfo{10:Work profile:30} running`],
+\tUserInfo{10:Work profile:30} running`,
+    ],
     expectedUsers: [owner, workProfile],
     expectedCommandFragments: ["shell dumpsys user", "shell pm list users"],
   },
   {
     name: "falls back to pm output when dumpsys throws",
-    outcomes: [new Error("dumpsys user failed"), `Users:
-\tUserInfo{0:Owner:4c13} running`],
+    outcomes: [
+      new Error("dumpsys user failed"),
+      `Users:
+\tUserInfo{0:Owner:4c13} running`,
+    ],
     expectedUsers: [owner],
     expectedCommandFragments: ["shell dumpsys user", "shell pm list users"],
   },
@@ -124,9 +140,12 @@ Users:
   },
   {
     name: "parses hexadecimal flags from pm output",
-    outcomes: [new Error("dumpsys unavailable"), `Users:
+    outcomes: [
+      new Error("dumpsys unavailable"),
+      `Users:
 \tUserInfo{0:Owner:4c13} running
-\tUserInfo{10:Work:1a2b} running`],
+\tUserInfo{10:Work:1a2b} running`,
+    ],
     expectedUsers: [owner, { userId: 10, name: "Work", flags: 0x1a2b, running: true }],
     expectedCommandFragments: ["shell dumpsys user", "shell pm list users"],
   },
@@ -136,7 +155,7 @@ describe("AdbClient.listUsers", () => {
   test.each(cases)("$name", async ({ outcomes, expectedUsers, expectedCommandFragments }) => {
     const commands: string[] = [];
     let outcomeIndex = 0;
-    const client = new AdbClient(null, async command => {
+    const client = new AdbClient(null, async (command) => {
       commands.push(command);
       const outcome = outcomes[outcomeIndex++];
       if (outcome instanceof Error) {
@@ -146,6 +165,8 @@ describe("AdbClient.listUsers", () => {
     });
 
     await expect(client.listUsers()).resolves.toEqual(expectedUsers);
-    expect(commands.map(command => command.replace(/^.*\badb\s+/, ""))).toEqual(expectedCommandFragments);
+    expect(commands.map((command) => command.replace(/^.*\badb\s+/, ""))).toEqual(
+      expectedCommandFragments,
+    );
   });
 });

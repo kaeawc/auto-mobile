@@ -4,7 +4,7 @@ import { FakeAvdManager } from "../../fakes/FakeAvdManager";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import {
   createDeviceImageResourcesHandler,
-  DeviceImagesResourceContent
+  DeviceImagesResourceContent,
 } from "../../../src/server/deviceImageResources";
 import { DeviceInfo } from "../../../src/models";
 import { AvdInfo } from "../../../src/utils/android-cmdline-tools/avdmanager";
@@ -28,35 +28,45 @@ describe("Device Image Resources with Fakes", () => {
     test("returns a normalized provisioning catalog for Android and iOS", async () => {
       fakeDeviceUtils.setDeviceImages("android", []);
       fakeDeviceUtils.setDeviceImages("ios", []);
-      fakeAvdManager.setListSystemImagesResponse([{
-        packageName: "system-images;android-35;google_apis;x86_64",
-        apiLevel: 35,
-        tag: "google_apis",
-        abi: "x86_64",
-        versionInfo: "Google APIs Intel x86_64 Atom System Image",
-      }]);
-      fakeAvdManager.setListDevicesResponse([{
-        id: "pixel_9",
-        name: "Pixel 9",
-        oem: "Google",
-      }]);
-      const runtimes: AppleDeviceRuntime[] = [{
-        bundlePath: "/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 18.0.simruntime",
-        buildversion: "22A3354",
-        runtimeRoot: "/Library/Developer/CoreSimulator/Volumes/iOS_22A3354/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 18.0.simruntime/Contents/Resources/RuntimeRoot",
-        identifier: "com.apple.CoreSimulator.SimRuntime.iOS-18-0",
-        version: "18.0",
-        isAvailable: true,
-        name: "iOS 18.0",
-      }];
-      const deviceTypes: AppleDeviceType[] = [{
-        minRuntimeVersion: 17,
-        bundlePath: "/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 16.simdevicetype",
-        maxRuntimeVersion: 18,
-        name: "iPhone 16",
-        identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
-        productFamily: "iPhone",
-      }];
+      fakeAvdManager.setListSystemImagesResponse([
+        {
+          packageName: "system-images;android-35;google_apis;x86_64",
+          apiLevel: 35,
+          tag: "google_apis",
+          abi: "x86_64",
+          versionInfo: "Google APIs Intel x86_64 Atom System Image",
+        },
+      ]);
+      fakeAvdManager.setListDevicesResponse([
+        {
+          id: "pixel_9",
+          name: "Pixel 9",
+          oem: "Google",
+        },
+      ]);
+      const runtimes: AppleDeviceRuntime[] = [
+        {
+          bundlePath: "/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 18.0.simruntime",
+          buildversion: "22A3354",
+          runtimeRoot:
+            "/Library/Developer/CoreSimulator/Volumes/iOS_22A3354/Library/Developer/CoreSimulator/Profiles/Runtimes/iOS 18.0.simruntime/Contents/Resources/RuntimeRoot",
+          identifier: "com.apple.CoreSimulator.SimRuntime.iOS-18-0",
+          version: "18.0",
+          isAvailable: true,
+          name: "iOS 18.0",
+        },
+      ];
+      const deviceTypes: AppleDeviceType[] = [
+        {
+          minRuntimeVersion: 17,
+          bundlePath:
+            "/Library/Developer/CoreSimulator/Profiles/DeviceTypes/iPhone 16.simdevicetype",
+          maxRuntimeVersion: 18,
+          name: "iPhone 16",
+          identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+          productFamily: "iPhone",
+        },
+      ];
       fakeSimCtl.setRuntimes(runtimes);
       fakeSimCtl.setDeviceTypes(deviceTypes);
 
@@ -94,21 +104,25 @@ describe("Device Image Resources with Fakes", () => {
             name: "iPhone 16",
           }),
         ]),
-        systemImages: [{
-          platform: "android",
-          id: "system-images;android-35;google_apis;x86_64",
-          name: "Google APIs Intel x86_64 Atom System Image",
-          apiLevel: 35,
-          tag: "google_apis",
-          abi: "x86_64",
-          version: "35",
-        }],
-        profiles: [{
-          platform: "android",
-          id: "pixel_9",
-          name: "Pixel 9",
-          manufacturer: "Google",
-        }],
+        systemImages: [
+          {
+            platform: "android",
+            id: "system-images;android-35;google_apis;x86_64",
+            name: "Google APIs Intel x86_64 Atom System Image",
+            apiLevel: 35,
+            tag: "google_apis",
+            abi: "x86_64",
+            version: "35",
+          },
+        ],
+        profiles: [
+          {
+            platform: "android",
+            id: "pixel_9",
+            name: "Pixel 9",
+            manufacturer: "Google",
+          },
+        ],
       });
     });
 
@@ -138,7 +152,7 @@ describe("Device Image Resources with Fakes", () => {
       const result = await handler.getDeviceImagesForPlatforms(["android"]);
 
       expect(result.catalogComplete).toBe(true);
-      expect(result.provisioningCatalog.systemImages.map(image => image.id)).toEqual([
+      expect(result.provisioningCatalog.systemImages.map((image) => image.id)).toEqual([
         availableImage.packageName,
         installedOnlyImage.packageName,
       ]);
@@ -170,7 +184,7 @@ describe("Device Image Resources with Fakes", () => {
       // Set up mock Android devices
       const androidDevices: DeviceInfo[] = [
         { name: "Pixel_6_API_33", platform: "android", deviceId: "avd-1", source: "local" },
-        { name: "Pixel_7_API_34", platform: "android", deviceId: "avd-2", source: "local" }
+        { name: "Pixel_7_API_34", platform: "android", deviceId: "avd-2", source: "local" },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
 
@@ -178,7 +192,7 @@ describe("Device Image Resources with Fakes", () => {
       const iosDevices: DeviceInfo[] = [
         { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" },
         { name: "iPhone 15 Pro", platform: "ios", deviceId: "sim-2", source: "local" },
-        { name: "iPad Pro", platform: "ios", deviceId: "sim-3", source: "local" }
+        { name: "iPad Pro", platform: "ios", deviceId: "sim-3", source: "local" },
       ];
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
 
@@ -188,7 +202,7 @@ describe("Device Image Resources with Fakes", () => {
       // Create handler with fakes
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils,
-        avdManager: fakeAvdManager
+        avdManager: fakeAvdManager,
       });
 
       // Get all device images
@@ -213,7 +227,7 @@ describe("Device Image Resources with Fakes", () => {
 
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils,
-        avdManager: fakeAvdManager
+        avdManager: fakeAvdManager,
       });
 
       const result = await handler.getDeviceImagesForPlatforms(["android", "ios"]);
@@ -227,10 +241,10 @@ describe("Device Image Resources with Fakes", () => {
     test("should filter to android platform only", async () => {
       // Set up mock devices for both platforms
       const androidDevices: DeviceInfo[] = [
-        { name: "Pixel_6_API_33", platform: "android", deviceId: "avd-1", source: "local" }
+        { name: "Pixel_6_API_33", platform: "android", deviceId: "avd-1", source: "local" },
       ];
       const iosDevices: DeviceInfo[] = [
-        { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" }
+        { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
@@ -238,7 +252,7 @@ describe("Device Image Resources with Fakes", () => {
 
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils,
-        avdManager: fakeAvdManager
+        avdManager: fakeAvdManager,
       });
 
       // Request only Android
@@ -255,11 +269,11 @@ describe("Device Image Resources with Fakes", () => {
     test("should filter to ios platform only", async () => {
       // Set up mock devices for both platforms
       const androidDevices: DeviceInfo[] = [
-        { name: "Pixel_6_API_33", platform: "android", deviceId: "avd-1", source: "local" }
+        { name: "Pixel_6_API_33", platform: "android", deviceId: "avd-1", source: "local" },
       ];
       const iosDevices: DeviceInfo[] = [
         { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" },
-        { name: "iPhone 15", platform: "ios", deviceId: "sim-2", source: "local" }
+        { name: "iPhone 15", platform: "ios", deviceId: "sim-2", source: "local" },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
@@ -267,7 +281,7 @@ describe("Device Image Resources with Fakes", () => {
 
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils,
-        avdManager: fakeAvdManager
+        avdManager: fakeAvdManager,
       });
 
       // Request only iOS
@@ -296,15 +310,15 @@ describe("Device Image Resources with Fakes", () => {
           runtime: "com.apple.CoreSimulator.SimRuntime.iOS-17-4",
           model: "iPhone15,3",
           architecture: "arm64",
-          availabilityError: undefined
-        }
+          availabilityError: undefined,
+        },
       ];
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
       fakeAvdManager.setListDeviceImagesResponse([]);
 
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils,
-        avdManager: fakeAvdManager
+        avdManager: fakeAvdManager,
       });
 
       const result = await handler.getDeviceImagesForPlatforms(["ios"]);
@@ -312,7 +326,9 @@ describe("Device Image Resources with Fakes", () => {
       expect(result.images[0].state).toBe("Booted");
       expect(result.images[0].isAvailable).toBe(true);
       expect(result.images[0].iosVersion).toBe("17.4");
-      expect(result.images[0].deviceType).toBe("com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro");
+      expect(result.images[0].deviceType).toBe(
+        "com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro",
+      );
       expect(result.images[0].runtime).toBe("com.apple.CoreSimulator.SimRuntime.iOS-17-4");
       expect(result.images[0].model).toBe("iPhone15,3");
       expect(result.images[0].architecture).toBe("arm64");
@@ -322,7 +338,7 @@ describe("Device Image Resources with Fakes", () => {
       // Set up mock Android devices
       const androidDevices: DeviceInfo[] = [
         { name: "Pixel_6_API_33", platform: "android", deviceId: "avd-1", source: "local" },
-        { name: "Pixel_7_API_34", platform: "android", deviceId: "avd-2", source: "local" }
+        { name: "Pixel_7_API_34", platform: "android", deviceId: "avd-2", source: "local" },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
 
@@ -332,21 +348,21 @@ describe("Device Image Resources with Fakes", () => {
           name: "Pixel_6_API_33",
           path: "/Users/test/.android/avd/Pixel_6_API_33.avd",
           target: "Google APIs (Google Inc.)",
-          basedOn: "Android 13.0 (API 33)"
+          basedOn: "Android 13.0 (API 33)",
         },
         {
           name: "Pixel_7_API_34",
           path: "/Users/test/.android/avd/Pixel_7_API_34.avd",
           target: "Google Play (Google Inc.)",
           basedOn: "Android 14 (API 34)",
-          error: undefined
-        }
+          error: undefined,
+        },
       ];
       fakeAvdManager.setListDeviceImagesResponse(avdInfoList);
 
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils,
-        avdManager: fakeAvdManager
+        avdManager: fakeAvdManager,
       });
 
       const result = await handler.getDeviceImagesForPlatforms(["android"]);
@@ -355,14 +371,14 @@ describe("Device Image Resources with Fakes", () => {
       expect(result.androidCount).toBe(2);
 
       // Verify extended metadata for first device
-      const pixel6 = result.images.find(img => img.name === "Pixel_6_API_33");
+      const pixel6 = result.images.find((img) => img.name === "Pixel_6_API_33");
       expect(pixel6).toBeDefined();
       expect(pixel6?.path).toBe("/Users/test/.android/avd/Pixel_6_API_33.avd");
       expect(pixel6?.target).toBe("Google APIs (Google Inc.)");
       expect(pixel6?.basedOn).toBe("Android 13.0 (API 33)");
 
       // Verify extended metadata for second device
-      const pixel7 = result.images.find(img => img.name === "Pixel_7_API_34");
+      const pixel7 = result.images.find((img) => img.name === "Pixel_7_API_34");
       expect(pixel7).toBeDefined();
       expect(pixel7?.path).toBe("/Users/test/.android/avd/Pixel_7_API_34.avd");
       expect(pixel7?.target).toBe("Google Play (Google Inc.)");
@@ -372,7 +388,7 @@ describe("Device Image Resources with Fakes", () => {
     test("should handle AVD info with errors", async () => {
       // Set up mock Android device
       const androidDevices: DeviceInfo[] = [
-        { name: "Corrupted_AVD", platform: "android", deviceId: "avd-err", source: "local" }
+        { name: "Corrupted_AVD", platform: "android", deviceId: "avd-err", source: "local" },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
 
@@ -381,14 +397,14 @@ describe("Device Image Resources with Fakes", () => {
         {
           name: "Corrupted_AVD",
           path: "/Users/test/.android/avd/Corrupted_AVD.avd",
-          error: "Error: config.ini is missing"
-        }
+          error: "Error: config.ini is missing",
+        },
       ];
       fakeAvdManager.setListDeviceImagesResponse(avdInfoList);
 
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils,
-        avdManager: fakeAvdManager
+        avdManager: fakeAvdManager,
       });
 
       const result = await handler.getDeviceImagesForPlatforms(["android"]);
@@ -402,7 +418,12 @@ describe("Device Image Resources with Fakes", () => {
     test("should handle missing AVD info gracefully", async () => {
       // Set up mock Android devices
       const androidDevices: DeviceInfo[] = [
-        { name: "Device_Without_AVD_Info", platform: "android", deviceId: "avd-1", source: "local" }
+        {
+          name: "Device_Without_AVD_Info",
+          platform: "android",
+          deviceId: "avd-1",
+          source: "local",
+        },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
 
@@ -411,7 +432,7 @@ describe("Device Image Resources with Fakes", () => {
 
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils,
-        avdManager: fakeAvdManager
+        avdManager: fakeAvdManager,
       });
 
       const result = await handler.getDeviceImagesForPlatforms(["android"]);
@@ -429,7 +450,7 @@ describe("Device Image Resources with Fakes", () => {
     test("should not include extended AVD metadata for iOS images", async () => {
       // Set up mock iOS devices
       const iosDevices: DeviceInfo[] = [
-        { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" }
+        { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" },
       ];
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
 
@@ -438,7 +459,7 @@ describe("Device Image Resources with Fakes", () => {
 
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils,
-        avdManager: fakeAvdManager
+        avdManager: fakeAvdManager,
       });
 
       const result = await handler.getDeviceImagesForPlatforms(["ios"]);
@@ -456,10 +477,10 @@ describe("Device Image Resources with Fakes", () => {
   describe("getAllDeviceImages", () => {
     test("should return ResourceContent with all device images", async () => {
       const androidDevices: DeviceInfo[] = [
-        { name: "Pixel_6", platform: "android", deviceId: "avd-1", source: "local" }
+        { name: "Pixel_6", platform: "android", deviceId: "avd-1", source: "local" },
       ];
       const iosDevices: DeviceInfo[] = [
-        { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" }
+        { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
@@ -467,7 +488,7 @@ describe("Device Image Resources with Fakes", () => {
 
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils,
-        avdManager: fakeAvdManager
+        avdManager: fakeAvdManager,
       });
 
       const result = await handler.getAllDeviceImages();
@@ -486,7 +507,7 @@ describe("Device Image Resources with Fakes", () => {
   describe("getDeviceImagesByPlatform", () => {
     test("should return android-specific images via platform param", async () => {
       const androidDevices: DeviceInfo[] = [
-        { name: "Pixel_6", platform: "android", deviceId: "avd-1", source: "local" }
+        { name: "Pixel_6", platform: "android", deviceId: "avd-1", source: "local" },
       ];
       fakeDeviceUtils.setDeviceImages("android", androidDevices);
       fakeDeviceUtils.setDeviceImages("ios", []);
@@ -494,7 +515,7 @@ describe("Device Image Resources with Fakes", () => {
 
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils,
-        avdManager: fakeAvdManager
+        avdManager: fakeAvdManager,
       });
 
       const result = await handler.getDeviceImagesByPlatform({ platform: "android" });
@@ -509,7 +530,7 @@ describe("Device Image Resources with Fakes", () => {
 
     test("should return ios-specific images via platform param", async () => {
       const iosDevices: DeviceInfo[] = [
-        { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" }
+        { name: "iPhone 14", platform: "ios", deviceId: "sim-1", source: "local" },
       ];
       fakeDeviceUtils.setDeviceImages("android", []);
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
@@ -517,7 +538,7 @@ describe("Device Image Resources with Fakes", () => {
 
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils,
-        avdManager: fakeAvdManager
+        avdManager: fakeAvdManager,
       });
 
       const result = await handler.getDeviceImagesByPlatform({ platform: "ios" });
@@ -533,7 +554,7 @@ describe("Device Image Resources with Fakes", () => {
     test("should return error for invalid platform", async () => {
       const handler = createDeviceImageResourcesHandler({
         deviceManager: fakeDeviceUtils,
-        avdManager: fakeAvdManager
+        avdManager: fakeAvdManager,
       });
 
       const result = await handler.getDeviceImagesByPlatform({ platform: "windows" });
@@ -551,14 +572,14 @@ describe("Device Image Resources with Fakes", () => {
   describe("Partial dependency injection", () => {
     test("should allow providing only deviceManager", async () => {
       const iosDevices: DeviceInfo[] = [
-        { name: "Test iPhone", platform: "ios", deviceId: "sim-test", source: "local" }
+        { name: "Test iPhone", platform: "ios", deviceId: "sim-test", source: "local" },
       ];
       fakeDeviceUtils.setDeviceImages("ios", iosDevices);
 
       // Only provide deviceManager. Use the iOS path so the default Android AVD
       // manager is not touched by this unit test.
       const handler = createDeviceImageResourcesHandler({
-        deviceManager: fakeDeviceUtils
+        deviceManager: fakeDeviceUtils,
       });
 
       const result = await handler.getDeviceImagesForPlatforms(["ios"]);
@@ -572,8 +593,8 @@ describe("Device Image Resources with Fakes", () => {
         {
           name: "Pixel_Test",
           path: "/path/to/avd",
-          target: "Google APIs"
-        }
+          target: "Google APIs",
+        },
       ];
       fakeAvdManager.setListDeviceImagesResponse(avdInfoList);
 
@@ -581,7 +602,7 @@ describe("Device Image Resources with Fakes", () => {
       // Note: This test verifies partial DI works but won't produce faked device data
       // since we're using the real device manager
       const handler = createDeviceImageResourcesHandler({
-        avdManager: fakeAvdManager
+        avdManager: fakeAvdManager,
       });
 
       // The handler was created successfully with partial deps

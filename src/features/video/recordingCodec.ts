@@ -52,7 +52,12 @@ interface BoxHeader {
  * extends-to-end sentinel (`size === 0`). Returns `undefined` when there are
  * not enough bytes for the header or the declared size cannot contain it.
  */
-function readBoxHeader(view: Buffer, offset: number, available: number, remaining: number): BoxHeader | undefined {
+function readBoxHeader(
+  view: Buffer,
+  offset: number,
+  available: number,
+  remaining: number,
+): BoxHeader | undefined {
   if (available < BOX_HEADER_SIZE) {
     return undefined;
   }

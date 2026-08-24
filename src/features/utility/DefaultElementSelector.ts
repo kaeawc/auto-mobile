@@ -13,7 +13,7 @@ export class DefaultElementSelector implements ElementSelector {
 
   constructor(
     finder: ElementFinder = new DefaultElementFinder(),
-    random: () => number = () => defaultRandom.next()
+    random: () => number = () => defaultRandom.next(),
   ) {
     this.finder = finder;
     this.random = random;
@@ -28,7 +28,7 @@ export class DefaultElementSelector implements ElementSelector {
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
-    }
+    },
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
     const matches = this.finder.findElementsByText(
@@ -37,7 +37,7 @@ export class DefaultElementSelector implements ElementSelector {
       options?.container ?? null,
       options?.partialMatch ?? true,
       options?.caseSensitive ?? false,
-      options?.index !== undefined
+      options?.index !== undefined,
     );
     return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }
@@ -50,7 +50,7 @@ export class DefaultElementSelector implements ElementSelector {
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
-    }
+    },
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
     const matches = this.finder.findElementsByResourceId(
@@ -58,7 +58,7 @@ export class DefaultElementSelector implements ElementSelector {
       resourceId,
       options?.container ?? null,
       options?.partialMatch ?? false,
-      options?.index !== undefined
+      options?.index !== undefined,
     );
     return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }
@@ -70,14 +70,14 @@ export class DefaultElementSelector implements ElementSelector {
       container?: { elementId?: string; text?: string } | null;
       strategy?: ElementSelectionStrategy;
       index?: number;
-    }
+    },
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
     const matches = this.finder.findElementsByTestTag(
       viewHierarchy,
       testTag,
       options?.container ?? null,
-      options?.index !== undefined
+      options?.index !== undefined,
     );
     return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }
@@ -90,7 +90,7 @@ export class DefaultElementSelector implements ElementSelector {
       fuzzyMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
-    }
+    },
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
     const matches = this.finder.findClickableParentsContainingText(
@@ -98,7 +98,7 @@ export class DefaultElementSelector implements ElementSelector {
       text,
       options?.container ?? null,
       options?.fuzzyMatch ?? true,
-      options?.caseSensitive ?? false
+      options?.caseSensitive ?? false,
     );
     return this.pickMatch(matches, strategy, viewHierarchy);
   }
@@ -109,13 +109,13 @@ export class DefaultElementSelector implements ElementSelector {
       container?: { elementId?: string; text?: string } | null;
       strategy?: ElementSelectionStrategy;
       scrollableContainer?: boolean;
-    }
+    },
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
     const matches = this.finder.findClickableElementsInContainer(
       viewHierarchy,
       options?.container ?? null,
-      options?.scrollableContainer ?? false
+      options?.scrollableContainer ?? false,
     );
     return this.pickMatch(matches, strategy, viewHierarchy);
   }
@@ -129,7 +129,7 @@ export class DefaultElementSelector implements ElementSelector {
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
-    }
+    },
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
     const matches = this.finder.findClickableSiblingsOfText(
@@ -137,7 +137,7 @@ export class DefaultElementSelector implements ElementSelector {
       text,
       options?.container ?? null,
       options?.fuzzyMatch ?? true,
-      options?.caseSensitive ?? false
+      options?.caseSensitive ?? false,
     );
     return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }
@@ -150,14 +150,14 @@ export class DefaultElementSelector implements ElementSelector {
       partialMatch?: boolean;
       strategy?: ElementSelectionStrategy;
       index?: number;
-    }
+    },
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
     const matches = this.finder.findClickableSiblingsOfResourceId(
       viewHierarchy,
       resourceId,
       options?.container ?? null,
-      options?.partialMatch ?? false
+      options?.partialMatch ?? false,
     );
     return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }
@@ -169,15 +169,19 @@ export class DefaultElementSelector implements ElementSelector {
 
     const centerX = (element.bounds.left + element.bounds.right) / 2;
     const centerY = (element.bounds.top + element.bounds.bottom) / 2;
-    return centerX < 0 || centerX > viewHierarchy.screenWidth ||
-      centerY < 0 || centerY > viewHierarchy.screenHeight;
+    return (
+      centerX < 0 ||
+      centerX > viewHierarchy.screenWidth ||
+      centerY < 0 ||
+      centerY > viewHierarchy.screenHeight
+    );
   }
 
   private pickMatch(
     matches: Element[],
     strategy: ElementSelectionStrategy,
     viewHierarchy: ViewHierarchyResult,
-    index?: number
+    index?: number,
   ): ElementSelectionResult {
     const totalMatches = matches.length;
     if (totalMatches === 0) {
@@ -186,7 +190,7 @@ export class DefaultElementSelector implements ElementSelector {
 
     const visibleMatches = matches
       .map((element, matchIndex) => ({ element, index: matchIndex }))
-      .filter(match => !this.isElementCenterOffScreen(match.element, viewHierarchy));
+      .filter((match) => !this.isElementCenterOffScreen(match.element, viewHierarchy));
 
     if (visibleMatches.length === 0) {
       return { element: null, indexInMatches: -1, totalMatches, strategy };
@@ -216,7 +220,7 @@ export class DefaultElementSelector implements ElementSelector {
       element: selectedMatch.element,
       indexInMatches: selectedMatch.index,
       totalMatches,
-      strategy
+      strategy,
     };
   }
 }

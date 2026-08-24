@@ -28,10 +28,18 @@ export function parseBootDeviceArgs(args: string[]): DeviceBootRequest {
   return request as DeviceBootRequest;
 }
 
-function applyBootDeviceArgument(request: Partial<DeviceBootRequest>, args: string[], index: number, flag: string): number {
+function applyBootDeviceArgument(
+  request: Partial<DeviceBootRequest>,
+  args: string[],
+  index: number,
+  flag: string,
+): number {
   const valueFields: Record<string, keyof DeviceBootRequest> = {
-    "--platform": "platform", "--device-id": "deviceId", "--name": "name",
-    "--min-os-version": "minOsVersion", "--max-os-version": "maxOsVersion",
+    "--platform": "platform",
+    "--device-id": "deviceId",
+    "--name": "name",
+    "--min-os-version": "minOsVersion",
+    "--max-os-version": "maxOsVersion",
   };
   const field = valueFields[flag];
   if (field) {
@@ -40,12 +48,20 @@ function applyBootDeviceArgument(request: Partial<DeviceBootRequest>, args: stri
   }
   if (flag === "--timeout-ms") {
     const parsed = Number(readValue(args, index, flag));
-    if (!Number.isFinite(parsed) || parsed <= 0) { throw new ActionableError("--timeout-ms must be a positive number."); }
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new ActionableError("--timeout-ms must be a positive number.");
+    }
     request.timeoutMs = parsed;
     return 1;
   }
-  if (flag === "--create-if-missing") { request.createIfMissing = true; return 0; }
-  if (flag === "--no-prefer-running") { request.preferRunning = false; return 0; }
+  if (flag === "--create-if-missing") {
+    request.createIfMissing = true;
+    return 0;
+  }
+  if (flag === "--no-prefer-running") {
+    request.preferRunning = false;
+    return 0;
+  }
   throw new ActionableError(`Unknown boot-device argument: ${flag}`);
 }
 
@@ -65,13 +81,15 @@ export async function runBootDeviceCommand(args: string[]): Promise<void> {
     bootRecovery: ciConfiguration?.recovery,
   });
   const result = await service.boot(ciConfiguration?.request ?? parsedRequest);
-  console.log(JSON.stringify({
-    deviceId: result.device.deviceId,
-    name: result.device.name,
-    platform: result.device.platform,
-    osVersion: result.device.osVersion ?? result.device.iosVersion,
-    source: result.source,
-    processId: result.processId,
-    provisioned: result.provisioned,
-  }));
+  console.log(
+    JSON.stringify({
+      deviceId: result.device.deviceId,
+      name: result.device.name,
+      platform: result.device.platform,
+      osVersion: result.device.osVersion ?? result.device.iosVersion,
+      source: result.source,
+      processId: result.processId,
+      provisioned: result.provisioned,
+    }),
+  );
 }

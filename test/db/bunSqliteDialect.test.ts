@@ -21,13 +21,13 @@ describe("BunSqliteDialect destroy-during-queued-query (issue #2792)", () => {
     dialect: BunSqliteDialect;
     firstEntered: Promise<void>;
     release: () => void;
-    } {
+  } {
     let release!: () => void;
-    const gate = new Promise<void>(r => {
+    const gate = new Promise<void>((r) => {
       release = r;
     });
     let signalEntered!: () => void;
-    const firstEntered = new Promise<void>(r => {
+    const firstEntered = new Promise<void>((r) => {
       signalEntered = r;
     });
     let count = 0;
@@ -88,7 +88,7 @@ describe("BunSqliteDialect destroy-during-queued-query (issue #2792)", () => {
     // Must NOT throw here — a throw is what strands the next Kysely mutex waiter.
     const after = await driver.acquireConnection();
     await expect(after.executeQuery(CompiledQuery.raw("SELECT 1"))).rejects.toThrow(
-      /closed database/i
+      /closed database/i,
     );
   });
 });
@@ -109,7 +109,7 @@ class FakeStatement {
 
   constructor(
     private readonly db: FakeDatabase,
-    readonly sql: string
+    readonly sql: string,
   ) {}
 
   all(...params: unknown[]): unknown[] {
@@ -197,15 +197,15 @@ class FakeDatabase {
   }
 
   preparedFor(sql: string): FakeStatement[] {
-    return this.preparedStatements.filter(statement => statement.sql === sql);
+    return this.preparedStatements.filter((statement) => statement.sql === sql);
   }
 
   get applicationPrepareCalls(): string[] {
-    return this.prepareCalls.filter(sql => sql !== "PRAGMA schema_version");
+    return this.prepareCalls.filter((sql) => sql !== "PRAGMA schema_version");
   }
 
   get applicationCalls(): Array<{ method: "all" | "run"; sql: string; params: unknown[] }> {
-    return this.calls.filter(call => call.sql !== "PRAGMA schema_version");
+    return this.calls.filter((call) => call.sql !== "PRAGMA schema_version");
   }
 }
 
@@ -226,7 +226,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   const timeout = new Promise<never>((_resolve, reject) => {
     handle = defaultTimer.setTimeout(
       () => reject(new Error(`TIMEOUT: call hung after ${ms}ms`)),
-      ms
+      ms,
     );
   });
   try {
@@ -249,7 +249,7 @@ describe("BunSqliteConnectionState — C4 nested-transaction guard", () => {
     // Second begin on the SAME owner previously busy-looped forever in
     // #reserveTransaction (owner waiting for itself to release).
     await expect(withTimeout(state.beginTransaction(owner), 1000)).rejects.toBeInstanceOf(
-      ActionableError
+      ActionableError,
     );
   });
 
@@ -295,7 +295,7 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
     await state.executeQuery(rawQuery("insert into foo (id) values (?)", [3]), owner);
 
     expect(db.applicationPrepareCalls).toEqual(["insert into foo (id) values (?)"]);
-    expect(db.applicationCalls.map(call => call.params)).toEqual([[1], [2], [3]]);
+    expect(db.applicationCalls.map((call) => call.params)).toEqual([[1], [2], [3]]);
   });
 
   test("keeps distinct SQL strings as distinct cache entries", async () => {
@@ -320,7 +320,10 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
 
     await state.executeQuery(rawQuery("insert into foo_0 (id) values (?)", [0]), owner);
     for (let index = 1; index < 200; index += 1) {
-      await state.executeQuery(rawQuery(`insert into foo_${index} (id) values (?)`, [index]), owner);
+      await state.executeQuery(
+        rawQuery(`insert into foo_${index} (id) values (?)`, [index]),
+        owner,
+      );
     }
 
     const oldest = db.preparedFor("insert into foo_0 (id) values (?)")[0];
@@ -334,8 +337,8 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
     expect(db.applicationPrepareCalls).toHaveLength(201);
     expect(
       db.preparedStatements.filter(
-        statement => statement.sql !== "PRAGMA schema_version" && !statement.finalized
-      )
+        (statement) => statement.sql !== "PRAGMA schema_version" && !statement.finalized,
+      ),
     ).toHaveLength(200);
   });
 
@@ -345,7 +348,10 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
     const owner = Symbol("lease");
 
     for (let index = 0; index < 201; index += 1) {
-      await state.executeQuery(rawQuery(`insert into foo_${index} (id) values (?)`, [index]), owner);
+      await state.executeQuery(
+        rawQuery(`insert into foo_${index} (id) values (?)`, [index]),
+        owner,
+      );
     }
     const evicted = db.preparedFor("insert into foo_0 (id) values (?)")[0];
     expect(evicted.finalized).toBe(true);
@@ -367,10 +373,10 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
     state.close();
 
     const applicationStatements = db.preparedStatements.filter(
-      statement => statement.sql !== "PRAGMA schema_version"
+      (statement) => statement.sql !== "PRAGMA schema_version",
     );
     expect(applicationStatements).toHaveLength(2);
-    expect(applicationStatements.every(statement => statement.finalized)).toBe(true);
+    expect(applicationStatements.every((statement) => statement.finalized)).toBe(true);
   });
 
   test("clears cached statements after successful schema-changing SQL", async () => {
@@ -442,7 +448,7 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
     });
 
     await expect(
-      state.executeQuery(rawQuery("insert into foo (name) values (?) returning id", ["x"]), owner)
+      state.executeQuery(rawQuery("insert into foo (name) values (?) returning id", ["x"]), owner),
     ).resolves.toEqual({
       rows: [{ id: 1 }, { id: 2 }],
       numAffectedRows: 2n,
@@ -450,7 +456,7 @@ describe("BunSqliteConnectionState — prepared statement cache (#2797)", () => 
 
     db.runResult = { changes: 3, lastInsertRowid: 42 };
     await expect(
-      state.executeQuery(rawQuery("update foo set name = ? where id = ?", ["y", 1]), owner)
+      state.executeQuery(rawQuery("update foo set name = ? where id = ?", ["y", 1]), owner),
     ).resolves.toEqual({
       rows: [],
       numAffectedRows: 3n,
@@ -513,7 +519,10 @@ describe("BunSqliteConnectionState — C6 word-boundary RETURNING detection", ()
     const owner = Symbol("lease");
 
     // Only occurrence of 'returning' is the table name — must take the run() branch.
-    await state.executeQuery(rawQuery("insert into returning_items (name) values (?)", ["x"]), owner);
+    await state.executeQuery(
+      rawQuery("insert into returning_items (name) values (?)", ["x"]),
+      owner,
+    );
 
     expect(db.last?.method).toBe("run");
   });
@@ -580,7 +589,7 @@ describe("BunSqliteConnectionState — close-time database maintenance", () => {
       // Best-effort: optimize failures must be logged and swallowed, not rethrown.
       expect(() => state.close()).not.toThrow();
       expect(debugSpy).toHaveBeenCalledWith(
-        "PRAGMA optimize on close failed: Error: optimize failed"
+        "PRAGMA optimize on close failed: Error: optimize failed",
       );
     } finally {
       debugSpy.mockRestore();

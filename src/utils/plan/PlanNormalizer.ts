@@ -27,7 +27,7 @@ export class PlanNormalizer {
     }
 
     const inlineParams: Record<string, any> = {};
-    Object.keys(step).forEach(key => {
+    Object.keys(step).forEach((key) => {
       if (
         key !== "tool" &&
         key !== "command" &&
@@ -46,8 +46,8 @@ export class PlanNormalizer {
       tool: toolName,
       params: {
         ...inlineParams,
-        ...paramsFromStep
-      }
+        ...paramsFromStep,
+      },
     };
 
     if (typeof step.label === "string") {

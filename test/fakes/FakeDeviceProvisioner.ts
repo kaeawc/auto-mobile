@@ -6,7 +6,10 @@ import type {
   ProvisionedDevice,
 } from "../../src/utils/deviceProvisioning";
 import type { AppleDeviceType } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
-import type { CreateAvdParams, SystemImage } from "../../src/utils/android-cmdline-tools/avdmanager";
+import type {
+  CreateAvdParams,
+  SystemImage,
+} from "../../src/utils/android-cmdline-tools/avdmanager";
 
 /** Records provisioning requests and returns a canned device. */
 export class FakeDeviceProvisioner implements DeviceProvisioner {
@@ -80,7 +83,9 @@ export class FakeAndroidAvdCreator implements AndroidAvdCreator {
     return this.images;
   }
 
-  async createAvd(params: CreateAvdParams): Promise<{ success: boolean; message: string; avdName?: string }> {
+  async createAvd(
+    params: CreateAvdParams,
+  ): Promise<{ success: boolean; message: string; avdName?: string }> {
     this.createCalls.push(params);
     return { ...this.result, avdName: this.result.avdName ?? params.name };
   }

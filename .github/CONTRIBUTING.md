@@ -6,12 +6,12 @@ If you have a question file an issue or discussion, but small contributions like
 
 ## Ways to Contribute
 
-| Type | Description |
-|------|-------------|
-| Bug reports | File issues with reproduction steps |
-| Feature requests | Propose new capabilities via issues |
-| Documentation | Improve guides, fix typos, add examples |
-| Code | Bug fixes, new features, performance improvements |
+| Type             | Description                                       |
+| ---------------- | ------------------------------------------------- |
+| Bug reports      | File issues with reproduction steps               |
+| Feature requests | Propose new capabilities via issues               |
+| Documentation    | Improve guides, fix typos, add examples           |
+| Code             | Bug fixes, new features, performance improvements |
 
 ## Code Guidelines
 
@@ -31,12 +31,13 @@ If you have a question file an issue or discussion, but small contributions like
 
 ## Local Development
 
-| Platform | Script |
-|----------|--------|
-| Android | `./scripts/local-dev/android-hot-reload.sh` |
-| iOS | `./scripts/local-dev/ios-hot-reload.sh` |
+| Platform | Script                                      |
+| -------- | ------------------------------------------- |
+| Android  | `./scripts/local-dev/android-hot-reload.sh` |
+| iOS      | `./scripts/local-dev/ios-hot-reload.sh`     |
 
 Options:
+
 - `--device <id>` - Target specific device (ADB device ID or simulator UDID)
 - `--skip-ai` - Run without AI agent prompt
 - `--once` - Build once and exit

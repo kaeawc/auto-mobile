@@ -465,7 +465,10 @@ describe("TelemetryPushSocketServer", () => {
   });
 
   it("filters by both category and deviceSessionUuid", () => {
-    const { socket } = server.simulateSubscription({ category: "log", deviceSessionUuid: "uuid-1" });
+    const { socket } = server.simulateSubscription({
+      category: "log",
+      deviceSessionUuid: "uuid-1",
+    });
 
     const matchEvent: TelemetryEvent = {
       category: "log",
@@ -615,7 +618,10 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
         socket as unknown as Socket,
       );
 
-      const messages = socket.getWrittenMessages<{ data: TelemetryEvent; subscriptionId: string }>();
+      const messages = socket.getWrittenMessages<{
+        data: TelemetryEvent;
+        subscriptionId: string;
+      }>();
       const crash = messages.find((m) => m.data.category === "crash");
       expect(crash).toBeDefined();
       expect(crash!.data.sessionId).toBe("session-abc");
@@ -644,54 +650,95 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
   });
 
   // AC4 for the BACKFILL path (epic #5256): a subscription that named a specific
-    // deviceSessionUuid which no longer resolves to a live serial (deviceId === null)
-    // must backfill NOTHING — never fall through to an all-devices DB query that would
-    // dump every device's history to a stale-uuid subscriber. Discriminating: delete
-    // the guard in backfillRecentEvents and the stale case below leaks the crash.
-    it("backfills zero events for a specific deviceSessionUuid that no longer resolves (AC4)", async () => {
-      await withInMemorySingletonDatabase(async () => {
-        const db = getDatabase() as unknown as Kysely<Database>;
-        await runMigrations(db as unknown as Kysely<unknown>);
+  // deviceSessionUuid which no longer resolves to a live serial (deviceId === null)
+  // must backfill NOTHING — never fall through to an all-devices DB query that would
+  // dump every device's history to a stale-uuid subscriber. Discriminating: delete
+  // the guard in backfillRecentEvents and the stale case below leaks the crash.
+  it("backfills zero events for a specific deviceSessionUuid that no longer resolves (AC4)", async () => {
+    await withInMemorySingletonDatabase(async () => {
+      const db = getDatabase() as unknown as Kysely<Database>;
+      await runMigrations(db as unknown as Kysely<unknown>);
 
-        await db
-          .insertInto("failure_groups")
-          .values({
-            id: "group-x", type: "crash", signature: "sig-x", title: "Boom", message: "boom",
-            severity: "critical", first_occurrence: 1000, last_occurrence: 1000,
-            total_count: 1, unique_sessions: 1, stack_trace_json: null, tool_call_info_json: null,
-          })
-          .execute();
-        await db
-          .insertInto("failure_occurrences")
-          .values({
-            id: "occ-x", group_id: "group-x", timestamp: 1000, device_id: "emulator-5554",
-            device_model: "Pixel", os: "34", app_version: "1.0.0", session_id: "session-x",
-            screen_at_failure: "MainActivity", test_name: null, test_execution_id: null,
-            error_code: null, duration_ms: null, tool_args_json: null,
-          })
-          .execute();
+      await db
+        .insertInto("failure_groups")
+        .values({
+          id: "group-x",
+          type: "crash",
+          signature: "sig-x",
+          title: "Boom",
+          message: "boom",
+          severity: "critical",
+          first_occurrence: 1000,
+          last_occurrence: 1000,
+          total_count: 1,
+          unique_sessions: 1,
+          stack_trace_json: null,
+          tool_call_info_json: null,
+        })
+        .execute();
+      await db
+        .insertInto("failure_occurrences")
+        .values({
+          id: "occ-x",
+          group_id: "group-x",
+          timestamp: 1000,
+          device_id: "emulator-5554",
+          device_model: "Pixel",
+          os: "34",
+          app_version: "1.0.0",
+          session_id: "session-x",
+          screen_at_failure: "MainActivity",
+          test_name: null,
+          test_execution_id: null,
+          error_code: null,
+          duration_ms: null,
+          tool_args_json: null,
+        })
+        .execute();
 
-        const server = new TestableTelemetryPushSocketServer(new FakeTimer());
+      const server = new TestableTelemetryPushSocketServer(new FakeTimer());
 
-        // Stale/retired uuid: resolves to deviceId === null → the guard suppresses the query.
-        const staleSocket = new FakeSocket();
-        const staleFilter = { category: null, deviceSessionUuid: "uuid-retired", deviceId: null, sessionId: null };
-        (server as any).subscribers.set("stale", {
-          socket: staleSocket as unknown as Socket, subscriptionId: "stale",
-          lastActivity: 0, filter: staleFilter, backfilling: true, drainPending: false,
-        });
-        await (server as any).backfillRecentEvents("stale", staleFilter, staleSocket as unknown as Socket);
-        expect(staleSocket.getWrittenMessages()).toHaveLength(0);
-
-        // Contrast: an all-devices subscription (deviceSessionUuid === null) still backfills.
-        const allSocket = new FakeSocket();
-        const allFilter = { category: null, deviceSessionUuid: null, deviceId: null, sessionId: null };
-        (server as any).subscribers.set("all", {
-          socket: allSocket as unknown as Socket, subscriptionId: "all",
-          lastActivity: 0, filter: allFilter, backfilling: true, drainPending: false,
-        });
-        await (server as any).backfillRecentEvents("all", allFilter, allSocket as unknown as Socket);
-        expect(allSocket.getWrittenMessages().length).toBeGreaterThan(0);
+      // Stale/retired uuid: resolves to deviceId === null → the guard suppresses the query.
+      const staleSocket = new FakeSocket();
+      const staleFilter = {
+        category: null,
+        deviceSessionUuid: "uuid-retired",
+        deviceId: null,
+        sessionId: null,
+      };
+      (server as any).subscribers.set("stale", {
+        socket: staleSocket as unknown as Socket,
+        subscriptionId: "stale",
+        lastActivity: 0,
+        filter: staleFilter,
+        backfilling: true,
+        drainPending: false,
       });
+      await (server as any).backfillRecentEvents(
+        "stale",
+        staleFilter,
+        staleSocket as unknown as Socket,
+      );
+      expect(staleSocket.getWrittenMessages()).toHaveLength(0);
+
+      // Contrast: an all-devices subscription (deviceSessionUuid === null) still backfills.
+      const allSocket = new FakeSocket();
+      const allFilter = {
+        category: null,
+        deviceSessionUuid: null,
+        deviceId: null,
+        sessionId: null,
+      };
+      (server as any).subscribers.set("all", {
+        socket: allSocket as unknown as Socket,
+        subscriptionId: "all",
+        lastActivity: 0,
+        filter: allFilter,
+        backfilling: true,
+        drainPending: false,
+      });
+      await (server as any).backfillRecentEvents("all", allFilter, allSocket as unknown as Socket);
+      expect(allSocket.getWrittenMessages().length).toBeGreaterThan(0);
     });
   });
+});

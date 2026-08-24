@@ -1,4 +1,7 @@
-import { AndroidBuildToolsLocator, AaptToolLocation } from "../../src/utils/android-cmdline-tools/AndroidBuildToolsLocator";
+import {
+  AndroidBuildToolsLocator,
+  AaptToolLocation,
+} from "../../src/utils/android-cmdline-tools/AndroidBuildToolsLocator";
 
 /**
  * Fake build tools locator for testing

@@ -91,7 +91,7 @@ describe("#4387 iOS egress p50/p95 baseline aggregation", () => {
         record({ platform: "android", egressKbps: 900 }),
         record({ platform: "ios", egressKbps: 300 }),
       ],
-      { platform: "ios" }
+      { platform: "ios" },
     );
 
     expect(summary.platform).toBe("ios");

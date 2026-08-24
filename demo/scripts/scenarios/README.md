@@ -50,21 +50,27 @@ show_footer
 ## Available Helper Functions
 
 ### `show_header <prompt>`
+
 Shows the user prompt header at the top of the demo.
 
 ### `show_thinking`
+
 Shows the "Demoing..." thinking animation.
 
 ### `show_footer`
+
 Shows the final ready prompt at the bottom.
 
 ### `add_line <text>`
+
 Adds a line of text with a small delay for animation.
 
 ### `replace_prev_line <text>`
+
 Replaces the previous line (useful for showing completion status).
 
 ### `call_mcp_tool <tool_name> [args...]`
+
 Calls an AutoMobile MCP tool silently in the background.
 
 ## Color Variables

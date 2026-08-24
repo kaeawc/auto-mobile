@@ -9,7 +9,7 @@ describe("DatabaseInspector", () => {
   const device: BootedDevice = {
     deviceId: "emulator-5554",
     name: "Test Device",
-    platform: "android"
+    platform: "android",
   };
 
   const appId = "com.example.app";
@@ -29,7 +29,7 @@ describe("DatabaseInspector", () => {
 
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method listDatabases`,
-        response
+        response,
       );
 
       const databases = await inspector.listDatabases(appId);
@@ -45,7 +45,7 @@ describe("DatabaseInspector", () => {
 
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method listDatabases`,
-        response
+        response,
       );
 
       const databases = await inspector.listDatabases(appId);
@@ -58,7 +58,7 @@ describe("DatabaseInspector", () => {
 
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method listDatabases`,
-        response
+        response,
       );
 
       await expect(inspector.listDatabases(appId)).rejects.toThrow(ActionableError);
@@ -72,7 +72,7 @@ describe("DatabaseInspector", () => {
 
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method listTables --extra databasePath:s:'${databasePath}'`,
-        response
+        response,
       );
 
       const tables = await inspector.listTables(appId, databasePath);
@@ -85,7 +85,7 @@ describe("DatabaseInspector", () => {
 
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method listTables --extra databasePath:s:'/invalid/path'`,
-        response
+        response,
       );
 
       await expect(inspector.listTables(appId, "/invalid/path")).rejects.toThrow("NotFound");
@@ -98,7 +98,7 @@ describe("DatabaseInspector", () => {
 
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method getTableData --extra databasePath:s:'${databasePath}' --extra table:s:'users' --extra limit:s:'50' --extra offset:s:'0'`,
-        response
+        response,
       );
 
       const data = await inspector.getTableData(appId, databasePath, "users");
@@ -114,7 +114,7 @@ describe("DatabaseInspector", () => {
 
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method getTableData --extra databasePath:s:'${databasePath}' --extra table:s:'users' --extra limit:s:'10' --extra offset:s:'50'`,
-        response
+        response,
       );
 
       const data = await inspector.getTableData(appId, databasePath, "users", 10, 50);
@@ -129,7 +129,7 @@ describe("DatabaseInspector", () => {
 
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method getTableData --extra databasePath:s:'${databasePath}' --extra table:s:'users' --extra limit:s:'50' --extra offset:s:'0'`,
-        response
+        response,
       );
 
       const data = await inspector.getTableData(appId, databasePath, "users");
@@ -145,7 +145,7 @@ describe("DatabaseInspector", () => {
 
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method getTableStructure --extra databasePath:s:'${databasePath}' --extra table:s:'users'`,
-        response
+        response,
       );
 
       const structure = await inspector.getTableStructure(appId, databasePath, "users");
@@ -156,7 +156,7 @@ describe("DatabaseInspector", () => {
         type: "INTEGER",
         nullable: false,
         primaryKey: true,
-        defaultValue: null
+        defaultValue: null,
       });
       expect(structure.columns[1].name).toBe("name");
       expect(structure.columns[1].defaultValue).toBe("'Unknown'");
@@ -169,7 +169,7 @@ describe("DatabaseInspector", () => {
 
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method executeSQL --extra databasePath:s:'${databasePath}' --extra query:s:'SELECT * FROM users'`,
-        response
+        response,
       );
 
       const result = await inspector.executeSQL(appId, databasePath, "SELECT * FROM users");
@@ -184,13 +184,13 @@ describe("DatabaseInspector", () => {
 
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method executeSQL --extra databasePath:s:${shellQuote(databasePath)} --extra query:s:${shellQuote("INSERT INTO users (name) VALUES ('Alice')")}`,
-        response
+        response,
       );
 
       const result = await inspector.executeSQL(
         appId,
         databasePath,
-        "INSERT INTO users (name) VALUES ('Alice')"
+        "INSERT INTO users (name) VALUES ('Alice')",
       );
 
       expect(result.type).toBe("mutation");
@@ -202,12 +202,12 @@ describe("DatabaseInspector", () => {
 
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method executeSQL --extra databasePath:s:'${databasePath}' --extra query:s:'SELEC * FROM users'`,
-        response
+        response,
       );
 
-      await expect(
-        inspector.executeSQL(appId, databasePath, "SELEC * FROM users")
-      ).rejects.toThrow("SqlError");
+      await expect(inspector.executeSQL(appId, databasePath, "SELEC * FROM users")).rejects.toThrow(
+        "SqlError",
+      );
     });
   });
 
@@ -224,7 +224,7 @@ describe("DatabaseInspector", () => {
     const errorFor = async (response: string): Promise<string> => {
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method listDatabases`,
-        response
+        response,
       );
       try {
         await inspector.listDatabases(appId);
@@ -236,7 +236,7 @@ describe("DatabaseInspector", () => {
 
     test("preserves a multi-word errorType", async () => {
       const message = await errorFor(
-        `Bundle[{success=false, errorType=SQL Error, error=Database inspection is disabled}]`
+        `Bundle[{success=false, errorType=SQL Error, error=Database inspection is disabled}]`,
       );
 
       expect(message).toBe("Database error (SQL Error): Database inspection is disabled");
@@ -244,7 +244,7 @@ describe("DatabaseInspector", () => {
 
     test("preserves error text containing commas", async () => {
       const message = await errorFor(
-        `Bundle[{success=false, errorType=SQLiteException, error=no such column: foo, bar}]`
+        `Bundle[{success=false, errorType=SQLiteException, error=no such column: foo, bar}]`,
       );
 
       expect(message).toBe("Database error (SQLiteException): no such column: foo, bar");
@@ -252,7 +252,7 @@ describe("DatabaseInspector", () => {
 
     test("preserves error text containing a closing brace", async () => {
       const message = await errorFor(
-        `Bundle[{success=false, errorType=SQLiteException, error=near "}": syntax error (code 1)}]`
+        `Bundle[{success=false, errorType=SQLiteException, error=near "}": syntax error (code 1)}]`,
       );
 
       expect(message).toBe(`Database error (SQLiteException): near "}": syntax error (code 1)`);
@@ -260,7 +260,7 @@ describe("DatabaseInspector", () => {
 
     test("preserves error text when errorType follows error in the bundle", async () => {
       const message = await errorFor(
-        `Bundle[{success=false, error=no such table: users, orders, errorType=SQLiteException}]`
+        `Bundle[{success=false, error=no such table: users, orders, errorType=SQLiteException}]`,
       );
 
       expect(message).toBe("Database error (SQLiteException): no such table: users, orders");
@@ -268,7 +268,7 @@ describe("DatabaseInspector", () => {
 
     test("single-word errorType and comma-free error text are unchanged", async () => {
       const message = await errorFor(
-        `Bundle[{success=false, errorType=DISABLED, error=Database inspection is disabled}]`
+        `Bundle[{success=false, errorType=DISABLED, error=Database inspection is disabled}]`,
       );
 
       expect(message).toBe("Database error (DISABLED): Database inspection is disabled");
@@ -285,7 +285,7 @@ describe("DatabaseInspector", () => {
       // span. The envelope reader latches onto that substring and parses it, but it carries no
       // errorType/error field, so the real flat values must still win.
       const message = await errorFor(
-        `Bundle[{success=false, errorType=SQLiteException, error=near result={"a":1} bad}]`
+        `Bundle[{success=false, errorType=SQLiteException, error=near result={"a":1} bad}]`,
       );
 
       expect(message).toBe(`Database error (SQLiteException): near result={"a":1} bad`);
@@ -301,7 +301,7 @@ describe("DatabaseInspector", () => {
     const errorFor = async (response: string): Promise<string> => {
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method listDatabases`,
-        response
+        response,
       );
       try {
         await inspector.listDatabases(appId);
@@ -315,7 +315,7 @@ describe("DatabaseInspector", () => {
       // The value contains a literal `, error=` sequence; the flat parser cuts it short, the
       // envelope carries it verbatim because it is inside a JSON string.
       const message = await errorFor(
-        `Bundle[{success=false, result={"errorType":"SQLiteException","error":"near \\"x, error=y\\": syntax"}}]`
+        `Bundle[{success=false, result={"errorType":"SQLiteException","error":"near \\"x, error=y\\": syntax"}}]`,
       );
 
       expect(message).toBe(`Database error (SQLiteException): near "x, error=y": syntax`);
@@ -323,18 +323,18 @@ describe("DatabaseInspector", () => {
 
     test("round-trips values containing every Bundle delimiter", async () => {
       const message = await errorFor(
-        `Bundle[{success=false, result={"errorType":"SQL, errorType=Error}]","error":"no such column: foo, bar}] errorType=x"}}]`
+        `Bundle[{success=false, result={"errorType":"SQL, errorType=Error}]","error":"no such column: foo, bar}] errorType=x"}}]`,
       );
 
       expect(message).toBe(
-        `Database error (SQL, errorType=Error}]): no such column: foo, bar}] errorType=x`
+        `Database error (SQL, errorType=Error}]): no such column: foo, bar}] errorType=x`,
       );
     });
 
     test("reads the envelope regardless of Bundle entry order", async () => {
       // Bundle is backed by a hash-ordered ArrayMap, so `result` may print before `success`.
       const message = await errorFor(
-        `Bundle[{result={"errorType":"SQLiteException","error":"disk I/O error"}, success=false}]`
+        `Bundle[{result={"errorType":"SQLiteException","error":"disk I/O error"}, success=false}]`,
       );
 
       expect(message).toBe("Database error (SQLiteException): disk I/O error");
@@ -362,22 +362,22 @@ describe("DatabaseInspector", () => {
 
     test("includes raw stdout when content call returns an unstructured error", async () => {
       const message = await errorFor(
-        "java.lang.SecurityException: Permission Denial: opening provider that is not exported"
+        "java.lang.SecurityException: Permission Denial: opening provider that is not exported",
       );
 
       expect(message).toBe(
-        "Database error (UNKNOWN): java.lang.SecurityException: Permission Denial: opening provider that is not exported"
+        "Database error (UNKNOWN): java.lang.SecurityException: Permission Denial: opening provider that is not exported",
       );
     });
 
     test("includes raw stderr when content call writes an unstructured error there", async () => {
       const message = await errorFor(
         "",
-        "java.lang.SecurityException: Do not have permission in call getContentProviderExternal()"
+        "java.lang.SecurityException: Do not have permission in call getContentProviderExternal()",
       );
 
       expect(message).toBe(
-        "Database error (UNKNOWN): java.lang.SecurityException: Do not have permission in call getContentProviderExternal()"
+        "Database error (UNKNOWN): java.lang.SecurityException: Do not have permission in call getContentProviderExternal()",
       );
     });
 
@@ -395,7 +395,7 @@ describe("DatabaseInspector", () => {
 
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method listDatabases`,
-        response
+        response,
       );
 
       await expect(inspector.listDatabases(appId)).rejects.toThrow(ActionableError);
@@ -406,7 +406,7 @@ describe("DatabaseInspector", () => {
 
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method listDatabases`,
-        response
+        response,
       );
 
       await expect(inspector.listDatabases(appId)).rejects.toThrow("invalid JSON");
@@ -421,7 +421,7 @@ describe("DatabaseInspector", () => {
       // The path should have escaped quotes
       fakeAdb.setCommandResult(
         `shell content call --uri content://${appId}.automobile.database --method listTables --extra databasePath:s:${shellQuote(pathWithQuote)}`,
-        response
+        response,
       );
 
       const tables = await inspector.listTables(appId, pathWithQuote);

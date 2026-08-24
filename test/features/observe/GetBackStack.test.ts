@@ -5,17 +5,17 @@ import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { ExecResult, BootedDevice } from "../../../src/models";
 
-describe("GetBackStack", function() {
+describe("GetBackStack", function () {
   let fakeAdb: FakeAdbExecutor;
   let fakeAdbFactory: FakeAdbClientFactory;
   let getBackStack: GetBackStack;
   let mockDevice: BootedDevice;
 
-  beforeEach(function() {
+  beforeEach(function () {
     mockDevice = {
       name: "test",
       platform: "android",
-      deviceId: "test-device"
+      deviceId: "test-device",
     };
 
     // Create FakeAdbExecutor and configure it with pattern matching
@@ -28,7 +28,7 @@ describe("GetBackStack", function() {
     getBackStack = new GetBackStack(mockDevice, fakeAdbFactory);
   });
 
-  test("parses every activity with its task, package and index-derived task-root flag", async function() {
+  test("parses every activity with its task, package and index-derived task-root flag", async function () {
     const result = await getBackStack.execute();
 
     expect(result.source).toBe("adb");
@@ -40,46 +40,46 @@ describe("GetBackStack", function() {
         name: "com.android.launcher3.Launcher",
         taskId: 1,
         taskAffinity: "com.android.launcher3",
-        isTaskRoot: true
+        isTaskRoot: true,
       },
       {
         name: "dev.jasonpearson.automobile.playground.DetailActivity",
         taskId: 123,
         taskAffinity: "dev.jasonpearson.automobile.playground",
-        isTaskRoot: false
+        isTaskRoot: false,
       },
       {
         name: "dev.jasonpearson.automobile.playground.ListActivity",
         taskId: 123,
         taskAffinity: "dev.jasonpearson.automobile.playground",
-        isTaskRoot: false
+        isTaskRoot: false,
       },
       {
         name: "dev.jasonpearson.automobile.playground.MainActivity",
         taskId: 123,
         taskAffinity: "dev.jasonpearson.automobile.playground",
-        isTaskRoot: true
-      }
+        isTaskRoot: true,
+      },
     ]);
   });
 
-  test("parses each task's id, package and activity count", async function() {
+  test("parses each task's id, package and activity count", async function () {
     const result = await getBackStack.execute();
 
     expect(result.tasks).toHaveLength(2);
     expect(result.tasks[0]).toMatchObject({
       id: 1,
       packageName: "com.android.launcher3",
-      numActivities: 1
+      numActivities: 1,
     });
     expect(result.tasks[1]).toMatchObject({
       id: 123,
       packageName: "dev.jasonpearson.automobile.playground",
-      numActivities: 3
+      numActivities: 3,
     });
   });
 
-  test("computes depth as the poppable count of the current task", async function() {
+  test("computes depth as the poppable count of the current task", async function () {
     const result = await getBackStack.execute();
 
     // Current task 123 holds 3 activities, so 2 can still be popped.
@@ -87,16 +87,16 @@ describe("GetBackStack", function() {
     expect(result.depth).toBe(2);
   });
 
-  test("identifies the resumed activity as the current activity", async function() {
+  test("identifies the resumed activity as the current activity", async function () {
     const result = await getBackStack.execute();
 
     expect(result.currentActivity).toEqual({
       name: "dev.jasonpearson.automobile.playground.DetailActivity",
-      taskId: 123
+      taskId: 123,
     });
   });
 
-  test("should parse topResumedActivity with special characters", async function() {
+  test("should parse topResumedActivity with special characters", async function () {
     const stdout = `
 ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
   Task id #42
@@ -119,7 +119,7 @@ ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
     expect(result.currentActivity?.taskId).toBe(42);
   });
 
-  test("stamps capturedAt from the injected clock", async function() {
+  test("stamps capturedAt from the injected clock", async function () {
     const timer = new FakeTimer();
     timer.setCurrentTime(1_700_000_000_000);
     getBackStack = new GetBackStack(mockDevice, fakeAdbFactory, timer);
@@ -129,7 +129,7 @@ ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
     expect(result.capturedAt).toBe(1_700_000_000_000);
   });
 
-  test("should handle empty back stack", async function() {
+  test("should handle empty back stack", async function () {
     // Mock empty output
     const emptyFakeAdb = new FakeAdbExecutor();
     emptyFakeAdb.setCommandResponse("dumpsys activity activities", { stdout: "", stderr: "" });
@@ -142,7 +142,7 @@ ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
     expect(result.activities).toHaveLength(0);
   });
 
-  test("should handle errors gracefully", async function() {
+  test("should handle errors gracefully", async function () {
     // Mock error by setting default response and letting the error handling work
     const errorFakeAdb = new FakeAdbExecutor();
     // Don't set any response - the error will come from the parsing logic
@@ -196,6 +196,6 @@ Display #0 (activities from top to bottom):
     stderr: "",
     toString: () => stdout,
     trim: () => stdout.trim(),
-    includes: (str: string) => stdout.includes(str)
+    includes: (str: string) => stdout.includes(str),
   };
 }

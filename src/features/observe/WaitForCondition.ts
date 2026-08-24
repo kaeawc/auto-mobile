@@ -24,12 +24,12 @@ const DEFAULT_POLL_MS = 150;
 export class RealWaitForCondition implements WaitForCondition {
   constructor(
     private readonly observeScreen: ObserveScreen,
-    private readonly timer: Timer = defaultTimer
+    private readonly timer: Timer = defaultTimer,
   ) {}
 
   async execute(
     predicate: ConditionPredicate,
-    options: WaitForConditionOptions = {}
+    options: WaitForConditionOptions = {},
   ): Promise<WaitForConditionResult> {
     const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const pollMs = options.pollMs ?? DEFAULT_POLL_MS;
@@ -40,10 +40,10 @@ export class RealWaitForCondition implements WaitForCondition {
       this.observeScreen,
       this.timer,
       { timeoutMs, pollMs, signal: options.signal },
-      observation => {
+      (observation) => {
         lastEvaluation = predicate(observation);
         return lastEvaluation.matched;
-      }
+      },
     );
 
     if (outcome.stopped) {

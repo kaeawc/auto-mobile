@@ -1,7 +1,9 @@
 # Changelog
 
 ## [v0.0.62] - 2026-08-23
+
 ### Added
+
 - Android: support precise taps within text elements containing ClickableSpans ([#5500](https://github.com/kaeawc/auto-mobile/issues/5500)) (android, a11y)
 - perf(ios): pause always-on CtrlProxy device samplers when no client is subscribed ([#5477](https://github.com/kaeawc/auto-mobile/issues/5477)) (ios, performance)
 - perf(ios): stop String-copying every /sdk-events batch in SdkHierarchyCache pre-check ([#5476](https://github.com/kaeawc/auto-mobile/issues/5476)) (ios, performance)
@@ -33,7 +35,9 @@
 - Desktop diagnostics: honor AUTOMOBILE_DAEMON_SOCKET_PATH overrides in process detection ([#4848](https://github.com/kaeawc/auto-mobile/issues/4848)) (desktop)
 - Desktop: FakeObservationStream fidelity (reset clears state; ignore requests while disconnected) ([#4810](https://github.com/kaeawc/auto-mobile/issues/4810)) (desktop)
 - epic(desktop): realign the desktop app with the daemon's current socket surface ([#3933](https://github.com/kaeawc/auto-mobile/issues/3933)) (android, maintenance)
+
 ### Changed
+
 - Harden no-inline-error-normalize against binding-shadow, getter, and TS-wrapper edge cases ([#5505](https://github.com/kaeawc/auto-mobile/issues/5505))
 - chore(errors): consolidate inline error normalization onto describeUnknownError + add oxlint gate ([#5457](https://github.com/kaeawc/auto-mobile/issues/5457))
 - Dead Code Detection: Threshold Exceeded ([#5197](https://github.com/kaeawc/auto-mobile/issues/5197)) (automated, dead-code)
@@ -41,7 +45,9 @@
 - build(android): extract shared android-app-signing convention (split from #5030) ([#5072](https://github.com/kaeawc/auto-mobile/issues/5072)) (android)
 - lint: evaluate eslint-plugin-functional scoped to pure domains (#3957 follow-up) ([#3967](https://github.com/kaeawc/auto-mobile/issues/3967)) (devxp)
 - Consolidate ID generation onto IdGenerator/Random (duplicate generateHighlightId + scattered randomUUID) ([#3511](https://github.com/kaeawc/auto-mobile/issues/3511))
+
 ### Fixed
+
 - Android: recover or classify closed transport during launchApp and observe ([#5499](https://github.com/kaeawc/auto-mobile/issues/5499)) (android)
 - Android: preserve active-session recovery semantics after device loss ([#5498](https://github.com/kaeawc/auto-mobile/issues/5498)) (android)
 - Drain/suppress in-flight ADB screenshot fallback when AndroidCtrlProxyClient is closed ([#5493](https://github.com/kaeawc/auto-mobile/issues/5493)) (android)
@@ -51,9 +57,13 @@
 - videoRecording reports codec:"h264" for iOS simulator recordings that are actually HEVC ([#4965](https://github.com/kaeawc/auto-mobile/issues/4965)) (ios, video)
 - Android CtrlProxy: prevent silent timeout for unsupported stale-frame gesture actions ([#4577](https://github.com/kaeawc/auto-mobile/issues/4577)) (android)
 - Windows runtime: @jimp/wasm-webp can hard-crash the Bun daemon during navigation/plan features (decide PNG-only vs WebP-on-Windows) ([#2974](https://github.com/kaeawc/auto-mobile/issues/2974)) (performance, javascript)
+
 ### Security
+
 - feat(ios): add an explicit simulator Keychain reset tool ([#5187](https://github.com/kaeawc/auto-mobile/issues/5187)) (enhancement, ios, testing)
+
 ### Other
+
 - Add opt-in structured container logging ([#5554](https://github.com/kaeawc/auto-mobile/issues/5554))
 - Android startDevice hides discovery failures until the readiness deadline ([#5538](https://github.com/kaeawc/auto-mobile/issues/5538))
 - Unlabelled emulator correlation can bind an externally-launched emulator (set-difference is not proof of ownership) ([#5453](https://github.com/kaeawc/auto-mobile/issues/5453))
@@ -63,33 +73,49 @@
 - test(ios): verify devicectl 'info processes' JSON field names against real device (terminateApp) ([#3038](https://github.com/kaeawc/auto-mobile/issues/3038)) (ios)
 
 ## [v0.0.61] - 2026-08-22
+
 ### Added
+
 - feat(device-control): capture a fresh raw device screenshot with cached-resource fallback ([#5437](https://github.com/kaeawc/auto-mobile/issues/5437)) (android, ios, research)
 - feat(resources): add completeness and provisioning-catalog data to device resources ([#5436](https://github.com/kaeawc/auto-mobile/issues/5436)) (android, ios, research)
 - feat(device-control): provision an exact virtual device from a caller-supplied specification ([#5434](https://github.com/kaeawc/auto-mobile/issues/5434)) (android, ios, research)
+
 ### Fixed
+
 - Android: provide a bounded shutdown policy for an ADB server started by AutoMobile ([#5433](https://github.com/kaeawc/auto-mobile/issues/5433)) (android)
 - Android startDevice can time out when AVD-name lookup is unavailable despite a usable emulator ([#5424](https://github.com/kaeawc/auto-mobile/issues/5424)) (android)
+
 ### Other
+
 - Fall back to Android AVD system property during emulator discovery ([#5450](https://github.com/kaeawc/auto-mobile/issues/5450))
 - iOS multi-simulator daemon startup exceeds the default readiness deadline ([#5431](https://github.com/kaeawc/auto-mobile/issues/5431))
 - release: pin the published runtime dependency graph ([#5421](https://github.com/kaeawc/auto-mobile/issues/5421)) (release engineering)
 - Allow log directory override independent of data directory ([#5413](https://github.com/kaeawc/auto-mobile/issues/5413))
 
 ## [v0.0.60] - 2026-08-19
+
 ### Added
+
 - feat(daemon): stamp deviceSessionUuid on every stream envelope + filter key + session lifecycle events ([#5259](https://github.com/kaeawc/auto-mobile/issues/5259))
 - feat(playground/android): hand-drawn treatment for filled/nav DS components + demo wiring ([#5115](https://github.com/kaeawc/auto-mobile/issues/5115)) (android)
 - Desktop: Navigation stream updates need deviceId before wiring (broadcast cross-contaminates panes) ([#4837](https://github.com/kaeawc/auto-mobile/issues/4837)) (desktop)
+
 ### Changed
+
 - chore(playground/ios): route views through the theme (colours + Shantell Sans typography) ([#5098](https://github.com/kaeawc/auto-mobile/issues/5098)) (ios)
+
 ### Fixed
+
 - Bound MCP sessions can expire and silently rebind to another device ([#5411](https://github.com/kaeawc/auto-mobile/issues/5411))
+
 ### Other
+
 - ci(playground): run the Playground design-system tests in CI (Android + iOS) ([#5102](https://github.com/kaeawc/auto-mobile/issues/5102)) (ci, testing)
 
 ## [v0.0.59] - 2026-08-19
+
 ### Added
+
 - observe perfSnapshot: add gfxinfo frame-time percentiles, memory breakdown, and startup timing (zero extra device overhead) ([#5403](https://github.com/kaeawc/auto-mobile/issues/5403)) (android, performance)
 - Enable Compose Hot Reload for desktop app (:desktop-app:hotRun is documented but non-functional) ([#5273](https://github.com/kaeawc/auto-mobile/issues/5273)) (devxp, desktop)
 - feat(desktop): status-bar 'update ready' button in the lower-left corner ([#5225](https://github.com/kaeawc/auto-mobile/issues/5225)) (desktop)
@@ -100,7 +126,9 @@
 - nav (app,build) Phase 3: tiered TTL + global LRU size-cap retention ([#4986](https://github.com/kaeawc/auto-mobile/issues/4986)) (blocked, database)
 - nav (app,build) Phase 2: app-union graph read + 100/50 opacity rendering with hover provenance ([#4985](https://github.com/kaeawc/auto-mobile/issues/4985)) (blocked, desktop)
 - navigation: touch navigation_apps.updated_at atomically on all graph mutations (promoteSuggestion / recordBackStack / updateNodeScreenshot) ([#4931](https://github.com/kaeawc/auto-mobile/issues/4931)) (database)
+
 ### Fixed
+
 - XCTestRunner flakes at videoRecording step: #5362 30s readiness budget too small for cold CtrlProxy launch (warm-up runs after) ([#5376](https://github.com/kaeawc/auto-mobile/issues/5376))
 - iOS CtrlProxy runner starves /health: WS commands run inline on the accept/HTTP serial queue ([#5374](https://github.com/kaeawc/auto-mobile/issues/5374))
 - startDevice cold-boot fails with 'Device pool identity mismatch' — transportId added to identity check (#5340) vs transportId-less expectedIdentity ([#5369](https://github.com/kaeawc/auto-mobile/issues/5369))
@@ -133,7 +161,9 @@
 - fix(startDevice): bound progress callbacks and clean up started devices ([#5280](https://github.com/kaeawc/auto-mobile/issues/5280))
 - bug(android): retain diagnosis and recovery outcome when a running emulator disappears ([#5276](https://github.com/kaeawc/auto-mobile/issues/5276)) (android)
 - Publish an AutoMobile npm release containing structured already-stopped errors ([#5193](https://github.com/kaeawc/auto-mobile/issues/5193)) (release engineering, testing)
+
 ### Other
+
 - deviceBootService: surface phase-labeled ActionableError on external abort ([#5394](https://github.com/kaeawc/auto-mobile/issues/5394))
 - observe freshness: Android ageMs/warning corrupted by device↔host clock skew (isFresh protected, age math is not) ([#5377](https://github.com/kaeawc/auto-mobile/issues/5377))
 - Flaky macOS Android H.264 integration test can hang before test execution ([#5373](https://github.com/kaeawc/auto-mobile/issues/5373)) (android, flaky test, ci, testing)
@@ -157,40 +187,58 @@
 - CI: iOS SDK navigation graph integration reads SpringBoard after event ingestion ([#4579](https://github.com/kaeawc/auto-mobile/issues/4579)) (flaky test, ios, ci)
 
 ## [v0.0.58] - 2026-08-15
+
 ### Other
+
 - No changes.
 
 ## [v0.0.57] - 2026-08-14
+
 ### Other
+
 - No changes.
 
 ## [v0.0.56] - 2026-08-14
+
 ### Other
+
 - No changes.
 
 ## [v0.0.55] - 2026-08-13
+
 ### Other
+
 - No changes.
 
 ## [v0.0.54] - 2026-08-13
+
 ### Added
+
 - feat(desktop): UpdateController — detect newer GitHub release (no UI, no side effects) ([#5224](https://github.com/kaeawc/auto-mobile/issues/5224)) (desktop)
 - feat(desktop): expose the app's own version at runtime (auto-update prerequisite) ([#5223](https://github.com/kaeawc/auto-mobile/issues/5223)) (desktop)
+
 ### Fixed
+
 - startDevice should enforce automation runner readiness and report setup failures ([#5237](https://github.com/kaeawc/auto-mobile/issues/5237))
 - bug(desktop): make iOS automation permission setup guided and recoverable ([#5216](https://github.com/kaeawc/auto-mobile/issues/5216)) (ios, desktop)
 - bug(android): prevent SDK hosts and CtrlProxy from defining the same signature permission ([#5215](https://github.com/kaeawc/auto-mobile/issues/5215)) (android)
 
 ## [v0.0.53] - 2026-08-11
+
 ### Fixed
+
 - bug(android): preserve Android emulator launch diagnostics on early exit ([#5209](https://github.com/kaeawc/auto-mobile/issues/5209)) (android, ci)
 
 ## [v0.0.52] - 2026-08-10
+
 ### Other
+
 - fix(android): support unit-suffixed AVD RAM settings ([#5194](https://github.com/kaeawc/auto-mobile/issues/5194))
 
 ## [v0.0.51] - 2026-08-09
+
 ### Added
+
 - feat(dx): add a fail-fast validate-loop pre-push command (loop) ([#5149](https://github.com/kaeawc/auto-mobile/issues/5149))
 - perf(build): cache typecheck as a turbo task + fix diff-based check:host-shell-boundary caching ([#5124](https://github.com/kaeawc/auto-mobile/issues/5124))
 - perf(lint): parallel boundary-check runner + prefilters + close local/CI parity ([#5121](https://github.com/kaeawc/auto-mobile/issues/5121))
@@ -222,13 +270,17 @@
 - Desktop workspace: telemetry-event selection + detail in the Logs facet ([#4705](https://github.com/kaeawc/auto-mobile/issues/4705)) (desktop)
 - Desktop workspace: execute emulator-control intents against the real device (rotate/screenshot/snapshot/unlock) ([#4694](https://github.com/kaeawc/auto-mobile/issues/4694)) (desktop)
 - feat(ios): network — simulate network errors (http500/timeout/connectionRefused/dnsFailure/tlsFailure) ([#2499](https://github.com/kaeawc/auto-mobile/issues/2499)) (ios)
+
 ### Changed
+
 - chore(dx): self-heal node_modules in fresh worktrees before local validation ([#5051](https://github.com/kaeawc/auto-mobile/issues/5051))
 - chore(build): remove the no-op iOS-assets build step from build.ts ([#5039](https://github.com/kaeawc/auto-mobile/issues/5039))
 - chore: align package.json Bun pin to 1.3.9 to match CI ([#5026](https://github.com/kaeawc/auto-mobile/issues/5026))
 - CtrlProxy: exclude a11y screenshot rate-limits from the 3-strike 'unsupported' counter ([#4997](https://github.com/kaeawc/auto-mobile/issues/4997)) (android)
 - Re-cut the Android CtrlProxy APK + bump checksum so ctrlproxy_rate_limited ships (follow-up to #4927/#4995) ([#4996](https://github.com/kaeawc/auto-mobile/issues/4996)) (android)
+
 ### Fixed
+
 - Android database policy allows writable PRAGMAs after revocation ([#5184](https://github.com/kaeawc/auto-mobile/issues/5184))
 - Android database policy bypass for custom DatabaseDriver SQL ([#5183](https://github.com/kaeawc/auto-mobile/issues/5183))
 - Android database policy allows mutating SQL with RETURNING ([#5182](https://github.com/kaeawc/auto-mobile/issues/5182))
@@ -239,9 +291,13 @@
 - Investigate and prevent Bun 1.3.9 Windows segmentation faults in CI ([#5079](https://github.com/kaeawc/auto-mobile/issues/5079)) (ci, dependencies, javascript)
 - Prepare Release 0.0.50 failed: bump-versions docs sync tripped the versioned-tree allow-list ([#5008](https://github.com/kaeawc/auto-mobile/issues/5008)) (ci)
 - Android CtrlProxy: a11y screenshots rate-limit into ADB fallover during animations (misclassified as ctrlproxy_failed) ([#4927](https://github.com/kaeawc/auto-mobile/issues/4927)) (android, performance)
+
 ### Security
+
 - Expand and harden iOS storage inspection ([#5061](https://github.com/kaeawc/auto-mobile/issues/5061)) (enhancement, ios, database)
+
 ### Other
+
 - Android database policy permits parenthesized writable PRAGMAs ([#5186](https://github.com/kaeawc/auto-mobile/issues/5186))
 - Android database policy rejects read-only SQL with leading comments ([#5185](https://github.com/kaeawc/auto-mobile/issues/5185))
 - test(shared): property-test MetricsUtils median/mode/weighted-average invariants ([#5178](https://github.com/kaeawc/auto-mobile/issues/5178)) (testing)
@@ -268,12 +324,16 @@
 - perf(ios): pin local simulator builds to arm64 + disable index store to ~halve local iOS build time ([#5024](https://github.com/kaeawc/auto-mobile/issues/5024)) (ios, performance)
 
 ## [v0.0.50] - 2026-08-03
+
 ### Other
+
 - Keep release-versioned documentation synchronized during prepare-release ([#5006](https://github.com/kaeawc/auto-mobile/issues/5006))
 - bug(sqlite): recover partially applied video-recordings owner-session migration ([#5004](https://github.com/kaeawc/auto-mobile/issues/5004))
 
 ## [v0.0.49] - 2026-08-03
+
 ### Added
+
 - macOS DMG: staple the notarization ticket to AutoMobile.app, not only the DMG (offline first-launch) ([#4955](https://github.com/kaeawc/auto-mobile/issues/4955)) (release engineering)
 - iOS WebRTC: in-helper encode for the physical-device capture path (AVFoundation 420v) ([#4790](https://github.com/kaeawc/auto-mobile/issues/4790)) (ios, performance, webrtc)
 - iOS WebRTC: consume in-helper encoded H.264 in IosH264Source (no ffmpeg on the encoded path) ([#4789](https://github.com/kaeawc/auto-mobile/issues/4789)) (ios, performance, webrtc)
@@ -284,9 +344,13 @@
 - perf(android-video): move H.264 encoder off Constrained Baseline to Main/High profile ([#4756](https://github.com/kaeawc/auto-mobile/issues/4756)) (android, performance, video, webrtc)
 - eventOnly fresh-focus: harden getDeviceTimestampMs degraded modes (lenient %3N parse / second truncation / host-timer fallback) ([#4720](https://github.com/kaeawc/auto-mobile/issues/4720))
 - Client Screen Control: input forwarding (parent) ([#1099](https://github.com/kaeawc/auto-mobile/issues/1099)) (android, ios)
+
 ### Changed
+
 - Upgrade execution-boundary lint guards from regex to AST-based detection ([#4830](https://github.com/kaeawc/auto-mobile/issues/4830))
+
 ### Fixed
+
 - Android: resolve custom AVD registry paths before RAM validation ([#4993](https://github.com/kaeawc/auto-mobile/issues/4993)) (android)
 - Android: keep transient offline emulator states within readiness deadline ([#4992](https://github.com/kaeawc/auto-mobile/issues/4992)) (android)
 - XCTestRunner Simulator Tests red on every PR since #4934: daemon reads new secure derived-data path while CI builds CtrlProxy iOS into /tmp/automobile-ctrl-proxy ([#4966](https://github.com/kaeawc/auto-mobile/issues/4966)) (ios, ci)
@@ -295,13 +359,17 @@
 - main red: WebRTC Publisher Integration (MediaMTX) broken by #4877 (H.264 encoder → Main profile) ([#4882](https://github.com/kaeawc/auto-mobile/issues/4882)) (webrtc)
 - release: verify published GitHub Release assets against the checksum registry (digest-based audit) ([#4685](https://github.com/kaeawc/auto-mobile/issues/4685)) (ci, release engineering)
 - 0.0.46 published with assets that mismatch the pinned checksums: client hard-fails runner provisioning ([#4672](https://github.com/kaeawc/auto-mobile/issues/4672)) (ci, release engineering)
+
 ### Security
+
 - [security] Low-severity capture hardening: audio over-read, INFO path logging, resource-path confinement, overflow arithmetic ([#4765](https://github.com/kaeawc/auto-mobile/issues/4765)) (ios, video)
 - [security] Verify captured window belongs to the iOS Simulator at capture time (windowID reuse/TOCTOU) ([#4763](https://github.com/kaeawc/auto-mobile/issues/4763)) (bug, ios)
 - [security] Video recording retention: add TTL, cap in-progress size, document secure-delete ([#4762](https://github.com/kaeawc/auto-mobile/issues/4762)) (enhancement, video)
 - [security] Close iOS helper download integrity bypasses (cached-fallback verify, http:// base URL, device-runner hash) ([#4761](https://github.com/kaeawc/auto-mobile/issues/4761)) (bug, ios, release engineering)
 - [security] Add codesign/notarization gate before launching the downloaded iOS helper ([#4760](https://github.com/kaeawc/auto-mobile/issues/4760)) (enhancement, ios, release engineering)
+
 ### Other
+
 - Test: inject AVD config fakes into mocked emulator launch tests ([#4994](https://github.com/kaeawc/auto-mobile/issues/4994)) (android, testing)
 - Make managed-device sessions and recovery explicit ([#4979](https://github.com/kaeawc/auto-mobile/issues/4979))
 - Emulator boot failures collapse into a generic 120s timeout — add detectors for mprotect/HVF, stuck-offline, tiny-RAM AVDs, and outdated cmdline-tools ([#4974](https://github.com/kaeawc/auto-mobile/issues/4974))
@@ -315,7 +383,9 @@
 - iOS: honor AUTOMOBILE_VERSION when the XCTestRunner autostarts the daemon (Swift startDaemon) ([#2813](https://github.com/kaeawc/auto-mobile/issues/2813)) (ios, release engineering)
 
 ## [v0.0.48] - 2026-08-01
+
 ### Added
+
 - Chart daily release download counts (GitHub assets + npm) on a docs dashboard ([#4890](https://github.com/kaeawc/auto-mobile/issues/4890)) (devxp)
 - chore(release): add a Maven Central publication manifest and usage budget preflight ([#4853](https://github.com/kaeawc/auto-mobile/issues/4853)) (release engineering)
 - chore(ios): screen-capture streaming hardening follow-ups ([#4772](https://github.com/kaeawc/auto-mobile/issues/4772)) (ios, webrtc)
@@ -324,14 +394,20 @@
 - perf(android-video): frame rate is preset-locked to 60fps and not plumbed end-to-end ([#4739](https://github.com/kaeawc/auto-mobile/issues/4739)) (android, performance, video, webrtc)
 - iOS capture: replace fixed 500ms Thread.sleep in helper device startup with bounded polling ([#4737](https://github.com/kaeawc/auto-mobile/issues/4737)) (ios, performance)
 - iOS WebRTC: stop copying a full frame per frame for lastHelperFrame (quick win) ([#4735](https://github.com/kaeawc/auto-mobile/issues/4735)) (ios, performance, webrtc)
+
 ### Changed
+
 - Centralize tar extraction behind a safe archive-extraction boundary ([#4065](https://github.com/kaeawc/auto-mobile/issues/4065)) (devxp, testing)
+
 ### Fixed
+
 - Enforce video-server reconnect-window expiry independently of the encode loop (blocked-write starvation) ([#4784](https://github.com/kaeawc/auto-mobile/issues/4784)) (android, webrtc)
 - Reconcile hygiene for video-server leases: wall-clock fallback, unparseable/.tmp sweep, serial-vs-reboot ordering ([#4783](https://github.com/kaeawc/auto-mobile/issues/4783)) (android, webrtc)
 - fix(ios): deterministic teardown and bounded recovery on mid-stream capture failure ([#4768](https://github.com/kaeawc/auto-mobile/issues/4768)) (ios, webrtc)
 - Sweep orphaned adb forward entries left behind by video-server self-expiry ([#4753](https://github.com/kaeawc/auto-mobile/issues/4753)) (android, webrtc)
+
 ### Security
+
 - [security] Move iOS helper extraction/launch off world-writable /tmp and re-verify hash before launch (TOCTOU) ([#4759](https://github.com/kaeawc/auto-mobile/issues/4759)) (bug, ios, release engineering)
 - [security] Session-scope the recording archive and recording/test-recording sockets ([#4752](https://github.com/kaeawc/auto-mobile/issues/4752)) (bug, video)
 - [security] Authenticate and session-scope the video-stream and WebRTC-stream sockets ([#4751](https://github.com/kaeawc/auto-mobile/issues/4751)) (bug, ios, webrtc)
@@ -342,7 +418,9 @@
 - [security] Authenticate video-server client before evicting the current one (pre-auth hijack/DoS) ([#4730](https://github.com/kaeawc/auto-mobile/issues/4730)) (bug, android, video)
 - [security] Decouple session token from socket name and require a token handshake ([#4729](https://github.com/kaeawc/auto-mobile/issues/4729)) (enhancement, android, video)
 - [security] Video-server LocalSocket is unauthenticated — any local app can read the screen stream ([#4728](https://github.com/kaeawc/auto-mobile/issues/4728)) (bug, android, video)
+
 ### Other
+
 - desktop: wire branded app icon into installers + Dock/notifications ([#4920](https://github.com/kaeawc/auto-mobile/issues/4920))
 - Automatic recovery when a booted Android emulator dies mid-session ([#4914](https://github.com/kaeawc/auto-mobile/issues/4914))
 - Desktop Navigation (Phase C): offline browse with no active device ([#4911](https://github.com/kaeawc/auto-mobile/issues/4911))
@@ -356,11 +434,15 @@
 - ci: lint bash embedded in .claude/commands and skills markdown ([#4118](https://github.com/kaeawc/auto-mobile/issues/4118)) (ci, devxp, testing)
 
 ## [v0.0.47] - 2026-07-29
+
 ### Fixed
+
 - release: screen-capture-helper asset name/format 404s for the client ([#4688](https://github.com/kaeawc/auto-mobile/issues/4688)) (release engineering)
 - release: mint-side checksum steps pipe sha256sum without pipefail (fail open) ([#4684](https://github.com/kaeawc/auto-mobile/issues/4684)) (ci, release engineering)
 - release: checksum bake never refreshes apkSha256/ipaSha256 for an already-registered version ([#4683](https://github.com/kaeawc/auto-mobile/issues/4683)) (release engineering)
+
 ### Other
+
 - Desktop workspace: emulator controls on each device pane (rotate · screenshot · snapshot + contextual Unlock) ([#4690](https://github.com/kaeawc/auto-mobile/issues/4690))
 - Desktop workspace: full-screen device picker with filter rail (state/platform/os/form-factor/architecture) + fuzzy search + multi-select observe ([#4676](https://github.com/kaeawc/auto-mobile/issues/4676))
 - feat(mcp): render observe output as an MCP App (inline screenshot + view hierarchy) ([#4669](https://github.com/kaeawc/auto-mobile/issues/4669))
@@ -368,16 +450,24 @@
 - Desktop: replace ThreePaneShell root with WorkspaceShell scaffolding (device-column model + empty state) ([#4663](https://github.com/kaeawc/auto-mobile/issues/4663))
 
 ## [v0.0.46] - 2026-07-24
+
 ### Added
+
 - feat(observe): wire settleObserve + waitForCondition into MCP tools + waitFor DSL ([#4398](https://github.com/kaeawc/auto-mobile/issues/4398))
 - feat(observe): Wait-For-Condition + Settle-Loop Observe primitives ([#4389](https://github.com/kaeawc/auto-mobile/issues/4389)) (performance)
 - feat(observe): Interactable Skeleton Projection — actionable-only observe output ([#4388](https://github.com/kaeawc/auto-mobile/issues/4388)) (performance)
 - feat(observe): add deferred waitFor settled, absence, and openLink integration ([#3490](https://github.com/kaeawc/auto-mobile/issues/3490))
+
 ### Changed
+
 - Remove dead utils/interfaces barrel + @deprecated re-export shims ([#3504](https://github.com/kaeawc/auto-mobile/issues/3504)) (dead-code)
+
 ### Fixed
+
 - fix(database): DatabaseInspectorProvider failure replies should carry a structured envelope, not raw Bundle.toString values ([#4216](https://github.com/kaeawc/auto-mobile/issues/4216))
+
 ### Other
+
 - iOS WebRTC device-capture lane flakes on macos26 (headless Chrome): add diagnostics + launch retry ([#4409](https://github.com/kaeawc/auto-mobile/issues/4409))
 - Skip iOS CtrlProxy prefetch when Xcode prerequisites (xcrun/xcodebuild) are unavailable ([#4407](https://github.com/kaeawc/auto-mobile/issues/4407))
 - Skip Android CtrlProxy APK prefetch when Android prerequisites are unavailable ([#4404](https://github.com/kaeawc/auto-mobile/issues/4404))
@@ -399,7 +489,9 @@
 - fix(observe): GetBackStack infers isTaskRoot from the Hist index instead of dumpsys rootOfTask ([#4340](https://github.com/kaeawc/auto-mobile/issues/4340))
 
 ## [v0.0.45] - 2026-07-24
+
 ### Added
+
 - ci(webrtc): exercise the MediaMTX publisher integration test on webrtc PRs and always on merge ([#4328](https://github.com/kaeawc/auto-mobile/issues/4328)) (video)
 - spike(webrtc): evaluate collapsing custom H264 RTP packetization / PLI onto werift built-ins (feasibility unproven) ([#4299](https://github.com/kaeawc/auto-mobile/issues/4299)) (video)
 - refactor(webrtc): retire the hand-rolled coordination server in favor of MediaMTX ([#4291](https://github.com/kaeawc/auto-mobile/issues/4291)) (video)
@@ -432,7 +524,9 @@
 - feature-flags.md: --ui-perf-mode is on-by-default, not an enable flag ([#3583](https://github.com/kaeawc/auto-mobile/issues/3583)) (documentation, doc-audit)
 - iOS multiFingerSwipe: mirror the #2910 private-symbol availability split (and public fallback where feasible) ([#2952](https://github.com/kaeawc/auto-mobile/issues/2952)) (ios)
 - Screen Streaming: Audio capture and playback ([#1097](https://github.com/kaeawc/auto-mobile/issues/1097)) (android, ios)
+
 ### Changed
+
 - ci: 30 of 40 pull_request jobs have no timeout-minutes, so any hang costs the 6-hour default ([#4155](https://github.com/kaeawc/auto-mobile/issues/4155)) (ci, devxp)
 - flaky(test): eight more test files assert on a monkey-patched shared logger singleton ([#4149](https://github.com/kaeawc/auto-mobile/issues/4149)) (flaky test, testing)
 - ci(ios): collapse the now-adjacent duplicate simulator shutdown steps ([#4116](https://github.com/kaeawc/auto-mobile/issues/4116)) (ios, ci)
@@ -483,7 +577,9 @@
 - perf: several selection helpers full-sort an array only to take the single min/max element ([#3432](https://github.com/kaeawc/auto-mobile/issues/3432)) (performance)
 - [tracking] Autonomous issue burn-down campaign — lanes, waves, status ([#3235](https://github.com/kaeawc/auto-mobile/issues/3235))
 - chore(db): verify dbWriteBarrier cold-start end-to-end when an in-process DB reopen path is introduced (#2912 follow-up) ([#2960](https://github.com/kaeawc/auto-mobile/issues/2960)) (database)
+
 ### Fixed
+
 - chore(ci): ratchet down the stale typecheck and shell-sete baseline entries ([#4248](https://github.com/kaeawc/auto-mobile/issues/4248))
 - ci(android): boot-emulator.sh runs outside the emulator-runner action, so listAvds cannot find the SDK ([#4237](https://github.com/kaeawc/auto-mobile/issues/4237))
 - ci: main is red on the typecheck gate (telemetryPushSocketServer TS2339), blocking every PR ([#4209](https://github.com/kaeawc/auto-mobile/issues/4209))
@@ -589,7 +685,9 @@
 - swipeOn system-inset math over-subtracts on right/bottom edges (under-scroll, inverted bounds) ([#3587](https://github.com/kaeawc/auto-mobile/issues/3587))
 - Idempotent snapshot/recording upsert overwrites created_at on conflict ([#3498](https://github.com/kaeawc/auto-mobile/issues/3498)) (database)
 - Daemon has no unhandledRejection/uncaughtException backstop — an escaped throw in an un-awaited callback (e.g. emulator child-process handlers) crashes the whole daemon ([#3408](https://github.com/kaeawc/auto-mobile/issues/3408))
+
 ### Other
+
 - perf(webrtc): optimize iOS WebRTC capture scaling and frame rate ([#4344](https://github.com/kaeawc/auto-mobile/issues/4344))
 - test(webrtc): measure device capture-to-browser stage latency ([#4343](https://github.com/kaeawc/auto-mobile/issues/4343))
 - Follow-ups from #4325 post-merge review: sdkmanager boundary guard gaps and cleanups ([#4338](https://github.com/kaeawc/auto-mobile/issues/4338))
@@ -724,7 +822,9 @@
 - [tracking] DB layer concurrency, migration & performance hardening ([#2803](https://github.com/kaeawc/auto-mobile/issues/2803)) (database)
 
 ## [v0.0.44] - 2026-07-11
+
 ### Other
+
 - junit-runner >= 0.0.36 forces kotlin-stdlib 2.4.0 on consumers, locking out projects on older Kotlin ([#3558](https://github.com/kaeawc/auto-mobile/issues/3558))
 - Daemon remains healthy after observation-stream socket disappears ([#3556](https://github.com/kaeawc/auto-mobile/issues/3556))
 - DevicePool should validate iOS simulator liveness before assigning idle pooled UDIDs ([#3553](https://github.com/kaeawc/auto-mobile/issues/3553))
@@ -733,12 +833,16 @@
 - CI: bump gradle-task-run actions off deprecated Node.js 20 ([#3547](https://github.com/kaeawc/auto-mobile/issues/3547)) (ci)
 
 ## [v0.0.43] - 2026-07-10
+
 ### Other
+
 - Invalid observe outputSchema breaks strict MCP tools/list clients ([#3542](https://github.com/kaeawc/auto-mobile/issues/3542))
 - observe returns malformed/truncated JSON on occlusion-heavy screens (regression in current main) ([#3539](https://github.com/kaeawc/auto-mobile/issues/3539))
 
 ## [v0.0.42] - 2026-07-10
+
 ### Added
+
 - docs/observe: contentDescription waitFor predicate silently ignores textMatch ([#3514](https://github.com/kaeawc/auto-mobile/issues/3514)) (documentation)
 - perf: getToolDefinitions() re-runs Zod->JSON-Schema conversion for every tool on every tools/list ([#3426](https://github.com/kaeawc/auto-mobile/issues/3426)) (performance)
 - perf: ObserveElementsBuilder makes 4 full tree traversals per observe, 2 identical ([#3419](https://github.com/kaeawc/auto-mobile/issues/3419)) (performance)
@@ -818,7 +922,9 @@
 - feat(ios): terminateApp — physical-device termination via devicectl ([#2488](https://github.com/kaeawc/auto-mobile/issues/2488)) (ios)
 - feat(ios): launchApp — physical-device launch/terminate via devicectl ([#2487](https://github.com/kaeawc/auto-mobile/issues/2487)) (ios)
 - feat(ios): pinchOn — coordinate-based pinch/zoom via XCUITest CtrlProxy runner ([#2482](https://github.com/kaeawc/auto-mobile/issues/2482)) (ios)
+
 ### Changed
+
 - chore(observe): remove dead camelCase element-attribute fallbacks in waitFor matcher ([#3513](https://github.com/kaeawc/auto-mobile/issues/3513)) (dead-code)
 - Consolidate near-duplicate ThresholdManager and MemoryThresholdManager into a generic threshold manager ([#3448](https://github.com/kaeawc/auto-mobile/issues/3448)) (performance)
 - Consolidate identical deviceSnapshot/videoRecording config socket servers into a generic ConfigSocketServer<T> ([#3447](https://github.com/kaeawc/auto-mobile/issues/3447))
@@ -864,7 +970,9 @@
 - refactor(observe): standardize AdbClientFactory injection, remove factory-vs-executor sniff across 11 observe classes ([#2754](https://github.com/kaeawc/auto-mobile/issues/2754)) (android)
 - refactor(models): introduce BaseActionResult to collapse ~65 duplicated action Result types ([#2753](https://github.com/kaeawc/auto-mobile/issues/2753))
 - refactor(android): finish WebSocketServer typed-handler migration in control-proxy (retire LegacyWebSocketRequest) ([#2752](https://github.com/kaeawc/auto-mobile/issues/2752)) (android, dead-code)
+
 ### Fixed
+
 - observe: occludedByViewId never populates — occluder's stable view-id is dropped in the Android runner occlusion pass ([#3536](https://github.com/kaeawc/auto-mobile/issues/3536)) (android)
 - AppLifecycleMonitor.isPackageRunning swallows ADB errors → emits phantom "terminate" lifecycle events ([#3515](https://github.com/kaeawc/auto-mobile/issues/3515))
 - fix(observe): fail fast on iOS activityName-only waitFor instead of silent timeout ([#3512](https://github.com/kaeawc/auto-mobile/issues/3512)) (ios)
@@ -901,7 +1009,9 @@
 - fix(daemon): make startup DB/migration failure fatal so the daemon doesn't run query-dead while reporting healthy ([#2784](https://github.com/kaeawc/auto-mobile/issues/2784)) (database)
 - fix(talkback): FocusNavigationExecutor.navigateToElement throws ReferenceError on zero-swipe path (accessibilityService out of scope) ([#2765](https://github.com/kaeawc/auto-mobile/issues/2765)) (android, a11y)
 - fix(ios): setDeviceState binary Do Not Disturb does not verify on iOS 18.6 simulator (notifyutil read-back unchanged) ([#2545](https://github.com/kaeawc/auto-mobile/issues/2545)) (ios)
+
 ### Other
+
 - chore: retire historical catch logging lint allowlist ([#3532](https://github.com/kaeawc/auto-mobile/issues/3532))
 - tapOn: no way to target the Nth of several matching elements (repeated controls with no unique text) ([#3524](https://github.com/kaeawc/auto-mobile/issues/3524))
 - tapOn --sibling can't reach a row's action control when the row's label is nested ([#3522](https://github.com/kaeawc/auto-mobile/issues/3522))
@@ -1089,7 +1199,9 @@
 - No loading-awareness when refreshing element position before tap ([#1949](https://github.com/kaeawc/auto-mobile/issues/1949))
 
 ## [v0.0.41] - 2026-07-07
+
 ### Added
+
 - Implement daemon text and key input endpoints ([#3343](https://github.com/kaeawc/auto-mobile/issues/3343)) (android, ios)
 - Implement daemon input/pressButton endpoint ([#3342](https://github.com/kaeawc/auto-mobile/issues/3342)) (android, ios)
 - Implement daemon input/swipe endpoint ([#3341](https://github.com/kaeawc/auto-mobile/issues/3341)) (android, ios)
@@ -1160,7 +1272,9 @@
 - feat(ios): terminateApp — physical-device termination via devicectl ([#2488](https://github.com/kaeawc/auto-mobile/issues/2488)) (ios)
 - feat(ios): launchApp — physical-device launch/terminate via devicectl ([#2487](https://github.com/kaeawc/auto-mobile/issues/2487)) (ios)
 - feat(ios): pinchOn — coordinate-based pinch/zoom via XCUITest CtrlProxy runner ([#2482](https://github.com/kaeawc/auto-mobile/issues/2482)) (ios)
+
 ### Changed
+
 - Dead Code Detection: Threshold Exceeded ([#3257](https://github.com/kaeawc/auto-mobile/issues/3257)) (automated, dead-code)
 - refactor(ios): extract IOSCtrlProxyManager port health and host-control collaborators ([#3218](https://github.com/kaeawc/auto-mobile/issues/3218)) (ios)
 - Follow-up to #2885: SessionManager barrier comment, in-process reopen reset, and trackExisting direction re-eval ([#3154](https://github.com/kaeawc/auto-mobile/issues/3154)) (database)
@@ -1202,7 +1316,9 @@
 - refactor(observe): standardize AdbClientFactory injection, remove factory-vs-executor sniff across 11 observe classes ([#2754](https://github.com/kaeawc/auto-mobile/issues/2754)) (android)
 - refactor(models): introduce BaseActionResult to collapse ~65 duplicated action Result types ([#2753](https://github.com/kaeawc/auto-mobile/issues/2753))
 - refactor(android): finish WebSocketServer typed-handler migration in control-proxy (retire LegacyWebSocketRequest) ([#2752](https://github.com/kaeawc/auto-mobile/issues/2752)) (android, dead-code)
+
 ### Fixed
+
 - Daemon shutdown mid-startup-migration doesn't await in-flight migrations before closeDatabase() ([#3044](https://github.com/kaeawc/auto-mobile/issues/3044))
 - JimpCliBackend wiring + drop @jimp/wasm-webp + Windows smoke (closes #2974) ([#3012](https://github.com/kaeawc/auto-mobile/issues/3012)) (performance, javascript)
 - Windows CI: databaseLazyPath + dbWriteBarrierResetOnClose file-DB tests still flake (EBUSY/livelock) despite #2916/#2923 ([#2992](https://github.com/kaeawc/auto-mobile/issues/2992))
@@ -1229,7 +1345,9 @@
 - fix(daemon): make startup DB/migration failure fatal so the daemon doesn't run query-dead while reporting healthy ([#2784](https://github.com/kaeawc/auto-mobile/issues/2784)) (database)
 - fix(talkback): FocusNavigationExecutor.navigateToElement throws ReferenceError on zero-swipe path (accessibilityService out of scope) ([#2765](https://github.com/kaeawc/auto-mobile/issues/2765)) (android, a11y)
 - fix(ios): setDeviceState binary Do Not Disturb does not verify on iOS 18.6 simulator (notifyutil read-back unchanged) ([#2545](https://github.com/kaeawc/auto-mobile/issues/2545)) (ios)
+
 ### Other
+
 - Support subscriber-controlled iOS hierarchy polling cadence ([#3381](https://github.com/kaeawc/auto-mobile/issues/3381))
 - startDevice reports a device as booted before the OS has finished booting ([#3334](https://github.com/kaeawc/auto-mobile/issues/3334))
 - Add configurable live observation cadence for stream subscribers ([#3333](https://github.com/kaeawc/auto-mobile/issues/3333))
@@ -1381,14 +1499,20 @@
 - No loading-awareness when refreshing element position before tap ([#1949](https://github.com/kaeawc/auto-mobile/issues/1949))
 
 ## [v0.0.40] - 2026-06-30
+
 ### Added
+
 - Cross-platform tool to read/write app preferences (adb prop / SharedPreferences / iOS UserDefaults) ([#2714](https://github.com/kaeawc/auto-mobile/issues/2714))
 - install.sh should detect and help install the required Android SDK platform (compileSdk) ([#2680](https://github.com/kaeawc/auto-mobile/issues/2680))
+
 ### Fixed
+
 - doctor reports all-green while iOS observe is broken (no client↔runner round-trip check) ([#2693](https://github.com/kaeawc/auto-mobile/issues/2693))
 - iOS CtrlProxy forced-restart recovery should use PortManager to clear processes bound to the target port ([#2692](https://github.com/kaeawc/auto-mobile/issues/2692))
 - iOS CtrlProxy port management collides with adb; client and runner ports diverge ([#2691](https://github.com/kaeawc/auto-mobile/issues/2691))
+
 ### Other
+
 - Stamp git SHA into pre-release daemon version so the version gate distinguishes dev builds ([#2738](https://github.com/kaeawc/auto-mobile/issues/2738))
 - Verify build-mismatch daemon restart doesn't worsen the #2599 session-wedge for sibling MCP sessions ([#2737](https://github.com/kaeawc/auto-mobile/issues/2737))
 - doctor: surface daemon build identity (entryScript / buildId) to spot wrong-build skew ([#2736](https://github.com/kaeawc/auto-mobile/issues/2736))
@@ -1407,11 +1531,15 @@
 - doctor: add iOS CtrlProxy runner check so iOS gives the same certain feedback as Android ([#2678](https://github.com/kaeawc/auto-mobile/issues/2678))
 
 ## [Unreleased]
+
 ### Fixed
+
 - iOS `highlight`: remove the non-functional runner-overlay fallback and report honestly that highlighting requires the in-app AutoMobile SDK ([#2681](https://github.com/kaeawc/auto-mobile/issues/2681)) (ios)
 
 ## [v0.0.39] - 2026-06-29
+
 ### Added
+
 - Implement iOS Simulator app-container file management ([#2571](https://github.com/kaeawc/auto-mobile/issues/2571))
 - Implement Android app-container file management ([#2570](https://github.com/kaeawc/auto-mobile/issues/2570))
 - Add internal app file management service abstraction ([#2569](https://github.com/kaeawc/auto-mobile/issues/2569))
@@ -1423,7 +1551,9 @@
 - feat(ios): pressButton — volume_up/volume_down/power hardware buttons ([#2485](https://github.com/kaeawc/auto-mobile/issues/2485)) (ios)
 - feat(ios): shake — simulate device shake gesture via XCUIDevice.shake() ([#2484](https://github.com/kaeawc/auto-mobile/issues/2484)) (ios)
 - feat(ios): executeGesture — multi-finger / VoiceOver multi-finger swipe via XCPointerEventPath ([#2483](https://github.com/kaeawc/auto-mobile/issues/2483)) (ios, a11y)
+
 ### Changed
+
 - Consolidate duplicated device-vs-session resolution in SocketServer.getRequestArgumentScopeKey ([#2664](https://github.com/kaeawc/auto-mobile/issues/2664))
 - Trim over-broad Random/Backoff utils and unify three UUID sources onto IdGenerator ([#2663](https://github.com/kaeawc/auto-mobile/issues/2663)) (dead-code)
 - iOS network mock-rule sync is copy-pasted from Android (require() in ESM, any-typed, debug-swallowed) ([#2662](https://github.com/kaeawc/auto-mobile/issues/2662)) (ios)
@@ -1433,12 +1563,16 @@
 - Refactor: de-duplicate DevicePool assignment methods (LRU drift) + remove left-in [DEVICE-POOL-DEBUG] logging ([#2656](https://github.com/kaeawc/auto-mobile/issues/2656))
 - Type safety: replace `any` in navigation hierarchy logic with existing ViewHierarchyNode type ([#2655](https://github.com/kaeawc/auto-mobile/issues/2655))
 - Dead Code Detection: Threshold Exceeded ([#2361](https://github.com/kaeawc/auto-mobile/issues/2361)) (automated, dead-code)
+
 ### Fixed
+
 - AndroidSystemConfigurationAdapter.setTimeZone reports success without read-back verification ([#2661](https://github.com/kaeawc/auto-mobile/issues/2661)) (android)
 - fix(ios): postNotification requires appId on iOS but the schema marks it optional ([#2544](https://github.com/kaeawc/auto-mobile/issues/2544)) (ios)
 - fix(ios): SDK in-app hierarchy (:8766) merged into observes of unrelated foreground apps — ~2.5MB hierarchies ([#2540](https://github.com/kaeawc/auto-mobile/issues/2540)) (ios)
 - fix(intellij): #2464 device-disconnect deviceEvents wired only to uncalled LayoutInspectorDashboard (live view may still freeze) ([#2531](https://github.com/kaeawc/auto-mobile/issues/2531)) (intellij plugin)
+
 ### Other
+
 - doctor: make daemon health socket probes non-destructive ([#2658](https://github.com/kaeawc/auto-mobile/issues/2658))
 - putAppFile resolves a relative sourcePath against the daemon cwd (homedir), not the launch cwd — ENOENT/wrong-file under a detached daemon ([#2644](https://github.com/kaeawc/auto-mobile/issues/2644))
 - doctor: reports 'Daemon is not running' while it is serving, and prints device=emulator-5554 during an iOS-only run ([#2643](https://github.com/kaeawc/auto-mobile/issues/2643))
@@ -1473,7 +1607,9 @@
 - launchApp rejects 'packageId' parameter — LLM commonly uses wrong field name ([#2217](https://github.com/kaeawc/auto-mobile/issues/2217))
 
 ## [v0.0.38] - 2026-06-25
+
 ### Added
+
 - feat(android): accessibilityFocus — set/clear TalkBack cursor focus ([#2503](https://github.com/kaeawc/auto-mobile/issues/2503)) (android, a11y)
 - feat(ios): biometricAuth — Touch ID / Face ID simulation via simctl Darwin notifications ([#2497](https://github.com/kaeawc/auto-mobile/issues/2497)) (ios)
 - feat(ios): getNotificationPolicy — read per-app notification authorization on simulators via BulletinBoard ([#2496](https://github.com/kaeawc/auto-mobile/issues/2496)) (ios, research)
@@ -1482,12 +1618,16 @@
 - feat(ios): setDeviceState — Do Not Disturb mode fidelity and physical-device support ([#2493](https://github.com/kaeawc/auto-mobile/issues/2493)) (ios, research)
 - feat(ios): getDeepLinks — URL scheme & universal link discovery via Info.plist ([#2486](https://github.com/kaeawc/auto-mobile/issues/2486)) (ios)
 - feat(ios): dragAndDrop — coordinate drag via XCUITest CtrlProxy runner ([#2481](https://github.com/kaeawc/auto-mobile/issues/2481)) (ios)
+
 ### Fixed
+
 - fix(ios): daemon runs the published-release CtrlProxy runner, not source — new runner commands fail "Unknown command type" against a stale binary ([#2539](https://github.com/kaeawc/auto-mobile/issues/2539)) (ios)
 - fix(ios): CtrlProxy WebSocket and AutoMobile SDK server collide on port 8766 — all iOS observe/gesture ops fail (Expected 101) ([#2538](https://github.com/kaeawc/auto-mobile/issues/2538)) (ios)
 - fix(daemon): signal/exception handlers registered inside main() after dynamic imports — startup window with no cleanup (regression from #2465) ([#2532](https://github.com/kaeawc/auto-mobile/issues/2532)) (release engineering)
 - fix(ios): observation stream double-pushes initial hierarchy frame on cold subscribe ([#2530](https://github.com/kaeawc/auto-mobile/issues/2530)) (ios)
+
 ### Other
+
 - Client can silently use a daemon of a mismatched version (@latest spawn + restart cooldown) ([#2452](https://github.com/kaeawc/auto-mobile/issues/2452))
 - Crash/force-kill leaves stale PID and socket files; no exit-time cleanup ([#2451](https://github.com/kaeawc/auto-mobile/issues/2451))
 - Device disconnects are not surfaced to observation-stream subscribers ([#2450](https://github.com/kaeawc/auto-mobile/issues/2450))
@@ -1503,36 +1643,54 @@
 - Add a fast `--version` flag; today it hangs by falling through to the stdio server ([#2440](https://github.com/kaeawc/auto-mobile/issues/2440))
 
 ## [v0.0.37] - 2026-06-24
+
 ### Other
+
 - No changes.
 
 ## [v0.0.36] - 2026-06-23
+
 ### Other
+
 - installApp succeeds but app not present for launchApp/openLink (device resolution incoherence) ([#2387](https://github.com/kaeawc/auto-mobile/issues/2387))
 
 ## [v0.0.35] - 2026-06-10
+
 ### Other
+
 - launchApp times out on iOS when clearAppData is true ([#2368](https://github.com/kaeawc/auto-mobile/issues/2368))
 
 ## [v0.0.34] - 2026-06-04
+
 ### Other
+
 - No changes.
 
 ## [v0.0.33] - 2026-06-04
+
 ### Other
+
 - No changes.
 
 ## [v0.0.32] - 2026-06-02
+
 ### Changed
+
 - Dead Code Detection: Threshold Exceeded ([#2313](https://github.com/kaeawc/auto-mobile/issues/2313)) (automated, dead-code)
+
 ### Other
+
 - Can't pin the on-device CtrlProxy release independently of the daemon ([#2293](https://github.com/kaeawc/auto-mobile/issues/2293))
 - `retryIfNoChange` fires false-positive retries during activity transitions ([#2283](https://github.com/kaeawc/auto-mobile/issues/2283))
 
 ## [v0.0.31] - 2026-05-27
+
 ### Changed
+
 - Dead Code Detection: Threshold Exceeded ([#1874](https://github.com/kaeawc/auto-mobile/issues/1874)) (automated, dead-code)
+
 ### Other
+
 - Only 2 of 7 daemon CLI flags log a startup confirmation ([#2286](https://github.com/kaeawc/auto-mobile/issues/2286))
 - CtrlProxy `getLatestHierarchy` 100ms fresh-data wait too short for contended environments ([#2285](https://github.com/kaeawc/auto-mobile/issues/2285))
 - Issue 3: `SelectionStateTracker` ignores `--no-ui-perf-mode` and dominates CI ADB overhead ([#2284](https://github.com/kaeawc/auto-mobile/issues/2284))
@@ -1541,11 +1699,15 @@
 - bug(ios): observe returns "received Android hierarchy for iOS device" inside conversation views ([#2275](https://github.com/kaeawc/auto-mobile/issues/2275))
 
 ## [v0.0.30] - 2026-05-20
+
 ### Other
+
 - Remove tapClickableParent from tapOn schema — redundant with auto-escalation ([#2248](https://github.com/kaeawc/auto-mobile/issues/2248))
 
 ## [v0.0.29] - 2026-05-20
+
 ### Other
+
 - SelectAllText accessibility-service path crashes: AdbExecutor passed to AdbClientFactory consumer ([#2231](https://github.com/kaeawc/auto-mobile/issues/2231))
 - InputText accessibility-service path crashes: AdbExecutor passed to AdbClientFactory consumer ([#2229](https://github.com/kaeawc/auto-mobile/issues/2229))
 - ImeAction accessibility-service path crashes: AdbExecutor passed to AdbClientFactory consumer ([#2230](https://github.com/kaeawc/auto-mobile/issues/2230))
@@ -1560,23 +1722,33 @@
 - PerformanceAudit crashes with 'J.create is not a function' in 0.0.28 build ([#2214](https://github.com/kaeawc/auto-mobile/issues/2214))
 
 ## [v0.0.28] - 2026-05-19
+
 ### Added
+
 - feat: Android emulator telephony and SMS simulation ([#1579](https://github.com/kaeawc/auto-mobile/issues/1579)) (android)
 - iOS: Implement ScreenCaptureKit simulator window capture ([#1096](https://github.com/kaeawc/auto-mobile/issues/1096)) (ios)
 - iOS: Implement Swift helper for AVFoundation device capture ([#1095](https://github.com/kaeawc/auto-mobile/issues/1095)) (ios)
+
 ### Changed
+
 - refactor: extract test helper for CommandHandlerTests boilerplate ([#1879](https://github.com/kaeawc/auto-mobile/issues/1879)) (ios, testing)
 
 ## [v0.0.27] - 2026-05-18
+
 ### Added
+
 - IDE Plugin: Display exported YAML in Record Test UX after finishing ([#1073](https://github.com/kaeawc/auto-mobile/issues/1073)) (intellij plugin)
 - epic: detect image/media loading via network and view hierarchy correlation ([#1015](https://github.com/kaeawc/auto-mobile/issues/1015)) (android, research, ai)
 - feat: correlate network requests with media views for loading detection ([#1014](https://github.com/kaeawc/auto-mobile/issues/1014)) (android, ai)
 - Extend focus navigation to handle scroll-then-focus for off-screen elements ([#472](https://github.com/kaeawc/auto-mobile/issues/472)) (android, a11y)
+
 ### Changed
+
 - refactor: extract sendCommand helper to eliminate WebSocket delegate boilerplate ([#1880](https://github.com/kaeawc/auto-mobile/issues/1880))
 - Chore: Test multi-device execution ([#764](https://github.com/kaeawc/auto-mobile/issues/764))
+
 ### Other
+
 - PlanMigrator: notification.timeout → awaitTimeout ([#2120](https://github.com/kaeawc/auto-mobile/issues/2120))
 - Plan execution ADB contention: skip screenshots and cancel orphaned jobs ([#2119](https://github.com/kaeawc/auto-mobile/issues/2119))
 - Tap resilience: ghost tap detection and pre-tap stability ([#2118](https://github.com/kaeawc/auto-mobile/issues/2118))
@@ -1605,36 +1777,52 @@
 - Create Homebrew formula for AutoMobile ([#978](https://github.com/kaeawc/auto-mobile/issues/978)) (release engineering, env)
 
 ## [v0.0.26] - 2026-05-06
+
 ### Other
+
 - WebSocket timeout cascade causes daemon blindness after slow hierarchy extraction ([#2079](https://github.com/kaeawc/auto-mobile/issues/2079))
 
 ## [v0.0.25] - 2026-05-06
+
 ### Other
+
 - Daemon mode ignores CLI flags (dismiss-keyboard, no-ui-perf, etc.) ([#2065](https://github.com/kaeawc/auto-mobile/issues/2065))
 
 ## [v0.0.24] - 2026-05-01
+
 ### Other
+
 - observe returns iOS hierarchy despite setActiveDevice to Android emulator ([#2053](https://github.com/kaeawc/auto-mobile/issues/2053))
 - ensureConnected should check if target simulator is still booted before relaunching CtrlProxy ([#2052](https://github.com/kaeawc/auto-mobile/issues/2052))
 
 ## [v0.0.23] - 2026-04-30
+
 ### Other
+
 - No changes.
 
 ## [v0.0.22] - 2026-04-30
+
 ### Other
+
 - No changes.
 
 ## [v0.0.21] - 2026-04-30
+
 ### Other
+
 - No changes.
 
 ## [v0.0.20] - 2026-04-29
+
 ### Other
+
 - No changes.
 
 ## [v0.0.19] - 2026-04-29
+
 ### Other
+
 - Daemon leaks unix-domain socket FDs; accepted peers never closed (backpressure + keepalive gap) ([#2008](https://github.com/kaeawc/auto-mobile/issues/2008))
 - CI cannot configure daemon flags without pre-starting manually - no JUnit runner integration ([#1971](https://github.com/kaeawc/auto-mobile/issues/1971))
 - No way to programmatically close the notification shade - pressButton "back" is fragile ([#1969](https://github.com/kaeawc/auto-mobile/issues/1969))
@@ -1651,29 +1839,41 @@
 - iOS SDK walker: surface visual properties for pure SwiftUI shapes via CALayer introspection ([#1926](https://github.com/kaeawc/auto-mobile/issues/1926))
 
 ## [v0.0.18] - 2026-04-17
+
 ### Other
+
 - iOS: text entry fails despite focused UITextField with react native ([#1925](https://github.com/kaeawc/auto-mobile/issues/1925))
 
 ## [v0.0.17] - 2026-04-16
+
 ### Added
+
 - startDevice: accept generic parameters and return/boot matching device ([#1887](https://github.com/kaeawc/auto-mobile/issues/1887))
 - Add resource for installed app metadata (version, build number) ([#1886](https://github.com/kaeawc/auto-mobile/issues/1886))
 - Support iOS app installation in installApp ([#1885](https://github.com/kaeawc/auto-mobile/issues/1885)) (ios)
 - Add uninstallApp tool ([#1884](https://github.com/kaeawc/auto-mobile/issues/1884))
 
 ## [v0.0.16] - 2026-04-03
+
 ### Added
+
 - IDE Plugin: Implement screen stream display in Layout Inspector ([#1033](https://github.com/kaeawc/auto-mobile/issues/1033)) (android, ios)
 - Server: Implement screen stream receiver and relay to IDE plugins ([#1032](https://github.com/kaeawc/auto-mobile/issues/1032))
 - Feature: iOS UserDefaults Inspection and Management ([#1022](https://github.com/kaeawc/auto-mobile/issues/1022)) (ios, devxp, testing)
 - feat: identify media-displaying views in hierarchy by class and role ([#1013](https://github.com/kaeawc/auto-mobile/issues/1013)) (android, a11y)
 - feat: Android version matrix testing in CI ([#835](https://github.com/kaeawc/auto-mobile/issues/835)) (android, ci, testing)
+
 ### Changed
+
 - Dead Code Detection: Threshold Exceeded ([#1648](https://github.com/kaeawc/auto-mobile/issues/1648)) (automated, dead-code)
+
 ### Fixed
+
 - tapOn fails to match text with Unicode curly apostrophe (U+2019) ([#1798](https://github.com/kaeawc/auto-mobile/issues/1798)) (ios)
 - Daemon disconnect cascade causes 6GB+ log flood and crash-restart loop ([#1773](https://github.com/kaeawc/auto-mobile/issues/1773))
+
 ### Other
+
 - iOS: Add rotate support via CtrlProxy ([#1859](https://github.com/kaeawc/auto-mobile/issues/1859))
 - iOS: Add systemTray support via CtrlProxy ([#1858](https://github.com/kaeawc/auto-mobile/issues/1858))
 - iOS: Add recentApps support via CtrlProxy ([#1857](https://github.com/kaeawc/auto-mobile/issues/1857))
@@ -1691,11 +1891,15 @@
 - ci: run JUnitRunner emulator tests on macOS/Windows/Linux matrix ([#959](https://github.com/kaeawc/auto-mobile/issues/959)) (android, ci, testing)
 
 ## [v0.0.15] - 2026-03-26
+
 ### Other
+
 - No changes.
 
 ## [v0.0.14] - 2026-03-26
+
 ### Added
+
 - feat: implement iOS clipboard operations (get/copy/paste/clear) ([#1501](https://github.com/kaeawc/auto-mobile/issues/1501)) (ios)
 - feat: add boomerang support to VoiceOverSwipeExecutor ([#1451](https://github.com/kaeawc/auto-mobile/issues/1451)) (ios, a11y)
 - feat: VoiceOver Phase 4 — documentation, example scripts, and parity review ([#1366](https://github.com/kaeawc/auto-mobile/issues/1366)) (documentation, ios, a11y)
@@ -1727,7 +1931,9 @@
 - IDE plugin: backwards compatibility + matrix testing ([#245](https://github.com/kaeawc/auto-mobile/issues/245)) (release engineering, testing, intellij plugin)
 - Add iOS support for accessibility audit mode ([#103](https://github.com/kaeawc/auto-mobile/issues/103)) (ios, a11y)
 - mitmproxy network call inspection ([#34](https://github.com/kaeawc/auto-mobile/issues/34))
+
 ### Changed
+
 - chore: extend lychee link checking to cover CONTRIBUTING.md and root markdown files ([#1457](https://github.com/kaeawc/auto-mobile/issues/1457)) (ci, devxp)
 - chore: fix CONTRIBUTING.md dead link to local-development.md ([#1456](https://github.com/kaeawc/auto-mobile/issues/1456)) (documentation, dead-code)
 - chore: add git-lfs setup to hot-reload dev environment bootstrap ([#1455](https://github.com/kaeawc/auto-mobile/issues/1455)) (devxp)
@@ -1739,12 +1945,16 @@
 - chore: remove MCP HTTP transport ([#1350](https://github.com/kaeawc/auto-mobile/issues/1350)) (dead-code)
 - Dead Code Detection: Threshold Exceeded ([#1293](https://github.com/kaeawc/auto-mobile/issues/1293)) (automated, dead-code)
 - Tighten XcodeExtension signing once .appex exists ([#921](https://github.com/kaeawc/auto-mobile/issues/921)) (ios)
+
 ### Fixed
+
 - Startup benchmark flake: FIFO stderr line truncation drops STARTUP_BENCHMARK prefix ([#1563](https://github.com/kaeawc/auto-mobile/issues/1563)) (performance, testing)
 - App view hierarchy disappears when keyboard/EditText is focused ([#1488](https://github.com/kaeawc/auto-mobile/issues/1488)) (android)
 - bug: CtrlProxy reboots multiple times per minute in hot reload and normal MCP use ([#1354](https://github.com/kaeawc/auto-mobile/issues/1354)) (ios)
 - bug: hot reload reboots iOS simulator unexpectedly ([#1353](https://github.com/kaeawc/auto-mobile/issues/1353)) (ios, devxp)
+
 ### Other
+
 - feat: iOS simulator support for changeLocalization tool ([#1578](https://github.com/kaeawc/auto-mobile/issues/1578))
 - Install Fails without SSH Configured ([#1559](https://github.com/kaeawc/auto-mobile/issues/1559))
 - research: iOS accessibility scroll action equivalent to Android scroll_forward/scroll_backward ([#1452](https://github.com/kaeawc/auto-mobile/issues/1452)) (ios, a11y, research)
@@ -1753,38 +1963,50 @@
 - CI: add macOS job for Xcode companion app + Source Editor Extension build ([#373](https://github.com/kaeawc/auto-mobile/issues/373)) (ios, ci)
 
 ## [v0.0.13] - 2026-02-13
+
 ### Other
+
 - Add CI checks for host control Docker scripts across macOS/Linux/Windows ([#981](https://github.com/kaeawc/auto-mobile/issues/981)) (ci, env)
 - Publish to official MCP registry ([#26](https://github.com/kaeawc/auto-mobile/issues/26)) (release engineering)
 - Publish AutoMobile on Docker Hub ([#25](https://github.com/kaeawc/auto-mobile/issues/25)) (release engineering)
 
 ## [v0.0.12] - 2026-02-11
+
 ### Other
+
 - No changes.
 
 ## [v0.0.11] - 2026-02-11
+
 ### Added
+
 - IDE plugin: always use active (white) toolbar icon ([#1214](https://github.com/kaeawc/auto-mobile/issues/1214)) (intellij plugin)
 - Remove feature flag for video test recording ([#1203](https://github.com/kaeawc/auto-mobile/issues/1203)) (video)
 - IDE plugin: show 'Device Disconnected' when observed device becomes unavailable ([#1202](https://github.com/kaeawc/auto-mobile/issues/1202)) (intellij plugin)
 - IDE Plugin: Add full-window FileEditor mode for dashboard ([#1167](https://github.com/kaeawc/auto-mobile/issues/1167)) (intellij plugin)
 - feat: iOS version matrix testing in CI ([#836](https://github.com/kaeawc/auto-mobile/issues/836)) (ios, ci, testing)
 - Support custom accessibility rules ([#104](https://github.com/kaeawc/auto-mobile/issues/104)) (devxp, a11y)
+
 ### Changed
+
 - refactor: ViewHierarchy has near-clone findFocusedElement / findAccessibilityFocusedElement ([#1191](https://github.com/kaeawc/auto-mobile/issues/1191))
 - refactor: UIStateExtractor reimplements ElementParser traversal and property extraction ([#1190](https://github.com/kaeawc/auto-mobile/issues/1190))
 - refactor: BugReport.traverseNode() reimplements ElementParser inline ([#1189](https://github.com/kaeawc/auto-mobile/issues/1189))
 - refactor: DebugSearch reimplements ElementParser, TextMatcher, and ElementFinder inline ([#1188](https://github.com/kaeawc/auto-mobile/issues/1188))
 - chore: upgrade GitHub Actions upload-artifact and download-artifact to v4.6+ ([#1158](https://github.com/kaeawc/auto-mobile/issues/1158)) (ci)
 - Dead Code Detection: Threshold Exceeded ([#1143](https://github.com/kaeawc/auto-mobile/issues/1143)) (automated, dead-code)
+
 ### Fixed
+
 - IDE plugin: device disconnected notification is too aggressive ([#1244](https://github.com/kaeawc/auto-mobile/issues/1244)) (intellij plugin)
 - iOS: toggle switch tap does not trigger view hierarchy or screenshot update ([#1227](https://github.com/kaeawc/auto-mobile/issues/1227))
 - bug: IDE plugin settings page fails to load feature flags with MCP error -32603 ([#1213](https://github.com/kaeawc/auto-mobile/issues/1213)) (intellij plugin)
 - Bug: IDE plugin crashes with IllegalArgumentException when opening test plan YAML file ([#1205](https://github.com/kaeawc/auto-mobile/issues/1205)) (intellij plugin)
 - Bug: failing JUnit Runner test does not produce a failing JUnit test result ([#1204](https://github.com/kaeawc/auto-mobile/issues/1204)) (testing)
 - iOS: Unable to observe system permission dialogs in view hierarchy ([#1147](https://github.com/kaeawc/auto-mobile/issues/1147)) (ios)
+
 ### Other
+
 - CI: add Xcode 26 to iOS build and test matrix ([#1207](https://github.com/kaeawc/auto-mobile/issues/1207)) (ios, ci)
 - CI: auto-retry iOS jobs when no simulator runtimes are installed on macOS runner ([#1206](https://github.com/kaeawc/auto-mobile/issues/1206)) (ios, ci)
 - CI: add macOS job for iOS Accessibility Bridge build + XCTest runner tests ([#372](https://github.com/kaeawc/auto-mobile/issues/372)) (ios, ci)
@@ -1792,15 +2014,21 @@
 - Publish AutoMobile JUnitRunner Library ([#121](https://github.com/kaeawc/auto-mobile/issues/121)) (android, ci, release engineering, testing)
 
 ## [v0.0.10] - 2026-02-06
+
 ### Added
+
 - Support custom accessibility rules ([#104](https://github.com/kaeawc/auto-mobile/issues/104)) (devxp, a11y)
+
 ### Other
+
 - chore: upgrade GitHub Actions upload-artifact and download-artifact to v4.6+ ([#1158](https://github.com/kaeawc/auto-mobile/issues/1158))
 - Publish AutoMobile Android SDK on Maven Central ([#122](https://github.com/kaeawc/auto-mobile/issues/122)) (android, ci, release engineering)
 - Publish AutoMobile JUnitRunner Library ([#121](https://github.com/kaeawc/auto-mobile/issues/121)) (android, ci, release engineering, testing)
 
 ## [v0.0.9] - 2026-02-04
+
 ### Added
+
 - Test Runners: Cascade MCP tool failures to JUnitRunner/XCTestRunner via executePlan response ([#1078](https://github.com/kaeawc/auto-mobile/issues/1078)) (android, ios, testing)
 - IDE Plugin: Add Cancel button to Record Test entry screen ([#1075](https://github.com/kaeawc/auto-mobile/issues/1075)) (intellij plugin)
 - IDE Plugin: Add 'Refine' button to simplify exported test plans with AI ([#1074](https://github.com/kaeawc/auto-mobile/issues/1074)) (intellij plugin, ai)
@@ -1827,7 +2055,9 @@
 - IDE Plugin: Display recent performance debug data ([#283](https://github.com/kaeawc/auto-mobile/issues/283)) (android, performance, intellij plugin)
 - IDE plugin: MCP resource viewer UI ([#255](https://github.com/kaeawc/auto-mobile/issues/255)) (intellij plugin)
 - IDE plugin: add source mapping support ([#247](https://github.com/kaeawc/auto-mobile/issues/247)) (intellij plugin)
+
 ### Changed
+
 - refactor: move src/features/observe/accessibility/ to src/features/observe/android/ ([#1123](https://github.com/kaeawc/auto-mobile/issues/1123)) (android)
 - refactor: consolidate screenshot utilities ([#1121](https://github.com/kaeawc/auto-mobile/issues/1121))
 - refactor: decompose SwipeOn - extract overlay detection and scroll-until ([#1120](https://github.com/kaeawc/auto-mobile/issues/1120)) (android)
@@ -1843,15 +2073,21 @@
 - Decompose AccessibilityServiceClient.ts (4652 lines) ([#1107](https://github.com/kaeawc/auto-mobile/issues/1107)) (android)
 - Migrate remaining AdbClient instantiations to AdbClientFactory ([#1106](https://github.com/kaeawc/auto-mobile/issues/1106)) (android)
 - Dead Code Detection: Threshold Exceeded ([#1027](https://github.com/kaeawc/auto-mobile/issues/1027)) (automated, dead-code)
+
 ### Fixed
+
 - pressButton should properly await fresh view hierarchy before returning observation ([#1051](https://github.com/kaeawc/auto-mobile/issues/1051))
+
 ### Other
+
 - perf: explore queueMicrotask optimization for FakeTimer ([#1130](https://github.com/kaeawc/auto-mobile/issues/1130)) (devxp, performance)
 - Navigation nodes should preserve aspect ratio instead of cropping screenshots ([#1052](https://github.com/kaeawc/auto-mobile/issues/1052)) (android, devxp, intellij plugin)
 - Research: DevXP for work profile app install tracking ([#754](https://github.com/kaeawc/auto-mobile/issues/754)) (android, devxp, research)
 
 ## [v0.0.8] - 2026-01-24
+
 ### Added
+
 - View hierarchy contains duplicate elements from merged sources ([#999](https://github.com/kaeawc/auto-mobile/issues/999)) (performance)
 - criticalSection: accept normalized params in nested steps ([#960](https://github.com/kaeawc/auto-mobile/issues/960))
 - Abstract other macOS CLI tools through host control daemon ([#932](https://github.com/kaeawc/auto-mobile/issues/932)) (ios, env)
@@ -1909,7 +2145,9 @@
 - Accessibility Bridge: implement element lookup + bounds + focus state ([#346](https://github.com/kaeawc/auto-mobile/issues/346)) (ios)
 - IDE plugin: real-time performance streaming + cache ([#305](https://github.com/kaeawc/auto-mobile/issues/305)) (android, performance, intellij plugin)
 - Enhanced contrast detection for gradients and overlays ([#102](https://github.com/kaeawc/auto-mobile/issues/102)) (a11y)
+
 ### Changed
+
 - Upgrade json-schema-validator to 3.0.0 (requires Jackson 3 migration) ([#967](https://github.com/kaeawc/auto-mobile/issues/967)) (android, dependencies)
 - Remove unused kotlinx-datetime dependency ([#966](https://github.com/kaeawc/auto-mobile/issues/966)) (android, dependencies)
 - Remove p99 from MCP Tool Throughput Benchmarks ([#950](https://github.com/kaeawc/auto-mobile/issues/950)) (performance)
@@ -1927,7 +2165,9 @@
 - chore: update TypeScript dependencies - research major version upgrades ([#838](https://github.com/kaeawc/auto-mobile/issues/838)) (dependencies)
 - docs: clean up and organize documentation ([#830](https://github.com/kaeawc/auto-mobile/issues/830)) (documentation)
 - Chore: Test notification triggering ([#765](https://github.com/kaeawc/auto-mobile/issues/765))
+
 ### Fixed
+
 - MCP startup benchmark sometimes hangs without reasonable timeout ([#1002](https://github.com/kaeawc/auto-mobile/issues/1002)) (ci, performance)
 - setActiveDevice does not single out iOS simulators for observe ([#1001](https://github.com/kaeawc/auto-mobile/issues/1001)) (ios)
 - rawViewHierarchy tool doesn't support iOS ([#1000](https://github.com/kaeawc/auto-mobile/issues/1000)) (ios)
@@ -1945,7 +2185,9 @@
 - Accessibility service state detection issues after automatic setup ([#801](https://github.com/kaeawc/auto-mobile/issues/801)) (android, a11y)
 - Prevent automated changelog PR from erroring on fork origin ([#793](https://github.com/kaeawc/auto-mobile/issues/793)) (ci, release engineering)
 - Fallback to uiautomator when AccessibilityWindowInfo.root returns null for active window ([#775](https://github.com/kaeawc/auto-mobile/issues/775)) (android, a11y)
+
 ### Other
+
 - docs: add reveal/collapse wrappers for demos to reduce page distraction ([#987](https://github.com/kaeawc/auto-mobile/issues/987)) (documentation)
 - Add CI checks for host control docker scripts across macOS/Linux/Windows ([#980](https://github.com/kaeawc/auto-mobile/issues/980))
 - ci: run TypeScript Node build/test on macOS/Windows/Linux matrix ([#958](https://github.com/kaeawc/auto-mobile/issues/958)) (ci, testing)
@@ -1966,7 +2208,9 @@
 - iOS ViewHierarchy WebSocket Accessibility Service/App ([#33](https://github.com/kaeawc/auto-mobile/issues/33)) (ios)
 
 ## [0.0.7] - 2026-01-15
+
 ### Added
+
 - Add configurable fade animation for highlights (1-5 second duration) ([#656](https://github.com/kaeawc/auto-mobile/issues/656)) (android, devxp)
 - Add smooth ink-line path drawing for freehand annotations ([#655](https://github.com/kaeawc/auto-mobile/issues/655)) (android, devxp)
 - Add runtime permission handling for drawing overlays ([#654](https://github.com/kaeawc/auto-mobile/issues/654)) (android, devxp)
@@ -2096,7 +2340,9 @@
 - Dockerize AutoMobile ([#5](https://github.com/kaeawc/auto-mobile/issues/5)) (env)
 - Database for memory and settings ([#2](https://github.com/kaeawc/auto-mobile/issues/2))
 - Rewrite internals with interfaces ([#1](https://github.com/kaeawc/auto-mobile/issues/1))
+
 ### Changed
+
 - Cache installed apps list in SQLite and update via package broadcast receivers ([#750](https://github.com/kaeawc/auto-mobile/issues/750)) (performance)
 - Optimize observe: Make screenshot capture async/non-blocking ([#749](https://github.com/kaeawc/auto-mobile/issues/749)) (performance)
 - Optimize launchApp: Run detectTargetUser and checkInstalled in parallel ([#748](https://github.com/kaeawc/auto-mobile/issues/748)) (performance)
@@ -2301,7 +2547,9 @@
 - Skip Docker CI if Dockerfiles and package.json did not change ([#62](https://github.com/kaeawc/auto-mobile/issues/62))
 - Document Claude Code installation and usage ([#31](https://github.com/kaeawc/auto-mobile/issues/31)) (documentation)
 - Publish scoped package on NPM ([#19](https://github.com/kaeawc/auto-mobile/issues/19)) (release engineering)
+
 ### Fixed
+
 - Bug: Duplicate/embedded observe in launchApp causing bloated MCP responses ([#751](https://github.com/kaeawc/auto-mobile/issues/751)) (performance)
 - Fix swipeOn coordinate calculation and overlay detection bugs ([#722](https://github.com/kaeawc/auto-mobile/issues/722))
 - Bug: swipeOn with lookFor scrolls in wrong direction repeatedly ([#671](https://github.com/kaeawc/auto-mobile/issues/671)) (android)
@@ -2318,9 +2566,13 @@
 - Fix MonkeyNavigate integration test timeouts ([#73](https://github.com/kaeawc/auto-mobile/issues/73))
 - Flaky test: AccessibilityServiceClient WebSocket connection failure handling ([#72](https://github.com/kaeawc/auto-mobile/issues/72)) (flaky test)
 - Flaky test: AccessibilityServiceClient WebSocket connection failure timeout ([#68](https://github.com/kaeawc/auto-mobile/issues/68)) (flaky test)
+
 ### Deprecated
+
 - Enhance devices resource with pool status and deprecate listDevices tool ([#606](https://github.com/kaeawc/auto-mobile/issues/606)) (ai)
+
 ### Removed
+
 - Remove deprecated listApps MCP tool ([#713](https://github.com/kaeawc/auto-mobile/issues/713))
 - Remove daemon_available_devices tool and forward usage to listDevices ([#607](https://github.com/kaeawc/auto-mobile/issues/607)) (ai)
 - Remove listSnapshots tool - create automobile:snapshots resource instead ([#602](https://github.com/kaeawc/auto-mobile/issues/602)) (ai)
@@ -2333,33 +2585,44 @@
 - Remove getAllConfigs/setDeviceMode/resetConfig MCP tool calls ([#175](https://github.com/kaeawc/auto-mobile/issues/175))
 - Delete source mapping and automatic test authoring ([#4](https://github.com/kaeawc/auto-mobile/issues/4))
 - Delete iOS implementation ([#3](https://github.com/kaeawc/auto-mobile/issues/3))
+
 ### Security
+
 - Deep Link Security Validator (validateDeepLinkSecurity) ([#58](https://github.com/kaeawc/auto-mobile/issues/58))
 - Security: Insecure temporary file creation in daemon manager ([#157](https://github.com/kaeawc/auto-mobile/issues/157))
 - CodeQL check failing in CI ([#141](https://github.com/kaeawc/auto-mobile/issues/141)) (ci)
 
 ## [0.0.6] - Unreleased
+
 ### Changed
+
 - Placeholder: started fork; release notes not recorded.
 
 ## [0.0.5] - 2025-07-22
+
 ### Added
+
 - Add ADB command auto retry
 
 ### Changed
+
 - Improve view hierarchy search for elements with auto retry
 - Refactor ConfigurationManager
 
 ### Fixed
+
 - Test authoring fixes
 
 ## [0.0.4] - 2025-07-08
+
 ### Added
+
 - Automate Accessibility Service install and enablement on first ADB command for a device
 - Check APK SHA256 before installing
 - Allow element search to restrict to specific containers in the view hierarchy
 
 ### Changed
+
 - Increase accessibility node inspection for better view hierarchy data
 - Filter unnecessary view hierarchy data to reduce observe payloads
 - Parallelize and cache observation and idling steps
@@ -2367,12 +2630,15 @@
 - Reduce tool calls to make it easier for agents to determine tool call selection
 
 ## [0.0.3] - 2025-07-08
+
 ### Added
+
 - Automate Accessibility Service install and enablement
 - Check APK SHA256 before installing
 - Allow element search to restrict to specific containers in the view hierarchy
 
 ### Changed
+
 - Increase accessibility node inspection for better view hierarchy data
 - Filter unnecessary view hierarchy data to reduce observe payloads
 - Parallelize and cache observation and idling steps
@@ -2380,15 +2646,20 @@
 - Reduce tool calls to make it easier for agents to determine tool call selection
 
 ## [0.0.2] - 2025-07-01
+
 ### Added
+
 - Accessibility service with availability checks
 - Active window caching
 - Device session management
 
 ### Changed
+
 - Improved docs for setup and installation
 - More test coverage
 
 ## [0.0.1] - 2025-06-24
+
 ### Added
+
 - Initial release

@@ -278,7 +278,7 @@ describe("PlanValidator", () => {
         ],
       };
       expect(() => PlanValidator.validate(plan)).toThrow(
-        "declares deviceCount=2 but 1 step references it"
+        "declares deviceCount=2 but 1 step references it",
       );
     });
 
@@ -330,7 +330,7 @@ describe("PlanValidator", () => {
         ],
       };
       expect(() => PlanValidator.validate(plan)).toThrow(
-        "Every step inside a criticalSection must declare a 'device' parameter"
+        "Every step inside a criticalSection must declare a 'device' parameter",
       );
       expect(() => PlanValidator.validate(plan)).toThrow("step 1.steps[1] (inputText)");
     });
@@ -354,7 +354,7 @@ describe("PlanValidator", () => {
         ],
       };
       expect(() => PlanValidator.validate(plan)).toThrow(
-        "criticalSection sub-steps use invalid device labels"
+        "criticalSection sub-steps use invalid device labels",
       );
       expect(() => PlanValidator.validate(plan)).toThrow('device="C"');
     });
@@ -418,7 +418,7 @@ describe("PlanValidator", () => {
       };
       expect(() => PlanValidator.validateMultiDeviceRequirements(plan)).toThrow(ActionableError);
       expect(() => PlanValidator.validateMultiDeviceRequirements(plan)).toThrow(
-        "does not declare 'devices' field"
+        "does not declare 'devices' field",
       );
     });
 
@@ -431,7 +431,7 @@ describe("PlanValidator", () => {
         ],
       };
       expect(() => PlanValidator.validateMultiDeviceRequirements(plan)).toThrow(
-        "does not declare 'devices' field"
+        "does not declare 'devices' field",
       );
     });
 
@@ -451,7 +451,7 @@ describe("PlanValidator", () => {
     test("parses and validates YAML with anchors and merge keys", async () => {
       const yamlContent = await fs.readFile(
         "test/resources/test-plans/yaml-anchors-test.yaml",
-        "utf-8"
+        "utf-8",
       );
 
       const serializer = new YamlPlanSerializer();

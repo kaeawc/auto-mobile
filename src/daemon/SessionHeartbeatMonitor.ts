@@ -12,9 +12,7 @@ export interface HeartbeatSessionSource {
   cleanupExpiredSessions(): void;
 }
 
-type SessionHeartbeatReleaseReason =
-  | "missing-first-heartbeat"
-  | "heartbeat-timeout";
+type SessionHeartbeatReleaseReason = "missing-first-heartbeat" | "heartbeat-timeout";
 
 export interface SessionHeartbeatMonitorConfig {
   /** How often to scan for stale sessions. Default: 10s. */
@@ -70,19 +68,37 @@ export class SessionHeartbeatMonitor {
     private readonly timer: Timer = defaultTimer,
     config: SessionHeartbeatMonitorConfig = {},
   ) {
-    this.checkIntervalMs = config.checkIntervalMs
-      ?? readPositiveMsEnv("AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS", "AUTO_MOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS")
-      ?? DEFAULT_CHECK_INTERVAL_MS;
-    this.graceMs = config.graceMs
-      ?? readPositiveMsEnv("AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS", "AUTO_MOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS")
-      ?? DEFAULT_INITIAL_GRACE_MS;
-    this.preFirstHeartbeatGraceMs = config.preFirstHeartbeatGraceMs
-      ?? readPositiveMsEnv("AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS", "AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS")
-      ?? DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS;
-    this.defaultHeartbeatTimeoutMs = config.heartbeatTimeoutMs
-      ?? readPositiveMsEnv("AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS", "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS")
-      ?? getDefaultSessionHeartbeatTimeoutMs();
-    this.interval = new SingleFlightInterval(this.timer, this.checkIntervalMs, () => this.tickOnce());
+    this.checkIntervalMs =
+      config.checkIntervalMs ??
+      readPositiveMsEnv(
+        "AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
+        "AUTO_MOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
+      ) ??
+      DEFAULT_CHECK_INTERVAL_MS;
+    this.graceMs =
+      config.graceMs ??
+      readPositiveMsEnv(
+        "AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS",
+        "AUTO_MOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS",
+      ) ??
+      DEFAULT_INITIAL_GRACE_MS;
+    this.preFirstHeartbeatGraceMs =
+      config.preFirstHeartbeatGraceMs ??
+      readPositiveMsEnv(
+        "AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+        "AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+      ) ??
+      DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS;
+    this.defaultHeartbeatTimeoutMs =
+      config.heartbeatTimeoutMs ??
+      readPositiveMsEnv(
+        "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+        "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+      ) ??
+      getDefaultSessionHeartbeatTimeoutMs();
+    this.interval = new SingleFlightInterval(this.timer, this.checkIntervalMs, () =>
+      this.tickOnce(),
+    );
   }
 
   start(): void {

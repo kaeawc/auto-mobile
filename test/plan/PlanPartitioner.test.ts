@@ -84,9 +84,7 @@ describe("PlanPartitioner", () => {
               device: "A",
               lock: "sync1",
               deviceCount: 2,
-              steps: [
-                { tool: "tapOn", params: { text: "Sync", device: "A" } },
-              ],
+              steps: [{ tool: "tapOn", params: { text: "Sync", device: "A" } }],
             },
           },
           { tool: "observe", params: { device: "B" } },
@@ -109,7 +107,7 @@ describe("PlanPartitioner", () => {
 
       // Timeline has three entries, all device-tagged steps
       expect(result!.timeline).toHaveLength(3);
-      expect(result!.timeline.every(e => e.type === "step")).toBe(true);
+      expect(result!.timeline.every((e) => e.type === "step")).toBe(true);
     });
 
     test("should handle multiple critical sections that share a lock across devices", () => {
@@ -145,7 +143,7 @@ describe("PlanPartitioner", () => {
       // Device A: observe, cs(sync1), cs(sync2), observe
       const trackA = result!.deviceTracks.get("A")!;
       expect(trackA).toHaveLength(4);
-      expect(trackA.map(t => t.step.tool)).toEqual([
+      expect(trackA.map((t) => t.step.tool)).toEqual([
         "observe",
         "criticalSection",
         "criticalSection",
@@ -155,7 +153,7 @@ describe("PlanPartitioner", () => {
       // Device B: cs(sync1), tapOn, cs(sync2)
       const trackB = result!.deviceTracks.get("B")!;
       expect(trackB).toHaveLength(3);
-      expect(trackB.map(t => t.step.tool)).toEqual([
+      expect(trackB.map((t) => t.step.tool)).toEqual([
         "criticalSection",
         "tapOn",
         "criticalSection",
@@ -269,9 +267,7 @@ describe("PlanPartitioner", () => {
         ],
       };
 
-      expect(() => PlanPartitioner.partition(plan)).toThrow(
-        "references unknown device"
-      );
+      expect(() => PlanPartitioner.partition(plan)).toThrow("references unknown device");
     });
 
     test("should maintain correct plan and track indices", () => {

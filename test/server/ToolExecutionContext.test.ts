@@ -23,7 +23,7 @@ describe("ToolExecutionContext", () => {
   const createBootedDevice = (deviceId: string): BootedDevice => ({
     name: deviceId,
     platform: "android",
-    deviceId
+    deviceId,
   });
 
   beforeEach(async () => {
@@ -32,7 +32,13 @@ describe("ToolExecutionContext", () => {
     sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     fakeAppsRepo = new FakeInstalledAppsRepository();
     fakeDeviceManager = new FakeDeviceManager();
-    devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager);
+    devicePool = new DevicePool(
+      sessionManager,
+      "test-daemon-session-id",
+      fakeTimer,
+      fakeAppsRepo,
+      fakeDeviceManager,
+    );
     await devicePool.initializeWithDevices([createBootedDevice("device-1")]);
     originalGetInstance = AndroidCtrlProxyManager.getInstance;
     originalClientGetInstance = AndroidCtrlProxyClient.getInstance;
@@ -56,19 +62,24 @@ describe("ToolExecutionContext", () => {
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
-        }
-      } as any);
+        },
+      }) as any;
 
     const clientCallArgs: unknown[] = [];
     AndroidCtrlProxyClient.getInstance = ((device: unknown) => {
       clientCallArgs.push(device);
       return {
         waitForConnection: async () => true,
-        close: async () => {}
+        close: async () => {},
       };
     }) as any;
 
-    const context = await createToolExecutionContext("session-1", sessionManager, devicePool, sessionOptions);
+    const context = await createToolExecutionContext(
+      "session-1",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+    );
 
     expect(context.deviceId).toBe("device-1");
     expect(setupCalls).toBe(1);
@@ -81,7 +92,13 @@ describe("ToolExecutionContext", () => {
 
   test("does not run accessibility setup when a pooled emulator serial is stale", async () => {
     const staleDeviceManager = new FakeDeviceManager();
-    const stalePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, staleDeviceManager);
+    const stalePool = new DevicePool(
+      sessionManager,
+      "test-daemon-session-id",
+      fakeTimer,
+      fakeAppsRepo,
+      staleDeviceManager,
+    );
     await stalePool.initializeWithDevices([createBootedDevice("emulator-5554")]);
     staleDeviceManager.bootedDevices = [];
 
@@ -92,11 +109,12 @@ describe("ToolExecutionContext", () => {
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
-        }
-      } as any);
+        },
+      }) as any;
 
-    await expect(createToolExecutionContext("session-stale", sessionManager, stalePool, sessionOptions))
-      .rejects.toThrow(/No devices in pool|not available|disconnected/);
+    await expect(
+      createToolExecutionContext("session-stale", sessionManager, stalePool, sessionOptions),
+    ).rejects.toThrow(/No devices in pool|not available|disconnected/);
     expect(setupCalls).toBe(0);
     expect(stalePool.getDevice("emulator-5554")).toBeNull();
   });
@@ -106,7 +124,7 @@ describe("ToolExecutionContext", () => {
       ({
         resetSetupState: () => {},
         setup: async () => ({ success: true, message: "ok" }),
-      } as any);
+      }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
       close: async () => {},
@@ -119,7 +137,9 @@ describe("ToolExecutionContext", () => {
     const state = sessionManager.getKeepScreenAwake("session-1");
     expect(state).toBeDefined();
     expect(state!.applied).toBe(false);
-    expect((sessionManager.getSessionCache("session-1") as Record<string, unknown>).customData).toBeUndefined();
+    expect(
+      (sessionManager.getSessionCache("session-1") as Record<string, unknown>).customData,
+    ).toBeUndefined();
   });
 
   test("should not run accessibility setup for existing sessions", async () => {
@@ -130,11 +150,16 @@ describe("ToolExecutionContext", () => {
         setup: async () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
-        }
-      } as any);
+        },
+      }) as any;
 
     await sessionManager.createSession("session-1", "device-1", "android");
-    const context = await createToolExecutionContext("session-1", sessionManager, devicePool, sessionOptions);
+    const context = await createToolExecutionContext(
+      "session-1",
+      sessionManager,
+      devicePool,
+      sessionOptions,
+    );
 
     expect(context.deviceId).toBe("device-1");
     expect(setupCalls).toBe(0);
@@ -160,8 +185,18 @@ describe("ToolExecutionContext", () => {
     fakeDeviceManager.bootedDevices = [first, second];
     await devicePool.addDevice(first, image(first));
     await devicePool.addDevice(second, image(second));
-    await devicePool.bindOrReuseDeviceSession("reset-session-1", first.deviceId, "android", image(first));
-    await devicePool.bindOrReuseDeviceSession("reset-session-2", second.deviceId, "android", image(second));
+    await devicePool.bindOrReuseDeviceSession(
+      "reset-session-1",
+      first.deviceId,
+      "android",
+      image(first),
+    );
+    await devicePool.bindOrReuseDeviceSession(
+      "reset-session-2",
+      second.deviceId,
+      "android",
+      image(second),
+    );
     const detached = await devicePool.detachAdbServerResetCohort([
       devicePool.getDevice(first.deviceId)!,
       devicePool.getDevice(second.deviceId)!,
@@ -208,15 +243,15 @@ describe("ToolExecutionContext", () => {
     ]);
 
     try {
-      expect(
-        devicePool.resolveAutolockSessionForMcpSession("mcp-session", "android"),
-      ).toBe(sessionId);
+      expect(devicePool.resolveAutolockSessionForMcpSession("mcp-session", "android")).toBe(
+        sessionId,
+      );
       await expect(
         createToolExecutionContext(sessionId, sessionManager, devicePool, sessionOptions),
       ).rejects.toThrow(/device-disconnected:emulator-5554;incident=/);
-      expect(
-        devicePool.resolveAutolockSessionForMcpSession("mcp-session", "android"),
-      ).toBe(sessionId);
+      expect(devicePool.resolveAutolockSessionForMcpSession("mcp-session", "android")).toBe(
+        sessionId,
+      );
     } finally {
       await devicePool.releaseAdbServerResetCohortReservations(detached.devices);
       delete process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK;
@@ -232,7 +267,7 @@ describe("ToolExecutionContext", () => {
           setupCalls += 1;
           return { success: true, message: "ok" };
         },
-      } as any);
+      }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
       close: async () => {},
@@ -242,7 +277,10 @@ describe("ToolExecutionContext", () => {
     let finishSetup!: () => void;
     const setup = sessionManager.trackSessionSetup(
       original,
-      () => new Promise<void>(resolve => { finishSetup = resolve; }),
+      () =>
+        new Promise<void>((resolve) => {
+          finishSetup = resolve;
+        }),
     );
     const release = sessionManager.releaseSession("session-recreated");
     await Promise.resolve();
@@ -262,9 +300,13 @@ describe("ToolExecutionContext", () => {
 
   test("does not apply keep-awake after a session is released during setup", async () => {
     let allowActivityWrite!: () => void;
-    const activityWrite = new Promise<void>(resolve => { allowActivityWrite = resolve; });
+    const activityWrite = new Promise<void>((resolve) => {
+      allowActivityWrite = resolve;
+    });
     let activityStarted!: () => void;
-    const activityStartedPromise = new Promise<void>(resolve => { activityStarted = resolve; });
+    const activityStartedPromise = new Promise<void>((resolve) => {
+      activityStarted = resolve;
+    });
     const repository = {
       async upsertActiveSession(): Promise<void> {},
       async recordActivity(): Promise<void> {
@@ -275,7 +317,13 @@ describe("ToolExecutionContext", () => {
       async markStaleActiveSessionsExpired(): Promise<void> {},
     };
     const manager = new SessionManager(fakeTimer, repository);
-    const pool = new DevicePool(manager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, new FakeDeviceManager());
+    const pool = new DevicePool(
+      manager,
+      "test-daemon-session-id",
+      fakeTimer,
+      fakeAppsRepo,
+      new FakeDeviceManager(),
+    );
     const applySpy = spyOn(KeepScreenAwakeManager.prototype, "apply").mockResolvedValue({
       applied: false,
       skipReason: "disabled",
@@ -315,9 +363,13 @@ describe("ToolExecutionContext", () => {
     );
     await boundedPool.initializeWithDevices([createBootedDevice("device-1")]);
     let finishSetup!: () => void;
-    const setupFinished = new Promise<void>(resolve => { finishSetup = resolve; });
+    const setupFinished = new Promise<void>((resolve) => {
+      finishSetup = resolve;
+    });
     let setupStarted!: () => void;
-    const setupStartedPromise = new Promise<void>(resolve => { setupStarted = resolve; });
+    const setupStartedPromise = new Promise<void>((resolve) => {
+      setupStarted = resolve;
+    });
     AndroidCtrlProxyManager.getInstance = () =>
       ({
         resetSetupState: () => {},
@@ -326,25 +378,36 @@ describe("ToolExecutionContext", () => {
           await setupFinished;
           return { success: true, message: "ok" };
         },
-      } as any);
+      }) as any;
     AndroidCtrlProxyClient.getInstance = (() => ({
       waitForConnection: async () => true,
       close: async () => {},
     })) as any;
 
     try {
-      const context = createToolExecutionContext("session-setup-race", boundedSessionManager, boundedPool, sessionOptions);
+      const context = createToolExecutionContext(
+        "session-setup-race",
+        boundedSessionManager,
+        boundedPool,
+        sessionOptions,
+      );
       await setupStartedPromise;
       const release = boundedSessionManager.releaseSession("session-setup-race");
-      for (let attempt = 0; attempt < 10 && !boundedTimer.getPendingTimeouts().includes(1_000); attempt++) {
+      for (
+        let attempt = 0;
+        attempt < 10 && !boundedTimer.getPendingTimeouts().includes(1_000);
+        attempt++
+      ) {
         await Promise.resolve();
       }
       expect(boundedTimer.getPendingTimeouts()).toContain(1_000);
       boundedTimer.advanceTime(1_000);
       let releasedDevice: string | null | undefined;
-      void release.then(deviceId => { releasedDevice = deviceId; });
+      void release.then((deviceId) => {
+        releasedDevice = deviceId;
+      });
       for (let attempt = 0; attempt < 10 && releasedDevice === undefined; attempt++) {
-        await new Promise<void>(resolve => setImmediate(resolve));
+        await new Promise<void>((resolve) => setImmediate(resolve));
       }
       expect(releasedDevice).toBe("device-1");
       await boundedPool.releaseDevice("device-1", "session-setup-race");

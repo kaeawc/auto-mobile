@@ -1,6 +1,9 @@
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { Element } from "../../../src/models";
-import { NavigationGraphManager, type NavigationEdge } from "../../../src/features/navigation/NavigationGraphManager";
+import {
+  NavigationGraphManager,
+  type NavigationEdge,
+} from "../../../src/features/navigation/NavigationGraphManager";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import {
@@ -11,7 +14,7 @@ import {
   markEdgeTraversed,
   selectNextEdgeToTraverse,
   findElementMatchingEdge,
-  addPendingEdge
+  addPendingEdge,
 } from "../../../src/features/navigation/ExploreValidateMode";
 
 describe("ExploreValidateMode", () => {
@@ -24,7 +27,7 @@ describe("ExploreValidateMode", () => {
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     getInstanceSpy = spyOn(NavigationGraphManager, "getInstance").mockReturnValue(
-      fakeGraph as unknown as NavigationGraphManager
+      fakeGraph as unknown as NavigationGraphManager,
     );
   });
 
@@ -34,23 +37,27 @@ describe("ExploreValidateMode", () => {
 
   function createMockElement(overrides: Partial<Element> = {}): Element {
     return {
-      "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
-      "clickable": true,
-      "enabled": true,
-      "text": "Button",
-      "class": "android.widget.Button",
+      bounds: { left: 0, top: 0, right: 100, bottom: 50 },
+      clickable: true,
+      enabled: true,
+      text: "Button",
+      class: "android.widget.Button",
       "resource-id": "com.test:id/button",
-      ...overrides
+      ...overrides,
     } as Element;
   }
 
-  function createMockEdge(from: string, to: string, overrides: Partial<NavigationEdge> = {}): NavigationEdge {
+  function createMockEdge(
+    from: string,
+    to: string,
+    overrides: Partial<NavigationEdge> = {},
+  ): NavigationEdge {
     return {
       from,
       to,
       timestamp: Date.now(),
       edgeType: "tool",
-      ...overrides
+      ...overrides,
     };
   }
 
@@ -75,12 +82,16 @@ describe("ExploreValidateMode", () => {
         metadata: {},
         timestamp: Date.now(),
         sequenceNumber: 1,
-        applicationId: "com.test.app"
+        applicationId: "com.test.app",
       });
 
-      await navManager.recordToolCall("tapOn", { text: "Button1" }, {
-        selectedElements: [{ text: "Button1", resourceId: "btn1", contentDesc: "" }]
-      });
+      await navManager.recordToolCall(
+        "tapOn",
+        { text: "Button1" },
+        {
+          selectedElements: [{ text: "Button1", resourceId: "btn1", contentDesc: "" }],
+        },
+      );
 
       navManager.recordNavigationEvent({
         destination: "Screen2",
@@ -89,7 +100,7 @@ describe("ExploreValidateMode", () => {
         metadata: {},
         timestamp: Date.now(),
         sequenceNumber: 2,
-        applicationId: "com.test.app"
+        applicationId: "com.test.app",
       });
 
       const state = await initializeGraphTraversal(navManager);
@@ -106,8 +117,8 @@ describe("ExploreValidateMode", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
 
       const key = getEdgeKey(edge);
@@ -120,16 +131,16 @@ describe("ExploreValidateMode", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
 
       const edge2 = createMockEdge("A", "B", {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button" },
-          timestamp: 2000 // Different timestamp
-        }
+          timestamp: 2000, // Different timestamp
+        },
       });
 
       expect(getEdgeKey(edge1)).toBe(getEdgeKey(edge2));
@@ -140,16 +151,16 @@ describe("ExploreValidateMode", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button A" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
 
       const edge2 = createMockEdge("A", "B", {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button B" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
 
       expect(getEdgeKey(edge1)).not.toBe(getEdgeKey(edge2));
@@ -160,16 +171,16 @@ describe("ExploreValidateMode", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
 
       const edge2 = createMockEdge("B", "C", {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
 
       expect(getEdgeKey(edge1)).not.toBe(getEdgeKey(edge2));
@@ -191,8 +202,8 @@ describe("ExploreValidateMode", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Submit" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
 
       const hash1 = hashEdgeAction(edge);
@@ -206,16 +217,16 @@ describe("ExploreValidateMode", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button", timestamp: 1000 },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
 
       const edge2 = createMockEdge("A", "B", {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button", timestamp: 2000 },
-          timestamp: 2000
-        }
+          timestamp: 2000,
+        },
       });
 
       expect(hashEdgeAction(edge1)).toBe(hashEdgeAction(edge2));
@@ -226,16 +237,16 @@ describe("ExploreValidateMode", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button", enabled: true },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
 
       const edge2 = createMockEdge("A", "B", {
         interaction: {
           toolName: "tapOn",
           args: { enabled: true, text: "Button" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
 
       expect(hashEdgeAction(edge1)).toBe(hashEdgeAction(edge2));
@@ -270,8 +281,8 @@ describe("ExploreValidateMode", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
 
       markEdgeTraversed(state, edge, "B", true, fakeTimer);
@@ -286,8 +297,8 @@ describe("ExploreValidateMode", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
 
       markEdgeTraversed(state, edge, "B", true, fakeTimer, undefined, 0.95);
@@ -306,8 +317,8 @@ describe("ExploreValidateMode", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
 
       markEdgeTraversed(state, edge, "C", false, fakeTimer, "Went to wrong screen", 0.7);
@@ -325,8 +336,8 @@ describe("ExploreValidateMode", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
 
       addPendingEdge(state, edge);
@@ -347,8 +358,8 @@ describe("ExploreValidateMode", () => {
         interaction: {
           toolName: "tapOn",
           args: { text: "Button" },
-          timestamp: 1000
-        }
+          timestamp: 1000,
+        },
       });
       addPendingEdge(state, edge);
 
@@ -390,10 +401,10 @@ describe("ExploreValidateMode", () => {
     test("should keep the from-index in sync as edges are traversed", async () => {
       const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
       const edge1 = createMockEdge("Current", "A", {
-        interaction: { toolName: "tapOn", args: { text: "A" }, timestamp: 1 }
+        interaction: { toolName: "tapOn", args: { text: "A" }, timestamp: 1 },
       });
       const edge2 = createMockEdge("Current", "B", {
-        interaction: { toolName: "tapOn", args: { text: "B" }, timestamp: 2 }
+        interaction: { toolName: "tapOn", args: { text: "B" }, timestamp: 2 },
       });
       addPendingEdge(state, edge1);
       addPendingEdge(state, edge2);
@@ -412,7 +423,7 @@ describe("ExploreValidateMode", () => {
     test("addPendingEdge deduplicates by edge key", async () => {
       const state = await initializeGraphTraversal(fakeGraph as unknown as NavigationGraphManager);
       const edge = createMockEdge("Current", "A", {
-        interaction: { toolName: "tapOn", args: { text: "A" }, timestamp: 1 }
+        interaction: { toolName: "tapOn", args: { text: "A" }, timestamp: 1 },
       });
       addPendingEdge(state, edge);
       addPendingEdge(state, edge);
@@ -433,15 +444,11 @@ describe("ExploreValidateMode", () => {
     });
 
     test("should match element by resource-id", () => {
-      const elements = [
-        createMockElement({ "resource-id": "com.test:id/btn", "text": "Click" })
-      ];
+      const elements = [createMockElement({ "resource-id": "com.test:id/btn", text: "Click" })];
       const edge = createMockEdge("A", "B", {
         uiState: {
-          selectedElements: [
-            { resourceId: "com.test:id/btn", text: "", contentDesc: "" }
-          ]
-        }
+          selectedElements: [{ resourceId: "com.test:id/btn", text: "", contentDesc: "" }],
+        },
       });
 
       const result = findElementMatchingEdge(elements, edge);
@@ -452,15 +459,11 @@ describe("ExploreValidateMode", () => {
     });
 
     test("should match element by text", () => {
-      const elements = [
-        createMockElement({ text: "Submit Button" })
-      ];
+      const elements = [createMockElement({ text: "Submit Button" })];
       const edge = createMockEdge("A", "B", {
         uiState: {
-          selectedElements: [
-            { text: "Submit Button", resourceId: "", contentDesc: "" }
-          ]
-        }
+          selectedElements: [{ text: "Submit Button", resourceId: "", contentDesc: "" }],
+        },
       });
 
       const result = findElementMatchingEdge(elements, edge);
@@ -471,14 +474,12 @@ describe("ExploreValidateMode", () => {
 
     test("should return null when confidence is below threshold", () => {
       const elements = [
-        createMockElement({ "text": "Different Text", "resource-id": "different_id" })
+        createMockElement({ text: "Different Text", "resource-id": "different_id" }),
       ];
       const edge = createMockEdge("A", "B", {
         uiState: {
-          selectedElements: [
-            { text: "Submit", resourceId: "submit_btn", contentDesc: "" }
-          ]
-        }
+          selectedElements: [{ text: "Submit", resourceId: "submit_btn", contentDesc: "" }],
+        },
       });
 
       const result = findElementMatchingEdge(elements, edge);
@@ -488,15 +489,13 @@ describe("ExploreValidateMode", () => {
 
     test("should return best match when multiple elements match", () => {
       const elements = [
-        createMockElement({ "text": "Submit", "resource-id": "wrong_id" }),
-        createMockElement({ "text": "Submit", "resource-id": "com.test:id/submit" })
+        createMockElement({ text: "Submit", "resource-id": "wrong_id" }),
+        createMockElement({ text: "Submit", "resource-id": "com.test:id/submit" }),
       ];
       const edge = createMockEdge("A", "B", {
         uiState: {
-          selectedElements: [
-            { text: "Submit", resourceId: "com.test:id/submit", contentDesc: "" }
-          ]
-        }
+          selectedElements: [{ text: "Submit", resourceId: "com.test:id/submit", contentDesc: "" }],
+        },
       });
 
       const result = findElementMatchingEdge(elements, edge);
@@ -507,20 +506,16 @@ describe("ExploreValidateMode", () => {
     });
 
     test("should match using interaction uiState as fallback", () => {
-      const elements = [
-        createMockElement({ text: "Navigate" })
-      ];
+      const elements = [createMockElement({ text: "Navigate" })];
       const edge = createMockEdge("A", "B", {
         interaction: {
           toolName: "tapOn",
           args: { text: "Navigate" },
           timestamp: 1000,
           uiState: {
-            selectedElements: [
-              { text: "Navigate", resourceId: "", contentDesc: "" }
-            ]
-          }
-        }
+            selectedElements: [{ text: "Navigate", resourceId: "", contentDesc: "" }],
+          },
+        },
       });
 
       const result = findElementMatchingEdge(elements, edge);

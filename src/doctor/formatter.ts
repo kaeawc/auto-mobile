@@ -13,10 +13,10 @@ const STATUS_ICONS: Record<CheckStatus, string> = {
 };
 
 const STATUS_COLORS: Record<CheckStatus, string> = {
-  pass: "\x1b[32m",  // green
-  warn: "\x1b[33m",  // yellow
-  fail: "\x1b[31m",  // red
-  skip: "\x1b[90m",  // gray
+  pass: "\x1b[32m", // green
+  warn: "\x1b[33m", // yellow
+  fail: "\x1b[31m", // red
+  skip: "\x1b[90m", // gray
 };
 
 const RESET = "\x1b[0m";

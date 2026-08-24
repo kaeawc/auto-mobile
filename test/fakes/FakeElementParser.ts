@@ -8,7 +8,8 @@ export class FakeElementParser implements ElementParser {
   nextParsedNode: Element | null = null;
   nextRootNodes: ViewHierarchyNode[] = [];
   nextWindowRootGroups: ViewHierarchyNode[][] = [];
-  nextFlattenedElements: Array<{ element: Element; index: number; depth: number; text?: string }> = [];
+  nextFlattenedElements: Array<{ element: Element; index: number; depth: number; text?: string }> =
+    [];
 
   extractNodeProperties(_node: ViewHierarchyNode): any {
     return this.nextNodeProperties;
@@ -28,20 +29,22 @@ export class FakeElementParser implements ElementParser {
 
   extractWindowRootGroups(
     _viewHierarchy: ViewHierarchyResult,
-    _order?: "topmost-first" | "bottommost-first"
+    _order?: "topmost-first" | "bottommost-first",
   ): ViewHierarchyNode[][] {
     return this.nextWindowRootGroups;
   }
 
   extractWindowRootNodes(
     _viewHierarchy: ViewHierarchyResult,
-    _order?: "topmost-first" | "bottommost-first"
+    _order?: "topmost-first" | "bottommost-first",
   ): ViewHierarchyNode[] {
     return this.nextWindowRootGroups.flat();
   }
 
   traverseNode(node: any, callback: (node: any, depth: number) => void, depth: number = 0): void {
-    if (!node) {return;}
+    if (!node) {
+      return;
+    }
     callback(node, depth);
     const childNodes = node.node || node.children;
     if (childNodes) {
@@ -54,7 +57,7 @@ export class FakeElementParser implements ElementParser {
 
   flattenViewHierarchy(
     _viewHierarchy: ViewHierarchyResult,
-    _options?: { includeWindows?: boolean; windowOrder?: "topmost-first" | "bottommost-first" }
+    _options?: { includeWindows?: boolean; windowOrder?: "topmost-first" | "bottommost-first" },
   ): Array<{ element: Element; index: number; depth: number; text?: string }> {
     return this.nextFlattenedElements;
   }

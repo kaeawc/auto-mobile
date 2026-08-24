@@ -1,6 +1,6 @@
 # TalkBack Simulation
 
-<kbd>❌ Not Implemented</kbd> *(MCP tools)* · <kbd>✅ Implemented</kbd> *(ADB commands, validated)*
+<kbd>❌ Not Implemented</kbd> _(MCP tools)_ · <kbd>✅ Implemented</kbd> _(ADB commands, validated)_
 
 > **Current state:** The ADB commands for enabling/disabling real TalkBack are validated on API 35. Of the three proposed MCP tools, explicit focus control now ships as [`accessibilityFocus`](accessibility-focus.md) (set/clear the TalkBack cursor); `setTalkBackEnabled` and `announce` have **not been built**. The AccessibilityService infrastructure needed by simulated mode is available.
 >

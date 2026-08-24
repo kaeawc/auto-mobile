@@ -19,7 +19,7 @@ function fakeClock(): { nowMs: () => number; advance: (ms: number) => void } {
   let current = 1_000;
   return {
     nowMs: () => current,
-    advance: ms => {
+    advance: (ms) => {
       current += ms;
     },
   };
@@ -140,7 +140,7 @@ describe("#4343 capture stage timeline", () => {
       decodedSize: null,
     });
 
-    expect(record.stages.map(measurement => measurement.stage)).toEqual([
+    expect(record.stages.map((measurement) => measurement.stage)).toEqual([
       "startRequest",
       "whipConnected",
       "sourceStarted",
@@ -210,7 +210,7 @@ describe("#4343 capture stage timeline", () => {
         RUNNER_OS: "macOS",
         ImageOS: "macos26",
       } as NodeJS.ProcessEnv,
-      () => "2026-07-23T23:35:08.000Z"
+      () => "2026-07-23T23:35:08.000Z",
     );
 
     expect(onCi).toEqual({
@@ -242,7 +242,9 @@ describe("#4343 capture stage timeline", () => {
     clock.advance(1_500);
     timeline.mark("whipConnected");
 
-    const formatted = formatCaptureStageRecord(timeline.toRecord({ ...context, outcome: "failed" }));
+    const formatted = formatCaptureStageRecord(
+      timeline.toRecord({ ...context, outcome: "failed" }),
+    );
 
     expect(formatted).toContain("platform=android");
     expect(formatted).toContain("stream=device-capture-android");
@@ -254,7 +256,9 @@ describe("#4343 capture stage timeline", () => {
     expect(formatted).toContain("1500ms");
     expect(formatted).toContain("run=30053647851/2");
     expect(formatted).toContain("sha=e573c0cd5379cee61a1d9fffc1f1094fc86dc507");
-    expect(formatted).toContain("missing=sourceStarted,firstEncodedFrame,whepConnected,firstDecodedFrame");
+    expect(formatted).toContain(
+      "missing=sourceStarted,firstEncodedFrame,whepConnected,firstDecodedFrame",
+    );
   });
 
   test("formats unavailable context as none rather than dropping the field", () => {
@@ -269,7 +273,7 @@ describe("#4343 capture stage timeline", () => {
         decodedSize: null,
         egressKbps: null,
         decodedFps: null,
-      })
+      }),
     );
 
     expect(formatted).toContain("source=none");
@@ -325,8 +329,8 @@ describe("#4354 teardown phase instrumentation", () => {
           clock.advance(800);
           throw new Error("simctl refused");
         },
-        5_000
-      )
+        5_000,
+      ),
     ).rejects.toThrow("simctl refused");
 
     expect(timeline.toRecord(context).phases).toEqual([
@@ -345,8 +349,8 @@ describe("#4354 teardown phase instrumentation", () => {
           clock.advance(5_000);
           throw new Error("simctl killed after timeout");
         },
-        5_000
-      )
+        5_000,
+      ),
     ).rejects.toThrow("simctl killed after timeout");
 
     const phase = timeline.toRecord(context).phases[0];
@@ -378,11 +382,9 @@ describe("#4354 teardown phase instrumentation", () => {
     await timeline.runPhase("browserLaunch", async () => clock.advance(700));
     await timeline.runPhase("pipelineTeardown", async () => clock.advance(150));
 
-    expect(timeline.toRecord(context).phases.map(phase => `${phase.phase}:${phase.elapsedMs}`)).toEqual([
-      "daemonStartup:300",
-      "browserLaunch:700",
-      "pipelineTeardown:150",
-    ]);
+    expect(
+      timeline.toRecord(context).phases.map((phase) => `${phase.phase}:${phase.elapsedMs}`),
+    ).toEqual(["daemonStartup:300", "browserLaunch:700", "pipelineTeardown:150"]);
   });
 
   test("a passed pipeline outcome co-exists with a timed-out teardown phase in the record", async () => {
@@ -396,7 +398,7 @@ describe("#4354 teardown phase instrumentation", () => {
           clock.advance(5_000);
           throw new Error("simctl wedged");
         },
-        5_000
+        5_000,
       )
       .catch(() => undefined);
 
@@ -425,7 +427,7 @@ describe("#4354 teardown phase instrumentation", () => {
           clock.advance(5_000);
           throw new Error("simctl wedged");
         },
-        5_000
+        5_000,
       )
       .catch(() => undefined);
 
@@ -450,7 +452,11 @@ describe("#4354 teardown phase instrumentation", () => {
 });
 
 describe("#4349 egress bitrate and decoded fps between two inbound-rtp samples", () => {
-  const sample = (bytesReceived: number, framesDecoded: number, timestampMs: number): EgressSample => ({
+  const sample = (
+    bytesReceived: number,
+    framesDecoded: number,
+    timestampMs: number,
+  ): EgressSample => ({
     bytesReceived,
     framesDecoded,
     timestampMs,

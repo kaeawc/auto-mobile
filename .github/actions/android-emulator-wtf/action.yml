@@ -8,7 +8,7 @@ inputs:
     required: "true"
   script:
     description: "Script to execute once the emulator.wtf session is ready"
-    example: './gradlew :junit-runner:test'
+    example: "./gradlew :junit-runner:test"
     required: "true"
   working-directory:
     description: "Working directory"

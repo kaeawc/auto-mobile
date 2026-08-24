@@ -1,9 +1,6 @@
 import { NavigationGraphManager } from "./NavigationGraphManager";
 import { DefaultPathOptimizer } from "./DefaultPathOptimizer";
-import {
-  BackButtonRecommendation,
-  NavigationRecommendation
-} from "./interfaces/PathOptimizer";
+import { BackButtonRecommendation, NavigationRecommendation } from "./interfaces/PathOptimizer";
 
 /**
  * Helper class for smart navigation using back stack awareness.
@@ -30,12 +27,12 @@ export class SmartNavigationHelper {
   public static async shouldUseBackButton(
     currentScreen: string,
     targetScreen: string,
-    currentBackStackDepth: number
+    currentBackStackDepth: number,
   ): Promise<BackButtonRecommendation> {
     return await SmartNavigationHelper.getOptimizer().shouldUseBackButton(
       currentScreen,
       targetScreen,
-      currentBackStackDepth
+      currentBackStackDepth,
     );
   }
 
@@ -56,12 +53,12 @@ export class SmartNavigationHelper {
   public static async getNavigationRecommendation(
     targetScreen: string,
     currentScreen: string,
-    currentBackStackDepth: number
+    currentBackStackDepth: number,
   ): Promise<NavigationRecommendation> {
     return await SmartNavigationHelper.getOptimizer().getNavigationRecommendation(
       targetScreen,
       currentScreen,
-      currentBackStackDepth
+      currentBackStackDepth,
     );
   }
 

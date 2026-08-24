@@ -33,11 +33,11 @@ export class FakeInstalledAppsRepository implements InstalledAppsStore {
   }
 
   async listInstalledApps(deviceId: string): Promise<DbInstalledApp[]> {
-    return this.rows.filter(row => row.device_id === deviceId).map(row => ({ ...row }));
+    return this.rows.filter((row) => row.device_id === deviceId).map((row) => ({ ...row }));
   }
 
   async replaceInstalledApps(deviceId: string, apps: NewInstalledApp[]): Promise<void> {
-    this.rows = this.rows.filter(row => row.device_id !== deviceId);
+    this.rows = this.rows.filter((row) => row.device_id !== deviceId);
     for (const app of apps) {
       this.rows.push({ daemon_session_id: null, device_session_start: null, ...app });
     }
@@ -48,12 +48,11 @@ export class FakeInstalledAppsRepository implements InstalledAppsStore {
     userId: number,
     packageName: string,
     isSystem: boolean,
-    timestampMs: number
+    timestampMs: number,
   ): Promise<void> {
-    const existing = this.rows.find(row =>
-      row.device_id === deviceId &&
-      row.user_id === userId &&
-      row.package_name === packageName
+    const existing = this.rows.find(
+      (row) =>
+        row.device_id === deviceId && row.user_id === userId && row.package_name === packageName,
     );
 
     if (existing) {
@@ -70,19 +69,20 @@ export class FakeInstalledAppsRepository implements InstalledAppsStore {
       installed_at: timestampMs,
       last_verified_at: timestampMs,
       daemon_session_id: null,
-      device_session_start: null
+      device_session_start: null,
     });
   }
 
   async removeInstalledApp(deviceId: string, userId: number, packageName: string): Promise<void> {
-    this.rows = this.rows.filter(row =>
-      !(row.device_id === deviceId && row.user_id === userId && row.package_name === packageName)
+    this.rows = this.rows.filter(
+      (row) =>
+        !(row.device_id === deviceId && row.user_id === userId && row.package_name === packageName),
     );
   }
 
   async removeInstalledAppForDevice(deviceId: string, packageName: string): Promise<void> {
-    this.rows = this.rows.filter(row =>
-      !(row.device_id === deviceId && row.package_name === packageName)
+    this.rows = this.rows.filter(
+      (row) => !(row.device_id === deviceId && row.package_name === packageName),
     );
   }
 
@@ -111,20 +111,19 @@ export class FakeInstalledAppsRepository implements InstalledAppsStore {
   }
 
   async clearDeviceSession(deviceId: string): Promise<void> {
-    this.rows = this.rows.filter(row => row.device_id !== deviceId);
+    this.rows = this.rows.filter((row) => row.device_id !== deviceId);
   }
 
   async clearOldDaemonSessions(currentDaemonSessionId: string): Promise<void> {
-    this.rows = this.rows.filter(row =>
-      row.daemon_session_id === null ||
-      row.daemon_session_id === currentDaemonSessionId
+    this.rows = this.rows.filter(
+      (row) => row.daemon_session_id === null || row.daemon_session_id === currentDaemonSessionId,
     );
   }
 
   async setSessionTracking(
     daemonSessionId: string,
     deviceId: string,
-    deviceSessionStart: number
+    deviceSessionStart: number,
   ): Promise<void> {
     for (const row of this.rows) {
       if (row.device_id === deviceId && row.daemon_session_id === null) {

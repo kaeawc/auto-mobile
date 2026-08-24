@@ -92,9 +92,7 @@ describe("Daemon session-release signal wiring", () => {
         status: "expired",
         release_reason: "heartbeat-timeout",
       });
-      expect(emitted).toEqual([
-        { sessionId: "heartbeat-expired", reason: "heartbeat-timeout" },
-      ]);
+      expect(emitted).toEqual([{ sessionId: "heartbeat-expired", reason: "heartbeat-timeout" }]);
     } finally {
       unsubscribe();
       internals.heartbeatMonitor?.stop();
@@ -115,21 +113,26 @@ describe("Daemon session-release signal wiring", () => {
     const unsubscribe = SessionReleaseBroadcaster.subscribe((releasedSessionId) => {
       emitted.push(releasedSessionId);
     });
-    const markReleasedSpy = spyOn(repository, "markReleased")
-      .mockRejectedValue(new Error("database unavailable"));
+    const markReleasedSpy = spyOn(repository, "markReleased").mockRejectedValue(
+      new Error("database unavailable"),
+    );
 
     try {
-      await devicePool.initializeWithDevices([{
-        name: "Pixel",
-        deviceId,
-        platform: "android",
-      }]);
+      await devicePool.initializeWithDevices([
+        {
+          name: "Pixel",
+          deviceId,
+          platform: "android",
+        },
+      ]);
       await devicePool.assignDeviceToSession(sessionId, "android");
 
-      await expect(internals.cancelAndReleaseSession(
-        sessionId,
-        deviceLossCancellationReason(deviceId, "incident-1"),
-      )).rejects.toThrow("Failed to persist terminal release");
+      await expect(
+        internals.cancelAndReleaseSession(
+          sessionId,
+          deviceLossCancellationReason(deviceId, "incident-1"),
+        ),
+      ).rejects.toThrow("Failed to persist terminal release");
 
       expect(sessionManager.getSession(sessionId)).toBeNull();
       expect(sessionManager.getTerminalReleaseSnapshot(sessionId)).toMatchObject({
@@ -175,12 +178,16 @@ describe("Daemon session-release signal wiring", () => {
 
     try {
       await sessionManager.createSession("session-rebind-navigation", "emulator-old", "android");
-      const oldNavigation = NavigationGraphManager.getInstanceForSession("session-rebind-navigation");
+      const oldNavigation = NavigationGraphManager.getInstanceForSession(
+        "session-rebind-navigation",
+      );
       await oldNavigation.setCurrentApp("com.example.old");
 
       await sessionManager.rebindSession("session-rebind-navigation", "emulator-new", "android");
 
-      const reboundNavigation = NavigationGraphManager.getInstanceForSession("session-rebind-navigation");
+      const reboundNavigation = NavigationGraphManager.getInstanceForSession(
+        "session-rebind-navigation",
+      );
       expect(reboundNavigation).not.toBe(oldNavigation);
       expect(reboundNavigation.getCurrentAppId()).toBeNull();
     } finally {

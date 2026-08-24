@@ -24,7 +24,7 @@ describe("PlanExecutor — observe waitFor timeout", () => {
         systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
         awaitTimeout: true,
         awaitDuration: 5000,
-      })
+      }),
     );
     ToolRegistry.register("observe", "Mock observe timeout", observeSchema, observeHandler);
     (ToolRegistry.getTool("observe") as { requiresDevice: boolean }).requiresDevice = true;
@@ -34,7 +34,7 @@ describe("PlanExecutor — observe waitFor timeout", () => {
       "observeAwaitTimeoutChainNoop",
       "noop after observe",
       noopSchema,
-      mock(async () => createStructuredToolResponse({ success: true }))
+      mock(async () => createStructuredToolResponse({ success: true })),
     );
   });
 

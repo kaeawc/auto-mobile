@@ -24,24 +24,24 @@ function generateTestElements(count: number): Element[] {
     const y = Math.floor(i / 5) * 100 + 50;
 
     elements.push({
-      "index": i,
-      "text": `Text Element ${i}`,
+      index: i,
+      text: `Text Element ${i}`,
       "resource-id": `com.example:id/text_${i}`,
-      "class": "android.widget.TextView",
-      "package": "com.example",
+      class: "android.widget.TextView",
+      package: "com.example",
       "content-desc": "",
-      "checkable": false,
-      "checked": false,
-      "clickable": false,
-      "enabled": true,
-      "focusable": false,
-      "focused": false,
-      "scrollable": false,
+      checkable: false,
+      checked: false,
+      clickable: false,
+      enabled: true,
+      focusable: false,
+      focused: false,
+      scrollable: false,
       "long-clickable": false,
-      "password": false,
-      "selected": false,
-      "visible": true,
-      "bounds": {
+      password: false,
+      selected: false,
+      visible: true,
+      bounds: {
         left: x,
         top: y,
         right: x + 80,
@@ -61,7 +61,7 @@ async function runBenchmark(
   checker: ContrastChecker,
   screenshotPath: string,
   elements: Element[],
-  useBatch: boolean = false
+  useBatch: boolean = false,
 ): Promise<BenchmarkResult> {
   const startTime = performance.now();
 
@@ -88,7 +88,9 @@ async function runBenchmark(
  */
 function hitRate(hits: number, misses: number): string {
   const total = hits + misses;
-  if (total === 0) {return "N/A";}
+  if (total === 0) {
+    return "N/A";
+  }
   return `${((hits / total) * 100).toFixed(1)}%`;
 }
 
@@ -114,7 +116,7 @@ function printResults(results: BenchmarkResult[]): void {
       const improvement = ((baseline - results[i].duration) / baseline) * 100;
       const speedup = baseline / results[i].duration;
       console.log(
-        `${results[i].name.padEnd(35)} ${improvement.toFixed(1)}% faster (${speedup.toFixed(1)}x)`
+        `${results[i].name.padEnd(35)} ${improvement.toFixed(1)}% faster (${speedup.toFixed(1)}x)`,
       );
     }
   }
@@ -128,19 +130,19 @@ function printResults(results: BenchmarkResult[]): void {
       console.log(`\n${result.name}:`);
       console.log(
         `  Screenshots:  ${stats.screenshots.size.toString().padStart(3)} cached, ` +
-          `${hitRate(stats.screenshots.hits, stats.screenshots.misses)} hit rate`
+          `${hitRate(stats.screenshots.hits, stats.screenshots.misses)} hit rate`,
       );
       console.log(
         `  Color Pairs:  ${stats.colorPairs.size.toString().padStart(3)} cached, ` +
-          `${hitRate(stats.colorPairs.hits, stats.colorPairs.misses)} hit rate`
+          `${hitRate(stats.colorPairs.hits, stats.colorPairs.misses)} hit rate`,
       );
       console.log(
         `  Elements:     ${stats.elements.size.toString().padStart(3)} cached, ` +
-          `${hitRate(stats.elements.hits, stats.elements.misses)} hit rate`
+          `${hitRate(stats.elements.hits, stats.elements.misses)} hit rate`,
       );
       console.log(
         `  Backgrounds:  ${stats.backgrounds.size.toString().padStart(3)} cached, ` +
-          `${hitRate(stats.backgrounds.hits, stats.backgrounds.misses)} hit rate`
+          `${hitRate(stats.backgrounds.hits, stats.backgrounds.misses)} hit rate`,
       );
     }
   }
@@ -172,7 +174,7 @@ async function main() {
     enableBackgroundCache: false,
   });
   results.push(
-    await runBenchmark("1. Cold cache (no caching)", noCacheChecker, screenshotPath, elements)
+    await runBenchmark("1. Cold cache (no caching)", noCacheChecker, screenshotPath, elements),
   );
 
   // Scenario 2: Screenshot caching only
@@ -188,21 +190,31 @@ async function main() {
       "2. Screenshot caching only",
       screenshotCacheChecker,
       screenshotPath,
-      elements
-    )
+      elements,
+    ),
   );
 
   // Scenario 3: All caches enabled (first run)
   console.log("Running: All caches enabled (first run)...");
   const fullCacheChecker = new ContrastChecker();
   results.push(
-    await runBenchmark("3. All caches enabled (first run)", fullCacheChecker, screenshotPath, elements)
+    await runBenchmark(
+      "3. All caches enabled (first run)",
+      fullCacheChecker,
+      screenshotPath,
+      elements,
+    ),
   );
 
   // Scenario 4: All caches enabled (warm cache - same elements)
   console.log("Running: All caches enabled (warm cache)...");
   results.push(
-    await runBenchmark("4. All caches enabled (warm cache)", fullCacheChecker, screenshotPath, elements)
+    await runBenchmark(
+      "4. All caches enabled (warm cache)",
+      fullCacheChecker,
+      screenshotPath,
+      elements,
+    ),
   );
 
   // Scenario 5: Batch processing with cold cache
@@ -215,8 +227,8 @@ async function main() {
       batchChecker,
       screenshotPath,
       elements,
-      true
-    )
+      true,
+    ),
   );
 
   // Scenario 6: Batch processing with warm cache
@@ -227,8 +239,8 @@ async function main() {
       batchChecker,
       screenshotPath,
       elements,
-      true
-    )
+      true,
+    ),
   );
 
   // Print all results
@@ -247,19 +259,19 @@ async function main() {
 
   console.log(`First audit (50 elements):           ${baseline.toFixed(0)} ms`);
   console.log(
-    `Repeated audit (warm cache):         ${warmCache.toFixed(0)} ms (${warmCacheImprovement.toFixed(1)}x faster)`
+    `Repeated audit (warm cache):         ${warmCache.toFixed(0)} ms (${warmCacheImprovement.toFixed(1)}x faster)`,
   );
   console.log(
-    `Batch + warm cache:                  ${batchWarm.toFixed(0)} ms (${batchWarmImprovement.toFixed(1)}x faster)`
+    `Batch + warm cache:                  ${batchWarm.toFixed(0)} ms (${batchWarmImprovement.toFixed(1)}x faster)`,
   );
 
   console.log("\nTarget Goals from Issue #105:");
   console.log("  ✓ Screenshot loaded once per audit (not per element)");
   console.log(
-    `  ${warmCacheImprovement >= 10 ? "✓" : "✗"} Repeated audits ≥10x faster: ${warmCacheImprovement.toFixed(1)}x`
+    `  ${warmCacheImprovement >= 10 ? "✓" : "✗"} Repeated audits ≥10x faster: ${warmCacheImprovement.toFixed(1)}x`,
   );
   console.log(
-    `  ${batchWarmImprovement >= 10 ? "✓" : "✗"} Batch processing ≥10x faster: ${batchWarmImprovement.toFixed(1)}x`
+    `  ${batchWarmImprovement >= 10 ? "✓" : "✗"} Batch processing ≥10x faster: ${batchWarmImprovement.toFixed(1)}x`,
   );
 
   const screenshotStats = results[3].cacheStats?.screenshots;
@@ -269,14 +281,14 @@ async function main() {
     const screenshotHitRate =
       screenshotStats.hits / (screenshotStats.hits + screenshotStats.misses);
     console.log(
-      `  ${screenshotHitRate >= 0.95 ? "✓" : "✗"} Screenshot cache hit rate: ${(screenshotHitRate * 100).toFixed(1)}%`
+      `  ${screenshotHitRate >= 0.95 ? "✓" : "✗"} Screenshot cache hit rate: ${(screenshotHitRate * 100).toFixed(1)}%`,
     );
   }
 
   if (colorPairStats) {
     const colorHitRate = colorPairStats.hits / (colorPairStats.hits + colorPairStats.misses);
     console.log(
-      `  ${colorHitRate >= 0.8 ? "✓" : "✗"} Color pair cache hit rate >80%: ${(colorHitRate * 100).toFixed(1)}%`
+      `  ${colorHitRate >= 0.8 ? "✓" : "✗"} Color pair cache hit rate >80%: ${(colorHitRate * 100).toFixed(1)}%`,
     );
   }
 

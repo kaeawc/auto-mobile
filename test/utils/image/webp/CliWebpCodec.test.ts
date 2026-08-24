@@ -18,7 +18,7 @@ class FakeWebpBinaryProvider implements WebpBinaryProvider {
 
   constructor(
     private readonly cwebpOutput: Buffer | Error = Buffer.from("RIFFxxxxWEBPencoded"),
-    private readonly dwebpOutput: Buffer | Error = Buffer.from("png-output")
+    private readonly dwebpOutput: Buffer | Error = Buffer.from("png-output"),
   ) {}
 
   async resolveCwebp(): Promise<string> {
@@ -64,7 +64,7 @@ describe("CliWebpCodec", () => {
 
     expect(encoded.toString()).toBe("RIFFxxxxWEBPencoded");
     expect(provider.runs).toEqual([
-      { binary: "cwebp", args: ["-q", "60", "-o", "-", "--", "-"], input }
+      { binary: "cwebp", args: ["-q", "60", "-o", "-", "--", "-"], input },
     ]);
   });
 
@@ -87,16 +87,14 @@ describe("CliWebpCodec", () => {
     const decoded = await codec.decode(input);
 
     expect(decoded.toString()).toBe("png-output");
-    expect(provider.runs).toEqual([
-      { binary: "dwebp", args: ["-o", "-", "--", "-"], input }
-    ]);
+    expect(provider.runs).toEqual([{ binary: "dwebp", args: ["-o", "-", "--", "-"], input }]);
   });
 
   test("rejects encode output that is not WebP", async () => {
     const provider = new FakeWebpBinaryProvider(Buffer.from("not-webp"));
     const codec = new CliWebpCodec(provider);
 
-    const thrown = await codec.encode(Buffer.from("png")).catch(error => error);
+    const thrown = await codec.encode(Buffer.from("png")).catch((error) => error);
 
     expect(thrown).toBeInstanceOf(ActionableError);
     expect(thrown.message).toContain("WebP");
@@ -107,7 +105,7 @@ describe("CliWebpCodec", () => {
     const provider = new FakeWebpBinaryProvider();
     const codec = new CliWebpCodec(provider);
 
-    const thrown = await codec.decode(Buffer.from("not-webp")).catch(error => error);
+    const thrown = await codec.decode(Buffer.from("not-webp")).catch((error) => error);
 
     expect(thrown).toBeInstanceOf(ActionableError);
     expect(thrown.message).toContain("WebP");
@@ -115,11 +113,13 @@ describe("CliWebpCodec", () => {
   });
 
   test("propagates resolver execution failures unchanged", async () => {
-    const failure = new ActionableError("cwebp failed (exited with code 1: bad webp). Set AUTOMOBILE_CWEBP_PATH to a working cwebp binary.");
+    const failure = new ActionableError(
+      "cwebp failed (exited with code 1: bad webp). Set AUTOMOBILE_CWEBP_PATH to a working cwebp binary.",
+    );
     const provider = new FakeWebpBinaryProvider(failure);
     const codec = new CliWebpCodec(provider);
 
-    const thrown = await codec.encode(Buffer.from("png")).catch(error => error);
+    const thrown = await codec.encode(Buffer.from("png")).catch((error) => error);
 
     expect(thrown).toBe(failure);
   });

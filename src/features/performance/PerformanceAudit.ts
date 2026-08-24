@@ -1,4 +1,7 @@
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { BootedDevice, ScreenSize } from "../../models";
@@ -104,7 +107,7 @@ export class PerformanceAudit {
     packageName: string,
     screenSize?: ScreenSize,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    options?: CollectMetricsOptions
+    options?: CollectMetricsOptions,
   ): Promise<PerformanceMetrics> {
     const opts = options ?? {};
     logger.info(`[PerformanceAudit] Collecting metrics for ${packageName}`);
@@ -161,19 +164,20 @@ export class PerformanceAudit {
    */
   private async collectGfxMetrics(
     packageName: string,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
   ): Promise<Partial<PerformanceMetrics>> {
     try {
       const { stdout } = await perf.track("adbGfxinfo", () =>
-        this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`)
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
       );
 
       const metrics = this.idle.parseMetrics(stdout);
 
       // Calculate jank count as sum of all jank indicators
-      const jankCount = (metrics.missedVsync || 0) +
-                        (metrics.slowUiThread || 0) +
-                        (metrics.frameDeadlineMissed || 0);
+      const jankCount =
+        (metrics.missedVsync || 0) +
+        (metrics.slowUiThread || 0) +
+        (metrics.frameDeadlineMissed || 0);
 
       return {
         p50Ms: metrics.percentile50th,
@@ -207,12 +211,12 @@ export class PerformanceAudit {
    */
   private async collectCpuMetrics(
     packageName: string,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
   ): Promise<Partial<PerformanceMetrics>> {
     try {
       // Get process ID
       const { stdout: pidOutput } = await perf.track("adbGetPid", () =>
-        this.adb.executeCommand(`shell pidof ${packageName}`)
+        this.adb.executeCommand(`shell pidof ${packageName}`),
       );
 
       const pid = pidOutput.trim();
@@ -227,13 +231,13 @@ export class PerformanceAudit {
 
       // Get thread count
       const { stdout: threadOutput } = await perf.track("adbThreadCount", () =>
-        this.adb.executeCommand(`shell ps -T -p ${pid} | wc -l`)
+        this.adb.executeCommand(`shell ps -T -p ${pid} | wc -l`),
       );
       const threadCount = parseInt(threadOutput.trim(), 10) - 1; // Subtract header line
 
       // Get CPU stats from /proc/{pid}/stat
       const { stdout: statOutput } = await perf.track("adbCpuStat", () =>
-        this.adb.executeCommand(`shell cat /proc/${pid}/stat`)
+        this.adb.executeCommand(`shell cat /proc/${pid}/stat`),
       );
 
       // Parse CPU usage
@@ -245,16 +249,14 @@ export class PerformanceAudit {
 
       // Get system uptime to calculate CPU percentage
       const { stdout: uptimeOutput } = await perf.track("adbUptime", () =>
-        this.adb.executeCommand("shell cat /proc/uptime")
+        this.adb.executeCommand("shell cat /proc/uptime"),
       );
       const uptimeSeconds = parseFloat(uptimeOutput.split(" ")[0] || "0");
 
       // CPU usage = (total_time / uptime) * 100
       // Note: This is a simplified calculation. For more accurate results,
       // we should measure delta over time
-      const cpuUsagePercent = uptimeSeconds > 0
-        ? (totalTime / (uptimeSeconds * 100)) * 100
-        : null;
+      const cpuUsagePercent = uptimeSeconds > 0 ? (totalTime / (uptimeSeconds * 100)) * 100 : null;
 
       return {
         cpuUsagePercent,
@@ -276,16 +278,16 @@ export class PerformanceAudit {
    */
   private async checkForAnr(
     packageName: string,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
   ): Promise<Partial<PerformanceMetrics>> {
     try {
       const { stdout } = await perf.track("adbCheckAnr", () =>
-        this.adb.executeCommand(`shell dumpsys activity processes | grep -A 20 "${packageName}"`)
+        this.adb.executeCommand(`shell dumpsys activity processes | grep -A 20 "${packageName}"`),
       );
 
       // Look for ANR indicators
-      const anrDetected = stdout.toLowerCase().includes("anr") ||
-                         stdout.toLowerCase().includes("not responding");
+      const anrDetected =
+        stdout.toLowerCase().includes("anr") || stdout.toLowerCase().includes("not responding");
 
       return {
         anrDetected,
@@ -308,27 +310,36 @@ export class PerformanceAudit {
   private async measureTouchLatency(
     packageName: string,
     screenSize: ScreenSize | undefined,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
   ): Promise<number | null> {
     // Only measure touch latency when UI performance mode is enabled
     if (!serverConfig.isUiPerfModeEnabled()) {
-      logger.debug("[PerformanceAudit] Touch latency measurement skipped (--ui-perf-mode not enabled)");
+      logger.debug(
+        "[PerformanceAudit] Touch latency measurement skipped (--ui-perf-mode not enabled)",
+      );
       return null;
     }
 
     // Screen size is required for touch latency measurement
     if (!screenSize) {
-      logger.warn("[PerformanceAudit] Touch latency measurement skipped (screen size not provided)");
+      logger.warn(
+        "[PerformanceAudit] Touch latency measurement skipped (screen size not provided)",
+      );
       return null;
     }
 
     try {
       logger.info("[PerformanceAudit] Measuring touch latency with synthetic touches");
       const result = await perf.track("touchLatencyMeasurement", () =>
-        this.touchLatencyTracker.measureLatency(packageName, screenSize, {
-          sampleCount: 3,
-          maxWaitMs: 200
-        }, perf)
+        this.touchLatencyTracker.measureLatency(
+          packageName,
+          screenSize,
+          {
+            sampleCount: 3,
+            maxWaitMs: 200,
+          },
+          perf,
+        ),
       );
 
       if (result.success) {
@@ -350,11 +361,11 @@ export class PerformanceAudit {
    */
   private async calculateFrameRate(
     packageName: string,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
   ): Promise<number | null> {
     try {
       const { stdout } = await perf.track("adbGfxinfoFrameRate", () =>
-        this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`)
+        this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
       );
 
       // Parse "Total frames rendered: N"
@@ -391,7 +402,7 @@ export class PerformanceAudit {
       if (jankyFrames > 0 && totalFrames > 0) {
         const normalFrames = totalFrames - jankyFrames;
         const frameTimeTarget = 1000 / refreshRate;
-        const totalTime = (normalFrames * frameTimeTarget) + (jankyFrames * frameTimeTarget * 2);
+        const totalTime = normalFrames * frameTimeTarget + jankyFrames * frameTimeTarget * 2;
         const fps = (totalFrames * 1000) / totalTime;
         return Math.min(fps, refreshRate);
       }
@@ -410,15 +421,15 @@ export class PerformanceAudit {
    */
   private async measureTimeToFirstFrame(
     packageName: string,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
   ): Promise<number | null> {
     try {
       // Clear logcat and launch the app to measure fresh TTFF
       // This looks for recent "Displayed" entries in logcat
       const { stdout } = await perf.track("adbLogcatTtff", () =>
         this.adb.executeCommand(
-          `shell "logcat -d -s ActivityManager:I | grep -E 'Displayed.*${packageName}' | tail -1"`
-        )
+          `shell "logcat -d -s ActivityManager:I | grep -E 'Displayed.*${packageName}' | tail -1"`,
+        ),
       );
 
       if (!stdout.trim()) {
@@ -462,7 +473,7 @@ export class PerformanceAudit {
   private async measureTimeToInteractive(
     packageName: string,
     ttffMs: number,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
   ): Promise<number | null> {
     try {
       const stabilityCheckIntervalMs = 100;
@@ -475,7 +486,7 @@ export class PerformanceAudit {
       while (elapsedMs < maxWaitMs) {
         // Reset gfxinfo to start fresh measurement
         await perf.track("adbGfxinfoTtiReset", () =>
-          this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName} reset`)
+          this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName} reset`),
         );
 
         // Wait for check interval
@@ -484,13 +495,14 @@ export class PerformanceAudit {
 
         // Get metrics after interval
         const { stdout: afterStdout } = await perf.track("adbGfxinfoTtiAfter", () =>
-          this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`)
+          this.adb.executeCommand(`shell dumpsys gfxinfo ${packageName}`),
         );
 
         const metrics = this.idle.parseMetrics(afterStdout);
-        const hasJank = (metrics.missedVsync || 0) > 0 ||
-                       (metrics.slowUiThread || 0) > 0 ||
-                       (metrics.frameDeadlineMissed || 0) > 0;
+        const hasJank =
+          (metrics.missedVsync || 0) > 0 ||
+          (metrics.slowUiThread || 0) > 0 ||
+          (metrics.frameDeadlineMissed || 0) > 0;
 
         if (hasJank) {
           stableStartTime = null;
@@ -528,7 +540,7 @@ export class PerformanceAudit {
       jankCountThreshold: number;
       cpuUsageThresholdPercent: number;
       touchLatencyThresholdMs: number;
-    }
+    },
   ): PerformanceViolation[] {
     const violations: PerformanceViolation[] = [];
 
@@ -585,8 +597,10 @@ export class PerformanceAudit {
     }
 
     // Check CPU usage
-    if (metrics.cpuUsagePercent !== null &&
-        metrics.cpuUsagePercent > thresholds.cpuUsageThresholdPercent) {
+    if (
+      metrics.cpuUsagePercent !== null &&
+      metrics.cpuUsagePercent > thresholds.cpuUsageThresholdPercent
+    ) {
       violations.push({
         metric: "cpuUsage",
         threshold: thresholds.cpuUsageThresholdPercent,
@@ -597,8 +611,10 @@ export class PerformanceAudit {
     }
 
     // Check touch latency
-    if (metrics.touchLatencyMs !== null &&
-        metrics.touchLatencyMs > thresholds.touchLatencyThresholdMs) {
+    if (
+      metrics.touchLatencyMs !== null &&
+      metrics.touchLatencyMs > thresholds.touchLatencyThresholdMs
+    ) {
       violations.push({
         metric: "touchLatency",
         threshold: thresholds.touchLatencyThresholdMs,
@@ -625,10 +641,7 @@ export class PerformanceAudit {
   /**
    * Generate weighted diagnostic output based on violations
    */
-  generateDiagnostics(
-    metrics: PerformanceMetrics,
-    violations: PerformanceViolation[]
-  ): string {
+  generateDiagnostics(metrics: PerformanceMetrics, violations: PerformanceViolation[]): string {
     if (violations.length === 0) {
       return "No performance issues detected";
     }
@@ -647,8 +660,8 @@ export class PerformanceAudit {
     diagnostics += "\nDiagnostic details:\n";
 
     // Include gfxinfo if we have frame timing issues
-    const hasFrameIssues = topContributors.some(v =>
-      ["p50", "p90", "p95", "p99", "jankCount"].includes(v.metric)
+    const hasFrameIssues = topContributors.some((v) =>
+      ["p50", "p90", "p95", "p99", "jankCount"].includes(v.metric),
     );
     if (hasFrameIssues && metrics.gfxinfoRaw) {
       diagnostics += "\n--- GFXINFO DUMP ---\n";
@@ -657,7 +670,7 @@ export class PerformanceAudit {
     }
 
     // Include CPU stats if we have CPU issues
-    const hasCpuIssues = topContributors.some(v => v.metric === "cpuUsage");
+    const hasCpuIssues = topContributors.some((v) => v.metric === "cpuUsage");
     if (hasCpuIssues && metrics.cpuStatsRaw) {
       diagnostics += "\n--- CPU STATS ---\n";
       diagnostics += `Thread count: ${metrics.threadCount}\n`;
@@ -692,7 +705,7 @@ export class PerformanceAudit {
       touchLatencyThresholdMs: number;
     },
     screenSize?: ScreenSize,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<PerformanceAuditResult> {
     logger.info(`[PerformanceAudit] Running audit for ${packageName}`);
 
@@ -706,9 +719,8 @@ export class PerformanceAudit {
     const violations = this.validateMetrics(metrics, thresholds);
 
     // Generate diagnostics
-    const diagnostics = violations.length > 0
-      ? this.generateDiagnostics(metrics, violations)
-      : null;
+    const diagnostics =
+      violations.length > 0 ? this.generateDiagnostics(metrics, violations) : null;
 
     const passed = violations.length === 0;
     const sessionId = new Date().toISOString().split("T")[0];

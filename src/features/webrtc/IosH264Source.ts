@@ -218,7 +218,10 @@ export interface IosFrameCaptureHelper {
   on(event: "malformed", listener: (error: MalformedFrameError) => void): this;
   on(event: "stderr", listener: (line: string) => void): this;
   on(event: "readiness", listener: (status: IosScreenCaptureReadiness) => void): this;
-  on(event: "exit", listener: (info: { code: number | null; signal: NodeJS.Signals | null }) => void): this;
+  on(
+    event: "exit",
+    listener: (info: { code: number | null; signal: NodeJS.Signals | null }) => void,
+  ): this;
   on(event: "error", listener: (error: Error) => void): this;
 }
 
@@ -233,13 +236,13 @@ export interface IosH264EncoderProcess {
 
 export type IosH264EncoderSpawner = (command: string, args: string[]) => IosH264EncoderProcess;
 export type IosFrameCaptureHelperFactory = (
-  options: IosScreenCaptureHelperOptions
+  options: IosScreenCaptureHelperOptions,
 ) => IosFrameCaptureHelper;
 export type IosSimulatorWindowResolver = (
   helperPath: string,
   device: BootedDevice,
   audioEnabled: boolean,
-  signal: AbortSignal
+  signal: AbortSignal,
 ) => Promise<number>;
 
 interface CommandResult {
@@ -249,7 +252,11 @@ interface CommandResult {
   signal: NodeJS.Signals | null;
 }
 
-type CommandRunner = (command: string, args: string[], signal?: AbortSignal) => Promise<CommandResult>;
+type CommandRunner = (
+  command: string,
+  args: string[],
+  signal?: AbortSignal,
+) => Promise<CommandResult>;
 
 const defaultCommandRunner: CommandRunner = (command, args, signal) =>
   new Promise((resolve, reject) => {
@@ -273,15 +280,15 @@ const defaultCommandRunner: CommandRunner = (command, args, signal) =>
       child.kill("SIGTERM");
       finish(() => reject(new Error(`Command aborted: ${command}`)));
     };
-    child.stdout.on("data", chunk => {
+    child.stdout.on("data", (chunk) => {
       stdout += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
     });
-    child.stderr.on("data", chunk => {
+    child.stderr.on("data", (chunk) => {
       stderr += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
     });
-    child.once("error", error => finish(() => reject(error)));
+    child.once("error", (error) => finish(() => reject(error)));
     child.once("exit", (exitCode, exitSignal) =>
-      finish(() => resolve({ stdout, stderr, exitCode, signal: exitSignal }))
+      finish(() => resolve({ stdout, stderr, exitCode, signal: exitSignal })),
     );
     signal?.addEventListener("abort", abort, { once: true });
   });
@@ -442,25 +449,28 @@ export class IosH264Source implements H264CaptureSource {
 
   constructor(private readonly options: IosH264SourceOptions) {
     this.helperPath = options.helperPath;
-    this.ffmpegPath =
-      resolveFfmpegBinary({
-        explicitPath: options.ffmpegPath,
-        environmentKeys: [IOS_WEBRTC_FFMPEG_ENV, IOS_WEBRTC_FFMPEG_ENV_ALIAS],
-      });
-    this.fps = options.fps ?? DEFAULT_IOS_WEBRTC_FPS;
-    this.createHelper = options.createHelper ?? (helperOptions => new IOSScreenCaptureHelper(helperOptions));
-    this.ffmpegClient = options.ffmpegClient ?? new DefaultFfmpegClient({
-      binaryPath: this.ffmpegPath,
-      spawn: options.spawner
-        ? (binaryPath, args) => {
-          // eslint-disable-next-line auto-mobile/no-unknown-cast -- The injected test spawner implements the process members FfmpegClient consumes.
-          return options.spawner!(binaryPath, args) as unknown as FfmpegProcess;
-        }
-        : undefined,
+    this.ffmpegPath = resolveFfmpegBinary({
+      explicitPath: options.ffmpegPath,
+      environmentKeys: [IOS_WEBRTC_FFMPEG_ENV, IOS_WEBRTC_FFMPEG_ENV_ALIAS],
     });
+    this.fps = options.fps ?? DEFAULT_IOS_WEBRTC_FPS;
+    this.createHelper =
+      options.createHelper ?? ((helperOptions) => new IOSScreenCaptureHelper(helperOptions));
+    this.ffmpegClient =
+      options.ffmpegClient ??
+      new DefaultFfmpegClient({
+        binaryPath: this.ffmpegPath,
+        spawn: options.spawner
+          ? (binaryPath, args) => {
+              // eslint-disable-next-line auto-mobile/no-unknown-cast -- The injected test spawner implements the process members FfmpegClient consumes.
+              return options.spawner!(binaryPath, args) as unknown as FfmpegProcess;
+            }
+          : undefined,
+      });
     this.commandRunner = options.commandRunner ?? defaultCommandRunner;
     this.helperPathExists = options.helperPathExists;
-    this.screenCaptureHelperProvider = options.screenCaptureHelperProvider ?? ScreenCaptureHelperProvider.getInstance();
+    this.screenCaptureHelperProvider =
+      options.screenCaptureHelperProvider ?? ScreenCaptureHelperProvider.getInstance();
     this.timer = options.timer ?? defaultTimer;
     this.firstFrameTimeoutMs = options.firstFrameTimeoutMs ?? IOS_FIRST_FRAME_TIMEOUT_MS;
     this.pendingFrames = new LatestFrameQueue({
@@ -474,14 +484,21 @@ export class IosH264Source implements H264CaptureSource {
     this.simulatorWindowResolver =
       options.simulatorWindowResolver ??
       ((helperPath, device, audioEnabled, signal) =>
-        defaultResolveSimulatorWindowId(helperPath, device, this.commandRunner, audioEnabled, signal));
+        defaultResolveSimulatorWindowId(
+          helperPath,
+          device,
+          this.commandRunner,
+          audioEnabled,
+          signal,
+        ));
     this.forceRaw = options.forceRawPipeline ?? readForceRawPipeline(process.env);
   }
 
   /** Resolve running-phase reconnect options against their defaults. */
-  private static resolveRunningReconnect(
-    options: IosH264SourceOptions
-  ): { maxAttempts: number; backoff: BackoffPolicy } {
+  private static resolveRunningReconnect(options: IosH264SourceOptions): {
+    maxAttempts: number;
+    backoff: BackoffPolicy;
+  } {
     return {
       maxAttempts: options.runningReconnectMaxAttempts ?? IOS_RUNNING_RECONNECT_MAX_ATTEMPTS,
       backoff: normalizeBackoff(options.runningReconnectBackoff ?? IOS_RUNNING_RECONNECT_BACKOFF),
@@ -568,7 +585,7 @@ export class IosH264Source implements H264CaptureSource {
       this.encodedFellBack = true;
       await this.stopCurrentHelper();
       logger.warn(
-        `[IosH264Source] helper cannot encode in-process; falling back to the raw ffmpeg pipeline: ${error.message}`
+        `[IosH264Source] helper cannot encode in-process; falling back to the raw ffmpeg pipeline: ${error.message}`,
       );
       return false;
     }
@@ -582,7 +599,11 @@ export class IosH264Source implements H264CaptureSource {
   private async establishRaw(helperPath: string, target: CaptureTarget): Promise<void> {
     this.mode = "raw";
     this.encodeSettings = null;
-    await validateFfmpegAvailability(this.ffmpegClient, this.ffmpegPath, this.options.commandRunner);
+    await validateFfmpegAvailability(
+      this.ffmpegClient,
+      this.ffmpegPath,
+      this.options.commandRunner,
+    );
     if (!this.isActive()) {
       return;
     }
@@ -744,7 +765,7 @@ export class IosH264Source implements H264CaptureSource {
    */
   private async reapOutgoingEncoder(encoder: IosH264EncoderProcess): Promise<void> {
     let exited = false;
-    const exitPromise = new Promise<void>(resolve => {
+    const exitPromise = new Promise<void>((resolve) => {
       encoder.once("exit", () => {
         exited = true;
         resolve();
@@ -754,7 +775,7 @@ export class IosH264Source implements H264CaptureSource {
     encoder.kill("SIGTERM");
 
     let timeout: NodeJS.Timeout | undefined;
-    const timedOut = new Promise<void>(resolve => {
+    const timedOut = new Promise<void>((resolve) => {
       timeout = this.timer.setTimeout(resolve, IOS_ENCODER_RESTART_GRACE_MS);
     });
     try {
@@ -767,7 +788,7 @@ export class IosH264Source implements H264CaptureSource {
 
     if (!exited) {
       logger.warn(
-        `[IosH264Source] outgoing ffmpeg encoder did not exit within ${IOS_ENCODER_RESTART_GRACE_MS}ms after SIGTERM; escalating to SIGKILL`
+        `[IosH264Source] outgoing ffmpeg encoder did not exit within ${IOS_ENCODER_RESTART_GRACE_MS}ms after SIGTERM; escalating to SIGKILL`,
       );
       encoder.kill("SIGKILL");
     }
@@ -787,8 +808,13 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   private async resolveHelperPath(): Promise<string> {
-    const configuredPath = this.helperPath ??
-      readEnvWithLegacy(process.env, IOS_SCREEN_CAPTURE_HELPER_ENV, IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS);
+    const configuredPath =
+      this.helperPath ??
+      readEnvWithLegacy(
+        process.env,
+        IOS_SCREEN_CAPTURE_HELPER_ENV,
+        IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS,
+      );
     if (configuredPath) {
       return resolveIosScreenCaptureHelperPath(configuredPath, {
         exists: this.helperPathExists,
@@ -802,7 +828,7 @@ export class IosH264Source implements H264CaptureSource {
     }
     throw new ActionableError(
       "iOS WebRTC streaming requires a verified screen-capture-helper from the matching GitHub Release. " +
-      `For local development, run swift build in ios/screen-capture and set ${IOS_SCREEN_CAPTURE_HELPER_ENV} to the resulting absolute path.`
+        `For local development, run swift build in ios/screen-capture and set ${IOS_SCREEN_CAPTURE_HELPER_ENV} to the resulting absolute path.`,
     );
   }
 
@@ -820,18 +846,22 @@ export class IosH264Source implements H264CaptureSource {
       };
       const timeout = this.timer.setTimeout(() => {
         controller.abort();
-        finish(() => reject(new ActionableError(
-          `Timed out resolving iOS Simulator window for ${this.options.device.name} after ${IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS}ms. Open the Simulator window and verify Screen Recording permission.`
-        )));
+        finish(() =>
+          reject(
+            new ActionableError(
+              `Timed out resolving iOS Simulator window for ${this.options.device.name} after ${IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS}ms. Open the Simulator window and verify Screen Recording permission.`,
+            ),
+          ),
+        );
       }, IOS_SIMULATOR_TARGET_RESOLUTION_TIMEOUT_MS);
       void this.simulatorWindowResolver(
         helperPath,
         this.options.device,
         this.options.audioEnabled === true,
-        controller.signal
+        controller.signal,
       ).then(
-        windowID => finish(() => resolve(windowID)),
-        error => finish(() => reject(error))
+        (windowID) => finish(() => resolve(windowID)),
+        (error) => finish(() => reject(error)),
       );
     });
   }
@@ -843,7 +873,10 @@ export class IosH264Source implements H264CaptureSource {
     return this.createHelper(options);
   }
 
-  private async startCaptureWithSimulatorRetry(helperPath: string, target: CaptureTarget): Promise<void> {
+  private async startCaptureWithSimulatorRetry(
+    helperPath: string,
+    target: CaptureTarget,
+  ): Promise<void> {
     const shouldRetryNoFirstFrame = target.kind === "simulator" && !this.options.createHelper;
     let currentTarget = target;
     for (let attempt = 0; ; attempt++) {
@@ -874,7 +907,7 @@ export class IosH264Source implements H264CaptureSource {
         // The failed lease is invalidated above, so one new ScreenCaptureKit session
         // can recover a transient no-frame startup without surfacing a warning.
         logger.debug(
-          `[IosH264Source] no first frame from pooled Simulator helper for ${describeCaptureTarget(currentTarget)}; retrying once`
+          `[IosH264Source] no first frame from pooled Simulator helper for ${describeCaptureTarget(currentTarget)}; retrying once`,
         );
         // A Simulator relaunch/reboot/window-recreation between attempts changes the
         // CGWindowID, so reusing the stale windowID would deterministically retry
@@ -888,7 +921,7 @@ export class IosH264Source implements H264CaptureSource {
 
   private async reresolveSimulatorTarget(
     helperPath: string,
-    target: CaptureTarget
+    target: CaptureTarget,
   ): Promise<CaptureTarget> {
     if (target.kind !== "simulator") {
       return target;
@@ -904,13 +937,15 @@ export class IosH264Source implements H264CaptureSource {
     }
     logger.debug(
       `[IosH264Source] Simulator windowID changed from ${target.windowID} to ${windowID} before retry; ` +
-      "targeting the freshly-resolved window"
+        "targeting the freshly-resolved window",
     );
     return { ...target, windowID };
   }
 
   private async startCaptureAttempt(helperPath: string, target: CaptureTarget): Promise<void> {
-    logger.info(`[IosH264Source] starting screen-capture-helper for ${describeCaptureTarget(target)}`);
+    logger.info(
+      `[IosH264Source] starting screen-capture-helper for ${describeCaptureTarget(target)}`,
+    );
     this.lastReadinessPhase = null;
     this.requiredPermission = null;
     this.requiredPermissionTarget = defaultScreenRecordingApprovalTarget(helperPath);
@@ -934,7 +969,10 @@ export class IosH264Source implements H264CaptureSource {
    * the encode capability surfaces {@link EncodedUnsupportedError} to trigger the
    * raw fallback (issue #4789).
    */
-  private async startEncodedCaptureAttempt(helper: IosFrameCaptureHelper, target: CaptureTarget): Promise<void> {
+  private async startEncodedCaptureAttempt(
+    helper: IosFrameCaptureHelper,
+    target: CaptureTarget,
+  ): Promise<void> {
     this.encodedCapabilityConfirmed = false;
     this.wireEncodedHelper(helper);
     const firstAudio = this.options.audioEnabled ? this.waitForFirstAudio(helper) : null;
@@ -974,17 +1012,19 @@ export class IosH264Source implements H264CaptureSource {
         this.phase = "running";
         finish(resolve);
       });
-      helper.on("stderr", line => {
+      helper.on("stderr", (line) => {
         if (this.helper !== helper || !this.isActive()) {
           return;
         }
         if (isNoFramesPermissionWarning(line)) {
-          finish(() => reject(makeScreenRecordingPermissionHintError(target, this.lastReadinessPhase)));
+          finish(() =>
+            reject(makeScreenRecordingPermissionHintError(target, this.lastReadinessPhase)),
+          );
         } else if (isHelperError(line)) {
           finish(() => reject(this.helperFailureFor(line)));
         }
       });
-      helper.on("error", error => {
+      helper.on("error", (error) => {
         if (this.helper !== helper || !this.isActive()) {
           return;
         }
@@ -994,12 +1034,15 @@ export class IosH264Source implements H264CaptureSource {
         }
         finish(() => reject(error));
       });
-      helper.on("exit", info => {
+      helper.on("exit", (info) => {
         if (this.helper !== helper || !this.isActive()) {
           return;
         }
-        const stderr = this.lastHelperStderr === null ? "" : `; last stderr: ${this.lastHelperStderr}`;
-        const error = new Error(`screen-capture-helper exited (code=${info.code}, signal=${info.signal})${stderr}`);
+        const stderr =
+          this.lastHelperStderr === null ? "" : `; last stderr: ${this.lastHelperStderr}`;
+        const error = new Error(
+          `screen-capture-helper exited (code=${info.code}, signal=${info.signal})${stderr}`,
+        );
         if (firstFrameSeen) {
           this.failIfCurrentHelper(helper, error);
           return;
@@ -1029,7 +1072,13 @@ export class IosH264Source implements H264CaptureSource {
       const cancel = (): void => finish(resolve);
       const rejectWait = (error: Error): void => finish(() => reject(error));
       const timeout = this.timer.setTimeout(() => {
-        finish(() => reject(new ActionableError("iOS Simulator audio capture did not produce PCM audio before startup timed out.")));
+        finish(() =>
+          reject(
+            new ActionableError(
+              "iOS Simulator audio capture did not produce PCM audio before startup timed out.",
+            ),
+          ),
+        );
       }, this.firstFrameTimeoutMs);
       this.cancelFirstAudioWait = cancel;
       this.rejectFirstAudioWait = rejectWait;
@@ -1038,14 +1087,20 @@ export class IosH264Source implements H264CaptureSource {
           finish(resolve);
         }
       });
-      helper.on("error", error => {
+      helper.on("error", (error) => {
         if (this.helper === helper && this.isActive()) {
           finish(() => reject(error));
         }
       });
-      helper.on("exit", info => {
+      helper.on("exit", (info) => {
         if (this.helper === helper && this.isActive()) {
-          finish(() => reject(new Error(`screen-capture-helper exited before audio (code=${info.code}, signal=${info.signal})`)));
+          finish(() =>
+            reject(
+              new Error(
+                `screen-capture-helper exited before audio (code=${info.code}, signal=${info.signal})`,
+              ),
+            ),
+          );
         }
       });
     });
@@ -1059,7 +1114,10 @@ export class IosH264Source implements H264CaptureSource {
    * for any other reason surfaces its real error; a timeout is a retryable
    * {@link NoFirstFrameError}, matching the raw path. Issue #4789.
    */
-  private waitForFirstEncodedRecord(helper: IosFrameCaptureHelper, target: CaptureTarget): Promise<void> {
+  private waitForFirstEncodedRecord(
+    helper: IosFrameCaptureHelper,
+    target: CaptureTarget,
+  ): Promise<void> {
     return new Promise((resolve, reject) => {
       let settled = false;
       let firstRecordSeen = false;
@@ -1093,17 +1151,19 @@ export class IosH264Source implements H264CaptureSource {
         this.phase = "running";
         finish(resolve);
       });
-      helper.on("stderr", line => {
+      helper.on("stderr", (line) => {
         if (this.helper !== helper || !this.isActive()) {
           return;
         }
         if (isNoFramesPermissionWarning(line)) {
-          finish(() => reject(makeScreenRecordingPermissionHintError(target, this.lastReadinessPhase)));
+          finish(() =>
+            reject(makeScreenRecordingPermissionHintError(target, this.lastReadinessPhase)),
+          );
         } else if (isHelperError(line)) {
           rejectStartupFailure(this.helperFailureFor(line));
         }
       });
-      helper.on("error", error => {
+      helper.on("error", (error) => {
         if (this.helper !== helper || !this.isActive()) {
           return;
         }
@@ -1113,12 +1173,15 @@ export class IosH264Source implements H264CaptureSource {
         }
         rejectStartupFailure(error);
       });
-      helper.on("exit", info => {
+      helper.on("exit", (info) => {
         if (this.helper !== helper || !this.isActive()) {
           return;
         }
-        const stderr = this.lastHelperStderr === null ? "" : `; last stderr: ${this.lastHelperStderr}`;
-        const error = new Error(`screen-capture-helper exited (code=${info.code}, signal=${info.signal})${stderr}`);
+        const stderr =
+          this.lastHelperStderr === null ? "" : `; last stderr: ${this.lastHelperStderr}`;
+        const error = new Error(
+          `screen-capture-helper exited (code=${info.code}, signal=${info.signal})${stderr}`,
+        );
         if (firstRecordSeen) {
           this.failIfCurrentHelper(helper, error);
           return;
@@ -1140,13 +1203,13 @@ export class IosH264Source implements H264CaptureSource {
     }
     return new EncodedUnsupportedError(
       `The screen-capture-helper did not advertise the '${ENCODED_VIDEO_CAPABILITY}' capability ` +
-      `before failing to start encoded capture (${error.message}).`
+        `before failing to start encoded capture (${error.message}).`,
     );
   }
 
   private wireHelperFrames(helper: IosFrameCaptureHelper): void {
-    helper.on("frame", frame => this.handleFrame(frame));
-    helper.on("malformed", error => {
+    helper.on("frame", (frame) => this.handleFrame(frame));
+    helper.on("malformed", (error) => {
       logger.warn(`[IosH264Source] malformed frame from helper: ${error.reason}`);
     });
     this.wireHelperDiagnostics(helper);
@@ -1161,15 +1224,15 @@ export class IosH264Source implements H264CaptureSource {
    * wiring with the raw path.
    */
   private wireEncodedHelper(helper: IosFrameCaptureHelper): void {
-    helper.on("encodedVideo", video => this.handleEncodedVideo(video));
-    helper.on("capability", token => {
+    helper.on("encodedVideo", (video) => this.handleEncodedVideo(video));
+    helper.on("capability", (token) => {
       if (token === ENCODED_VIDEO_CAPABILITY) {
         this.encodedCapabilityConfirmed = true;
       }
     });
-    helper.on("malformed", error => {
+    helper.on("malformed", (error) => {
       logger.warn(
-        `[IosH264Source] malformed encoded record from helper: ${error.reason}; requesting keyframe to recover`
+        `[IosH264Source] malformed encoded record from helper: ${error.reason}; requesting keyframe to recover`,
       );
       this.requestKeyFrame();
     });
@@ -1178,34 +1241,34 @@ export class IosH264Source implements H264CaptureSource {
 
   /** stderr/readiness/metrics/audio wiring shared by the raw and encoded paths. */
   private wireHelperDiagnostics(helper: IosFrameCaptureHelper): void {
-    helper.on("frameMetrics", metrics => {
+    helper.on("frameMetrics", (metrics) => {
       if (this.helper === helper && this.isActive()) {
         this.helperFrameMetrics = metrics;
         this.reportFrameMetrics();
       }
     });
-    helper.on("captureMetrics", metrics => {
+    helper.on("captureMetrics", (metrics) => {
       if (this.helper === helper && this.isActive()) {
         this.nativeFrameMetrics = metrics;
         this.reportFrameMetrics();
       }
     });
-    helper.on("audio", audio => {
+    helper.on("audio", (audio) => {
       if (this.isActive() && this.options.audioEnabled) {
         this.options.onAudioData?.(audio.pcm16le);
       }
     });
-    helper.on("permission", permission => {
+    helper.on("permission", (permission) => {
       if (this.helper === helper) {
         this.requiredPermission = permission;
       }
     });
-    helper.on("permissionTarget", target => {
+    helper.on("permissionTarget", (target) => {
       if (this.helper === helper) {
         this.requiredPermissionTarget = target;
       }
     });
-    helper.on("stderr", line => {
+    helper.on("stderr", (line) => {
       if (line.length > 0) {
         this.lastHelperStderr = line.slice(-2_048);
         // The helper runs in a separate process. Preserve its diagnostics in the
@@ -1213,26 +1276,24 @@ export class IosH264Source implements H264CaptureSource {
         logger.warn(`[IosH264Source] screen-capture-helper stderr: ${line}`);
       }
       if (isHelperError(line)) {
-        this.failIfCurrentHelper(
-          helper,
-          this.helperFailureFor(line)
-        );
+        this.failIfCurrentHelper(helper, this.helperFailureFor(line));
       }
     });
-    helper.on("readiness", status => {
+    helper.on("readiness", (status) => {
       if (this.helper === helper && this.isActive()) {
         // Track the furthest startup stage reached so a first-frame timeout can
         // name exactly where capture stalled (issue #4766).
         this.lastReadinessPhase = status.phase;
       }
       logger.debug(
-        `[IosH264Source] capture readiness phase=${status.phase} atMs=${status.atMs}${status.detail ? ` detail=${status.detail}` : ""}`
+        `[IosH264Source] capture readiness phase=${status.phase} atMs=${status.atMs}${status.detail ? ` detail=${status.detail}` : ""}`,
       );
     });
   }
 
   private helperFailureFor(line: string): Error {
-    return this.requiredPermission === "screen-recording" || hasScreenRecordingPermissionDenial(line)
+    return this.requiredPermission === "screen-recording" ||
+      hasScreenRecordingPermissionDenial(line)
       ? new ScreenRecordingPermissionError(this.requiredPermissionTarget ?? "AutoMobile")
       : new Error(`screen-capture-helper reported an error: ${line}`);
   }
@@ -1290,7 +1351,7 @@ export class IosH264Source implements H264CaptureSource {
     const previous = this.encoderSize;
     logger.info(
       `[IosH264Source] capture frame size changed from ${previous?.width}x${previous?.height} ` +
-      `to ${newSize.width}x${newSize.height}; restarting encoder at the new size`
+        `to ${newSize.width}x${newSize.height}; restarting encoder at the new size`,
     );
     const oldEncoder = this.encoder;
     // Queued frames carry the old geometry; drop them so the new encoder is not
@@ -1305,13 +1366,15 @@ export class IosH264Source implements H264CaptureSource {
 
   private writeFrameToEncoder(frame: DecodedFrame): void {
     const encoder = this.encoder;
-    if (!encoder) {return;}
+    if (!encoder) {
+      return;
+    }
     const startedAt = this.timer.now();
     const accepted = encoder.stdin.write(tightlyPackBgraFrame(frame));
     this.lastOutputWriteDurationMs = Math.max(0, this.timer.now() - startedAt);
     this.outputWriteHighWaterDurationMs = Math.max(
       this.outputWriteHighWaterDurationMs,
-      this.lastOutputWriteDurationMs
+      this.lastOutputWriteDurationMs,
     );
     // Retain the reference rather than copying the whole frame every frame.
     // `lastHelperFrame` is only re-read in `requestKeyFrame()` to reprime a
@@ -1353,7 +1416,7 @@ export class IosH264Source implements H264CaptureSource {
       this.forcedKeyFrameParser = new H264AnnexBParser();
     }
 
-    encoder.stdout.on("data", chunk => {
+    encoder.stdout.on("data", (chunk) => {
       if (this.isActive() && this.encoder === encoder) {
         const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         this.recordEncoderIdr(encoder, data);
@@ -1361,7 +1424,7 @@ export class IosH264Source implements H264CaptureSource {
         this.options.onData(data);
       }
     });
-    encoder.stderr.on("data", chunk => {
+    encoder.stderr.on("data", (chunk) => {
       const text = Buffer.isBuffer(chunk) ? chunk.toString("utf8").trim() : String(chunk).trim();
       if (this.encoder === encoder && text.length > 0) {
         this.lastEncoderStderr = `${this.lastEncoderStderr ?? ""}\n${text}`.trim().slice(-2_048);
@@ -1374,14 +1437,14 @@ export class IosH264Source implements H264CaptureSource {
         this.writePendingFrameToEncoder();
       }
     });
-    encoder.stdin.on("error", error => {
+    encoder.stdin.on("error", (error) => {
       if (this.encoder === encoder) {
         this.failIfRunning(
-          this.withEncoderDiagnostics(error instanceof Error ? error : new Error(String(error)))
+          this.withEncoderDiagnostics(error instanceof Error ? error : new Error(String(error))),
         );
       }
     });
-    encoder.once("error", error => {
+    encoder.once("error", (error) => {
       if (this.encoder === encoder) {
         this.failIfRunning(this.withEncoderDiagnostics(error));
       }
@@ -1389,17 +1452,21 @@ export class IosH264Source implements H264CaptureSource {
     encoder.once("exit", (code, signal) => {
       if (this.encoder === encoder) {
         this.failIfRunning(
-          this.withEncoderDiagnostics(new Error(`ffmpeg exited (code=${code}, signal=${signal})`))
+          this.withEncoderDiagnostics(new Error(`ffmpeg exited (code=${code}, signal=${signal})`)),
         );
       }
     });
   }
 
   private writePendingFrameToEncoder(): void {
-    if (!this.isActive() || this.encoderBackpressured) {return;}
+    if (!this.isActive() || this.encoderBackpressured) {
+      return;
+    }
     const frame = this.pendingFrames.take();
     this.reportFrameMetrics();
-    if (frame === null) {return;}
+    if (frame === null) {
+      return;
+    }
     const size = { width: frame.header.width, height: frame.header.height };
     if (
       this.encoderSize &&
@@ -1467,7 +1534,9 @@ export class IosH264Source implements H264CaptureSource {
     } catch (error) {
       // The RTP writer will surface malformed Annex-B separately. Leave this
       // gate closed so an unverified warming encoder is not recycled into PLI churn.
-      logger.debug(`[IosH264Source] could not parse encoder output while awaiting initial IDR: ${error}`);
+      logger.debug(
+        `[IosH264Source] could not parse encoder output while awaiting initial IDR: ${error}`,
+      );
     }
   }
 
@@ -1524,7 +1593,7 @@ export class IosH264Source implements H264CaptureSource {
       "-g",
       String(Math.max(1, Math.round(this.fps * IOS_KEYFRAME_INTERVAL_SECONDS))),
       "-forced-idr",
-      "1"
+      "1",
     );
     // Resolve the target encoder bitrate. An operator override
     // (`AUTOMOBILE_WEBRTC_BITRATE_KBPS`) always wins, on either capture kind.
@@ -1595,7 +1664,7 @@ export class IosH264Source implements H264CaptureSource {
   private async runReconnect(initialError: Error): Promise<void> {
     logger.warn(
       `[IosH264Source] running-phase capture failure; attempting bounded reconnect ` +
-      `(up to ${this.runningReconnectMaxAttempts}): ${initialError.message}`
+        `(up to ${this.runningReconnectMaxAttempts}): ${initialError.message}`,
     );
     await this.beginTeardown();
 
@@ -1614,9 +1683,7 @@ export class IosH264Source implements H264CaptureSource {
         await this.establishCapture();
         if (this.phaseNow() === "running") {
           this.startupComplete = true;
-          logger.info(
-            `[IosH264Source] running-phase reconnect succeeded on attempt ${attempt}`
-          );
+          logger.info(`[IosH264Source] running-phase reconnect succeeded on attempt ${attempt}`);
           return;
         }
         // A stop() raced the handshake; teardown is owned by stop().
@@ -1624,7 +1691,7 @@ export class IosH264Source implements H264CaptureSource {
       } catch (error) {
         logger.warn(
           `[IosH264Source] reconnect attempt ${attempt}/${this.runningReconnectMaxAttempts} failed: ` +
-          `${errorMessage(error)}`
+            `${errorMessage(error)}`,
         );
         await this.beginTeardown();
         const phase = this.phaseNow();
@@ -1646,7 +1713,7 @@ export class IosH264Source implements H264CaptureSource {
    * so reconnect timing is deterministic under a FakeTimer.
    */
   private waitReconnectBackoff(delayMs: number): Promise<boolean> {
-    return new Promise(resolve => {
+    return new Promise((resolve) => {
       const handle = this.timer.setTimeout(() => {
         this.cancelReconnectDelay = null;
         resolve(false);
@@ -1714,7 +1781,7 @@ export class IosH264Source implements H264CaptureSource {
     this.rejectFirstAudioWait = null;
     const helper = this.helper;
     this.helper = null;
-    await helper?.stop().catch(error => {
+    await helper?.stop().catch((error) => {
       logger.debug(`[IosH264Source] helper stop failed: ${error}`);
     });
   }
@@ -1766,13 +1833,13 @@ export function resolveIosEncoderScale(size: EncoderSize): EncoderSize | null {
     // would otherwise let the product escape the budget; re-cap the other axis.
     Math.min(
       Math.floor(columns * factor),
-      Math.floor(WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME / targetRows)
-    )
+      Math.floor(WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME / targetRows),
+    ),
   );
 
   const scale = Math.min(
     (targetColumns * H264_MACROBLOCK_SIZE) / width,
-    (targetRows * H264_MACROBLOCK_SIZE) / height
+    (targetRows * H264_MACROBLOCK_SIZE) / height,
   );
   return { width: evenFloor(width * scale), height: evenFloor(height * scale) };
 }
@@ -1783,18 +1850,16 @@ function clampMacroblockAxis(value: number): number {
 
 function makeNoFramesError(
   target: CaptureTarget,
-  lastPhase: IosScreenCaptureReadinessPhase | null
+  lastPhase: IosScreenCaptureReadinessPhase | null,
 ): NoFirstFrameError {
   const stage = lastPhase === null ? "" : ` (last stage: ${lastPhase})`;
   const hint = hintForNoFrames(target, lastPhase);
-  return new NoFirstFrameError(
-    `iOS screen capture did not produce a first frame${stage}.${hint}`
-  );
+  return new NoFirstFrameError(`iOS screen capture did not produce a first frame${stage}.${hint}`);
 }
 
 function makeScreenRecordingPermissionHintError(
   target: CaptureTarget,
-  lastPhase: IosScreenCaptureReadinessPhase | null
+  lastPhase: IosScreenCaptureReadinessPhase | null,
 ): ScreenRecordingPermissionHintError {
   return new ScreenRecordingPermissionHintError(makeNoFramesError(target, lastPhase).message);
 }
@@ -1804,7 +1869,7 @@ function makeScreenRecordingPermissionHintError(
 // (issue #4766).
 function hintForNoFrames(
   target: CaptureTarget,
-  lastPhase: IosScreenCaptureReadinessPhase | null
+  lastPhase: IosScreenCaptureReadinessPhase | null,
 ): string {
   const permissionHint =
     " Screen Recording permission may be required to observe the iOS Simulator window.";
@@ -1848,12 +1913,7 @@ function tightlyPackBgraFrame(frame: DecodedFrame): Buffer {
   const packed = Buffer.alloc(frame.header.height * tightBytesPerRow);
   for (let row = 0; row < frame.header.height; row++) {
     const sourceStart = row * frame.header.bytesPerRow;
-    frame.pixels.copy(
-      packed,
-      row * tightBytesPerRow,
-      sourceStart,
-      sourceStart + tightBytesPerRow
-    );
+    frame.pixels.copy(packed, row * tightBytesPerRow, sourceStart, sourceStart + tightBytesPerRow);
   }
   return packed;
 }
@@ -1865,7 +1925,7 @@ export interface IosScreenCaptureHelperPathResolverOptions {
 
 export function resolveIosScreenCaptureHelperPath(
   explicitPath?: string,
-  options: IosScreenCaptureHelperPathResolverOptions = {}
+  options: IosScreenCaptureHelperPathResolverOptions = {},
 ): string {
   const env = options.env ?? process.env;
   const exists = options.exists ?? existsSync;
@@ -1881,14 +1941,14 @@ export function resolveIosScreenCaptureHelperPath(
   }
 
   throw new ActionableError(
-    `No executable screen-capture-helper was found at the configured path. Set ${IOS_SCREEN_CAPTURE_HELPER_ENV} to the absolute path of a local development build.`
+    `No executable screen-capture-helper was found at the configured path. Set ${IOS_SCREEN_CAPTURE_HELPER_ENV} to the absolute path of a local development build.`,
   );
 }
 
 function readEnvWithLegacy(
   env: NodeJS.ProcessEnv,
   primaryName: string,
-  legacyName: string
+  legacyName: string,
 ): string | undefined {
   return env[primaryName] ?? env[legacyName];
 }
@@ -1917,11 +1977,11 @@ async function validateFfmpegAvailability(
     const message = errorMessage(error);
     if (message.includes("missing required encoder")) {
       throw new ActionableError(
-        "iOS WebRTC streaming requires an ffmpeg build with the h264_videotoolbox encoder."
+        "iOS WebRTC streaming requires an ffmpeg build with the h264_videotoolbox encoder.",
       );
     }
     throw new ActionableError(
-      `iOS WebRTC streaming requires ffmpeg. Set ${IOS_WEBRTC_FFMPEG_ENV} to a working ffmpeg binary. ${message}`
+      `iOS WebRTC streaming requires ffmpeg. Set ${IOS_WEBRTC_FFMPEG_ENV} to a working ffmpeg binary. ${message}`,
     );
   }
 }
@@ -1935,12 +1995,12 @@ async function validateFfmpegAvailabilityWithRunner(
     version = await commandRunner(ffmpegPath, ["-version"]);
   } catch (error) {
     throw new ActionableError(
-      `iOS WebRTC streaming requires ffmpeg. Set ${IOS_WEBRTC_FFMPEG_ENV} to a working ffmpeg binary. ${errorMessage(error)}`
+      `iOS WebRTC streaming requires ffmpeg. Set ${IOS_WEBRTC_FFMPEG_ENV} to a working ffmpeg binary. ${errorMessage(error)}`,
     );
   }
   if (version.exitCode !== 0) {
     throw new ActionableError(
-      `iOS WebRTC ffmpeg probe failed: ${version.stderr.trim() || `exited with code ${version.exitCode}`}`
+      `iOS WebRTC ffmpeg probe failed: ${version.stderr.trim() || `exited with code ${version.exitCode}`}`,
     );
   }
 
@@ -1948,7 +2008,7 @@ async function validateFfmpegAvailabilityWithRunner(
   const encoderOutput = `${encoders.stdout}\n${encoders.stderr}`;
   if (encoders.exitCode !== 0 || !encoderOutput.includes("h264_videotoolbox")) {
     throw new ActionableError(
-      "iOS WebRTC streaming requires an ffmpeg build with the h264_videotoolbox encoder."
+      "iOS WebRTC streaming requires an ffmpeg build with the h264_videotoolbox encoder.",
     );
   }
 }
@@ -1958,17 +2018,18 @@ async function defaultResolveSimulatorWindowId(
   device: BootedDevice,
   commandRunner: CommandRunner,
   audioEnabled: boolean,
-  signal: AbortSignal
+  signal: AbortSignal,
 ): Promise<number> {
   const result = await commandRunner(helperPath, ["--list-simulators"], signal);
   if (result.exitCode !== 0) {
     if (hasScreenRecordingPermissionDenial(result.stderr)) {
       throw new ScreenRecordingPermissionError(
-        screenRecordingApprovalTarget(result.stderr) ?? defaultScreenRecordingApprovalTarget(helperPath)
+        screenRecordingApprovalTarget(result.stderr) ??
+          defaultScreenRecordingApprovalTarget(helperPath),
       );
     }
     throw new ActionableError(
-      `Unable to list iOS Simulator windows: ${result.stderr.trim() || `exited with code ${result.exitCode}`}`
+      `Unable to list iOS Simulator windows: ${result.stderr.trim() || `exited with code ${result.exitCode}`}`,
     );
   }
 
@@ -1981,7 +2042,7 @@ async function defaultResolveSimulatorWindowId(
 
   if (audioEnabled && windows.length > 1) {
     throw new ActionableError(
-      "iOS Simulator audio capture requires exactly one visible Simulator window because ScreenCaptureKit cannot isolate audio to a selected Simulator window. Close other Simulator windows and try again."
+      "iOS Simulator audio capture requires exactly one visible Simulator window because ScreenCaptureKit cannot isolate audio to a selected Simulator window. Close other Simulator windows and try again.",
     );
   }
 
@@ -1994,29 +2055,30 @@ async function defaultResolveSimulatorWindowId(
   const deviceName = device.name.trim().toLowerCase();
   const titledWindows = windows.filter(
     (window): window is SimulatorWindowInfo & { title: string } =>
-      typeof window.title === "string" && window.title.trim().length > 0
+      typeof window.title === "string" && window.title.trim().length > 0,
   );
-  const exactMatches = titledWindows.filter(window =>
-    simulatorTitleNamesDeviceExactly(window.title, deviceName)
+  const exactMatches = titledWindows.filter((window) =>
+    simulatorTitleNamesDeviceExactly(window.title, deviceName),
   );
-  const matches = exactMatches.length > 0
-    ? exactMatches
-    : titledWindows.filter(window => window.title.toLowerCase().includes(deviceName));
+  const matches =
+    exactMatches.length > 0
+      ? exactMatches
+      : titledWindows.filter((window) => window.title.toLowerCase().includes(deviceName));
   if (matches.length === 1) {
     return matches[0].windowID;
   }
   if (matches.length === 0) {
     throw new ActionableError(
-      `No visible iOS Simulator window matched ${device.name}. Open the simulator window and grant Screen Recording permission if prompted.`
+      `No visible iOS Simulator window matched ${device.name}. Open the simulator window and grant Screen Recording permission if prompted.`,
     );
   }
   throw new ActionableError(
-    `Multiple iOS Simulator windows matched ${device.name}; close extras or use a more specific device.`
+    `Multiple iOS Simulator windows matched ${device.name}; close extras or use a more specific device.`,
   );
 }
 
 function hasScreenRecordingPermissionDenial(stderr: string): boolean {
-  return stderr.split(/\r?\n/).some(line => {
+  return stderr.split(/\r?\n/).some((line) => {
     const normalized = line.trim().toLowerCase();
     return (
       normalized === `${CAPTURE_PERMISSION_PREFIX} screen-recording` ||

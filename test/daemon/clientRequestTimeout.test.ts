@@ -12,7 +12,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 function createBlackHoleSocket(): Duplex {
   return new Duplex({
     read() {},
-    write(_chunk, _encoding, callback) { callback(); },
+    write(_chunk, _encoding, callback) {
+      callback();
+    },
   });
 }
 
@@ -99,8 +101,14 @@ describe("DaemonClient per-request timeout", () => {
     fakeTimer.advanceTime(1000);
 
     let resolved = false;
-    promise.then(() => { resolved = true; }).catch(() => { resolved = true; });
-    await new Promise(r => setImmediate(r));
+    promise
+      .then(() => {
+        resolved = true;
+      })
+      .catch(() => {
+        resolved = true;
+      });
+    await new Promise((r) => setImmediate(r));
     expect(resolved).toBe(false);
 
     await client.close();

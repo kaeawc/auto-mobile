@@ -40,7 +40,7 @@ export interface InputKeyResult {
 export interface FrameContextValidator {
   validateFrameContext(
     frameContext: string,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<{ success: boolean; error?: string }>;
 }
 
@@ -52,7 +52,7 @@ export class InputKey {
     device: BootedDevice,
     private readonly adbFactory: AdbClientFactory = defaultAdbClientFactory,
     private readonly frameContextValidator?: FrameContextValidator,
-    private readonly timer: Timer = defaultTimer
+    private readonly timer: Timer = defaultTimer,
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -61,7 +61,7 @@ export class InputKey {
   async press(
     key: InputKeyName,
     timeoutMs?: number,
-    frameContext?: string
+    frameContext?: string,
   ): Promise<InputKeyResult> {
     if (this.device.platform !== "android") {
       return {
@@ -86,31 +86,34 @@ export class InputKey {
       }
       let validationFailure: InputKeyResult | undefined;
       try {
-        await this.adb.execute(
-          ["shell", "input", "keyevent", keyCode],
-          {
-            timeoutMs: adbTimeoutMs,
-            noRetry: true,
-            beforeDispatch: frameContext === undefined
+        await this.adb.execute(["shell", "input", "keyevent", keyCode], {
+          timeoutMs: adbTimeoutMs,
+          noRetry: true,
+          beforeDispatch:
+            frameContext === undefined
               ? undefined
               : async () => {
-                validationFailure = await this.validateFrameContext(key, keyCode, frameContext, deadlineMs);
-                if (validationFailure) {
-                  throw new Error(validationFailure.error);
-                }
-                const remainingMs = this.remainingMs(deadlineMs);
-                if (remainingMs !== undefined && remainingMs <= 0) {
-                  validationFailure = {
-                    success: false,
+                  validationFailure = await this.validateFrameContext(
                     key,
                     keyCode,
-                    error: "input/key deadline exhausted before ADB keyevent",
-                  };
-                  throw new Error(validationFailure.error);
-                }
-              },
-          }
-        );
+                    frameContext,
+                    deadlineMs,
+                  );
+                  if (validationFailure) {
+                    throw new Error(validationFailure.error);
+                  }
+                  const remainingMs = this.remainingMs(deadlineMs);
+                  if (remainingMs !== undefined && remainingMs <= 0) {
+                    validationFailure = {
+                      success: false,
+                      key,
+                      keyCode,
+                      error: "input/key deadline exhausted before ADB keyevent",
+                    };
+                    throw new Error(validationFailure.error);
+                  }
+                },
+        });
       } catch (error) {
         if (validationFailure) {
           return validationFailure;
@@ -138,7 +141,7 @@ export class InputKey {
     key: InputKeyName,
     keyCode: string,
     frameContext: string | undefined,
-    deadlineMs: number | undefined
+    deadlineMs: number | undefined,
   ): Promise<InputKeyResult | undefined> {
     if (frameContext === undefined) {
       return undefined;
@@ -152,7 +155,8 @@ export class InputKey {
         error: "input/key deadline exhausted before frame context validation",
       };
     }
-    const validator = this.frameContextValidator ??
+    const validator =
+      this.frameContextValidator ??
       AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     const validation = await validator.validateFrameContext(frameContext, validationTimeoutMs);
     if (validation.success) {
@@ -162,7 +166,9 @@ export class InputKey {
       success: false,
       key,
       keyCode,
-      error: validation.error ?? "Frame context is stale or unavailable; observe a fresh frame before retrying",
+      error:
+        validation.error ??
+        "Frame context is stale or unavailable; observe a fresh frame before retrying",
     };
   }
 

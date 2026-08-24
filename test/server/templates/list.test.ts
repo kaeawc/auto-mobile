@@ -1,7 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import {
-  ListResourceTemplatesRequestSchema
-} from "@modelcontextprotocol/sdk/types.js";
+import { ListResourceTemplatesRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { z } from "zod/v4";
 
@@ -19,24 +17,28 @@ describe("MCP Templates List", () => {
     }
   });
 
-  test("should return registered resource templates including emulator template", async function() {
-
+  test("should return registered resource templates including emulator template", async function () {
     const { client } = fixture.getContext();
 
     // Send resources/templates/list request
     const listResourceTemplatesResponseSchema = z.object({
-      resourceTemplates: z.array(z.object({
-        uriTemplate: z.string(),
-        name: z.string().optional(),
-        description: z.string().optional(),
-        mimeType: z.string().optional()
-      }))
+      resourceTemplates: z.array(
+        z.object({
+          uriTemplate: z.string(),
+          name: z.string().optional(),
+          description: z.string().optional(),
+          mimeType: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/templates/list",
-      params: {}
-    }, listResourceTemplatesResponseSchema);
+    const result = await client.request(
+      {
+        method: "resources/templates/list",
+        params: {},
+      },
+      listResourceTemplatesResponseSchema,
+    );
 
     // Verify resource templates list contains the emulator template
     expect(typeof result).toBe("object");
@@ -46,14 +48,13 @@ describe("MCP Templates List", () => {
 
     // Verify booted devices template is present
     const bootedDevicesTemplate = result.resourceTemplates.find(
-      (t: any) => t.uriTemplate === "automobile:devices/booted/{platform}"
+      (t: any) => t.uriTemplate === "automobile:devices/booted/{platform}",
     );
     expect(bootedDevicesTemplate).toBeDefined();
     expect(bootedDevicesTemplate?.name).toBe("Platform-specific Booted Devices");
   });
 
-  test("given a template is registered, endpoint should return a list with that template", async function() {
-
+  test("given a template is registered, endpoint should return a list with that template", async function () {
     // For this test, we need to mock or implement a template registration
     // Since the current server doesn't have template registration functionality,
     // we'll mock the server's response handler to return a test template
@@ -65,31 +66,33 @@ describe("MCP Templates List", () => {
       uriTemplate: "file:///logs/{date}.log",
       name: "Daily Log Template",
       description: "Template for accessing daily log files by date",
-      mimeType: "text/plain"
+      mimeType: "text/plain",
     };
 
     // Mock the handler to return our test template on the existing server
-    server.server.setRequestHandler(
-      ListResourceTemplatesRequestSchema,
-      async () => ({
-        resourceTemplates: [testTemplate]
-      })
-    );
+    server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+      resourceTemplates: [testTemplate],
+    }));
 
     // Send resources/templates/list request
     const listResourceTemplatesResponseSchema = z.object({
-      resourceTemplates: z.array(z.object({
-        uriTemplate: z.string(),
-        name: z.string().optional(),
-        description: z.string().optional(),
-        mimeType: z.string().optional()
-      }))
+      resourceTemplates: z.array(
+        z.object({
+          uriTemplate: z.string(),
+          name: z.string().optional(),
+          description: z.string().optional(),
+          mimeType: z.string().optional(),
+        }),
+      ),
     });
 
-    const result = await client.request({
-      method: "resources/templates/list",
-      params: {}
-    }, listResourceTemplatesResponseSchema);
+    const result = await client.request(
+      {
+        method: "resources/templates/list",
+        params: {},
+      },
+      listResourceTemplatesResponseSchema,
+    );
 
     // Verify resource templates list contains the test template
     expect(typeof result).toBe("object");

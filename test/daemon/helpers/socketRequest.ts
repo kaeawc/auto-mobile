@@ -56,7 +56,11 @@ export function sendRawSocketRequest(
   options: SocketRequestOptions = {},
 ): Promise<SocketRequestResult> {
   const { deadlineMs = SOCKET_REQUEST_DEADLINE_MS, onConnect, resolveOn = "first" } = options;
-  const label = String((request as Record<string, unknown>).method ?? (request as Record<string, unknown>).type ?? "request");
+  const label = String(
+    (request as Record<string, unknown>).method ??
+      (request as Record<string, unknown>).type ??
+      "request",
+  );
   return new Promise((resolve, reject) => {
     const client = new Socket();
     let buffer = "";
@@ -74,10 +78,14 @@ export function sendRawSocketRequest(
       action();
     };
     const deadline = defaultTimer.setTimeout(() => {
-      settle(() => reject(new Error(
-        `No response to ${label} on ${socketPath} within ${deadlineMs}ms — `
-        + "bounded socket-test deadline hit (the server hung or dropped the request)"
-      )));
+      settle(() =>
+        reject(
+          new Error(
+            `No response to ${label} on ${socketPath} within ${deadlineMs}ms — ` +
+              "bounded socket-test deadline hit (the server hung or dropped the request)",
+          ),
+        ),
+      );
     }, deadlineMs);
 
     client.connect(socketPath, () => {
@@ -85,7 +93,7 @@ export function sendRawSocketRequest(
       client.write(JSON.stringify({ id: randomUUID(), ...request }) + "\n");
     });
 
-    client.on("data", data => {
+    client.on("data", (data) => {
       buffer += data.toString();
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
@@ -110,7 +118,7 @@ export function sendRawSocketRequest(
       }
     });
 
-    client.on("error", error => settle(() => reject(error)));
+    client.on("error", (error) => settle(() => reject(error)));
     client.on("close", () => {
       const response = lastResponse;
       if (response) {
@@ -170,9 +178,15 @@ export function connectBounded(
       action();
     };
     const deadline = defaultTimer.setTimeout(() => {
-      settle(() => reject(new Error(
-        `Socket did not connect to ${socketPath} within ${deadlineMs}ms — bounded socket-test deadline hit`
-      )), true);
+      settle(
+        () =>
+          reject(
+            new Error(
+              `Socket did not connect to ${socketPath} within ${deadlineMs}ms — bounded socket-test deadline hit`,
+            ),
+          ),
+        true,
+      );
     }, deadlineMs);
     const onError = (error: Error) => settle(() => reject(error), true);
     socket.once("error", onError);

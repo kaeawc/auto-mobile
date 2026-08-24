@@ -53,7 +53,7 @@ async function validateTestPlans(searchPath?: string): Promise<ValidationReport>
     totalFiles: files.length,
     validFiles: 0,
     invalidFiles: 0,
-    results: []
+    results: [],
   };
 
   // Validate each file
@@ -70,9 +70,7 @@ async function validateTestPlans(searchPath?: string): Promise<ValidationReport>
 
       if (result.errors) {
         for (const error of result.errors) {
-          const location = error.line !== undefined
-            ? `:${error.line}:${error.column}`
-            : "";
+          const location = error.line !== undefined ? `:${error.line}:${error.column}` : "";
           console.log(`  ${error.field}${location}: ${error.message}`);
         }
       }
@@ -82,7 +80,7 @@ async function validateTestPlans(searchPath?: string): Promise<ValidationReport>
     report.results.push({
       file: relativePath,
       valid: result.valid,
-      errors: result.errors
+      errors: result.errors,
     });
   }
 

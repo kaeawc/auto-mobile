@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -17,7 +26,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 
 /** Let queued microtasks (busy-wait loop continuations) run. */
 async function flush(): Promise<void> {
-  await new Promise<void>(resolve => setImmediate(resolve));
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 /** The pid line of a lock file — the token (if any) trails on line 2 (#2947). */
@@ -73,7 +82,7 @@ describe("FileMigrationLock", () => {
       timer,
       pid: 4242,
       pollIntervalMs: 100,
-      isProcessRunning: pid => pid === 9999, // the holder is alive
+      isProcessRunning: (pid) => pid === 9999, // the holder is alive
     });
 
     let acquired = false;
@@ -270,7 +279,7 @@ describe("FileMigrationLock", () => {
     });
 
     let rejection: unknown;
-    const pending = lock.acquire().catch(error => {
+    const pending = lock.acquire().catch((error) => {
       rejection = error;
     });
 
@@ -300,14 +309,14 @@ describe("FileMigrationLock", () => {
       pid: 100,
       pollIntervalMs: 50,
       timeoutMs: 1000,
-      isProcessRunning: pid => pid !== 9999, // 9999 dead, everyone else alive
+      isProcessRunning: (pid) => pid !== 9999, // 9999 dead, everyone else alive
     });
     const lockB = new FileMigrationLock(lockPath, {
       timer,
       pid: 200,
       pollIntervalMs: 50,
       timeoutMs: 1000,
-      isProcessRunning: pid => pid !== 9999,
+      isProcessRunning: (pid) => pid !== 9999,
     });
 
     // A reclaims the stale lock first.
@@ -430,7 +439,7 @@ describe("migrationLockPathFor", () => {
       // Two aliases for the same directory must derive the SAME lock file so the
       // openers actually contend.
       expect(viaLink).toBe(viaReal);
-    }
+    },
   );
 
   test.skipIf(process.platform === "win32")(
@@ -447,6 +456,6 @@ describe("migrationLockPathFor", () => {
       // A symlinked DB file itself must derive the SAME lock as its real path.
       expect(viaAlias).toBe(viaReal);
       expect(viaReal).toBe(`${realpathSync(realDb)}.migrate.lock`);
-    }
+    },
   );
 });

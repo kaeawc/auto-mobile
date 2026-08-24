@@ -34,7 +34,9 @@ export class TouchFrameReconstructor {
   feedLine(line: string, arrivedAt: number): RawTouchFrame | GestureEvent | null {
     // Match: "[timestamp] EV_TYPE   EVENT_CODE   value"
     const match = line.match(/^\[\s*[\d.]+\]\s+(\S+)\s+(\S+)\s+(\S+)\s*$/);
-    if (!match) {return null;}
+    if (!match) {
+      return null;
+    }
 
     const evType = match[1];
     const evCode = match[2];
@@ -108,17 +110,17 @@ export class TouchFrameReconstructor {
     }
   }
 
-  private handleSynEvent(
-    evCode: string,
-    evValue: string,
-    arrivedAt: number
-  ): RawTouchFrame | null {
-    if (evCode !== "SYN_REPORT") {return null;}
+  private handleSynEvent(evCode: string, evValue: string, arrivedAt: number): RawTouchFrame | null {
+    if (evCode !== "SYN_REPORT") {
+      return null;
+    }
 
     // value 0x00000000 = SYN_REPORT (Protocol B)
     // value 0x00000002 = SYN_MT_REPORT (Protocol A, ignored)
     const value = parseInt(evValue, 16);
-    if (value !== 0) {return null;}
+    if (value !== 0) {
+      return null;
+    }
 
     const activeSlots: TouchSlot[] = [];
     const releasedSlots: number[] = [];

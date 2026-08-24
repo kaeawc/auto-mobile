@@ -68,7 +68,7 @@ function opener(lockPath: string, pid: number, timeoutMs = 60_000): FileMigratio
     pollIntervalMs: 5,
     timeoutMs,
     // Distinct virtual PIDs, all "alive" — the file lock is the only arbiter.
-    isProcessRunning: candidate => candidate === 1 || candidate === 2,
+    isProcessRunning: (candidate) => candidate === 1 || candidate === 2,
   });
 }
 

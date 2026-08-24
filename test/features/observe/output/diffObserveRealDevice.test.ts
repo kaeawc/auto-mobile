@@ -32,12 +32,12 @@ import { loadDiffFixture, measureValue } from "../../../fixtures/observe/observe
  */
 function everyEntryHasNonEmptyKey(diff: ObserveDiff): boolean {
   const keyed = [...diff.added, ...diff.removed, ...diff.changed];
-  return keyed.length > 0 && keyed.every(e => typeof e.key === "string" && e.key.length > 0);
+  return keyed.length > 0 && keyed.every((e) => typeof e.key === "string" && e.key.length > 0);
 }
 
 /** True if any `changed` entry reports the `extras` bag (the #3051 regression). */
 function anyChangedReportsExtras(diff: ObserveDiff): boolean {
-  return diff.changed.some(c => "extras" in c.changes);
+  return diff.changed.some((c) => "extras" in c.changes);
 }
 
 describe("actions-diff-observe real-device sign-off (#3051)", () => {
@@ -61,7 +61,7 @@ describe("actions-diff-observe real-device sign-off (#3051)", () => {
       expect(everyEntryHasNonEmptyKey(diff)).toBe(true);
       // The new EditText is fully reconstructable from `added` alone (no baseline
       // needed): its typed text rides along in the emitted attributes.
-      const typed = diff.added.find(n => n.attributes["text"] === "SignOff3051");
+      const typed = diff.added.find((n) => n.attributes["text"] === "SignOff3051");
       expect(typed).toBeDefined();
       expect(typed!.attributes["className"]).toBe("android.widget.EditText");
     });
@@ -72,8 +72,8 @@ describe("actions-diff-observe real-device sign-off (#3051)", () => {
       // `added`, and there is NO `changed: { text: {from,to} }`. Pinned here on real
       // output so the sign-off doc's AC#2 caveat can't silently regress.
       const diff = diffObserveResult(textBefore, textAfter);
-      expect(diff.added.some(n => n.attributes["text"] === "SignOff3051")).toBe(true);
-      expect(diff.changed.some(c => "text" in c.changes)).toBe(false);
+      expect(diff.added.some((n) => n.attributes["text"] === "SignOff3051")).toBe(true);
+      expect(diff.changed.some((c) => "text" in c.changes)).toBe(false);
     });
 
     test("no `changed` entry is polluted by volatile `extras` metadata (#3051 fix, on real data)", () => {
@@ -117,14 +117,14 @@ describe("actions-diff-observe real-device sign-off (#3051)", () => {
     test("content identity collapses shifted, stably-identified rows to bounds-only `changed`", () => {
       const diff = diffObserveResult(scrollBefore, scrollAfter);
       const boundsOnly = diff.changed.filter(
-        c => Object.keys(c.changes).length === 1 && "bounds" in c.changes
+        (c) => Object.keys(c.changes).length === 1 && "bounds" in c.changes,
       );
       // Rows carrying a stable resource-id re-pair into compact bounds deltas
       // instead of the remove+add churn a positional-only diff would produce.
       expect(boundsOnly.length).toBeGreaterThanOrEqual(5);
       for (const c of boundsOnly) {
-        expect((c.changes.bounds.from as unknown)).toBeDefined();
-        expect((c.changes.bounds.to as unknown)).toBeDefined();
+        expect(c.changes.bounds.from as unknown).toBeDefined();
+        expect(c.changes.bounds.to as unknown).toBeDefined();
       }
     });
 

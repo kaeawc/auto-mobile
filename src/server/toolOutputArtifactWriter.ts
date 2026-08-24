@@ -48,7 +48,7 @@ export class NodeToolOutputArtifactFileSystem implements ToolOutputArtifactFileS
   }
 
   listFiles(dirPath: string): ToolOutputArtifactDirectoryEntry[] {
-    return fs.readdirSync(dirPath, { withFileTypes: true }).map(entry => {
+    return fs.readdirSync(dirPath, { withFileTypes: true }).map((entry) => {
       const entryPath = path.join(dirPath, entry.name);
       const stats = fs.statSync(entryPath);
       return {
@@ -127,18 +127,19 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
 
     try {
       const nowMs = this.timer.now();
-      const candidates = this.fileSystem.listFiles(this.outputDirectory)
-        .filter(entry => entry.isFile && entry.name.endsWith(".json"))
+      const candidates = this.fileSystem
+        .listFiles(this.outputDirectory)
+        .filter((entry) => entry.isFile && entry.name.endsWith(".json"))
         .sort((a, b) => a.mtimeMs - b.mtimeMs);
-      const expired = candidates.filter(entry => nowMs - entry.mtimeMs > retention.maxAgeMs);
-      const expiredPaths = new Set(expired.map(entry => entry.path));
+      const expired = candidates.filter((entry) => nowMs - entry.mtimeMs > retention.maxAgeMs);
+      const expiredPaths = new Set(expired.map((entry) => entry.path));
       const remainingCount = candidates.length - expiredPaths.size;
       const overflowCount = Math.max(0, remainingCount - retention.maxFiles);
       const overflow = candidates
-        .filter(entry => !expiredPaths.has(entry.path))
-        .filter(entry => nowMs - entry.mtimeMs > retention.overflowMinAgeMs)
+        .filter((entry) => !expiredPaths.has(entry.path))
+        .filter((entry) => nowMs - entry.mtimeMs > retention.overflowMinAgeMs)
         .slice(0, overflowCount);
-      const filesToDelete = new Set([...expired, ...overflow].map(entry => entry.path));
+      const filesToDelete = new Set([...expired, ...overflow].map((entry) => entry.path));
 
       for (const filePath of filesToDelete) {
         this.fileSystem.deleteFile(filePath);

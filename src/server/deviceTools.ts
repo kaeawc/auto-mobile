@@ -911,8 +911,10 @@ function invalidateAndroidObserver(observer: AndroidCtrlProxyClient, deviceId: s
   // retaining the singleton until that completes would keep an obsolete client
   // (and the failed-shutdown reservation) alive indefinitely.
   observer.invalidateForShutdownRecovery();
-  void observer.close().catch(error => {
-    logger.warn(`[DeviceTools] Failed to clean up invalidated Android observer for ${deviceId}: ${error}`);
+  void observer.close().catch((error) => {
+    logger.warn(
+      `[DeviceTools] Failed to clean up invalidated Android observer for ${deviceId}: ${error}`,
+    );
   });
 }
 

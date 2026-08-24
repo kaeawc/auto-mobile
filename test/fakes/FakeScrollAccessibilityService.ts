@@ -7,7 +7,9 @@ type RequestActionCall = {
 };
 
 export class FakeScrollAccessibilityService implements ScrollAccessibilityService {
-  requestActionResult: { success: boolean; error?: string; [key: string]: unknown } = { success: true };
+  requestActionResult: { success: boolean; error?: string; [key: string]: unknown } = {
+    success: true,
+  };
   requestActionCalls: RequestActionCall[] = [];
   private throwOnRequest: Error | null = null;
 
@@ -19,7 +21,7 @@ export class FakeScrollAccessibilityService implements ScrollAccessibilityServic
     action: string,
     resourceId?: string,
     timeoutMs?: number,
-    _perf?: unknown
+    _perf?: unknown,
   ): Promise<{ success: boolean; error?: string; [key: string]: unknown }> {
     this.requestActionCalls.push({ action, resourceId, timeoutMs });
     if (this.throwOnRequest) {

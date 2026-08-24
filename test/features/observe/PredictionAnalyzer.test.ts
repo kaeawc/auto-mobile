@@ -27,30 +27,30 @@ const baseObservation: ObserveResult = {
     hierarchy: {
       node: {
         $: {
-          "bounds": { left: 0, top: 0, right: 1, bottom: 1 },
-          "text": "Settings",
-          "resource-id": "id/settings"
-        }
-      }
-    }
-  }
+          bounds: { left: 0, top: 0, right: 1, bottom: 1 },
+          text: "Settings",
+          "resource-id": "id/settings",
+        },
+      },
+    },
+  },
 };
 
 const buildObservation = (overrides: Partial<ObserveResult>): ObserveResult => ({
   ...baseObservation,
-  ...overrides
+  ...overrides,
 });
 
 const buildPrediction = (overrides: Partial<PredictedAction>): PredictedAction => ({
   action: "tapOn",
   target: {
     text: "Settings",
-    elementId: "id/settings"
+    elementId: "id/settings",
   },
   predictedScreen: "SettingsScreen",
   predictedElements: ["Settings", "id/settings"],
   confidence: 0.6,
-  ...overrides
+  ...overrides,
 });
 
 describe("PredictionAnalyzer", () => {
@@ -62,29 +62,29 @@ describe("PredictionAnalyzer", () => {
     const previous = buildObservation({
       predictions: {
         likelyActions: [buildPrediction({})],
-        interactableElements: []
-      }
+        interactableElements: [],
+      },
     });
     const actual = buildObservation({
       viewHierarchy: {
         hierarchy: {
           node: {
             $: {
-              "bounds": { left: 0, top: 0, right: 1, bottom: 1 },
-              "text": "Settings",
+              bounds: { left: 0, top: 0, right: 1, bottom: 1 },
+              text: "Settings",
               "resource-id": "id/settings",
-              "content-desc": "Settings"
-            }
-          }
-        }
-      }
+              "content-desc": "Settings",
+            },
+          },
+        },
+      },
     });
 
     await analyzer.recordOutcomeForAction(previous, actual, {
       appId: "com.test.app",
       fromScreen: "HomeScreen",
       toolName: "tapOn",
-      toolArgs: { text: "Settings" }
+      toolArgs: { text: "Settings" },
     });
 
     expect(history.outcomes).toHaveLength(1);
@@ -101,15 +101,15 @@ describe("PredictionAnalyzer", () => {
     const previous = buildObservation({
       predictions: {
         likelyActions: [buildPrediction({ predictedScreen: "SettingsScreen" })],
-        interactableElements: []
-      }
+        interactableElements: [],
+      },
     });
 
     await analyzer.recordOutcomeForAction(previous, baseObservation, {
       appId: "com.test.app",
       fromScreen: "HomeScreen",
       toolName: "tapOn",
-      toolArgs: { text: "Settings" }
+      toolArgs: { text: "Settings" },
     });
 
     expect(history.outcomes).toHaveLength(1);
@@ -126,15 +126,15 @@ describe("PredictionAnalyzer", () => {
     const previous = buildObservation({
       predictions: {
         likelyActions: [buildPrediction({ predictedElements: ["Settings", "Missing"] })],
-        interactableElements: []
-      }
+        interactableElements: [],
+      },
     });
 
     await analyzer.recordOutcomeForAction(previous, baseObservation, {
       appId: "com.test.app",
       fromScreen: "HomeScreen",
       toolName: "tapOn",
-      toolArgs: { text: "Settings" }
+      toolArgs: { text: "Settings" },
     });
 
     expect(history.outcomes).toHaveLength(1);

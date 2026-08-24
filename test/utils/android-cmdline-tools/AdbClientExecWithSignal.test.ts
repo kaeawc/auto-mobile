@@ -6,9 +6,7 @@ import {
   AdbCommandTimeoutError,
   adbHostProcessExecutor,
 } from "../../../src/utils/android-cmdline-tools/AdbClient";
-import type {
-  StartedHostCommand,
-} from "../../../src/utils/HostCommandExecutor";
+import type { StartedHostCommand } from "../../../src/utils/HostCommandExecutor";
 import { defaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 

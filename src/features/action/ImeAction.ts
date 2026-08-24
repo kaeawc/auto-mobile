@@ -1,7 +1,12 @@
 import { errorMessage } from "../../utils/describeUnknownError";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { BootedDevice, ImeAction as ImeActionType, ImeActionResult, ObserveResult } from "../../models";
+import {
+  BootedDevice,
+  ImeAction as ImeActionType,
+  ImeActionResult,
+  ObserveResult,
+} from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
@@ -17,17 +22,14 @@ export class ImeAction extends BaseVisualChange {
     device: BootedDevice,
     adb: AdbClient | null = null,
     a11yService: AndroidCtrlProxy | null = null,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
   ) {
     super(device, adb, timer);
     this.a11yService = a11yService;
     this.imeTimer = timer;
   }
 
-  async execute(
-    action: ImeActionType,
-    progress?: ProgressCallback
-  ): Promise<ImeActionResult> {
+  async execute(action: ImeActionType, progress?: ProgressCallback): Promise<ImeActionResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("imeAction");
 
@@ -37,7 +39,7 @@ export class ImeAction extends BaseVisualChange {
       return {
         success: false,
         action: "",
-        error: "No IME action provided"
+        error: "No IME action provided",
       };
     }
 
@@ -48,11 +50,11 @@ export class ImeAction extends BaseVisualChange {
           switch (this.device.platform) {
             case "android":
               return await perf.track("androidImeAction", () =>
-                this.executeAndroidImeAction(action, observeResult)
+                this.executeAndroidImeAction(action, observeResult),
               );
             case "ios":
               return await perf.track("iOSImeAction", () =>
-                this.executeiOSImeAction(action, observeResult)
+                this.executeiOSImeAction(action, observeResult),
               );
             default:
               perf.end();
@@ -64,18 +66,18 @@ export class ImeAction extends BaseVisualChange {
           return {
             success: false,
             action,
-            error: `Failed to execute IME action: ${errorMsg}`
+            error: `Failed to execute IME action: ${errorMsg}`,
           };
         }
       },
       {
         changeExpected: true,
-        tolerancePercent: 0.00,
+        tolerancePercent: 0.0,
         timeoutMs: 3000, // IME actions should be quick
         progress,
         perf,
-        skipUiStability: true // Skip UI stability wait - a11y service already waits for quiescence
-      }
+        skipUiStability: true, // Skip UI stability wait - a11y service already waits for quiescence
+      },
     );
   }
 
@@ -85,19 +87,24 @@ export class ImeAction extends BaseVisualChange {
    */
   private async executeAndroidImeAction(
     action: ImeActionType,
-    _observeResult: ObserveResult
+    _observeResult: ObserveResult,
   ): Promise<ImeActionResult> {
     // Use provided a11y service or get default instance
-    const a11yClient = this.a11yService || AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+    const a11yClient =
+      this.a11yService || AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     const a11yResult = await a11yClient.requestImeAction(action);
 
     if (a11yResult.success) {
-      logger.info(`[ImeAction] IME action '${action}' completed via accessibility service: ${a11yResult.totalTimeMs}ms`);
+      logger.info(
+        `[ImeAction] IME action '${action}' completed via accessibility service: ${a11yResult.totalTimeMs}ms`,
+      );
       return { success: true, action };
     }
 
     // Fall back to ADB key events
-    logger.warn(`[ImeAction] Accessibility service IME action failed: ${a11yResult.error}, falling back to ADB`);
+    logger.warn(
+      `[ImeAction] Accessibility service IME action failed: ${a11yResult.error}, falling back to ADB`,
+    );
     return this.executeAdbImeAction(action);
   }
 
@@ -107,21 +114,19 @@ export class ImeAction extends BaseVisualChange {
    * NOTE: This approach has known issues - KEYCODE_TAB inserts tab characters
    * instead of moving focus between fields.
    */
-  private async executeAdbImeAction(
-    action: ImeActionType
-  ): Promise<ImeActionResult> {
+  private async executeAdbImeAction(action: ImeActionType): Promise<ImeActionResult> {
     logger.info("Executing IME action via ADB", { action });
 
     // Map IME actions to Android key codes
     // NOTE: KEYCODE_TAB doesn't work correctly for "next" - it inserts a tab character
     // This fallback is only used if accessibility service is unavailable
     const imeKeyCodeMap: { [key: string]: string } = {
-      "done": "KEYCODE_ENTER",
-      "next": "KEYCODE_TAB", // WARNING: May insert tab character instead of moving focus
-      "search": "KEYCODE_SEARCH",
-      "send": "KEYCODE_ENTER",
-      "go": "KEYCODE_ENTER",
-      "previous": "KEYCODE_SHIFT_LEFT KEYCODE_TAB" // WARNING: May not work correctly
+      done: "KEYCODE_ENTER",
+      next: "KEYCODE_TAB", // WARNING: May insert tab character instead of moving focus
+      search: "KEYCODE_SEARCH",
+      send: "KEYCODE_ENTER",
+      go: "KEYCODE_ENTER",
+      previous: "KEYCODE_SHIFT_LEFT KEYCODE_TAB", // WARNING: May not work correctly
     };
 
     const keyCode = imeKeyCodeMap[action];
@@ -129,7 +134,7 @@ export class ImeAction extends BaseVisualChange {
       return {
         success: false,
         action,
-        error: `Unsupported IME action: ${action}`
+        error: `Unsupported IME action: ${action}`,
       };
     }
 
@@ -154,7 +159,7 @@ export class ImeAction extends BaseVisualChange {
       return {
         success: false,
         action,
-        error: `ADB key event failed: ${errorMsg}`
+        error: `ADB key event failed: ${errorMsg}`,
       };
     }
   }
@@ -164,7 +169,7 @@ export class ImeAction extends BaseVisualChange {
    */
   private async executeiOSImeAction(
     action: ImeActionType,
-    _observeResult: ObserveResult
+    _observeResult: ObserveResult,
   ): Promise<ImeActionResult> {
     try {
       const client = IOSCtrlProxyClient.getInstance(this.device);

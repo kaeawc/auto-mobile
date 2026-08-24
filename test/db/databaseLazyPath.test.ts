@@ -66,58 +66,66 @@ describe("database path lazy resolution", () => {
       expect(second).toBe(first);
     }));
 
-  test("queries issued immediately after getDatabase wait for startup migrations", () =>
-    runExclusiveResetTest(async () => {
-      const dbDir = await harness.makeTempDbDir("auto-mobile-db-startup-");
-      process.env.AUTOMOBILE_DB_DIR = dbDir;
-      delete process.env[DAEMON_LAUNCH_CWD_ENV];
+  test(
+    "queries issued immediately after getDatabase wait for startup migrations",
+    () =>
+      runExclusiveResetTest(async () => {
+        const dbDir = await harness.makeTempDbDir("auto-mobile-db-startup-");
+        process.env.AUTOMOBILE_DB_DIR = dbDir;
+        delete process.env[DAEMON_LAUNCH_CWD_ENV];
 
-      const databaseModule = await harness.importFreshDatabaseModule();
-      const db = databaseModule.getDatabase();
+        const databaseModule = await harness.importFreshDatabaseModule();
+        const db = databaseModule.getDatabase();
 
-      try {
-        const rows = await db
-          .selectFrom("tool_calls" as any)
-          .selectAll()
-          .execute();
+        try {
+          const rows = await db
+            .selectFrom("tool_calls" as any)
+            .selectAll()
+            .execute();
 
-        expect(rows).toEqual([]);
-      } finally {
-        await databaseModule.closeDatabase();
-      }
-    // Opens a real temp DB and runs the full startup migration set. A cold,
-    // loaded windows-latest runner legitimately needs more than bun's 5s
-    // default per-test timeout, so a slow-but-correct migration would otherwise
-    // read as a failure (#2992).
-    }), WINDOWS_FILE_DB_TEST_TIMEOUT_MS);
+          expect(rows).toEqual([]);
+        } finally {
+          await databaseModule.closeDatabase();
+        }
+        // Opens a real temp DB and runs the full startup migration set. A cold,
+        // loaded windows-latest runner legitimately needs more than bun's 5s
+        // default per-test timeout, so a slow-but-correct migration would otherwise
+        // read as a failure (#2992).
+      }),
+    WINDOWS_FILE_DB_TEST_TIMEOUT_MS,
+  );
 
-  test("queries fail clearly and consistently when startup migrations fail", () =>
-    runExclusiveResetTest(async () => {
-      const dbDir = await harness.makeTempDbDir("auto-mobile-db-startup-fail-");
-      process.env.AUTOMOBILE_DB_DIR = dbDir;
-      process.env.AUTOMOBILE_MIGRATIONS_DIR = path.join(dbDir, "missing-migrations");
-      delete process.env.AUTO_MOBILE_MIGRATIONS_DIR;
-      delete process.env[DAEMON_LAUNCH_CWD_ENV];
+  test(
+    "queries fail clearly and consistently when startup migrations fail",
+    () =>
+      runExclusiveResetTest(async () => {
+        const dbDir = await harness.makeTempDbDir("auto-mobile-db-startup-fail-");
+        process.env.AUTOMOBILE_DB_DIR = dbDir;
+        process.env.AUTOMOBILE_MIGRATIONS_DIR = path.join(dbDir, "missing-migrations");
+        delete process.env.AUTO_MOBILE_MIGRATIONS_DIR;
+        delete process.env[DAEMON_LAUNCH_CWD_ENV];
 
-      const databaseModule = await harness.importFreshDatabaseModule();
-      const db = databaseModule.getDatabase();
-      const query = () =>
-        db
-          .selectFrom("tool_calls" as any)
-          .selectAll()
-          .execute();
+        const databaseModule = await harness.importFreshDatabaseModule();
+        const db = databaseModule.getDatabase();
+        const query = () =>
+          db
+            .selectFrom("tool_calls" as any)
+            .selectAll()
+            .execute();
 
-      try {
-        await expect(query()).rejects.toThrow(
-          "Database startup migrations failed; refusing to run queries until the daemon restarts."
-        );
-        await expect(query()).rejects.toThrow(
-          "Database startup migrations failed; refusing to run queries until the daemon restarts."
-        );
-      } finally {
-        await databaseModule.closeDatabase();
-      }
-    // File-backed like the sibling above; the same generous ceiling covers a
-    // slow Windows startup-migration attempt before it fails clearly (#2992).
-    }), WINDOWS_FILE_DB_TEST_TIMEOUT_MS);
+        try {
+          await expect(query()).rejects.toThrow(
+            "Database startup migrations failed; refusing to run queries until the daemon restarts.",
+          );
+          await expect(query()).rejects.toThrow(
+            "Database startup migrations failed; refusing to run queries until the daemon restarts.",
+          );
+        } finally {
+          await databaseModule.closeDatabase();
+        }
+        // File-backed like the sibling above; the same generous ceiling covers a
+        // slow Windows startup-migration attempt before it fails clearly (#2992).
+      }),
+    WINDOWS_FILE_DB_TEST_TIMEOUT_MS,
+  );
 });

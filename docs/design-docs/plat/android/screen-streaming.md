@@ -28,12 +28,12 @@ The accessibility service **cannot** use VirtualDisplay for screen capture. A se
 
 scrcpy achieves permission-less screen capture by running via `adb shell app_process` as **shell user (UID 2000)**, impersonating `com.android.shell`, and accessing hidden `DisplayManagerGlobal.createVirtualDisplay(displayIdToMirror)` via reflection. These privileges are not available to the accessibility service.
 
-| Capability | Accessibility Service | Shell User (adb) |
-|------------|----------------------|------------------|
-| Hidden `DisplayManagerGlobal` APIs | No | Yes |
-| `SurfaceControl.createDisplay()` | No | Yes |
-| Screen capture without dialog | No | Yes |
-| Impersonate `com.android.shell` | No | Yes |
+| Capability                         | Accessibility Service | Shell User (adb) |
+| ---------------------------------- | --------------------- | ---------------- |
+| Hidden `DisplayManagerGlobal` APIs | No                    | Yes              |
+| `SurfaceControl.createDisplay()`   | No                    | Yes              |
+| Screen capture without dialog      | No                    | Yes              |
+| Impersonate `com.android.shell`    | No                    | Yes              |
 
 The accessibility service can only do on-demand `takeScreenshot()` or request `MediaProjection` (which requires a user permission dialog **each session** and foreground service on Android 14+).
 
@@ -91,12 +91,12 @@ enforced around that push/launch, both driven by a single on-device hash:
   (`sha256sum` + `wc -c`, through the injectable ADB seam, bounded by the
   launch-command timeout) and compares it against the host-known expected sha256
   and byte size. On a **definitive mismatch** the launch is refused with an
-  `ActionableError` and the source degrades to `screenrecord`; an *unreadable*
+  `ActionableError` and the source degrades to `screenrecord`; an _unreadable_
   probe (a device lacking `sha256sum`/`wc`, or a probe timeout) is not a mismatch
   — the push already overwrote the remote with trusted bytes, so it logs and
   proceeds (mirrors the handshake graceful-degrade).
 
-- **Skip the redundant push (startup latency).** The same probe runs once *before*
+- **Skip the redundant push (startup latency).** The same probe runs once _before_
   the push: when the remote copy is already byte-identical (size **and** hash),
   the ~2.5 MB `adb push` is skipped and that match doubles as the pre-launch gate
   (the happy path hashes the remote once). Any mismatch **or** uncertainty
@@ -113,6 +113,7 @@ were never checked against it. The value is memoized across relaunches.
 ## Protocol Specification
 
 ### Video Stream Header (12 bytes)
+
 ```
 ┌─────────────────┬─────────────────┬─────────────────┐
 │ codec_id (4)    │ width (4)       │ height (4)      │
@@ -125,6 +126,7 @@ codec_id values:
 ```
 
 ### Packet Header (12 bytes per packet)
+
 ```
 ┌─────────────────────────────────────┬─────────────────┐
 │ pts_and_flags (8)                   │ size (4)        │
@@ -176,12 +178,12 @@ val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width
 
 ## Bandwidth and Quality Tradeoffs
 
-| Quality | Resolution | Bitrate | Bandwidth | Notes |
-|---------|------------|---------|-----------|-------|
-| Low | 540p | 2 Mbps | ~2.5 MB/s | Good for slow USB |
-| Medium | 720p | 4 Mbps | ~5 MB/s | Balanced |
-| High | 1080p | 8 Mbps | ~10 MB/s | Full HD |
-| Ultra | Native | 16 Mbps | ~20 MB/s | 4K devices |
+| Quality | Resolution | Bitrate | Bandwidth | Notes             |
+| ------- | ---------- | ------- | --------- | ----------------- |
+| Low     | 540p       | 2 Mbps  | ~2.5 MB/s | Good for slow USB |
+| Medium  | 720p       | 4 Mbps  | ~5 MB/s   | Balanced          |
+| High    | 1080p      | 8 Mbps  | ~10 MB/s  | Full HD           |
+| Ultra   | Native     | 16 Mbps | ~20 MB/s  | 4K devices        |
 
 USB 2.0: ~30 MB/s theoretical, ~20 MB/s practical - all quality levels supported.
 
@@ -193,7 +195,7 @@ Depend on `org.bytedeco:ffmpeg` with the **host platform's classifier**, resolve
 
 - **not** `ffmpeg-platform`, which pulls every platform's natives (~150–200 MB)
 - **not** `javacv-platform`, which drags in OpenCV
-- **not** the `-gpl` artifact — only the x264/x265 *encoders* require it, and we decode, so the LGPL build is correct
+- **not** the `-gpl` artifact — only the x264/x265 _encoders_ require it, and we decode, so the LGPL build is correct
 
 That keeps the installer growth to ~20–30 MB per platform. The decoder reads a raw Annex-B elementary stream from memory (an `AVCodecParserContext` reassembles access units, so callers may feed arbitrary chunk boundaries) and yields tightly packed BGRA that copies straight into a Skia raster image — no AWT/Swing surface involved.
 
@@ -204,22 +206,26 @@ That keeps the installer growth to ~20–30 MB per platform. The decoder reads a
 ## Implementation Plan
 
 ### Milestone 1: Proof of Concept
+
 - [ ] Create automobile-video-server JAR with basic VirtualDisplay + MediaCodec
 - [ ] Test manual execution via `adb shell`
 - [ ] Verify H.264 stream output with ffplay
 
 ### Milestone 2: MCP Integration ✅ (#3994)
+
 - [x] Add video stream socket server to daemon (`video-stream.sock`)
 - [x] Implement ADB forward management (reuses the existing H.264 capture sources)
 - [x] Add start/stop video streaming commands (JSON subscribe handshake, then binary framing)
 
 ### Milestone 3: Desktop Decoder ✅ (#4008)
+
 - [x] Add decoder dependency (`org.bytedeco:ffmpeg`, host-platform classifier)
 - [x] Implement VideoStreamClient
 - [x] Create frame-to-ImageBitmap pipeline (`DecodedFrame.toImageBitmap()`)
 - [ ] Benchmark decode performance — not yet measured against a real device
 
 ### Milestone 4: Compose Integration (#3995)
+
 - [x] `DeviceScreenView` accepts an optional `liveFrame` that renders instead of the polled screenshot
 - [ ] Supply that frame: `LayoutInspectorDashboard` must construct a client and collect its frames
 - [ ] Choose live vs screenshot at runtime and fall back on `VideoStreamState.Unavailable`
@@ -229,6 +235,7 @@ That keeps the installer growth to ~20–30 MB per platform. The decoder reads a
 - [x] Add quality/resolution controls — Low/Medium/High preset selector on the focused pane; resolution follows the preset (#1098)
 
 ### Milestone 5: Polish
+
 - [ ] Handle device disconnect/reconnect
 - [ ] Add fallback to screenshot mode
 - [x] Automatic quality adjustment on frame drops — client-side `QualityController` steps the preset and re-subscribes; because a shared per-device capture's encode is fixed by the first subscriber, this applies for a sole subscriber / the next subscribe, and reconfiguring a live shared capture is a server-side follow-up (#1098)
@@ -237,6 +244,7 @@ That keeps the installer growth to ~20–30 MB per platform. The decoder reads a
 ## References
 
 ### Android Screen Capture
+
 - [scrcpy source code](https://github.com/Genymobile/scrcpy) - Reference implementation
 - [Android MediaCodec docs](https://developer.android.com/reference/android/media/MediaCodec)
 - [Android VirtualDisplay](https://developer.android.com/reference/android/hardware/display/VirtualDisplay)
@@ -244,6 +252,7 @@ That keeps the installer growth to ~20–30 MB per platform. The decoder reads a
 - [Android 14 MediaProjection requirements](https://developer.android.com/about/versions/14/changes/fgs-types-required)
 
 ### Video Decoding (Desktop)
+
 - [bytedeco javacpp-presets: ffmpeg](https://github.com/bytedeco/javacpp-presets/tree/master/ffmpeg) - chosen solution
 - [Klarity](https://github.com/numq/Klarity) - evaluated and rejected; file-path-only API cannot consume a live stream
 - [JetBrains Skiko](https://github.com/JetBrains/skiko) - Skia bindings for Kotlin

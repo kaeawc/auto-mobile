@@ -38,16 +38,16 @@ All messages are newline-delimited JSON sent over the Unix socket. Each request 
 }
 ```
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `id` | `string` | Yes | Caller-assigned ID echoed back in the response |
-| `type` | `"mcp_request" \| "daemon_request"` | Yes | Request category |
-| `method` | `string` | Yes | Endpoint name (e.g. `ide/ping`, `daemon/availableDevices`) |
-| `params` | `object` | Yes | Method-specific parameters; pass `{}` when none are needed |
-| `timeoutMs` | `number` | No | Per-request timeout in milliseconds (default: 30 000). Long-running `tools/call` requests may be raised to a tool-specific minimum timeout by the daemon (see [Tool-specific timeout floors](#tool-specific-timeout-floors)). |
-| `clientVersion` | `string` | No | Client package/release version. Supply it to opt into version mismatch detection; clients that omit every handshake field are treated as legacy and bypass the handshake. |
-| `clientBuildId` | `string` | No | Content hash of the client entry script. TypeScript clients should supply this together with `clientEntryScript` for build-identity detection. |
-| `clientEntryScript` | `string` | No | Absolute path to the client entry script. Supply it with `clientBuildId`; Kotlin and Swift clients use `clientVersion` only. |
+| Field               | Type                                | Required | Description                                                                                                                                                                                                                   |
+| ------------------- | ----------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | `string`                            | Yes      | Caller-assigned ID echoed back in the response                                                                                                                                                                                |
+| `type`              | `"mcp_request" \| "daemon_request"` | Yes      | Request category                                                                                                                                                                                                              |
+| `method`            | `string`                            | Yes      | Endpoint name (e.g. `ide/ping`, `daemon/availableDevices`)                                                                                                                                                                    |
+| `params`            | `object`                            | Yes      | Method-specific parameters; pass `{}` when none are needed                                                                                                                                                                    |
+| `timeoutMs`         | `number`                            | No       | Per-request timeout in milliseconds (default: 30 000). Long-running `tools/call` requests may be raised to a tool-specific minimum timeout by the daemon (see [Tool-specific timeout floors](#tool-specific-timeout-floors)). |
+| `clientVersion`     | `string`                            | No       | Client package/release version. Supply it to opt into version mismatch detection; clients that omit every handshake field are treated as legacy and bypass the handshake.                                                     |
+| `clientBuildId`     | `string`                            | No       | Content hash of the client entry script. TypeScript clients should supply this together with `clientEntryScript` for build-identity detection.                                                                                |
+| `clientEntryScript` | `string`                            | No       | Absolute path to the client entry script. Supply it with `clientBuildId`; Kotlin and Swift clients use `clientVersion` only.                                                                                                  |
 
 **Response**
 
@@ -56,18 +56,18 @@ All messages are newline-delimited JSON sent over the Unix socket. Each request 
   "id": "unique-request-id",
   "type": "mcp_response",
   "success": true,
-  "result": { }
+  "result": {}
 }
 ```
 
-| Field | Type | Description |
-|---|---|---|
-| `id` | `string` | Echoed from the request |
-| `type` | `"mcp_response"` | Always this value |
-| `success` | `boolean` | `true` on success, `false` on error |
-| `result` | `object` | Present when `success` is `true` |
-| `error` | `string` | Present when `success` is `false` |
-| `transportFailure` | `object` | Optional machine-readable device-control transport failure metadata. The allowlisted fields are `code`, `transport`, `toolName`, optional `deviceId`, optional `deviceSessionUuid`, optional target-owner `sessionUuid`, optional caller `routingSessionUuid`, `sessionValid`, `deviceSessionValid`, `phase`, `retryable`, `reconnectAttempted`, and `replayAttempted`. `sessionValid` reports whether all captured daemon-session identities remain valid; `deviceSessionValid` independently reports whether the captured device epoch is still current. Legacy clients can continue using `error`. |
+| Field              | Type             | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------ | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`               | `string`         | Echoed from the request                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `type`             | `"mcp_response"` | Always this value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `success`          | `boolean`        | `true` on success, `false` on error                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `result`           | `object`         | Present when `success` is `true`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `error`            | `string`         | Present when `success` is `false`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `transportFailure` | `object`         | Optional machine-readable device-control transport failure metadata. The allowlisted fields are `code`, `transport`, `toolName`, optional `deviceId`, optional `deviceSessionUuid`, optional target-owner `sessionUuid`, optional caller `routingSessionUuid`, `sessionValid`, `deviceSessionValid`, `phase`, `retryable`, `reconnectAttempted`, and `replayAttempted`. `sessionValid` reports whether all captured daemon-session identities remain valid; `deviceSessionValid` independently reports whether the captured device epoch is still current. Legacy clients can continue using `error`. |
 
 ---
 
@@ -156,9 +156,7 @@ Lists all available feature flags and their current state. See [Feature Flags](.
 
 ```json
 {
-  "flags": [
-    { "key": "debugMode", "enabled": false, "config": null }
-  ]
+  "flags": [{ "key": "debugMode", "enabled": false, "config": null }]
 }
 ```
 
@@ -170,11 +168,11 @@ Enables or disables a feature flag, with optional configuration.
 
 **Params**
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `key` | `string` | Yes | Feature flag key |
-| `enabled` | `boolean` | Yes | Enable or disable the flag |
-| `config` | `object \| null` | No | Optional flag-specific configuration |
+| Field     | Type             | Required | Description                          |
+| --------- | ---------------- | -------- | ------------------------------------ |
+| `key`     | `string`         | Yes      | Feature flag key                     |
+| `enabled` | `boolean`        | Yes      | Enable or disable the flag           |
+| `config`  | `object \| null` | No       | Optional flag-specific configuration |
 
 **Result:** the updated feature flag object.
 
@@ -186,10 +184,10 @@ Updates the Android accessibility service APK or restarts the iOS CtrlProxy iOS 
 
 **Params**
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `deviceId` | `string` | Yes | ADB device ID or simulator UDID |
-| `platform` | `"android" \| "ios"` | Yes | Target platform |
+| Field      | Type                 | Required | Description                     |
+| ---------- | -------------------- | -------- | ------------------------------- |
+| `deviceId` | `string`             | Yes      | ADB device ID or simulator UDID |
+| `platform` | `"android" \| "ios"` | Yes      | Target platform                 |
 
 **Result**
 
@@ -211,14 +209,14 @@ Writes a value into an Android app's SharedPreferences file via the accessibilit
 
 **Params**
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `deviceId` | `string` | Yes | ADB device ID |
-| `appId` | `string` | Yes | Application package name |
-| `fileName` | `string` | Yes | SharedPreferences file name (without `.xml`) |
-| `key` | `string` | Yes | Preference key |
-| `value` | `string \| null` | Yes | Value to write; `null` removes the key |
-| `type` | `"STRING" \| "INT" \| "LONG" \| "FLOAT" \| "BOOLEAN" \| "STRING_SET"` | Yes | Preference type |
+| Field      | Type                                                                  | Required | Description                                  |
+| ---------- | --------------------------------------------------------------------- | -------- | -------------------------------------------- |
+| `deviceId` | `string`                                                              | Yes      | ADB device ID                                |
+| `appId`    | `string`                                                              | Yes      | Application package name                     |
+| `fileName` | `string`                                                              | Yes      | SharedPreferences file name (without `.xml`) |
+| `key`      | `string`                                                              | Yes      | Preference key                               |
+| `value`    | `string \| null`                                                      | Yes      | Value to write; `null` removes the key       |
+| `type`     | `"STRING" \| "INT" \| "LONG" \| "FLOAT" \| "BOOLEAN" \| "STRING_SET"` | Yes      | Preference type                              |
 
 **Result**
 
@@ -234,12 +232,12 @@ Removes a single key from an Android app's SharedPreferences file. <kbd>🤖 And
 
 **Params**
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `deviceId` | `string` | Yes | ADB device ID |
-| `appId` | `string` | Yes | Application package name |
-| `fileName` | `string` | Yes | SharedPreferences file name |
-| `key` | `string` | Yes | Preference key to remove |
+| Field      | Type     | Required | Description                 |
+| ---------- | -------- | -------- | --------------------------- |
+| `deviceId` | `string` | Yes      | ADB device ID               |
+| `appId`    | `string` | Yes      | Application package name    |
+| `fileName` | `string` | Yes      | SharedPreferences file name |
+| `key`      | `string` | Yes      | Preference key to remove    |
 
 **Result**
 
@@ -255,11 +253,11 @@ Clears all keys from an Android app's SharedPreferences file. <kbd>🤖 Android 
 
 **Params**
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `deviceId` | `string` | Yes | ADB device ID |
-| `appId` | `string` | Yes | Application package name |
-| `fileName` | `string` | Yes | SharedPreferences file name |
+| Field      | Type     | Required | Description                 |
+| ---------- | -------- | -------- | --------------------------- |
+| `deviceId` | `string` | Yes      | ADB device ID               |
+| `appId`    | `string` | Yes      | Application package name    |
+| `fileName` | `string` | Yes      | SharedPreferences file name |
 
 **Result**
 
@@ -296,10 +294,10 @@ All input requests use `type: "mcp_request"` and a method name under `input/`.
 The method-specific payload lives in `params`. `timeoutMs` remains a top-level
 socket request field, matching the base protocol envelope.
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `platform` | `"android" \| "ios"` | Yes | Target device platform. |
-| `deviceId` | `string` | No | ADB device ID or iOS simulator UDID. |
+| Field      | Type                 | Required | Description                          |
+| ---------- | -------------------- | -------- | ------------------------------------ |
+| `platform` | `"android" \| "ios"` | Yes      | Target device platform.              |
+| `deviceId` | `string`             | No       | ADB device ID or iOS simulator UDID. |
 
 When `deviceId` is omitted, the daemon targets the device assigned to the
 current socket session. If the socket session has no assigned device, the daemon
@@ -338,14 +336,14 @@ working in points. See
 
 ### Implementation status
 
-| Method | Android | iOS | Notes |
-|---|---|---|---|
-| `input/tap` | Supported | Supported | Absolute device-screen coordinates. |
-| `input/swipe` | Supported | Supported | Absolute device-screen start/end coordinates. Use for drag gestures until `input/drag` has distinct semantics. |
-| `input/drag` | Deferred | Deferred | Not a separate method in this contract. |
-| `input/pressButton` | Supported | Supported with platform gaps | Device/navigation buttons aligned with MCP `pressButton`. Unsupported buttons fail instead of being ignored. |
-| `input/typeText` | Supported | Supported | Sends committed text only; IME composition is deferred. Non-destructive `mode: "append"` is supported on both platforms. |
-| `input/key` | Supported | Unsupported | Discrete non-text key presses. Modifiers are deferred. |
+| Method              | Android   | iOS                          | Notes                                                                                                                    |
+| ------------------- | --------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `input/tap`         | Supported | Supported                    | Absolute device-screen coordinates.                                                                                      |
+| `input/swipe`       | Supported | Supported                    | Absolute device-screen start/end coordinates. Use for drag gestures until `input/drag` has distinct semantics.           |
+| `input/drag`        | Deferred  | Deferred                     | Not a separate method in this contract.                                                                                  |
+| `input/pressButton` | Supported | Supported with platform gaps | Device/navigation buttons aligned with MCP `pressButton`. Unsupported buttons fail instead of being ignored.             |
+| `input/typeText`    | Supported | Supported                    | Sends committed text only; IME composition is deferred. Non-destructive `mode: "append"` is supported on both platforms. |
+| `input/key`         | Supported | Unsupported                  | Discrete non-text key presses. Modifiers are deferred.                                                                   |
 
 All successful input responses use this result shape:
 
@@ -440,9 +438,9 @@ The value is opaque, device-specific, and must only be echoed unchanged. It is n
 not portable across devices or runner restarts, and a client must fail closed when the screenshot
 and hierarchy contexts are absent or unequal.
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `frameContext` | `string` | No | Opaque context from the paired screenshot and hierarchy. Screen-control clients echo it on every `input/*` request; generic callers without a rendered frame omit it. |
+| Field          | Type     | Required | Description                                                                                                                                                           |
+| -------------- | -------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `frameContext` | `string` | No       | Opaque context from the paired screenshot and hierarchy. Screen-control clients echo it on every `input/*` request; generic callers without a rendered frame omit it. |
 
 ### `input/tap`
 
@@ -451,13 +449,13 @@ the current device orientation.
 
 **Params**
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `platform` | `"android" \| "ios"` | Yes | Target platform. |
-| `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
-| `x` | `number` | Yes | X coordinate in physical screen pixels. |
-| `y` | `number` | Yes | Y coordinate in physical screen pixels. |
-| `duration` | `number` | No | Tap duration in milliseconds. |
+| Field      | Type                 | Required | Description                                                     |
+| ---------- | -------------------- | -------- | --------------------------------------------------------------- |
+| `platform` | `"android" \| "ios"` | Yes      | Target platform.                                                |
+| `deviceId` | `string`             | No       | Target device; see [Common input fields](#common-input-fields). |
+| `x`        | `number`             | Yes      | X coordinate in physical screen pixels.                         |
+| `y`        | `number`             | Yes      | Y coordinate in physical screen pixels.                         |
+| `duration` | `number`             | No       | Tap duration in milliseconds.                                   |
 
 **Request**
 
@@ -498,15 +496,15 @@ duration.
 
 **Params**
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `platform` | `"android" \| "ios"` | Yes | Target platform. |
-| `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
-| `startX` | `number` | Yes | Start X coordinate in physical screen pixels. |
-| `startY` | `number` | Yes | Start Y coordinate in physical screen pixels. |
-| `endX` | `number` | Yes | End X coordinate in physical screen pixels. |
-| `endY` | `number` | Yes | End Y coordinate in physical screen pixels. |
-| `durationMs` | `number` | No | Gesture duration in milliseconds, from 1 to 60 000 inclusive. The daemon uses 300 when omitted. |
+| Field        | Type                 | Required | Description                                                                                     |
+| ------------ | -------------------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `platform`   | `"android" \| "ios"` | Yes      | Target platform.                                                                                |
+| `deviceId`   | `string`             | No       | Target device; see [Common input fields](#common-input-fields).                                 |
+| `startX`     | `number`             | Yes      | Start X coordinate in physical screen pixels.                                                   |
+| `startY`     | `number`             | Yes      | Start Y coordinate in physical screen pixels.                                                   |
+| `endX`       | `number`             | Yes      | End X coordinate in physical screen pixels.                                                     |
+| `endY`       | `number`             | Yes      | End Y coordinate in physical screen pixels.                                                     |
+| `durationMs` | `number`             | No       | Gesture duration in milliseconds, from 1 to 60 000 inclusive. The daemon uses 300 when omitted. |
 
 **Request**
 
@@ -547,11 +545,11 @@ Presses a device or navigation button.
 
 **Params**
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `platform` | `"android" \| "ios"` | Yes | Target platform. |
-| `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
-| `button` | `"back" \| "home" \| "app_switch" \| "volume_up" \| "volume_down" \| "power"` plus MCP aliases `"menu"` and `"recent"` | Yes | Button to press. Unsupported buttons fail with `success: false`. |
+| Field      | Type                                                                                                                   | Required | Description                                                      |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------- |
+| `platform` | `"android" \| "ios"`                                                                                                   | Yes      | Target platform.                                                 |
+| `deviceId` | `string`                                                                                                               | No       | Target device; see [Common input fields](#common-input-fields).  |
+| `button`   | `"back" \| "home" \| "app_switch" \| "volume_up" \| "volume_down" \| "power"` plus MCP aliases `"menu"` and `"recent"` | Yes      | Button to press. Unsupported buttons fail with `success: false`. |
 
 **Request**
 
@@ -613,13 +611,13 @@ this contract; clients should send the final committed string.
 
 **Params**
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `platform` | `"android" \| "ios"` | Yes | Target platform. |
-| `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
-| `text` | `string` | Yes | Non-empty text to type. |
-| `submit` | `boolean` | No | When true, press enter/return after typing if the platform supports it. |
-| `mode` | `"append"` | No | Append to the focused field instead of replacing its contents. Android uses real key events; iOS uses CtrlProxy's focused-field insert primitive. `"append"` is the only accepted value; any other value fails validation. |
+| Field      | Type                 | Required | Description                                                                                                                                                                                                                |
+| ---------- | -------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `platform` | `"android" \| "ios"` | Yes      | Target platform.                                                                                                                                                                                                           |
+| `deviceId` | `string`             | No       | Target device; see [Common input fields](#common-input-fields).                                                                                                                                                            |
+| `text`     | `string`             | Yes      | Non-empty text to type.                                                                                                                                                                                                    |
+| `submit`   | `boolean`            | No       | When true, press enter/return after typing if the platform supports it.                                                                                                                                                    |
+| `mode`     | `"append"`           | No       | Append to the focused field instead of replacing its contents. Android uses real key events; iOS uses CtrlProxy's focused-field insert primitive. `"append"` is the only accepted value; any other value fails validation. |
 
 **Replace vs. append.** On Android, the default path sets the focused field's
 contents via `ACTION_SET_TEXT`, which **replaces** whatever is there — right for
@@ -745,25 +743,25 @@ Modifiers are not supported in the first version. Requests that include
 
 Supported key names:
 
-| Key | Android mapping | iOS |
-|---|---|---|
-| `enter` | `KEYCODE_ENTER` | Unsupported |
-| `tab` | `KEYCODE_TAB` | Unsupported |
-| `escape` | `KEYCODE_ESCAPE` | Unsupported |
-| `backspace` | `KEYCODE_DEL` | Unsupported |
-| `delete` | `KEYCODE_FORWARD_DEL` | Unsupported |
-| `arrow_up` | `KEYCODE_DPAD_UP` | Unsupported |
-| `arrow_down` | `KEYCODE_DPAD_DOWN` | Unsupported |
-| `arrow_left` | `KEYCODE_DPAD_LEFT` | Unsupported |
-| `arrow_right` | `KEYCODE_DPAD_RIGHT` | Unsupported |
+| Key           | Android mapping       | iOS         |
+| ------------- | --------------------- | ----------- |
+| `enter`       | `KEYCODE_ENTER`       | Unsupported |
+| `tab`         | `KEYCODE_TAB`         | Unsupported |
+| `escape`      | `KEYCODE_ESCAPE`      | Unsupported |
+| `backspace`   | `KEYCODE_DEL`         | Unsupported |
+| `delete`      | `KEYCODE_FORWARD_DEL` | Unsupported |
+| `arrow_up`    | `KEYCODE_DPAD_UP`     | Unsupported |
+| `arrow_down`  | `KEYCODE_DPAD_DOWN`   | Unsupported |
+| `arrow_left`  | `KEYCODE_DPAD_LEFT`   | Unsupported |
+| `arrow_right` | `KEYCODE_DPAD_RIGHT`  | Unsupported |
 
 **Params**
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `platform` | `"android" \| "ios"` | Yes | Target platform. |
-| `deviceId` | `string` | No | Target device; see [Common input fields](#common-input-fields). |
-| `key` | One of the supported key names above | Yes | Platform-neutral key name. |
+| Field      | Type                                 | Required | Description                                                     |
+| ---------- | ------------------------------------ | -------- | --------------------------------------------------------------- |
+| `platform` | `"android" \| "ios"`                 | Yes      | Target platform.                                                |
+| `deviceId` | `string`                             | No       | Target device; see [Common input fields](#common-input-fields). |
+| `key`      | One of the supported key names above | Yes      | Platform-neutral key name.                                      |
 
 **Request**
 
@@ -838,10 +836,10 @@ Calls a registered MCP tool by name.
 
 **Params**
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `name` | `string` | Yes | MCP tool name (e.g. `observe`, `tapOn`) |
-| `arguments` | `object` | Yes | Tool-specific arguments |
+| Field       | Type     | Required | Description                             |
+| ----------- | -------- | -------- | --------------------------------------- |
+| `name`      | `string` | Yes      | MCP tool name (e.g. `observe`, `tapOn`) |
+| `arguments` | `object` | Yes      | Tool-specific arguments                 |
 
 **Result:** standard MCP `CallToolResult`.
 
@@ -853,12 +851,12 @@ request still uses `max(timeoutMs, floor)`, so a caller-supplied `timeoutMs` abo
 the floor is preserved, but a shorter one (or none) is lifted to the floor rather
 than aborting work that is still in progress.
 
-| Tool | Default floor | Override |
-|---|---|---|
-| `executePlan` | 600 000 ms | — |
-| `startDevice` | 180 000 ms | — |
-| `launchApp` | 90 000 ms | — |
-| `openLink` | 90 000 ms | `AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS` (legacy alias: `AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS`) |
+| Tool          | Default floor | Override                                                                                     |
+| ------------- | ------------- | -------------------------------------------------------------------------------------------- |
+| `executePlan` | 600 000 ms    | —                                                                                            |
+| `startDevice` | 180 000 ms    | —                                                                                            |
+| `launchApp`   | 90 000 ms     | —                                                                                            |
+| `openLink`    | 90 000 ms     | `AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS` (legacy alias: `AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS`) |
 
 For `startDevice`, 180 000 ms is only the minimum transport floor. When the
 tool arguments specify a larger total `timeoutMs` (either at the top level or
@@ -901,9 +899,9 @@ Reads a single MCP resource by URI.
 
 **Params**
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `uri` | `string` | Yes | Resource URI (e.g. `automobile:devices/booted`) |
+| Field | Type     | Required | Description                                     |
+| ----- | -------- | -------- | ----------------------------------------------- |
+| `uri` | `string` | Yes      | Resource URI (e.g. `automobile:devices/booted`) |
 
 **Result:** standard MCP `ReadResourceResult`.
 
@@ -979,11 +977,13 @@ recovery eligibility for each pooled device.
     "error": 0
   },
   "recoveryPolicy": { "onLoss": true, "maxAttempts": 2 },
-  "devices": [{
-    "deviceId": "emulator-5554",
-    "platform": "android",
-    "recoveryEligibility": { "eligible": true, "action": "restart" }
-  }]
+  "devices": [
+    {
+      "deviceId": "emulator-5554",
+      "platform": "android",
+      "recoveryEligibility": { "eligible": true, "action": "restart" }
+    }
+  ]
 }
 ```
 
@@ -992,7 +992,7 @@ recovery eligibility for each pooled device.
 ### `daemon/listDeviceSessions`
 
 Returns the current map of connected devices to their **device-session UUIDs**. A
-`deviceSessionUuid` identifies a device *connection epoch*: it is minted when a
+`deviceSessionUuid` identifies a device _connection epoch_: it is minted when a
 device is first booted/connected, retired on disconnect, and a fresh UUID is
 minted on same-serial reconnect. Unlike the adb serial / simulator UDID
 (`deviceId`, which a rebooted emulator reuses), the `deviceSessionUuid` is a
@@ -1007,12 +1007,14 @@ survive a daemon restart).
 
 ```json
 {
-  "deviceSessions": [{
-    "deviceSessionUuid": "b1f2c3d4-0000-4000-8000-000000000001",
-    "deviceId": "emulator-5554",
-    "platform": "android",
-    "epochStartedAt": 1734300000000
-  }],
+  "deviceSessions": [
+    {
+      "deviceSessionUuid": "b1f2c3d4-0000-4000-8000-000000000001",
+      "deviceId": "emulator-5554",
+      "platform": "android",
+      "epochStartedAt": 1734300000000
+    }
+  ],
   "totalDeviceSessions": 1
 }
 ```
@@ -1047,9 +1049,9 @@ Returns metadata for an active session.
 
 **Params**
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `sessionId` | `string` | Yes | Session ID to query |
+| Field       | Type     | Required | Description         |
+| ----------- | -------- | -------- | ------------------- |
+| `sessionId` | `string` | Yes      | Session ID to query |
 
 **Result**
 
@@ -1075,9 +1077,9 @@ Releases a session and returns its device to the idle pool. Idempotent — safe 
 
 **Params**
 
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `sessionId` | `string` | Yes | Session to release |
+| Field       | Type     | Required | Description        |
+| ----------- | -------- | -------- | ------------------ |
+| `sessionId` | `string` | Yes      | Session to release |
 
 **Result**
 

@@ -32,7 +32,7 @@ PR [#4117](https://github.com/kaeawc/auto-mobile/pull/4117) with `per_page=2`: f
 the unpaginated result. (The `gh api` manual describes pages as separate documents — true for
 GraphQL and for object-shaped responses, but not for these array endpoints on this version. If
 you are on an older gh, re-check before relying on it.) Do **not** add `--slurp`
-here: on an array endpoint it produces an array *of pages* (`[[…],[…]]`), and it is rejected
+here: on an array endpoint it produces an array _of pages_ (`[[…],[…]]`), and it is rejected
 outright when combined with `--jq` (`the --slurp option is not supported with --jq or
 --template`). GraphQL is the opposite case — see below.
 
@@ -80,7 +80,7 @@ Only resolve on a PR **we** authored and are actively working, once the finding 
 handled — fixed in a pushed commit, or verified and declined. Both count: resolving claims the
 thread is dealt with, not that the reviewer was right. Leave it open only when you could not
 determine whether the finding is real.
-Replying instead takes the *comment* id, not the thread id:
+Replying instead takes the _comment_ id, not the thread id:
 
 ```bash
 gh api repos/kaeawc/auto-mobile/pulls/<PR>/comments/<comment_id>/replies -f body='…'
@@ -124,7 +124,7 @@ gh api --paginate "repos/kaeawc/auto-mobile/commits/<HEAD_SHA>/check-runs?per_pa
 
 The **same name twice with different conclusions** — a cancelled older run beside a successful
 newer one — is what parks automerge; take the newest. An empty legacy combined status is
-*inconclusive*, not green, and a `queued`/`in_progress` job is never implicitly green.
+_inconclusive_, not green, and a `queued`/`in_progress` job is never implicitly green.
 
 ## Actions: runs, jobs, logs
 

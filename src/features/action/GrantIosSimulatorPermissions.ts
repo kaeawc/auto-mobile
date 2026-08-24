@@ -4,10 +4,7 @@ import { IosSimulatorPermissions, type IosSimulatorPrivacyClient } from "./IosSi
 export class GrantIosSimulatorPermissions {
   private permissions: IosSimulatorPermissions;
 
-  constructor(
-    device: BootedDevice,
-    simctl: IosSimulatorPrivacyClient | null = null
-  ) {
+  constructor(device: BootedDevice, simctl: IosSimulatorPrivacyClient | null = null) {
     this.permissions = new IosSimulatorPermissions(device, simctl);
   }
 
@@ -16,7 +13,7 @@ export class GrantIosSimulatorPermissions {
     return {
       ...result,
       grantedCount: result.changedCount,
-      results: result.results
+      results: result.results,
     };
   }
 }

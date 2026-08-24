@@ -61,11 +61,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
       bootedDevice({ deviceId: "2", platform: "ios", osVersion: "17.2" }),
     ];
 
-    const result = matcher.matchBootedDevice(
-      { platform: "ios" },
-      devices,
-      "LATEST"
-    );
+    const result = matcher.matchBootedDevice({ platform: "ios" }, devices, "LATEST");
     expect(result?.deviceId).toBe("2");
   });
 
@@ -79,7 +75,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     const result = matcher.matchBootedDevice(
       { platform: "android", minOsVersion: "14" },
       devices,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.deviceId).toBe("3");
   });
@@ -94,7 +90,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     const result = matcher.matchBootedDevice(
       { platform: "android", maxOsVersion: "14" },
       devices,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.deviceId).toBe("2");
   });
@@ -110,7 +106,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     const result = matcher.matchBootedDevice(
       { platform: "android", minOsVersion: "14", maxOsVersion: "15" },
       devices,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.deviceId).toBe("3");
   });
@@ -145,7 +141,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     const result = matcher.matchBootedDevice(
       { platform: "android", minOsVersion: "14", maxOsVersion: "15" },
       devices,
-      "LATEST"
+      "LATEST",
     );
     expect(result).toBeNull();
   });
@@ -160,7 +156,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     const result = matcher.matchBootedDevice(
       { platform: "android", name: "iphone" },
       devices,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.deviceId).toBe("1");
   });
@@ -174,7 +170,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     const result = matcher.matchBootedDevice(
       { platform: "android", name: "iPhone 15 Pro" },
       devices,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.deviceId).toBe("2");
   });
@@ -188,7 +184,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     const result = matcher.matchBootedDevice(
       { platform: "android", formFactor: "tablet" },
       devices,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.deviceId).toBe("2");
   });
@@ -202,7 +198,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     const result = matcher.matchBootedDevice(
       { platform: "android", screenSize: { width: 1080, height: 2340 } },
       devices,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.deviceId).toBe("1");
   });
@@ -215,7 +211,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     const result = matcher.matchBootedDevice(
       { platform: "android", screenSize: { width: 800, height: 1280 } },
       devices,
-      "LATEST"
+      "LATEST",
     );
     expect(result).toBeNull();
   });
@@ -227,11 +223,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
       bootedDevice({ deviceId: "3", osVersion: "14" }),
     ];
 
-    const result = matcher.matchBootedDevice(
-      { platform: "android" },
-      devices,
-      "LATEST"
-    );
+    const result = matcher.matchBootedDevice({ platform: "android" }, devices, "LATEST");
     expect(result?.deviceId).toBe("2");
   });
 
@@ -245,7 +237,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     const result = matcher.matchBootedDevice(
       { platform: "android", minOsVersion: "14" },
       devices,
-      "MINIMUM"
+      "MINIMUM",
     );
     expect(result?.deviceId).toBe("3");
   });
@@ -260,32 +252,26 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     const result = matcher.matchBootedDevice(
       { platform: "android", minOsVersion: "14" },
       devices,
-      "RANDOM"
+      "RANDOM",
     );
     expect(result).not.toBeNull();
     expect(result!.deviceId).toBe("2");
   });
 
   it("returns null for empty device list", () => {
-    const result = matcher.matchBootedDevice(
-      { platform: "android" },
-      [],
-      "LATEST"
-    );
+    const result = matcher.matchBootedDevice({ platform: "android" }, [], "LATEST");
     expect(result).toBeNull();
   });
 
   it("does not silently drop a device whose osVersion has a non-numeric suffix", () => {
     // "14-QPR1" is Android 14; before the fix it parsed to NaN and was rejected
     // by BOTH the min and max filters, so the device vanished entirely (#4183).
-    const devices = [
-      bootedDevice({ deviceId: "1", osVersion: "14-QPR1" }),
-    ];
+    const devices = [bootedDevice({ deviceId: "1", osVersion: "14-QPR1" })];
 
     const result = matcher.matchBootedDevice(
       { platform: "android", minOsVersion: "14", maxOsVersion: "14" },
       devices,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.deviceId).toBe("1");
   });
@@ -300,7 +286,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     const result = matcher.matchBootedDevice(
       { platform: "android", minOsVersion: "14-QPR2" },
       devices,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.deviceId).toBe("qpr2");
   });
@@ -325,7 +311,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     const result = matcher.matchBootedDevice(
       { platform: "android", minOsVersion: " 14 ", maxOsVersion: "\t14\n" },
       devices,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.deviceId).toBe("14");
   });
@@ -336,12 +322,13 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
       bootedDevice({ deviceId: "numeric", osVersion: "15" }),
     ];
 
-    expect(matcher.matchBootedDevice(
-      { platform: "android", minOsVersion: "14" },
-      devices,
-      "LATEST"
-    )?.deviceId).toBe("numeric");
-    expect(matcher.matchBootedDevice({ platform: "android" }, devices, "LATEST")?.deviceId).toBe("numeric");
+    expect(
+      matcher.matchBootedDevice({ platform: "android", minOsVersion: "14" }, devices, "LATEST")
+        ?.deviceId,
+    ).toBe("numeric");
+    expect(matcher.matchBootedDevice({ platform: "android" }, devices, "LATEST")?.deviceId).toBe(
+      "numeric",
+    );
   });
 
   it("skips devices without osVersion when minOsVersion filter is set", () => {
@@ -353,7 +340,7 @@ describe("DefaultDeviceMatcher.matchBootedDevice", () => {
     const result = matcher.matchBootedDevice(
       { platform: "android", minOsVersion: "13" },
       devices,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.deviceId).toBe("2");
   });
@@ -370,7 +357,7 @@ describe("DefaultDeviceMatcher.matchDeviceImage", () => {
     const result = matcher.matchDeviceImage(
       { platform: "android", minOsVersion: "14" },
       images,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.name).toBe("Pixel_7_API_34");
   });
@@ -385,7 +372,7 @@ describe("DefaultDeviceMatcher.matchDeviceImage", () => {
     const result = matcher.matchDeviceImage(
       { platform: "android", minOsVersion: "14" },
       images,
-      "MINIMUM"
+      "MINIMUM",
     );
     expect(result?.name).toBe("A");
   });
@@ -400,49 +387,82 @@ describe("DefaultDeviceMatcher.matchDeviceImage", () => {
     const result = matcher.matchDeviceImage(
       { platform: "ios", name: "iPhone 16" },
       images,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.name).toBe("iPhone 16e");
   });
 
   it("filters images by formFactor and screenSize", () => {
     const images = [
-      deviceImage({ name: "Phone", formFactor: "phone", screenWidth: 1080, screenHeight: 2400, osVersion: "14" }),
-      deviceImage({ name: "Tablet", formFactor: "tablet", screenWidth: 2560, screenHeight: 1600, osVersion: "14" }),
+      deviceImage({
+        name: "Phone",
+        formFactor: "phone",
+        screenWidth: 1080,
+        screenHeight: 2400,
+        osVersion: "14",
+      }),
+      deviceImage({
+        name: "Tablet",
+        formFactor: "tablet",
+        screenWidth: 2560,
+        screenHeight: 1600,
+        osVersion: "14",
+      }),
     ];
 
     const result = matcher.matchDeviceImage(
       { platform: "android", formFactor: "tablet" },
       images,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.name).toBe("Tablet");
   });
 
   it("returns null when no images match", () => {
-    const images = [
-      deviceImage({ name: "Old", osVersion: "12" }),
-    ];
+    const images = [deviceImage({ name: "Old", osVersion: "12" })];
 
     const result = matcher.matchDeviceImage(
       { platform: "android", minOsVersion: "14" },
       images,
-      "LATEST"
+      "LATEST",
     );
     expect(result).toBeNull();
   });
 
   it("combines all criteria", () => {
     const images = [
-      deviceImage({ name: "A", osVersion: "14", formFactor: "phone", screenWidth: 1080, screenHeight: 2400 }),
-      deviceImage({ name: "B", osVersion: "14", formFactor: "tablet", screenWidth: 2560, screenHeight: 1600 }),
-      deviceImage({ name: "C", osVersion: "15", formFactor: "phone", screenWidth: 1080, screenHeight: 2400 }),
+      deviceImage({
+        name: "A",
+        osVersion: "14",
+        formFactor: "phone",
+        screenWidth: 1080,
+        screenHeight: 2400,
+      }),
+      deviceImage({
+        name: "B",
+        osVersion: "14",
+        formFactor: "tablet",
+        screenWidth: 2560,
+        screenHeight: 1600,
+      }),
+      deviceImage({
+        name: "C",
+        osVersion: "15",
+        formFactor: "phone",
+        screenWidth: 1080,
+        screenHeight: 2400,
+      }),
     ];
 
     const result = matcher.matchDeviceImage(
-      { platform: "android", minOsVersion: "14", formFactor: "phone", screenSize: { width: 1080, height: 2400 } },
+      {
+        platform: "android",
+        minOsVersion: "14",
+        formFactor: "phone",
+        screenSize: { width: 1080, height: 2400 },
+      },
       images,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.name).toBe("C");
   });
@@ -457,7 +477,7 @@ describe("DefaultDeviceMatcher.matchDeviceImage", () => {
     const result = matcher.matchDeviceImage(
       { platform: "android", minOsVersion: "14", maxOsVersion: "15" },
       images,
-      "LATEST"
+      "LATEST",
     );
     expect(result?.name).toBe("B");
   });

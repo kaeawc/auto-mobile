@@ -11,7 +11,10 @@ interface LoggedError {
   args: unknown[];
 }
 
-function makeFakeLogger(): { errors: LoggedError[]; error: (message: string, ...args: unknown[]) => void } {
+function makeFakeLogger(): {
+  errors: LoggedError[];
+  error: (message: string, ...args: unknown[]) => void;
+} {
   const errors: LoggedError[] = [];
   return {
     errors,
@@ -27,7 +30,7 @@ class FakeProcess implements ProcessLifecycleProcess {
 
   on<K extends keyof ProcessLifecycleEventMap>(
     event: K,
-    listener: (...args: ProcessLifecycleEventMap[K]) => void
+    listener: (...args: ProcessLifecycleEventMap[K]) => void,
   ): unknown {
     const eventListeners = this.listeners.get(event) ?? [];
     eventListeners.push(listener);
@@ -40,7 +43,10 @@ class FakeProcess implements ProcessLifecycleProcess {
     return undefined as never;
   }
 
-  emit<K extends keyof ProcessLifecycleEventMap>(event: K, ...args: ProcessLifecycleEventMap[K]): void {
+  emit<K extends keyof ProcessLifecycleEventMap>(
+    event: K,
+    ...args: ProcessLifecycleEventMap[K]
+  ): void {
     for (const listener of this.listeners.get(event) ?? []) {
       listener(...args);
     }
@@ -72,7 +78,11 @@ describe("createDaemonFatalProcessHandler (unit)", () => {
     const logger = makeFakeLogger();
     const handler = createDaemonFatalProcessHandler(logger);
 
-    handler({ type: "unhandledRejection", reason: "floating rejection", promise: Promise.resolve() });
+    handler({
+      type: "unhandledRejection",
+      reason: "floating rejection",
+      promise: Promise.resolve(),
+    });
 
     expect(logger.errors).toHaveLength(1);
     expect(logger.errors[0].message).toContain("unhandledRejection");
@@ -105,7 +115,7 @@ describe("daemon fatal handler wired through ProcessLifecycleHandlers (integrati
 
     // The regression this guards (#3408): the daemon must NOT exit on background failures.
     expect(fakeProcess.exitCodes).toEqual([]);
-    expect(logger.errors.map(e => e.message.includes("uncaughtException"))).toContain(true);
-    expect(logger.errors.map(e => e.message.includes("unhandledRejection"))).toContain(true);
+    expect(logger.errors.map((e) => e.message.includes("uncaughtException"))).toContain(true);
+    expect(logger.errors.map((e) => e.message.includes("unhandledRejection"))).toContain(true);
   });
 });

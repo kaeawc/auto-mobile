@@ -6,7 +6,11 @@ import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/
 import { logger } from "../../utils/logger";
 import { ToolRegistry } from "../../server/toolRegistry";
 import { throwIfInternalToolFailed } from "../../server/internalToolCall";
-import { NavigationGraphManager, type NavigationEdge, type NavigationGraphService } from "./NavigationGraphManager";
+import {
+  NavigationGraphManager,
+  type NavigationEdge,
+  type NavigationGraphService,
+} from "./NavigationGraphManager";
 import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
 import { TapOnElement } from "../action/TapOnElement";
 import { SwipeOnElement } from "../action/SwipeOnElement";
@@ -30,7 +34,7 @@ import type {
   ExploreExecutionResult,
   ElementSelectionStats,
   TrackedElement,
-  GraphTraversalState
+  GraphTraversalState,
 } from "./ExploreTypes";
 
 // Import element extraction functions
@@ -39,7 +43,7 @@ import {
   extractScrollableContainers,
   extractAllElements,
   getElementKey,
-  filterUnexhaustedElements
+  filterUnexhaustedElements,
 } from "./ExploreElementExtraction";
 
 // Import element scoring functions
@@ -49,14 +53,14 @@ import {
   selectWeighted,
   rankElementsForDryRun,
   getElementTarget,
-  predictOutcomeForElement
+  predictOutcomeForElement,
 } from "./ExploreElementScoring";
 
 // Import blocker detection functions
 import {
   detectAndHandleBlockers,
   isPermissionDialog,
-  handlePermissionDialog
+  handlePermissionDialog,
 } from "./ExploreBlockerDetection";
 
 // Import validate mode functions
@@ -66,7 +70,7 @@ import {
   markEdgeTraversed,
   selectNextEdgeToTraverse,
   findElementMatchingEdge,
-  validateNavigation
+  validateNavigation,
 } from "./ExploreValidateMode";
 
 /**
@@ -108,7 +112,7 @@ export class Explore extends BaseVisualChange {
     adb: AdbClient | null = null,
     timer: Timer = defaultTimer,
     navigationManager?: NavigationGraphService,
-    sessionUuid?: string
+    sessionUuid?: string,
   ) {
     super(device, adb, timer);
     this.navigationManager = navigationManager ?? NavigationGraphManager.getInstance();
@@ -123,7 +127,7 @@ export class Explore extends BaseVisualChange {
   async execute(
     options: ExploreOptions = {},
     progress?: ProgressCallback,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<ExploreExecutionResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("explore");
@@ -166,7 +170,7 @@ export class Explore extends BaseVisualChange {
       if (mode === "validate") {
         this.graphTraversalState = await initializeGraphTraversal(this.navigationManager);
         logger.info(
-          `[Explore] Validate mode: traversing ${this.graphTraversalState?.totalEdgesInGraph ?? 0} known edges`
+          `[Explore] Validate mode: traversing ${this.graphTraversalState?.totalEdgesInGraph ?? 0} known edges`,
         );
       }
 
@@ -177,7 +181,11 @@ export class Explore extends BaseVisualChange {
           break;
         }
         // Get current screen state
-        const observation = await this.observeScreen.execute({ perf, skipWaitForFresh: true, signal });
+        const observation = await this.observeScreen.execute({
+          perf,
+          skipWaitForFresh: true,
+          signal,
+        });
 
         const viewHierarchy = observation.viewHierarchy;
         if (viewHierarchy && !viewHierarchy.hierarchy.error) {
@@ -200,7 +208,7 @@ export class Explore extends BaseVisualChange {
           const enforcement = await this.enforceTargetApp(
             observation,
             this.targetPackageName,
-            progress
+            progress,
           );
           if (enforcement === "handled") {
             continue;
@@ -216,8 +224,8 @@ export class Explore extends BaseVisualChange {
           this.device,
           this.adb,
           this.elementParser,
-          p => this.handleDeadEnd(p),
-          progress
+          (p) => this.handleDeadEnd(p),
+          progress,
         );
         if (blockerHandled) {
           // Re-observe after handling blocker
@@ -237,12 +245,7 @@ export class Explore extends BaseVisualChange {
         }
 
         // Select next element to interact with
-        const nextElement = await this.selectNextElement(
-          observation,
-          strategy,
-          mode,
-          perf
-        );
+        const nextElement = await this.selectNextElement(observation, strategy, mode, perf);
 
         if (!nextElement) {
           logger.info("[Explore] No suitable element found, attempting back navigation");
@@ -257,7 +260,7 @@ export class Explore extends BaseVisualChange {
           observation,
           progress,
           perf,
-          signal
+          signal,
         );
 
         if (interactionSuccess) {
@@ -272,7 +275,9 @@ export class Explore extends BaseVisualChange {
               this.navigationManager,
               this.timer,
               this.currentElementConfidence,
-              reason => { this.stopReason = reason; }
+              (reason) => {
+                this.stopReason = reason;
+              },
             );
 
             if (!validationSuccess) {
@@ -296,7 +301,9 @@ export class Explore extends BaseVisualChange {
             if (visitCount > 0) {
               // We're returning to a previously visited screen - increment loop counter
               this.loopDetection.set(newScreen, visitCount + 1);
-              logger.debug(`[Explore] Returning to screen ${newScreen}, visit count: ${visitCount + 1}`);
+              logger.debug(
+                `[Explore] Returning to screen ${newScreen}, visit count: ${visitCount + 1}`,
+              );
             } else {
               // First visit to this screen - initialize counter
               this.loopDetection.set(newScreen, 1);
@@ -323,7 +330,7 @@ export class Explore extends BaseVisualChange {
             await progress(
               this.interactionCount,
               maxInteractions,
-              `Validating graph: ${edgesTraversed}/${totalEdges} edges traversed (${coveragePercent}%) - ${this.interactionCount}/${maxInteractions} interactions`
+              `Validating graph: ${edgesTraversed}/${totalEdges} edges traversed (${coveragePercent}%) - ${this.interactionCount}/${maxInteractions} interactions`,
             );
           } else {
             // Report discovery progress
@@ -332,7 +339,7 @@ export class Explore extends BaseVisualChange {
             await progress(
               this.interactionCount,
               maxInteractions,
-              `Explored ${currentNodeCount - initialNodeCount} new screens (${this.interactionCount}/${maxInteractions} interactions)`
+              `Explored ${currentNodeCount - initialNodeCount} new screens (${this.interactionCount}/${maxInteractions} interactions)`,
             );
           }
         }
@@ -356,7 +363,7 @@ export class Explore extends BaseVisualChange {
     progress: ProgressCallback | undefined,
     signal: AbortSignal | undefined,
     perf: PerformanceTracker,
-    startTime: number
+    startTime: number,
   ): Promise<ExploreDryRunResult> {
     const strategy = options.strategy ?? "weighted";
     const mode = options.mode ?? "hybrid";
@@ -386,32 +393,30 @@ export class Explore extends BaseVisualChange {
         dryRun: true,
         currentScreen: {
           name: "unknown",
-          interactableElements: 0
+          interactableElements: 0,
         },
         plannedInteractions: [],
         estimatedCoverage: {
           screensToVisit: [],
           newScreensExpected: 0,
-          existingScreensToRevisit: 0
+          existingScreensToRevisit: 0,
         },
         warnings,
         observation,
-        durationMs: this.timer.now() - startTime
+        durationMs: this.timer.now() - startTime,
       };
     }
 
     const currentPackage = this.getObservationPackageName(observation);
     if (this.targetPackageName && currentPackage && this.targetPackageName !== currentPackage) {
       warnings.push(
-        `Foreground package '${currentPackage}' does not match target '${this.targetPackageName}'.`
+        `Foreground package '${currentPackage}' does not match target '${this.targetPackageName}'.`,
       );
     }
 
     const currentScreen = this.navigationManager.getCurrentScreen() ?? "unknown";
     const edges =
-      currentScreen !== "unknown"
-        ? await this.navigationManager.getEdgesFrom(currentScreen)
-        : [];
+      currentScreen !== "unknown" ? await this.navigationManager.getEdgesFrom(currentScreen) : [];
 
     const navigationElements = extractNavigationElements(viewHierarchy, this.elementParser);
     const scrollableContainers = extractScrollableContainers(viewHierarchy, this.elementParser);
@@ -432,19 +437,21 @@ export class Explore extends BaseVisualChange {
         target,
         reason: entry.reason,
         predictedOutcome,
-        whitelistStatus: entry.whitelistStatus
+        whitelistStatus: entry.whitelistStatus,
       };
     });
 
     const predictedScreens = plannedInteractions
-      .map(interaction => interaction.predictedOutcome.screen)
-      .filter(screen => screen && screen !== "unknown");
+      .map((interaction) => interaction.predictedOutcome.screen)
+      .filter((screen) => screen && screen !== "unknown");
     const uniqueScreens = Array.from(new Set(predictedScreens));
     const knownScreens = await this.navigationManager.getKnownScreens();
     const knownScreenSet = new Set(knownScreens);
 
-    const newScreensExpected = uniqueScreens.filter(screen => !knownScreenSet.has(screen)).length;
-    const existingScreensToRevisit = uniqueScreens.filter(screen => knownScreenSet.has(screen)).length;
+    const newScreensExpected = uniqueScreens.filter((screen) => !knownScreenSet.has(screen)).length;
+    const existingScreensToRevisit = uniqueScreens.filter((screen) =>
+      knownScreenSet.has(screen),
+    ).length;
 
     if (currentScreen === "unknown") {
       warnings.push("Current screen is unknown; outcome predictions may be limited.");
@@ -458,28 +465,24 @@ export class Explore extends BaseVisualChange {
       dryRun: true,
       currentScreen: {
         name: currentScreen,
-        interactableElements: allCandidates.length
+        interactableElements: allCandidates.length,
       },
       plannedInteractions,
       estimatedCoverage: {
         screensToVisit: uniqueScreens,
         newScreensExpected,
-        existingScreensToRevisit
+        existingScreensToRevisit,
       },
       warnings,
       observation,
-      durationMs: this.timer.now() - startTime
+      durationMs: this.timer.now() - startTime,
     };
   }
 
   /**
    * Check if exploration should continue
    */
-  private shouldContinue(
-    maxInteractions: number,
-    timeoutMs: number,
-    startTime: number
-  ): boolean {
+  private shouldContinue(maxInteractions: number, timeoutMs: number, startTime: number): boolean {
     if (this.stopReason) {
       return false;
     }
@@ -540,7 +543,7 @@ export class Explore extends BaseVisualChange {
     observation: ObserveResult,
     strategy: ExplorationStrategy,
     mode: ExplorationMode,
-    perf: PerformanceTracker
+    perf: PerformanceTracker,
   ): Promise<Element | null> {
     return await perf.track("selectNextElement", async () => {
       const viewHierarchy = observation.viewHierarchy;
@@ -592,7 +595,7 @@ export class Explore extends BaseVisualChange {
             null,
             false,
             this.timer,
-            "Element not found on screen"
+            "Element not found on screen",
           );
 
           return null;
@@ -600,7 +603,7 @@ export class Explore extends BaseVisualChange {
 
         logger.info(
           `[Explore] Validate mode: targeting edge ${targetEdge.from}->${targetEdge.to} ` +
-            `(confidence: ${(match.confidence * 100).toFixed(0)}%)`
+            `(confidence: ${(match.confidence * 100).toFixed(0)}%)`,
         );
 
         // Store target edge and confidence for post-interaction validation
@@ -620,7 +623,7 @@ export class Explore extends BaseVisualChange {
       const unexhaustedElements = filterUnexhaustedElements(
         allCandidates,
         this.exploredElements,
-        currentScreen
+        currentScreen,
       );
 
       if (unexhaustedElements.length === 0) {
@@ -649,9 +652,7 @@ export class Explore extends BaseVisualChange {
 
   private getObservationPackageName(observation: ObserveResult): string | null {
     const packageName =
-      observation.viewHierarchy?.packageName ??
-      observation.activeWindow?.appId ??
-      null;
+      observation.viewHierarchy?.packageName ?? observation.activeWindow?.appId ?? null;
 
     if (!packageName) {
       return null;
@@ -664,7 +665,7 @@ export class Explore extends BaseVisualChange {
   private async enforceTargetApp(
     observation: ObserveResult,
     targetPackageName: string,
-    progress?: ProgressCallback
+    progress?: ProgressCallback,
   ): Promise<"ok" | "handled" | "stop"> {
     const currentPackage = this.getObservationPackageName(observation);
 
@@ -675,7 +676,7 @@ export class Explore extends BaseVisualChange {
 
     this.consecutiveOutOfAppCount++;
     logger.warn(
-      `[Explore] Foreground package '${currentPackage}' is outside target '${targetPackageName}', attempting to return`
+      `[Explore] Foreground package '${currentPackage}' is outside target '${targetPackageName}', attempting to return`,
     );
 
     await this.handleDeadEnd(progress);
@@ -699,7 +700,7 @@ export class Explore extends BaseVisualChange {
     observation: ObserveResult,
     progress?: ProgressCallback,
     perf?: PerformanceTracker,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<boolean> {
     const elementKey = getElementKey(element);
     const currentScreen = this.navigationManager.getCurrentScreen() ?? "unknown";
@@ -712,7 +713,7 @@ export class Explore extends BaseVisualChange {
         contentDesc: element["content-desc"],
         className: element["class"],
         interactionCount: 0,
-        lastInteractionScreen: currentScreen
+        lastInteractionScreen: currentScreen,
       };
 
       tracked.interactionCount++;
@@ -724,7 +725,9 @@ export class Explore extends BaseVisualChange {
 
       if (isScrollable) {
         // Perform swipe on scrollable container
-        logger.info(`[Explore] Swiping on scrollable container: ${element["resource-id"] || element["class"]}`);
+        logger.info(
+          `[Explore] Swiping on scrollable container: ${element["resource-id"] || element["class"]}`,
+        );
         const swipeOn = new SwipeOnElement(this.device, this.adb);
 
         const swipeResult = await swipeOn.execute(
@@ -732,7 +735,7 @@ export class Explore extends BaseVisualChange {
           "up",
           { duration: 600 }, // Slow swipe
           progress,
-          signal
+          signal,
         );
 
         // Reset consecutive back count since we did a swipe
@@ -747,10 +750,10 @@ export class Explore extends BaseVisualChange {
           {
             text: element.text,
             elementId: element["resource-id"],
-            action: "tap"
+            action: "tap",
           },
           progress,
-          signal
+          signal,
         );
 
         // Reset consecutive back count since we did a tap
@@ -773,7 +776,7 @@ export class Explore extends BaseVisualChange {
         await progress(
           this.interactionCount,
           this.interactionCount + 1,
-          "Dead end detected, navigating back..."
+          "Dead end detected, navigating back...",
         );
       }
 
@@ -792,7 +795,7 @@ export class Explore extends BaseVisualChange {
           button: "back",
           platform: this.device.platform,
           deviceId: this.device.deviceId,
-          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
         });
         throwIfInternalToolFailed(response, "pressButton", this.device.platform);
       }
@@ -815,7 +818,7 @@ export class Explore extends BaseVisualChange {
         await progress(
           this.interactionCount,
           this.interactionCount + 1,
-          "Resetting to home screen..."
+          "Resetting to home screen...",
         );
       }
 
@@ -831,7 +834,7 @@ export class Explore extends BaseVisualChange {
         const response = await ToolRegistry.callInternal("homeScreen", {
           platform: this.device.platform,
           deviceId: this.device.deviceId,
-          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {})
+          ...(this.sessionUuid ? { sessionUuid: this.sessionUuid } : {}),
         });
         throwIfInternalToolFailed(response, "homeScreen", this.device.platform);
       }
@@ -853,7 +856,7 @@ export class Explore extends BaseVisualChange {
   private async generateReport(
     initialGraph: ExportedGraph,
     startTime: number,
-    cancelled: boolean
+    cancelled: boolean,
   ): Promise<ExploreResult> {
     const finalGraph = await this.navigationManager.exportGraph();
     const screensDiscovered = finalGraph.nodes.length - initialGraph.nodes.length;
@@ -862,8 +865,7 @@ export class Explore extends BaseVisualChange {
     // Calculate coverage
     const totalScreens = finalGraph.nodes.length;
     const exploredScreens = new Set(this.explorationPath).size;
-    const coveragePercentage =
-      totalScreens > 0 ? (exploredScreens / totalScreens) * 100 : 0;
+    const coveragePercentage = totalScreens > 0 ? (exploredScreens / totalScreens) * 100 : 0;
 
     // Build graph traversal metrics if in validate mode
     let graphTraversal: ExploreResult["graphTraversal"];
@@ -881,7 +883,7 @@ export class Explore extends BaseVisualChange {
         edgesTraversed: this.graphTraversalState.traversedEdges.size,
         totalEdges: this.graphTraversalState.totalEdgesInGraph,
         edgeValidationResults: Array.from(this.graphTraversalState.edgeValidationResults.values()),
-        coveragePercentage: Math.round(traversalCoverage * 100) / 100
+        coveragePercentage: Math.round(traversalCoverage * 100) / 100,
       };
     }
 
@@ -896,12 +898,12 @@ export class Explore extends BaseVisualChange {
       coverage: {
         totalScreens,
         exploredScreens,
-        percentage: Math.round(coveragePercentage * 100) / 100
+        percentage: Math.round(coveragePercentage * 100) / 100,
       },
       elementSelections: this.elementSelections,
       durationMs: this.timer.now() - startTime,
       stopReason: this.stopReason || "Exploration completed successfully",
-      graphTraversal
+      graphTraversal,
     };
   }
 }

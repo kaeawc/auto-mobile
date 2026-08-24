@@ -68,11 +68,7 @@ export function parseBunLock(text: string): LockGraph {
   const packages = parsed.packages ?? {};
   const graph: LockGraph = new Map();
   for (const [key, entry] of Object.entries(packages)) {
-    if (
-      !Array.isArray(entry) ||
-      entry.length === 0 ||
-      typeof entry[0] !== "string"
-    ) {
+    if (!Array.isArray(entry) || entry.length === 0 || typeof entry[0] !== "string") {
       continue;
     }
     const { name, version } = splitIdSpec(entry[0]);
@@ -80,10 +76,8 @@ export function parseBunLock(text: string): LockGraph {
       (part): part is Record<string, unknown> =>
         Boolean(part) && typeof part === "object" && !Array.isArray(part),
     );
-    const deps =
-      (meta?.dependencies as Record<string, string> | undefined) ?? {};
-    const optionalDeps =
-      (meta?.optionalDependencies as Record<string, string> | undefined) ?? {};
+    const deps = (meta?.dependencies as Record<string, string> | undefined) ?? {};
+    const optionalDeps = (meta?.optionalDependencies as Record<string, string> | undefined) ?? {};
     graph.set(key, { name, version, deps, optionalDeps });
   }
   return graph;
@@ -147,9 +141,7 @@ export function resolveKey(
 /** Return the containing package's lock key, accounting for scoped package names. */
 function parentLockKey(key: string): string | null {
   const segments = key.split("/");
-  const packageSegmentCount = segments[segments.length - 2]?.startsWith("@")
-    ? 2
-    : 1;
+  const packageSegmentCount = segments[segments.length - 2]?.startsWith("@") ? 2 : 1;
   const parent = segments.slice(0, -packageSegmentCount).join("/");
   return parent || null;
 }
@@ -175,10 +167,7 @@ export function lockKeyToNodeModulesPath(key: string): string {
  * `bun install` will attempt to install when the platform matches). Returns a
  * map of package name -> the set of resolved versions reachable in the closure.
  */
-export function resolveRuntimeClosure(
-  graph: LockGraph,
-  roots: string[],
-): Map<string, Set<string>> {
+export function resolveRuntimeClosure(graph: LockGraph, roots: string[]): Map<string, Set<string>> {
   const versionsByName = new Map<string, Set<string>>();
   const visited = new Set<string>();
 
@@ -241,11 +230,7 @@ export function findRuntimeDependencyOwners(
   const owners = new Map<string, Map<string, Set<string>>>();
   const visited = new Set<string>();
 
-  const record = (
-    ownerKey: string,
-    dependency: string,
-    version: string,
-  ): void => {
+  const record = (ownerKey: string, dependency: string, version: string): void => {
     let dependencies = owners.get(ownerKey);
     if (!dependencies) {
       dependencies = new Map();
@@ -301,18 +286,14 @@ export function findRuntimeDependencyOwners(
         Object.fromEntries(
           [...dependencies.entries()]
             .sort(([a], [b]) => a.localeCompare(b))
-            .map(([dependency, versions]) => [
-              dependency,
-              [...versions].sort(compareVersionDesc),
-            ]),
+            .map(([dependency, versions]) => [dependency, [...versions].sort(compareVersionDesc)]),
         ),
       ]),
   );
 }
 
 /** A semver version string with no range operators (`^`, `~`, `x`, ranges, tags). */
-const EXACT_VERSION =
-  /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
 /** True when `spec` pins one exact version (what a pinned graph requires). */
 export function isExactVersion(spec: string): boolean {
@@ -466,9 +447,7 @@ export interface RepartitionResult {
  * generator records those names so selected parent packages can bundle their
  * exact nested closure into the published artifact.
  */
-export function repartitionDependencies(
-  input: RepartitionInput,
-): RepartitionResult {
+export function repartitionDependencies(input: RepartitionInput): RepartitionResult {
   const {
     currentDependencies,
     currentDevDependencies,
@@ -485,15 +464,10 @@ export function repartitionDependencies(
 
   for (const [name, version] of Object.entries(closurePins)) {
     const current = currentSpecOf(name);
-    const wasGeneratedPin =
-      current !== undefined && previousRuntimeDependencies[name] === current;
+    const wasGeneratedPin = current !== undefined && previousRuntimeDependencies[name] === current;
     if (rootSet.has(name)) {
       dependencies[name] = version;
-    } else if (
-      current !== undefined &&
-      current !== version &&
-      !wasGeneratedPin
-    ) {
+    } else if (current !== undefined && current !== version && !wasGeneratedPin) {
       // We already use this name directly at a DIFFERENT version (our build
       // inlines that version). Pinning the transitive version here would collide
       // with the build dependency, so leave it to transitive resolution and let

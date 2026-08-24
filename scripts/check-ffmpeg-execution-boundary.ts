@@ -22,7 +22,7 @@ interface Violation {
 }
 
 function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const file = join(directory, entry.name);
     if (entry.isDirectory()) {
       return sourceFiles(file);
@@ -40,7 +40,13 @@ function findViolations(file: string): Violation[] {
   if (!/ffmpeg/i.test(source)) {
     return [];
   }
-  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
   const childProcessNamespaces = new Set<string>();
   const childProcessFunctions = new Set<string>();
   const ffmpegBinaries = new Set<string>();
@@ -118,7 +124,7 @@ function findViolations(file: string): Violation[] {
   const hasFfmpegShellArgument = (expression: ts.Expression | undefined): boolean =>
     !!expression &&
     ts.isArrayLiteralExpression(expression) &&
-    expression.elements.some(element => ts.isExpression(element) && isFfmpegCommand(element));
+    expression.elements.some((element) => ts.isExpression(element) && isFfmpegCommand(element));
 
   const isBunSpawn = (expression: ts.LeftHandSideExpression): boolean =>
     ts.isPropertyAccessExpression(expression) &&
@@ -128,7 +134,12 @@ function findViolations(file: string): Violation[] {
 
   const record = (node: ts.CallExpression): void => {
     const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-    violations.push({ file, line: line + 1, column: character + 1, text: node.getText(sourceFile) });
+    violations.push({
+      file,
+      line: line + 1,
+      column: character + 1,
+      text: node.getText(sourceFile),
+    });
   };
 
   const visit = (node: ts.Node): void => {
@@ -167,7 +178,8 @@ function findViolations(file: string): Violation[] {
       }
       if (ts.isObjectBindingPattern(node.name) && isChildProcessRequire(node.initializer)) {
         for (const element of node.name.elements) {
-          const imported = element.propertyName?.getText(sourceFile) ?? element.name.getText(sourceFile);
+          const imported =
+            element.propertyName?.getText(sourceFile) ?? element.name.getText(sourceFile);
           if (ts.isIdentifier(element.name) && CHILD_PROCESS_FUNCTIONS.has(imported)) {
             childProcessFunctions.add(element.name.text);
           }
@@ -193,7 +205,8 @@ function findViolations(file: string): Violation[] {
         const launcher = launcherName(node.expression);
         if (
           isFfmpegExpression(node.arguments[0]) ||
-          ((launcher === "exec" || launcher === "execSync") && isFfmpegCommand(node.arguments[0])) ||
+          ((launcher === "exec" || launcher === "execSync") &&
+            isFfmpegCommand(node.arguments[0])) ||
           (isShellBinary(node.arguments[0]) && hasFfmpegShellArgument(node.arguments[1]))
         ) {
           record(node);
@@ -215,13 +228,15 @@ function findViolations(file: string): Violation[] {
 }
 
 const violations = sourceFiles(SOURCE_ROOT)
-  .filter(file => file !== OWNER)
+  .filter((file) => file !== OWNER)
   .flatMap(findViolations);
 
 if (violations.length > 0) {
   console.error("error: FFmpeg execution must use src/utils/media/FfmpegClient.ts:");
   for (const violation of violations) {
-    console.error(`${relative(SOURCE_ROOT, violation.file)}:${violation.line}:${violation.column}: ${violation.text}`);
+    console.error(
+      `${relative(SOURCE_ROOT, violation.file)}:${violation.line}:${violation.column}: ${violation.text}`,
+    );
   }
   process.exit(1);
 }

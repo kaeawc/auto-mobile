@@ -47,13 +47,13 @@ If a selector targets `text: "Settings"` expecting to match the `UILabel` direct
 
 AutoMobile queries `UIAccessibility.isVoiceOverRunning` via the CtrlProxy WebSocket when a device session starts and caches the result (refreshed every 60 seconds). When VoiceOver is detected, the following adaptations apply transparently:
 
-| Tool | Standard behavior | VoiceOver behavior |
-|------|------------------|--------------------|
-| `tapOn` | Coordinate-based tap | Accessibility activation on the target element |
-| `swipeOn` / scroll | Single-finger swipe | Unsupported; no VoiceOver-aware scroll mechanism or synthesized-gesture fallback |
-| `inputText` / `clearText` | Text injection | Text injection (unchanged) |
-| `pressButton` | Device/navigation button | Device/navigation button (unchanged; see note below) |
-| `launchApp`, `terminateApp`, `installApp` | Standard | Unchanged |
+| Tool                                      | Standard behavior        | VoiceOver behavior                                                               |
+| ----------------------------------------- | ------------------------ | -------------------------------------------------------------------------------- |
+| `tapOn`                                   | Coordinate-based tap     | Accessibility activation on the target element                                   |
+| `swipeOn` / scroll                        | Single-finger swipe      | Unsupported; no VoiceOver-aware scroll mechanism or synthesized-gesture fallback |
+| `inputText` / `clearText`                 | Text injection           | Text injection (unchanged)                                                       |
+| `pressButton`                             | Device/navigation button | Device/navigation button (unchanged; see note below)                             |
+| `launchApp`, `terminateApp`, `installApp` | Standard                 | Unchanged                                                                        |
 
 No tool parameters change for supported interactions. Automation that scrolls while VoiceOver is active must use an app-specific navigation path or disable VoiceOver for that portion of the flow.
 

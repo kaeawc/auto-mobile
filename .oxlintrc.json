@@ -3,9 +3,17 @@
   "plugins": ["typescript"],
   "jsPlugins": ["./oxlint-plugins/auto-mobile.mjs"],
   "ignorePatterns": [
-    "ios/**", "android/**", "scratch/**", "dist/**", "node_modules/**",
-    "**/*.generated.ts", "**/generated/**",
-    "**/*.js", "**/*.mjs", "**/*.cjs", "**/*.jsx"
+    "ios/**",
+    "android/**",
+    "scratch/**",
+    "dist/**",
+    "node_modules/**",
+    "**/*.generated.ts",
+    "**/generated/**",
+    "**/*.js",
+    "**/*.mjs",
+    "**/*.cjs",
+    "**/*.jsx"
   ],
   "categories": { "correctness": "off" },
   "rules": {
@@ -31,7 +39,10 @@
     "radix": "error",
     "valid-typeof": "error",
     "no-implicit-globals": "error",
-    "no-unused-expressions": ["error", { "allowShortCircuit": true, "allowTernary": true, "allowTaggedTemplates": true }],
+    "no-unused-expressions": [
+      "error",
+      { "allowShortCircuit": true, "allowTernary": true, "allowTaggedTemplates": true }
+    ],
     "no-empty": ["error", { "allowEmptyCatch": false }],
     "no-proto": "error",
     "require-yield": "error",
@@ -45,17 +56,25 @@
     {
       "files": ["src/**/*.ts"],
       "rules": {
-        "no-restricted-properties": ["error", {
-          "object": "Math",
-          "property": "random",
-          "message": "Use an injected Random or IdGenerator. Math.random() makes production behavior non-deterministic and bypasses the project's test seams."
-        }],
-        "no-restricted-imports": ["error", {
-          "patterns": [{
-            "group": ["lodash", "lodash/*"],
-            "message": "Prefer the JavaScript/Node standard library or an existing AutoMobile helper. Do not add a direct lodash dependency."
-          }]
-        }],
+        "no-restricted-properties": [
+          "error",
+          {
+            "object": "Math",
+            "property": "random",
+            "message": "Use an injected Random or IdGenerator. Math.random() makes production behavior non-deterministic and bypasses the project's test seams."
+          }
+        ],
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["lodash", "lodash/*"],
+                "message": "Prefer the JavaScript/Node standard library or an existing AutoMobile helper. Do not add a direct lodash dependency."
+              }
+            ]
+          }
+        ],
         "max-nested-callbacks": ["error", 3],
         "auto-mobile/no-accumulator-foreach": "error",
         "auto-mobile/no-inline-error-normalize": "error",
@@ -75,7 +94,10 @@
       }
     },
     {
-      "files": ["src/features/navigation/ScreenFingerprint.ts", "src/features/navigation/ExploreElementExtraction.ts"],
+      "files": [
+        "src/features/navigation/ScreenFingerprint.ts",
+        "src/features/navigation/ExploreElementExtraction.ts"
+      ],
       "rules": {
         "typescript/no-explicit-any": "error"
       }

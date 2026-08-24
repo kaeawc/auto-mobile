@@ -5,7 +5,7 @@ import { BootedDevice, LocalizationSettingsResult } from "../models";
 import { logger } from "../utils/logger";
 
 const LOCALIZATION_RESOURCE_TEMPLATES = {
-  DEVICE_LOCALIZATION: "automobile:devices/{deviceId}/localization"
+  DEVICE_LOCALIZATION: "automobile:devices/{deviceId}/localization",
 } as const;
 
 export interface LocalizationSettingsProvider {
@@ -29,13 +29,13 @@ async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> 
   try {
     const manager = PlatformDeviceManagerFactory.getInstance();
     const androidDevices = await manager.getBootedDevices("android");
-    const android = androidDevices.find(device => device.deviceId === deviceId);
+    const android = androidDevices.find((device) => device.deviceId === deviceId);
     if (android) {
       return android;
     }
 
     const iosDevices = await manager.getBootedDevices("ios");
-    return iosDevices.find(device => device.deviceId === deviceId) ?? null;
+    return iosDevices.find((device) => device.deviceId === deviceId) ?? null;
   } catch (error) {
     logger.warn(`[LocalizationResources] Failed to list booted devices: ${error}`);
     return null;
@@ -44,7 +44,7 @@ async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> 
 
 function toLocalizationResourceContent(
   device: BootedDevice,
-  settings: LocalizationSettingsResult
+  settings: LocalizationSettingsResult,
 ): LocalizationResourceContent {
   return {
     deviceId: device.deviceId,
@@ -56,14 +56,14 @@ function toLocalizationResourceContent(
     calendarSystem: settings.calendarSystem ?? null,
     lastUpdated: new Date().toISOString(),
     success: settings.success,
-    error: settings.error
+    error: settings.error,
   };
 }
 
 export async function getLocalizationResource(
   deviceId: string,
-  createSettingsProvider: (device: BootedDevice) => LocalizationSettingsProvider =
-  device => new SystemConfigurationManager(device)
+  createSettingsProvider: (device: BootedDevice) => LocalizationSettingsProvider = (device) =>
+    new SystemConfigurationManager(device),
 ): Promise<ResourceContent> {
   const uri = `automobile:devices/${deviceId}/localization`;
   const device = await findBootedDevice(deviceId);
@@ -71,9 +71,13 @@ export async function getLocalizationResource(
     return {
       uri,
       mimeType: "application/json",
-      text: JSON.stringify({
-        error: `Device not found or not booted: ${deviceId}`
-      }, null, 2)
+      text: JSON.stringify(
+        {
+          error: `Device not found or not booted: ${deviceId}`,
+        },
+        null,
+        2,
+      ),
     };
   }
 
@@ -84,7 +88,7 @@ export async function getLocalizationResource(
   return {
     uri,
     mimeType: "application/json",
-    text: JSON.stringify(content, null, 2)
+    text: JSON.stringify(content, null, 2),
   };
 }
 
@@ -94,7 +98,7 @@ export function registerLocalizationResources(): void {
     "Device Localization Settings",
     "Current localization settings (locale, time zone, text direction, time format, calendar) for a device.",
     "application/json",
-    async params => getLocalizationResource(params.deviceId)
+    async (params) => getLocalizationResource(params.deviceId),
   );
 
   logger.info("[LocalizationResources] Registered localization resources");

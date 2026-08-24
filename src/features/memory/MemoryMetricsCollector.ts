@@ -63,7 +63,7 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
   constructor(
     device: BootedDevice,
     adbOrFactory: AdbExecutor | AdbClientFactory | null = null,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
   ) {
     this.device = device;
     this.timer = timer;
@@ -85,11 +85,11 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
    */
   async takeSnapshot(
     packageName: string,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<MemorySnapshot> {
     try {
       const { stdout } = await perf.track("adbMeminfo", () =>
-        this.adb.executeCommand(`shell dumpsys meminfo ${packageName}`)
+        this.adb.executeCommand(`shell dumpsys meminfo ${packageName}`),
       );
 
       const metrics = this.parseMeminfo(stdout);
@@ -142,14 +142,14 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
    */
   async triggerGC(
     packageName: string,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<void> {
     try {
       logger.info(`[MemoryMetricsCollector] Triggering explicit GC for ${packageName}`);
 
       // Get the PID first
       const { stdout: pidOutput } = await perf.track("adbGetPid", () =>
-        this.adb.executeCommand(`shell pidof ${packageName}`)
+        this.adb.executeCommand(`shell pidof ${packageName}`),
       );
 
       const pid = pidOutput.trim();
@@ -159,9 +159,7 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
       }
 
       // Send SIGUSR1 to trigger GC (Android uses this signal for GC)
-      await perf.track("adbTriggerGC", () =>
-        this.adb.executeCommand(`shell kill -USR1 ${pid}`)
-      );
+      await perf.track("adbTriggerGC", () => this.adb.executeCommand(`shell kill -USR1 ${pid}`));
 
       // Wait for GC to complete (small delay)
       await this.timer.sleep(500);
@@ -179,13 +177,13 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
   async captureGCEvents(
     startTimestamp: number,
     endTimestamp: number,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<GCEvent[]> {
     try {
       // Clear logcat buffer before starting if this is the start
       // For now, we'll just read the recent buffer and filter by timestamp
       const { stdout } = await perf.track("adbLogcatGC", () =>
-        this.adb.executeCommand(`shell logcat -d -s dalvikvm:I art:I | grep "GC_"`, 5000)
+        this.adb.executeCommand(`shell logcat -d -s dalvikvm:I art:I | grep "GC_"`, 5000),
       );
 
       return this.parseGCEvents(stdout, startTimestamp, endTimestamp);
@@ -232,11 +230,11 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
    */
   async getUnreachableObjects(
     packageName: string,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<UnreachableObjectsInfo | null> {
     try {
       const { stdout } = await perf.track("adbMeminfoUnreachable", () =>
-        this.adb.executeCommand(`shell dumpsys meminfo --unreachable ${packageName}`, 10000)
+        this.adb.executeCommand(`shell dumpsys meminfo --unreachable ${packageName}`, 10000),
       );
 
       return this.parseUnreachableObjects(stdout);
@@ -251,7 +249,9 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
    */
   private parseUnreachableObjects(output: string): UnreachableObjectsInfo {
     // Pattern: "Unreachable memory: 123 bytes in 45 unreachable objects"
-    const unreachableMatch = output.match(/Unreachable memory:\s+(\d+)\s+bytes in\s+(\d+)\s+unreachable objects/i);
+    const unreachableMatch = output.match(
+      /Unreachable memory:\s+(\d+)\s+bytes in\s+(\d+)\s+unreachable objects/i,
+    );
 
     if (unreachableMatch) {
       const sizeBytes = parseInt(unreachableMatch[1], 10);
@@ -280,9 +280,7 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
    */
   async clearLogcat(perf: PerformanceTracker = new NoOpPerformanceTracker()): Promise<void> {
     try {
-      await perf.track("adbLogcatClear", () =>
-        this.adb.executeCommand("logcat -c")
-      );
+      await perf.track("adbLogcatClear", () => this.adb.executeCommand("logcat -c"));
       logger.debug("[MemoryMetricsCollector] Logcat buffer cleared");
     } catch (error) {
       logger.warn(`[MemoryMetricsCollector] Failed to clear logcat: ${error}`);
@@ -296,7 +294,7 @@ export class MemoryMetricsCollector implements MemoryMetricsProvider {
   async collectMetrics(
     packageName: string,
     beforeAction: () => Promise<void>,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<MemoryMetrics> {
     logger.info(`[MemoryMetricsCollector] Collecting memory metrics for ${packageName}`);
 

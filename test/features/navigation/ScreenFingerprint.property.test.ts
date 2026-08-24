@@ -40,9 +40,9 @@ const shortSuffix = fc.string({ unit: safeChar, maxLength: 5 });
 // above, and `text` never satisfies TIME_PATTERN/NUMBER_PATTERN/PERCENT_PATTERN
 // (all of which require the string to be pure digits, so a leading letter is
 // enough to dodge every one of them).
-const safeText = shortSuffix.map(s => `t${s}`);
-const safeResourceId = shortSuffix.map(s => `rid${s}`);
-const safeClassName = shortSuffix.map(s => `Cls${s}`);
+const safeText = shortSuffix.map((s) => `t${s}`);
+const safeResourceId = shortSuffix.map((s) => `rid${s}`);
+const safeClassName = shortSuffix.map((s) => `Cls${s}`);
 const trueOrAbsent = fc.option(fc.constant("true" as const), { nil: undefined });
 
 /**
@@ -52,11 +52,11 @@ const trueOrAbsent = fc.option(fc.constant("true" as const), { nil: undefined })
  */
 function nodeArbitrary(depth: number): fc.Arbitrary<AccessibilityNode> {
   const scalarFields = {
-    "text": fc.option(safeText, { nil: undefined }),
+    text: fc.option(safeText, { nil: undefined }),
     "resource-id": fc.option(safeResourceId, { nil: undefined }),
-    "className": fc.option(safeClassName, { nil: undefined }),
-    "scrollable": trueOrAbsent,
-    "selected": trueOrAbsent,
+    className: fc.option(safeClassName, { nil: undefined }),
+    scrollable: trueOrAbsent,
+    selected: trueOrAbsent,
   };
 
   if (depth <= 0) {
@@ -77,9 +77,13 @@ const treeArbitrary = nodeArbitrary(3);
 const totalityTreeArbitrary = fc.oneof(fc.constant<AccessibilityNode>({}), treeArbitrary);
 
 const timestamp = fc.integer({ min: 0, max: 10_000_000 });
-const packageName = shortSuffix.map(s => `pkg.${s}`);
+const packageName = shortSuffix.map((s) => `pkg.${s}`);
 
-function toHierarchy(hierarchy: AccessibilityNode, updatedAt: number, pkg: string): AccessibilityHierarchy {
+function toHierarchy(
+  hierarchy: AccessibilityNode,
+  updatedAt: number,
+  pkg: string,
+): AccessibilityHierarchy {
   return { updatedAt, packageName: pkg, hierarchy };
 }
 
@@ -93,7 +97,11 @@ function sha256Hex(data: string): string {
  * resource-id onto whichever node the walk lands on. Operates on a deep
  * clone so the caller's original tree is left untouched.
  */
-function injectNavigationId(root: AccessibilityNode, path: number[], navId: string): AccessibilityNode {
+function injectNavigationId(
+  root: AccessibilityNode,
+  path: number[],
+  navId: string,
+): AccessibilityNode {
   const clone = structuredClone(root);
   let current = clone;
 
@@ -103,7 +111,9 @@ function injectNavigationId(root: AccessibilityNode, path: number[], navId: stri
       : current.node
         ? [current.node]
         : [];
-    if (children.length === 0) {break;}
+    if (children.length === 0) {
+      break;
+    }
     current = children[step % children.length];
   }
 
@@ -114,15 +124,22 @@ function injectNavigationId(root: AccessibilityNode, path: number[], navId: stri
 describe("ScreenFingerprint.compute (property-based)", () => {
   test("hash is a pure function of tree content — independent of object identity, updatedAt, and packageName", () => {
     fc.assert(
-      fc.property(treeArbitrary, timestamp, timestamp, packageName, packageName, (tree, t1, t2, p1, p2) => {
-        const clone = structuredClone(tree);
+      fc.property(
+        treeArbitrary,
+        timestamp,
+        timestamp,
+        packageName,
+        packageName,
+        (tree, t1, t2, p1, p2) => {
+          const clone = structuredClone(tree);
 
-        const result1 = ScreenFingerprint.compute(toHierarchy(tree, t1, p1));
-        const result2 = ScreenFingerprint.compute(toHierarchy(clone, t2, p2));
+          const result1 = ScreenFingerprint.compute(toHierarchy(tree, t1, p1));
+          const result2 = ScreenFingerprint.compute(toHierarchy(clone, t2, p2));
 
-        return result1.hash === result2.hash;
-      }),
-      RUN_OPTIONS
+          return result1.hash === result2.hash;
+        },
+      ),
+      RUN_OPTIONS,
     );
   });
 
@@ -137,8 +154,8 @@ describe("ScreenFingerprint.compute (property-based)", () => {
   test("reversing two structurally distinct children changes the hash (order-sensitivity is real, not a false property)", () => {
     fc.assert(
       fc.property(treeArbitrary, treeArbitrary, timestamp, (subtreeA, subtreeB, t) => {
-        const childA: AccessibilityNode = { "resource-id": "discA", "node": subtreeA.node };
-        const childB: AccessibilityNode = { "resource-id": "discB", "node": subtreeB.node };
+        const childA: AccessibilityNode = { "resource-id": "discA", node: subtreeA.node };
+        const childB: AccessibilityNode = { "resource-id": "discB", node: subtreeB.node };
 
         const forward: AccessibilityNode = { className: "Parent", node: [childA, childB] };
         const reversed: AccessibilityNode = { className: "Parent", node: [childB, childA] };
@@ -148,7 +165,7 @@ describe("ScreenFingerprint.compute (property-based)", () => {
 
         return hashForward !== hashReversed;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -164,12 +181,9 @@ describe("ScreenFingerprint.compute (property-based)", () => {
       fc.property(totalityTreeArbitrary, timestamp, packageName, (tree, t, pkg) => {
         const result = ScreenFingerprint.compute(toHierarchy(tree, t, pkg));
 
-        return (
-          /^[0-9a-f]{64}$/.test(result.hash) &&
-          validConfidences.includes(result.confidence)
-        );
+        return /^[0-9a-f]{64}$/.test(result.hash) && validConfidences.includes(result.confidence);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -192,9 +206,9 @@ describe("ScreenFingerprint.compute (property-based)", () => {
             result.navigationId === navId &&
             result.hash === sha256Hex(`nav:${navId}`)
           );
-        }
+        },
       ),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

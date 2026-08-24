@@ -53,7 +53,7 @@ describe("#4137 iOS integration workflow-change guard", () => {
     expect(guard?.env?.IOS_INTEGRATION_WORKFLOW_LABELS).toContain(
       "toJson(github.event.pull_request.labels.*.name)",
     );
-    expect(fastValidation?.needs).toBe("detect-changes");
+    expect(fastValidation?.needs).toEqual(["detect-changes", "format-check"]);
     expect(fastValidation?.if).toBe("always()");
     expect(fastValidation?.["timeout-minutes"]).toBe(70);
     const waitIndex =

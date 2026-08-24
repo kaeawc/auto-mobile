@@ -26,7 +26,7 @@ export interface StoppedSegment {
  */
 export async function writeSegmentManifest(
   sessionId: string,
-  segments: StoppedSegment[]
+  segments: StoppedSegment[],
 ): Promise<string | undefined> {
   const first = segments[0];
   if (!first) {
@@ -37,7 +37,7 @@ export async function writeSegmentManifest(
     const manifest = {
       sessionId,
       segmentCount: segments.length,
-      segments: segments.map(segment => ({
+      segments: segments.map((segment) => ({
         index: segment.segmentIndex,
         recordingId: segment.recordingId,
         filePath: segment.filePath,
@@ -48,7 +48,7 @@ export async function writeSegmentManifest(
   } catch (error) {
     logger.warn(
       `[VideoRecording] Failed to write segment manifest for session ${sessionId}: ` +
-      `${errorMessage(error)}`
+        `${errorMessage(error)}`,
     );
     return undefined;
   }

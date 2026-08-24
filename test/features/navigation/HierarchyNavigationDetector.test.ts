@@ -1,7 +1,5 @@
 import { expect, describe, test, beforeEach, afterEach } from "bun:test";
-import {
-  HierarchyNavigationDetector,
-} from "../../../src/features/navigation/HierarchyNavigationDetector";
+import { HierarchyNavigationDetector } from "../../../src/features/navigation/HierarchyNavigationDetector";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { AccessibilityHierarchy } from "../../../src/features/navigation/ScreenFingerprint";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -148,7 +146,7 @@ describe("HierarchyNavigationDetector", () => {
       fakeTimer.advanceTime(60);
 
       // Wait for async navigation recording
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
 
       // For apps without SDK events (no named nodes), hierarchy events don't create screens
       // They are silently ignored until the app has named nodes from SDK integration
@@ -259,7 +257,7 @@ describe("HierarchyNavigationDetector", () => {
 
     test("invokes the navigation callback once per detected navigation", () => {
       const seen: CallbackInfo[] = [];
-      detector.setNavigationCallback(info => seen.push(info));
+      detector.setNavigationCallback((info) => seen.push(info));
 
       // The very first stabilization (initial -> Screen A) is itself a recorded
       // navigation, so the callback fires here too — not only on the A -> B hop.
@@ -297,7 +295,7 @@ describe("HierarchyNavigationDetector", () => {
 
     test("stops invoking the callback after it is cleared", () => {
       const seen: CallbackInfo[] = [];
-      detector.setNavigationCallback(info => seen.push(info));
+      detector.setNavigationCallback((info) => seen.push(info));
       detector.setNavigationCallback(null);
 
       detector.onHierarchyUpdate(createHierarchy("Screen A"));
@@ -320,7 +318,7 @@ describe("HierarchyNavigationDetector", () => {
         updatedAt: Date.now(),
         packageName: "com.test.app",
         hierarchy: {
-          "text": "Screen A",
+          text: "Screen A",
           "resource-id": "com.test.app:id/screen_a",
         },
       };
@@ -328,7 +326,7 @@ describe("HierarchyNavigationDetector", () => {
       fakeTimer.advanceTime(60);
 
       // Wait for async recording
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
 
       // Record a tool call BEFORE the second screen appears
       manager.recordToolCall("tapOn", { text: "Next" });
@@ -338,7 +336,7 @@ describe("HierarchyNavigationDetector", () => {
         updatedAt: Date.now(),
         packageName: "com.test.app",
         hierarchy: {
-          "text": "Screen B",
+          text: "Screen B",
           "resource-id": "com.test.app:id/screen_b",
         },
       };
@@ -346,7 +344,7 @@ describe("HierarchyNavigationDetector", () => {
       fakeTimer.advanceTime(60);
 
       // Wait for async navigation recording
-      await new Promise(resolve => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
 
       // Without SDK events (named nodes), no screens or edges are created
       // The detector tracks fingerprints internally, but they aren't recorded
@@ -371,7 +369,7 @@ function createHierarchy(uniqueContent: string): AccessibilityHierarchy {
     updatedAt: Date.now(),
     packageName: "com.test.app",
     hierarchy: {
-      "text": uniqueContent,
+      text: uniqueContent,
       "resource-id": `com.test.app:id/${uniqueContent.toLowerCase().replace(/\s/g, "_")}`,
     },
   };

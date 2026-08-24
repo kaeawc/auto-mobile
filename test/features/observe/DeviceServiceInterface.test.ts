@@ -11,7 +11,10 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import type { DeviceService, AndroidDeviceService } from "../../../src/features/observe/DeviceService";
+import type {
+  DeviceService,
+  AndroidDeviceService,
+} from "../../../src/features/observe/DeviceService";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -47,7 +50,7 @@ describe("DeviceService Interface Compliance", () => {
         testDevice,
         fakeAdb,
         createSuccessWebSocketFactory(),
-        fakeTimer
+        fakeTimer,
       );
 
       // The assignment is the interface-conformance check (tsc fails the build if the class stops
@@ -75,7 +78,7 @@ describe("DeviceService Interface Compliance", () => {
         testDevice,
         8765,
         createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer
+        fakeTimer,
       );
 
       const deviceService: DeviceService = client;
@@ -103,7 +106,7 @@ describe("DeviceService Interface Compliance", () => {
         testDevice,
         fakeAdb,
         createSuccessWebSocketFactory(),
-        fakeTimer
+        fakeTimer,
       );
 
       // Assignment proves AndroidDeviceService conformance at compile time; the assertion exercises
@@ -129,7 +132,7 @@ describe("DeviceService Interface Compliance", () => {
         testDevice,
         8765,
         createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer
+        fakeTimer,
       );
 
       // Pin the Apple-specific control surface at compile time: dropping any of these
@@ -175,7 +178,7 @@ describe("DeviceService Interface Compliance", () => {
         testDevice,
         fakeAdb,
         createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer
+        fakeTimer,
       );
 
       expect(client.isConnected()).toBe(false);
@@ -201,7 +204,7 @@ describe("DeviceService Interface Compliance", () => {
         testDevice,
         fakeAdb,
         createInstantFailureWebSocketFactory(fakeTimer),
-        fakeTimer
+        fakeTimer,
       );
 
       const connected = await client.ensureConnected();
@@ -228,7 +231,7 @@ describe("DeviceService Interface Compliance", () => {
         testDevice,
         8765,
         createSuccessWebSocketFactory(fakeTimer),
-        fakeTimer
+        fakeTimer,
       );
 
       expect(client.isConnected()).toBe(false);
@@ -250,7 +253,7 @@ describe("DeviceService Interface Compliance", () => {
         testDevice,
         8765,
         createInstantFailureWebSocketFactory(fakeTimer),
-        fakeTimer
+        fakeTimer,
       );
 
       const connected = await client.ensureConnected();

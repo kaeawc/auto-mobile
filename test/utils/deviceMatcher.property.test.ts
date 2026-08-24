@@ -29,8 +29,11 @@ const refCompareSign = (a: number[], b: number[]): number => {
 describe("compareVersions (property-based)", () => {
   test("is reflexive: a version compares equal to itself", () => {
     fc.assert(
-      fc.property(versionParts, parts => compareVersions(versionOf(parts), versionOf(parts)) === 0),
-      RUN_OPTIONS
+      fc.property(
+        versionParts,
+        (parts) => compareVersions(versionOf(parts), versionOf(parts)) === 0,
+      ),
+      RUN_OPTIONS,
     );
   });
 
@@ -41,7 +44,7 @@ describe("compareVersions (property-based)", () => {
         const vb = versionOf(b);
         return Math.sign(compareVersions(va, vb)) === -Math.sign(compareVersions(vb, va));
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -50,7 +53,7 @@ describe("compareVersions (property-based)", () => {
       fc.property(versionParts, versionParts, (a, b) => {
         return Math.sign(compareVersions(versionOf(a), versionOf(b))) === refCompareSign(a, b);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -60,7 +63,7 @@ describe("compareVersions (property-based)", () => {
         const padded = versionOf([...parts, ...Array(extraZeros).fill(0)]);
         return compareVersions(versionOf(parts), padded) === 0;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -71,9 +74,12 @@ describe("compareVersions (property-based)", () => {
         const vb = versionOf(b);
         const vc = versionOf(c);
         // a <= b <= c  ⇒  a <= c
-        return !(compareVersions(va, vb) <= 0 && compareVersions(vb, vc) <= 0) || compareVersions(va, vc) <= 0;
+        return (
+          !(compareVersions(va, vb) <= 0 && compareVersions(vb, vc) <= 0) ||
+          compareVersions(va, vc) <= 0
+        );
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });
@@ -83,7 +89,7 @@ const device: fc.Arbitrary<BootedDevice> = fc.record({
   name: fc.string({ maxLength: 12 }),
   platform,
   deviceId: fc.string({ minLength: 1, maxLength: 8 }),
-  osVersion: fc.option(versionParts.map(versionOf), { nil: undefined })
+  osVersion: fc.option(versionParts.map(versionOf), { nil: undefined }),
 });
 const deviceList = fc.array(device, { maxLength: 16 });
 
@@ -92,10 +98,14 @@ describe("DefaultDeviceMatcher.matchBootedDevice (property-based)", () => {
     const strategy = fc.constantFrom<MatchingStrategy>("LATEST", "MINIMUM", "RANDOM");
     fc.assert(
       fc.property(deviceList, platform, strategy, (devices, p, s) => {
-        const result = new DefaultDeviceMatcher(new SeededRandom(1)).matchBootedDevice({ platform: p }, devices, s);
+        const result = new DefaultDeviceMatcher(new SeededRandom(1)).matchBootedDevice(
+          { platform: p },
+          devices,
+          s,
+        );
         return result === null || (devices.includes(result) && result.platform === p);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -103,11 +113,15 @@ describe("DefaultDeviceMatcher.matchBootedDevice (property-based)", () => {
     const strategy = fc.constantFrom<MatchingStrategy>("LATEST", "MINIMUM", "RANDOM");
     fc.assert(
       fc.property(deviceList, platform, strategy, (devices, p, s) => {
-        const result = new DefaultDeviceMatcher(new SeededRandom(1)).matchBootedDevice({ platform: p }, devices, s);
-        const hasMatch = devices.some(d => d.platform === p);
+        const result = new DefaultDeviceMatcher(new SeededRandom(1)).matchBootedDevice(
+          { platform: p },
+          devices,
+          s,
+        );
+        const hasMatch = devices.some((d) => d.platform === p);
         return (result === null) === !hasMatch;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -115,29 +129,41 @@ describe("DefaultDeviceMatcher.matchBootedDevice (property-based)", () => {
     const extremum = fc.constantFrom<MatchingStrategy>("LATEST", "MINIMUM");
     fc.assert(
       fc.property(deviceList, platform, extremum, (devices, p, s) => {
-        const result = new DefaultDeviceMatcher(new SeededRandom(1)).matchBootedDevice({ platform: p }, devices, s);
+        const result = new DefaultDeviceMatcher(new SeededRandom(1)).matchBootedDevice(
+          { platform: p },
+          devices,
+          s,
+        );
         if (result === null) {
           return true;
         }
-        const matches = devices.filter(d => d.platform === p);
+        const matches = devices.filter((d) => d.platform === p);
         const resultVersion = result.osVersion ?? "0";
-        return matches.every(d => {
+        return matches.every((d) => {
           const cmp = compareVersions(resultVersion, d.osVersion ?? "0");
           return s === "LATEST" ? cmp >= 0 : cmp <= 0;
         });
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("RANDOM selection is deterministic under a fixed seed", () => {
     fc.assert(
       fc.property(deviceList, platform, fc.integer({ min: 1, max: 1_000 }), (devices, p, seed) => {
-        const a = new DefaultDeviceMatcher(new SeededRandom(seed)).matchBootedDevice({ platform: p }, devices, "RANDOM");
-        const b = new DefaultDeviceMatcher(new SeededRandom(seed)).matchBootedDevice({ platform: p }, devices, "RANDOM");
+        const a = new DefaultDeviceMatcher(new SeededRandom(seed)).matchBootedDevice(
+          { platform: p },
+          devices,
+          "RANDOM",
+        );
+        const b = new DefaultDeviceMatcher(new SeededRandom(seed)).matchBootedDevice(
+          { platform: p },
+          devices,
+          "RANDOM",
+        );
         return a === b;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 });

@@ -17,39 +17,42 @@ export interface TimerContractCapabilities {
 export const runTimerContract = (
   description: string,
   makeTimer: () => Timer,
-  capabilities: TimerContractCapabilities = {}
+  capabilities: TimerContractCapabilities = {},
 ): void => {
   if (capabilities.advance) {
     runManualDrivenTimerContract(description, makeTimer, capabilities.advance);
     return;
   }
-  describe(`Timer contract: ${description}`, function() {
-    test("now returns a finite millisecond timestamp", function() {
+  describe(`Timer contract: ${description}`, function () {
+    test("now returns a finite millisecond timestamp", function () {
       const timer = makeTimer();
 
       expect(Number.isFinite(timer.now())).toBe(true);
     });
 
-    test("sleep resolves", async function() {
+    test("sleep resolves", async function () {
       const timer = makeTimer();
 
       await timer.sleep(capabilities.realTime ? 1 : 10);
     });
 
-    test("setTimeout fires its callback", async function() {
+    test("setTimeout fires its callback", async function () {
       const timer = makeTimer();
       let fired = false;
 
-      timer.setTimeout(() => {
-        fired = true;
-      }, capabilities.realTime ? 1 : 10);
+      timer.setTimeout(
+        () => {
+          fired = true;
+        },
+        capabilities.realTime ? 1 : 10,
+      );
 
       await timer.sleep(capabilities.realTime ? 15 : 20);
 
       expect(fired).toBe(true);
     });
 
-    test("setTimeout dispatches shorter delays before longer delays", async function() {
+    test("setTimeout dispatches shorter delays before longer delays", async function () {
       const timer = makeTimer();
       const calls: string[] = [];
 
@@ -71,13 +74,16 @@ export const runTimerContract = (
       }
     });
 
-    test("setTimeout callback can be cancelled", async function() {
+    test("setTimeout callback can be cancelled", async function () {
       const timer = makeTimer();
       let fired = false;
 
-      const handle = timer.setTimeout(() => {
-        fired = true;
-      }, capabilities.realTime ? 5 : 10);
+      const handle = timer.setTimeout(
+        () => {
+          fired = true;
+        },
+        capabilities.realTime ? 5 : 10,
+      );
       timer.clearTimeout(handle);
 
       if (capabilities.realTime) {
@@ -87,13 +93,16 @@ export const runTimerContract = (
       expect(fired).toBe(false);
     });
 
-    test("setInterval callback can be cancelled", async function() {
+    test("setInterval callback can be cancelled", async function () {
       const timer = makeTimer();
       let calls = 0;
 
-      const handle = timer.setInterval(() => {
-        calls++;
-      }, capabilities.realTime ? 1 : 10);
+      const handle = timer.setInterval(
+        () => {
+          calls++;
+        },
+        capabilities.realTime ? 1 : 10,
+      );
       timer.clearInterval(handle);
 
       await timer.sleep(capabilities.realTime ? 15 : 0);
@@ -102,7 +111,7 @@ export const runTimerContract = (
     });
 
     if (!capabilities.realTime) {
-      test("setInterval keeps firing until it is cancelled", async function() {
+      test("setInterval keeps firing until it is cancelled", async function () {
         const timer = makeTimer();
         let calls = 0;
         const handle = timer.setInterval(() => {
@@ -127,14 +136,14 @@ export const runTimerContract = (
 const runManualDrivenTimerContract = (
   description: string,
   makeTimer: () => Timer,
-  advance: (timer: Timer, ms: number) => Promise<void>
+  advance: (timer: Timer, ms: number) => Promise<void>,
 ): void => {
-  describe(`Timer contract (manual advance): ${description}`, function() {
-    test("now returns a finite millisecond timestamp", function() {
+  describe(`Timer contract (manual advance): ${description}`, function () {
+    test("now returns a finite millisecond timestamp", function () {
       expect(Number.isFinite(makeTimer().now())).toBe(true);
     });
 
-    test("advancing fires a scheduled timeout callback", async function() {
+    test("advancing fires a scheduled timeout callback", async function () {
       const timer = makeTimer();
       let fired = false;
 
@@ -146,7 +155,7 @@ const runManualDrivenTimerContract = (
       expect(fired).toBe(true);
     });
 
-    test("dispatches shorter delays before longer delays", async function() {
+    test("dispatches shorter delays before longer delays", async function () {
       const timer = makeTimer();
       const calls: string[] = [];
 
@@ -157,7 +166,7 @@ const runManualDrivenTimerContract = (
       expect(calls).toEqual(["early", "late"]);
     });
 
-    test("an interval fires once per elapsed period across a single advance", async function() {
+    test("an interval fires once per elapsed period across a single advance", async function () {
       const timer = makeTimer();
       let calls = 0;
 
@@ -169,7 +178,7 @@ const runManualDrivenTimerContract = (
       expect(calls).toBe(10);
     });
 
-    test("a callback observes its own scheduled time on the clock", async function() {
+    test("a callback observes its own scheduled time on the clock", async function () {
       const timer = makeTimer();
       const observed: number[] = [];
 
@@ -180,7 +189,7 @@ const runManualDrivenTimerContract = (
       expect(observed).toEqual([10, 30]);
     });
 
-    test("a cancelled timeout never fires when time advances past it", async function() {
+    test("a cancelled timeout never fires when time advances past it", async function () {
       const timer = makeTimer();
       let fired = false;
 

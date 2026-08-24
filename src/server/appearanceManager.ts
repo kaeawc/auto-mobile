@@ -8,7 +8,7 @@ const configRepository = createAppearanceConfigRepository();
 
 function mergeConfigInput(
   defaults: AppearanceConfigInput,
-  overrides: AppearanceConfigInput
+  overrides: AppearanceConfigInput,
 ): AppearanceConfigInput {
   return {
     syncWithHost: overrides.syncWithHost ?? defaults.syncWithHost,
@@ -34,7 +34,7 @@ export async function getAppearanceConfig(): Promise<AppearanceConfig> {
 }
 
 export async function updateAppearanceConfig(
-  update: AppearanceConfigInput | null
+  update: AppearanceConfigInput | null,
 ): Promise<AppearanceConfig> {
   if (update === null) {
     await configRepository.clearConfig();
@@ -49,10 +49,8 @@ export async function updateAppearanceConfig(
   return nextConfig;
 }
 
-export async function resolveAppearanceMode(
-  config?: AppearanceConfig
-): Promise<AppearanceMode> {
-  const resolvedConfig = config ?? await getAppearanceConfig();
+export async function resolveAppearanceMode(config?: AppearanceConfig): Promise<AppearanceMode> {
+  const resolvedConfig = config ?? (await getAppearanceConfig());
   if (resolvedConfig.syncWithHost || resolvedConfig.defaultMode === "auto") {
     return detectHostAppearance();
   }

@@ -7,16 +7,22 @@ const RUN_OPTIONS = { seed: 1_234_567, numRuns: 300 } as const;
 
 const MAX = 4000;
 // Newline-free tokens so the structured, line-per-field output stays parseable.
-const safe = fc.string({ unit: fc.constantFrom("a", "b", "/", ".", "-", "_", " ", "1"), maxLength: 12 });
+const safe = fc.string({
+  unit: fc.constantFrom("a", "b", "/", ".", "-", "_", " ", "1"),
+  maxLength: 12,
+});
 const options = fc.record(
   {
     command: safe,
     args: fc.array(safe, { maxLength: 3 }),
-    cwd: fc.option(safe.filter(s => s.length > 0), { nil: undefined }),
+    cwd: fc.option(
+      safe.filter((s) => s.length > 0),
+      { nil: undefined },
+    ),
     stdout: fc.option(fc.string({ maxLength: 40 }), { nil: undefined }),
-    stderr: fc.option(fc.string({ maxLength: 40 }), { nil: undefined })
+    stderr: fc.option(fc.string({ maxLength: 40 }), { nil: undefined }),
   },
-  { requiredKeys: ["command"] }
+  { requiredKeys: ["command"] },
 );
 
 // The full caught-error domain: Error objects, primitives, plain objects, and
@@ -37,14 +43,16 @@ describe("formatCommandError (property-based)", () => {
         const commandLine = [opts.command, ...(opts.args ?? [])].join(" ");
         return typeof out === "string" && out.startsWith(`Command failed: ${commandLine}`);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("always includes a raw-error line", () => {
     fc.assert(
-      fc.property(errorValue, options, (error, opts) => formatCommandError(error, opts).includes("raw error:")),
-      RUN_OPTIONS
+      fc.property(errorValue, options, (error, opts) =>
+        formatCommandError(error, opts).includes("raw error:"),
+      ),
+      RUN_OPTIONS,
     );
   });
 
@@ -54,7 +62,7 @@ describe("formatCommandError (property-based)", () => {
         const hasCwdLine = formatCommandError(error, opts).split("\n").includes(`cwd: ${opts.cwd}`);
         return hasCwdLine === (opts.cwd !== undefined);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -68,14 +76,18 @@ describe("formatCommandError (property-based)", () => {
         }
         const lines = formatCommandError(err, opts).split("\n");
         if (typeof c === "number") {
-          return lines.includes(`exit code: ${c}`) && !lines.some(l => l.startsWith("error code:"));
+          return (
+            lines.includes(`exit code: ${c}`) && !lines.some((l) => l.startsWith("error code:"))
+          );
         }
         if (typeof c === "string") {
-          return lines.includes(`error code: ${c}`) && !lines.some(l => l.startsWith("exit code:"));
+          return (
+            lines.includes(`error code: ${c}`) && !lines.some((l) => l.startsWith("exit code:"))
+          );
         }
-        return !lines.some(l => l.startsWith("exit code:") || l.startsWith("error code:"));
+        return !lines.some((l) => l.startsWith("exit code:") || l.startsWith("error code:"));
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -84,21 +96,21 @@ describe("formatCommandError (property-based)", () => {
       fc.property(fc.string({ maxLength: 40 }), options, (stdout, opts) => {
         const out = formatCommandError(new Error("x"), { ...opts, stdout, stderr: undefined });
         const hasSection = out.includes("stdout: (last");
-        return hasSection === (stdout.trim().length > 0);
+        return hasSection === stdout.trim().length > 0;
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("bounds each output excerpt to at most MAX+3 chars and reproduces the excerpt oracle", () => {
     const maybeLong = fc.string({ maxLength: 4300 });
     fc.assert(
-      fc.property(maybeLong, opts => {
+      fc.property(maybeLong, (opts) => {
         const out = formatCommandError(new Error("x"), { command: "cmd", stdout: opts });
         const ex = excerpt(opts);
         return ex.length <= MAX + 3 && (ex.length === 0 || out.includes(ex));
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
@@ -122,19 +134,23 @@ describe("wrapCommandError (property-based)", () => {
         const wrapped = wrapCommandError(error, opts);
         return wrapped instanceof Error && wrapped.message === formatCommandError(error, opts);
       }),
-      RUN_OPTIONS
+      RUN_OPTIONS,
     );
   });
 
   test("preserves the original error's name when the input is an Error", () => {
-    const named = fc.string({ maxLength: 12 }).map(n => {
+    const named = fc.string({ maxLength: 12 }).map((n) => {
       const e = new Error("boom");
       e.name = n || "Error";
       return e;
     });
     fc.assert(
-      fc.property(named, options, (error, opts) => wrapCommandError(error, opts).name === error.name),
-      RUN_OPTIONS
+      fc.property(
+        named,
+        options,
+        (error, opts) => wrapCommandError(error, opts).name === error.name,
+      ),
+      RUN_OPTIONS,
     );
   });
 });

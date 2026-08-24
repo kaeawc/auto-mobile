@@ -156,6 +156,7 @@ Missing devices may have failed or not reached the critical section.
 ```
 
 **Resolution**:
+
 - Check that all devices are reaching the critical section
 - Increase timeout if devices need more time
 - Verify deviceCount is correct
@@ -177,8 +178,8 @@ Error: Nested critical sections are not supported.
 Found barrier step inside critical section "outer-lock".
 ```
 
-There is also a second, lock-level guard: if the *same* device arrives at the
-*same* lock again before the barrier has passed (e.g. re-entry via a wrapped
+There is also a second, lock-level guard: if the _same_ device arrives at the
+_same_ lock again before the barrier has passed (e.g. re-entry via a wrapped
 call), the coordinator rejects it:
 
 ```yaml
@@ -187,6 +188,7 @@ Nested critical sections with the same lock are not supported.
 ```
 
 **Resolution**:
+
 - Remove nested critical sections (or `barrier` steps inside them)
 - Use different lock names for sequential synchronization points
 
@@ -200,6 +202,7 @@ Failed at step 2/3 (observe): Element not found
 ```
 
 **Behavior**:
+
 - Execution stops immediately (fail-fast)
 - Lock is released
 - Other waiting devices will timeout
@@ -209,6 +212,6 @@ Failed at step 2/3 (observe): Element not found
 
 1. **No Nesting**: Critical sections cannot be nested. Each lock must be distinct.
 
-4. **Fail-Fast**: If any device fails inside the critical section, all devices fail. There is no partial success mode.
+2. **Fail-Fast**: If any device fails inside the critical section, all devices fail. There is no partial success mode.
 
-5. **Static Device Count**: The device count must be known upfront and cannot change during execution.
+3. **Static Device Count**: The device count must be known upfront and cannot change during execution.

@@ -16,12 +16,12 @@ describe("InputText.execute", () => {
   const androidDevice: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    name: "Test Device"
+    name: "Test Device",
   };
   const iosDevice: BootedDevice = {
     deviceId: "ios-test-device",
     platform: "ios",
-    name: "Test iPhone"
+    name: "Test iPhone",
   };
 
   let fakeAdb: FakeAdbExecutor;
@@ -39,7 +39,7 @@ describe("InputText.execute", () => {
     timestamp: Date.now(),
     screenSize: { width: 1080, height: 1920 },
     systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
-    viewHierarchy: { hierarchy: { node: { $: {} } } }
+    viewHierarchy: { hierarchy: { node: { $: {} } } },
   });
 
   const wireFakes = (inputText: InputText): void => {
@@ -58,7 +58,11 @@ describe("InputText.execute", () => {
     fakeObserveScreen.setObserveResult(() => createObserveResult());
     fakeWindow = new FakeWindow();
     fakeWindow.configureCachedActiveWindow(null);
-    fakeWindow.configureActiveWindow({ appId: "com.test.app", activityName: "MainActivity", layoutSeqSum: 1 });
+    fakeWindow.configureActiveWindow({
+      appId: "com.test.app",
+      activityName: "MainActivity",
+      layoutSeqSum: 1,
+    });
     fakeAwaitIdle = new FakeAwaitIdle();
     fakeA11yService = new FakeCtrlProxy();
     fakeIosCtrlProxy = new FakeIOSCtrlProxy();
@@ -80,7 +84,12 @@ describe("InputText.execute", () => {
 
     const result = await inputText.execute(undefined as any);
 
-    expect(result).toMatchObject({ success: false, text: "", error: "No text provided", method: "a11y" });
+    expect(result).toMatchObject({
+      success: false,
+      text: "",
+      error: "No text provided",
+      method: "a11y",
+    });
     // Early return: never reaches the accessibility service or ADB.
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
@@ -88,7 +97,7 @@ describe("InputText.execute", () => {
   test("uses the atomic a11y setText (no key events) when no marker matches", async () => {
     serverConfig.setEventAllMarkers([]);
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as unknown as AndroidCtrlProxyClient
+      fakeA11yService as unknown as AndroidCtrlProxyClient,
     );
 
     const inputText = new InputText(androidDevice, fakeAdb as any);
@@ -100,13 +109,13 @@ describe("InputText.execute", () => {
     expect(result.method).toBe("a11y");
     // a11y mode sets the whole string atomically and issues no per-character keyevents.
     expect(fakeA11yService.getTextInputHistory()).toEqual([{ text: "/a", resourceId: undefined }]);
-    expect(fakeAdb.getExecutedCommands().some(cmd => cmd.includes("keyevent"))).toBe(false);
+    expect(fakeAdb.getExecutedCommands().some((cmd) => cmd.includes("keyevent"))).toBe(false);
   });
 
   test("auto-promotes to eventAll key events when the text matches a configured marker", async () => {
     serverConfig.setEventAllMarkers(["/"]);
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as unknown as AndroidCtrlProxyClient
+      fakeA11yService as unknown as AndroidCtrlProxyClient,
     );
 
     const inputText = new InputText(androidDevice, fakeAdb as any);
@@ -118,12 +127,12 @@ describe("InputText.execute", () => {
     expect(result.method).toBe("eventAll");
     // eventAll types character-by-character via real key events so keystroke-driven
     // autocomplete (slash/@ popups) actually opens.
-    expect(fakeAdb.getExecutedCommands().some(cmd => cmd.includes("keyevent"))).toBe(true);
+    expect(fakeAdb.getExecutedCommands().some((cmd) => cmd.includes("keyevent"))).toBe(true);
   });
 
   test("routes iOS input through the CtrlProxy client and ignores Android modes", async () => {
     iosGetInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeIosCtrlProxy as unknown as IOSCtrlProxyClient
+      fakeIosCtrlProxy as unknown as IOSCtrlProxyClient,
     );
 
     const inputText = new InputText(iosDevice, fakeAdb as any);
@@ -134,7 +143,9 @@ describe("InputText.execute", () => {
     expect(result.success).toBe(true);
     // iOS always reports the a11y method regardless of the requested Android mode.
     expect(result.method).toBe("a11y");
-    expect(fakeIosCtrlProxy.getTextInputHistory()).toEqual([{ text: "hello", resourceId: undefined }]);
+    expect(fakeIosCtrlProxy.getTextInputHistory()).toEqual([
+      { text: "hello", resourceId: undefined },
+    ]);
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
 });

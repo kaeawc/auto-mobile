@@ -1,4 +1,7 @@
-import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import {
+  AdbClientFactory,
+  defaultAdbClientFactory,
+} from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BackStackInfo, ActivityInfo, TaskInfo, BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
@@ -89,7 +92,7 @@ function parseHistRow(line: string): HistRow | undefined {
   return {
     histIndex: parseInt(match[1], 10),
     component: match[2],
-    taskId: taskId ? parseInt(taskId[1], 10) : undefined
+    taskId: taskId ? parseInt(taskId[1], 10) : undefined,
   };
 }
 
@@ -191,7 +194,7 @@ function fieldsFromTail(id: number, tail: string): TaskHeaderFields {
   return {
     id,
     affinity: affinity ? affinity[1] : undefined,
-    component: component ? component[1] : undefined
+    component: component ? component[1] : undefined,
   };
 }
 
@@ -202,7 +205,11 @@ export class GetBackStack implements BackStack {
   private adb: AdbExecutor;
   private timer: Timer;
 
-  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory, timer: Timer = defaultTimer) {
+  constructor(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    timer: Timer = defaultTimer,
+  ) {
     this.adb = adbFactory.create(device);
     this.timer = timer;
   }
@@ -269,7 +276,7 @@ export class GetBackStack implements BackStack {
           taskAffinity: currentTaskAffinity,
           // Index-derived fallback, authoritative only on API <= 29; overridden
           // below by the block's own rootOfTask= line when one is printed.
-          isTaskRoot: histIndex === 0
+          isTaskRoot: histIndex === 0,
         };
 
         activities.push(activity);
@@ -496,7 +503,7 @@ export class GetBackStack implements BackStack {
       // Match mResumedActivity or mFocusedActivity
       // Format: "mResumedActivity: ActivityRecord{...} u0 com.example/.MainActivity t123"
       const resumedMatch = line.match(
-        /(mResumedActivity|mFocusedActivity|topResumedActivity)\s*[:=].*?u\d+\s+([^\s]+)(?:\s+t(\d+))?/
+        /(mResumedActivity|mFocusedActivity|topResumedActivity)\s*[:=].*?u\d+\s+([^\s]+)(?:\s+t(\d+))?/,
       );
       if (resumedMatch) {
         const fullName = resumedMatch[2];
@@ -513,7 +520,7 @@ export class GetBackStack implements BackStack {
         logger.debug(`[BACK_STACK] Current activity: ${activityName} (task: ${taskId})`);
         return {
           name: activityName,
-          taskId
+          taskId,
         };
       }
     }
@@ -528,7 +535,7 @@ export class GetBackStack implements BackStack {
    */
   async execute(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<BackStackInfo> {
     const startTime = this.timer.now();
 
@@ -537,7 +544,13 @@ export class GetBackStack implements BackStack {
 
       // Execute dumpsys activity activities
       const dumpsysOutput = await perf.track("dumpsysActivities", () =>
-        this.adb.executeCommand("shell dumpsys activity activities", undefined, undefined, undefined, signal)
+        this.adb.executeCommand(
+          "shell dumpsys activity activities",
+          undefined,
+          undefined,
+          undefined,
+          signal,
+        ),
       );
 
       // Parse activities, tasks, and current activity in parallel
@@ -545,8 +558,8 @@ export class GetBackStack implements BackStack {
         Promise.all([
           Promise.resolve(this.parseActivities(dumpsysOutput.stdout)),
           Promise.resolve(this.parseTasks(dumpsysOutput.stdout)),
-          Promise.resolve(this.getCurrentActivity(dumpsysOutput.stdout))
-        ])
+          Promise.resolve(this.getCurrentActivity(dumpsysOutput.stdout)),
+        ]),
       );
 
       // Calculate depth: number of activities in current task minus 1 (the current activity).
@@ -555,7 +568,7 @@ export class GetBackStack implements BackStack {
       // falling back to the "Hist #N" index -- #0 is the root -- where the field is not
       // printed (API <= 29). See ROOT_OF_TASK_LINE and issue #4340.
       const currentTaskId = currentActivity?.taskId || -1;
-      const activitiesInCurrentTask = activities.filter(a => a.taskId === currentTaskId);
+      const activitiesInCurrentTask = activities.filter((a) => a.taskId === currentTaskId);
       const depth = Math.max(0, activitiesInCurrentTask.length - 1);
 
       const backStackInfo: BackStackInfo = {
@@ -565,14 +578,14 @@ export class GetBackStack implements BackStack {
         currentActivity,
         currentTaskId,
         capturedAt: this.timer.now(),
-        source: "adb"
+        source: "adb",
       };
 
       const duration = this.timer.now() - startTime;
       logger.info(
         `[BACK_STACK] Back stack retrieved in ${duration}ms: ` +
-        `depth=${depth}, activities=${activities.length}, tasks=${tasks.length}, ` +
-        `currentActivity=${currentActivity?.name || "unknown"}`
+          `depth=${depth}, activities=${activities.length}, tasks=${tasks.length}, ` +
+          `currentActivity=${currentActivity?.name || "unknown"}`,
       );
 
       return backStackInfo;
@@ -587,7 +600,7 @@ export class GetBackStack implements BackStack {
         tasks: [],
         capturedAt: this.timer.now(),
         partial: true,
-        source: "adb"
+        source: "adb",
       };
     }
   }

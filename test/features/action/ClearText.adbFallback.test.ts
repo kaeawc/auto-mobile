@@ -9,7 +9,7 @@ describe("ClearText Android ADB fallback", () => {
   const device: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
-    name: "Test Device"
+    name: "Test Device",
   };
 
   let fakeAdb: FakeAdbExecutor;
@@ -25,26 +25,28 @@ describe("ClearText Android ADB fallback", () => {
       hierarchy: {
         node: {
           $: {
-            "focused": "true",
-            "text": text,
-            "class": "android.widget.EditText"
-          }
-        }
-      }
-    }
+            focused: "true",
+            text: text,
+            class: "android.widget.EditText",
+          },
+        },
+      },
+    },
   });
 
   const noHierarchyObserve = (): ObserveResult => ({
     timestamp: Date.now(),
     screenSize: { width: 1080, height: 1920 },
-    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
   });
 
   const runClearText = (observeResult: ObserveResult) => {
     const clearText = new ClearText(device, fakeAdb as any);
     observedSpy = spyOn(
-      clearText as unknown as { observedInteraction: (fn: (o: ObserveResult) => Promise<unknown>) => Promise<unknown> },
-      "observedInteraction"
+      clearText as unknown as {
+        observedInteraction: (fn: (o: ObserveResult) => Promise<unknown>) => Promise<unknown>;
+      },
+      "observedInteraction",
     ).mockImplementation(async (fn: (o: ObserveResult) => Promise<unknown>) => fn(observeResult));
     return clearText.execute();
   };
@@ -53,7 +55,7 @@ describe("ClearText Android ADB fallback", () => {
     fakeAdb = new FakeAdbExecutor();
     fakeA11yService = new FakeCtrlProxy();
     getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
-      fakeA11yService as unknown as AndroidCtrlProxyClient
+      fakeA11yService as unknown as AndroidCtrlProxyClient,
     );
   });
 
@@ -73,7 +75,11 @@ describe("ClearText Android ADB fallback", () => {
   });
 
   test("falls back to ADB deletes sized to the focused field when a11y clear fails", async () => {
-    fakeA11yService.setClearTextResult({ success: false, totalTimeMs: 0, error: "no focused node" });
+    fakeA11yService.setClearTextResult({
+      success: false,
+      totalTimeMs: 0,
+      error: "no focused node",
+    });
 
     const result = await runClearText(focusedFieldObserve("hello"));
 
@@ -85,12 +91,16 @@ describe("ClearText Android ADB fallback", () => {
       "shell input keyevent KEYCODE_DEL",
       "shell input keyevent KEYCODE_DEL",
       "shell input keyevent KEYCODE_DEL",
-      "shell input keyevent KEYCODE_DEL"
+      "shell input keyevent KEYCODE_DEL",
     ]);
   });
 
   test("issues no key events when the focused field is already empty", async () => {
-    fakeA11yService.setClearTextResult({ success: false, totalTimeMs: 0, error: "no focused node" });
+    fakeA11yService.setClearTextResult({
+      success: false,
+      totalTimeMs: 0,
+      error: "no focused node",
+    });
 
     const result = await runClearText(focusedFieldObserve(""));
 
@@ -100,14 +110,18 @@ describe("ClearText Android ADB fallback", () => {
   });
 
   test("uses the 200-delete default when no view hierarchy is available", async () => {
-    fakeA11yService.setClearTextResult({ success: false, totalTimeMs: 0, error: "no focused node" });
+    fakeA11yService.setClearTextResult({
+      success: false,
+      totalTimeMs: 0,
+      error: "no focused node",
+    });
 
     const result = await runClearText(noHierarchyObserve());
 
     expect(result.success).toBe(true);
     const commands = fakeAdb.getExecutedCommands();
     expect(commands[0]).toBe("shell input keyevent KEYCODE_MOVE_END");
-    const deletes = commands.filter(cmd => cmd === "shell input keyevent KEYCODE_DEL");
+    const deletes = commands.filter((cmd) => cmd === "shell input keyevent KEYCODE_DEL");
     expect(deletes.length).toBe(200);
   });
 });

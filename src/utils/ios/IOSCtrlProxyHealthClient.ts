@@ -38,7 +38,7 @@ export class IOSCtrlProxyHealthClient {
   public constructor(
     private readonly processExecutor: HostCommandExecutor = new DefaultHostCommandExecutor(),
     private readonly timer: Timer,
-    private readonly context: CtrlProxyHealthContext
+    private readonly context: CtrlProxyHealthContext,
   ) {}
 
   /**
@@ -59,7 +59,7 @@ export class IOSCtrlProxyHealthClient {
   public async checkHealthEndpointOnPortForDevice(
     port: number,
     deviceId: string,
-    timeoutMs?: number
+    timeoutMs?: number,
   ): Promise<boolean> {
     const body = await this.readHealthEndpointBodyOnPort(port, timeoutMs);
     if (body === null) {
@@ -107,22 +107,22 @@ export class IOSCtrlProxyHealthClient {
    * `curl` (bounded by `--max-time`); remote probes use `fetch` bounded by a
    * timer-driven `AbortController`.
    */
-  public async readHealthEndpointBodyOnPort(port: number, timeoutMs?: number): Promise<string | null> {
+  public async readHealthEndpointBodyOnPort(
+    port: number,
+    timeoutMs?: number,
+  ): Promise<string | null> {
     try {
       const requestTimeoutMs = Math.min(
         IOSCtrlProxyHealthClient.FETCH_TIMEOUT_MS,
-        Math.max(1, timeoutMs ?? IOSCtrlProxyHealthClient.FETCH_TIMEOUT_MS)
+        Math.max(1, timeoutMs ?? IOSCtrlProxyHealthClient.FETCH_TIMEOUT_MS),
       );
       const host = this.context.useRemoteRunner() ? this.context.getHost() : "localhost";
       if (this.context.useRemoteRunner()) {
         const controller = new AbortController();
-        const timeoutId = this.timer.setTimeout(
-          () => controller.abort(),
-          requestTimeoutMs
-        );
+        const timeoutId = this.timer.setTimeout(() => controller.abort(), requestTimeoutMs);
         try {
           const response = await fetch(`http://${host}:${port}/health`, {
-            signal: controller.signal
+            signal: controller.signal,
           });
           return await response.text();
         } finally {
@@ -134,7 +134,7 @@ export class IOSCtrlProxyHealthClient {
       const { stdout } = await this.processExecutor.executeCommand(
         "curl",
         ["-s", "--max-time", String(requestTimeoutMs / 1000), `http://${host}:${port}/health`],
-        { timeoutMs: requestTimeoutMs }
+        { timeoutMs: requestTimeoutMs },
       );
       return stdout;
     } catch (error) {

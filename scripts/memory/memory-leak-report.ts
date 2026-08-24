@@ -20,7 +20,7 @@ export function parseMemoryLeakArgs(argv: string[]): MemoryLeakArgs {
     heapGrowthLimitMb: DEFAULT_HEAP_GROWTH_LIMIT_MB,
     snapshotDir: process.cwd(),
     mode: "strict",
-    failOnLeak: true
+    failOnLeak: true,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -95,7 +95,7 @@ export interface HeapSnapshotDeps {
 export async function writeHeapSnapshotSafe(
   deps: HeapSnapshotDeps,
   snapshotDir: string,
-  label: string
+  label: string,
 ): Promise<string | null> {
   const filePath = buildSnapshotPath(snapshotDir, label, deps.now());
   try {
@@ -162,7 +162,7 @@ export function buildLeakReport(input: LeakReportInput): LeakReport {
       heapUsedStart: input.heapUsedStart,
       heapUsedEnd: input.heapUsedEnd,
       heapGrowthBytes: heapGrowth,
-      effectiveGrowthBytes: effectiveGrowth
-    }
+      effectiveGrowthBytes: effectiveGrowth,
+    },
   };
 }

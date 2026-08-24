@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.telemetry
 
 import dev.jasonpearson.automobile.desktop.core.clipboard.FakeClipboardWriter
+import java.util.Locale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -86,6 +87,33 @@ class InspectorEventExportTest {
     val markdown = eventAsMarkdown(log)
 
     assertTrue("pipe escaped", markdown.contains("| Message | a \\| b |"))
+  }
+
+  @Test
+  fun `eventAsMarkdown formats performance CPU locale-independently`() {
+    val perf =
+      TelemetryDisplayEvent.Performance(
+        timestamp = 7L,
+        fps = 60.0,
+        frameTimeMs = null,
+        jankFrames = null,
+        touchLatencyMs = null,
+        memoryUsageMb = 128.0,
+        cpuUsagePercent = 3.5,
+        health = "ok",
+        changedMetrics = emptyList(),
+      )
+
+    val default = Locale.getDefault()
+    try {
+      // A comma-decimal locale would render "3,5" if the formatter used the default locale.
+      Locale.setDefault(Locale.GERMANY)
+      val markdown = eventAsMarkdown(perf)
+      assertTrue("dot decimal", markdown.contains("| CPU | 3.5% |"))
+      assertFalse("no comma decimal", markdown.contains("3,5"))
+    } finally {
+      Locale.setDefault(default)
+    }
   }
 
   @Test

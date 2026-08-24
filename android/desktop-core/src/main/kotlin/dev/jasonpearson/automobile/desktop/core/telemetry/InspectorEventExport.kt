@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.telemetry
 
 import dev.jasonpearson.automobile.desktop.core.clipboard.ClipboardWriter
+import java.util.Locale
 
 /**
  * Pure, deterministic formatters that export an inspector [TelemetryDisplayEvent] to shareable text
@@ -67,7 +68,10 @@ internal fun eventAsMarkdown(event: TelemetryDisplayEvent): String {
     }
     is TelemetryDisplayEvent.Performance -> {
       event.fps?.let { rows.add("FPS" to "${it.toInt()}") }
-      event.cpuUsagePercent?.let { rows.add("CPU" to "${"%.1f".format(it)}%") }
+      event.cpuUsagePercent?.let {
+        // Locale.US so the exported Markdown is deterministic across host locales.
+        rows.add("CPU" to "${String.format(Locale.US, "%.1f", it)}%")
+      }
       event.memoryUsageMb?.let { rows.add("Memory" to "${it.toInt()} MB") }
     }
     else -> {}

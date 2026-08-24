@@ -11,6 +11,7 @@ import type { BootedDevice } from "../models";
 import * as realFs from "fs/promises";
 import { errorMessage } from "../utils/describeUnknownError";
 import { OPERATION_CANCELLED_MESSAGE } from "../utils/constants";
+import { detectImageMimeType } from "../utils/screenshot/imageHeaderDimensions";
 
 interface ScreenshotFileSystem {
   stat(path: string): Promise<{ isFile(): boolean }>;
@@ -94,6 +95,20 @@ export function setSessionScreenshotResourceDependencies(
 
 export function resetSessionScreenshotResourceDependencies(): void {
   sessionScreenshotResourceDependencies = defaultSessionScreenshotResourceDependencies;
+}
+
+function screenshotMimeType(path: string, imageBuffer: Buffer): string {
+  const detected = detectImageMimeType(imageBuffer);
+  if (detected) {
+    return detected;
+  }
+  if (path.endsWith(".webp")) {
+    return "image/webp";
+  }
+  if (path.endsWith(".jpg") || path.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+  return "image/png";
 }
 
 // Resource URIs
@@ -219,7 +234,7 @@ async function getLatestScreenshot(): Promise<ResourceContent> {
     const base64Image = imageBuffer.toString("base64");
 
     // Determine mime type from file extension
-    const mimeType = screenshotPath.endsWith(".webp") ? "image/webp" : "image/png";
+    const mimeType = screenshotMimeType(screenshotPath, imageBuffer);
 
     return {
       uri: RESOURCE_URIS.LATEST_SCREENSHOT,
@@ -378,7 +393,7 @@ async function readFreshScreenshot(
     }
     return {
       uri,
-      mimeType: "image/png",
+      mimeType: screenshotMimeType(path, imageBuffer),
       blob: imageBuffer.toString("base64"),
     };
   } catch (error) {
@@ -511,7 +526,7 @@ async function getSessionScreenshot(
 
     const imageBuffer = await screenshotFileSystem.readFile(screenshotPath);
     const base64Image = imageBuffer.toString("base64");
-    const mimeType = screenshotPath.endsWith(".webp") ? "image/webp" : "image/png";
+    const mimeType = screenshotMimeType(screenshotPath, imageBuffer);
 
     return { uri, mimeType, blob: base64Image };
   } catch (error) {
@@ -561,7 +576,7 @@ async function getFreshSessionScreenshot(
       activeSession.device,
     );
     const { promise } = screenshotService.startTrackedCapture(
-      { format: "png" },
+      {},
       {
         parentSignal: context.signal,
         queueAfterPending: true,

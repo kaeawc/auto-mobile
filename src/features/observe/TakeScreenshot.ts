@@ -22,13 +22,16 @@ import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
 import { selectScreenshotsToEvict, SCREENSHOT_MIN_EVICT_AGE_MS } from "./screenshotCacheEviction";
 import { IOSCtrlProxyClient } from "./ios";
+import { AndroidCtrlProxyClient } from "./android";
 import type { CtrlProxyScreenshotResult } from "./ios/types";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { defaultIdGenerator, IdGenerator } from "../../utils/IdGenerator";
 import {
   ANDROID_ADB_SCREENSHOT_METADATA,
+  ANDROID_CTRLPROXY_SCREENSHOT_METADATA,
   IOS_CTRLPROXY_SCREENSHOT_METADATA,
+  metadataForScreenshotFormat,
 } from "./ScreenshotMetadata";
 
 /** Secure file mode: owner read/write only */
@@ -48,8 +51,12 @@ async function writeFileSecure(filePath: string, data: Buffer): Promise<void> {
   }
 }
 
+function replaceScreenshotExtension(filePath: string, extension: string): string {
+  return filePath.replace(/\.[^.]+$/, `.${extension}`);
+}
+
 export interface ScreenshotOptions {
-  format?: "png" | "webp";
+  format?: "jpeg" | "png" | "webp";
   quality?: number;
   lossless?: boolean;
 }
@@ -139,7 +146,8 @@ export class TakeScreenshot implements ScreenshotService {
    * @returns Full file path for screenshot
    */
   generateScreenshotPath(timestamp: number, options: ScreenshotOptions): string {
-    const fileExtension = options.format === "webp" ? "webp" : "png";
+    const fileExtension =
+      options.format === "webp" ? "webp" : options.format === "jpeg" ? "jpg" : "png";
     return path.join(
       TakeScreenshot.getCacheDir(),
       `screenshot_${timestamp}_${this.idGenerator.next()}.${fileExtension}`,
@@ -245,6 +253,16 @@ export class TakeScreenshot implements ScreenshotService {
   ): Promise<ScreenshotResult> {
     logger.info(`[SCREENSHOT] Starting screenshot capture with format: ${options.format}`);
 
+    if (options.format === undefined || options.format === "jpeg") {
+      try {
+        return await this.captureScreenshotViaCtrlProxy(finalPath, signal);
+      } catch (error) {
+        logger.info(`[SCREENSHOT] CtrlProxy capture failed, falling back to ADB: ${error}`);
+        finalPath = replaceScreenshotExtension(finalPath, "png");
+        options = { ...options, format: "png" };
+      }
+    }
+
     // Try base64 approach first (faster for smaller screenshots)
     try {
       return await this.captureScreenshotBase64(finalPath, options, signal);
@@ -264,6 +282,33 @@ export class TakeScreenshot implements ScreenshotService {
         throw err;
       }
     }
+  }
+
+  private async captureScreenshotViaCtrlProxy(
+    finalPath: string,
+    signal?: AbortSignal,
+  ): Promise<ScreenshotResult> {
+    const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+    const result = await client.requestScreenshot(10000);
+    if (signal?.aborted) {
+      return { success: false, error: OPERATION_CANCELLED_MESSAGE };
+    }
+    if (!result.success || !result.data) {
+      throw new Error(result.error || "No screenshot data returned from Android CtrlProxy");
+    }
+
+    const format = result.format?.toLowerCase() === "png" ? "png" : "jpeg";
+    const imageBuffer = Buffer.from(result.data, "base64");
+    const screenshotPath = replaceScreenshotExtension(
+      finalPath,
+      format === "jpeg" ? "jpg" : format,
+    );
+    await writeFileSecure(screenshotPath, imageBuffer);
+    return {
+      success: true,
+      path: screenshotPath,
+      ...metadataForScreenshotFormat(ANDROID_CTRLPROXY_SCREENSHOT_METADATA, format),
+    };
   }
 
   /**
@@ -337,6 +382,7 @@ export class TakeScreenshot implements ScreenshotService {
     return {
       success: true,
       path: finalPath,
+      ...IOS_CTRLPROXY_SCREENSHOT_METADATA,
     };
   }
 
@@ -448,6 +494,7 @@ export class TakeScreenshot implements ScreenshotService {
     return {
       success: true,
       path: finalPath,
+      ...metadataForScreenshotFormat(ANDROID_ADB_SCREENSHOT_METADATA, options.format),
     };
   }
 
@@ -548,6 +595,7 @@ export class TakeScreenshot implements ScreenshotService {
       return {
         success: true,
         path: finalPath,
+        ...metadataForScreenshotFormat(ANDROID_ADB_SCREENSHOT_METADATA, options.format),
       };
     } catch (err) {
       const totalDuration = this.timer.now() - startTime;

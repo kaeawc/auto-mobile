@@ -71,7 +71,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
   start(perf: PerformanceTracker = new NoOpPerformanceTracker(), signal?: AbortSignal): void {
     perf.startOperation("screenshot");
     const { promise } = this.screenshotUtil.startTrackedCapture(
-      { format: "png" },
+      {},
       {
         parentSignal: signal,
         // Fire-and-forget: if a screencap is already in flight (e.g. mid-poll
@@ -115,7 +115,7 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
     try {
       await perf.track("screenshot", async () => {
         const { promise } = this.screenshotUtil.startTrackedCapture(
-          { format: "png" },
+          {},
           {
             parentSignal: signal,
             // Awaitable observe captures share an ordinary in-flight capture,

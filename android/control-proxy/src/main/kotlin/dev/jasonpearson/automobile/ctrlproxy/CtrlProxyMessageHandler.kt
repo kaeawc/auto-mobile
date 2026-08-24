@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.protocol.AddHighlight
 import dev.jasonpearson.automobile.protocol.ClearPreferences
 import dev.jasonpearson.automobile.protocol.DragResult
 import dev.jasonpearson.automobile.protocol.GetCurrentFocus
+import dev.jasonpearson.automobile.protocol.GetDataStore
 import dev.jasonpearson.automobile.protocol.GetDeviceOwnerStatus
 import dev.jasonpearson.automobile.protocol.GetPermission
 import dev.jasonpearson.automobile.protocol.GetPreference
@@ -12,6 +13,7 @@ import dev.jasonpearson.automobile.protocol.GetPreferences
 import dev.jasonpearson.automobile.protocol.GetTraversalOrder
 import dev.jasonpearson.automobile.protocol.InstallCaCert
 import dev.jasonpearson.automobile.protocol.InstallCaCertFromPath
+import dev.jasonpearson.automobile.protocol.ListDataStores
 import dev.jasonpearson.automobile.protocol.ListPreferenceFiles
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
 import dev.jasonpearson.automobile.protocol.PinchResult
@@ -345,6 +347,15 @@ class CtrlProxyMessageHandler(
       is ListPreferenceFiles -> actions.listPreferenceFiles(request.requestId, request.packageName)
       is GetPreferences ->
         actions.getPreferences(request.requestId, request.packageName, request.fileName)
+      is ListDataStores ->
+        actions.listDataStores(request.requestId, request.packageName, request.adapterName)
+      is GetDataStore ->
+        actions.getDataStore(
+          request.requestId,
+          request.packageName,
+          request.adapterName,
+          request.storeName,
+        )
       is SubscribeStorage ->
         actions.subscribeStorage(request.requestId, request.packageName, request.fileName)
       is UnsubscribeStorage -> {

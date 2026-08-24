@@ -186,6 +186,7 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 11 :: src/features/observe/audits/AccessibilityAuditor.ts: error TS2741: Property '$' is missing in type 'Hierarchy' but required in type 'ViewHierarchyNode'.
 # swap-fp: 11 :: src/features/record/android/DualTrackRecorder.ts: error TS2322: Type 'A11ySource | AndroidCtrlProxyClient' is not assignable to type 'A11ySource'.
 # swap-fp: 11,11 :: src/daemon/testRecordingSocketServer.ts: error TS2322: Type 'string' is not assignable to type 'Platform | undefined'.
+# swap-fp: 11,13,13 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
 # swap-fp: 11,53,57,65 :: src/features/navigation/Explore.ts: error TS2740: Type 'AdbExecutor' is missing the following properties from type 'AdbClient': device, execAsync, spawnFn, adbPath, and 30 more.
 # swap-fp: 12,12 :: src/db/migrations/2026_01_27_000_failures.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
 # swap-fp: 12,12 :: src/db/migrations/2026_03_15_000_telemetry_events.ts: error TS2345: Argument of type 'string' is not assignable to parameter of type 'ReferenceExpression<unknown, never>'.
@@ -193,7 +194,6 @@ src/utils/ios-cmdline-tools/XcodeSigning.ts: error TS2322: Type 'Promise<string 
 # swap-fp: 13 :: src/db/migrations/2026_01_27_000_failures.ts: error TS2769: No overload matches this call.
 # swap-fp: 13 :: src/db/migrations/2026_03_15_000_telemetry_events.ts: error TS2769: No overload matches this call.
 # swap-fp: 13 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type '(Element | null)[]' is not assignable to type 'Element[]'.
-# swap-fp: 13,13,27 :: src/features/observe/android/AndroidCtrlProxyClient.ts: error TS2322: Type 'number | undefined' is not assignable to type 'number'.
 # swap-fp: 14 :: src/features/accessibility/WcagAudit.ts: error TS2352: Conversion of type 'ViewHierarchyNode[]' to type 'ViewHierarchyNode' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
 # swap-fp: 149 :: src/server/navigationTools.ts: error TS2339: Property 'coverage' does not exist on type 'ExploreExecutionResult'.
 # swap-fp: 15 :: src/server/networkTools.ts: error TS2459: Module '"../utils/deviceUtils"' declares 'BootedDevice' locally, but it is not exported.

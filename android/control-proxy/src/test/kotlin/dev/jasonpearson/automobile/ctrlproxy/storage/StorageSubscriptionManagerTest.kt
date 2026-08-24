@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import io.mockk.verify
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -151,6 +152,87 @@ class StorageSubscriptionManagerTest {
     every { contentResolver.call(any<Uri>(), eq("getPreferences"), any(), any()) } returns bundle
 
     val result = manager.getPreferences("com.example.app", "nonexistent")
+
+    assertTrue(result.isFailure)
+    assertTrue(result.exceptionOrNull() is StorageError.FileNotFound)
+  }
+
+  // ================= DataStore Tests =================
+
+  @Test
+  fun `listDataStores returns descriptors and passes adapterName`() {
+    val bundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        // DataStore descriptors reuse the shared FileList shape (path emitted empty).
+        putString(
+          "result",
+          """{"type":"files","files":[{"name":"user_prefs","path":"","entryCount":2}]}""",
+        )
+      }
+    val extrasSlot = slot<Bundle>()
+    every {
+      contentResolver.call(any<Uri>(), eq("listDataStores"), any(), capture(extrasSlot))
+    } returns bundle
+
+    val result = manager.listDataStores("com.example.app", "settings")
+
+    assertTrue(result.isSuccess)
+    val files = result.getOrNull()!!
+    assertEquals(1, files.size)
+    assertEquals("user_prefs", files[0].name)
+    assertEquals(2, files[0].entryCount)
+    assertEquals("settings", extrasSlot.captured.getString("adapterName"))
+  }
+
+  @Test
+  fun `listDataStores returns failure when SDK not installed`() {
+    every { contentResolver.call(any<Uri>(), eq("listDataStores"), any(), any()) } returns null
+
+    val result = manager.listDataStores("com.example.app", "settings")
+
+    assertTrue(result.isFailure)
+    assertTrue(result.exceptionOrNull() is StorageError.SdkNotInstalled)
+  }
+
+  @Test
+  fun `getDataStore returns entries and passes adapterName and storeName`() {
+    val bundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString(
+          "result",
+          """{"type":"preferences","entries":[{"key":"theme","value":"dark","type":"STRING"}]}""",
+        )
+      }
+    val extrasSlot = slot<Bundle>()
+    every {
+      contentResolver.call(any<Uri>(), eq("getDataStore"), any(), capture(extrasSlot))
+    } returns bundle
+
+    val result = manager.getDataStore("com.example.app", "settings", "user_prefs")
+
+    assertTrue(result.isSuccess)
+    val entries = result.getOrNull()!!
+    assertEquals(1, entries.size)
+    assertEquals("theme", entries[0].key)
+    assertEquals("dark", entries[0].value)
+    assertEquals("STRING", entries[0].type)
+    assertEquals("settings", extrasSlot.captured.getString("adapterName"))
+    assertEquals("user_prefs", extrasSlot.captured.getString("storeName"))
+  }
+
+  @Test
+  fun `getDataStore maps StoreNotFound to FileNotFound`() {
+    val bundle =
+      Bundle().apply {
+        putBoolean("success", false)
+        putString("errorType", "StoreNotFound")
+        putString("error", "Store not found")
+      }
+    every { contentResolver.call(any<Uri>(), eq("getDataStore"), any(), any()) } returns bundle
+
+    val result = manager.getDataStore("com.example.app", "settings", "missing")
 
     assertTrue(result.isFailure)
     assertTrue(result.exceptionOrNull() is StorageError.FileNotFound)

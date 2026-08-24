@@ -391,6 +391,34 @@ export interface GetPreferencesMessage {
   fileName: string;
 }
 
+/**
+ * `@SerialName("list_data_stores")` → `ListDataStores`.
+ *
+ * Lists the Jetpack DataStore instances exposed by a host-registered adapter (issue #5192/#5573).
+ * DataStore descriptors reuse the SharedPreferences `preference_files` result envelope
+ * (`StorageResponse.FileList`, path emitted empty), disambiguated by `requestId`.
+ */
+export interface ListDataStoresMessage {
+  type: "list_data_stores";
+  requestId: string;
+  packageName: string;
+  adapterName: string;
+}
+
+/**
+ * `@SerialName("get_data_store")` → `GetDataStore`.
+ *
+ * Reads all entries from a named DataStore instance. Reuses the SharedPreferences `preferences`
+ * result envelope (`StorageResponse.Preferences`), disambiguated by `requestId`.
+ */
+export interface GetDataStoreMessage {
+  type: "get_data_store";
+  requestId: string;
+  packageName: string;
+  adapterName: string;
+  storeName: string;
+}
+
 /** `@SerialName("subscribe_storage")` → `SubscribeStorage` */
 export interface SubscribeStorageMessage {
   type: "subscribe_storage";
@@ -591,6 +619,8 @@ export type CtrlProxyRequest =
   | AddHighlightMessage
   | ListPreferenceFilesMessage
   | GetPreferencesMessage
+  | ListDataStoresMessage
+  | GetDataStoreMessage
   | SubscribeStorageMessage
   | UnsubscribeStorageMessage
   | GetPreferenceMessage
@@ -659,6 +689,8 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   add_highlight: true,
   list_preference_files: true,
   get_preferences: true,
+  list_data_stores: true,
+  get_data_store: true,
   subscribe_storage: true,
   unsubscribe_storage: true,
   get_preference: true,
@@ -910,6 +942,34 @@ export const ctrlProxyRequests = {
       requestId: args.requestId,
       packageName: args.packageName,
       fileName: args.fileName,
+    };
+  },
+
+  listDataStores(args: {
+    requestId: string;
+    packageName: string;
+    adapterName: string;
+  }): ListDataStoresMessage {
+    return {
+      type: "list_data_stores",
+      requestId: args.requestId,
+      packageName: args.packageName,
+      adapterName: args.adapterName,
+    };
+  },
+
+  getDataStore(args: {
+    requestId: string;
+    packageName: string;
+    adapterName: string;
+    storeName: string;
+  }): GetDataStoreMessage {
+    return {
+      type: "get_data_store",
+      requestId: args.requestId,
+      packageName: args.packageName,
+      adapterName: args.adapterName,
+      storeName: args.storeName,
     };
   },
 

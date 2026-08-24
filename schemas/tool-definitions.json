@@ -1727,6 +1727,51 @@
     }
   },
   {
+    "name": "getDataStore",
+    "description": "Read entries from an app Jetpack DataStore instance (Android, requires AutoMobile SDK adapter).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string"
+        },
+        "adapterName": {
+          "description": "Name the host app registered its DataStore adapter under (AutoMobile SDK)",
+          "type": "string"
+        },
+        "name": {
+          "description": "DataStore instance name",
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "adapterName",
+        "name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "getDeepLinks",
     "description": "Query app deep links",
     "inputSchema": {
@@ -3029,6 +3074,46 @@
       "type": "object",
       "properties": {},
       "additionalProperties": {}
+    }
+  },
+  {
+    "name": "listDataStores",
+    "description": "List app Jetpack DataStore instances (Android, requires AutoMobile SDK adapter).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string"
+        },
+        "adapterName": {
+          "description": "Name the host app registered its DataStore adapter under (AutoMobile SDK)",
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "adapterName"
+      ],
+      "additionalProperties": false
     }
   },
   {

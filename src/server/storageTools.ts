@@ -49,6 +49,41 @@ const TYPE_GUIDANCE: Record<string, string> = {
 
 const STORAGE_NAME_DESCRIPTION = "Storage name";
 
+const ADAPTER_NAME_DESCRIPTION =
+  "Name the host app registered its DataStore adapter under (AutoMobile SDK)";
+
+// listDataStores: enumerate the DataStore instances exposed by a host-registered adapter (Android).
+const listDataStoresSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z.object({
+      appId: z.string(),
+      adapterName: z.string().describe(ADAPTER_NAME_DESCRIPTION),
+    }),
+  ),
+);
+
+interface ListDataStoresArgs {
+  appId: string;
+  adapterName: string;
+}
+
+// getDataStore: read all entries from a named DataStore instance (Android).
+const getDataStoreSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z.object({
+      appId: z.string(),
+      adapterName: z.string().describe(ADAPTER_NAME_DESCRIPTION),
+      name: z.string().describe("DataStore instance name"),
+    }),
+  ),
+);
+
+interface GetDataStoreArgs {
+  appId: string;
+  adapterName: string;
+  name: string;
+}
+
 const legacyFileNameDescription = "Deprecated alias for name";
 
 function resolveStorageName(args: { name?: string; fileName?: string }): string {
@@ -294,11 +329,76 @@ export function registerStorageTools(): void {
     }
   };
 
+  // listDataStores handler — Android-only (Jetpack DataStore has no iOS analog).
+  const listDataStoresHandler = async (device: BootedDevice, args: ListDataStoresArgs) => {
+    if (device.platform !== "android") {
+      throw new ActionableError(
+        `listDataStores is Android-only; DataStore is not available on ${device.platform}.`,
+      );
+    }
+    try {
+      const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
+      const stores = await client.listDataStores(args.appId, args.adapterName);
+      return createJSONToolResponse({
+        success: true,
+        appId: args.appId,
+        adapterName: args.adapterName,
+        stores,
+      });
+    } catch (error) {
+      if (error instanceof ActionableError) {
+        throw error;
+      }
+      throw new ActionableError(`Failed to list data stores: ${error}`);
+    }
+  };
+
+  // getDataStore handler — Android-only.
+  const getDataStoreHandler = async (device: BootedDevice, args: GetDataStoreArgs) => {
+    if (device.platform !== "android") {
+      throw new ActionableError(
+        `getDataStore is Android-only; DataStore is not available on ${device.platform}.`,
+      );
+    }
+    try {
+      const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
+      const entries = await client.getDataStore(args.appId, args.adapterName, args.name);
+      return createJSONToolResponse({
+        success: true,
+        appId: args.appId,
+        adapterName: args.adapterName,
+        name: args.name,
+        entries,
+      });
+    } catch (error) {
+      if (error instanceof ActionableError) {
+        throw error;
+      }
+      throw new ActionableError(`Failed to get data store: ${error}`);
+    }
+  };
+
   ToolRegistry.registerDeviceAware(
     "setKeyValue",
     "Set app key-value storage entry.",
     setKeyValueSchema,
     setKeyValueHandler,
+    { defaultEnabled: false, embeddedSdkOnly: true },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "listDataStores",
+    "List app Jetpack DataStore instances (Android, requires AutoMobile SDK adapter).",
+    listDataStoresSchema,
+    listDataStoresHandler,
+    { defaultEnabled: false, embeddedSdkOnly: true },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "getDataStore",
+    "Read entries from an app Jetpack DataStore instance (Android, requires AutoMobile SDK adapter).",
+    getDataStoreSchema,
+    getDataStoreHandler,
     { defaultEnabled: false, embeddedSdkOnly: true },
   );
 

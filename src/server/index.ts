@@ -103,6 +103,7 @@ export interface McpServerOptions {
   sessionContext?: {
     sessionId?: string;
     initialSessionToolBinding?: string;
+    initialReleasedSession?: string;
     initialToolSelectionProfile?: string;
   };
   planExecutionLock?: PlanExecutionLock;
@@ -312,6 +313,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   const sessionToolBinding = new SessionToolBinding(
     options.sessionContext?.initialSessionToolBinding,
     options.sessionContext?.initialToolSelectionProfile,
+    undefined,
+    options.sessionContext?.initialReleasedSession,
   );
   // Plan execution lock with per-session scope to prevent interference during executePlan
   // Each test thread gets its own sessionUuid, enabling parallel execution on different devices

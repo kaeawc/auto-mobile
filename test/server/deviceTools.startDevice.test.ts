@@ -277,6 +277,7 @@ describe("startDevice handler", () => {
     expect(resolveDirectSessionDevice("session-1")).toEqual({
       sessionUuid: "session-1",
       device: androidDevice,
+      incarnation: expect.any(Number),
     });
   });
 

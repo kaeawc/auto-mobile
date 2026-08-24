@@ -16,6 +16,7 @@ import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_RELEASED_SESSION_PARAM,
 } from "./constants";
 import type { DaemonNotification, DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
@@ -1714,6 +1715,7 @@ export class DaemonMcpProxy {
       ? {
           sessionUuid: terminalSessionUuid,
           [DAEMON_BOUND_SESSION_PARAM]: terminalSessionUuid,
+          [DAEMON_RELEASED_SESSION_PARAM]: terminalSessionUuid,
         }
       : this.withBoundSessionUuid({});
     return await this.withRecoverableReconnect(

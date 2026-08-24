@@ -10,6 +10,7 @@ import type { TrackedScreenshotService } from "../features/observe/screenshot/Ob
 import type { BootedDevice } from "../models";
 import * as realFs from "fs/promises";
 import { errorMessage } from "../utils/describeUnknownError";
+import { OPERATION_CANCELLED_MESSAGE } from "../utils/constants";
 
 interface ScreenshotFileSystem {
   stat(path: string): Promise<{ isFile(): boolean }>;
@@ -29,11 +30,25 @@ export function resetScreenshotFileSystem(): void {
 interface ActiveSessionDevice {
   sessionUuid: string;
   device: BootedDevice;
+  incarnation?: number;
 }
 
 interface SessionScreenshotResourceDependencies {
   resolveActiveSession(sessionUuid: string): ActiveSessionDevice | undefined;
   createScreenshotService(device: BootedDevice): TrackedScreenshotService;
+}
+
+let nextSessionIncarnation = 0;
+const sessionIncarnations = new WeakMap<object, number>();
+
+function getSessionIncarnation(session: object): number {
+  const existing = sessionIncarnations.get(session);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const incarnation = ++nextSessionIncarnation;
+  sessionIncarnations.set(session, incarnation);
+  return incarnation;
 }
 
 function resolveActiveSession(sessionUuid: string): ActiveSessionDevice | undefined {
@@ -54,6 +69,7 @@ function resolveActiveSession(sessionUuid: string): ActiveSessionDevice | undefi
 
   return {
     sessionUuid,
+    incarnation: getSessionIncarnation(session),
     device: {
       deviceId: pooledDevice.id,
       name: pooledDevice.name,
@@ -243,7 +259,10 @@ function sessionResourceError(uri: string, sessionUuid: string): ResourceContent
 type FreshSessionScreenshotFailureCode =
   | "SESSION_NOT_ACTIVE"
   | "SESSION_OWNERSHIP_LOST"
-  | "SCREENSHOT_CAPTURE_FAILED";
+  | "SCREENSHOT_CAPTURE_FAILED"
+  | "SCREENSHOT_CAPTURE_CANCELLED"
+  | "SCREENSHOT_READ_FAILED"
+  | "SCREENSHOT_ACCESS_DENIED";
 
 function freshSessionScreenshotError(
   uri: string,
@@ -256,6 +275,20 @@ function freshSessionScreenshotError(
     mimeType: "application/json",
     text: JSON.stringify({ code, retryable, error }, null, 2),
   };
+}
+
+function freshScreenshotCaptureFailure(
+  uri: string,
+  signal: AbortSignal | undefined,
+  error: string,
+): ResourceContent {
+  if (signal?.aborted || error.includes(OPERATION_CANCELLED_MESSAGE)) {
+    return freshSessionScreenshotError(uri, "SCREENSHOT_CAPTURE_CANCELLED", false, error);
+  }
+  if (/EACCES|EPERM|permission denied|read-only/i.test(error)) {
+    return freshSessionScreenshotError(uri, "SCREENSHOT_ACCESS_DENIED", false, error);
+  }
+  return freshSessionScreenshotError(uri, "SCREENSHOT_CAPTURE_FAILED", true, error);
 }
 
 function unauthorizedSessionResourceError(uri: string): ResourceContent {
@@ -272,6 +305,28 @@ function unauthorizedSessionResourceError(uri: string): ResourceContent {
   };
 }
 
+function unauthorizedFreshScreenshotError(uri: string): ResourceContent {
+  return freshSessionScreenshotError(
+    uri,
+    "SCREENSHOT_ACCESS_DENIED",
+    false,
+    "This resource can only be read by its bound device session.",
+  );
+}
+
+function sessionOwnershipChanged(
+  currentSession: ActiveSessionDevice | undefined,
+  originalSession: ActiveSessionDevice,
+): boolean {
+  if (currentSession?.device.deviceId !== originalSession.device.deviceId) {
+    return true;
+  }
+  if (currentSession?.incarnation !== undefined && originalSession.incarnation !== undefined) {
+    return currentSession.incarnation !== originalSession.incarnation;
+  }
+  return false;
+}
+
 function isAuthorizedSessionResource(context: ResourceReadContext, sessionUuid: string): boolean {
   return context.sessionUuid === sessionUuid;
 }
@@ -282,8 +337,8 @@ function releasedSessionNotActiveError(
   sessionUuid: string,
 ): ResourceContent | undefined {
   if (
-    context.releasedSessionUuid === sessionUuid
-    && !sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid)
+    context.releasedSessionUuid === sessionUuid &&
+    !sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid)
   ) {
     return freshSessionScreenshotError(
       uri,
@@ -293,6 +348,64 @@ function releasedSessionNotActiveError(
     );
   }
   return undefined;
+}
+
+async function readFreshScreenshot(
+  uri: string,
+  sessionUuid: string,
+  activeSession: ActiveSessionDevice,
+  context: ResourceReadContext,
+  path: string,
+): Promise<ResourceContent> {
+  try {
+    const imageBuffer = await screenshotFileSystem.readFile(path);
+    if (context.signal?.aborted) {
+      return freshSessionScreenshotError(
+        uri,
+        "SCREENSHOT_CAPTURE_CANCELLED",
+        false,
+        OPERATION_CANCELLED_MESSAGE,
+      );
+    }
+    const finalSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
+    if (sessionOwnershipChanged(finalSession, activeSession)) {
+      return freshSessionScreenshotError(
+        uri,
+        "SESSION_OWNERSHIP_LOST",
+        false,
+        "Device session ownership was lost while reading a fresh screenshot.",
+      );
+    }
+    return {
+      uri,
+      mimeType: "image/png",
+      blob: imageBuffer.toString("base64"),
+    };
+  } catch (error) {
+    const reason = errorMessage(error);
+    logger.error(
+      `[ObservationResources] Failed to read fresh screenshot for session ${sessionUuid}: ${reason}`,
+    );
+    if (context.signal?.aborted || reason.includes(OPERATION_CANCELLED_MESSAGE)) {
+      return freshSessionScreenshotError(uri, "SCREENSHOT_CAPTURE_CANCELLED", false, reason);
+    }
+    const failedReadSession =
+      sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
+    if (sessionOwnershipChanged(failedReadSession, activeSession)) {
+      return freshSessionScreenshotError(
+        uri,
+        "SESSION_OWNERSHIP_LOST",
+        false,
+        "Device session ownership was lost while reading a fresh screenshot.",
+      );
+    }
+    return freshSessionScreenshotError(
+      uri,
+      "SCREENSHOT_READ_FAILED",
+      false,
+      `Failed to read fresh screenshot for sessionUuid ${sessionUuid}: ${reason}`,
+    );
+  }
 }
 
 // Session-scoped handler for a cached observation.
@@ -428,7 +541,10 @@ async function getFreshSessionScreenshot(
   const { sessionUuid } = params;
   const uri = `automobile:device-session/${sessionUuid}/screenshot`;
   if (!isAuthorizedSessionResource(context, sessionUuid)) {
-    return releasedSessionNotActiveError(uri, context, sessionUuid) ?? unauthorizedSessionResourceError(uri);
+    return (
+      releasedSessionNotActiveError(uri, context, sessionUuid) ??
+      unauthorizedFreshScreenshotError(uri)
+    );
   }
   const activeSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
   if (!activeSession) {
@@ -454,7 +570,7 @@ async function getFreshSessionScreenshot(
     const result = await promise;
 
     const currentSession = sessionScreenshotResourceDependencies.resolveActiveSession(sessionUuid);
-    if (currentSession?.device.deviceId !== activeSession.device.deviceId) {
+    if (sessionOwnershipChanged(currentSession, activeSession)) {
       return freshSessionScreenshotError(
         uri,
         "SESSION_OWNERSHIP_LOST",
@@ -470,27 +586,17 @@ async function getFreshSessionScreenshot(
       );
     }
 
-    const imageBuffer = await screenshotFileSystem.readFile(result.path);
-    return {
-      uri,
-      mimeType: "image/png",
-      blob: imageBuffer.toString("base64"),
-    };
+    return readFreshScreenshot(uri, sessionUuid, activeSession, context, result.path);
   } catch (error) {
+    const reason = errorMessage(error);
     logger.error(
-      `[ObservationResources] Failed to capture fresh screenshot for session ${sessionUuid}: ${error}`,
+      `[ObservationResources] Failed to capture fresh screenshot for session ${sessionUuid}: ${reason}`,
     );
-    return {
+    return freshScreenshotCaptureFailure(
       uri,
-      mimeType: "application/json",
-      text: JSON.stringify(
-        {
-          error: `Failed to capture fresh screenshot for sessionUuid ${sessionUuid}: ${error}`,
-        },
-        null,
-        2,
-      ),
-    };
+      context.signal,
+      `Failed to capture fresh screenshot for sessionUuid ${sessionUuid}: ${reason}`,
+    );
   }
 }
 

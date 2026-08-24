@@ -935,34 +935,37 @@ describe("AndroidCtrlProxyClient", function () {
     }
   });
 
-  // Windows Bun evaluates the Android barrel and direct import as separate module
-  // records, so their singleton registries cannot exercise this lifecycle.
-  test.skipIf(process.platform === "win32")(
-    "late invalidated-observer cleanup cannot release a replacement observer's port",
-    async function () {
-      await accessibilityServiceClient.close();
-      AndroidCtrlProxyClient.resetInstances();
-      PortManager.reset();
-      PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
-      try {
-        const original = AndroidCtrlProxyClient.getInstance(testDevice, fakeAdbFactory);
-        const originalPort = PortManager.getPort(testDevice.deviceId);
-        original.invalidateForShutdownRecovery();
+  test("late invalidated-observer cleanup cannot release a replacement observer's port", async function () {
+    await accessibilityServiceClient.close();
+    const isolatedDevice = { ...testDevice, deviceId: "late-cleanup-isolated-device" };
+    PortManager.setPortAvailabilityCheckerForTesting({ isPortAvailable: () => true });
+    const original = AndroidCtrlProxyClient.createForTesting(
+      isolatedDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    const originalPort = PortManager.getPort(isolatedDevice.deviceId);
+    original.invalidateForShutdownRecovery();
 
-        const replacement = AndroidCtrlProxyClient.getInstance(testDevice, fakeAdbFactory);
-        const replacementPort = PortManager.getPort(testDevice.deviceId);
-        expect(replacementPort).not.toBe(originalPort);
+    const replacement = AndroidCtrlProxyClient.createForTesting(
+      isolatedDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    const replacementPort = PortManager.getPort(isolatedDevice.deviceId);
+    try {
+      expect(replacementPort).not.toBe(originalPort);
 
-        await original.close();
-        expect(PortManager.getPort(testDevice.deviceId)).toBe(replacementPort);
-
-        await replacement.close();
-      } finally {
-        PortManager.setPortAvailabilityCheckerForTesting(null);
-        PortManager.reset();
-      }
-    },
-  );
+      await original.close();
+      expect(PortManager.getPort(isolatedDevice.deviceId)).toBe(replacementPort);
+    } finally {
+      await replacement.close();
+      PortManager.setPortAvailabilityCheckerForTesting(null);
+      PortManager.release(isolatedDevice.deviceId);
+    }
+  });
 
   describe("connection lifecycle", function () {
     test("notifies the observation stream when the WebSocket connection closes", function () {

@@ -17,9 +17,11 @@ export class SessionToolBinding {
     initialSessionUuid?: string,
     initialToolSelectionProfileUuid?: string,
     private readonly idGenerator: IdGenerator = defaultIdGenerator,
+    initialReleasedSessionUuid?: string,
   ) {
     this.initialSessionUuid = initialSessionUuid;
     this.initialToolSelectionProfileUuid = initialToolSelectionProfileUuid;
+    this.releasedInitialSessionUuid = initialReleasedSessionUuid;
   }
 
   private boundSessionUuid(mcpSessionId: string | undefined): string | undefined {

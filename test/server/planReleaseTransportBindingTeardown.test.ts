@@ -60,7 +60,10 @@ describe("createMcpServer server-side session-binding teardown (issue #4611 Gap 
       },
     });
     fixture = new McpTestFixture({
-      sessionContext: { sessionId: "transport-resource", initialSessionToolBinding: RELEASED_SESSION },
+      sessionContext: {
+        sessionId: "transport-resource",
+        initialSessionToolBinding: RELEASED_SESSION,
+      },
     });
     await fixture.setup();
     const { client } = fixture.getContext();

@@ -19,9 +19,11 @@ import {
   DAEMON_HANDSHAKE_ENABLED,
   DAEMON_SUBSCRIBE_NOTIFICATIONS_METHOD,
   DAEMON_SESSION_TOOL_BINDING_HEADER,
+  DAEMON_RELEASED_SESSION_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_HEADER,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_BOUND_SESSION_PARAM,
+  DAEMON_RELEASED_SESSION_PARAM,
   DAEMON_VERSION,
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
 } from "./constants";
@@ -146,6 +148,7 @@ interface SocketFileIdentity {
 export type McpClientFactory = (
   boundSessionUuid?: string,
   toolSelectionProfileUuid?: string,
+  releasedSessionUuid?: string,
 ) => Promise<Client>;
 
 /**
@@ -185,6 +188,7 @@ interface McpForwardRoute {
   /** Replayed when this transport needs to establish a fresh MCP session. */
   sessionUuid?: string;
   toolSelectionProfileUuid?: string;
+  releasedSessionUuid?: string;
 }
 
 interface DeviceControlTransportIdentity {
@@ -325,8 +329,11 @@ export class UnixSocketServer {
    * Defaults to the real {@link createMcpClient}; tests assign a fake here to
    * exercise forwarding without a live HTTP endpoint.
    */
-  mcpClientFactory: McpClientFactory = (sessionUuid, toolSelectionProfileUuid) =>
-    this.createMcpClient(sessionUuid, toolSelectionProfileUuid);
+  mcpClientFactory: McpClientFactory = (
+    sessionUuid,
+    toolSelectionProfileUuid,
+    releasedSessionUuid,
+  ) => this.createMcpClient(sessionUuid, toolSelectionProfileUuid, releasedSessionUuid);
 
   /**
    * Factory for the Android append-text helper behind `input/typeText mode:"append"`.
@@ -1033,7 +1040,21 @@ export class UnixSocketServer {
   ): McpForwardRoute {
     const sessionUuid = this.getSessionUuid(request.params);
     if (sessionUuid) {
-      return this.sessionScopedForwardRoute(socketSessionId, sessionUuid, undefined);
+      const releasedSessionUuid =
+        request.params?.[DAEMON_RELEASED_SESSION_PARAM] === sessionUuid ? sessionUuid : undefined;
+      const isReleasedScreenshot =
+        releasedSessionUuid !== undefined &&
+        request.params?.uri === `automobile:device-session/${sessionUuid}/screenshot`;
+      if (!isReleasedScreenshot) {
+        this.throwIfReleasedBoundSession(request.params);
+      }
+      return this.sessionScopedForwardRoute(
+        socketSessionId,
+        sessionUuid,
+        undefined,
+        undefined,
+        releasedSessionUuid === sessionUuid ? releasedSessionUuid : undefined,
+      );
     }
     const uri = request.params?.uri;
     return this.sharedMcpForwardRoute(
@@ -1093,10 +1114,13 @@ export class UnixSocketServer {
     socketSessionId: string,
     sessionUuid: string,
     toolSelectionProfileUuid?: string,
+    releasedSessionUuid?: string,
   ): string {
-    return toolSelectionProfileUuid
-      ? `socket:${socketSessionId}:session:${sessionUuid}:tool-selection:${toolSelectionProfileUuid}`
-      : `socket:${socketSessionId}:session:${sessionUuid}`;
+    const profileSuffix = toolSelectionProfileUuid
+      ? `:tool-selection:${toolSelectionProfileUuid}`
+      : "";
+    const releaseSuffix = releasedSessionUuid ? ":released-resource" : "";
+    return `socket:${socketSessionId}:session:${sessionUuid}${profileSuffix}${releaseSuffix}`;
   }
 
   private toolSelectionProfileMcpClientKey(
@@ -1114,12 +1138,19 @@ export class UnixSocketServer {
     sessionUuid: string,
     scopedKey: string | undefined,
     toolSelectionProfileUuid?: string,
+    releasedSessionUuid?: string,
   ): McpForwardRoute {
     return {
       executionKey: scopedKey ?? `session:${sessionUuid}`,
-      clientKey: this.sessionMcpClientKey(socketSessionId, sessionUuid, toolSelectionProfileUuid),
+      clientKey: this.sessionMcpClientKey(
+        socketSessionId,
+        sessionUuid,
+        toolSelectionProfileUuid,
+        releasedSessionUuid,
+      ),
       sessionUuid,
       toolSelectionProfileUuid,
+      releasedSessionUuid,
     };
   }
 
@@ -1299,6 +1330,7 @@ export class UnixSocketServer {
         context.route.clientKey,
         context.route.sessionUuid,
         context.route.toolSelectionProfileUuid,
+        context.route.releasedSessionUuid,
       );
     } catch (error) {
       if (!this.isDeviceControlSocketClosure(context.request, error)) {
@@ -1363,6 +1395,7 @@ export class UnixSocketServer {
         context.route.clientKey,
         context.route.sessionUuid,
         context.route.toolSelectionProfileUuid,
+        context.route.releasedSessionUuid,
       );
     } catch (error) {
       if (!this.isDeviceControlSocketClosure(context.request, error)) {
@@ -1726,6 +1759,7 @@ export class UnixSocketServer {
       input.route.clientKey,
       input.route.sessionUuid,
       input.route.toolSelectionProfileUuid,
+      input.route.releasedSessionUuid,
     );
     // getMcpClient registers its pending creation synchronously, so this snapshot
     // identifies the attempt this wait started. Staggered deadlines can share a
@@ -3923,6 +3957,7 @@ export class UnixSocketServer {
     const boundSessionUuid = this.getSessionUuid(forwardedArgs);
     const usesBoundSession = forwardedArgs[DAEMON_BOUND_SESSION_PARAM] === boundSessionUuid;
     delete forwardedArgs[DAEMON_BOUND_SESSION_PARAM];
+    delete forwardedArgs[DAEMON_RELEASED_SESSION_PARAM];
     // Connection-bound sessions are carried by the loopback transport header.
     // Never let a stale injected UUID reach ToolExecutionContext, whose legacy
     // explicit-session contract would otherwise create a replacement session.
@@ -3942,6 +3977,7 @@ export class UnixSocketServer {
   private async createMcpClient(
     boundSessionUuid?: string,
     toolSelectionProfileUuid?: string,
+    releasedSessionUuid?: string,
   ): Promise<Client> {
     logger.info(`Creating MCP client with endpoint: "${this.mcpEndpoint}"`);
     if (!this.mcpEndpoint) {
@@ -3950,12 +3986,15 @@ export class UnixSocketServer {
     }
     const transport = new StreamableHTTPClientTransport(new URL(this.mcpEndpoint), {
       reconnectionOptions: DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION,
-      ...(boundSessionUuid || toolSelectionProfileUuid
+      ...(boundSessionUuid || toolSelectionProfileUuid || releasedSessionUuid
         ? {
             requestInit: {
               headers: {
                 ...(boundSessionUuid
                   ? { [DAEMON_SESSION_TOOL_BINDING_HEADER]: boundSessionUuid }
+                  : {}),
+                ...(releasedSessionUuid
+                  ? { [DAEMON_RELEASED_SESSION_HEADER]: releasedSessionUuid }
                   : {}),
                 ...(toolSelectionProfileUuid
                   ? { [DAEMON_TOOL_SELECTION_PROFILE_HEADER]: toolSelectionProfileUuid }
@@ -3989,6 +4028,7 @@ export class UnixSocketServer {
     key: string,
     boundSessionUuid?: string,
     toolSelectionProfileUuid?: string,
+    releasedSessionUuid?: string,
   ): Promise<Client> {
     this.clearMcpClientIdleTimer(key);
 
@@ -4003,7 +4043,11 @@ export class UnixSocketServer {
     }
 
     const generation = this.lifecycleGeneration;
-    const clientPromise = this.mcpClientFactory(boundSessionUuid, toolSelectionProfileUuid)
+    const clientPromise = this.mcpClientFactory(
+      boundSessionUuid,
+      toolSelectionProfileUuid,
+      releasedSessionUuid,
+    )
       .then(async (client) => {
         if (
           this.closing ||

@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.connection.DaemonConnectionMonitor
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.desktop.core.daemon.DesktopDaemonSession
@@ -70,6 +71,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.rememberWorkspaceDevic
 import dev.jasonpearson.automobile.desktop.core.workspace.wireName
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -112,27 +114,19 @@ private const val GRID_REFRESH_POLL_MS = 5_000L
  */
 @Composable
 private fun rememberDaemonConnectionState(client: AutoMobileClient): ConnectionState {
-  var state by remember(client) { mutableStateOf<ConnectionState>(ConnectionState.Connecting) }
-  LaunchedEffect(client) {
-    while (true) {
-      state =
-        try {
-          withContext(Dispatchers.IO) { client.getDaemonStatus() }
-          ConnectionState.Connected()
-        } catch (cancellation: CancellationException) {
-          // Disposal cancels this effect; propagate it instead of logging a false daemon failure
-          // and flipping the dot to disconnected during teardown.
-          throw cancellation
-        } catch (error: Exception) {
-          // A failed status call means the daemon socket is unreachable; surface it as
-          // disconnected so the status dot goes red. Logged so there is a trace behind the dot.
+  val monitor =
+    remember(client) {
+      DaemonConnectionMonitor(
+        probe = { withContext(Dispatchers.IO) { client.getDaemonStatus() } },
+        pollInterval = DAEMON_STATUS_POLL_MS.milliseconds,
+        // A failed status call means the daemon socket is unreachable; the dot goes red via the
+        // returned Disconnected state, and this keeps a trace behind the dot.
+        onProbeFailure = { error ->
           LOG.warn("Daemon status poll failed: ${error.message}", error)
-          ConnectionState.Disconnected(error.message)
-        }
-      delay(DAEMON_STATUS_POLL_MS)
+        },
+      )
     }
-  }
-  return state
+  return monitor.connectionStates().collectAsState(initial = ConnectionState.Connecting).value
 }
 
 /**

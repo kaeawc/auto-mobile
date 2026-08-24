@@ -52,8 +52,7 @@ updates:
       # that test/packaging/runtimeGraphPinning.test.ts forbids, with zero
       # runtime effect. Allow only patch updates to the pinned 1.4.x line.
       - dependency-name: "sax"
-        update-types:
-          ["version-update:semver-minor", "version-update:semver-major"]
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
   # Android Gradle dependencies
   - package-ecosystem: "gradle"
     directory: "/android"

@@ -11,6 +11,8 @@ import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType"
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "../observe/android";
+import { ListInstalledApps } from "../observe/ListInstalledApps";
+import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { IOSCtrlProxyClient } from "../observe/ios";
 
 /**
@@ -242,18 +244,39 @@ export class TerminateApp extends BaseVisualChange {
   }
 
   /**
-   * Simulator terminate via simctl (unchanged from the original iOS path):
-   * check install via `simctl listapps`, then `simctl terminate`, treating a
-   * "nothing to terminate" error as wasRunning=false.
+   * Simulator terminate via simctl: check install via the shared
+   * `ListInstalledApps` listing, then `simctl terminate`, treating a "nothing
+   * to terminate" error as wasRunning=false.
+   *
+   * The listing goes through `executeIosDetailedResult()` so a listing that
+   * *failed* is distinguishable from a device that genuinely has no such app
+   * (issue #5621) — the same contract `UninstallApp` uses. Caching stays off so
+   * the pre-terminate check always reflects live device state.
    */
   private async terminateSimulator(
     bundleId: string,
     perf: ReturnType<typeof createGlobalPerformanceTracker>,
   ): Promise<TerminateAppResult> {
-    const installedApps = await perf.track("checkInstalled", () =>
-      this.simctl.listApps(this.device.deviceId),
-    );
-    const wasInstalled = installedApps.some((app) => this.getBundleId(app) === bundleId);
+    const listApps = new ListInstalledApps(this.device, { create: () => this.adb }, this.simctl, {
+      cacheEnabled: false,
+    });
+    const listing = await perf.track("checkInstalled", () => listApps.executeIosDetailedResult());
+
+    if (!listing.successful) {
+      // Omit wasInstalled/wasRunning: install state was never established, so
+      // reporting them as `false` would assert a fact we do not have.
+      return {
+        success: false,
+        packageName: bundleId,
+        wasForeground: false,
+        error:
+          `Could not determine whether ${bundleId} is installed on iOS device ` +
+          `${this.device.deviceId}: the installed-app listing failed. Confirm the device ` +
+          `is booted and that Xcode command line tools are available, then retry.`,
+      };
+    }
+
+    const wasInstalled = listing.apps.some((app) => getIosInstalledAppBundleId(app) === bundleId);
 
     if (!wasInstalled) {
       return {
@@ -339,21 +362,5 @@ export class TerminateApp extends BaseVisualChange {
         error: message,
       };
     }
-  }
-
-  private getBundleId(app: any): string | undefined {
-    if (!app || typeof app !== "object") {
-      return undefined;
-    }
-    if (typeof app.bundleId === "string" && app.bundleId.trim().length > 0) {
-      return app.bundleId;
-    }
-    if (typeof app.bundleIdentifier === "string" && app.bundleIdentifier.trim().length > 0) {
-      return app.bundleIdentifier;
-    }
-    if (typeof app.CFBundleIdentifier === "string" && app.CFBundleIdentifier.trim().length > 0) {
-      return app.CFBundleIdentifier;
-    }
-    return undefined;
   }
 }

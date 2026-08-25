@@ -115,4 +115,37 @@ describe("SimCtlClient listApps", () => {
     expect(calls.some((call) => call.startsWith("plutil "))).toBe(false);
     expect(apps).toEqual([{ bundleId: "com.apple.Maps", bundleName: "Maps" }]);
   });
+
+  // Issue #5621: `listApps` keeps its lenient "failure reads as no apps"
+  // contract for existing callers, but the install pre-checks in UninstallApp /
+  // TerminateApp need the failure preserved, so `listAppsOrThrow` propagates it.
+  const failingSimctl = (deviceId: string): SimCtlClient => {
+    const device: BootedDevice = {
+      deviceId,
+      name: "iOS Device",
+      platform: "ios",
+      source: "local",
+    };
+    const execAsync = async (file: string, args: string[]) => {
+      if (args.join(" ") === "simctl --version") {
+        return createExecResult("simctl version 1.0.0", "");
+      }
+      throw new Error("Unable to boot device in current state");
+    };
+    return new SimCtlClient(device, execAsync);
+  };
+
+  test("listAppsOrThrow propagates a listing failure", async () => {
+    const simctl = failingSimctl("ios-device-fails");
+
+    await expect(simctl.listAppsOrThrow()).rejects.toThrow(
+      "Unable to boot device in current state",
+    );
+  });
+
+  test("listApps still collapses a listing failure into an empty array", async () => {
+    const simctl = failingSimctl("ios-device-fails-lenient");
+
+    expect(await simctl.listApps()).toEqual([]);
+  });
 });

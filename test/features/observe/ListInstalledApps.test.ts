@@ -349,7 +349,7 @@ describe("ListInstalledApps", function () {
           bundlePath: "/Applications/Cached.app",
         },
       ]);
-      expect(simctl.getMethodCallCount("listApps")).toBe(1);
+      expect(simctl.getMethodCallCount("listAppsOrThrow")).toBe(1);
     });
 
     test("normalizes all supported iOS bundle ID fields", async function () {
@@ -642,7 +642,7 @@ describe("ListInstalledApps physical iOS devices", function () {
 
     await expect(list.execute()).resolves.toEqual(["com.example.device", "com.example.other"]);
     expect(lister.calls).toEqual([PHYSICAL_UDID]);
-    expect(simctl.getMethodCallCount("listApps")).toBe(0);
+    expect(simctl.getMethodCallCount("listAppsOrThrow")).toBe(0);
   });
 
   test("preserves devicectl app metadata in the detailed result", async function () {

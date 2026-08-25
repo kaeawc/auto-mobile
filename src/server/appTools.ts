@@ -327,12 +327,23 @@ export function registerAppTools() {
         skipUiStability: true, // skip the 12+ second stability polling
       });
 
+      // A typed failure (e.g. an iOS installed-app listing that failed, or a
+      // devicectl termination error) must surface as an error rather than a
+      // response claiming the app was terminated — issue #5621. Mirrors the
+      // uninstall handler below.
+      if (!result.success) {
+        throw new ActionableError(result.error || `Failed to terminate app ${args.appId}`);
+      }
+
       return createJSONToolResponse({
         message: `Terminated app ${args.appId}`,
         observation: result.observation,
         ...result,
       });
     } catch (error) {
+      if (error instanceof ActionableError) {
+        throw error;
+      }
       throw new ActionableError(`Failed to terminate app: ${error}`);
     } finally {
       try {

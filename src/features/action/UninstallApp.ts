@@ -8,6 +8,7 @@ import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/And
 import { UninstallAppResult } from "../../models/UninstallAppResult";
 import { BootedDevice } from "../../models";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
+import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppManager } from "../../utils/ios-cmdline-tools/DeviceAppManager";
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
@@ -109,7 +110,24 @@ export class UninstallApp {
       const listApps = new ListInstalledApps(this.device, this.adbFactory, this.simctl, {
         cacheEnabled: false,
       });
-      const installed = (await listApps.execute()).find((app) => app === bundleId) !== undefined;
+      // `execute()` collapses a failed listing into an empty array, which reads
+      // as "the app is absent" and turns a broken listing into a silent
+      // success no-op (issue #5621). Consume the detailed result so a failed
+      // listing is reported as a failure instead.
+      const preCheck = await listApps.executeIosDetailedResult();
+      if (!preCheck.successful) {
+        return {
+          success: false,
+          packageName: bundleId,
+          keepData: false,
+          error:
+            `Could not determine whether ${bundleId} is installed on iOS device ` +
+            `${this.device.deviceId}: the installed-app listing failed. Confirm the device ` +
+            `is connected and unlocked and that Xcode command line tools are available, ` +
+            `then retry.`,
+        };
+      }
+      const installed = preCheck.apps.some((app) => getIosInstalledAppBundleId(app) === bundleId);
 
       if (!installed) {
         IOSCtrlProxyClient.getExistingInstance(this.device.deviceId)?.clearSdkScreenIdentity(
@@ -136,9 +154,18 @@ export class UninstallApp {
       await this.deviceAppUninstaller.uninstallApp(this.device.deviceId, bundleId, simulator);
       await this.markInstalledAppsCacheStale();
 
-      // Verify the app was uninstalled
+      // Verify the app was uninstalled. A listing that fails here is
+      // inconclusive rather than a contradiction: the uninstall command itself
+      // already succeeded, so trust it and only log the lost verification.
+      const verification = await listApps.executeIosDetailedResult();
+      if (!verification.successful) {
+        logger.warn(
+          `[UninstallApp] Could not verify removal of ${bundleId}: the post-uninstall listing failed; trusting the uninstall command`,
+        );
+      }
       const isStillInstalled =
-        (await listApps.execute()).find((app) => app === bundleId) !== undefined;
+        verification.successful &&
+        verification.apps.some((app) => getIosInstalledAppBundleId(app) === bundleId);
 
       if (isStillInstalled) {
         return {

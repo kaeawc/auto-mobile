@@ -824,9 +824,11 @@ jobs:
             --only yaml,xml,bun-version-coherence,shellcheck,shell-portability,shell-sete,stdlib-first,dependency-decisions,sharp-matrix,runtime-pins,shell-quote-boundary,security-boundary,app-bundle-metadata-boundary,ios-ctrl-proxy-process-boundary,mkdocs-nav,ktfmt,claude-plugin,codex-skills,github-python-lock \
             --max-parallel 4
 
-      - name: "Run BATS Tests (Ubuntu)"
-        shell: bash
-        run: bats test/bats/
+      # The BATS suite (913 tests, ~3.5min serially) is NOT run here. It ran a
+      # full Ubuntu pass inline and dominated this required gate's wall-clock; the
+      # Ubuntu coverage now lives in the `bats-tests` matrix job (mirroring
+      # merge.yml), gated by the required "Shell Tests" roll-up and running in
+      # parallel instead of on this job's critical path.
 
       # Drift gate for the generated iOS runner version constant (#2814). Pure
       # bash + python3, so it runs on this Ubuntu job rather than the macOS Swift
@@ -948,7 +950,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest]
+        # Ubuntu was folded in here (#5643-era Fast Validation split): the Ubuntu
+        # BATS pass used to run inline inside the required Fast Validation job and
+        # dominated its wall-clock. It now runs as a parallel matrix leg, matching
+        # merge.yml, and is gated by the required "Shell Tests" roll-up.
+        os: [ubuntu-latest, macos-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6

@@ -389,8 +389,28 @@ async function deleteDeviceSnapshotRecord(record: DeviceSnapshotRecord): Promise
     avdName: record.deviceName,
   });
   await snapshotStore.deleteSnapshotData(record.snapshotName, pathOptions);
+  // Snapshots captured before AVD-scoping (#5707) — including any created in the
+  // ~/.auto-mobile base-path window between #5716 and this change — keep their
+  // data at the unscoped flat path. Eviction now computes the scoped path, which
+  // misses that data: the row would be deleted and its bytes reported reclaimed
+  // while the flat directory survives (and, if it holds a legacy manifest.json,
+  // listDeviceSnapshots re-imports it, so the archive limit can never evict it).
+  // When scoping applied, also clear the flat path — but never a reserved scope
+  // root (a snapshot literally named "android"/"ios", whose flat path IS the
+  // scope tree); name sanitization is tracked separately (#5705).
+  if (pathOptions && !isReservedScopeSegment(record.snapshotName)) {
+    await snapshotStore.deleteSnapshotData(record.snapshotName);
+  }
   const deleted = await snapshotRepository.deleteSnapshot(record.snapshotName);
   return deleted;
+}
+
+// Top-level segments the store uses to scope snapshots by platform/device. A
+// snapshot whose name equals one of these resolves its flat path to the scope
+// root, so the legacy flat-path cleanup must skip it to avoid deleting the whole
+// scope tree.
+function isReservedScopeSegment(snapshotName: string): boolean {
+  return snapshotName === "android" || snapshotName === "ios";
 }
 
 async function enforceDeviceSnapshotArchiveLimit(

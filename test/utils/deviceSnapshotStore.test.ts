@@ -134,6 +134,62 @@ describe("DeviceSnapshotStore", () => {
     expect(await store.snapshotDirectoryExists(snapshotName)).toBe(false);
   });
 
+  describe("replaceSnapshotData (#5713)", () => {
+    it("replaces existing contents so no stale files survive", async () => {
+      const snapshotName = "replace-me";
+      const dest = store.getSnapshotPath(snapshotName);
+      await fs.mkdir(dest, { recursive: true });
+      await fs.writeFile(path.join(dest, "stale.txt"), "old");
+
+      const result = await store.replaceSnapshotData(snapshotName, undefined, async () => {
+        await fs.mkdir(dest, { recursive: true });
+        await fs.writeFile(path.join(dest, "fresh.txt"), "new");
+        return "captured";
+      });
+
+      expect(result).toBe("captured");
+      const entries = await fs.readdir(dest);
+      expect(entries.sort()).toEqual(["fresh.txt"]);
+      // The set-aside copy must be cleaned up on success.
+      expect(await store.snapshotDirectoryExists(`${snapshotName}.replacing`)).toBe(false);
+    });
+
+    it("restores the prior snapshot when the capture fails", async () => {
+      const snapshotName = "keep-on-failure";
+      const dest = store.getSnapshotPath(snapshotName);
+      await fs.mkdir(dest, { recursive: true });
+      await fs.writeFile(path.join(dest, "original.txt"), "keep");
+
+      await expect(
+        store.replaceSnapshotData(snapshotName, undefined, async () => {
+          await fs.mkdir(dest, { recursive: true });
+          await fs.writeFile(path.join(dest, "partial.txt"), "garbage");
+          throw new Error("capture blew up");
+        }),
+      ).rejects.toThrow("capture blew up");
+
+      // Prior data is restored; the partial capture is discarded.
+      const entries = await fs.readdir(dest);
+      expect(entries.sort()).toEqual(["original.txt"]);
+      expect(await fs.readFile(path.join(dest, "original.txt"), "utf-8")).toBe("keep");
+      expect(await store.snapshotDirectoryExists(`${snapshotName}.replacing`)).toBe(false);
+    });
+
+    it("captures cleanly when no prior snapshot exists", async () => {
+      const snapshotName = "brand-new";
+      const dest = store.getSnapshotPath(snapshotName);
+
+      await store.replaceSnapshotData(snapshotName, undefined, async () => {
+        await fs.mkdir(dest, { recursive: true });
+        await fs.writeFile(path.join(dest, "data.txt"), "value");
+      });
+
+      expect(await store.snapshotDirectoryExists(snapshotName)).toBe(true);
+      expect(await fs.readFile(path.join(dest, "data.txt"), "utf-8")).toBe("value");
+      expect(await store.snapshotDirectoryExists(`${snapshotName}.replacing`)).toBe(false);
+    });
+  });
+
   it("should compute snapshot size", async () => {
     const snapshotName = "snapshot-size";
     const snapshotDir = store.getSnapshotPath(snapshotName);

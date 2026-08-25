@@ -10,6 +10,7 @@ type DeviceSnapshotStoreContract = Pick<
   | "snapshotDirectoryExists"
   | "getSnapshotSizeBytes"
   | "deleteSnapshotData"
+  | "replaceSnapshotData"
 >;
 
 export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
@@ -66,6 +67,28 @@ export class FakeDeviceSnapshotStore implements DeviceSnapshotStoreContract {
 
   async getSnapshotSizeBytes(snapshotName: string): Promise<number> {
     return this.sizes.get(snapshotName) ?? 0;
+  }
+
+  async replaceSnapshotData<T>(
+    snapshotName: string,
+    _options: unknown,
+    capture: () => Promise<T>,
+  ): Promise<T> {
+    // The fresh capture replaces any prior on-disk data for this name. On
+    // failure the prior "exists" flag is left intact (the real store restores
+    // the set-aside copy), mirroring the atomic-overwrite contract.
+    const priorExists = this.existing.has(snapshotName);
+    this.existing.delete(snapshotName);
+    try {
+      const result = await capture();
+      this.existing.add(snapshotName);
+      return result;
+    } catch (error) {
+      if (priorExists) {
+        this.existing.add(snapshotName);
+      }
+      throw error;
+    }
   }
 
   async deleteSnapshotData(snapshotName: string): Promise<void> {

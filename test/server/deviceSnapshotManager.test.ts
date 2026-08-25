@@ -162,6 +162,91 @@ describe("deviceSnapshotManager", () => {
     expect(listed).toEqual([]);
   });
 
+  test("re-capturing an existing name replaces it instead of erroring (#5713)", async () => {
+    const first = await captureDeviceSnapshot(TEST_DEVICE, {
+      snapshotName: "dup",
+      includeAppData: true,
+    });
+    expect(first.result.snapshotName).toBe("dup");
+
+    // A stale on-disk directory (the historical check-then-create rejected this).
+    store.setSnapshotExists("dup", true);
+    fakeTimer.advanceTime(1000);
+
+    const second = await captureDeviceSnapshot(TEST_DEVICE, {
+      snapshotName: "dup",
+      includeAppData: false,
+    });
+    expect(second.result.snapshotName).toBe("dup");
+
+    // Record is replaced, not duplicated, and reflects the second capture.
+    const listed = await repository.listSnapshots();
+    expect(listed.length).toBe(1);
+    const record = await repository.getSnapshot("dup");
+    expect(record?.includeAppData).toBe(false);
+    // Both captures actually ran (the second was not short-circuited by an error).
+    expect(captureCalls.length).toBe(2);
+  });
+
+  test("serializes concurrent same-name captures into one consistent snapshot (#5713)", async () => {
+    const events: string[] = [];
+    const releases: Array<() => void> = [];
+    let captureIndex = 0;
+
+    await setDeviceSnapshotManagerDependencies({
+      createCaptureProvider: () => ({
+        capture: async (args) => {
+          const index = captureIndex++;
+          events.push(`start:${index}`);
+          await new Promise<void>((resolve) => releases.push(resolve));
+          events.push(`end:${index}`);
+          const timestamp = new Date(fakeTimer.now()).toISOString();
+          const manifest: DeviceSnapshotManifest = {
+            snapshotName: args.snapshotName,
+            timestamp,
+            deviceId: TEST_DEVICE.deviceId,
+            deviceName: TEST_DEVICE.name,
+            platform: TEST_DEVICE.platform,
+            snapshotType: "adb",
+            includeAppData: args.includeAppData ?? true,
+            includeSettings: args.includeSettings ?? true,
+          };
+          return { snapshotName: args.snapshotName, timestamp, snapshotType: "adb", manifest };
+        },
+      }),
+    });
+
+    // Microtask-only polling — deterministic, no real timers.
+    const waitUntil = async (cond: () => boolean): Promise<void> => {
+      for (let i = 0; i < 1000 && !cond(); i++) {
+        await Promise.resolve();
+      }
+      if (!cond()) {
+        throw new Error(`waitUntil timed out; events=${JSON.stringify(events)}`);
+      }
+    };
+
+    const p1 = captureDeviceSnapshot(TEST_DEVICE, { snapshotName: "race" });
+    const p2 = captureDeviceSnapshot(TEST_DEVICE, { snapshotName: "race" });
+
+    // Only the first capture may be in flight; the second must wait for the lock.
+    await waitUntil(() => events.length >= 1);
+    expect(events).toEqual(["start:0"]);
+    expect(releases.length).toBe(1);
+
+    releases[0]();
+    await waitUntil(() => events.length >= 3);
+    expect(events.slice(0, 3)).toEqual(["start:0", "end:0", "start:1"]);
+    expect(releases.length).toBe(2);
+
+    releases[1]();
+    await Promise.all([p1, p2]);
+
+    const listed = await repository.listSnapshots();
+    expect(listed.length).toBe(1);
+    expect(listed[0]?.snapshotName).toBe("race");
+  });
+
   test("restoreDeviceSnapshot touches lastAccessedAt and forwards manifest", async () => {
     const createdAt = new Date(0).toISOString();
     const manifest: DeviceSnapshotManifest = {

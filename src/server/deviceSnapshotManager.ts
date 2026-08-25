@@ -79,6 +79,34 @@ interface DeviceSnapshotManagerDependencies {
 let moduleDependencies: DeviceSnapshotManagerDependencies | null = null;
 const LEGACY_MANIFEST_FILENAME = "manifest.json";
 
+// Serializes captures per snapshot name within this process. Two concurrent
+// same-name captures must not interleave their filesystem writes or race the
+// record upsert; running them one-after-another makes the outcome deterministic
+// (last writer wins) and closes the historical check-then-create TOCTOU window
+// (issue #5713). The daemon is single-process, so an in-process promise chain is
+// sufficient — cross-process coordination is out of scope.
+const captureLocks = new Map<string, Promise<unknown>>();
+
+function withCaptureLock<T>(snapshotName: string, task: () => Promise<T>): Promise<T> {
+  const prior = captureLocks.get(snapshotName) ?? Promise.resolve();
+  // Run after the prior holder settles, regardless of whether it resolved or
+  // rejected, so one failed capture doesn't wedge every later same-name capture.
+  const run = prior.then(task, task);
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  captureLocks.set(snapshotName, tail);
+  void tail.finally(() => {
+    // Drop the entry once this is the last holder, so the map doesn't grow
+    // unbounded across distinct snapshot names.
+    if (captureLocks.get(snapshotName) === tail) {
+      captureLocks.delete(snapshotName);
+    }
+  });
+  return run;
+}
+
 function getSnapshotPathOptions(context: {
   platform?: string;
   deviceId?: string;
@@ -137,6 +165,7 @@ export async function setDeviceSnapshotManagerDependencies(
 
 export function resetDeviceSnapshotManagerDependencies(): void {
   moduleDependencies = null;
+  captureLocks.clear();
 }
 
 function configToInput(config: DeviceSnapshotConfig): DeviceSnapshotConfigInput {
@@ -361,33 +390,22 @@ async function notifySnapshotResources(): Promise<void> {
   await ResourceRegistry.notifyResourcesUpdated([DEVICE_SNAPSHOT_RESOURCE_URIS.ARCHIVE]);
 }
 
-async function ensureSnapshotAvailable(
-  snapshotName: string,
-  snapshotStore: DeviceSnapshotStore,
-  snapshotRepository: DeviceSnapshotRepository,
-  pathOptions?: SnapshotPathOptions,
-): Promise<void> {
+function assertSnapshotNameWritable(snapshotName: string): void {
   // "android"/"ios" are the platform scope roots under the snapshots dir. An
   // unscoped (physical / fallback) snapshot with one of those names would take
   // the scope directory itself, so deleting it later would recursively remove
   // every scoped snapshot nested under it. Reject the collision at the source
   // (#5707); broader snapshotName sanitization is tracked in #5705.
+  //
+  // A pre-existing snapshot of the same name is intentionally NOT rejected:
+  // re-capturing an existing name overwrites it (issue #5713). The overwrite is
+  // made atomic by DeviceSnapshotStore.replaceSnapshotData plus the per-name
+  // capture lock, and the record is replaced (not duplicated) by the repository
+  // upsert — so the old check-then-create existence probe (a TOCTOU window) is
+  // gone.
   if (isReservedScopeSegment(snapshotName)) {
     throw new ActionableError(
       `Snapshot name '${snapshotName}' is reserved. Please choose a different name.`,
-    );
-  }
-
-  const existing = await snapshotRepository.getSnapshot(snapshotName);
-  if (existing) {
-    throw new ActionableError(
-      `Snapshot '${snapshotName}' already exists. Please choose a different name.`,
-    );
-  }
-
-  if (await snapshotStore.snapshotDirectoryExists(snapshotName, pathOptions)) {
-    throw new ActionableError(
-      `Snapshot '${snapshotName}' already exists on disk. Please choose a different name.`,
     );
   }
 }
@@ -524,9 +542,12 @@ export async function captureDeviceSnapshot(
 
   const baseConfig = await getDeviceSnapshotConfig();
   const snapshotName = args.snapshotName ?? snapshotStore.generateSnapshotName(device.name);
-  // Reject a traversal/absolute name before any filesystem probe (this runs
-  // `fs.access` via ensureSnapshotAvailable) or capture command (issue #5705).
+  // Reject a traversal/absolute name before any filesystem operation or capture
+  // command can act on it (issue #5705).
   assertSafeSnapshotName(snapshotName);
+  // Reject reserved scope-root names (#5707). An existing same-name snapshot is
+  // deliberately allowed through — it is overwritten atomically below (#5713).
+  assertSnapshotNameWritable(snapshotName);
   const pathOptions = getSnapshotPathOptions({
     platform: device.platform,
     deviceId: device.deviceId,
@@ -534,8 +555,6 @@ export async function captureDeviceSnapshot(
     // `adb emu avd name` during discovery.
     avdName: device.name,
   });
-
-  await ensureSnapshotAvailable(snapshotName, snapshotStore, snapshotRepository, pathOptions);
 
   const mergedConfig: DeviceSnapshotConfig = {
     ...baseConfig,
@@ -546,38 +565,48 @@ export async function captureDeviceSnapshot(
     vmSnapshotTimeoutMs: args.vmSnapshotTimeoutMs ?? baseConfig.vmSnapshotTimeoutMs,
   };
 
-  const captureProvider = createCaptureProvider(device, timer, snapshotStore);
-  const result = await captureProvider.capture({
-    snapshotName,
-    includeAppData: mergedConfig.includeAppData,
-    includeSettings: mergedConfig.includeSettings,
-    useVmSnapshot: mergedConfig.useVmSnapshot,
-    strictBackupMode: mergedConfig.strictBackupMode,
-    vmSnapshotTimeoutMs: mergedConfig.vmSnapshotTimeoutMs,
-    appBundleIds: args.appBundleIds,
+  // Serialize same-name captures so concurrent requests can't race; overwrite
+  // the on-disk data atomically (clean replace, prior data restored on failure);
+  // the repository upsert replaces the record rather than duplicating it (#5713).
+  return withCaptureLock(snapshotName, async () => {
+    const captureProvider = createCaptureProvider(device, timer, snapshotStore);
+
+    const result = await snapshotStore.replaceSnapshotData(snapshotName, pathOptions, async () => {
+      const captured = await captureProvider.capture({
+        snapshotName,
+        includeAppData: mergedConfig.includeAppData,
+        includeSettings: mergedConfig.includeSettings,
+        useVmSnapshot: mergedConfig.useVmSnapshot,
+        strictBackupMode: mergedConfig.strictBackupMode,
+        vmSnapshotTimeoutMs: mergedConfig.vmSnapshotTimeoutMs,
+        appBundleIds: args.appBundleIds,
+      });
+
+      const sizeBytes = await snapshotStore.getSnapshotSizeBytes(snapshotName, pathOptions);
+      const timestamp = captured.manifest.timestamp;
+
+      await snapshotRepository.insertSnapshot({
+        snapshotName: captured.snapshotName,
+        deviceId: captured.manifest.deviceId,
+        deviceName: captured.manifest.deviceName,
+        platform: captured.manifest.platform,
+        snapshotType: captured.manifest.snapshotType,
+        includeAppData: captured.manifest.includeAppData,
+        includeSettings: captured.manifest.includeSettings,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes,
+        manifest: captured.manifest,
+      });
+
+      return captured;
+    });
+
+    const eviction = await enforceDeviceSnapshotArchiveLimit(mergedConfig.maxArchiveSizeMb);
+    await notifySnapshotResources();
+
+    return { result, evictedSnapshotNames: eviction.evictedSnapshotNames };
   });
-
-  const sizeBytes = await snapshotStore.getSnapshotSizeBytes(snapshotName, pathOptions);
-  const timestamp = result.manifest.timestamp;
-
-  await snapshotRepository.insertSnapshot({
-    snapshotName: result.snapshotName,
-    deviceId: result.manifest.deviceId,
-    deviceName: result.manifest.deviceName,
-    platform: result.manifest.platform,
-    snapshotType: result.manifest.snapshotType,
-    includeAppData: result.manifest.includeAppData,
-    includeSettings: result.manifest.includeSettings,
-    createdAt: timestamp,
-    lastAccessedAt: timestamp,
-    sizeBytes,
-    manifest: result.manifest,
-  });
-
-  const eviction = await enforceDeviceSnapshotArchiveLimit(mergedConfig.maxArchiveSizeMb);
-  await notifySnapshotResources();
-
-  return { result, evictedSnapshotNames: eviction.evictedSnapshotNames };
 }
 
 export async function restoreDeviceSnapshot(

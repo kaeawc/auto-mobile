@@ -82,6 +82,57 @@ export class DeviceSnapshotStore {
     }
   }
 
+  /**
+   * Run `capture` as an atomic overwrite of `snapshotName`'s on-disk data.
+   *
+   * Any existing snapshot directory is moved aside first, so the capture writes
+   * into a clean directory and no stale files from a prior capture survive
+   * ("replace", not "merge"). On success the set-aside copy is discarded; on
+   * failure the partial capture is removed and the prior data is restored — a
+   * failed overwrite must never destroy the snapshot it was replacing. Callers
+   * serialize same-name captures at a higher layer, so the fixed sibling
+   * set-aside path (`<dir>.replacing`) only ever hosts one overwrite at a time
+   * (issue #5713).
+   */
+  async replaceSnapshotData<T>(
+    snapshotName: string,
+    options: SnapshotPathOptions | undefined,
+    capture: () => Promise<T>,
+  ): Promise<T> {
+    const snapshotPath = this.getSnapshotPathWithOptions(snapshotName, options);
+    const asidePath = `${snapshotPath}.replacing`;
+
+    // Clear any set-aside leftover from a prior interrupted overwrite so the
+    // rename below can't collide with stale state.
+    await fs.rm(asidePath, { recursive: true, force: true });
+
+    let hadExisting = false;
+    try {
+      await fs.rename(snapshotPath, asidePath);
+      hadExisting = true;
+    } catch (error) {
+      // ENOENT means there was nothing to replace (first capture of this name),
+      // which is normal. Any other error means we could not move the existing
+      // data aside — fail rather than risk a dirty, half-overwritten snapshot.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+
+    try {
+      const result = await capture();
+      await fs.rm(asidePath, { recursive: true, force: true });
+      return result;
+    } catch (error) {
+      // Discard the partial fresh capture and restore the prior snapshot.
+      await fs.rm(snapshotPath, { recursive: true, force: true });
+      if (hadExisting) {
+        await fs.rename(asidePath, snapshotPath);
+      }
+      throw error;
+    }
+  }
+
   async deleteSnapshotData(snapshotName: string, options?: SnapshotPathOptions): Promise<void> {
     const snapshotPath = this.getSnapshotPathWithOptions(snapshotName, options);
     try {

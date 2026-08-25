@@ -929,6 +929,93 @@ final class WebSocketServerTests: XCTestCase {
         XCTAssertEqual(response["success"] as? Bool, true)
     }
 
+    // MARK: - Close paths cancel the NWConnection (#5677)
+
+    /// AC2: `onClose` fires **exactly once** per connection even when the close
+    /// machinery is triggered more than once. Every error/close path now cancels
+    /// the `NWConnection`, and Network.framework can deliver both `.failed` and
+    /// `.cancelled` for one socket, so the state handler routes through the guarded
+    /// `fireOnClose()`. Calling it twice must still invoke the `onClose` callback —
+    /// which removes the connection from the registry and updates presence — only
+    /// once. Pre-fix (a bare `onClose()` with no guard) this would report 2.
+    func testFireOnCloseIsIdempotent() {
+        var onCloseCount = 0
+        // An NWConnection that is never started: `fireOnClose` is driven directly.
+        let nwConnection = NWConnection(host: "127.0.0.1", port: 1, using: .tcp)
+        let connection = WebSocketConnection(
+            id: 1,
+            connection: nwConnection,
+            queue: DispatchQueue(label: "test.ws.fireclose"),
+            boundPort: 8765,
+            onMessage: { _ in },
+            onClose: { onCloseCount += 1 }
+        )
+
+        connection.fireOnClose()
+        connection.fireOnClose()
+
+        XCTAssertEqual(onCloseCount, 1, "onClose must fire exactly once per connection (issue #5677 AC2)")
+    }
+
+    /// AC1/AC3: a client close frame (0x08) makes the server deterministically tear
+    /// the socket down — not merely stop reading — so the peer observes the
+    /// connection close (EOF). Pre-fix the close handler called `onClose()` without
+    /// `connection.cancel()`, leaving a half-open socket whose file descriptor
+    /// lingered until the peer disconnected, so `waitForServerClose` times out.
+    func testCloseFrameCancelsConnectionSoPeerObservesClose() throws {
+        let fakeTimeProvider = FakeTimeProvider(initialTime: 1000)
+        perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
+        let handler = CommandHandler.createForTesting(
+            elementLocator: FakeElementLocator(),
+            gesturePerformer: FakeGesturePerformer(),
+            perfProvider: perfProvider
+        )
+        let (server, port) = startServerOnFreePort(commandHandler: handler, perfProvider: perfProvider)
+        defer { server.stop() }
+
+        let client = RawWebSocketClient(port: port)
+        defer { client.close() }
+        try client.connectAndUpgrade(timeout: 10)
+
+        // A client→server close frame is masked (§5.3); an empty payload is fine.
+        client.sendFrame(opcode: 0x08, fin: true, payload: Data())
+
+        XCTAssertTrue(
+            client.waitForServerClose(timeout: 10),
+            "server must cancel the NWConnection after a close frame so the peer observes EOF (issue #5677)"
+        )
+    }
+
+    /// AC1/AC3: a fragmentation protocol error also cancels the socket, so the peer
+    /// observes the close. A continuation frame (0x00) with no message in progress
+    /// is rejected pre-read in `readPayload` and, pre-fix, called `onClose()` alone
+    /// — leaving the socket half-open. Post-fix the connection is cancelled and the
+    /// peer sees EOF.
+    func testFragmentationProtocolErrorCancelsConnection() throws {
+        let fakeTimeProvider = FakeTimeProvider(initialTime: 1000)
+        perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
+        let handler = CommandHandler.createForTesting(
+            elementLocator: FakeElementLocator(),
+            gesturePerformer: FakeGesturePerformer(),
+            perfProvider: perfProvider
+        )
+        let (server, port) = startServerOnFreePort(commandHandler: handler, perfProvider: perfProvider)
+        defer { server.stop() }
+
+        let client = RawWebSocketClient(port: port)
+        defer { client.close() }
+        try client.connectAndUpgrade(timeout: 10)
+
+        // Continuation (0x00), FIN=1, with no fragmented message open → protocol
+        // error rejected before the payload is accumulated.
+        client.sendFrame(opcode: 0x00, fin: true, payload: Data("orphan".utf8))
+
+        XCTAssertTrue(
+            client.waitForServerClose(timeout: 10),
+            "server must cancel the NWConnection after a fragmentation protocol error so the peer observes EOF (issue #5677)"
+        )
+    }
+
     // MARK: - Frame pipelined with the upgrade handshake (#5678)
 
     /// AC5 deterministic: a complete masked text frame already sitting in the
@@ -1203,6 +1290,11 @@ private final class RawWebSocketClient: @unchecked Sendable {
     private let queue = DispatchQueue(label: "test.rawws.client")
     private let lock = NSLock()
     private var buffer = Data()
+    /// Signalled once the background receive loop observes the server closing its
+    /// write side (EOF via `isComplete`, or a receive error). Lets a test assert
+    /// the peer deterministically saw the socket close after a server-side
+    /// error/close path cancelled the `NWConnection` (issue #5677).
+    private let serverClosed = DispatchSemaphore(value: 0)
 
     init(port: UInt16) {
         let params = NWParameters.tcp
@@ -1335,9 +1427,20 @@ private final class RawWebSocketClient: @unchecked Sendable {
                 self.buffer.append(data)
                 self.lock.unlock()
             }
-            if error != nil || isComplete { return }
+            if error != nil || isComplete {
+                self.serverClosed.signal()
+                return
+            }
             self.startReceiveLoop()
         }
+    }
+
+    /// Blocks until the background receive loop observes the server closing the
+    /// connection (EOF/error), or the timeout elapses. Returns `true` only if the
+    /// peer actually saw the socket close — the property issue #5677 requires of
+    /// every server-side error/close path.
+    func waitForServerClose(timeout: TimeInterval) -> Bool {
+        serverClosed.wait(timeout: .now() + timeout) == .success
     }
 
     /// Consumes complete frames from the head of the buffer, returning the first

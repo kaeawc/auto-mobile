@@ -81,6 +81,7 @@ import { registerDatabaseResources } from "./databaseResources";
 import { registerFailuresResources } from "./failuresResources";
 import { registerStorageResources } from "./storageResources";
 import { registerStorageCapabilityResources } from "./storageCapabilityResources";
+import { registerDataStoreResources } from "./dataStoreResources";
 import { registerAppFileResources } from "./appFileResources";
 import { registerSharedStorageResources } from "./sharedStorageResources";
 import { registerFeatureFlagResources } from "./featureFlagResources";
@@ -325,6 +326,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerFailuresResources();
   registerStorageResources();
   registerStorageCapabilityResources();
+  registerDataStoreResources();
   registerAppFileResources();
   registerSharedStorageResources();
   registerFeatureFlagResources();

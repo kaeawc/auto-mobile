@@ -227,12 +227,20 @@ Used for physical Android devices and for emulator captures with
 
 Snapshot payloads are stored in `~/.auto-mobile/snapshots/` (settings-only Android snapshots), and metadata is tracked in SQLite at `~/.auto-mobile/auto-mobile.db`:
 
+Android emulator settings-only snapshots are scoped by AVD name — unique
+(avdmanager enforces one AVD per name) and stable across reboots, unlike the
+port-based emulator serial — so the same snapshot name can be reused across
+AVDs without a filesystem collision. Physical Android devices have no AVD name
+and keep the unscoped path.
+
 ```text
 ~/.auto-mobile/snapshots/
-├── Pixel_5_2026-01-08_12-30-45/
-│   └── settings.json          # Device settings (settings-only snapshots)
-└── another-snapshot/
-    └── ...
+├── android/
+│   └── <avd-name>/             # e.g. Pixel_5
+│       └── <snapshot-name>/
+│           └── settings.json   # Device settings (settings-only snapshots)
+└── <snapshot-name>/            # physical Android (no AVD name) — unscoped
+    └── settings.json
 ```
 
 VM snapshots themselves are stored in the emulator AVD directory and persist across emulator restarts. Automatic cleanup removes AutoMobile metadata and host snapshot payloads, but does not delete the emulator's VM snapshot.

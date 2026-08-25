@@ -75,8 +75,10 @@ commands:
             # Write the list to a file and grep the file — NOT `git diff | grep`
             # (grep exits on first match while git diff is still writing, and
             # under pipefail that SIGPIPE (141) would divert a real match into
-            # the halt branch) and NOT a `<<<` here-string (CircleCI's config
-            # processor parses `<<` as a parameter-tag delimiter and rejects it).
+            # the halt branch) and NOT a shell here-string: CircleCI's config
+            # processor reads the here-string redirection operator as a
+            # parameter-tag delimiter and rejects the whole config. Keep every
+            # such double-angle sequence out of this file entirely.
             git diff --no-renames --name-only "${BASE}" HEAD > /tmp/ios_changed.txt || true
             if grep -qE '^(ios/|scripts/ios/|\.circleci/)' /tmp/ios_changed.txt; then
               echo "iOS changes in this branch vs main — continuing."

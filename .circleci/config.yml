@@ -45,15 +45,32 @@ commands:
           name: "Halt if no iOS changes"
           command: |
             set -euo pipefail
-            # First build on a branch has no HEAD~1 — don't halt then.
-            if ! git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
-              echo "No previous commit to diff against — running."
+            # Diff the WHOLE branch against its base (merge-base with main), not
+            # just HEAD~1..HEAD: a multi-commit push — or a post-rebase tip that
+            # only touches docs — can leave an earlier commit's ios/** change
+            # invisible to a tip-only diff, wrongly halting a build that should
+            # run. Always fall back to RUNNING if a base can't be established, so
+            # a real iOS change is never skipped.
+            if ! git fetch --no-tags --quiet origin main 2>/dev/null; then
+              echo "Could not fetch origin/main — running to be safe."
               exit 0
             fi
-            if git diff --name-only HEAD~1 HEAD | grep -qE '^(ios/|scripts/ios/)'; then
-              echo "iOS changes detected — continuing."
+            BASE="$(git merge-base FETCH_HEAD HEAD 2>/dev/null || true)"
+            if [ -z "${BASE}" ]; then
+              echo "No merge-base with main — running to be safe."
+              exit 0
+            fi
+            if [ "${BASE}" = "$(git rev-parse HEAD)" ]; then
+              # HEAD is an ancestor of main (e.g. a build on main itself): no PR
+              # delta to test, and main was already validated on its PR.
+              echo "On base branch (no delta vs main) — halting to save macOS credits."
+              circleci step halt
+              exit 0
+            fi
+            if git diff --name-only "${BASE}" HEAD | grep -qE '^(ios/|scripts/ios/)'; then
+              echo "iOS changes in this branch vs main — continuing."
             else
-              echo "No ios/** or scripts/ios/** changes — halting to save macOS credits."
+              echo "No ios/** or scripts/ios/** changes vs main — halting to save macOS credits."
               circleci step halt
             fi
   restore_spm_cache:

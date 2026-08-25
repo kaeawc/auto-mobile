@@ -1172,7 +1172,30 @@ export class DaemonMcpProxy {
         );
       }
       logger.info("[DaemonMcpProxy] Daemon started successfully");
+      return;
     }
+
+    // The daemon reports running but startDaemon is only reached when the
+    // observation-only socket probe (DaemonClient.isAvailable) failed — i.e. the
+    // socket is not connectable yet. A daemon in-progress startup writes its
+    // early-owner PID record (daemon.ts writeEarlyOwnerRecord) BEFORE publishing
+    // the Unix socket, which appears seconds later once DB init, device-pool
+    // discovery, and iOS services complete. Treat that missing socket as pending
+    // readiness, not a terminal error: wait behind the same bounded readiness
+    // path so publication can complete instead of letting the subsequent
+    // client.connect() fail immediately with "Daemon socket not found" (issue
+    // #5664). waitForReady polls the socket + verifyDaemonConnection and never
+    // unlinks a live daemon's socket, so stale-socket / dead-daemon handling and
+    // the "do not replace a live daemon's socket" contract are preserved. A
+    // genuinely wedged daemon that never publishes still fails promptly at the
+    // deadline with an actionable error.
+    const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
+    if (!ready) {
+      throw new DaemonUnavailableError(
+        `Daemon failed to start within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
+      );
+    }
+    logger.info("[DaemonMcpProxy] Daemon reported running; socket became ready");
   }
 
   private async withRecoverableReconnect<T>(

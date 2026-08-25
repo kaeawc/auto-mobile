@@ -1,4 +1,4 @@
-import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
+import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -126,6 +126,35 @@ function getEntriesCacheKey(deviceId: string, packageName: string, fileName: str
   return `${deviceId}:${packageName}:${fileName}`;
 }
 
+// Decode a percent-encoded path segment, returning null when the encoding is
+// malformed. A host-defined package or file name may contain a literal `%`
+// that is not valid percent-encoding; letting decodeURIComponent's URIError
+// escape would bypass the JSON diagnostic envelope, exactly the failure mode
+// #5686 fixed for query params — here for path params (issue #5734).
+function safeDecodeSegment(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    logger.debug(`[StorageResources] Malformed URI segment '${value}': ${error}`);
+    return null;
+  }
+}
+
+// Structured diagnostic for a URI whose path segments are not valid
+// percent-encoding, served on the originally-requested URI so the client still
+// gets a typed JSON envelope rather than a raw MCP error.
+function malformedUriContent(params: Record<string, string>): ResourceContent {
+  return {
+    uri: getRequestedResourceUri(params) ?? "",
+    mimeType: "application/json",
+    text: JSON.stringify(
+      { error: "Malformed resource URI: a path segment is not valid percent-encoding." },
+      null,
+      2,
+    ),
+  };
+}
+
 /**
  * Build resource URI for storage files
  */
@@ -145,7 +174,10 @@ function buildEntriesUri(deviceId: string, packageName: string, fileName: string
  */
 async function getStorageFilesResource(params: Record<string, string>): Promise<ResourceContent> {
   const { deviceId, packageName } = params;
-  const decodedPackage = decodeURIComponent(packageName);
+  const decodedPackage = safeDecodeSegment(packageName);
+  if (decodedPackage === null) {
+    return malformedUriContent(params);
+  }
   const uri = buildFilesUri(deviceId, decodedPackage);
 
   logger.info(
@@ -213,8 +245,11 @@ async function getStorageFilesResource(params: Record<string, string>): Promise<
  */
 async function getStorageEntriesResource(params: Record<string, string>): Promise<ResourceContent> {
   const { deviceId, packageName, fileName } = params;
-  const decodedPackage = decodeURIComponent(packageName);
-  const decodedFileName = decodeURIComponent(fileName);
+  const decodedPackage = safeDecodeSegment(packageName);
+  const decodedFileName = safeDecodeSegment(fileName);
+  if (decodedPackage === null || decodedFileName === null) {
+    return malformedUriContent(params);
+  }
   const uri = buildEntriesUri(deviceId, decodedPackage, decodedFileName);
 
   try {

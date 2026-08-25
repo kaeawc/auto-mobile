@@ -62,4 +62,26 @@ describe("storageResources", () => {
     const content = await readResource(uri);
     expect(content.uri).toBe(uri);
   });
+
+  test("storage-files resource returns a JSON envelope for a malformed percent-encoded segment (not a raw throw)", async () => {
+    // A host-defined package segment with a literal `%` that is not valid
+    // percent-encoding must yield a typed JSON diagnostic served on the
+    // originally-requested URI, not a URIError that escapes the handler and
+    // ResourceRegistry (cf. #5686 for query params; issue #5734 for path params).
+    const uri = "automobile:devices/emulator-5554/storage/wei%rd/files";
+    const content = await readResource(uri);
+    expect(content.mimeType).toBe("application/json");
+    expect(content.uri).toBe(uri);
+    const body = JSON.parse(content.text ?? "{}");
+    expect(String(body.error)).toContain("percent-encoding");
+  });
+
+  test("storage-entries resource returns a JSON envelope for a malformed percent-encoded segment (not a raw throw)", async () => {
+    const uri = "automobile:devices/emulator-5554/storage/com.example.app/wei%rd/entries";
+    const content = await readResource(uri);
+    expect(content.mimeType).toBe("application/json");
+    expect(content.uri).toBe(uri);
+    const body = JSON.parse(content.text ?? "{}");
+    expect(String(body.error)).toContain("percent-encoding");
+  });
 });

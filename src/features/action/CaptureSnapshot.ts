@@ -469,6 +469,27 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     const appDataPath = this.store.getAppDataPath(snapshotName, pathOptions);
     await fs.mkdir(appDataPath, { recursive: true });
 
+    // The mkdir above creates the snapshot directory (recursive parent). If the
+    // backup then fails — strict-mode all-or-nothing, the 0-backed-up guard, or
+    // an installation-listing error — that directory is left behind and blocks a
+    // later capture reusing the same explicit `snapshotName` at
+    // ensureSnapshotAvailable's "already exists on disk" guard. Unwind it before
+    // re-throwing so an explicit-name retry can succeed (issue #5723). Safe
+    // because ensureSnapshotAvailable already verified the directory did not
+    // exist before this capture, so we only remove what this capture created.
+    try {
+      return await this.backupIosAppContainers(sanitized, strictBackupMode, appDataPath);
+    } catch (error) {
+      await this.store.deleteSnapshotData(snapshotName, pathOptions);
+      throw error;
+    }
+  }
+
+  private async backupIosAppContainers(
+    sanitized: string[],
+    strictBackupMode: boolean,
+    appDataPath: string,
+  ): Promise<DeviceSnapshotManifest["appDataBackup"]> {
     // Validate installation up front so an unknown bundle is reported as
     // not-installed rather than silently "succeeding".
     const installedBundleIds = await this.getInstalledIosBundleIds();

@@ -825,6 +825,46 @@ describe("CaptureSnapshot (iOS)", () => {
     await expect(promise).rejects.toThrow(/backed up 0 of 1/i);
   });
 
+  it("removes the orphan snapshot directory when strictBackupMode fails (#5723)", async () => {
+    // strictBackupMode rejects a not-installed bundle, but captureIosAppData has
+    // already run fs.mkdir on the app-data path (creating the parent snapshot
+    // dir). It must unwind that directory so an explicit-name retry isn't blocked
+    // by ensureSnapshotAvailable's "already exists on disk" guard.
+    const pathOptions = { platform: "ios", deviceId: device.deviceId } as const;
+    const snapshotName = "strict-orphan";
+    const captureSnapshot = makeCapture();
+
+    await expect(
+      captureSnapshot.execute({
+        snapshotName,
+        includeAppData: true,
+        strictBackupMode: true,
+        appBundleIds: ["com.example.missing"],
+      }),
+    ).rejects.toThrow("Failed to backup app data");
+
+    expect(await store.snapshotDirectoryExists(snapshotName, pathOptions)).toBe(false);
+  });
+
+  it("removes the orphan snapshot directory when 0 packages back up (#5723)", async () => {
+    // The 0-backed-up guard fires after the app-data mkdir; the created snapshot
+    // dir must be unwound before re-throwing.
+    const pathOptions = { platform: "ios", deviceId: device.deviceId } as const;
+    const snapshotName = "empty-orphan";
+    simctl.setInstalledApps([{ CFBundleIdentifier: "com.example.other" }]);
+    const captureSnapshot = makeCapture();
+
+    await expect(
+      captureSnapshot.execute({
+        snapshotName,
+        includeAppData: true,
+        appBundleIds: ["com.fake.doesnotexist"],
+      }),
+    ).rejects.toThrow(/backed up 0 of 1/i);
+
+    expect(await store.snapshotDirectoryExists(snapshotName, pathOptions)).toBe(false);
+  });
+
   it("succeeds when at least one bundle is captured in a mixed set", async () => {
     // Mixed/partial policy (non-strict): one captured, one skipped-no-container,
     // one not-installed. backedUpPackages is non-empty, so the capture succeeds.

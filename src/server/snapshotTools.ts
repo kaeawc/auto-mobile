@@ -17,7 +17,12 @@ const deviceSnapshotCommonShape = {
     ),
   includeSettings: z.boolean().optional().describe("Include settings"),
   useVmSnapshot: z.boolean().optional().describe("Use emulator VM snapshot"),
-  strictBackupMode: z.boolean().optional().describe("iOS-only: fail if app container backup fails"),
+  strictBackupMode: z
+    .boolean()
+    .optional()
+    .describe(
+      "iOS-only: fail the whole snapshot unless every requested bundle is backed up (all-or-nothing)",
+    ),
   vmSnapshotTimeoutMs: z.number().optional().describe("VM snapshot timeout ms"),
   appBundleIds: z.array(z.string()).optional().describe("iOS bundle IDs for app data snapshot"),
 };

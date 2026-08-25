@@ -732,6 +732,64 @@ describe("CaptureSnapshot (iOS)", () => {
     ).rejects.toThrow("Failed to backup app data");
   });
 
+  it("fails in strictBackupMode when a requested bundle has no data container (all-or-nothing)", async () => {
+    // strict = all-or-nothing (#5711): a skipped-no-container bundle keeps
+    // backedUpPackages from covering the full requested set, so the whole
+    // snapshot must fail even though one bundle captured and none "failed".
+    const captured = "com.example.captured";
+    const noContainer = "com.example.nocontainer";
+
+    const containerRoot = path.join(testBasePath, "containers", captured);
+    await fs.mkdir(path.join(containerRoot, "Documents"), { recursive: true });
+    await fs.writeFile(path.join(containerRoot, "Documents", "data.txt"), "hello");
+
+    simctl.setContainerPath(captured, containerRoot);
+    simctl.setInstalledApps([
+      { CFBundleIdentifier: captured },
+      { CFBundleIdentifier: noContainer },
+    ]);
+
+    const captureSnapshot = makeCapture();
+    const promise = captureSnapshot.execute({
+      snapshotName: "strict-no-container",
+      includeAppData: true,
+      includeSettings: false,
+      strictBackupMode: true,
+      appBundleIds: [captured, noContainer],
+    });
+
+    await expect(promise).rejects.toThrow("Failed to backup app data");
+    // Names the bundle that was not backed up so the failure is actionable.
+    await expect(promise).rejects.toThrow(/com\.example\.nocontainer/);
+  });
+
+  it("fails in strictBackupMode for a mixed valid+invalid set (#5711 AC)", async () => {
+    // Mixed set: one installed-with-container (valid) + one not-installed
+    // (invalid). Strict mode rejects the whole snapshot and names the invalid
+    // bundle; the same set succeeds non-strict (covered above).
+    const captured = "com.example.captured";
+    const notInstalled = "com.example.missing";
+
+    const containerRoot = path.join(testBasePath, "containers", captured);
+    await fs.mkdir(path.join(containerRoot, "Documents"), { recursive: true });
+    await fs.writeFile(path.join(containerRoot, "Documents", "data.txt"), "hello");
+
+    simctl.setContainerPath(captured, containerRoot);
+    simctl.setInstalledApps([{ CFBundleIdentifier: captured }]);
+
+    const captureSnapshot = makeCapture();
+    const promise = captureSnapshot.execute({
+      snapshotName: "strict-mixed",
+      includeAppData: true,
+      includeSettings: false,
+      strictBackupMode: true,
+      appBundleIds: [captured, notInstalled],
+    });
+
+    await expect(promise).rejects.toThrow("Failed to backup app data");
+    await expect(promise).rejects.toThrow(/com\.example\.missing/);
+  });
+
   it("fails the capture when every requested bundle is not installed (0 captured)", async () => {
     // No installed apps: com.fake.doesnotexist resolves to not-installed, so
     // backedUpPackages is empty. Before #5710 this "succeeded" with an empty

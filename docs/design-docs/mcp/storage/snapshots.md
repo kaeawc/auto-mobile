@@ -39,7 +39,7 @@ Capture or restore device snapshots.
 - `includeSettings` (capture only): Include system settings (global/secure/system)
 - `useVmSnapshot` (capture/restore): Use emulator VM snapshot if available (faster for emulators)
 - `vmSnapshotTimeoutMs` (capture/restore): Timeout in milliseconds for emulator VM snapshot commands
-- `strictBackupMode` (capture only, **iOS-only**): If true, fail the snapshot when an iOS app-container backup fails. No effect on Android now that the adb-backup path is gone.
+- `strictBackupMode` (capture only, **iOS-only**): If true, fail the whole snapshot unless every requested bundle is backed up (all-or-nothing) — any bundle that is not-installed, container-less, or fails to copy rejects the capture with an `ActionableError` naming the uncovered bundles (issue #5711). No effect on Android now that the adb-backup path is gone.
 - `appBundleIds` (capture only): iOS bundle IDs to include in app container backups
 - `sessionUuid` (optional): Session UUID for multi-device targeting
 - `device` (optional): Device label for multi-device control

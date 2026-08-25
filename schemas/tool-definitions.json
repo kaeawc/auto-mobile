@@ -936,7 +936,7 @@
           "type": "boolean"
         },
         "strictBackupMode": {
-          "description": "iOS-only: fail if app container backup fails",
+          "description": "iOS-only: fail the whole snapshot unless every requested bundle is backed up (all-or-nothing)",
           "type": "boolean"
         },
         "vmSnapshotTimeoutMs": {

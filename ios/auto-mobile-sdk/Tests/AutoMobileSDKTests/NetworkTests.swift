@@ -768,6 +768,39 @@ final class AutoMobileNetworkTests: XCTestCase {
 }
 
 final class NetworkCaptureRecorderTests: XCTestCase {
+    /// Single-threaded harness whose `emit` re-enters the recorder. `@unchecked Sendable`
+    /// because the whole test runs synchronously on one thread.
+    private final class ReentrantEmitHarness: @unchecked Sendable {
+        var recorder: NetworkCaptureRecorder?
+        var sequences: [UInt64] = []
+        var reentered = false
+    }
+
+    /// `emit` must run OUTSIDE `emissionLock`: an emit closure that re-enters the recorder
+    /// (triggering a second emission) must not deadlock. On the pre-fix code — which held
+    /// the non-recursive `emissionLock` across `emit` — the re-entrant emit would deadlock
+    /// (this test would hang).
+    func testEmitRunsOutsideEmissionLockSoReentrantEmitDoesNotDeadlock() {
+        let harness = ReentrantEmitHarness()
+        let recorder = NetworkCaptureRecorder(emit: { [harness] record in
+            harness.sequences.append(record.sequenceNumber ?? 0)
+            if !harness.reentered {
+                harness.reentered = true
+                if let inner = harness.recorder {
+                    let id2 = inner.beginRequest(url: "https://example.com/2")
+                    inner.recordCompletion(requestId: id2, statusCode: 200)
+                }
+            }
+        }, idGenerator: { UUID().uuidString })
+        harness.recorder = recorder
+
+        let id1 = recorder.beginRequest(url: "https://example.com/1")
+        recorder.recordCompletion(requestId: id1, statusCode: 200) // emit → re-entrant emit
+
+        XCTAssertEqual(harness.sequences.count, 2, "the initial and the re-entrant emit both completed")
+        XCTAssertEqual(harness.sequences, [1, 2], "sequence numbers stay monotonic across the re-entrant emit")
+    }
+
     func testRecorderEmitsOneCompletedRequestWithStableIdentityAndBoundedBody() {
         let collector = NetworkRecordCollector()
         let recorder = NetworkCaptureRecorder(

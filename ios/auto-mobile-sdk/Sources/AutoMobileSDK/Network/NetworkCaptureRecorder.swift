@@ -45,13 +45,6 @@ public final class NetworkCaptureRecorder: @unchecked Sendable {
     private let headerRedactor: @Sendable ([String: String]) -> [String: String]
     private var requests: [String: InFlightRequest] = [:]
     private var nextSequenceNumber: UInt64 = 0
-    /// FIFO of records awaiting delivery, a head index into it, and whether a drainer is
-    /// currently running. All guarded by `emissionLock`; the drainer calls `emit` outside
-    /// the lock. The head index makes dequeue amortized O(1) (no `removeFirst` element
-    /// shift under the lock); the buffer is reset once fully drained. See `emitRecord`.
-    private var pendingEmits: [NetworkRequestRecord] = []
-    private var pendingHead = 0
-    private var draining = false
     private let maxBodyBytes: Int
 
     public init(
@@ -277,40 +270,26 @@ public final class NetworkCaptureRecorder: @unchecked Sendable {
     }
 
     private func emitRecord(_ record: NetworkRequestRecord) {
-        // Assign the monotonic sequence number and enqueue under emissionLock, then drain
-        // the FIFO calling `emit` OUTSIDE the lock. This preserves assigned order — the
-        // consumer (SdkEventBuffer) appends in arrival order and does not re-sort by
-        // sequenceNumber — while never holding the non-recursive lock across `emit`, which
-        // reaches other locks/state (AutoMobileNetwork.lock -> buffer.add) and can re-enter
-        // emitRecord. A single drainer runs at a time: a re-entrant or concurrent emit just
-        // appends to the queue and returns, and the active drainer delivers it in order.
+        // Assign the monotonic sequence number under the lock, then RELEASE it before
+        // calling the caller-supplied `emit`. Holding the non-recursive emissionLock across
+        // `emit` — which reaches AutoMobileNetwork.lock -> buffer.add and could re-enter
+        // emitRecord — would self-deadlock or invert lock order.
+        //
+        // `emit` is called SYNCHRONOUSLY (not via a recorder-owned queue): a completion is
+        // therefore fully delivered to the sink before `recordCompletion` returns — nothing
+        // is left queued to be dropped if `AutoMobileSDK.shutdown()` then clears the buffer —
+        // and backpressure/bounding stays the sink's responsibility (`SdkEventBuffer`'s
+        // `maxPendingEvents`) rather than a second, unbounded recorder-level queue. The one
+        // cost is that two genuinely-concurrent emits may reach the sink out of order; every
+        // record carries `sequenceNumber`, which exists precisely so a consumer can restore
+        // the total order. Preserving strict delivery order here would require either holding
+        // the lock across `emit` (the deadlock above) or an unbounded in-recorder queue.
         emissionLock.lock()
         nextSequenceNumber += 1
         var sequencedRecord = record
         sequencedRecord.sequenceNumber = nextSequenceNumber
-        pendingEmits.append(sequencedRecord)
-        if draining {
-            emissionLock.unlock()
-            return
-        }
-        draining = true
         emissionLock.unlock()
-
-        while true {
-            emissionLock.lock()
-            guard pendingHead < pendingEmits.count else {
-                // Fully drained: reset the buffer so it doesn't grow unbounded.
-                pendingEmits.removeAll(keepingCapacity: true)
-                pendingHead = 0
-                draining = false
-                emissionLock.unlock()
-                return
-            }
-            let next = pendingEmits[pendingHead]
-            pendingHead += 1
-            emissionLock.unlock()
-            emit(next)
-        }
+        emit(sequencedRecord)
     }
 
     private func truncate(_ value: String?) -> String? {

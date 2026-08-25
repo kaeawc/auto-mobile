@@ -142,7 +142,7 @@ describe("parseDevicectlDeviceList", () => {
   });
 
   test("rejects records whose udid is not a physical iOS udid", () => {
-    const { devices } = parseDevicectlDeviceList(
+    const discovery = parseDevicectlDeviceList(
       devicectlPayload([
         connectedIphone({ hardwareProperties: { udid: SIMULATOR_UDID } }),
         connectedIphone({ hardwareProperties: { udid: "emulator-5554" } }),
@@ -151,7 +151,11 @@ describe("parseDevicectlDeviceList", () => {
       ]),
     );
 
-    expect(devices).toEqual([]);
+    expect(discovery.devices).toEqual([]);
+    // None of these are records this lister understands and skips — devicectl
+    // reports physical hardware, so each is unreadable rather than filtered, and
+    // the listing must not claim to be authoritative.
+    expect(discovery.complete).toBe(false);
   });
 
   test("falls back through name sources when deviceProperties has no name", () => {
@@ -182,6 +186,56 @@ describe("parseDevicectlDeviceList", () => {
     expect(
       parseDevicectlDeviceList({ info: { outcome: "failure" }, result: { devices: [] } }),
     ).toEqual({ devices: [], complete: false });
+  });
+
+  test("an iOS record it cannot identify makes the listing incomplete", () => {
+    // devicectl enumerates CoreDevices — physical hardware — so a reachable iOS
+    // record that yields no physical UDID is schema drift, not a device we meant
+    // to filter. Reporting the survivors as an authoritative listing is what lets
+    // the disconnect monitor count misses against a phone that never moved.
+    expect(
+      parseDevicectlDeviceList(
+        devicectlPayload([connectedIphone({ hardwareProperties: { platform: "iOS" } })]),
+      ),
+    ).toEqual({ devices: [], complete: false });
+
+    expect(
+      parseDevicectlDeviceList(
+        devicectlPayload([connectedIphone({ hardwareProperties: { udid: 42, platform: "iOS" } })]),
+      ),
+    ).toEqual({ devices: [], complete: false });
+
+    expect(parseDevicectlDeviceList(devicectlPayload(["not-an-object"]))).toEqual({
+      devices: [],
+      complete: false,
+    });
+  });
+
+  test("a healthy device alongside an unidentifiable one is still reported", () => {
+    // Incompleteness must not swallow the devices the sweep did resolve: the
+    // daemon needs the iPhone it found AND the signal that the list is partial.
+    const discovery = parseDevicectlDeviceList(
+      devicectlPayload([
+        connectedIphone(),
+        connectedIphone({ hardwareProperties: { platform: "iOS" } }),
+      ]),
+    );
+
+    expect(discovery.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
+    expect(discovery.complete).toBe(false);
+  });
+
+  test("records it deliberately filters keep the listing authoritative", () => {
+    // A paired Watch and an unreachable phone are understood, not drifted: the
+    // sweep still knows exactly which physical iOS devices are attached.
+    expect(
+      parseDevicectlDeviceList(
+        devicectlPayload([
+          connectedIphone({ hardwareProperties: { udid: PHYSICAL_UDID, platform: "watchOS" } }),
+          connectedIphone({ connectionProperties: { tunnelState: "unavailable" } }),
+        ]),
+      ),
+    ).toEqual({ devices: [], complete: true });
   });
 
   test("a recognized empty listing is authoritative", () => {
@@ -261,6 +315,52 @@ describe("DevicectlDeviceLister", () => {
     // the first caller's cancellation; the timeout is what bounds it.
     expect(options?.timeoutMs).toBe(15_000);
     expect(options?.signal).toBeUndefined();
+  });
+
+  test("a partially unreadable sweep still surfaces the devices it did resolve", async () => {
+    // The sweep is non-authoritative because one entry drifted, but the iPhone it
+    // *did* resolve is real. Falling back to last-known would report nothing at
+    // all on a cold start, hiding hardware that is plugged in right now.
+    const lister = makeLister({
+      readFile: async () =>
+        JSON.stringify(
+          devicectlPayload([
+            connectedIphone(),
+            connectedIphone({ hardwareProperties: { platform: "iOS" } }),
+          ]),
+        ),
+    });
+
+    const discovery = await lister.listConnectedDevices();
+
+    expect(discovery.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
+    expect(discovery.complete).toBe(false);
+  });
+
+  test("a partial sweep unions its devices with the ones it retained", async () => {
+    // The drifted entry may well be the second phone: retention and this sweep
+    // are both partial views, so neither may evict the other's device.
+    const timer = new FakeTimer();
+    let payload = devicectlPayload([
+      connectedIphone({ hardwareProperties: { udid: LEGACY_UDID } }),
+    ]);
+    const lister = makeLister({ timer, readFile: async () => JSON.stringify(payload) });
+
+    expect((await lister.listConnectedDevices()).devices.map((d) => d.deviceId)).toEqual([
+      LEGACY_UDID,
+    ]);
+
+    payload = devicectlPayload([
+      connectedIphone(),
+      connectedIphone({ hardwareProperties: { platform: "iOS" } }),
+    ]);
+    timer.advanceTime(DEVICE_LIST_CACHE_TTL_MS);
+    const partial = await lister.listConnectedDevices();
+
+    expect(partial.devices.map((device) => device.deviceId).sort()).toEqual(
+      [LEGACY_UDID, PHYSICAL_UDID].sort(),
+    );
+    expect(partial.complete).toBe(false);
   });
 
   test("retains the last good listing across a failing sweep, then lets it go stale", async () => {

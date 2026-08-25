@@ -27,8 +27,9 @@ export interface IosPhysicalDeviceLister {
  * Outcome of one physical-device sweep.
  *
  * `complete` is the load-bearing half: it is false ONLY when devicectl was
- * reachable but its listing failed, so callers can tell "no physical devices are
- * attached" from "we could not find out". The daemon's disconnect monitor prunes
+ * reachable but its listing could not be read in full — the invocation failed, or
+ * the payload drifted — so callers can tell "no physical devices are attached"
+ * from "we could not find out". The daemon's disconnect monitor prunes
  * on that distinction, and pruning a still-connected iPhone because devicectl
  * blipped would evict a device mid-session.
  *
@@ -99,24 +100,22 @@ function extractDeviceEntries(data: unknown): unknown[] | null {
 }
 
 /**
- * The physical-device UDID a devicectl record identifies, or null when the
- * record is not a reachable physical iOS device.
+ * What one devicectl record turned out to be.
  *
- * The UDID is validated with the canonical {@link isIosPhysicalUdid} predicate
- * rather than trusted, so a simulator entry, a paired-Watch record, or a renamed
- * field can never be surfaced as a physical iOS device.
+ * `filtered` and `malformed` both yield no device, but they mean opposite things
+ * for completeness. `filtered` is a record this lister *understands* and does not
+ * want — a paired Watch, an unreachable phone — so the sweep still knows exactly
+ * which iPhones are attached. `malformed` is a record it cannot identify at all,
+ * which means the payload no longer matches what this parser reads and the
+ * resulting device list may be missing hardware that is physically present.
  */
-function reachablePhysicalUdid(
-  hardware: Record<string, unknown> | null,
-  connection: Record<string, unknown> | null,
-  identifier: unknown,
-): string | null {
-  if (!isIosPlatform(hardware) || !isReachable(connection)) {
-    return null;
-  }
-  const udid = asString(hardware?.udid) ?? asString(identifier);
-  return udid && isIosPhysicalUdid(udid) ? udid : null;
-}
+type DeviceEntryOutcome =
+  | { kind: "device"; device: BootedDevice }
+  | { kind: "filtered" }
+  | { kind: "malformed" };
+
+const FILTERED: DeviceEntryOutcome = { kind: "filtered" };
+const MALFORMED: DeviceEntryOutcome = { kind: "malformed" };
 
 /**
  * False only when the record names a platform that is not iOS. A missing field
@@ -154,23 +153,34 @@ function deviceDisplayName(
 }
 
 /**
- * Convert one devicectl device record into a `BootedDevice`, or null when the
- * record is not a reachable physical iOS device.
+ * Classify one devicectl device record.
+ *
+ * The order matters: the two *understood* rejections — a non-iOS platform and a
+ * documented-unreachable tunnel state — are checked first, so everything that
+ * survives them is a record devicectl says is a reachable iOS CoreDevice. Those
+ * are physical hardware by definition, so failing to read a physical UDID out of
+ * one is schema drift rather than a device we meant to skip, and it must make the
+ * whole listing non-authoritative.
+ *
+ * The UDID is validated with the canonical {@link isIosPhysicalUdid} predicate
+ * rather than trusted, so a simulator-shaped entry or a renamed field can never
+ * be surfaced as a physical iOS device.
  */
-function toBootedDevice(entry: unknown): BootedDevice | null {
+function classifyDeviceEntry(entry: unknown): DeviceEntryOutcome {
   const record = asRecord(entry);
   if (!record) {
-    return null;
+    // A non-record entry inside a recognized envelope is drift, not a device.
+    return MALFORMED;
   }
 
   const hardware = asRecord(record.hardwareProperties);
-  const udid = reachablePhysicalUdid(
-    hardware,
-    asRecord(record.connectionProperties),
-    record.identifier,
-  );
-  if (!udid) {
-    return null;
+  if (!isIosPlatform(hardware) || !isReachable(asRecord(record.connectionProperties))) {
+    return FILTERED;
+  }
+
+  const udid = asString(hardware?.udid) ?? asString(record.identifier);
+  if (!udid || !isIosPhysicalUdid(udid)) {
+    return MALFORMED;
   }
 
   const deviceProperties = asRecord(record.deviceProperties);
@@ -178,11 +188,14 @@ function toBootedDevice(entry: unknown): BootedDevice | null {
   const formFactor = inferIosFormFactor(asString(hardware?.productType));
 
   return {
-    name: deviceDisplayName(deviceProperties, hardware, udid),
-    platform: "ios",
-    deviceId: udid,
-    ...(osVersion ? { iosVersion: osVersion, osVersion } : {}),
-    ...(formFactor ? { formFactor } : {}),
+    kind: "device",
+    device: {
+      name: deviceDisplayName(deviceProperties, hardware, udid),
+      platform: "ios",
+      deviceId: udid,
+      ...(osVersion ? { iosVersion: osVersion, osVersion } : {}),
+      ...(formFactor ? { formFactor } : {}),
+    },
   };
 }
 
@@ -191,11 +204,13 @@ function toBootedDevice(entry: unknown): BootedDevice | null {
  * physical iOS devices it reports, sorted by UDID to match
  * `SimCtlClient.getBootedSimulatorsChecked`'s stable ordering.
  *
- * `complete` separates a *recognized* empty listing ("nothing is plugged in",
- * authoritative) from an envelope this parser does not understand — a failed
- * `info.outcome`, a missing/non-array `devices`, or a future rename. Reporting
- * the latter as an authoritative empty list is what would let the disconnect
- * monitor drop a still-connected iPhone.
+ * `complete` separates a *recognized* listing (authoritative — an empty one means
+ * "nothing is plugged in") from one this parser could not fully read. That covers
+ * both halves of the payload: an envelope it does not understand — a failed
+ * `info.outcome`, a missing/non-array `devices`, or a future rename — and an
+ * individual entry devicectl calls a reachable iOS device but which yields no
+ * physical UDID. Reporting either as authoritative is what would let the
+ * disconnect monitor drop a still-connected iPhone.
  *
  * Exported separately from the client so the payload shape can be pinned by
  * fast unit tests with no host tooling involved.
@@ -205,11 +220,26 @@ export function parseDevicectlDeviceList(data: unknown): PhysicalIosDeviceDiscov
   if (!entries) {
     return { devices: [], complete: false };
   }
-  const devices = entries
-    .map(toBootedDevice)
-    .filter((device): device is BootedDevice => device !== null);
+  const outcomes = entries.map(classifyDeviceEntry);
+  const devices = outcomes
+    .filter((outcome) => outcome.kind === "device")
+    .map((outcome) => outcome.device);
   devices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
-  return { devices, complete: true };
+  // The devices that did resolve are still reported: the caller needs both the
+  // iPhone it found and the signal that something in the payload was unreadable.
+  return { devices, complete: !outcomes.some((outcome) => outcome.kind === "malformed") };
+}
+
+/**
+ * Union two device listings by UDID, preferring the first list's record for a
+ * device both report, and keeping the UDID ordering `parseDevicectlDeviceList`
+ * establishes.
+ */
+function mergeById(preferred: BootedDevice[], fallback: BootedDevice[]): BootedDevice[] {
+  const seen = new Set(preferred.map((device) => device.deviceId));
+  const merged = [...preferred, ...fallback.filter((device) => !seen.has(device.deviceId))];
+  merged.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
+  return merged;
 }
 
 /**
@@ -343,7 +373,14 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
     const now = this.deps.timer.now();
     const resolved = discovery.complete
       ? this.recordLastGood(discovery, now)
-      : { devices: this.retainedDevices(now), complete: false };
+      : {
+          // A partial sweep and the retained listing are both incomplete views of
+          // the same hardware, so neither may evict the other's device: union
+          // them. When the sweep failed outright its half is empty and this
+          // degrades to pure retention.
+          devices: mergeById(discovery.devices, this.retainedDevices(now)),
+          complete: false,
+        };
     this.cache = { discovery: resolved, expiresAt: now + DEVICE_LIST_CACHE_TTL_MS };
     return resolved;
   }

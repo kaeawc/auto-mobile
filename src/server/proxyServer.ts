@@ -12,6 +12,7 @@ import {
 import { logger } from "../utils/logger";
 import {
   DaemonBoundSessionExpiredError,
+  DaemonConnectionSessionReleasedError,
   DaemonMcpProxy,
   type DaemonMcpProxyConfig,
 } from "../daemon/daemonMcpProxy";
@@ -63,6 +64,35 @@ function sessionOwnershipLostResult(error: DaemonBoundSessionExpiredError): Call
 function sessionOwnershipLostError(error: DaemonBoundSessionExpiredError): McpError {
   const payload = sessionOwnershipLostPayload(error);
   return new McpError(-32603, sessionOwnershipLostMessage(error), payload);
+}
+
+function noActiveDeviceSessionPayload(error: DaemonConnectionSessionReleasedError) {
+  return {
+    error: {
+      code: "no_active_device_session",
+      message: error.message,
+      reason: error.reason,
+    },
+  };
+}
+
+function noActiveDeviceSessionMessage(error: DaemonConnectionSessionReleasedError): string {
+  return JSON.stringify(noActiveDeviceSessionPayload(error));
+}
+
+function noActiveDeviceSessionResult(error: DaemonConnectionSessionReleasedError): CallToolResult {
+  return {
+    content: [{ type: "text", text: noActiveDeviceSessionMessage(error) }],
+    isError: true,
+  };
+}
+
+function noActiveDeviceSessionError(error: DaemonConnectionSessionReleasedError): McpError {
+  return new McpError(
+    -32603,
+    noActiveDeviceSessionMessage(error),
+    noActiveDeviceSessionPayload(error),
+  );
 }
 
 function deviceControlTransportFailureResult(error: DeviceControlTransportError): CallToolResult {
@@ -161,6 +191,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       if (error instanceof DaemonBoundSessionExpiredError) {
         throw sessionOwnershipLostError(error);
       }
+      if (error instanceof DaemonConnectionSessionReleasedError) {
+        throw noActiveDeviceSessionError(error);
+      }
       logger.error(`[ProxyServer] Failed to list tools: ${error}`);
       throw new ActionableError(`Failed to list tools from daemon: ${errorMessage(error)}`);
     }
@@ -186,6 +219,10 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
           `[ProxyServer] Session ownership lost for ${error.sessionUuid}: ${error.reason}`,
         );
         return sessionOwnershipLostResult(error);
+      }
+      if (error instanceof DaemonConnectionSessionReleasedError) {
+        logger.warn(`[ProxyServer] No active device session (released: ${error.reason})`);
+        return noActiveDeviceSessionResult(error);
       }
       if (error instanceof DeviceControlTransportError) {
         logger.warn(
@@ -216,6 +253,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       if (error instanceof DaemonBoundSessionExpiredError) {
         throw sessionOwnershipLostError(error);
       }
+      if (error instanceof DaemonConnectionSessionReleasedError) {
+        throw noActiveDeviceSessionError(error);
+      }
       logger.error(`[ProxyServer] Failed to list resources: ${error}`);
       throw new ActionableError(`Failed to list resources from daemon: ${errorMessage(error)}`);
     }
@@ -229,6 +269,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
         throw sessionOwnershipLostError(error);
+      }
+      if (error instanceof DaemonConnectionSessionReleasedError) {
+        throw noActiveDeviceSessionError(error);
       }
       logger.error(`[ProxyServer] Failed to list resource templates: ${error}`);
       throw new ActionableError(
@@ -253,6 +296,9 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
         throw sessionOwnershipLostError(error);
+      }
+      if (error instanceof DaemonConnectionSessionReleasedError) {
+        throw noActiveDeviceSessionError(error);
       }
       logger.error(`[ProxyServer] Resource read failed: ${uri} - ${error}`);
       throw new ActionableError(`Failed to read resource from daemon: ${errorMessage(error)}`);

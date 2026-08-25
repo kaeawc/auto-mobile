@@ -1,6 +1,10 @@
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
-import { getDefaultSessionHeartbeatTimeoutMs, type Session } from "./sessionManager";
+import {
+  getDefaultPreFirstHeartbeatGraceMs,
+  getDefaultSessionHeartbeatTimeoutMs,
+  type Session,
+} from "./sessionManager";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 
 /**
@@ -26,7 +30,6 @@ export interface SessionHeartbeatMonitorConfig {
 }
 
 const DEFAULT_CHECK_INTERVAL_MS = 10_000;
-const DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS = 5_000;
 const DEFAULT_INITIAL_GRACE_MS = 20_000;
 
 function readPositiveMsEnv(primaryName: string, legacyName: string): number | undefined {
@@ -83,12 +86,7 @@ export class SessionHeartbeatMonitor {
       ) ??
       DEFAULT_INITIAL_GRACE_MS;
     this.preFirstHeartbeatGraceMs =
-      config.preFirstHeartbeatGraceMs ??
-      readPositiveMsEnv(
-        "AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
-        "AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
-      ) ??
-      DEFAULT_PRE_FIRST_HEARTBEAT_GRACE_MS;
+      config.preFirstHeartbeatGraceMs ?? getDefaultPreFirstHeartbeatGraceMs();
     this.defaultHeartbeatTimeoutMs =
       config.heartbeatTimeoutMs ??
       readPositiveMsEnv(

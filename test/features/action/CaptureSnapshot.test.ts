@@ -859,3 +859,52 @@ describe("CaptureSnapshot (iOS)", () => {
     expect(settingsCommands).toEqual([]);
   });
 });
+
+describe("CaptureSnapshot snapshotName path-traversal rejection (#5705)", () => {
+  let device: BootedDevice;
+  let fakeAdb: FakeAdbClient;
+  let fakeAdbFactory: AdbClientFactory;
+  let fakeTimer: FakeTimer;
+  let store: DeviceSnapshotStore;
+  let testBasePath: string;
+
+  beforeEach(async () => {
+    device = {
+      deviceId: "emulator-5554",
+      name: "Pixel_5",
+      platform: "android",
+      isEmulator: true,
+    };
+    fakeAdb = new FakeAdbClient();
+    fakeAdbFactory = { create: () => fakeAdb as any };
+    fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-traversal-test-"));
+    store = new DeviceSnapshotStore(testBasePath);
+  });
+
+  afterEach(async () => {
+    try {
+      await fs.rm(testBasePath, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+    fakeTimer.reset();
+  });
+
+  for (const badName of ["../traversal_x", "a/b", "/etc/passwd"]) {
+    it(`rejects '${badName}' before any adb snapshot-save command`, async () => {
+      const capture = new CaptureSnapshot(device, fakeAdbFactory, undefined, fakeTimer, store);
+      await expect(capture.execute({ snapshotName: badName, useVmSnapshot: true })).rejects.toThrow(
+        /invalid snapshot name/i,
+      );
+      // The VM path must never forward the raw name to the emulator console.
+      expect(
+        fakeAdb.getAllCommands().some((command) => command.startsWith("emu avd snapshot save")),
+      ).toBe(false);
+      // Nothing may have been written under the snapshots base directory.
+      const entries = await fs.readdir(testBasePath);
+      expect(entries).toEqual([]);
+    });
+  }
+});

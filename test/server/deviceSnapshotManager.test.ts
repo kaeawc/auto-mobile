@@ -478,6 +478,25 @@ describe("deviceSnapshotManager", () => {
     }
   });
 
+  test("captureDeviceSnapshot rejects a path-traversal name before capturing (#5705)", async () => {
+    for (const badName of ["../traversal_x", "a/b", "/etc/passwd"]) {
+      await expect(captureDeviceSnapshot(TEST_DEVICE, { snapshotName: badName })).rejects.toThrow(
+        /invalid snapshot name/i,
+      );
+    }
+    // The capture provider must never be invoked for an unsafe name.
+    expect(captureCalls).toEqual([]);
+  });
+
+  test("restoreDeviceSnapshot rejects a path-traversal name before lookup (#5705)", async () => {
+    for (const badName of ["../traversal_x", "a/b", "/etc/passwd"]) {
+      await expect(restoreDeviceSnapshot(TEST_DEVICE, { snapshotName: badName })).rejects.toThrow(
+        /invalid snapshot name/i,
+      );
+    }
+    expect(restoreCalls).toEqual([]);
+  });
+
   test("legacy flat-path cleanup never deletes a reserved scope root (#5707)", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-reserved-"));
     try {

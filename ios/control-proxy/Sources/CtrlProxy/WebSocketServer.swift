@@ -644,7 +644,16 @@ class WebSocketConnection: WebSocketResponding {
     /// can detect a runner/client port mismatch (issue #2735).
     private let boundPort: UInt16
     private var isWebSocketUpgraded = false
-    private var pendingHTTPRequest = Data()
+    /// Single per-connection inbound byte buffer drained by **both** the handshake
+    /// reader (`receiveHTTPUpgrade`) and the frame reader (`receiveFrameBytes`).
+    /// The handshake reader accumulates socket reads here and slices out one
+    /// complete HTTP request; any bytes left after that slice — most importantly a
+    /// WebSocket frame pipelined in the same TCP segment as the upgrade request —
+    /// stay in the buffer and are handed to the frame parser rather than being
+    /// stranded and lost (issue #5678). Mutated only from `connection.receive`
+    /// completions, which all run on the server `queue`, so no lock is needed
+    /// (same invariant as `fragmentedOpcode`/`fragmentBuffer`).
+    private var inboundBuffer = Data()
     private static let maximumHTTPRequestLength = 1_000_000
 
     /// In-progress fragmented-message reassembly state (RFC 6455 §5.4). Both are
@@ -728,25 +737,32 @@ class WebSocketConnection: WebSocketResponding {
                 return
             }
 
-            self.pendingHTTPRequest.append(data)
-            guard self.pendingHTTPRequest.count <= Self.maximumHTTPRequestLength else {
+            self.inboundBuffer.append(data)
+            guard self.inboundBuffer.count <= Self.maximumHTTPRequestLength else {
                 print("[WebSocketConnection] HTTP request exceeds maximum length")
                 self.connection.cancel()
                 return
             }
 
-            guard let requestLength = Self.completeHTTPRequestLength(in: self.pendingHTTPRequest) else {
+            guard let requestLength = Self.completeHTTPRequestLength(in: self.inboundBuffer) else {
                 self.receiveHTTPUpgrade()
                 return
             }
 
-            let requestData = Data(self.pendingHTTPRequest.prefix(requestLength))
-            self.pendingHTTPRequest.removeFirst(requestLength)
+            let requestData = Data(self.inboundBuffer.prefix(requestLength))
+            self.inboundBuffer.removeFirst(requestLength)
             guard let request = String(data: requestData, encoding: .utf8) else {
                 self.connection.cancel()
                 return
             }
 
+            // Only the WebSocket-upgrade branch consumes bytes left in
+            // `inboundBuffer` after the slice: `receiveWebSocketFrame` drains them
+            // first (issue #5678). The HTTP branches (`GET /health`,
+            // `POST /sdk-events`, `GET /sdk-events`) each send their response and
+            // then `connection.cancel()`, so any residual bytes after their request
+            // are discarded with the connection — residual-carry there is out of
+            // scope by design (AC4).
             if request.contains("Upgrade: websocket") || request.contains("upgrade: websocket") {
                 self.handleWebSocketUpgrade(request)
             } else if request.contains("GET /health") {
@@ -920,9 +936,29 @@ class WebSocketConnection: WebSocketResponding {
 
     // MARK: - WebSocket Frame Handling
 
-    private func receiveWebSocketFrame() {
-        // Read first 2 bytes (header)
-        connection.receive(minimumIncompleteLength: 2, maximumLength: 2) { [weak self] data, _, isComplete, error in
+    /// Reads exactly `count` bytes for the frame parser, first draining any bytes
+    /// already sitting in `inboundBuffer` from an earlier socket read — most
+    /// importantly a WebSocket frame pipelined in the same TCP segment as the
+    /// upgrade request, which would otherwise be stranded after the handshake
+    /// slice and lost (issue #5678). Only when the buffer is short does it refill
+    /// from the socket, reading precisely the shortfall so the buffer never grows
+    /// beyond what a single frame read needs (per-frame size is already bounded by
+    /// `frameReadLength`/`maxFramePayloadLength` in `readPayload`, and handshake
+    /// residual by `maximumHTTPRequestLength`). All completions run on the server
+    /// `queue`, so `inboundBuffer` needs no lock (same invariant as the handshake
+    /// reader and the reassembly state). `onData` is invoked with exactly `count`
+    /// bytes; on socket error/EOF the connection is closed and `onData` is not
+    /// called.
+    private func receiveFrameBytes(_ count: Int, onData: @escaping (Data) -> Void) {
+        if inboundBuffer.count >= count {
+            let chunk = Data(inboundBuffer.prefix(count))
+            inboundBuffer.removeFirst(count)
+            onData(chunk)
+            return
+        }
+
+        let needed = count - inboundBuffer.count
+        connection.receive(minimumIncompleteLength: needed, maximumLength: needed) { [weak self] data, _, isComplete, error in
             guard let self = self else { return }
 
             if let error = error {
@@ -936,12 +972,27 @@ class WebSocketConnection: WebSocketResponding {
                 return
             }
 
-            guard let headerData = data, headerData.count == 2 else {
-                self.receiveWebSocketFrame()
+            guard let data = data else {
+                // No error and not complete but no bytes yet — wait for the socket
+                // to supply the shortfall.
+                self.receiveFrameBytes(count, onData: onData)
                 return
             }
 
-            self.parseWebSocketFrame(headerData)
+            // `minimumIncompleteLength: needed` guarantees the buffer now holds at
+            // least `count` bytes; slice exactly `count` and keep any surplus.
+            self.inboundBuffer.append(data)
+            let chunk = Data(self.inboundBuffer.prefix(count))
+            self.inboundBuffer.removeFirst(count)
+            onData(chunk)
+        }
+    }
+
+    private func receiveWebSocketFrame() {
+        // Read first 2 bytes (header), draining the inbound buffer first so a
+        // frame pipelined with the upgrade handshake is parsed (issue #5678).
+        receiveFrameBytes(2) { [weak self] headerData in
+            self?.parseWebSocketFrame(headerData)
         }
     }
 
@@ -990,11 +1041,8 @@ class WebSocketConnection: WebSocketResponding {
     }
 
     private func readExtendedLength(_ bytes: Int, isMasked: Bool, opcode: UInt8, isFinal: Bool) {
-        connection.receive(minimumIncompleteLength: bytes, maximumLength: bytes) { [weak self] data, _, _, _ in
-            guard let self = self, let data = data else {
-                self?.onClose()
-                return
-            }
+        receiveFrameBytes(bytes) { [weak self] data in
+            guard let self = self else { return }
 
             var length: UInt64 = 0
             for byte in data {
@@ -1253,36 +1301,32 @@ class WebSocketConnection: WebSocketResponding {
             return
         }
 
-        connection
-            .receive(minimumIncompleteLength: totalLength, maximumLength: totalLength) { [weak self] data, _, _, _ in
-                guard let self = self, let data = data else {
-                    self?.onClose()
-                    return
-                }
+        receiveFrameBytes(totalLength) { [weak self] data in
+            guard let self = self else { return }
 
-                let payload: Data = isMasked ? Self.unmaskFrame(data) : data
+            let payload: Data = isMasked ? Self.unmaskFrame(data) : data
 
-                if Self.isDataOrContinuation(opcode) {
-                    self.handleDataFrame(opcode: opcode, isFinal: isFinal, payload: payload)
-                    return
-                }
-
-                // Control frames (ping/pong and any non-data opcode) are handled
-                // independently and never touch the reassembly buffer (§5.4).
-                switch Self.frameAction(opcode: opcode, unmaskedPayload: payload) {
-                case .deliver:
-                    // Unreachable: data opcodes are handled above via reassembly.
-                    break
-                case let .pong(applicationData):
-                    // Echo the ping application data back in the pong (§5.5.3).
-                    let pongFrame = Self.createWebSocketFrame(data: applicationData, opcode: 0x0A)
-                    self.connection.send(content: pongFrame, completion: .contentProcessed { _ in })
-                case .ignore:
-                    break
-                }
-
-                self.receiveWebSocketFrame()
+            if Self.isDataOrContinuation(opcode) {
+                self.handleDataFrame(opcode: opcode, isFinal: isFinal, payload: payload)
+                return
             }
+
+            // Control frames (ping/pong and any non-data opcode) are handled
+            // independently and never touch the reassembly buffer (§5.4).
+            switch Self.frameAction(opcode: opcode, unmaskedPayload: payload) {
+            case .deliver:
+                // Unreachable: data opcodes are handled above via reassembly.
+                break
+            case let .pong(applicationData):
+                // Echo the ping application data back in the pong (§5.5.3).
+                let pongFrame = Self.createWebSocketFrame(data: applicationData, opcode: 0x0A)
+                self.connection.send(content: pongFrame, completion: .contentProcessed { _ in })
+            case .ignore:
+                break
+            }
+
+            self.receiveWebSocketFrame()
+        }
     }
 
     /// Whether `opcode` denotes a data (text/binary) or continuation frame — the

@@ -287,6 +287,61 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     }
   });
 
+  // issue #5643 (close race): because the `connected` flip is deferred until after
+  // the awaited first heartbeat, a close() landing DURING that round-trip must not be
+  // undone. doConnect() re-checks `closing` before the flip, so the proxy stays
+  // disconnected instead of resuming with a stale connected flag over a nulled client.
+  test("does not resurrect the connected flag when close() lands during the first heartbeat", async () => {
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+
+    const released = Promise.withResolvers<void>();
+    let heartbeatObserved = false;
+    const fakeClient = new FakeDaemonClient({
+      onCallDaemonMethod: async (method, params) => {
+        if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
+          heartbeatObserved = true;
+          await released.promise;
+          sessionManager.recordHeartbeat(params.sessionId);
+        }
+      },
+    });
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    try {
+      // The establishing caller rejects when close() tears down the connection; the
+      // detached doConnect() must still not flip connected=true afterwards.
+      const connectResult = proxy.ensureConnected().then(
+        () => "resolved",
+        () => "rejected",
+      );
+
+      for (let i = 0; i < 50 && !heartbeatObserved; i++) {
+        await Promise.resolve();
+      }
+      expect(heartbeatObserved).toBe(true);
+
+      // Close while the first heartbeat is still gated in flight.
+      const closed = proxy.close();
+      released.resolve();
+      await closed;
+      expect(await connectResult).toBe("rejected");
+
+      // The flag must reflect the close, not the resumed establishment.
+      expect(proxy.isConnected()).toBe(false);
+    } finally {
+      released.resolve();
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
   // AC3: connection establishment delivers exactly one first heartbeat — a
   // reconnect must not compound duplicates onto a fresh transport.
   test("delivers exactly one heartbeat on a single establishment", async () => {

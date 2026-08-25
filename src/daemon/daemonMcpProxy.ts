@@ -756,10 +756,14 @@ export class DaemonMcpProxy {
     }
   }
 
-  private async doConnect(): Promise<void> {
+  private throwIfClosing(): void {
     if (this.closing) {
       throw new DaemonUnavailableError("MCP proxy is closing");
     }
+  }
+
+  private async doConnect(): Promise<void> {
+    this.throwIfClosing();
     // Check if daemon is available
     const socketPath = this.config.socketPath ?? SOCKET_PATH;
     // This is an observation-only probe. A daemon from another checkout may own
@@ -785,9 +789,7 @@ export class DaemonMcpProxy {
     }
 
     // Create and connect client
-    if (this.closing) {
-      throw new DaemonUnavailableError("MCP proxy is closing");
-    }
+    this.throwIfClosing();
     this.client = this.clientFactory();
     const client = this.client;
     // Wire daemon-pushed list-changed forwarding (issue #3223) when the client
@@ -829,6 +831,13 @@ export class DaemonMcpProxy {
     // RECONNECT there is no ownership to wait for, so establishBoundSessionHeartbeat
     // flips `connected` itself before dispatching the keeper heartbeat (see there).
     await this.establishBoundSessionHeartbeat();
+    // Re-check closing before the deferred flip: the establishment heartbeat awaits a
+    // real daemon round-trip, and a close() landing during it already set
+    // connected=false and nulled the client. Without this guard doConnect would
+    // resume and set connected=true again — leaving a stale connected flag over a
+    // closed transport (the old pre-await placement flipped before this await, so
+    // close() ran last). Mirrors the closing rechecks above.
+    this.throwIfClosing();
     this.connected = true;
 
     if (supportsNotifications) {

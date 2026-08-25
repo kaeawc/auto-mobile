@@ -215,6 +215,8 @@ by the capture paths).
 - Copies `Documents/`, `Library/`, and `tmp/` for each bundle ID
 - Snapshot type is `app_data`
 - Simulator-wide `simctl snapshot` is intentionally not used for portability
+- Each requested bundle ID is validated up front (installed via `simctl listapps`, has a data container via `get_app_container … data`) and reported with a per-bundle status — `captured`, `skipped-no-container`, `not-installed`, or `failed` — in `appDataBackup.bundleStatuses` and at the top level of the capture tool result (`bundleStatuses`), rather than silently "succeeding"
+- Capture with `includeAppData: true` but no usable `appBundleIds` (empty or all blank) is rejected with an `ActionableError` — pass explicit bundle IDs, or set `includeAppData: false` for a settings-only snapshot
 
 ## Storage Location
 

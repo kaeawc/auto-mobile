@@ -4,9 +4,16 @@ export type DeviceSnapshotType = "vm" | "adb" | "simctl" | "app_data";
  * Outcome of an iOS app-container capture for a single requested bundle id:
  * `captured` — installed with a data container that was backed up;
  * `skipped-no-container` — installed but has no data container to capture;
- * `not-installed` — no such app is installed on the simulator (issue #5712).
+ * `not-installed` — no such app is installed on the simulator;
+ * `failed` — installed with a resolved container, but copying it errored
+ * (issue #5712). `captured` → `backedUpPackages`, `skipped-no-container` →
+ * `skippedPackages`, and both `not-installed` and `failed` → `failedPackages`.
  */
-export type IosBundleCaptureStatusKind = "captured" | "skipped-no-container" | "not-installed";
+export type IosBundleCaptureStatusKind =
+  | "captured"
+  | "skipped-no-container"
+  | "not-installed"
+  | "failed";
 
 export interface IosBundleCaptureStatus {
   bundleId: string;

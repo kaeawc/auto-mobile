@@ -787,7 +787,7 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
         // failure, not a missing app; count it as failed so strict mode rejects.
         logger.warn(`[iOS] Failed to backup app data for ${bundleId}: ${error}`);
         failedPackages.push(bundleId);
-        bundleStatuses.push({ bundleId, status: "skipped-no-container" });
+        bundleStatuses.push({ bundleId, status: "failed" });
       }
     }
 

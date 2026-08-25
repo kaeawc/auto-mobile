@@ -115,14 +115,20 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     public func startListening(suiteName: String? = nil) {
         guard isEnabled else { return }
 
-        // Remove any existing observer before registering a new one. stopListening()
-        // bumps listenGeneration; capture it AFTER, so a concurrent stopListening() (or a
-        // newer startListening()) that runs while we register below bumps it again and our
-        // publication is rejected — otherwise a stop that "wins" the race would leave our
-        // just-registered observer live after teardown.
-        stopListening()
+        // Atomically remove any current observer and claim this start's generation in a
+        // SINGLE critical section. Capturing the generation in a separate lock after
+        // stopListening() would be a TOCTOU: a concurrent stopListening() in the gap would
+        // bump the generation and we'd capture *its* value, so our later equality guard
+        // would wrongly succeed and publish an observer after that stop. Bumping and
+        // capturing together means only a stop/start that runs AFTER this point can
+        // invalidate us — exactly what the store-time guard checks.
         lock.lock()
+        listenGeneration += 1
         let generation = listenGeneration
+        if let observer = kvoObserver {
+            NotificationCenter.default.removeObserver(observer)
+            kvoObserver = nil
+        }
         lock.unlock()
 
         let defaults = suiteName.map { UserDefaults(suiteName: $0) } ?? UserDefaults.standard

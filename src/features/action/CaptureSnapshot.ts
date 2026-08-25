@@ -47,7 +47,7 @@ export interface CaptureSnapshotArgs {
   includeAppData?: boolean;
   includeSettings?: boolean;
   useVmSnapshot?: boolean;
-  strictBackupMode?: boolean; // iOS-only: if true, fail the snapshot when an app container backup fails
+  strictBackupMode?: boolean; // iOS-only: if true, fail the whole snapshot unless every requested bundle is backed up (all-or-nothing)
   vmSnapshotTimeoutMs?: number; // Timeout in milliseconds for emulator VM snapshot commands (default: 30000ms)
   appBundleIds?: string[]; // iOS-only: bundle identifiers to include in app data snapshot
 }
@@ -507,9 +507,16 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
       }
     }
 
-    if (strictBackupMode && failedPackages.length > 0) {
+    // strict = all-or-nothing (#5711): fail the whole snapshot unless every
+    // requested bundle was actually backed up. `failedPackages` alone is not
+    // enough — a bundle with no data container lands in `skippedPackages` yet
+    // still leaves the requested set uncovered, so key the check on coverage.
+    if (strictBackupMode && backedUpPackages.length < sanitized.length) {
+      const backedUp = new Set(backedUpPackages);
+      const notBackedUp = sanitized.filter((bundleId) => !backedUp.has(bundleId));
       throw new ActionableError(
-        `Failed to backup app data for ${failedPackages.length} app(s): ${failedPackages.join(", ")}`,
+        `Failed to backup app data for ${notBackedUp.length} of ${sanitized.length} ` +
+          `requested app(s) in strictBackupMode (all-or-nothing): ${notBackedUp.join(", ")}.`,
       );
     }
 

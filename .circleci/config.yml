@@ -19,7 +19,7 @@ version: 2.1
 #
 # Budget: CircleCI's open-source plan includes ~30,000 macOS credits/month
 # (~150 macOS minutes at ~200 credits/min); paid overflow is ~$0.12-0.24/min.
-# Every job halts early unless ios/** or scripts/ios/** changed, so non-iOS
+# Every job halts early unless ios/**, scripts/ios/**, or this config changed, so non-iOS
 # commits cost nothing. To trim spend further, drop `ios-xcode-build` from the
 # workflow and keep only `ios-swift-packages`.
 #
@@ -35,7 +35,9 @@ executors:
       xcode: "26.5"
     # OSS-tier Apple-silicon class (~200 credits/min). Use the smallest macOS
     # class CircleCI offers your plan; larger classes burn the free budget faster.
-    resource_class: macos.m2pro.medium
+    # Apple-silicon classes take NO `macos.` prefix (that prefix is only on the
+    # legacy m1/Intel classes, e.g. macos.m1.medium.gen1).
+    resource_class: m2pro.medium
 
 commands:
   halt_if_no_ios_changes:
@@ -74,10 +76,10 @@ commands:
             # `git diff` is still writing, and under `pipefail` that SIGPIPE (141)
             # would wrongly divert an early match into the halt branch.
             CHANGED="$(git diff --no-renames --name-only "${BASE}" HEAD)"
-            if grep -qE '^(ios/|scripts/ios/)' <<<"${CHANGED}"; then
+            if grep -qE '^(ios/|scripts/ios/|\.circleci/)' <<<"${CHANGED}"; then
               echo "iOS changes in this branch vs main — continuing."
             else
-              echo "No ios/** or scripts/ios/** changes vs main — halting to save macOS credits."
+              echo "No ios/**, scripts/ios/**, or .circleci/ changes vs main — halting to save macOS credits."
               circleci-agent step halt
             fi
   restore_spm_cache:

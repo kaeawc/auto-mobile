@@ -83,7 +83,9 @@ drop a user's data.
 flowchart TD
     A["migrateToLatest() throws<br/>'corrupted migrations'"] --> B{"recovery enabled?<br/>(value not in {0,false,no,off})"};
     B -->|"no"| Z["Log guidance, rethrow<br/>(startup fails)"];
-    B -->|"yes"| C["Snapshot original migration history"];
+    B -->|"yes"| SKEW{"forward version-skew?<br/>(all shipped migrations applied &<br/>every unknown row is newer)"};
+    SKEW -->|"yes"| NOOP["✅ Leave ledger untouched<br/>(a newer build ran ahead)"];
+    SKEW -->|"no"| C["Snapshot original migration history"];
     C --> D["Rebuild kysely_migration table<br/>to match on-disk migrations<br/>(prune missing entries)"];
     D --> E["Re-run migrateToLatest()"];
     E -->|"success"| OK["✅ Migrations complete"];
@@ -100,13 +102,20 @@ flowchart TD
     classDef decision fill:#CC2200,stroke-width:0px,color:white;
     classDef logic fill:#525FE1,stroke-width:0px,color:white;
     classDef result stroke-width:0px;
-    class A,Z,OK,REFUSE,REFUSE2 result;
-    class B,F,H,BK decision;
+    class A,Z,OK,NOOP,REFUSE,REFUSE2 result;
+    class B,SKEW,F,H,BK decision;
     class C,D,E,G,DROP,BACKUP,R logic;
 ```
 
 Key properties:
 
+- **Forward version-skew is a no-op (issue #5684).** Before any rebuild, if every
+  migration this build ships is already applied and the only unrecognized ledger
+  rows are lexically newer than the newest migration it knows, a _newer_ build
+  migrated this shared database ahead of this one. The ledger is left completely
+  untouched. Pruning those newer rows is what makes the newer daemon re-run them
+  on its next start, so two builds alternating on one `~/.auto-mobile` DB would
+  otherwise churn the history back and forth indefinitely.
 - **Safe first.** The rebuild only rewrites the `kysely_migration` bookkeeping
   table to match the migrations actually on disk; user data is not touched. Most
   corruption from a pruned/renamed migration is resolved here.

@@ -3,7 +3,7 @@ import { Database as BunDatabase } from "bun:sqlite";
 import { Kysely, sql } from "kysely";
 import type { Migration, MigrationProvider } from "kysely/migration";
 import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
-import { runMigrations, isAnyTableNonEmpty } from "../../src/db/migrator";
+import { runMigrations, isAnyTableNonEmpty, isBenignForwardSkew } from "../../src/db/migrator";
 import { ActionableError } from "../../src/models/ActionableError";
 
 // --- Fake migration set (all in-memory, deterministic, <100ms) -------------
@@ -32,6 +32,7 @@ const WIDGETS = "2026_01_02_000_widgets";
 const GADGETS = "2026_01_05_000_gadgets";
 const BACKPORT = "2026_01_03_000_backport"; // sorts between WIDGETS and GADGETS
 const RENAMED_GADGETS = "2026_01_05_000_gizmos"; // rename of GADGETS, same table
+const FUTURE = "2026_01_09_000_future"; // sorts after GADGETS; only a newer build ships it
 
 function baseMigrations(): Record<string, Migration> {
   return {
@@ -78,24 +79,95 @@ describe("runMigrations recovery", () => {
     delete process.env.AUTOMOBILE_MIGRATION_RECOVERY;
   });
 
-  // Preserved: safe removed-migration prune path against the real migration folder.
-  test("prunes missing migrations from history", async () => {
+  // Smoke test against the REAL on-disk migration folder (no injected provider):
+  // the whole shipped set applies cleanly on a fresh DB. Every other test in this
+  // file uses a fake provider, so this is the file's only guard that the real
+  // migration set is internally consistent.
+  test("applies the real migration folder on a fresh DB", async () => {
     await runMigrations(db);
+    const names = await migrationNames(db);
+    expect(names.length).toBeGreaterThan(0);
+  });
 
-    const missingName = "2099_01_01_000_missing_migration";
-    await sql`insert into kysely_migration (name, timestamp) values (${missingName}, ${new Date().toISOString()})`.execute(
-      db,
-    );
+  // Forward version-skew (issue #5684): a NEWER build ran ahead against the same
+  // shared DB, recording a migration this (older) build does not ship, lexically
+  // newer than everything it knows. All of this build's migrations are already
+  // applied, so it must leave the ledger untouched rather than prune the newer
+  // row — pruning is what makes the newer daemon re-run the migration on its next
+  // start, and with two builds alternating that becomes a permanent churn loop.
+  test("preserves a newer build's migration row on forward skew (populated DB)", async () => {
+    const newerProvider = providerFor({
+      ...baseMigrations(),
+      [FUTURE]: createTableMigration("futures"),
+    });
+    await runMigrations(db, { provider: newerProvider, env: {} });
+    await insertSentinel(db);
+    const before = await migrationNames(db);
+    expect(before).toContain(FUTURE);
 
-    await runMigrations(db);
+    // The older build (no FUTURE) opens the same DB. It must NOT rewrite history.
+    await runMigrations(db, { provider: providerFor(baseMigrations()), env: {} });
 
-    const rows = await db
-      .selectFrom("kysely_migration" as any)
-      .select("name")
-      .execute();
-    const names = rows.map((row) => String(row.name));
+    expect(await migrationNames(db)).toEqual(before);
+    expect(await migrationNames(db)).toContain(FUTURE);
+    expect(await sentinelSurvives(db)).toBe(true);
+  });
 
-    expect(names).not.toContain(missingName);
+  // Forward skew must also no-op on an EMPTY DB: the pre-#5684 rebuild pruned the
+  // newer row even here, so guard that the empty-DB reset path is not taken.
+  test("does not reset or prune on forward skew when the DB has no user rows", async () => {
+    const newerProvider = providerFor({
+      ...baseMigrations(),
+      [FUTURE]: createTableMigration("futures"),
+    });
+    await runMigrations(db, { provider: newerProvider, env: {} });
+    // No sentinel: user tables are empty.
+
+    await runMigrations(db, { provider: providerFor(baseMigrations()), env: {} });
+
+    expect(await migrationNames(db)).toContain(FUTURE);
+  });
+
+  // The forward-skew short-circuit is gated behind recovery being enabled, like
+  // every other recovery branch: with recovery disabled the corrupted-migrations
+  // error is rethrown untouched.
+  test("forward skew still rethrows when recovery is disabled", async () => {
+    const newerProvider = providerFor({
+      ...baseMigrations(),
+      [FUTURE]: createTableMigration("futures"),
+    });
+    await runMigrations(db, { provider: newerProvider, env: {} });
+
+    let thrown: unknown;
+    try {
+      await runMigrations(db, {
+        provider: providerFor(baseMigrations()),
+        env: { AUTOMOBILE_MIGRATION_RECOVERY: "0" },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toContain("corrupted migrations");
+    expect(await migrationNames(db)).toContain(FUTURE);
+  });
+
+  // Genuine corruption whose unknown row is NOT purely trailing-newer is still
+  // pruned/reset by the existing recovery path — the forward-skew guard must not
+  // swallow an out-of-order divergence. Backport sorts in the MIDDLE, so the
+  // empty-DB reset path replays cleanly (mirrors the auto-heal test).
+  test("still recovers a middle-inserted unknown migration (not forward skew)", async () => {
+    // A build that shipped a since-removed BACKPORT recorded it in history.
+    const withBackport = { ...baseMigrations(), [BACKPORT]: createTableMigration("sprockets") };
+    await runMigrations(db, { provider: providerFor(withBackport), env: {} });
+    expect(await migrationNames(db)).toContain(BACKPORT);
+
+    // This build does not ship BACKPORT and it sorts before GADGETS -> not
+    // forward skew -> the empty DB auto-heals by resetting and replaying.
+    await runMigrations(db, { provider: providerFor(baseMigrations()), env: {} });
+
+    expect(await migrationNames(db)).toEqual([WIDGETS, GADGETS].sort());
   });
 
   // (A) Populated + default: out-of-order backport refuses, rows intact.
@@ -319,9 +391,12 @@ describe("runMigrations recovery", () => {
     expect(await sentinelSurvives(db)).toBe(true);
   });
 
-  // (E) Safe removed-migration prune path heals and never invokes the backup guard,
-  //     even on a populated DB. Also confirms =true keeps the rebuild path enabled.
-  test("removed-migration prune path heals a populated DB without a backup", async () => {
+  // (E) A trailing migration this build no longer ships is name-indistinguishable
+  //     from a newer build's row, so it is now treated as forward skew (issue
+  //     #5684): the history is left untouched and the backup guard is never
+  //     invoked, on a populated DB, regardless of the recovery-destructiveness
+  //     level. (Pre-#5684 this pruned GADGETS from history.)
+  test("preserves a trailing removed migration on a populated DB without a backup", async () => {
     await runMigrations(db, { provider: providerFor(baseMigrations()), env: {} });
     await insertSentinel(db);
 
@@ -329,7 +404,8 @@ describe("runMigrations recovery", () => {
     const backup = async (): Promise<void> => {
       backupCalls++;
     };
-    // GADGETS removed from the available set -> history prune, re-run succeeds.
+    // GADGETS removed from the available set; it sorts after WIDGETS -> forward
+    // skew -> no rebuild, no reset, history intact.
     const reduced = { [WIDGETS]: createTableMigration("widgets") };
 
     await runMigrations(db, {
@@ -340,7 +416,7 @@ describe("runMigrations recovery", () => {
 
     expect(backupCalls).toBe(0);
     expect(await sentinelSurvives(db)).toBe(true);
-    expect(await migrationNames(db)).toEqual([WIDGETS]);
+    expect(await migrationNames(db)).toEqual([WIDGETS, GADGETS].sort());
   });
 
   // (F) The row-count excludes both bookkeeping tables so the seeded lock row does
@@ -450,5 +526,49 @@ describe("runMigrations recovery", () => {
     expect(fkStillEnforced).toBe(true);
 
     await fkDb.destroy();
+  });
+});
+
+describe("isBenignForwardSkew", () => {
+  const M1 = "2026_01_01_000_a";
+  const M2 = "2026_01_02_000_b";
+  const M3 = "2026_01_03_000_c";
+
+  test("true when the only unknown executed rows are newer than the newest known", () => {
+    expect(isBenignForwardSkew([M1, M2], [M1, M2, M3])).toBe(true);
+    expect(isBenignForwardSkew([M1, M2], [M1, M2, M3, "2026_01_04_000_d"])).toBe(true);
+  });
+
+  test("true when there are no unknown rows (nothing to reconcile)", () => {
+    expect(isBenignForwardSkew([M1, M2], [M1, M2])).toBe(true);
+  });
+
+  test("false when a known migration is not yet applied", () => {
+    // M2 is known but absent from the ledger -> genuine pending/out-of-order work.
+    expect(isBenignForwardSkew([M1, M2, M3], [M1, M3])).toBe(false);
+  });
+
+  test("false when an unknown row sorts before the newest known migration", () => {
+    const middle = "2026_01_015_000_x"; // between M1 and M2
+    expect(isBenignForwardSkew([M1, M2], [M1, middle, M2])).toBe(false);
+  });
+
+  test("false when an unknown row is older than every known migration", () => {
+    expect(isBenignForwardSkew([M2, M3], ["2026_01_01_000_older", M2, M3])).toBe(false);
+  });
+
+  test("false when this build ships no migrations (cannot classify)", () => {
+    expect(isBenignForwardSkew([], [M1])).toBe(false);
+  });
+
+  // Guards the ordering-primitive choice: `newestKnown` is the max under the
+  // default code-unit sort Kysely uses for the available set, and condition (2)
+  // must compare with that same ordering. Uppercase letters sort BEFORE lowercase
+  // in code-unit order, so an unknown row starting with an uppercase letter is
+  // NOT newer than a lowercase newestKnown and must be rejected — localeCompare
+  // would wrongly rank it after and accept it.
+  test("uses code-unit ordering consistently for the newer-than check", () => {
+    // "Z..." (0x5A) sorts before "a..." (0x61) in code-unit order.
+    expect(isBenignForwardSkew(["a_known"], ["a_known", "Z_unknown"])).toBe(false);
   });
 });

@@ -157,6 +157,88 @@ async function rebuildMigrationTable(
   return { pruned, kept };
 }
 
+/**
+ * Classify a corrupted-migrations state as benign forward version-skew: every
+ * migration this build ships is already recorded as executed, and the only
+ * unrecognized ledger rows are lexically newer than the newest migration this
+ * build knows about — i.e. a NEWER build ran ahead against the same shared DB
+ * (issue #5684).
+ *
+ * In that case this build has nothing to do and MUST NOT rewrite the ledger.
+ * Pruning those newer rows (the pre-#5684 rebuild behavior) is what converts a
+ * harmless version skew into a churn loop: the newer daemon re-runs the pruned
+ * migration on its next start, and with two builds alternating on one DB the
+ * ledger is rewritten back and forth indefinitely.
+ *
+ * Anything else — a known migration not yet applied, or an unknown row that
+ * sorts at or before the newest known migration (out-of-order / renamed /
+ * middle-inserted) — is NOT forward skew and falls through to the existing
+ * destructive rebuild/reset recovery. `availableNames` must be sorted (Kysely's
+ * `Migrator.getMigrations()` guarantees this).
+ *
+ * Two conventions this repo already upholds keep the no-op safe; a future
+ * maintainer must not break either (issue #5684):
+ *   1. A shipped migration's body is immutable given its name. Like Kysely
+ *      itself (which never re-runs an applied name), this trusts name == applied;
+ *      re-bodying a released migration would let the no-op accept a divergent
+ *      schema silently.
+ *   2. Migration names are globally monotonic and append-only across releases,
+ *      so a newer mainline build's migrations always sort AFTER an older build's
+ *      newest. Branch divergence that interleaves names is deliberately treated
+ *      as corruption (condition 2 returns false), not forward skew.
+ */
+export function isBenignForwardSkew(availableNames: string[], executedNames: string[]): boolean {
+  // A build that ships no migrations cannot distinguish "newer build ran ahead"
+  // from "everything is unknown"; stay conservative and let recovery decide.
+  if (availableNames.length === 0) {
+    return false;
+  }
+
+  const availableSet = new Set(availableNames);
+  const executedSet = new Set(executedNames);
+
+  // (1) Every migration this build knows about must already be applied.
+  for (const name of availableNames) {
+    if (!executedSet.has(name)) {
+      return false;
+    }
+  }
+
+  // (2) Every executed row this build does not recognize must be strictly newer
+  //     than the newest migration it ships. Compare with the same default
+  //     code-unit ordering that selected `newestKnown` (Kysely sorts the
+  //     available set with `Array#sort`); using `localeCompare` here could
+  //     disagree on case/diacritics against a code-unit-chosen `newestKnown`.
+  const newestKnown = availableNames[availableNames.length - 1];
+  for (const name of executedNames) {
+    if (!availableSet.has(name) && name <= newestKnown) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Read the ledger and this build's migration set, and report whether the
+ * corrupted-migrations state is benign forward version-skew (see
+ * {@link isBenignForwardSkew}).
+ */
+async function isForwardVersionSkew(db: Kysely<unknown>, migrator: Migrator): Promise<boolean> {
+  if (!(await tableExists(db, DEFAULT_MIGRATION_TABLE))) {
+    return false;
+  }
+  const availableNames = (await migrator.getMigrations()).map((migration) => migration.name);
+  // Raw sql (like defaultCountTableRows) rather than selectFrom(... as any), which
+  // resolves to `never` under Kysely<unknown> and would add a fresh typecheck-
+  // baseline error.
+  const executedRows = await sql<{ name: string }>`select name from ${sql.table(
+    DEFAULT_MIGRATION_TABLE,
+  )}`.execute(db);
+  const executedNames = executedRows.rows.map((row) => row.name);
+  return isBenignForwardSkew(availableNames, executedNames);
+}
+
 const defaultCountTableRows: CountTableRows = async (db, tableName) => {
   const result = await sql<{ count: number }>`select count(*) as count from ${sql.table(
     tableName,
@@ -321,6 +403,54 @@ async function runMigrationsOnce(migrator: Migrator) {
   return result;
 }
 
+/**
+ * Handle a failed migration run: attempt recovery when the error is a corrupted
+ * migration history and recovery is enabled, otherwise rethrow. Extracted from
+ * {@link runMigrations} so the nested branching lives in its own depth budget.
+ * Returns normally when the database is healthy (recovered, or benign forward
+ * skew); throws otherwise.
+ */
+async function handleMigrationFailure(
+  db: Kysely<unknown>,
+  migrator: Migrator,
+  error: unknown,
+  options: RunMigrationsOptions,
+  env: NodeJS.ProcessEnv,
+): Promise<void> {
+  if (isCorruptedMigrationError(error) && isMigrationRecoveryEnabled(env)) {
+    // A newer build migrated this shared DB ahead of us; every migration we ship
+    // is already applied. Leave the ledger untouched instead of pruning the newer
+    // rows, which would make the newer daemon re-run them and churn the history
+    // back and forth (issue #5684).
+    if (await isForwardVersionSkew(db, migrator)) {
+      logger.info(
+        "Migration ledger records migrations newer than this build ships and all " +
+          "known migrations are already applied; a newer build migrated this database. " +
+          "Leaving migration history untouched (issue #5684).",
+      );
+      return;
+    }
+
+    const recoveryResult = await recoverCorruptedMigrations(db, migrator, error, options, env);
+    if (recoveryResult.error) {
+      logger.error("Failed to run migrations after recovery:", recoveryResult.error);
+      throw recoveryResult.error;
+    }
+    logger.info("All migrations completed successfully");
+    return;
+  }
+
+  if (isCorruptedMigrationError(error) && !isMigrationRecoveryEnabled(env)) {
+    logger.error(
+      "Corrupted migrations detected. Set AUTOMOBILE_MIGRATION_RECOVERY=1 to enable automatic " +
+        "recovery or reset the local database state.",
+    );
+  }
+
+  logger.error("Failed to run migrations:", error);
+  throw error;
+}
+
 async function recoverCorruptedMigrations(
   db: Kysely<unknown>,
   migrator: Migrator,
@@ -392,25 +522,8 @@ export async function runMigrations(
     const { error } = await runMigrationsOnce(migrator);
 
     if (error) {
-      if (isCorruptedMigrationError(error) && isMigrationRecoveryEnabled(env)) {
-        const recoveryResult = await recoverCorruptedMigrations(db, migrator, error, options, env);
-        if (recoveryResult.error) {
-          logger.error("Failed to run migrations after recovery:", recoveryResult.error);
-          throw recoveryResult.error;
-        }
-        logger.info("All migrations completed successfully");
-        return;
-      }
-
-      if (isCorruptedMigrationError(error) && !isMigrationRecoveryEnabled(env)) {
-        logger.error(
-          "Corrupted migrations detected. Set AUTOMOBILE_MIGRATION_RECOVERY=1 to enable automatic " +
-            "recovery or reset the local database state.",
-        );
-      }
-
-      logger.error("Failed to run migrations:", error);
-      throw error;
+      await handleMigrationFailure(db, migrator, error, options, env);
+      return;
     }
 
     logger.info("All migrations completed successfully");

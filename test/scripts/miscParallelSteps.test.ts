@@ -72,11 +72,17 @@ describe("#4130 hadolint hoist (fast-validation)", () => {
   test("the hadolint barrier comes after the job's real work, so a failure still surfaces", () => {
     const waitIndex = indexOfWaitOn(steps, "hadolint");
     const checksIndex = indexOfNamed(steps, "Run fast validation checks");
-    const batsIndex = indexOfNamed(steps, "Run BATS Tests (Ubuntu)");
+    // The iOS version-constant drift gate is the last real step before the
+    // barrier now that the inline Ubuntu BATS pass has moved to the parallel
+    // `bats-tests` matrix job.
+    const versionCheckIndex = indexOfNamed(
+      steps,
+      "Check iOS version constant is in sync with package.json",
+    );
 
     expect(waitIndex).toBeGreaterThanOrEqual(0);
     expect(waitIndex).toBeGreaterThan(checksIndex);
-    expect(waitIndex).toBeGreaterThan(batsIndex);
+    expect(waitIndex).toBeGreaterThan(versionCheckIndex);
   });
 
   test("the documentation lock validation toolchain is ready before fast checks", () => {

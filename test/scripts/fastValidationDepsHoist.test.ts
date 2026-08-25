@@ -52,19 +52,18 @@ describe("#4125 fast-validation dependency install hoist", () => {
     expect(installIndex).toBeLessThan(npmPackageIndex);
   });
 
-  test("the wait barrier precedes the fast validation checks and the BATS step", () => {
-    // AC2: the aggregator's `xml` check shells out to xmlstarlet, and the BATS
-    // step needs bats — both come from the backgrounded install.
+  test("the wait barrier precedes the fast validation checks", () => {
+    // AC2: the aggregator's `xml` check shells out to xmlstarlet, which comes
+    // from the backgrounded install, so the barrier must sit before it. (The
+    // Ubuntu BATS pass that also consumed this install now runs in the parallel
+    // `bats-tests` matrix job, not inline here.)
     const waitIndex = indexOfWaitOn(steps, INSTALL_ID);
     const checksIndex = indexOfNamed(steps, "Run fast validation checks");
-    const batsIndex = indexOfNamed(steps, "Run BATS Tests (Ubuntu)");
 
     expect(waitIndex).toBeGreaterThanOrEqual(0);
     expect(checksIndex).toBeGreaterThanOrEqual(0);
-    expect(batsIndex).toBeGreaterThanOrEqual(0);
 
     expect(waitIndex).toBeLessThan(checksIndex);
-    expect(waitIndex).toBeLessThan(batsIndex);
   });
 
   test("the JDK setup still precedes the checks that need it", () => {

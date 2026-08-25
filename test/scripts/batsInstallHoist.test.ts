@@ -13,9 +13,9 @@ import { indexOfNamed, indexOfWaitOn, loadJobSteps, stepNamed } from "../helpers
 // required check, so the barrier placement is pinned here rather than left to
 // review.
 //
-// Scoped by job id, which matters: pull_request.yml ALSO runs bats inside
-// `fast-validation` (as "Run BATS Tests (Ubuntu)"), and a whole-file search
-// would conflate the two.
+// Scoped by job id, which matters: the `bats-tests` job now runs the suite on
+// both ubuntu-latest and macos-latest (the Ubuntu pass used to run inline inside
+// `fast-validation`), and a whole-file search could conflate jobs.
 
 const JOB_ID = "bats-tests";
 const INSTALL_STEP = "Install BATS";

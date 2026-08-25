@@ -1,5 +1,6 @@
 import { ActionableError, type BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
+import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import type {
   RecordingHandle,
   RecordingResult,
@@ -31,6 +32,18 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
     const device = config.device;
     if (!device) {
       throw new ActionableError("Device is required to start video recording.");
+    }
+
+    // Physical iOS devices are now discoverable and assignable through DevicePool, but the
+    // iOS video path routes every iOS device to FfmpegVideoProcessingBackend.startIos →
+    // `simctl io <deviceId> recordVideo`, which only drives Simulators. Reject a physical
+    // iPhone here (branching on the UDID type before backend selection) with an actionable
+    // error, rather than surfacing a confusing simctl transport failure.
+    if (device.platform === "ios" && isIosPhysicalUdid(device.deviceId)) {
+      throw new ActionableError(
+        `Video recording is not supported on physical iOS devices (${device.deviceId}); ` +
+          "it currently requires a Simulator (simctl io recordVideo).",
+      );
     }
 
     const backend = this.selectBackend(device);

@@ -3663,7 +3663,7 @@ export function registerDeviceTools() {
         "RUNNING DEVICES (booted/active):\n" +
         `  - automobile:devices/booted - All running devices\n` +
         `  - automobile:devices/booted/android - Android devices only\n` +
-        `  - automobile:devices/booted/ios - iOS simulators only\n\n` +
+        `  - automobile:devices/booted/ios - Booted iOS simulators and connected physical iOS devices\n\n` +
         "AVAILABLE DEVICE IMAGES (can be started):\n" +
         `  - automobile:devices/images - All available images\n` +
         `  - automobile:devices/images/android - Android AVDs\n` +

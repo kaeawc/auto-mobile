@@ -15,7 +15,7 @@ import { defaultTimer, Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../deviceTimeouts";
 import { PlistClient, type PlistReader } from "./PlistClient";
-import { isIosSimulatorUdid } from "./iosDeviceType";
+import { inferIosFormFactor, isIosSimulatorUdid } from "./iosDeviceType";
 import { getAbortSignal } from "../AbortContext";
 import { Mutex } from "async-mutex";
 
@@ -444,19 +444,6 @@ function pickHighestRuntime(
     .filter((runtime) => typeof runtime.version === "string" && runtime.version.startsWith(prefix))
     .sort((a, b) => compareVersions(a.version, b.version))
     .pop();
-}
-
-function inferIosFormFactor(deviceTypeId: string | undefined): "phone" | "tablet" | undefined {
-  if (!deviceTypeId) {
-    return undefined;
-  }
-  if (deviceTypeId.includes("iPad")) {
-    return "tablet";
-  }
-  if (deviceTypeId.includes("iPhone")) {
-    return "phone";
-  }
-  return undefined;
 }
 
 function isAlreadyBootedCoreSimulator405(error: unknown, udid: string): boolean {

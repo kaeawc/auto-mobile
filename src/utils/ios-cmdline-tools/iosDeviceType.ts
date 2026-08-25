@@ -61,3 +61,27 @@ export function isIosPhysicalUdid(deviceId: string): boolean {
 export function isIosUdid(deviceId: string): boolean {
   return isIosSimulatorUdid(deviceId) || isIosPhysicalUdid(deviceId);
 }
+
+/**
+ * Infer an iOS form factor from any Apple device-model string.
+ *
+ * Deliberately substring-based so a single implementation covers both device
+ * vocabularies: simulator device-type identifiers
+ * (`com.apple.CoreSimulator.SimDeviceType.iPhone-15`) and the product types
+ * physical devices report through devicectl (`iPhone16,1`, `iPad14,3`).
+ * Anything else — Apple TV, Watch, Vision — has no form factor here.
+ */
+export function inferIosFormFactor(
+  deviceTypeId: string | undefined,
+): "phone" | "tablet" | undefined {
+  if (!deviceTypeId) {
+    return undefined;
+  }
+  if (deviceTypeId.includes("iPad")) {
+    return "tablet";
+  }
+  if (deviceTypeId.includes("iPhone")) {
+    return "phone";
+  }
+  return undefined;
+}

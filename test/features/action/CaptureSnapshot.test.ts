@@ -827,6 +827,19 @@ describe("CaptureSnapshot (iOS)", () => {
     return new CaptureSnapshot(device, undefined, undefined, undefined, store, simctl as any);
   }
 
+  it("rejects a physical iOS device instead of driving simctl against it", async () => {
+    // Physical iOS devices became discoverable/assignable in #5620, but every iOS
+    // capture path routes through SimCtlClient (metadata, settings, app containers),
+    // which only drives Simulators. Reject the physical UDID up front so the caller
+    // gets an actionable error rather than a "captured successfully" over failed simctl.
+    device = { deviceId: "00008030-001C2D3E1234567A", name: "iPhone 15 Pro", platform: "ios" };
+
+    await expect(makeCapture().execute({ snapshotName: "physical" })).rejects.toThrow(
+      /physical iOS device/i,
+    );
+    expect(simctl.getMethodCalls("getDeviceInfo").length).toBe(0);
+  });
+
   it("captures app data and writes metadata", async () => {
     const snapshotName = "ios-snapshot";
     const bundleId = "com.example.app";

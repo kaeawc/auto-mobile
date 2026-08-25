@@ -4,11 +4,20 @@ import { join, relative } from "node:path";
 import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 
 const ROOT = join(import.meta.dir, "..", "..");
-const OWNER = "src/utils/ios-cmdline-tools/DeviceAppManager.ts";
+// Files sanctioned to execute `xcrun devicectl` directly. Each is a distinct,
+// coherent devicectl domain kept deliberately narrow (issue #4053):
+//   - DeviceAppManager: app lifecycle (launch/terminate/info apps).
+//   - DevicectlDeviceLister: physical-device discovery (`devicectl list devices`, #5620).
+// Any OTHER file that reaches devicectl directly must route through one of these.
+const OWNERS = [
+  "src/utils/ios-cmdline-tools/DeviceAppManager.ts",
+  "src/utils/ios-cmdline-tools/DevicectlDeviceLister.ts",
+];
+const PRIMARY_OWNER = OWNERS[0];
 
 /**
  * True when `source` hands `devicectl` to a subprocess directly — i.e. a
- * production call that bypasses the single {@link OWNER} boundary. Two shapes
+ * production call that bypasses the sanctioned {@link OWNERS} boundary. Two shapes
  * are caught:
  *
  * 1. A launcher primitive (exec/execFile/spawn family, promisified or not, plus
@@ -20,7 +29,7 @@ const OWNER = "src/utils/ios-cmdline-tools/DeviceAppManager.ts";
  *    Requiring the `xcrun` literal keeps benign `executeCommand("adb", ...)` /
  *    `executeCommand("xcrun", ["simctl", ...])` calls off the offender list.
  *
- * DeviceAppManager itself is excluded as the owner. Elsewhere, an injected
+ * The sanctioned owners are excluded. Elsewhere, an injected
  * `execute(file, args)` seam is treated as a launch boundary too, so a refactor
  * cannot hide a literal xcrun/devicectl call behind that indirection.
  */
@@ -109,18 +118,18 @@ function sourceFiles(directory: string): string[] {
 }
 
 describe("devicectl execution boundary (issue #4053)", () => {
-  test("only DeviceAppManager directly executes xcrun devicectl", () => {
+  test("only sanctioned owners directly execute xcrun devicectl", () => {
     const exceptions = new Map<string, string>([
       // Diagnostic-only references are allowed only with a concrete reason here.
     ]);
     const offenders = sourceFiles(join(ROOT, "src")).flatMap((file) => {
       const repoPath = relative(ROOT, file).replace(/\\/g, "/");
-      if (repoPath === OWNER || exceptions.has(repoPath)) {
+      if (OWNERS.includes(repoPath) || exceptions.has(repoPath)) {
         return [];
       }
       const source = readFileSync(file, "utf8");
       return directlyExecutesDevicectl(source)
-        ? [`${repoPath} directly executes devicectl; route it through ${OWNER} instead.`]
+        ? [`${repoPath} directly executes devicectl; route it through ${PRIMARY_OWNER} (or another sanctioned owner) instead.`]
         : [];
     });
 
@@ -145,6 +154,20 @@ describe("devicectl execution boundary (issue #4053)", () => {
     expect(
       directlyExecutesDevicectl('execFile("xcrun" as const, ["devicectl", "device", "list"]);'),
     ).toBe(true);
+  });
+
+  test("detects the injected this.deps.execute devicectl seam", () => {
+    // DevicectlDeviceLister runs devicectl through a `this.deps.execute(file, args)` seam;
+    // the boundary must recognize it so a stray call via that indirection cannot hide.
+    expect(
+      directlyExecutesDevicectl(
+        'await this.deps.execute("xcrun", ["devicectl", "list", "devices"], { timeoutMs: 5000 });',
+      ),
+    ).toBe(true);
+    // Benign non-devicectl calls through the same seam stay off the offender list.
+    expect(
+      directlyExecutesDevicectl('await this.deps.execute("xcrun", ["simctl", "list"]);'),
+    ).toBe(false);
   });
 
   test("detects Bun.spawn devicectl launches", () => {

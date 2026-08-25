@@ -185,7 +185,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
         node.name.text === "runExecSeam" ||
         (node.name.text === "execute" &&
           (node.expression.kind === ts.SyntaxKind.ThisKeyword ||
-            /(?:executor|host|process)/i.test(node.expression.getText(sourceFile))))));
+            /(?:executor|host|process|deps)/i.test(node.expression.getText(sourceFile))))));
   const isRunExecSeamReference = (node: ts.Expression): boolean =>
     (ts.isIdentifier(node) && runExecSeamAliases.has(node.text)) ||
     (ts.isPropertyAccessExpression(node) && node.name.text === "runExecSeam");

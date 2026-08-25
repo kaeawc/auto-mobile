@@ -130,6 +130,35 @@ describe("HybridVideoCaptureBackend - Unit Tests", function () {
     await expect(backend.start(configWithoutDevice)).rejects.toThrow("Device is required");
   });
 
+  // Physical iOS devices are discoverable now, but the iOS video path is simctl-only.
+  test("start rejects a physical iOS device (simctl recordVideo is simulator-only)", async function () {
+    const physicalConfig: VideoCaptureConfig = {
+      ...baseConfig,
+      device: {
+        platform: "ios",
+        deviceId: "00008030-001C2D3E1234567A", // physical UDID (8-hex + 16-hex)
+      } as BootedDevice,
+    };
+    await expect(backend.start(physicalConfig)).rejects.toThrow(
+      "not supported on physical iOS devices",
+    );
+    expect(ffmpegBackend.startCalls.length).toBe(0);
+    expect(platformBackend.startCalls.length).toBe(0);
+  });
+
+  test("start routes a Simulator iOS device to the ffmpeg backend", async function () {
+    const simulatorConfig: VideoCaptureConfig = {
+      ...baseConfig,
+      device: {
+        platform: "ios",
+        deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890", // simulator UUID
+      } as BootedDevice,
+    };
+    await backend.start(simulatorConfig);
+    expect(ffmpegBackend.startCalls.length).toBe(1);
+    expect(platformBackend.startCalls.length).toBe(0);
+  });
+
   test("stop rejects when the backend handle is missing or not a hybrid handle", async function () {
     await expect(
       backend.stop({

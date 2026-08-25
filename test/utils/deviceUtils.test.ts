@@ -188,6 +188,25 @@ describe("MultiPlatformDeviceManager", () => {
       });
     });
 
+    test("killDevice refuses a physical UDID instead of shelling out to simctl", async () => {
+      await withProcessPlatform("darwin", async () => {
+        const fakeSimctl = {
+          killSimulator: async () => {
+            throw new Error("simctl shutdown must not run for a physical UDID");
+          },
+        } as unknown as SimCtlClient;
+        const manager = new MultiPlatformDeviceManager(
+          new FakeAdbClient() as unknown as AdbClient,
+          fakeSimctl,
+          {} as unknown as AndroidEmulatorClient,
+        );
+
+        await expect(manager.killDevice(physicalDevice)).rejects.toThrow(
+          /Cannot shut down physical iOS device/,
+        );
+      });
+    });
+
     test("physical discovery is not attempted when iOS tooling is unavailable", async () => {
       await withProcessPlatform("linux", async () => {
         let listerCalls = 0;

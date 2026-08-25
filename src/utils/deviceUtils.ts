@@ -626,6 +626,16 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.emulator.killDevice(device, options);
       case "ios":
+        // Physical devices are discoverable now (issue #5620), so a kill request
+        // can reach one. `simctl shutdown` cannot act on a physical UDID — it
+        // would fail with an opaque CoreSimulator error — and there is no
+        // devicectl equivalent of shutting a device down, so say so plainly.
+        if (device.deviceId && isIosPhysicalUdid(device.deviceId)) {
+          throw new ActionableError(
+            `Cannot shut down physical iOS device ${device.deviceId}: only simulators have a ` +
+              `remote shutdown path. Disconnect or power the device off manually.`,
+          );
+        }
         return this.simctl.killSimulator(device, options);
     }
   }

@@ -1183,7 +1183,6 @@ private final class RawWebSocketClient: @unchecked Sendable {
                 }
             }
             // Otherwise (control frame, or non-matching data frame) keep parsing.
-            // Otherwise (control frame, or non-matching data frame) keep parsing.
         }
     }
 }

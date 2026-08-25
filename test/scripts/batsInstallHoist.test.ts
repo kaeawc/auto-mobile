@@ -78,5 +78,14 @@ for (const workflow of WORKFLOWS) {
       expect(bunDepsIndex).toBeGreaterThanOrEqual(0);
       expect(bunDepsIndex).toBeLessThan(consumerIndex);
     });
+
+    test("the suite runs through the parallel runner, not a bare serial `bats`", () => {
+      // The ~900-test suite runs cross-file-parallel via scripts/ci/run-bats.sh.
+      // Guard against a regression back to serial `bats test/bats/`, which is
+      // what dominated the required "Shell Tests" gate's wall-clock.
+      const consumer = stepNamed(steps, CONSUMER_STEP);
+      expect(consumer?.run).toContain("scripts/ci/run-bats.sh");
+      expect(consumer?.run).not.toContain("bats test/bats/");
+    });
   });
 }

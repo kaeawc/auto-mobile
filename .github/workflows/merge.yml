@@ -381,8 +381,10 @@ jobs:
 
       - wait: install-bats
 
+      # Cross-file parallel (`--jobs`), within-file serial. See scripts/ci/run-bats.sh.
       - name: "Run BATS Tests"
-        run: bats test/bats/
+        shell: bash
+        run: scripts/ci/run-bats.sh
 
   # Always exercise the real WHIP publisher contract post-merge on main:
   # FFmpeg H.264 -> WebRtcPublisher -> MediaMTX -> headless-Chrome WHEP decode.

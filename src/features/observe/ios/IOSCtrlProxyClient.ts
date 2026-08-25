@@ -955,6 +955,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       // makes the base connectWebSocket() open-guard drop that socket and clear
       // isConnecting, leaving a fresh connect free to dial the new port.
       this.connectionGeneration++;
+      // Eagerly abort a handshake still stuck in CONNECTING (this.ws null,
+      // isConnecting true, dialing the now-stale old port): the generation bump
+      // above is only observed inside the socket's open/error handlers, so a
+      // socket emitting neither would keep isConnecting true until
+      // connectionTimeoutMs, stalling the new-port connect by up to ~5s. (#5656)
+      this.abortPendingConnect();
       // The connection-attempt budget is per-endpoint: failures against the old
       // port must not cool down the new one. Without this reset, a port change on
       // the max-th in-flight attempt leaves connectionAttempts at the ceiling, so

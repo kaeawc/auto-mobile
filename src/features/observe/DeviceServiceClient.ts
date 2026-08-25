@@ -77,6 +77,13 @@ export abstract class DeviceServiceClient {
   // Bumped by close() so a connection that opens after close() is discarded
   // instead of installing its socket and restarting the health check.
   protected connectionGeneration: number = 0;
+  // Set while a handshake is mid-flight (socket CONNECTING, this.ws still null)
+  // so close()/updatePort() can eagerly abort a socket stuck in CONNECTING that
+  // emits NEITHER "open" NOR "error". The generation guard alone only fires when
+  // the socket eventually resolves; a wedged handshake would otherwise keep
+  // isConnecting true until connectionTimeoutMs, stalling a fresh-port connect
+  // by up to ~5s. Cleared to null the moment the handshake terminates. (#5656)
+  private pendingConnectAbort: (() => void) | null = null;
 
   // Auto-reconnection state
   protected autoReconnectEnabled: boolean = true;
@@ -251,6 +258,11 @@ export abstract class DeviceServiceClient {
       // Invalidate any in-flight connection whose `open` has not fired yet, so
       // it cannot install its socket / restart the health check after close().
       this.connectionGeneration++;
+      // Eagerly abort a handshake stuck in CONNECTING (no open/error yet): the
+      // generation bump above is only observed inside the socket's open/error
+      // handlers, so without this a wedged socket keeps isConnecting true until
+      // connectionTimeoutMs fires. (#5656)
+      this.abortPendingConnect();
 
       // Clear any pending reconnection timeout
       if (this.reconnectTimeoutId !== null) {
@@ -287,6 +299,26 @@ export abstract class DeviceServiceClient {
       this.onConnectionClosed();
     } catch (error) {
       logger.warn(`[${this.logTag}] Error during close: ${error}`);
+    }
+  }
+
+  /**
+   * Eagerly abort a handshake that is stuck in CONNECTING.
+   *
+   * Called by close() and updatePort() right after bumping
+   * {@link connectionGeneration}. The generation guard alone is re-checked only
+   * inside the socket's `open`/`error` handlers, so a socket that emits neither
+   * would keep {@link isConnecting} true until {@link ConnectionConfig.connectionTimeoutMs}.
+   * Running the stored abort closes+discards that socket, clears isConnecting,
+   * and resolves the pending connect as a failure, so a fresh connect (e.g. to a
+   * new port) proceeds immediately instead of stalling. No-op when no handshake
+   * is in flight. (#5656)
+   */
+  protected abortPendingConnect(): void {
+    const abort = this.pendingConnectAbort;
+    if (abort) {
+      this.pendingConnectAbort = null;
+      abort();
     }
   }
 
@@ -380,11 +412,37 @@ export abstract class DeviceServiceClient {
           new Promise<boolean>((resolve, reject) => {
             const ws = this.webSocketFactory(wsUrl);
             const connectionTimeout = this.timer.setTimeout(() => {
+              this.pendingConnectAbort = null;
               ws.close();
               reject(new Error("WebSocket connection timeout"));
             }, this.config.connectionTimeoutMs);
 
+            // Track this in-flight handshake so a generation change
+            // (close()/updatePort()) can abort it eagerly. A socket stuck in
+            // CONNECTING emits neither "open" nor "error", so the generation
+            // guard in the handlers below would never run for it. (#5656)
+            this.pendingConnectAbort = () => {
+              this.timer.clearTimeout(connectionTimeout);
+              // Detach lifecycle listeners before closing so the aborted
+              // socket's delayed close/error cannot mutate state for the
+              // replacement connect; keep a lone swallowing error listener so a
+              // mid-handshake error cannot throw and crash the daemon.
+              try {
+                ws.removeAllListeners();
+                ws.on("error", (error) => {
+                  logger.debug(`[${this.logTag}] Ignoring error on aborted WebSocket: ${error}`);
+                });
+                ws.close();
+              } catch (error) {
+                // The socket may already be closing; nothing else to clean up.
+                logger.debug(`[${this.logTag}] Error closing aborted WebSocket: ${error}`);
+              }
+              this.isConnecting = false;
+              resolve(false);
+            };
+
             ws.on("open", () => {
+              this.pendingConnectAbort = null;
               this.timer.clearTimeout(connectionTimeout);
               if (generation !== this.connectionGeneration) {
                 // close() or updatePort() ran while this connection was mid-handshake.
@@ -435,6 +493,7 @@ export abstract class DeviceServiceClient {
             });
 
             ws.on("error", (error) => {
+              this.pendingConnectAbort = null;
               this.timer.clearTimeout(connectionTimeout);
               logger.warn(`[${this.logTag}] WebSocket error: ${error.message}`);
               this.isConnecting = false;
@@ -442,6 +501,7 @@ export abstract class DeviceServiceClient {
             });
 
             ws.on("close", () => {
+              this.pendingConnectAbort = null;
               logger.info(`[${this.logTag}] WebSocket connection closed`);
               this.ws = null;
               this.isConnecting = false;

@@ -129,7 +129,9 @@ describe("devicectl execution boundary (issue #4053)", () => {
       }
       const source = readFileSync(file, "utf8");
       return directlyExecutesDevicectl(source)
-        ? [`${repoPath} directly executes devicectl; route it through ${PRIMARY_OWNER} (or another sanctioned owner) instead.`]
+        ? [
+            `${repoPath} directly executes devicectl; route it through ${PRIMARY_OWNER} (or another sanctioned owner) instead.`,
+          ]
         : [];
     });
 
@@ -165,9 +167,9 @@ describe("devicectl execution boundary (issue #4053)", () => {
       ),
     ).toBe(true);
     // Benign non-devicectl calls through the same seam stay off the offender list.
-    expect(
-      directlyExecutesDevicectl('await this.deps.execute("xcrun", ["simctl", "list"]);'),
-    ).toBe(false);
+    expect(directlyExecutesDevicectl('await this.deps.execute("xcrun", ["simctl", "list"]);')).toBe(
+      false,
+    );
   });
 
   test("detects Bun.spawn devicectl launches", () => {

@@ -53,6 +53,17 @@ describe("snapshot tool", () => {
             snapshotType: "app_data",
             includeAppData: args.includeAppData ?? true,
             includeSettings: false,
+            appDataBackup: {
+              backupMethod: "simctl_copy",
+              totalPackages: args.appBundleIds?.length ?? 0,
+              backedUpPackages: args.appBundleIds ?? [],
+              skippedPackages: [],
+              failedPackages: [],
+              bundleStatuses: (args.appBundleIds ?? []).map((bundleId) => ({
+                bundleId,
+                status: "captured" as const,
+              })),
+            },
           };
           return {
             snapshotName: args.snapshotName,
@@ -143,6 +154,12 @@ describe("snapshot tool", () => {
     expect(payload.message).toContain("captured successfully");
     expect(captureCalls).toHaveLength(1);
     expect(captureCalls[0]?.appBundleIds).toEqual(["com.example.app"]);
+    // AC2: per-bundle status is surfaced at the top level of the tool result,
+    // not only nested inside the manifest.
+    expect(payload.bundleStatuses).toEqual([{ bundleId: "com.example.app", status: "captured" }]);
+    expect(payload.manifest.appDataBackup.bundleStatuses).toEqual([
+      { bundleId: "com.example.app", status: "captured" },
+    ]);
   });
 
   test("restores snapshot and returns payload", async () => {

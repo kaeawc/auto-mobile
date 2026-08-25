@@ -849,6 +849,12 @@ describe("CaptureSnapshot (iOS)", () => {
     await fs.writeFile(path.join(documentsPath, "data.txt"), "hello");
 
     simctl.setContainerPath(bundleId, containerRoot);
+    // Installed apps: the user app (with a container) and a system app that is
+    // installed but exposes no data container.
+    simctl.setInstalledApps([
+      { CFBundleIdentifier: bundleId },
+      { CFBundleIdentifier: "com.apple.Preferences" },
+    ]);
     simctl.setDeviceInfo(device.deviceId, {
       udid: device.deviceId,
       name: "iPhone 15",
@@ -878,8 +884,13 @@ describe("CaptureSnapshot (iOS)", () => {
     expect(parsed.snapshotName).toBe(snapshotName);
     expect(parsed.platform).toBe("ios");
     expect(parsed.appDataBackup?.backedUpPackages).toEqual([bundleId]);
+    // com.apple.Preferences is installed but container-less → skipped-no-container.
     expect(parsed.appDataBackup?.skippedPackages).toEqual(["com.apple.Preferences"]);
     expect(parsed.appDataBackup?.totalPackages).toBe(2);
+    expect(parsed.appDataBackup?.bundleStatuses).toEqual([
+      { bundleId, status: "captured" },
+      { bundleId: "com.apple.Preferences", status: "skipped-no-container" },
+    ]);
 
     const appDataPath = store.getAppDataPath(snapshotName, pathOptions);
     const copiedFile = await fs.readFile(
@@ -902,17 +913,89 @@ describe("CaptureSnapshot (iOS)", () => {
     ).rejects.toThrow("Failed to backup app data");
   });
 
-  it("marks backup as none when no bundle IDs are provided", async () => {
+  it("throws when includeAppData is true but no appBundleIds are provided", async () => {
     const captureSnapshot = makeCapture();
 
+    await expect(
+      captureSnapshot.execute({
+        snapshotName: "no-bundles",
+        includeAppData: true,
+        appBundleIds: [],
+      }),
+    ).rejects.toThrow("No app bundle IDs");
+  });
+
+  it("throws when includeAppData is true and appBundleIds is undefined", async () => {
+    const captureSnapshot = makeCapture();
+
+    await expect(
+      captureSnapshot.execute({
+        snapshotName: "undefined-bundles",
+        includeAppData: true,
+      }),
+    ).rejects.toThrow("No app bundle IDs");
+  });
+
+  it("throws when appBundleIds contains only blank entries", async () => {
+    const captureSnapshot = makeCapture();
+
+    await expect(
+      captureSnapshot.execute({
+        snapshotName: "blank-bundles",
+        includeAppData: true,
+        appBundleIds: ["  ", ""],
+      }),
+    ).rejects.toThrow("No app bundle IDs");
+  });
+
+  it("classifies bundles as captured, skipped-no-container, or not-installed", async () => {
+    const snapshotName = "classify";
+    const captured = "com.example.captured";
+    const noContainer = "com.example.nocontainer";
+    const notInstalled = "com.example.missing";
+
+    const containerRoot = path.join(testBasePath, "containers", captured);
+    await fs.mkdir(path.join(containerRoot, "Documents"), { recursive: true });
+    await fs.writeFile(path.join(containerRoot, "Documents", "data.txt"), "hello");
+
+    simctl.setContainerPath(captured, containerRoot);
+    // `noContainer` is installed but has no data container (empty path).
+    simctl.setInstalledApps([
+      { CFBundleIdentifier: captured },
+      { CFBundleIdentifier: noContainer },
+    ]);
+
+    const captureSnapshot = makeCapture();
     const result = await captureSnapshot.execute({
-      snapshotName: "no-bundles",
+      snapshotName,
       includeAppData: true,
-      appBundleIds: [],
+      includeSettings: false,
+      appBundleIds: [captured, noContainer, notInstalled],
     });
 
-    expect(result.manifest.appDataBackup?.backupMethod).toBe("none");
-    expect(result.manifest.appDataBackup?.totalPackages).toBe(0);
+    expect(result.manifest.appDataBackup?.bundleStatuses).toEqual([
+      { bundleId: captured, status: "captured" },
+      { bundleId: noContainer, status: "skipped-no-container" },
+      { bundleId: notInstalled, status: "not-installed" },
+    ]);
+    expect(result.manifest.appDataBackup?.backedUpPackages).toEqual([captured]);
+    expect(result.manifest.appDataBackup?.skippedPackages).toEqual([noContainer]);
+    expect(result.manifest.appDataBackup?.failedPackages).toEqual([notInstalled]);
+    expect(result.manifest.appDataBackup?.totalPackages).toBe(3);
+  });
+
+  it("fails in strictBackupMode when a bundle is not installed", async () => {
+    simctl.setInstalledApps([{ CFBundleIdentifier: "com.example.other" }]);
+    const captureSnapshot = makeCapture();
+
+    await expect(
+      captureSnapshot.execute({
+        snapshotName: "strict-not-installed",
+        includeAppData: true,
+        strictBackupMode: true,
+        appBundleIds: ["com.example.missing"],
+      }),
+    ).rejects.toThrow("Failed to backup app data");
   });
 
   it("captures iOS settings (locale + UI) into the manifest when includeSettings", async () => {

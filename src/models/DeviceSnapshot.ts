@@ -1,5 +1,25 @@
 export type DeviceSnapshotType = "vm" | "adb" | "simctl" | "app_data";
 
+/**
+ * Outcome of an iOS app-container capture for a single requested bundle id:
+ * `captured` — installed with a data container that was backed up;
+ * `skipped-no-container` — installed but has no data container to capture;
+ * `not-installed` — no such app is installed on the simulator;
+ * `failed` — installed with a resolved container, but copying it errored
+ * (issue #5712). `captured` → `backedUpPackages`, `skipped-no-container` →
+ * `skippedPackages`, and both `not-installed` and `failed` → `failedPackages`.
+ */
+export type IosBundleCaptureStatusKind =
+  | "captured"
+  | "skipped-no-container"
+  | "not-installed"
+  | "failed";
+
+export interface IosBundleCaptureStatus {
+  bundleId: string;
+  status: IosBundleCaptureStatusKind;
+}
+
 export interface DeviceSnapshotManifest {
   snapshotName: string;
   timestamp: string;
@@ -35,6 +55,15 @@ export interface DeviceSnapshotManifest {
     totalPackages?: number;
     backupTimedOut?: boolean;
     backupMethod?: "adb_backup" | "root_pull" | "none" | "simctl_copy";
+    /**
+     * iOS-only per-bundle outcome for each requested `appBundleIds` entry, so a
+     * caller can tell an installed-and-captured app apart from one that was
+     * never installed or has no data container — instead of every bundle
+     * silently "succeeding" (issue #5712). Mirrors the
+     * backedUp/skipped/failedPackages arrays: `captured` → backedUp,
+     * `skipped-no-container` → skipped, `not-installed` → failed.
+     */
+    bundleStatuses?: IosBundleCaptureStatus[];
   };
 }
 

@@ -13,7 +13,7 @@ export class DeviceSnapshotStore {
   private basePath: string;
 
   constructor(customBasePath?: string) {
-    this.basePath = customBasePath || path.join(os.homedir(), ".automobile", "snapshots");
+    this.basePath = customBasePath || path.join(os.homedir(), ".auto-mobile", "snapshots");
   }
 
   getBasePath(): string {

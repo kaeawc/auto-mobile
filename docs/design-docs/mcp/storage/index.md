@@ -16,7 +16,7 @@ flowchart TB
 
     subgraph Storage["Persistent Storage"]
         SQLite["🗄️ SQLite<br/>~/.auto-mobile/auto-mobile.db"]
-        Snapshots["📸 Snapshots<br/>~/.automobile/snapshots/"]
+        Snapshots["📸 Snapshots<br/>~/.auto-mobile/snapshots/"]
         Migrations["🔄 Migrations<br/>src/db/migrations/"]
     end
 
@@ -38,7 +38,7 @@ flowchart TB
 | Path                            | Purpose                        |
 | ------------------------------- | ------------------------------ |
 | `~/.auto-mobile/auto-mobile.db` | SQLite database for metadata   |
-| `~/.automobile/snapshots/`      | Device state snapshot payloads |
+| `~/.auto-mobile/snapshots/`     | Device state snapshot payloads |
 | `~/.auto-mobile/*.sock`         | Unix sockets for configuration |
 
 ## Topics
@@ -78,9 +78,9 @@ See [Database Migrations](migrations.md) for details on adding new migrations.
 
 Device snapshots use a hybrid approach:
 
-| Snapshot Type | Metadata | Payload                    |
-| ------------- | -------- | -------------------------- |
-| VM Snapshot   | SQLite   | Emulator AVD directory     |
-| ADB Snapshot  | SQLite   | `~/.automobile/snapshots/` |
+| Snapshot Type | Metadata | Payload                     |
+| ------------- | -------- | --------------------------- |
+| VM Snapshot   | SQLite   | Emulator AVD directory      |
+| ADB Snapshot  | SQLite   | `~/.auto-mobile/snapshots/` |
 
 See [Device Snapshots](snapshots.md) for capture/restore workflows.

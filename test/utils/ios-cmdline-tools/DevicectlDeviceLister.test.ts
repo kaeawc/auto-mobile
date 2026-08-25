@@ -5,6 +5,7 @@ import {
 } from "../../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import type { ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { join } from "path";
 
 const PHYSICAL_UDID = "00008120-001C2D3E1234567A";
@@ -108,6 +109,36 @@ describe("parseDevicectlDeviceList", () => {
     expect(devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID, LEGACY_UDID].sort());
   });
 
+  test("rejects connected non-iOS CoreDevices (Watch, TV, Vision)", () => {
+    const devices = parseDevicectlDeviceList(
+      devicectlPayload([
+        connectedIphone({
+          hardwareProperties: { udid: LEGACY_UDID, platform: "watchOS", productType: "Watch7,1" },
+        }),
+        connectedIphone({
+          hardwareProperties: { udid: PHYSICAL_UDID, platform: "xrOS" },
+        }),
+      ]),
+    );
+
+    expect(devices).toEqual([]);
+  });
+
+  test("keeps iPadOS records and records that omit the platform field", () => {
+    const devices = parseDevicectlDeviceList(
+      devicectlPayload([
+        connectedIphone({
+          hardwareProperties: { udid: LEGACY_UDID, platform: "iPadOS", productType: "iPad14,3" },
+        }),
+        connectedIphone({ hardwareProperties: { udid: PHYSICAL_UDID } }),
+      ]),
+    );
+
+    expect(devices.map((device) => device.deviceId).sort()).toEqual(
+      [LEGACY_UDID, PHYSICAL_UDID].sort(),
+    );
+  });
+
   test("rejects records whose udid is not a physical iOS udid", () => {
     const devices = parseDevicectlDeviceList(
       devicectlPayload([
@@ -156,7 +187,7 @@ describe("DevicectlDeviceLister", () => {
       },
     });
 
-    expect(await lister.listConnectedDevices()).toEqual([]);
+    expect(await lister.listConnectedDevices()).toEqual({ devices: [], complete: true });
     expect(executed).toBe(0);
   });
 
@@ -173,27 +204,47 @@ describe("DevicectlDeviceLister", () => {
       },
     });
 
-    const devices = await lister.listConnectedDevices();
+    const discovery = await lister.listConnectedDevices();
 
-    expect(devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
+    expect(discovery.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
+    expect(discovery.complete).toBe(true);
     expect(args.slice(0, 3)).toEqual(["devicectl", "list", "devices"]);
     expect(args).toContain(JSON_PATH);
   });
 
-  test("degrades to an empty list when devicectl is unavailable", async () => {
+  test("degrades to an incomplete empty list when devicectl is unavailable", async () => {
     const lister = makeLister({
       execute: async () => {
         throw new Error('xcrun: error: unable to find utility "devicectl"');
       },
     });
 
-    expect(await lister.listConnectedDevices()).toEqual([]);
+    // `complete: false` is what stops the daemon reading this as "the iPhone
+    // disconnected" and pruning a device that is still plugged in.
+    expect(await lister.listConnectedDevices()).toEqual({ devices: [], complete: false });
   });
 
-  test("degrades to an empty list when the JSON output is unreadable", async () => {
+  test("degrades to an incomplete empty list when the JSON output is unreadable", async () => {
     const lister = makeLister({ readFile: async () => "{not json" });
 
-    expect(await lister.listConnectedDevices()).toEqual([]);
+    expect(await lister.listConnectedDevices()).toEqual({ devices: [], complete: false });
+  });
+
+  test("bounds the devicectl invocation and forwards the ambient abort signal", async () => {
+    let options: { timeoutMs?: number; signal?: AbortSignal } | undefined;
+    const controller = new AbortController();
+    const lister = makeLister({
+      execute: async (_file: string, _args: string[], execOptions: typeof options) => {
+        options = execOptions;
+        return okExec;
+      },
+      readFile: async () => JSON.stringify(devicectlPayload([])),
+    });
+
+    await runWithAbortSignal(controller.signal, () => lister.listConnectedDevices());
+
+    expect(options?.timeoutMs).toBe(15_000);
+    expect(options?.signal).toBe(controller.signal);
   });
 
   test("removes its temp directory on both success and failure", async () => {
@@ -240,7 +291,7 @@ describe("DevicectlDeviceLister", () => {
     expect(executions).toBe(1);
 
     timer.advanceTime(2);
-    expect((await lister.listConnectedDevices()).map((device) => device.deviceId)).toEqual([
+    expect((await lister.listConnectedDevices()).devices.map((device) => device.deviceId)).toEqual([
       PHYSICAL_UDID,
     ]);
     expect(executions).toBe(2);
@@ -255,8 +306,8 @@ describe("DevicectlDeviceLister", () => {
       },
     });
 
-    expect(await lister.listConnectedDevices()).toEqual([]);
-    expect(await lister.listConnectedDevices()).toEqual([]);
+    expect(await lister.listConnectedDevices()).toEqual({ devices: [], complete: false });
+    expect(await lister.listConnectedDevices()).toEqual({ devices: [], complete: false });
     expect(executions).toBe(1);
   });
 
@@ -287,7 +338,7 @@ describe("DevicectlDeviceLister", () => {
       readFile: async () => JSON.stringify(devicectlPayload([connectedIphone()])),
     });
 
-    expect((await lister.listConnectedDevices()).map((device) => device.deviceId)).toEqual([
+    expect((await lister.listConnectedDevices()).devices.map((device) => device.deviceId)).toEqual([
       PHYSICAL_UDID,
     ]);
   });

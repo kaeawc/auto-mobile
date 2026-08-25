@@ -7,7 +7,9 @@ import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import {
   DevicectlDeviceLister,
   type IosPhysicalDeviceLister,
+  type PhysicalIosDeviceDiscovery,
 } from "./ios-cmdline-tools/DevicectlDeviceLister";
+import { isIosPhysicalUdid } from "./ios-cmdline-tools/iosDeviceType";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
 import { deleteAvd } from "./android-cmdline-tools/avdmanager";
 import { logger } from "./logger";
@@ -358,14 +360,15 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
    * answer. Additive to simulator discovery and never throws, so a host with no
    * Xcode/hardware still resolves its simulators (issue #5620).
    */
-  private async listPhysicalIosDevices(): Promise<BootedDevice[]> {
+  private async listPhysicalIosDevices(): Promise<PhysicalIosDeviceDiscovery> {
     try {
       return await this.physicalIosDevices.listConnectedDevices();
     } catch (error) {
       // The lister contract is non-throwing; a misbehaving implementation must
-      // still not take simulator discovery down with it.
-      logger.debug(`[DeviceManager] physical iOS device discovery failed: ${errorMessage(error)}`);
-      return [];
+      // still not take simulator discovery down with it. `complete: false` so a
+      // devicectl blip cannot be read as "the physical device disconnected".
+      logger.warn(`[DeviceManager] physical iOS device discovery failed: ${errorMessage(error)}`);
+      return { devices: [], complete: false };
     }
   }
 
@@ -377,7 +380,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       logger.debug(`[DeviceManager] booted simulator discovery failed: ${errorMessage(error)}`);
       return [] as BootedDevice[];
     });
-    return mergeIosDevices(simulators, await this.listPhysicalIosDevices());
+    return mergeIosDevices(simulators, (await this.listPhysicalIosDevices()).devices);
   }
 
   /**
@@ -553,13 +556,27 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     const physical = await this.listPhysicalIosDevices();
     try {
       const simulators = await this.simctl.getBootedSimulatorsChecked();
-      return { devices: mergeIosDevices(simulators, physical), succeeded: true };
+      const devices = mergeIosDevices(simulators, physical.devices);
+      // An incomplete physical sweep leaves iOS un-discovered even though simctl
+      // answered: the disconnect monitor prunes on this flag, and a devicectl
+      // blip must not evict a still-connected iPhone.
+      return physical.complete
+        ? { devices, succeeded: true }
+        : {
+            devices,
+            succeeded: false,
+            error: {
+              code: "failed",
+              message:
+                "iOS physical-device discovery failed; retaining tracked physical iOS devices.",
+            },
+          };
     } catch (error) {
       logger.warn(
         `[DeviceManager] iOS booted-device discovery failed; retaining tracked iOS devices: ${error}`,
       );
       return {
-        devices: physical,
+        devices: physical.devices,
         succeeded: false,
         error: {
           code: "failed",
@@ -700,6 +717,20 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
           signal,
         );
       case "ios":
+        // A connected physical device has no simulator lifecycle: `simctl
+        // bootstatus` cannot answer for its UDID, and discovery already proved
+        // it reachable. Treat successful discovery as readiness rather than
+        // shelling out to a tool that would only fail (issue #5620).
+        if (device.deviceId && isIosPhysicalUdid(device.deviceId)) {
+          return {
+            name: device.name,
+            platform: "ios",
+            deviceId: device.deviceId,
+            ...(device.iosVersion ? { iosVersion: device.iosVersion } : {}),
+            ...(device.osVersion ? { osVersion: device.osVersion } : {}),
+            ...(device.formFactor ? { formFactor: device.formFactor } : {}),
+          };
+        }
         // A `childProcess` is only supplied on the cold-boot path, where
         // `startSimulator` has already run `bootstatus -b`. Signal that so the
         // wait doesn't redundantly repeat the full boot-readiness wait; the

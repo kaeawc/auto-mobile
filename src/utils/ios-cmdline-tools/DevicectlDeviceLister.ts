@@ -4,7 +4,8 @@ import { join } from "path";
 import type { ExecResult } from "../../models";
 import type { BootedDevice } from "../../models/DeviceInfo";
 import { errorMessage } from "../describeUnknownError";
-import { DefaultHostCommandExecutor } from "../HostCommandExecutor";
+import { DefaultHostCommandExecutor, type HostCommandOptions } from "../HostCommandExecutor";
+import { getAbortSignal } from "../AbortContext";
 import { logger, type Logger } from "../logger";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { inferIosFormFactor, isIosPhysicalUdid } from "./iosDeviceType";
@@ -20,7 +21,25 @@ import { inferIosFormFactor, isIosPhysicalUdid } from "./iosDeviceType";
  * attached hardware degrades to an empty list.
  */
 export interface IosPhysicalDeviceLister {
-  listConnectedDevices(): Promise<BootedDevice[]>;
+  listConnectedDevices(): Promise<PhysicalIosDeviceDiscovery>;
+}
+
+/**
+ * Outcome of one physical-device sweep.
+ *
+ * `complete` is the load-bearing half: it is false ONLY when devicectl was
+ * reachable but its listing failed, so callers can tell "no physical devices are
+ * attached" from "we could not find out". The daemon's disconnect monitor prunes
+ * on that distinction, and pruning a still-connected iPhone because devicectl
+ * blipped would evict a device mid-session.
+ *
+ * A host that cannot run devicectl at all (non-darwin, no Xcode) reports
+ * `complete: true`: no physical device can ever be tracked there, so their
+ * absence is authoritative.
+ */
+export interface PhysicalIosDeviceDiscovery {
+  devices: BootedDevice[];
+  complete: boolean;
 }
 
 /**
@@ -33,6 +52,20 @@ export interface IosPhysicalDeviceLister {
  * rejection. Only states devicectl documents as unreachable filter a device out.
  */
 const UNREACHABLE_TUNNEL_STATES = new Set(["unavailable", "disconnected"]);
+
+/**
+ * `hardwareProperties.platform` values this lister accepts as an iOS device.
+ *
+ * A paired Apple Watch, Apple TV, or Vision Pro is a CoreDevice too, and they
+ * use the same physical-UDID shapes — so the UDID pattern alone cannot tell them
+ * apart. Without this gate they would be published as `platform: "ios"` and
+ * route iOS operations to hardware that cannot serve them.
+ *
+ * A record with NO platform field is still accepted, keeping the same
+ * degrade-toward-inclusion policy as {@link UNREACHABLE_TUNNEL_STATES}: older
+ * devicectl payloads that omit the field must not lose their iPhones.
+ */
+const IOS_PLATFORM_VALUES = new Set(["ios", "ipados"]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -76,12 +109,29 @@ function reachablePhysicalUdid(
   connection: Record<string, unknown> | null,
   identifier: unknown,
 ): string | null {
-  const udid = asString(hardware?.udid) ?? asString(identifier);
-  if (!udid || !isIosPhysicalUdid(udid)) {
+  if (!isIosPlatform(hardware) || !isReachable(connection)) {
     return null;
   }
+  const udid = asString(hardware?.udid) ?? asString(identifier);
+  return udid && isIosPhysicalUdid(udid) ? udid : null;
+}
+
+/**
+ * False only when the record names a platform that is not iOS. A missing field
+ * passes, per the degrade-toward-inclusion policy on {@link IOS_PLATFORM_VALUES}.
+ */
+function isIosPlatform(hardware: Record<string, unknown> | null): boolean {
+  const devicePlatform = asString(hardware?.platform)?.toLowerCase();
+  return !devicePlatform || IOS_PLATFORM_VALUES.has(devicePlatform);
+}
+
+/**
+ * False only when devicectl names a tunnel state it documents as unreachable.
+ * A missing or unrecognized state passes; see {@link UNREACHABLE_TUNNEL_STATES}.
+ */
+function isReachable(connection: Record<string, unknown> | null): boolean {
   const tunnelState = asString(connection?.tunnelState)?.toLowerCase();
-  return tunnelState && UNREACHABLE_TUNNEL_STATES.has(tunnelState) ? null : udid;
+  return !tunnelState || !UNREACHABLE_TUNNEL_STATES.has(tunnelState);
 }
 
 /**
@@ -161,10 +211,18 @@ export function parseDevicectlDeviceList(data: unknown): BootedDevice[] {
  */
 const DEVICE_LIST_CACHE_TTL_MS = 3_000;
 
+/**
+ * Ceiling on one `devicectl list devices` invocation. Unbounded, a stalled
+ * devicectl would hang every caller awaiting iOS discovery — including
+ * simulator-only app-resource reads — and the shared in-flight promise would
+ * wedge each later sweep behind it.
+ */
+const DEVICE_LIST_TIMEOUT_MS = 15_000;
+
 interface DevicectlDeviceListerDependencies {
   platform: () => NodeJS.Platform;
   timer: Pick<Timer, "now">;
-  execute: (file: string, args: string[]) => Promise<ExecResult>;
+  execute: (file: string, args: string[], options: HostCommandOptions) => Promise<ExecResult>;
   readFile: (path: string) => Promise<string>;
   mkdtemp: (prefix: string) => Promise<string>;
   rm: (path: string) => Promise<void>;
@@ -174,7 +232,8 @@ interface DevicectlDeviceListerDependencies {
 
 const defaultDependencies: DevicectlDeviceListerDependencies = {
   platform: () => process.platform,
-  execute: (file, args) => new DefaultHostCommandExecutor().executeCommand(file, args),
+  execute: (file, args, options) =>
+    new DefaultHostCommandExecutor().executeCommand(file, args, options),
   readFile: async (path) => fs.readFile(path, "utf-8"),
   mkdtemp: async (prefix) => fs.mkdtemp(prefix),
   rm: async (path) => fs.rm(path, { recursive: true, force: true }),
@@ -194,19 +253,19 @@ const defaultDependencies: DevicectlDeviceListerDependencies = {
  */
 export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
   private readonly deps: DevicectlDeviceListerDependencies;
-  private cache: { devices: BootedDevice[]; expiresAt: number } | null = null;
-  private inFlight: Promise<BootedDevice[]> | null = null;
+  private cache: { discovery: PhysicalIosDeviceDiscovery; expiresAt: number } | null = null;
+  private inFlight: Promise<PhysicalIosDeviceDiscovery> | null = null;
 
   constructor(dependencies: Partial<DevicectlDeviceListerDependencies> = {}) {
     this.deps = { ...defaultDependencies, ...dependencies };
   }
 
-  async listConnectedDevices(): Promise<BootedDevice[]> {
+  async listConnectedDevices(): Promise<PhysicalIosDeviceDiscovery> {
     if (this.deps.platform() !== "darwin") {
-      return [];
+      return { devices: [], complete: true };
     }
     if (this.cache && this.deps.timer.now() < this.cache.expiresAt) {
-      return this.cache.devices;
+      return this.cache.discovery;
     }
     // Concurrent sweeps share one devicectl process rather than racing two.
     this.inFlight ??= this.runListing().finally(() => {
@@ -215,21 +274,21 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
     return this.inFlight;
   }
 
-  private async runListing(): Promise<BootedDevice[]> {
+  private async runListing(): Promise<PhysicalIosDeviceDiscovery> {
     let tempDir: string | null = null;
     try {
       tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-devices-"));
       const jsonPath = join(tempDir, "devices.json");
-      await this.deps.execute("xcrun", [
-        "devicectl",
-        "list",
-        "devices",
-        "--json-output",
-        jsonPath,
-        "--quiet",
-      ]);
+      await this.deps.execute(
+        "xcrun",
+        ["devicectl", "list", "devices", "--json-output", jsonPath, "--quiet"],
+        { timeoutMs: DEVICE_LIST_TIMEOUT_MS, signal: getAbortSignal() },
+      );
       const raw = await this.deps.readFile(jsonPath);
-      return this.remember(parseDevicectlDeviceList(JSON.parse(raw) as unknown));
+      return this.remember({
+        devices: parseDevicectlDeviceList(JSON.parse(raw) as unknown),
+        complete: true,
+      });
     } catch (error) {
       // A host without Xcode 15+, without paired hardware, or with a devicectl
       // that failed still has working simulator discovery; degrade to
@@ -238,8 +297,9 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
         `[DevicectlDeviceLister] physical iOS device discovery unavailable: ${errorMessage(error)}`,
       );
       // Cache the empty result too: a host with no Xcode must not pay for a
-      // failing process spawn on every sweep.
-      return this.remember([]);
+      // failing process spawn on every sweep. `complete: false` keeps callers
+      // from reading the emptiness as "the iPhone went away".
+      return this.remember({ devices: [], complete: false });
     } finally {
       if (tempDir) {
         try {
@@ -253,8 +313,8 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
     }
   }
 
-  private remember(devices: BootedDevice[]): BootedDevice[] {
-    this.cache = { devices, expiresAt: this.deps.timer.now() + DEVICE_LIST_CACHE_TTL_MS };
-    return devices;
+  private remember(discovery: PhysicalIosDeviceDiscovery): PhysicalIosDeviceDiscovery {
+    this.cache = { discovery, expiresAt: this.deps.timer.now() + DEVICE_LIST_CACHE_TTL_MS };
+    return discovery;
   }
 }

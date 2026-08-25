@@ -42,6 +42,7 @@ describe("MultiPlatformDeviceManager", () => {
     function makeManager(options: {
       simulators?: BootedDevice[] | Error;
       physical?: BootedDevice[] | Error;
+      physicalComplete?: boolean;
     }): MultiPlatformDeviceManager {
       const resolve = <T>(value: T | Error): Promise<T> =>
         value instanceof Error ? Promise.reject(value) : Promise.resolve(value);
@@ -51,7 +52,10 @@ describe("MultiPlatformDeviceManager", () => {
         getBootedSimulatorsChecked: () => resolve(options.simulators ?? []),
       } as unknown as SimCtlClient;
       const fakeLister: IosPhysicalDeviceLister = {
-        listConnectedDevices: () => resolve(options.physical ?? []),
+        listConnectedDevices: async () => ({
+          devices: await resolve(options.physical ?? []),
+          complete: options.physicalComplete ?? true,
+        }),
       };
 
       return new MultiPlatformDeviceManager(
@@ -125,6 +129,62 @@ describe("MultiPlatformDeviceManager", () => {
         expect(discovery.devices).toEqual([physicalDevice]);
         expect(discovery.succeededPlatforms.has("ios")).toBe(false);
         expect(discovery.discoveryErrors.ios?.code).toBe("failed");
+      });
+    });
+
+    test("an incomplete physical sweep keeps iOS out of succeededPlatforms", async () => {
+      await withProcessPlatform("darwin", async () => {
+        // A devicectl blip must not let the disconnect monitor prune a
+        // still-connected iPhone just because simctl answered.
+        const manager = makeManager({
+          simulators: [simulator],
+          physical: [],
+          physicalComplete: false,
+        });
+
+        const discovery = await manager.getBootedDevicesDetailed("ios");
+
+        expect(discovery.devices).toEqual([simulator]);
+        expect(discovery.succeededPlatforms.has("ios")).toBe(false);
+        expect(discovery.discoveryErrors.ios?.code).toBe("failed");
+      });
+    });
+
+    test("a lister that throws is reported as an incomplete sweep, not an empty one", async () => {
+      await withProcessPlatform("darwin", async () => {
+        const manager = makeManager({
+          simulators: [simulator],
+          physical: new Error("lister broke its non-throwing contract"),
+        });
+
+        const discovery = await manager.getBootedDevicesDetailed("ios");
+
+        expect(discovery.devices).toEqual([simulator]);
+        expect(discovery.succeededPlatforms.has("ios")).toBe(false);
+      });
+    });
+
+    test("waitForDeviceReady adopts a connected physical device without simctl", async () => {
+      await withProcessPlatform("darwin", async () => {
+        const fakeSimctl = {
+          isAvailable: async () => true,
+          waitForSimulatorReady: async () => {
+            throw new Error("simctl bootstatus must not run for a physical UDID");
+          },
+        } as unknown as SimCtlClient;
+        const manager = new MultiPlatformDeviceManager(
+          new FakeAdbClient() as unknown as AdbClient,
+          fakeSimctl,
+          {} as unknown as AndroidEmulatorClient,
+        );
+
+        await expect(
+          manager.waitForDeviceReady({
+            name: physicalDevice.name,
+            platform: "ios",
+            deviceId: physicalDevice.deviceId,
+          } as DeviceInfo),
+        ).resolves.toEqual(physicalDevice);
       });
     });
 

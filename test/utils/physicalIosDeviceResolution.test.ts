@@ -38,7 +38,7 @@ describe("physical iOS device resolution reaches ListInstalledApps", () => {
       { getBootedDevices: async () => [] } as unknown as AndroidEmulatorClient,
       undefined,
       undefined,
-      { listConnectedDevices: async () => [physical] },
+      { listConnectedDevices: async () => ({ devices: [physical], complete: true }) },
     );
 
     // Exactly the lookup src/server/appResources.ts performs.

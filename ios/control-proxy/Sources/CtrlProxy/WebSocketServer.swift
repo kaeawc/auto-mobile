@@ -665,6 +665,16 @@ class WebSocketConnection: WebSocketResponding {
     private var fragmentedOpcode: UInt8?
     private var fragmentBuffer = Data()
 
+    /// Whether `onClose` has already fired for this connection. Every error/close
+    /// path now cancels the `NWConnection` and lets the `.cancelled` state
+    /// transition invoke `onClose`, but Network.framework can deliver both
+    /// `.failed` and `.cancelled` for one socket, so this guard keeps the callback
+    /// — which removes the connection from the registry and updates presence
+    /// bookkeeping — firing exactly once (issue #5677). Touched only from the state
+    /// handler and receive/send completions, all of which run on the server
+    /// `queue`, so it needs no lock (same invariant as the reassembly state).
+    private var didFireClose = false
+
     init(
         id: Int,
         connection: NWConnection,
@@ -693,7 +703,7 @@ class WebSocketConnection: WebSocketResponding {
             case .ready:
                 self?.receiveHTTPUpgrade()
             case .failed, .cancelled:
-                self?.onClose()
+                self?.fireOnClose()
             default:
                 break
             }
@@ -704,6 +714,32 @@ class WebSocketConnection: WebSocketResponding {
 
     func close() {
         connection.cancel()
+    }
+
+    /// Deterministically tears the socket down on an error/close path by
+    /// cancelling the `NWConnection`, mirroring how `close()` / `stop()` already
+    /// release the socket. The `.cancelled` state transition then invokes `onClose`
+    /// exactly once via `fireOnClose()`, so no error/close path is left calling
+    /// `onClose` directly and leaking a half-open connection whose file descriptor
+    /// lingers until the peer disconnects (issue #5677). `NWConnection.cancel()` is
+    /// idempotent, so a path that cancels and then also observes `.failed` /
+    /// `.cancelled` stays safe. Runs on the server `queue` (every receive/send
+    /// completion does), so it needs no lock.
+    private func closeConnection() {
+        connection.cancel()
+    }
+
+    /// Invokes the `onClose` callback at most once per connection. Called only from
+    /// the `.failed` / `.cancelled` state handler now that every error/close path
+    /// cancels the connection rather than calling `onClose` inline; the
+    /// `didFireClose` guard collapses a `.failed`-then-`.cancelled` pair (or any
+    /// repeat) into a single `onClose` (issue #5677 AC2). Internal, not private, so
+    /// `WebSocketServerTests` can pin the exactly-once contract without a live
+    /// socket. Runs on the server `queue`, so the guard needs no lock.
+    func fireOnClose() {
+        guard !didFireClose else { return }
+        didFireClose = true
+        onClose()
     }
 
     func send(_ data: Data) {
@@ -723,12 +759,12 @@ class WebSocketConnection: WebSocketResponding {
 
             if let error = error {
                 print("[WebSocketConnection] Error: \(error)")
-                self.onClose()
+                self.closeConnection()
                 return
             }
 
             if isComplete {
-                self.onClose()
+                self.closeConnection()
                 return
             }
 
@@ -910,7 +946,7 @@ class WebSocketConnection: WebSocketResponding {
         connection.send(content: response.data(using: .utf8), completion: .contentProcessed { [weak self] error in
             if let error = error {
                 print("[WebSocketConnection] Upgrade send error: \(error)")
-                self?.onClose()
+                self?.closeConnection()
                 return
             }
 
@@ -973,7 +1009,7 @@ class WebSocketConnection: WebSocketResponding {
 
             if let error = error {
                 print("[WebSocketConnection] Frame error: \(error)")
-                self.onClose()
+                self.closeConnection()
                 return
             }
 
@@ -1014,7 +1050,7 @@ class WebSocketConnection: WebSocketResponding {
             // Still short of a full frame. EOF here means the peer closed
             // mid-frame, so nothing more is coming — close.
             if isComplete {
-                self.onClose()
+                self.closeConnection()
                 return
             }
 
@@ -1053,10 +1089,11 @@ class WebSocketConnection: WebSocketResponding {
         let isMasked = (byte1 & 0x80) != 0
         let payloadLength = UInt64(byte1 & 0x7F)
 
-        // Handle close frame
+        // Handle close frame. Send the close frame back, then cancel the socket
+        // from the send completion so the peer receives the close before the TCP
+        // teardown; the `.cancelled` transition fires `onClose` once (issue #5677).
         if opcode == 0x08 {
             sendCloseFrame()
-            onClose()
             return
         }
 
@@ -1071,7 +1108,7 @@ class WebSocketConnection: WebSocketResponding {
         if opcode == 0x09 {
             guard Self.isValidControlFramePayloadLength(payloadLength) else {
                 print("[WebSocketConnection] Ping payload too large (\(payloadLength) bytes), closing connection")
-                onClose()
+                closeConnection()
                 return
             }
             readPayload(length: payloadLength, isMasked: isMasked, opcode: opcode, isFinal: isFinal)
@@ -1312,7 +1349,7 @@ class WebSocketConnection: WebSocketResponding {
     private func readPayload(length: UInt64, isMasked: Bool, opcode: UInt8, isFinal: Bool) {
         guard let totalLength = Self.frameReadLength(payloadLength: length, isMasked: isMasked) else {
             print("[WebSocketConnection] Frame payload too large (\(length) bytes), closing connection")
-            onClose()
+            closeConnection()
             return
         }
 
@@ -1331,7 +1368,7 @@ class WebSocketConnection: WebSocketResponding {
             print("[WebSocketConnection] Fragmentation protocol error (pre-read): \(reason), closing connection")
             fragmentedOpcode = nil
             fragmentBuffer = Data()
-            onClose()
+            closeConnection()
             return
         }
 
@@ -1404,7 +1441,7 @@ class WebSocketConnection: WebSocketResponding {
             print("[WebSocketConnection] Fragmentation protocol error: \(reason), closing connection")
             fragmentedOpcode = nil
             fragmentBuffer = Data()
-            onClose()
+            closeConnection()
         }
     }
 
@@ -1437,7 +1474,12 @@ class WebSocketConnection: WebSocketResponding {
 
     private func sendCloseFrame() {
         let frame = Self.createWebSocketFrame(data: Data(), opcode: 0x08)
-        connection.send(content: frame, completion: .contentProcessed { _ in })
+        // Cancel from the send completion — as the HTTP responders do — so the
+        // close frame reaches the peer before the TCP teardown; the resulting
+        // `.cancelled` transition fires `onClose` exactly once (issue #5677).
+        connection.send(content: frame, completion: .contentProcessed { [weak self] _ in
+            self?.connection.cancel()
+        })
     }
 }
 

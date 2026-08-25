@@ -920,4 +920,94 @@ final class NetworkCaptureRecorderTests: XCTestCase {
         XCTAssertNil(collector.records.first?.requestBodySize)
         XCTAssertEqual(collector.records.first?.responseBodySize, 13)
     }
+
+    #if DEBUG
+    private func makeDelayedFaultProtocol(client: RecordingURLProtocolClient) -> AutoMobileURLProtocol {
+        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: SdkEventBuffer { _ in })
+        NetworkMockRuleStore.shared.setFaultRules([
+            NetworkFaultRuleDTO(
+                faultId: "delayed-error", transport: .urlSession, host: nil, port: nil,
+                scheme: nil, path: nil, method: nil, headers: nil, origin: nil,
+                connectionId: nil, sessionId: nil, action: .error, statusCode: nil,
+                responseHeaders: nil, responseBody: nil, contentType: nil, errorType: "timeout",
+                delayMs: 100, bandwidthBytesPerSecond: nil, dropBytes: nil, limit: nil,
+                expiresAtEpochMs: nil, scope: nil, dryRun: false
+            ),
+        ])
+        let request = URLRequest(url: URL(string: "https://api.example.com/v1/x")!)
+        return AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+    }
+
+    // The delayed fault fires normally when the protocol has NOT been stopped.
+    func testDelayedFaultFiresWhenNotStopped() {
+        let scheduler = FakeFaultScheduler()
+        AutoMobileURLProtocol.faultScheduler = scheduler
+        defer {
+            AutoMobileURLProtocol.faultScheduler = RealFaultScheduler()
+            NetworkMockRuleStore.shared.setFaultRules([])
+        }
+
+        let client = RecordingURLProtocolClient()
+        let proto = makeDelayedFaultProtocol(client: client)
+        proto.startLoading() // schedules the fault via the fake scheduler (captured, not fired)
+
+        scheduler.captured?.perform() // fire the delayed fault
+
+        XCTAssertEqual(client.calls, ["didFail"], "an un-stopped delayed fault serves the client")
+    }
+
+    // A fault whose work item fires AFTER stopLoading — the already-running interleaving —
+    // must not invoke the client, because serveFault's stopped-check is atomic with delivery.
+    func testDelayedFaultFiringAfterStopDoesNotCallClient() {
+        let scheduler = FakeFaultScheduler()
+        AutoMobileURLProtocol.faultScheduler = scheduler
+        defer {
+            AutoMobileURLProtocol.faultScheduler = RealFaultScheduler()
+            NetworkMockRuleStore.shared.setFaultRules([])
+        }
+
+        let client = RecordingURLProtocolClient()
+        let proto = makeDelayedFaultProtocol(client: client)
+        proto.startLoading() // captures the work item
+        proto.stopLoading() // marks the protocol stopped (and cancels the work item)
+
+        scheduler.captured?.perform() // fire the (now stale) work item anyway
+
+        XCTAssertTrue(
+            client.calls.isEmpty,
+            "a delayed fault that fires after stopLoading() must not invoke the client"
+        )
+    }
+    #endif
+}
+
+#if DEBUG
+/// Captures the delayed-fault work item so a test can fire it deterministically, instead
+/// of waiting on the real timer.
+private final class FakeFaultScheduler: FaultScheduling {
+    var captured: DispatchWorkItem?
+    func schedule(delayMs _: Int, work: DispatchWorkItem) { captured = work }
+}
+#endif
+
+/// Records `URLProtocolClient` callbacks so a test can assert a stopped protocol makes none.
+private final class RecordingURLProtocolClient: NSObject, URLProtocolClient {
+    private let lock = NSLock()
+    private var _calls: [String] = []
+    var calls: [String] {
+        lock.lock(); defer { lock.unlock() }; return _calls
+    }
+
+    private func record(_ name: String) {
+        lock.lock(); _calls.append(name); lock.unlock()
+    }
+
+    func urlProtocol(_: URLProtocol, wasRedirectedTo _: URLRequest, redirectResponse _: URLResponse) { record("redirect") }
+    func urlProtocol(_: URLProtocol, cachedResponseIsValid _: CachedURLResponse) { record("cached") }
+    func urlProtocol(_: URLProtocol, didReceive _: URLResponse, cacheStoragePolicy _: URLCache.StoragePolicy) { record("didReceive") }
+    func urlProtocol(_: URLProtocol, didLoad _: Data) { record("didLoad") }
+    func urlProtocolDidFinishLoading(_: URLProtocol) { record("finish") }
+    func urlProtocol(_: URLProtocol, didFailWithError _: Error) { record("didFail") }
+    func urlProtocol(_: URLProtocol, didReceive _: URLAuthenticationChallenge) { record("challenge") }
+    func urlProtocol(_: URLProtocol, didCancel _: URLAuthenticationChallenge) { record("cancelChallenge") }
 }

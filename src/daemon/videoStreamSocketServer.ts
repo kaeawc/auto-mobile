@@ -387,12 +387,16 @@ export class VideoStreamSocketServer extends BaseSocketServer {
               current.rotation = rotation;
             }
           },
-          onDroppedFrames: droppedFrames => {
+          onDroppedFrames: (droppedFrames) => {
             const current = this.captures.get(deviceId);
-            if (!current || !Number.isSafeInteger(droppedFrames) || droppedFrames < 0) {return;}
+            if (!current || !Number.isSafeInteger(droppedFrames) || droppedFrames < 0) {
+              return;
+            }
             const packet = encodeDroppedFrames(droppedFrames);
             for (const subscriber of current.subscribers) {
-              if (!subscriber.destroyed) {subscriber.write(packet);}
+              if (!subscriber.destroyed) {
+                subscriber.write(packet);
+              }
             }
           },
           onError: (error) => {
@@ -698,6 +702,7 @@ function defaultDependencies(): VideoStreamSocketServerDependencies {
           onData: options.onData,
           onError: options.onError,
           onRotation: options.onRotation,
+          onDroppedFrames: options.onDroppedFrames,
           bitrateBps: options.bitrateBps,
           size: options.size,
           quality: options.quality,

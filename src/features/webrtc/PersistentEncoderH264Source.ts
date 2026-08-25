@@ -2229,7 +2229,9 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
         this.sawStreamingStarted = true;
       }
       for (const line of lines) {
-        if (!line.startsWith("VIDEO_STATS ")) {continue;}
+        if (!line.startsWith("VIDEO_STATS ")) {
+          continue;
+        }
         const match = VIDEO_STATS_PATTERN.exec(line);
         const droppedFrames = match ? Number(match[1]) : NaN;
         if (Number.isSafeInteger(droppedFrames) && droppedFrames >= 0) {

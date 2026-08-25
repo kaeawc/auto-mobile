@@ -95,7 +95,10 @@ export function encodePacket(ptsAndFlags: bigint, payload: Buffer): Buffer {
 
 /** Encode source-side encoder-drop telemetry without injecting bytes into the H.264 decoder. */
 export function encodeDroppedFrames(droppedFrames: number): Buffer {
-  return encodePacket(PACKET_FLAG_DROPPED_FRAMES | (BigInt(droppedFrames) & PTS_MASK), Buffer.alloc(0));
+  return encodePacket(
+    PACKET_FLAG_DROPPED_FRAMES | (BigInt(droppedFrames) & PTS_MASK),
+    Buffer.alloc(0),
+  );
 }
 
 /**

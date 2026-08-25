@@ -138,7 +138,7 @@ async function startHarness(
     captureOptions,
     emit: (chunk) => onData?.(chunk),
     emitRotation: (rotation) => onRotation?.(rotation),
-    emitDroppedFrames: droppedFrames => onDroppedFrames?.(droppedFrames),
+    emitDroppedFrames: (droppedFrames) => onDroppedFrames?.(droppedFrames),
     cleanup: async () => {
       await server.close();
       rmSync(dir, { recursive: true, force: true });

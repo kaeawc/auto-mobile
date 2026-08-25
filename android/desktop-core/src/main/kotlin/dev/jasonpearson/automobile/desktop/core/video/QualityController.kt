@@ -109,6 +109,7 @@ class QualityController(
         samples = 0
         lowStreak = 0
         highStreak = 0
+        dropStreak = 0
       }
       field = value
     }
@@ -200,21 +201,38 @@ class QualityController(
   }
 
   private var lastDroppedFrames: Long? = null
+  private var dropStreak = 0
 
   /**
    * Records the source encoder's cumulative dropped-frame count. Counter growth proves encoder
    * overload even when frame timing is indistinguishable from an idle screen.
+   *
+   * Encoder-drop evidence lives in its own [dropStreak], deliberately kept separate from the
+   * timing-driven [lowStreak]/[highStreak]. Telemetry arrives far less often than frames — Android
+   * reports every ~5s, iOS every ~1s — so between two counter reports many ordinary frames run
+   * through [classify] and reset the timing streaks. Sharing the low streak would let those frames
+   * erase the drop evidence before it ever reaches [samplesToDowngrade], leaving an actively
+   * delivering severe-drop stream stuck at High. A dedicated streak that only
+   * [classify]-independent counter increases advance closes that gap.
    */
   fun onDroppedFrames(droppedFrames: Long) {
     val previous = lastDroppedFrames
     lastDroppedFrames = droppedFrames
     if (!autoAdjustEnabled || previous == null || droppedFrames <= previous) return
-    lowStreak++
+    dropStreak++
+    // A counter increase is direct encoder-overload evidence, unlike a timing sample; it also
+    // forbids climbing back up while the encoder is behind.
     highStreak = 0
-    // A counter increase is direct encoder-overload evidence, unlike a timing sample. It still
-    // uses the low-streak hysteresis, but does not wait for unrelated frame-rate samples first.
-    samples = minSamplesForDecision
-    maybeAdjust(lastFrameMs ?: 0L)
+    maybeDowngradeForDrops(lastFrameMs ?: 0L)
+  }
+
+  /** Downgrades once encoder-drop evidence clears the hysteresis, independent of frame timing. */
+  private fun maybeDowngradeForDrops(nowMs: Long) {
+    val dwellElapsed = lastChangeAtMs?.let { nowMs - it >= minDwellMs } ?: true
+    if (!dwellElapsed) return
+    if (dropStreak >= samplesToDowngrade && _quality.value != VideoStreamQuality.Low) {
+      change(_quality.value.lower(), nowMs)
+    }
   }
 
   private fun maybeAdjust(nowMs: Long) {
@@ -247,6 +265,7 @@ class QualityController(
     samples = 0
     lowStreak = 0
     highStreak = 0
+    dropStreak = 0
     lastDroppedFrames = null
   }
 }

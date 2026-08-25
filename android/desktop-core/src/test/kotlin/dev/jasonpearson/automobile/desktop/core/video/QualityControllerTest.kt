@@ -101,6 +101,34 @@ class QualityControllerTest {
   }
 
   @Test
+  fun `encoder drops still downgrade when healthy frames arrive between telemetry reports`() {
+    val controller =
+      QualityController(
+        initialQuality = VideoStreamQuality.High,
+        targetFps = 30,
+        samplesToDowngrade = 3,
+        minDwellMs = 0,
+      )
+
+    // An actively delivering stream: healthy frames stream in between each drop report. Those
+    // frames reset the timing streaks in classify; the separate drop streak must survive them so
+    // sustained counter increases still downgrade (regression for the shared-streak bug). The
+    // first counter report only establishes a baseline, so four reports = one prime + three
+    // increases = one downgrade step.
+    var now = 0L
+    var dropped = 0L
+    repeat(4) {
+      repeat(5) {
+        now += 33
+        controller.onFrame(now)
+      }
+      controller.onDroppedFrames(++dropped)
+    }
+
+    assertEquals(VideoStreamQuality.Medium, controller.quality.value)
+  }
+
+  @Test
   fun `static Android and iOS sources do not downgrade while encoder drops stay flat`() {
     val controller =
       QualityController(

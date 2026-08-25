@@ -448,6 +448,14 @@ describe("deviceSnapshotManager", () => {
     }
   });
 
+  test("captureDeviceSnapshot rejects a reserved scope-root name (#5707)", async () => {
+    for (const reserved of ["android", "ios"]) {
+      await expect(captureDeviceSnapshot(TEST_DEVICE, { snapshotName: reserved })).rejects.toThrow(
+        /reserved/i,
+      );
+    }
+  });
+
   test("legacy flat-path cleanup never deletes a reserved scope root (#5707)", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-reserved-"));
     try {

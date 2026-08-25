@@ -366,6 +366,17 @@ async function ensureSnapshotAvailable(
   snapshotRepository: DeviceSnapshotRepository,
   pathOptions?: SnapshotPathOptions,
 ): Promise<void> {
+  // "android"/"ios" are the platform scope roots under the snapshots dir. An
+  // unscoped (physical / fallback) snapshot with one of those names would take
+  // the scope directory itself, so deleting it later would recursively remove
+  // every scoped snapshot nested under it. Reject the collision at the source
+  // (#5707); broader snapshotName sanitization is tracked in #5705.
+  if (isReservedScopeSegment(snapshotName)) {
+    throw new ActionableError(
+      `Snapshot name '${snapshotName}' is reserved. Please choose a different name.`,
+    );
+  }
+
   const existing = await snapshotRepository.getSnapshot(snapshotName);
   if (existing) {
     throw new ActionableError(

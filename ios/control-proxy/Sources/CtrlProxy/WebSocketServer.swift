@@ -647,6 +647,15 @@ class WebSocketConnection: WebSocketResponding {
     private var pendingHTTPRequest = Data()
     private static let maximumHTTPRequestLength = 1_000_000
 
+    /// In-progress fragmented-message reassembly state (RFC 6455 §5.4). Both are
+    /// mutated **only** from `connection.receive` completions, which all run on the
+    /// server `queue` (`connection.start(queue:)` binds them there) and are
+    /// therefore serialized — so no lock is needed. `fragmentedOpcode` is the data
+    /// opcode (0x1/0x2) of the message being assembled, or nil when none is open;
+    /// `fragmentBuffer` accumulates the ordered payload bytes (issue #5674).
+    private var fragmentedOpcode: UInt8?
+    private var fragmentBuffer = Data()
+
     init(
         id: Int,
         connection: NWConnection,
@@ -940,6 +949,7 @@ class WebSocketConnection: WebSocketResponding {
         let byte0 = header[0]
         let byte1 = header[1]
 
+        let isFinal = (byte0 & 0x80) != 0
         let opcode = byte0 & 0x0F
         let isMasked = (byte1 & 0x80) != 0
         let payloadLength = UInt64(byte1 & 0x7F)
@@ -965,21 +975,21 @@ class WebSocketConnection: WebSocketResponding {
                 onClose()
                 return
             }
-            readPayload(length: payloadLength, isMasked: isMasked, opcode: opcode)
+            readPayload(length: payloadLength, isMasked: isMasked, opcode: opcode, isFinal: isFinal)
             return
         }
 
         // Read extended length if needed
         if payloadLength == 126 {
-            readExtendedLength(2, isMasked: isMasked, opcode: opcode)
+            readExtendedLength(2, isMasked: isMasked, opcode: opcode, isFinal: isFinal)
         } else if payloadLength == 127 {
-            readExtendedLength(8, isMasked: isMasked, opcode: opcode)
+            readExtendedLength(8, isMasked: isMasked, opcode: opcode, isFinal: isFinal)
         } else {
-            readPayload(length: payloadLength, isMasked: isMasked, opcode: opcode)
+            readPayload(length: payloadLength, isMasked: isMasked, opcode: opcode, isFinal: isFinal)
         }
     }
 
-    private func readExtendedLength(_ bytes: Int, isMasked: Bool, opcode: UInt8) {
+    private func readExtendedLength(_ bytes: Int, isMasked: Bool, opcode: UInt8, isFinal: Bool) {
         connection.receive(minimumIncompleteLength: bytes, maximumLength: bytes) { [weak self] data, _, _, _ in
             guard let self = self, let data = data else {
                 self?.onClose()
@@ -991,7 +1001,7 @@ class WebSocketConnection: WebSocketResponding {
                 length = length << 8 | UInt64(byte)
             }
 
-            self.readPayload(length: length, isMasked: isMasked, opcode: opcode)
+            self.readPayload(length: length, isMasked: isMasked, opcode: opcode, isFinal: isFinal)
         }
     }
 
@@ -1011,6 +1021,54 @@ class WebSocketConnection: WebSocketResponding {
     ) -> Int? {
         guard payloadLength <= maxPayload else { return nil }
         return Int(payloadLength) + (isMasked ? 4 : 0)
+    }
+
+    /// Whether a data/continuation frame may be received, decided from the frame
+    /// header alone.
+    enum FramePreReadDecision: Equatable {
+        /// The frame is admissible — receive its payload, then hand to `accumulate`.
+        case read
+        /// The frame is malformed or would overflow the reassembly budget — close
+        /// the connection without receiving it.
+        case reject(String)
+    }
+
+    /// Decides, from the frame header **before** any payload is received or
+    /// unmasked, whether a data (0x1/0x2) or continuation (0x0) frame can legally
+    /// be accepted into the current reassembly state. This mirrors `accumulate`'s
+    /// rejection conditions but runs pre-read, so a malformed or oversized frame is
+    /// rejected without ever allocating (and, when masked, copying) a payload the
+    /// server would immediately discard — bounding per-connection memory to ~1× the
+    /// cap instead of ~3× (issue #5674 review). Only frames this returns `.read`
+    /// for reach `accumulate`, which stays the post-read authority for the accepted
+    /// paths (defense in depth).
+    static func preReadDataFrameDecision(
+        opcode: UInt8,
+        declaredPayloadLength: UInt64,
+        inProgressOpcode: UInt8?,
+        alreadyBuffered: Int,
+        maxTotal: UInt64 = maxFramePayloadLength
+    ) -> FramePreReadDecision {
+        switch opcode {
+        case 0x01, 0x02:
+            if inProgressOpcode != nil {
+                return .reject("new data frame (opcode 0x\(String(opcode, radix: 16))) while a fragmented message is open")
+            }
+            guard declaredPayloadLength <= maxTotal else {
+                return .reject("frame payload exceeds \(maxTotal) bytes")
+            }
+            return .read
+        case 0x00:
+            guard inProgressOpcode != nil else {
+                return .reject("continuation frame with no message in progress")
+            }
+            guard UInt64(alreadyBuffered) + declaredPayloadLength <= maxTotal else {
+                return .reject("reassembled message exceeds \(maxTotal) bytes")
+            }
+            return .read
+        default:
+            return .reject("unsupported opcode 0x\(String(opcode, radix: 16))")
+        }
     }
 
     /// Unmask a masked WebSocket frame whose first 4 bytes are the masking key and
@@ -1069,15 +1127,129 @@ class WebSocketConnection: WebSocketResponding {
         }
     }
 
-    private func readPayload(length: UInt64, isMasked: Bool, opcode: UInt8) {
+    /// The outcome of applying one data/continuation frame to the reassembly
+    /// buffer. Kept small so the fragmentation semantics can be unit-tested
+    /// without a socket, mirroring `frameAction` (issue #5674).
+    enum AccumulateResult: Equatable {
+        /// The message is complete → deliver these fully-reassembled bytes.
+        case deliver(Data)
+        /// The fragment was appended in place; more frames are expected.
+        case buffered
+        /// A malformed fragmentation sequence or an exceeded total-size bound →
+        /// the caller closes the connection rather than mis-delivering (§5.4).
+        case protocolError(String)
+    }
+
+    /// Applies one data/continuation frame to the in-progress reassembly state,
+    /// mutating the caller-owned `buffer` and `inProgressOpcode` **in place**
+    /// (RFC 6455 §5.4):
+    ///
+    /// - A text/binary frame (0x1/0x2) with FIN=1 and nothing in progress is a
+    ///   complete single-frame message → `.deliver` verbatim, untouched buffer
+    ///   (no regression, and no copy).
+    /// - A text/binary frame with FIN=0 starts a fragmented message: the payload
+    ///   becomes the buffer and the opcode is recorded → `.buffered`.
+    /// - A continuation frame (0x0) appends to the buffer; on FIN=1 the buffer is
+    ///   handed off and reset → `.deliver`, otherwise `.buffered`.
+    /// - A continuation with nothing in progress, or a new data frame while a
+    ///   message is still open, is malformed → `.protocolError`.
+    /// - The **total** reassembled size is bounded by `maxTotal` (the per-frame
+    ///   `maxFramePayloadLength` applied cumulatively); exceeding it is a
+    ///   `.protocolError` so the buffer cannot grow unboundedly.
+    ///
+    /// Appending into the caller's `buffer` via `inout` (rather than returning a
+    /// freshly concatenated `Data`) keeps reassembly amortized O(total) instead of
+    /// O(total²): a `var combined = accumulated; combined.append(...)` copy-on-write
+    /// -copies the whole message-so-far for every continuation frame, so a legal
+    /// large message split into many small fragments could pin the serial server
+    /// queue and starve `/health` (issue #5674 review).
+    static func accumulate(
+        into buffer: inout Data,
+        opcode: UInt8,
+        isFinal: Bool,
+        payload: Data,
+        inProgressOpcode: inout UInt8?,
+        maxTotal: UInt64 = maxFramePayloadLength
+    ) -> AccumulateResult {
+        switch opcode {
+        case 0x01, 0x02:
+            // A new data frame is illegal while a fragmented message is still open.
+            if inProgressOpcode != nil {
+                return .protocolError("new data frame (opcode 0x\(String(opcode, radix: 16))) while a fragmented message is open")
+            }
+            guard UInt64(payload.count) <= maxTotal else {
+                return .protocolError("frame payload exceeds \(maxTotal) bytes")
+            }
+            if isFinal {
+                // Single, unfragmented message — deliver directly, no buffering.
+                return .deliver(payload)
+            }
+            // Start a fragmented message: the payload seeds the buffer.
+            inProgressOpcode = opcode
+            buffer = payload
+            return .buffered
+
+        case 0x00:
+            // A continuation frame requires an in-progress message.
+            guard inProgressOpcode != nil else {
+                return .protocolError("continuation frame with no message in progress")
+            }
+            guard UInt64(buffer.count) + UInt64(payload.count) <= maxTotal else {
+                return .protocolError("reassembled message exceeds \(maxTotal) bytes")
+            }
+            buffer.append(payload)
+            guard isFinal else {
+                return .buffered
+            }
+            // Final continuation — hand off the accumulated bytes and reset.
+            let message = buffer
+            buffer = Data()
+            inProgressOpcode = nil
+            return .deliver(message)
+
+        default:
+            // Reserved / unexpected data opcode (control frames never reach here).
+            return .protocolError("unsupported opcode 0x\(String(opcode, radix: 16))")
+        }
+    }
+
+    private func readPayload(length: UInt64, isMasked: Bool, opcode: UInt8, isFinal: Bool) {
         guard let totalLength = Self.frameReadLength(payloadLength: length, isMasked: isMasked) else {
             print("[WebSocketConnection] Frame payload too large (\(length) bytes), closing connection")
             onClose()
             return
         }
 
+        // Reject any malformed or over-budget data/continuation frame from its
+        // header, before receiving/unmasking its payload, so a malformed peer
+        // cannot make the runner allocate a frame it would immediately discard
+        // (§5.4; issue #5674 review). `accumulate` still enforces the same
+        // conditions post-read as defense in depth for the accepted paths.
+        if Self.isDataOrContinuation(opcode),
+           case let .reject(reason) = Self.preReadDataFrameDecision(
+               opcode: opcode,
+               declaredPayloadLength: length,
+               inProgressOpcode: fragmentedOpcode,
+               alreadyBuffered: fragmentBuffer.count
+           ) {
+            print("[WebSocketConnection] Fragmentation protocol error (pre-read): \(reason), closing connection")
+            fragmentedOpcode = nil
+            fragmentBuffer = Data()
+            onClose()
+            return
+        }
+
+        // A zero-length frame carries no payload/mask bytes to read, but for a
+        // data/continuation frame the FIN bit still matters: an empty final
+        // continuation completes a fragmented message, and an empty non-final data
+        // frame opens one. Route it through reassembly with an empty payload rather
+        // than skipping straight to the next frame.
         guard totalLength > 0 else {
-            receiveWebSocketFrame()
+            if Self.isDataOrContinuation(opcode) {
+                handleDataFrame(opcode: opcode, isFinal: isFinal, payload: Data())
+            } else {
+                receiveWebSocketFrame()
+            }
             return
         }
 
@@ -1090,9 +1262,17 @@ class WebSocketConnection: WebSocketResponding {
 
                 let payload: Data = isMasked ? Self.unmaskFrame(data) : data
 
+                if Self.isDataOrContinuation(opcode) {
+                    self.handleDataFrame(opcode: opcode, isFinal: isFinal, payload: payload)
+                    return
+                }
+
+                // Control frames (ping/pong and any non-data opcode) are handled
+                // independently and never touch the reassembly buffer (§5.4).
                 switch Self.frameAction(opcode: opcode, unmaskedPayload: payload) {
-                case let .deliver(message):
-                    self.onMessage(message)
+                case .deliver:
+                    // Unreachable: data opcodes are handled above via reassembly.
+                    break
                 case let .pong(applicationData):
                     // Echo the ping application data back in the pong (§5.5.3).
                     let pongFrame = Self.createWebSocketFrame(data: applicationData, opcode: 0x0A)
@@ -1103,6 +1283,37 @@ class WebSocketConnection: WebSocketResponding {
 
                 self.receiveWebSocketFrame()
             }
+    }
+
+    /// Whether `opcode` denotes a data (text/binary) or continuation frame — the
+    /// frames that participate in fragmentation reassembly (§5.4).
+    static func isDataOrContinuation(_ opcode: UInt8) -> Bool {
+        opcode == 0x00 || opcode == 0x01 || opcode == 0x02
+    }
+
+    /// Feeds one data/continuation frame through the pure `reassemble` state
+    /// machine, updating the per-connection reassembly state and delivering the
+    /// completed message, buffering, or closing on a malformed sequence. Runs on
+    /// the server `queue` (see `fragmentedOpcode`), so the mutations are serialized.
+    private func handleDataFrame(opcode: UInt8, isFinal: Bool, payload: Data) {
+        switch WebSocketConnection.accumulate(
+            into: &fragmentBuffer,
+            opcode: opcode,
+            isFinal: isFinal,
+            payload: payload,
+            inProgressOpcode: &fragmentedOpcode
+        ) {
+        case let .deliver(message):
+            onMessage(message)
+            receiveWebSocketFrame()
+        case .buffered:
+            receiveWebSocketFrame()
+        case let .protocolError(reason):
+            print("[WebSocketConnection] Fragmentation protocol error: \(reason), closing connection")
+            fragmentedOpcode = nil
+            fragmentBuffer = Data()
+            onClose()
+        }
     }
 
     /// Build an unmasked server→client frame (server frames are never masked,

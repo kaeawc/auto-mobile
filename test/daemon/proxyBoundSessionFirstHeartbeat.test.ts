@@ -224,6 +224,69 @@ describe("proxy-bound session first heartbeat (issue #5637)", () => {
     }
   });
 
+  // issue #5643: a CONCURRENT ensureConnected() (e.g. a parallel listTools/callTool
+  // during MCP startup) that arrives while the establishment heartbeat is still in
+  // flight must not resolve on the `connected` fast path before the daemon has
+  // recorded the first ownership heartbeat. The establishment guarantee must hold
+  // for concurrent callers, not just the one that triggered doConnect().
+  test("holds a concurrent ensureConnected() until the first heartbeat is recorded", async () => {
+    await sessionManager.createSession(BOUND_SESSION, "emulator-5554", "android", 60_000);
+
+    const released = Promise.withResolvers<void>();
+    let heartbeatObserved = false;
+    const fakeClient = new FakeDaemonClient({
+      onCallDaemonMethod: async (method, params) => {
+        if (method === "daemon/heartbeat" && typeof params.sessionId === "string") {
+          heartbeatObserved = true;
+          await released.promise;
+          sessionManager.recordHeartbeat(params.sessionId);
+        }
+      },
+    });
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      initialSessionUuid: BOUND_SESSION,
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer,
+    });
+
+    try {
+      // First caller triggers doConnect(); its establishment heartbeat is gated.
+      const firstConnect = proxy.ensureConnected();
+
+      // Let the connection reach the (gated) first heartbeat.
+      for (let i = 0; i < 50 && !heartbeatObserved; i++) {
+        await Promise.resolve();
+      }
+      expect(heartbeatObserved).toBe(true);
+
+      // A concurrent caller arriving while the first heartbeat is in flight must
+      // NOT short-circuit on the `connected` fast path before ownership is recorded.
+      let concurrentResolved = false;
+      const concurrentConnect = proxy.ensureConnected().then(() => {
+        concurrentResolved = true;
+      });
+
+      // Give any (incorrect) fast-path resolution a chance to land.
+      for (let i = 0; i < 20; i++) {
+        await Promise.resolve();
+      }
+      expect(concurrentResolved).toBe(false);
+      expect(sessionManager.getSession(BOUND_SESSION)?.hasReceivedHeartbeat).toBe(false);
+
+      released.resolve();
+      await Promise.all([firstConnect, concurrentConnect]);
+      expect(concurrentResolved).toBe(true);
+      expect(sessionManager.getSession(BOUND_SESSION)?.hasReceivedHeartbeat).toBe(true);
+    } finally {
+      released.resolve();
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
   // AC3: connection establishment delivers exactly one first heartbeat — a
   // reconnect must not compound duplicates onto a fresh transport.
   test("delivers exactly one heartbeat on a single establishment", async () => {

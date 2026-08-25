@@ -807,7 +807,6 @@ export class DaemonMcpProxy {
       await client.close();
       throw new DaemonUnavailableError("MCP proxy is closing");
     }
-    this.connected = true;
     logger.info("[DaemonMcpProxy] Connected to daemon");
 
     // Deliver the ownership heartbeat FIRST — before the best-effort notification
@@ -817,7 +816,20 @@ export class DaemonMcpProxy {
     // grace edge before the heartbeat is even sent. The notification handler is
     // already registered above (before connect), so a session-released frame is
     // still handled during the heartbeat even without the opt-in subscription.
+    //
+    // On the FIRST establishment mark the proxy `connected` only AFTER the
+    // establishment heartbeat lands (issue #5643). ensureConnected()'s fast path
+    // returns as soon as `connected && client` is true; setting the flag before the
+    // awaited first heartbeat would let a CONCURRENT ensureConnected() (a parallel
+    // listTools/callTool during MCP startup) resolve and forward a request in the
+    // sub-millisecond window before the daemon has recorded ownership. Deferring the
+    // flip holds those concurrent callers on the `connecting` guard until ownership
+    // is recorded; the heartbeat guards key off the live transport (`transportLive`),
+    // not this flag, so the first heartbeat still fires while it is still false. On a
+    // RECONNECT there is no ownership to wait for, so establishBoundSessionHeartbeat
+    // flips `connected` itself before dispatching the keeper heartbeat (see there).
     await this.establishBoundSessionHeartbeat();
+    this.connected = true;
 
     if (supportsNotifications) {
       try {
@@ -1609,8 +1621,27 @@ export class DaemonMcpProxy {
     );
   }
 
+  /**
+   * The daemon transport is live and usable for a heartbeat. Distinct from the
+   * public `connected` flag, which is deferred until AFTER the establishment
+   * heartbeat lands so concurrent ensureConnected() callers block on ownership
+   * (issue #5643). During that window the client has connected but `connected` is
+   * still false; the first-heartbeat / keeper guards must treat the transport as
+   * usable. Everywhere else `this.client !== null` tracks `connected` (both are
+   * set on connect and cleared together on reset/close), so this only widens the
+   * guard across the deliberate establishment window.
+   */
+  private get transportLive(): boolean {
+    return this.client !== null;
+  }
+
   private startBoundSessionHeartbeat(): void {
-    if (this.boundSessionUuid && !this.terminalBoundSession && this.connected && !this.closing) {
+    if (
+      this.boundSessionUuid &&
+      !this.terminalBoundSession &&
+      this.transportLive &&
+      !this.closing
+    ) {
       void this.heartbeatKeeper.run();
       this.heartbeatKeeper.start();
       this.heartbeatKeeperStarted = true;
@@ -1634,7 +1665,9 @@ export class DaemonMcpProxy {
    * emitting a duplicate.
    */
   private async establishBoundSessionHeartbeat(): Promise<void> {
-    if (!(this.boundSessionUuid && !this.terminalBoundSession && this.connected && !this.closing)) {
+    if (
+      !(this.boundSessionUuid && !this.terminalBoundSession && this.transportLive && !this.closing)
+    ) {
       return;
     }
     if (this.heartbeatKeeperStarted) {
@@ -1642,6 +1675,15 @@ export class DaemonMcpProxy {
       // reconnect is itself driven by a keeper tick, run() shares that in-flight
       // tick instead of emitting a duplicate; otherwise it sends a fresh heartbeat
       // on the new transport, exactly as before this change.
+      //
+      // Ownership was already recorded by the first establishment, so — unlike the
+      // first-heartbeat path (issue #5643) — there is nothing to hold concurrent
+      // callers behind. Mark the transport connected BEFORE dispatching the keeper
+      // heartbeat: startBoundSessionHeartbeat void-dispatches run(), which re-enters
+      // ensureConnected() and must short-circuit on the fast path so the heartbeat
+      // lands on the fresh transport before the retried operation (#2737/#4610
+      // ordering). doConnect defers this flip only on the first establishment.
+      this.connected = true;
       this.startBoundSessionHeartbeat();
       return;
     }
@@ -1650,7 +1692,9 @@ export class DaemonMcpProxy {
     // close() landing mid-send may have terminally fenced this binding and stopped
     // the keeper. Restarting it here would leak a no-op interval and desync
     // heartbeatKeeperStarted from the fenced state. Mirrors startBoundSessionHeartbeat's guard.
-    if (!(this.boundSessionUuid && !this.terminalBoundSession && this.connected && !this.closing)) {
+    if (
+      !(this.boundSessionUuid && !this.terminalBoundSession && this.transportLive && !this.closing)
+    ) {
       return;
     }
     // The keeper owns every subsequent tick, its reconnect, and terminal fencing.

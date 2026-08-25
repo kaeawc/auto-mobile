@@ -920,4 +920,62 @@ final class NetworkCaptureRecorderTests: XCTestCase {
         XCTAssertNil(collector.records.first?.requestBodySize)
         XCTAssertEqual(collector.records.first?.responseBodySize, 13)
     }
+
+    #if DEBUG
+    func testDelayedFaultCancelledByStopLoadingDoesNotCallClient() {
+        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: SdkEventBuffer { _ in })
+        NetworkMockRuleStore.shared.setFaultRules([
+            NetworkFaultRuleDTO(
+                faultId: "delayed-error", transport: .urlSession, host: nil, port: nil,
+                scheme: nil, path: nil, method: nil, headers: nil, origin: nil,
+                connectionId: nil, sessionId: nil, action: .error, statusCode: nil,
+                responseHeaders: nil, responseBody: nil, contentType: nil, errorType: "timeout",
+                delayMs: 100, bandwidthBytesPerSecond: nil, dropBytes: nil, limit: nil,
+                expiresAtEpochMs: nil, scope: nil, dryRun: false
+            ),
+        ])
+        defer { NetworkMockRuleStore.shared.setFaultRules([]) }
+
+        let request = URLRequest(url: URL(string: "https://api.example.com/v1/x")!)
+        let client = RecordingURLProtocolClient()
+        let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+
+        proto.startLoading() // schedules the 100ms-delayed fault as a work item
+        proto.stopLoading() // synchronously cancels the work item + marks the protocol stopped
+
+        // The cancelled work item must never fire serveFault, so the client stays untouched.
+        // Deterministic: stopLoading ran synchronously well before the 100ms delay, so the
+        // work item is cancelled; we wait past the delay only to prove nothing fired.
+        let waited = expectation(description: "past the fault delay")
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { waited.fulfill() }
+        wait(for: [waited], timeout: 1.0)
+
+        XCTAssertTrue(
+            client.calls.isEmpty,
+            "a delayed fault cancelled by stopLoading() must not invoke the client after stop"
+        )
+    }
+    #endif
+}
+
+/// Records `URLProtocolClient` callbacks so a test can assert a stopped protocol makes none.
+private final class RecordingURLProtocolClient: NSObject, URLProtocolClient {
+    private let lock = NSLock()
+    private var _calls: [String] = []
+    var calls: [String] {
+        lock.lock(); defer { lock.unlock() }; return _calls
+    }
+
+    private func record(_ name: String) {
+        lock.lock(); _calls.append(name); lock.unlock()
+    }
+
+    func urlProtocol(_: URLProtocol, wasRedirectedTo _: URLRequest, redirectResponse _: URLResponse) { record("redirect") }
+    func urlProtocol(_: URLProtocol, cachedResponseIsValid _: CachedURLResponse) { record("cached") }
+    func urlProtocol(_: URLProtocol, didReceive _: URLResponse, cacheStoragePolicy _: URLCache.StoragePolicy) { record("didReceive") }
+    func urlProtocol(_: URLProtocol, didLoad _: Data) { record("didLoad") }
+    func urlProtocolDidFinishLoading(_: URLProtocol) { record("finish") }
+    func urlProtocol(_: URLProtocol, didFailWithError _: Error) { record("didFail") }
+    func urlProtocol(_: URLProtocol, didReceive _: URLAuthenticationChallenge) { record("challenge") }
+    func urlProtocol(_: URLProtocol, didCancel _: URLAuthenticationChallenge) { record("cancelChallenge") }
 }

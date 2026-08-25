@@ -475,6 +475,11 @@ public class AutoMobileURLProtocol: URLProtocol {
     private var receivedResponse: URLResponse?
     private var receivedData = Data()
     private var totalBytesReceived = 0
+    /// Guards the delayed-fault lifecycle across `stopLoading()` (called by the URL
+    /// loading system) and the global-queue timer block that serves a delayed fault.
+    private let faultLock = NSLock()
+    private var stopped = false
+    private var faultWorkItem: DispatchWorkItem?
 
     private static let supportedSchemes: Set<String> = ["http", "https"]
 
@@ -516,9 +521,16 @@ public class AutoMobileURLProtocol: URLProtocol {
            !fault.dryRun
         {
             if let delayMs = fault.delayMs, delayMs > 0 {
-                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(delayMs)) { [weak self] in
+                // Schedule as a cancellable work item stored on the protocol so
+                // stopLoading() can cancel it — otherwise the timer fires serveFault()
+                // (client callbacks) after the protocol has been torn down.
+                let workItem = DispatchWorkItem { [weak self] in
                     self?.serveFault(fault, url: url)
                 }
+                faultLock.lock()
+                faultWorkItem = workItem
+                faultLock.unlock()
+                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(delayMs), execute: workItem)
             } else {
                 serveFault(fault, url: url)
             }
@@ -597,6 +609,15 @@ public class AutoMobileURLProtocol: URLProtocol {
     }
 
     public override func stopLoading() {
+        // Cancel a pending delayed fault and mark the protocol stopped so neither the
+        // timer block (if not yet started) nor an already-running serveFault invokes the
+        // client after teardown.
+        faultLock.lock()
+        stopped = true
+        faultWorkItem?.cancel()
+        faultWorkItem = nil
+        faultLock.unlock()
+
         dataTask?.cancel()
         // Invalidate session to break the retain cycle (session -> delegate -> self)
         urlSession?.invalidateAndCancel()
@@ -606,6 +627,13 @@ public class AutoMobileURLProtocol: URLProtocol {
 
     #if DEBUG
     private func serveFault(_ fault: NetworkMockRuleStore.FaultDecision, url: URL) {
+        // If the protocol was stopped (e.g. the delayed-fault timer began executing just
+        // as stopLoading() ran), do not invoke the client on a torn-down protocol.
+        faultLock.lock()
+        let isStopped = stopped
+        faultLock.unlock()
+        if isStopped { return }
+
         let method = request.httpMethod ?? "GET"
         let error: URLError
         switch fault.errorType {

@@ -28,7 +28,7 @@ import {
   DeviceAllocationRequest,
 } from "./DeviceCriteriaMatcher";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
-import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
@@ -2068,7 +2068,6 @@ export class DevicePool {
 
     const bootedDevice = discovery.devices.find((booted) => booted.deviceId === device.id);
     if (bootedDevice && this.matchesRuntimeIdentity(device, bootedDevice)) {
-      this.applyMutableRuntimeMetadata(device, bootedDevice);
       this.refreshMissingDeviceMisses.delete(device.id);
       return true;
     }
@@ -5222,25 +5221,12 @@ export class DevicePool {
   }
 
   /**
-   * True when the pooled device's display name is metadata rather than part of
-   * its runtime identity, so a changed name must not evict it (#5690).
-   *
-   * Physical iOS devices qualify: the UDID is burned into the hardware, while
-   * the name can change with no hardware or connection change at all — the user
-   * renames the iPhone in Settings, or a `devicectl` payload omits
-   * `deviceProperties.name` and `DevicectlDeviceLister.deviceDisplayName()`
-   * falls back through `marketingName` -> `deviceType` -> UDID. Treating that as
-   * a new runtime evicts a live session for a payload variation.
-   *
-   * Simulators are deliberately left alone: their UDID is equally stable, but
-   * `simctl` publishes a single authoritative `name` with no fallback chain, so
-   * the involuntary drift this tolerance exists for cannot occur. A simulator
-   * rename is a deliberate user action, and re-cataloguing it as a fresh pooled
-   * incarnation is the pre-existing, tested behavior. Android emulators keep
-   * their own narrower tolerance in {@link hasSameOrUnknownEmulatorName}.
+   * Whether this pooled device's name is mutable metadata rather than identity.
+   * Delegates to the shared predicate so the pool and the public `startDevice`
+   * validator (`validatePooledDeviceMapping`) cannot drift apart (#5690).
    */
   private hasMutableDisplayName(pooled: PooledDevice): boolean {
-    return pooled.platform === "ios" && isIosPhysicalUdid(pooled.id);
+    return hasMutableDisplayName(pooled.platform, pooled.id);
   }
 
   /**

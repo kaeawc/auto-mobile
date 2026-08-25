@@ -109,6 +109,7 @@ import {
 } from "../utils/virtualDeviceLifecycleCoordinator";
 import { DeviceTeardownService, type DeviceTeardownPhase } from "../utils/deviceTeardownService";
 import { DeviceShutdownService } from "../utils/deviceShutdownService";
+import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -2953,7 +2954,15 @@ function validatePooledDeviceMapping(device: BootedDevice, requestedIdentity: st
     return;
   }
   const pooled = daemonState.getDevicePool().getDevice(device.deviceId);
-  if (pooled && (pooled.platform !== device.platform || pooled.name !== device.name)) {
+  // A physical iPhone's display name is mutable metadata, not identity, so a
+  // rename must not read as a stale pool entry here either (#5690). The pool
+  // itself tolerates it in matchesRuntimeIdentity(); both consult the same
+  // predicate so this validator cannot reject what the pool would accept.
+  const nameIsIdentity = !hasMutableDisplayName(device.platform, device.deviceId);
+  if (
+    pooled &&
+    (pooled.platform !== device.platform || (nameIsIdentity && pooled.name !== device.name))
+  ) {
     throw new ActionableError(
       `startDevice identity mismatch: requested=[${requestedIdentity}] ` +
         `resolved=[${device.name} (${device.deviceId}) platform=${device.platform}] ` +

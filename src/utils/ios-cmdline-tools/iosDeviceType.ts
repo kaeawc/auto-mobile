@@ -1,3 +1,5 @@
+import type { Platform } from "../../models/Platform";
+
 /**
  * iOS simulator UDIDs are standard 8-4-4-4-12 hex UUIDs, whereas physical
  * device UDIDs are 40-char hex or the newer 8-hex + `-` + 16-hex form.
@@ -51,6 +53,29 @@ export function isIosPhysicalUdid(deviceId: string): boolean {
     IOS_PHYSICAL_UDID_MODERN_PATTERN.test(deviceId) ||
     IOS_PHYSICAL_UDID_LEGACY_PATTERN.test(deviceId)
   );
+}
+
+/**
+ * True when a device's display name is mutable metadata rather than part of its
+ * runtime identity, so a changed name must not be read as a different device
+ * (#5690).
+ *
+ * Physical iOS devices qualify: the UDID is burned into the hardware, while the
+ * name can change with no hardware or connection change at all — the user
+ * renames the iPhone in Settings, or a `devicectl` payload omits
+ * `deviceProperties.name` and `DevicectlDeviceLister.deviceDisplayName()` falls
+ * back through `marketingName` -> `deviceType` -> UDID.
+ *
+ * Simulators are deliberately excluded: their UDIDs are equally stable, but
+ * `simctl` publishes a single authoritative `name` with no fallback chain, so
+ * the involuntary drift this tolerance exists for cannot occur there.
+ *
+ * Every identity comparison that would otherwise reject a renamed device must
+ * consult this one predicate, so the pool and the public `startDevice` path
+ * cannot disagree about what counts as the same device.
+ */
+export function hasMutableDisplayName(platform: Platform, deviceId: string): boolean {
+  return platform === "ios" && isIosPhysicalUdid(deviceId);
 }
 
 /**

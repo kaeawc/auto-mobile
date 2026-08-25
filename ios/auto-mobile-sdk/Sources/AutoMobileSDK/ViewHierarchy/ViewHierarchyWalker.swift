@@ -14,9 +14,21 @@
         // MARK: - Public API
 
         /// Walk the entire view hierarchy and return a snapshot.
-        /// Must be called on the main thread.
+        ///
+        /// Reads UIKit (`UIApplication`/`UIScreen`/the view tree), which is main-thread
+        /// only. Host apps may call this SDK from any thread, so this enforces the
+        /// requirement rather than doing undefined off-main UIKit work: a debug build
+        /// asserts (surfacing the misuse in development), and any build called off the
+        /// main thread hops onto it synchronously. A main-thread caller runs inline
+        /// (the `Thread.isMainThread` guard avoids a `DispatchQueue.main.sync` self-deadlock).
         public static func walk(bundleId: String? = nil) -> SdkViewHierarchy {
-            walk(in: visibleKeyWindow(), bundleId: bundleId)
+            assert(Thread.isMainThread, "ViewHierarchyWalker.walk(bundleId:) must be called on the main thread")
+            if Thread.isMainThread {
+                return walk(in: visibleKeyWindow(), bundleId: bundleId)
+            }
+            return DispatchQueue.main.sync {
+                walk(in: visibleKeyWindow(), bundleId: bundleId)
+            }
         }
 
         /// Testability seam: snapshot an explicit window rather than resolving the

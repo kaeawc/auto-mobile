@@ -676,142 +676,122 @@ final class WebSocketServerTests: XCTestCase {
 
     // MARK: - Fragmented message reassembly (#5674)
 
-    /// AC2: a single unfragmented frame (FIN=1, text/binary opcode, nothing in
-    /// progress) is delivered verbatim, exactly as before the fragmentation fix.
-    func testSingleUnfragmentedFrameDeliversUnchanged() {
-        let payload = Data("hello".utf8)
-        XCTAssertEqual(
-            WebSocketConnection.reassemble(
-                opcode: 0x01,
-                isFinal: true,
-                payload: payload,
-                inProgressOpcode: nil,
-                accumulated: Data()
-            ),
-            .deliver(payload)
+    /// Drives `WebSocketConnection.accumulate` against local reassembly state,
+    /// mirroring how one connection feeds successive frames (the helper owns the
+    /// `buffer`/`opcode` the production code keeps per-connection). Exposing the
+    /// buffer + opcode lets the tests pin both the result *and* the in-place
+    /// accumulated bytes / carried opcode.
+    private struct FragmentReassembler {
+        var buffer = Data()
+        var opcode: UInt8?
+
+        mutating func feed(
+            opcode: UInt8,
+            isFinal: Bool,
+            payload: Data,
+            maxTotal: UInt64 = WebSocketConnection.maxFramePayloadLength
         )
+            -> WebSocketConnection.AccumulateResult
+        {
+            WebSocketConnection.accumulate(
+                into: &buffer,
+                opcode: opcode,
+                isFinal: isFinal,
+                payload: payload,
+                inProgressOpcode: &self.opcode,
+                maxTotal: maxTotal
+            )
+        }
+    }
+
+    /// AC2: a single unfragmented frame (FIN=1, text/binary opcode, nothing in
+    /// progress) is delivered verbatim and leaves no reassembly state behind,
+    /// exactly as before the fragmentation fix.
+    func testSingleUnfragmentedFrameDeliversUnchanged() {
+        var reassembler = FragmentReassembler()
+        let payload = Data("hello".utf8)
+        XCTAssertEqual(reassembler.feed(opcode: 0x01, isFinal: true, payload: payload), .deliver(payload))
+        XCTAssertNil(reassembler.opcode, "a single frame opens no in-progress message")
+        XCTAssertTrue(reassembler.buffer.isEmpty, "a single frame is delivered without buffering")
     }
 
     /// AC1/AC6: a two-fragment message (initial FIN=0 text, final FIN=1
     /// continuation) buffers the first fragment then delivers the ordered
     /// concatenation once complete.
     func testTwoFragmentMessageReassembles() {
+        var reassembler = FragmentReassembler()
         let first = Data("Hello, ".utf8)
         let second = Data("world!".utf8)
 
-        let initialDecision = WebSocketConnection.reassemble(
-            opcode: 0x01,
-            isFinal: false,
-            payload: first,
-            inProgressOpcode: nil,
-            accumulated: Data()
-        )
-        XCTAssertEqual(initialDecision, .buffered(opcode: 0x01, buffer: first))
+        XCTAssertEqual(reassembler.feed(opcode: 0x01, isFinal: false, payload: first), .buffered)
+        XCTAssertEqual(reassembler.opcode, 0x01)
+        XCTAssertEqual(reassembler.buffer, first)
 
-        let finalDecision = WebSocketConnection.reassemble(
-            opcode: 0x00,
-            isFinal: true,
-            payload: second,
-            inProgressOpcode: 0x01,
-            accumulated: first
-        )
-        XCTAssertEqual(finalDecision, .deliver(first + second))
+        XCTAssertEqual(reassembler.feed(opcode: 0x00, isFinal: true, payload: second), .deliver(first + second))
+        XCTAssertNil(reassembler.opcode, "delivery clears the in-progress opcode")
+        XCTAssertTrue(reassembler.buffer.isEmpty, "delivery resets the buffer")
     }
 
     /// AC1/AC6: a three-fragment binary message (initial FIN=0 binary, a middle
     /// FIN=0 continuation, a final FIN=1 continuation) reassembles in order and
     /// carries the initial opcode forward through each continuation.
     func testThreeFragmentMessageReassemblesInOrder() {
+        var reassembler = FragmentReassembler()
         let partA = Data("aaa".utf8)
         let partB = Data("bbb".utf8)
         let partC = Data("ccc".utf8)
 
-        let initialDecision = WebSocketConnection.reassemble(
-            opcode: 0x02,
-            isFinal: false,
-            payload: partA,
-            inProgressOpcode: nil,
-            accumulated: Data()
-        )
-        XCTAssertEqual(initialDecision, .buffered(opcode: 0x02, buffer: partA))
+        XCTAssertEqual(reassembler.feed(opcode: 0x02, isFinal: false, payload: partA), .buffered)
+        XCTAssertEqual(reassembler.opcode, 0x02)
+        XCTAssertEqual(reassembler.buffer, partA)
 
-        let middleDecision = WebSocketConnection.reassemble(
-            opcode: 0x00,
-            isFinal: false,
-            payload: partB,
-            inProgressOpcode: 0x02,
-            accumulated: partA
-        )
-        XCTAssertEqual(middleDecision, .buffered(opcode: 0x02, buffer: partA + partB))
+        XCTAssertEqual(reassembler.feed(opcode: 0x00, isFinal: false, payload: partB), .buffered)
+        XCTAssertEqual(reassembler.opcode, 0x02, "the initial opcode is carried through continuations")
+        XCTAssertEqual(reassembler.buffer, partA + partB)
 
-        let finalDecision = WebSocketConnection.reassemble(
-            opcode: 0x00,
-            isFinal: true,
-            payload: partC,
-            inProgressOpcode: 0x02,
-            accumulated: partA + partB
-        )
-        XCTAssertEqual(finalDecision, .deliver(partA + partB + partC))
+        XCTAssertEqual(reassembler.feed(opcode: 0x00, isFinal: true, payload: partC), .deliver(partA + partB + partC))
     }
 
     /// AC2: a non-final data frame does not trigger delivery — it is buffered
     /// with the in-progress opcode recorded.
     func testNonFinalStartFrameDoesNotDeliver() {
+        var reassembler = FragmentReassembler()
         let payload = Data("partial".utf8)
-        let decision = WebSocketConnection.reassemble(
-            opcode: 0x01,
-            isFinal: false,
-            payload: payload,
-            inProgressOpcode: nil,
-            accumulated: Data()
-        )
-        XCTAssertEqual(decision, .buffered(opcode: 0x01, buffer: payload))
-        if case .deliver = decision {
+        let result = reassembler.feed(opcode: 0x01, isFinal: false, payload: payload)
+        XCTAssertEqual(result, .buffered)
+        XCTAssertEqual(reassembler.opcode, 0x01)
+        XCTAssertEqual(reassembler.buffer, payload)
+        if case .deliver = result {
             XCTFail("a non-final frame must not deliver")
         }
     }
 
     /// AC3: a control frame between fragments is handled independently
-    /// (`frameAction` → pong/ignore) and never fed to `reassemble`, so the
+    /// (`frameAction` → pong/ignore) and never fed to `accumulate`, so the
     /// in-progress opcode + accumulated buffer are untouched and the following
     /// continuation still reassembles into the full message.
     func testControlFrameBetweenFragmentsDoesNotCorruptReassembly() {
+        var reassembler = FragmentReassembler()
         let first = Data("frag-".utf8)
-        let initialDecision = WebSocketConnection.reassemble(
-            opcode: 0x01,
-            isFinal: false,
-            payload: first,
-            inProgressOpcode: nil,
-            accumulated: Data()
-        )
-        XCTAssertEqual(initialDecision, .buffered(opcode: 0x01, buffer: first))
+        XCTAssertEqual(reassembler.feed(opcode: 0x01, isFinal: false, payload: first), .buffered)
 
-        // A ping arriving here routes through frameAction, not reassemble.
+        // A ping arriving here routes through frameAction, not accumulate, and so
+        // does not touch the reassembler's buffer/opcode.
         XCTAssertEqual(WebSocketConnection.frameAction(opcode: 0x09, unmaskedPayload: Data()), .pong(Data()))
+        XCTAssertEqual(reassembler.opcode, 0x01)
+        XCTAssertEqual(reassembler.buffer, first)
 
         // The continuation resumes from the unchanged in-progress state.
         let second = Data("done".utf8)
-        let finalDecision = WebSocketConnection.reassemble(
-            opcode: 0x00,
-            isFinal: true,
-            payload: second,
-            inProgressOpcode: 0x01,
-            accumulated: first
-        )
-        XCTAssertEqual(finalDecision, .deliver(first + second))
+        XCTAssertEqual(reassembler.feed(opcode: 0x00, isFinal: true, payload: second), .deliver(first + second))
     }
 
     /// AC5/AC6: a continuation frame with no message in progress is a protocol
     /// error, so the caller closes the connection rather than mis-delivering.
     func testContinuationWithNoMessageInProgressIsRejected() {
-        let decision = WebSocketConnection.reassemble(
-            opcode: 0x00,
-            isFinal: true,
-            payload: Data("x".utf8),
-            inProgressOpcode: nil,
-            accumulated: Data()
-        )
-        guard case .protocolError = decision else {
+        var reassembler = FragmentReassembler()
+        let result = reassembler.feed(opcode: 0x00, isFinal: true, payload: Data("x".utf8))
+        guard case .protocolError = result else {
             return XCTFail("a continuation with no in-progress message must be a protocol error")
         }
     }
@@ -819,14 +799,10 @@ final class WebSocketServerTests: XCTestCase {
     /// AC5: a new non-control data frame while a fragmented message is still open
     /// is a protocol error (interleaved data messages are not permitted, §5.4).
     func testNewDataFrameWhileFragmentOpenIsRejected() {
-        let decision = WebSocketConnection.reassemble(
-            opcode: 0x01,
-            isFinal: false,
-            payload: Data("y".utf8),
-            inProgressOpcode: 0x01,
-            accumulated: Data("open".utf8)
-        )
-        guard case .protocolError = decision else {
+        var reassembler = FragmentReassembler()
+        XCTAssertEqual(reassembler.feed(opcode: 0x01, isFinal: false, payload: Data("open".utf8)), .buffered)
+        let result = reassembler.feed(opcode: 0x01, isFinal: false, payload: Data("y".utf8))
+        guard case .protocolError = result else {
             return XCTFail("a new data frame during an open fragment must be a protocol error")
         }
     }
@@ -835,15 +811,13 @@ final class WebSocketServerTests: XCTestCase {
     /// that would push the message past `maxTotal` is a protocol error rather than
     /// growing the buffer unboundedly.
     func testReassemblyTotalSizeBoundExceededIsRejected() {
-        let decision = WebSocketConnection.reassemble(
-            opcode: 0x00,
-            isFinal: true,
-            payload: Data("world".utf8), // 5
-            inProgressOpcode: 0x01,
-            accumulated: Data("hello".utf8), // 5, total 10
-            maxTotal: 8
+        var reassembler = FragmentReassembler()
+        XCTAssertEqual(
+            reassembler.feed(opcode: 0x01, isFinal: false, payload: Data("hello".utf8), maxTotal: 8), // 5
+            .buffered
         )
-        guard case .protocolError = decision else {
+        let result = reassembler.feed(opcode: 0x00, isFinal: true, payload: Data("world".utf8), maxTotal: 8) // +5 → 10 > 8
+        guard case .protocolError = result else {
             return XCTFail("exceeding the total reassembled size bound must be a protocol error")
         }
     }
@@ -851,15 +825,15 @@ final class WebSocketServerTests: XCTestCase {
     /// AC4: a message whose total lands exactly on the bound is accepted — the
     /// cap is inclusive, matching `frameReadLength`'s per-frame bound.
     func testReassemblyAtExactBoundIsAccepted() {
-        let decision = WebSocketConnection.reassemble(
-            opcode: 0x00,
-            isFinal: true,
-            payload: Data("lo".utf8), // 2
-            inProgressOpcode: 0x01,
-            accumulated: Data("hel".utf8), // 3, total 5
-            maxTotal: 5
+        var reassembler = FragmentReassembler()
+        XCTAssertEqual(
+            reassembler.feed(opcode: 0x01, isFinal: false, payload: Data("hel".utf8), maxTotal: 5), // 3
+            .buffered
         )
-        XCTAssertEqual(decision, .deliver(Data("hello".utf8)))
+        XCTAssertEqual(
+            reassembler.feed(opcode: 0x00, isFinal: true, payload: Data("lo".utf8), maxTotal: 5), // +2 → 5 == 5
+            .deliver(Data("hello".utf8))
+        )
     }
 
     /// AC1/AC2/AC3 end-to-end over a real socket: a client command split across

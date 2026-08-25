@@ -1079,43 +1079,50 @@ class WebSocketConnection: WebSocketResponding {
         }
     }
 
-    /// The reassembly decision for a data (0x1/0x2) or continuation (0x0) frame —
-    /// control frames are handled before this and never reach it. Pure (state in,
-    /// action out) so the fragmentation semantics can be unit-tested without a
-    /// socket, mirroring `frameAction` (issue #5674).
-    enum FragmentDecision: Equatable {
+    /// The outcome of applying one data/continuation frame to the reassembly
+    /// buffer. Kept small so the fragmentation semantics can be unit-tested
+    /// without a socket, mirroring `frameAction` (issue #5674).
+    enum AccumulateResult: Equatable {
         /// The message is complete → deliver these fully-reassembled bytes.
         case deliver(Data)
-        /// A fragment was stored; more frames are expected. Carries the opcode now
-        /// in progress and the accumulated buffer so the caller can update the
-        /// per-connection reassembly state.
-        case buffered(opcode: UInt8, buffer: Data)
+        /// The fragment was appended in place; more frames are expected.
+        case buffered
         /// A malformed fragmentation sequence or an exceeded total-size bound →
         /// the caller closes the connection rather than mis-delivering (§5.4).
         case protocolError(String)
     }
 
-    /// Applies one data/continuation frame to the in-progress reassembly state and
-    /// decides the next action (RFC 6455 §5.4):
+    /// Applies one data/continuation frame to the in-progress reassembly state,
+    /// mutating the caller-owned `buffer` and `inProgressOpcode` **in place**
+    /// (RFC 6455 §5.4):
     ///
     /// - A text/binary frame (0x1/0x2) with FIN=1 and nothing in progress is a
-    ///   complete single-frame message → `.deliver` verbatim (no regression).
-    /// - A text/binary frame with FIN=0 starts a fragmented message → `.buffered`.
-    /// - A continuation frame (0x0) extends the in-progress message; on FIN=1 it
-    ///   completes → `.deliver` the ordered concatenation, otherwise `.buffered`.
+    ///   complete single-frame message → `.deliver` verbatim, untouched buffer
+    ///   (no regression, and no copy).
+    /// - A text/binary frame with FIN=0 starts a fragmented message: the payload
+    ///   becomes the buffer and the opcode is recorded → `.buffered`.
+    /// - A continuation frame (0x0) appends to the buffer; on FIN=1 the buffer is
+    ///   handed off and reset → `.deliver`, otherwise `.buffered`.
     /// - A continuation with nothing in progress, or a new data frame while a
     ///   message is still open, is malformed → `.protocolError`.
     /// - The **total** reassembled size is bounded by `maxTotal` (the per-frame
     ///   `maxFramePayloadLength` applied cumulatively); exceeding it is a
     ///   `.protocolError` so the buffer cannot grow unboundedly.
-    static func reassemble(
+    ///
+    /// Appending into the caller's `buffer` via `inout` (rather than returning a
+    /// freshly concatenated `Data`) keeps reassembly amortized O(total) instead of
+    /// O(total²): a `var combined = accumulated; combined.append(...)` copy-on-write
+    /// -copies the whole message-so-far for every continuation frame, so a legal
+    /// large message split into many small fragments could pin the serial server
+    /// queue and starve `/health` (issue #5674 review).
+    static func accumulate(
+        into buffer: inout Data,
         opcode: UInt8,
         isFinal: Bool,
         payload: Data,
-        inProgressOpcode: UInt8?,
-        accumulated: Data,
+        inProgressOpcode: inout UInt8?,
         maxTotal: UInt64 = maxFramePayloadLength
-    ) -> FragmentDecision {
+    ) -> AccumulateResult {
         switch opcode {
         case 0x01, 0x02:
             // A new data frame is illegal while a fragmented message is still open.
@@ -1125,19 +1132,32 @@ class WebSocketConnection: WebSocketResponding {
             guard UInt64(payload.count) <= maxTotal else {
                 return .protocolError("frame payload exceeds \(maxTotal) bytes")
             }
-            return isFinal ? .deliver(payload) : .buffered(opcode: opcode, buffer: payload)
+            if isFinal {
+                // Single, unfragmented message — deliver directly, no buffering.
+                return .deliver(payload)
+            }
+            // Start a fragmented message: the payload seeds the buffer.
+            inProgressOpcode = opcode
+            buffer = payload
+            return .buffered
 
         case 0x00:
             // A continuation frame requires an in-progress message.
-            guard let openOpcode = inProgressOpcode else {
+            guard inProgressOpcode != nil else {
                 return .protocolError("continuation frame with no message in progress")
             }
-            guard UInt64(accumulated.count) + UInt64(payload.count) <= maxTotal else {
+            guard UInt64(buffer.count) + UInt64(payload.count) <= maxTotal else {
                 return .protocolError("reassembled message exceeds \(maxTotal) bytes")
             }
-            var combined = accumulated
-            combined.append(payload)
-            return isFinal ? .deliver(combined) : .buffered(opcode: openOpcode, buffer: combined)
+            buffer.append(payload)
+            guard isFinal else {
+                return .buffered
+            }
+            // Final continuation — hand off the accumulated bytes and reset.
+            let message = buffer
+            buffer = Data()
+            inProgressOpcode = nil
+            return .deliver(message)
 
         default:
             // Reserved / unexpected data opcode (control frames never reach here).
@@ -1209,21 +1229,17 @@ class WebSocketConnection: WebSocketResponding {
     /// completed message, buffering, or closing on a malformed sequence. Runs on
     /// the server `queue` (see `fragmentedOpcode`), so the mutations are serialized.
     private func handleDataFrame(opcode: UInt8, isFinal: Bool, payload: Data) {
-        switch WebSocketConnection.reassemble(
+        switch WebSocketConnection.accumulate(
+            into: &fragmentBuffer,
             opcode: opcode,
             isFinal: isFinal,
             payload: payload,
-            inProgressOpcode: fragmentedOpcode,
-            accumulated: fragmentBuffer
+            inProgressOpcode: &fragmentedOpcode
         ) {
         case let .deliver(message):
-            fragmentedOpcode = nil
-            fragmentBuffer = Data()
             onMessage(message)
             receiveWebSocketFrame()
-        case let .buffered(openOpcode, buffer):
-            fragmentedOpcode = openOpcode
-            fragmentBuffer = buffer
+        case .buffered:
             receiveWebSocketFrame()
         case let .protocolError(reason):
             print("[WebSocketConnection] Fragmentation protocol error: \(reason), closing connection")

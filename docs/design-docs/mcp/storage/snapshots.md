@@ -23,7 +23,7 @@ The snapshot feature provides deterministic device state management for mobile t
 - **Settings-only Snapshots**: Portable device-settings snapshots for physical Android devices and non-VM emulator captures (no app data)
 - **iOS App Container Backups**: Portable app-scoped snapshots for iOS simulators
 - **Auto-generated Naming**: Automatic timestamp-based snapshot names with optional custom naming
-- **Host-based Storage**: Snapshots stored in `~/.automobile/snapshots/` for fast access and easy management
+- **Host-based Storage**: Snapshots stored in `~/.auto-mobile/snapshots/` for fast access and easy management
 
 ## MCP Tool
 
@@ -163,7 +163,7 @@ compatibility with existing archived snapshots; it no longer carries app data.
 - Emulator replies with `OK` or `KO: <reason>` (missing `OK` is treated as failure)
 - Commands time out after 30000ms by default (configurable via `vmSnapshotTimeoutMs`)
 - Snapshots stored in emulator's AVD directory (typically `~/.android/avd/<avd>.avd/snapshots/`)
-- Metadata stored in `~/.automobile/snapshots/` for management
+- Metadata stored in `~/.auto-mobile/snapshots/` for management
 
 ### Settings-only Snapshots (Non-VM Android)
 
@@ -225,10 +225,10 @@ Used for physical Android devices and for emulator captures with
 
 ## Storage Location
 
-Snapshot payloads are stored in `~/.automobile/snapshots/` (settings-only Android snapshots), and metadata is tracked in SQLite at `~/.auto-mobile/auto-mobile.db`:
+Snapshot payloads are stored in `~/.auto-mobile/snapshots/` (settings-only Android snapshots), and metadata is tracked in SQLite at `~/.auto-mobile/auto-mobile.db`:
 
 ```text
-~/.automobile/snapshots/
+~/.auto-mobile/snapshots/
 ├── Pixel_5_2026-01-08_12-30-45/
 │   └── settings.json          # Device settings (settings-only snapshots)
 └── another-snapshot/
@@ -240,7 +240,7 @@ VM snapshots themselves are stored in the emulator AVD directory and persist acr
 iOS app container backups are stored per simulator device ID:
 
 ```text
-~/.automobile/snapshots/ios/
+~/.auto-mobile/snapshots/ios/
 └── <device-udid>/
     └── <snapshot-name>/
         ├── metadata.json
@@ -369,7 +369,7 @@ still honor `strictBackupMode`.
 - For VM snapshots, ensure emulator console is accessible
 - If VM snapshot commands time out, increase `vmSnapshotTimeoutMs` or restart the emulator
 - If the emulator reports an unknown command, update the emulator to a version that supports snapshots
-- Check available disk space in `~/.automobile/snapshots/`
+- Check available disk space in `~/.auto-mobile/snapshots/`
 
 ### Snapshot Restore Fails
 

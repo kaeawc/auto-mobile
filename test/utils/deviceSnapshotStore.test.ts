@@ -24,14 +24,10 @@ describe("DeviceSnapshotStore", () => {
 
   it("should default to the ~/.auto-mobile/snapshots base path", () => {
     const defaultStore = new DeviceSnapshotStore();
-    expect(defaultStore.getBasePath()).toBe(
-      path.join(os.homedir(), ".auto-mobile", "snapshots"),
-    );
+    expect(defaultStore.getBasePath()).toBe(path.join(os.homedir(), ".auto-mobile", "snapshots"));
     // Guard against regressing to the historical hyphen-less ".automobile" typo,
     // which orphaned snapshot state from the rest of ~/.auto-mobile (issue #5706).
-    expect(defaultStore.getBasePath()).not.toContain(
-      path.join(".automobile", "snapshots"),
-    );
+    expect(defaultStore.getBasePath()).not.toContain(path.join(".automobile", "snapshots"));
   });
 
   describe("generateSnapshotName", () => {

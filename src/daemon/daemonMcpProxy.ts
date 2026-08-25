@@ -60,6 +60,14 @@ function isFreshSessionScreenshotUri(uri: string, sessionUuid: string): boolean 
   return uri === `automobile:device-session/${sessionUuid}/screenshot`;
 }
 
+// The session UUID embedded in a fresh-session-screenshot resource URI
+// (`automobile:device-session/<uuid>/screenshot`), or undefined for any other
+// URI. Kept in lockstep with {@link isFreshSessionScreenshotUri}.
+function freshSessionScreenshotUriSessionUuid(uri: string): string | undefined {
+  const match = uri.match(/^automobile:device-session\/([^/]+)\/screenshot$/);
+  return match?.[1];
+}
+
 function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
   const configuredTimeout = config.heartbeatTimeoutMs;
   const configuredInterval = config.heartbeatIntervalMs;
@@ -615,6 +623,16 @@ export class DaemonMcpProxy {
   // result-minted one reports the connection state instead of a stale UUID the
   // caller never referenced (issue #5689).
   private boundSessionFromResultMint = false;
+  // Every device session this connection has bound over its lifetime and not yet
+  // seen released. `boundSessionUuid` only tracks the LATEST binding, so acquiring
+  // a second device (e.g. getApple after getAndroid) moves it off the first
+  // session. A fresh-screenshot resource read names its session in the URI, and it
+  // must route to that owning session — not the latest binding — or the daemon
+  // seeds the loopback with the wrong session and denies the just-established
+  // owner with SCREENSHOT_ACCESS_DENIED (issue #5663). Membership here is what
+  // authorizes owner-routing; a session this connection never bound is absent, so
+  // a foreign read still forwards this connection's own binding and stays denied.
+  private readonly ownedDeviceSessions = new Set<string>();
   // Once the daemon confirms this transport's bound session is gone, preserve
   // that terminal identity instead of clearing it and allowing the same UUID to
   // acquire another device. `fromResultMint` records the binding's provenance at
@@ -698,6 +716,7 @@ export class DaemonMcpProxy {
       this.boundSessionUuid = config.initialSessionUuid.trim();
       this.boundSessionUuidAt = this.timer.now();
       this.initialSessionBindingConfigured = true;
+      this.ownedDeviceSessions.add(this.boundSessionUuid);
     }
     this.buildIdentity = config.buildIdentity ?? getCurrentBuildIdentity();
     this.clientVersion = config.clientVersion ?? DAEMON_VERSION;
@@ -874,6 +893,11 @@ export class DaemonMcpProxy {
       return;
     }
     this.recordSessionReleased(releasedSessionUuid, notification.reason);
+    // A released session is no longer owned: drop it so a later fresh-screenshot
+    // read stops owner-routing to it and falls back to the live binding (which the
+    // daemon denies), matching the "released session remains denied" guarantee
+    // (issue #5663).
+    this.ownedDeviceSessions.delete(releasedSessionUuid);
     if (
       releasedSessionUuid === this.boundSessionUuid ||
       releasedSessionUuid === this.terminalBoundSession?.sessionUuid
@@ -1788,6 +1812,7 @@ export class DaemonMcpProxy {
     this.terminalBoundSession = undefined;
     this.boundSessionUuid = mintedSessionUuid;
     this.boundSessionUuidAt = this.timer.now();
+    this.ownedDeviceSessions.add(mintedSessionUuid);
     this.boundSessionFromResultMint = true;
     this.initialSessionBindingConfigured = false;
     // Deliver the first ownership heartbeat as part of the acquisition so the
@@ -1842,6 +1867,7 @@ export class DaemonMcpProxy {
     }
     this.boundSessionUuid = sessionUuid;
     this.boundSessionUuidAt = this.timer.now();
+    this.ownedDeviceSessions.add(sessionUuid);
   }
 
   // Refresh the replay lease for a call that was ADMITTED and forwarded to the
@@ -1964,6 +1990,33 @@ export class DaemonMcpProxy {
     }
   }
 
+  // Route a fresh-session-screenshot read to the session named in its URI when
+  // this connection owns that session but has since bound a newer one (e.g.
+  // getApple after getAndroid). Forwarding the URI's session — not the latest
+  // binding — makes the daemon seed the loopback SessionToolBinding with the
+  // owning session, so the just-established owner is authorized instead of denied
+  // with SCREENSHOT_ACCESS_DENIED (issue #5663). Returns undefined for any other
+  // URI, a foreign/unowned session (which must keep forwarding this connection's
+  // own binding and stay denied), or the current binding / a fenced connection
+  // (both already handled by withBoundSessionUuid and the released-session path).
+  private freshScreenshotOwnerForwardParams(uri: string): Record<string, unknown> | undefined {
+    if (this.terminalBoundSession) {
+      return undefined;
+    }
+    const uriSessionUuid = freshSessionScreenshotUriSessionUuid(uri);
+    if (
+      !uriSessionUuid ||
+      uriSessionUuid === this.boundSessionUuid ||
+      !this.ownedDeviceSessions.has(uriSessionUuid)
+    ) {
+      return undefined;
+    }
+    return {
+      sessionUuid: uriSessionUuid,
+      [DAEMON_BOUND_SESSION_PARAM]: uriSessionUuid,
+    };
+  }
+
   /**
    * Read a resource from the daemon
    */
@@ -1977,7 +2030,7 @@ export class DaemonMcpProxy {
           [DAEMON_BOUND_SESSION_PARAM]: terminalSessionUuid,
           [DAEMON_RELEASED_SESSION_PARAM]: terminalSessionUuid,
         }
-      : this.withBoundSessionUuid({});
+      : (this.freshScreenshotOwnerForwardParams(uri) ?? this.withBoundSessionUuid({}));
     return await this.withRecoverableReconnect(
       () => this.client!.readResource(uri, forwardedParams),
       this.sessionUuidFromArgs(forwardedParams),
@@ -2016,6 +2069,7 @@ export class DaemonMcpProxy {
     this.notificationUnsubscribe = null;
     this.connected = false;
     this.clearBoundSessionUuid();
+    this.ownedDeviceSessions.clear();
     this.terminalBoundSession = undefined;
     // Drain the per-UUID release-tracking maps at the close/reconnect boundary.
     // Ordinary completion already evicts each entry when its last in-flight

@@ -1015,6 +1015,53 @@ final class WebSocketServerTests: XCTestCase {
         XCTAssertEqual(response["success"] as? Bool, true)
     }
 
+    /// AC1 + review hardening: several masked data frames coalesced into the same
+    /// TCP segment as the upgrade request must **all** be delivered in order, not
+    /// just the first. This exercises the buffered-drain path across back-to-back
+    /// frames — the case the issue's "TCP stack that coalesces segments under load"
+    /// note describes — and guards the re-dispatch that keeps that drain from
+    /// recursing on one stack.
+    func testMultipleFramesPipelinedWithUpgradeAllDelivered() throws {
+        let fakeTimeProvider = FakeTimeProvider(initialTime: 1000)
+        perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
+        let handler = CommandHandler.createForTesting(
+            elementLocator: FakeElementLocator(),
+            gesturePerformer: FakeGesturePerformer(),
+            perfProvider: perfProvider
+        )
+        let (server, port) = startServerOnFreePort(commandHandler: handler, perfProvider: perfProvider)
+        defer { server.stop() }
+
+        let ids = ["pipe-a", "pipe-b", "pipe-c"]
+        var tail = Data()
+        for id in ids {
+            let command = #"{"type":"request_press_back","requestId":"\#(id)"}"#
+            tail.append(RawWebSocketClient.maskedFrame(opcode: 0x01, fin: true, payload: Data(command.utf8)))
+        }
+
+        let client = RawWebSocketClient(port: port)
+        defer { client.close() }
+        // Upgrade request + three data frames, all in one TCP segment.
+        try client.connectAndUpgrade(timeout: 10, pipelinedTail: tail)
+
+        let seenBox = Box<Set<String>>([])
+        let received = expectation(description: "all pipelined command responses decode")
+        DispatchQueue.global().async {
+            for _ in ids {
+                guard let object = try? client.waitForMessage(timeout: 12, where: { object in
+                    (object["type"] as? String) == "press_back_result"
+                }) else { break }
+                if let id = object["requestId"] as? String {
+                    seenBox.value.insert(id)
+                }
+            }
+            received.fulfill()
+        }
+        wait(for: [received], timeout: 20)
+
+        XCTAssertEqual(seenBox.value, Set(ids), "every frame pipelined in the same segment must be delivered, not just the first")
+    }
+
     // MARK: - Client presence gating (#5477)
 
     /// Presence tracks only upgraded WebSocket clients and fires the hook exactly

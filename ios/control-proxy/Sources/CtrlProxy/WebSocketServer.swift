@@ -949,11 +949,21 @@ class WebSocketConnection: WebSocketResponding {
     /// reader and the reassembly state). `onData` is invoked with exactly `count`
     /// bytes; on socket error/EOF the connection is closed and `onData` is not
     /// called.
+    ///
+    /// The buffered fast-path re-dispatches `onData` onto `queue` rather than
+    /// calling it inline. Otherwise, when several frames are buffered together
+    /// (the handshake reads up to `maximumHTTPRequestLength` in one segment, and
+    /// coalesced pipelining can pack many frames into it), the whole
+    /// parse → `readPayload` → `receiveFrameBytes` → `handleDataFrame` →
+    /// `receiveWebSocketFrame` chain would recurse on a single call stack with no
+    /// unwind between frames, risking stack exhaustion. The hop keeps per-frame
+    /// stack depth bounded; ordering and the no-lock invariant are preserved
+    /// because `queue` is the same serial queue every completion already runs on.
     private func receiveFrameBytes(_ count: Int, onData: @escaping (Data) -> Void) {
         if inboundBuffer.count >= count {
             let chunk = Data(inboundBuffer.prefix(count))
             inboundBuffer.removeFirst(count)
-            onData(chunk)
+            queue.async { onData(chunk) }
             return
         }
 
@@ -979,8 +989,11 @@ class WebSocketConnection: WebSocketResponding {
                 return
             }
 
-            // `minimumIncompleteLength: needed` guarantees the buffer now holds at
-            // least `count` bytes; slice exactly `count` and keep any surplus.
+            // `minimumIncompleteLength: needed` guarantees the socket delivered
+            // exactly `needed` bytes, so the buffer now holds exactly `count`;
+            // slice them out. (This completion is already an async break, so no
+            // extra hop is needed here — only the buffered fast-path above adds
+            // one to bound recursion depth.)
             self.inboundBuffer.append(data)
             let chunk = Data(self.inboundBuffer.prefix(count))
             self.inboundBuffer.removeFirst(count)

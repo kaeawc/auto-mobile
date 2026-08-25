@@ -22,8 +22,14 @@ printf '%s\n' "\$*" >> "$ARGS_FILE"
 EOF
   chmod +x "$STUB_BIN/bats"
 
+  # GNU parallel identifies itself via `--version`; the runner probes for that
+  # string, so the stub must emit it or the runner would try to install.
   cat > "$STUB_BIN/parallel" <<'EOF'
 #!/usr/bin/env bash
+if [[ "$1" == "--version" ]]; then
+  echo "GNU parallel 20230101"
+  exit 0
+fi
 exit 0
 EOF
   chmod +x "$STUB_BIN/parallel"
@@ -86,4 +92,27 @@ serial_pass_args() { grep -v -- '--jobs' "$ARGS_FILE"; }
   run env HOME="$FAKE_HOME" PATH="$STUB_BIN:$PATH" bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$(cat "$ARGS_FILE")" == *"test/bats"* ]]
+}
+
+# is_gnu_parallel must accept only GNU parallel, not the unrelated moreutils
+# `parallel` (which is also named `parallel` but breaks `bats --jobs`). Source
+# the script (main() is guarded) and probe the function directly.
+@test "is_gnu_parallel accepts GNU parallel" {
+  PATH="$STUB_BIN:$PATH" source "$SCRIPT"
+  PATH="$STUB_BIN:$PATH" run is_gnu_parallel
+  [ "$status" -eq 0 ]
+}
+
+@test "is_gnu_parallel rejects a non-GNU (moreutils-style) parallel" {
+  # moreutils parallel does not understand --version and errors instead.
+  cat > "$STUB_BIN/parallel" <<'EOF'
+#!/usr/bin/env bash
+echo "parallel: invalid option -- '-'" >&2
+exit 1
+EOF
+  chmod +x "$STUB_BIN/parallel"
+
+  source "$SCRIPT"
+  PATH="$STUB_BIN:/usr/bin:/bin" run is_gnu_parallel
+  [ "$status" -ne 0 ]
 }

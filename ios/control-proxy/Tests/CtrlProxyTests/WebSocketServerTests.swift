@@ -929,6 +929,176 @@ final class WebSocketServerTests: XCTestCase {
         XCTAssertEqual(response["success"] as? Bool, true)
     }
 
+    // MARK: - Frame pipelined with the upgrade handshake (#5678)
+
+    /// AC5 deterministic: a complete masked text frame already sitting in the
+    /// connection's inbound buffer — exactly the residual left when a frame is
+    /// pipelined in the same TCP segment as the upgrade request — is parsed and
+    /// delivered through the real frame path with **no** socket read. This pins
+    /// the residual-carry behavior without depending on TCP segment coalescing, so
+    /// it cannot false-pass the way a real-socket test can if the stack splits the
+    /// segment (the socket tests below remain as integration coverage). Against the
+    /// pre-fix implementation — where `receiveWebSocketFrame` issued a fresh
+    /// `connection.receive` and ignored buffered bytes — `onMessage` never fires
+    /// and this times out.
+    func testBufferedResidualFrameIsDeliveredWithoutSocketRead() {
+        let command = #"{"type":"request_press_back","requestId":"buffered-1"}"#
+        let frame = RawWebSocketClient.maskedFrame(opcode: 0x01, fin: true, payload: Data(command.utf8))
+
+        let delivered = expectation(description: "buffered residual frame delivered via onMessage")
+        let payloadBox = Box<Data?>(nil)
+        // An NWConnection that is never started: the buffered drain path must
+        // deliver the whole frame without ever touching it.
+        let nwConnection = NWConnection(host: "127.0.0.1", port: 1, using: .tcp)
+        let connection = WebSocketConnection(
+            id: 1,
+            connection: nwConnection,
+            queue: DispatchQueue(label: "test.ws.buffered"),
+            boundPort: 8765,
+            onMessage: { data in
+                payloadBox.value = data
+                delivered.fulfill()
+            },
+            onClose: {}
+        )
+
+        connection.deliverBufferedFramesForTesting(frame)
+
+        wait(for: [delivered], timeout: 3)
+        XCTAssertEqual(payloadBox.value, Data(command.utf8), "the buffered residual frame must be delivered verbatim")
+    }
+
+    /// AC1 end-to-end over a real socket: a masked WebSocket data frame delivered
+    /// in the **same TCP segment** as the upgrade request (pipelined) must be
+    /// carried into the frame parser after the handshake slice, not stranded in
+    /// the inbound buffer and lost. The client sends the upgrade request and the
+    /// first command frame in a single `connection.send`, so the server's first
+    /// read contains both; pre-fix `receiveHTTPUpgrade` slices out the upgrade and
+    /// starts a fresh `receive` that never sees the residual frame, so no
+    /// `press_back_result` ever comes back and the wait times out.
+    func testFramePipelinedWithUpgradeIsDelivered() throws {
+        let fakeTimeProvider = FakeTimeProvider(initialTime: 1000)
+        perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
+        let handler = CommandHandler.createForTesting(
+            elementLocator: FakeElementLocator(),
+            gesturePerformer: FakeGesturePerformer(),
+            perfProvider: perfProvider
+        )
+        let (server, port) = startServerOnFreePort(commandHandler: handler, perfProvider: perfProvider)
+        defer { server.stop() }
+
+        let command = #"{"type":"request_press_back","requestId":"pipelined-1"}"#
+        let pipelinedFrame = RawWebSocketClient.maskedFrame(opcode: 0x01, fin: true, payload: Data(command.utf8))
+
+        let client = RawWebSocketClient(port: port)
+        defer { client.close() }
+        // Upgrade request + first data frame sent together, in one TCP segment.
+        try client.connectAndUpgrade(timeout: 10, pipelinedTail: pipelinedFrame)
+
+        // Dispatch runs through `runOnMainThread` (`DispatchQueue.main.sync`), so
+        // the main thread must stay in `wait(for:)` pumping its run loop; poll the
+        // frames on a background queue (mirroring the ping/fragment tests).
+        let responseBox = Box<[String: Any]?>(nil)
+        let received = expectation(description: "pipelined command response decodes")
+        DispatchQueue.global().async {
+            let object = try? client.waitForMessage(timeout: 12) { object in
+                object["type"] as? String == "press_back_result"
+            }
+            responseBox.value = object
+            received.fulfill()
+        }
+        wait(for: [received], timeout: 15)
+
+        let response = try XCTUnwrap(responseBox.value, "a frame pipelined with the upgrade must be delivered, not dropped (issue #5678)")
+        XCTAssertEqual(response["requestId"] as? String, "pipelined-1")
+        XCTAssertEqual(response["success"] as? Bool, true)
+    }
+
+    /// AC2 (no regression): the normal case — the client waits for the `101` and
+    /// only then sends its first frame in a later segment — still delivers. Guards
+    /// against the residual-carry change double-processing or breaking the plain
+    /// pull-based frame read when the inbound buffer is empty at upgrade time.
+    func testFrameArrivingAfterUpgradeStillDelivered() throws {
+        let fakeTimeProvider = FakeTimeProvider(initialTime: 1000)
+        perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
+        let handler = CommandHandler.createForTesting(
+            elementLocator: FakeElementLocator(),
+            gesturePerformer: FakeGesturePerformer(),
+            perfProvider: perfProvider
+        )
+        let (server, port) = startServerOnFreePort(commandHandler: handler, perfProvider: perfProvider)
+        defer { server.stop() }
+
+        let client = RawWebSocketClient(port: port)
+        defer { client.close() }
+        try client.connectAndUpgrade(timeout: 10) // waits for 101 before any frame
+
+        let command = #"{"type":"request_press_back","requestId":"later-1"}"#
+        client.sendFrame(opcode: 0x01, fin: true, payload: Data(command.utf8))
+
+        let responseBox = Box<[String: Any]?>(nil)
+        let received = expectation(description: "later command response decodes")
+        DispatchQueue.global().async {
+            let object = try? client.waitForMessage(timeout: 12) { object in
+                object["type"] as? String == "press_back_result"
+            }
+            responseBox.value = object
+            received.fulfill()
+        }
+        wait(for: [received], timeout: 15)
+
+        let response = try XCTUnwrap(responseBox.value, "a frame sent after the upgrade must still be delivered")
+        XCTAssertEqual(response["requestId"] as? String, "later-1")
+        XCTAssertEqual(response["success"] as? Bool, true)
+    }
+
+    /// AC1 + review hardening: several masked data frames coalesced into the same
+    /// TCP segment as the upgrade request must **all** be delivered in order, not
+    /// just the first. This exercises the buffered-drain path across back-to-back
+    /// frames — the case the issue's "TCP stack that coalesces segments under load"
+    /// note describes — and guards the re-dispatch that keeps that drain from
+    /// recursing on one stack.
+    func testMultipleFramesPipelinedWithUpgradeAllDelivered() throws {
+        let fakeTimeProvider = FakeTimeProvider(initialTime: 1000)
+        perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
+        let handler = CommandHandler.createForTesting(
+            elementLocator: FakeElementLocator(),
+            gesturePerformer: FakeGesturePerformer(),
+            perfProvider: perfProvider
+        )
+        let (server, port) = startServerOnFreePort(commandHandler: handler, perfProvider: perfProvider)
+        defer { server.stop() }
+
+        let ids = ["pipe-a", "pipe-b", "pipe-c"]
+        var tail = Data()
+        for id in ids {
+            let command = #"{"type":"request_press_back","requestId":"\#(id)"}"#
+            tail.append(RawWebSocketClient.maskedFrame(opcode: 0x01, fin: true, payload: Data(command.utf8)))
+        }
+
+        let client = RawWebSocketClient(port: port)
+        defer { client.close() }
+        // Upgrade request + three data frames, all in one TCP segment.
+        try client.connectAndUpgrade(timeout: 10, pipelinedTail: tail)
+
+        let seenBox = Box<Set<String>>([])
+        let received = expectation(description: "all pipelined command responses decode")
+        DispatchQueue.global().async {
+            for _ in ids {
+                guard let object = try? client.waitForMessage(timeout: 12, where: { object in
+                    (object["type"] as? String) == "press_back_result"
+                }) else { break }
+                if let id = object["requestId"] as? String {
+                    seenBox.value.insert(id)
+                }
+            }
+            received.fulfill()
+        }
+        wait(for: [received], timeout: 20)
+
+        XCTAssertEqual(seenBox.value, Set(ids), "every frame pipelined in the same segment must be delivered, not just the first")
+    }
+
     // MARK: - Client presence gating (#5477)
 
     /// Presence tracks only upgraded WebSocket clients and fires the hook exactly
@@ -1051,7 +1221,13 @@ private final class RawWebSocketClient: @unchecked Sendable {
     /// until the `101` response headers are received. Any bytes after the header
     /// separator (e.g. the server's `connected` event frame) are retained for
     /// later frame parsing, then a background receive loop is started.
-    func connectAndUpgrade(timeout: TimeInterval) throws {
+    ///
+    /// `pipelinedTail`, when non-empty, is appended to the upgrade request and
+    /// sent in the **same** `connection.send` — i.e. in the same TCP segment — so
+    /// a client-first frame is pipelined with the handshake. This is the vector
+    /// for issue #5678: the server must carry those residual bytes into the frame
+    /// parser rather than stranding them after the handshake slice.
+    func connectAndUpgrade(timeout: TimeInterval, pipelinedTail: Data = Data()) throws {
         let ready = DispatchSemaphore(value: 0)
         connection.stateUpdateHandler = { state in
             if case .ready = state { ready.signal() }
@@ -1071,7 +1247,9 @@ private final class RawWebSocketClient: @unchecked Sendable {
             "",
             "",
         ].joined(separator: "\r\n")
-        connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in })
+        var requestData = Data(request.utf8)
+        requestData.append(pipelinedTail)
+        connection.send(content: requestData, completion: .contentProcessed { _ in })
 
         let deadline = Date().addingTimeInterval(timeout)
         var httpBuffer = Data()
@@ -1096,9 +1274,11 @@ private final class RawWebSocketClient: @unchecked Sendable {
         throw ClientError.timeout("handshake headers not received")
     }
 
-    /// Sends one client→server frame, masked as §5.3 requires. Test payloads are
-    /// all < 126 bytes, so only the 7-bit length form is emitted.
-    func sendFrame(opcode: UInt8, fin: Bool, payload: Data) {
+    /// Builds one client→server frame, masked as §5.3 requires. Test payloads are
+    /// all < 126 bytes, so only the 7-bit length form is emitted. `static` so a
+    /// frame can be built and pipelined with the upgrade request (issue #5678)
+    /// before the client instance is even connected.
+    static func maskedFrame(opcode: UInt8, fin: Bool, payload: Data) -> Data {
         var frame = Data()
         frame.append((fin ? 0x80 : 0x00) | opcode)
         frame.append(0x80 | UInt8(payload.count)) // mask bit set + 7-bit length
@@ -1107,7 +1287,12 @@ private final class RawWebSocketClient: @unchecked Sendable {
         for (i, byte) in payload.enumerated() {
             frame.append(byte ^ mask[i % 4])
         }
-        connection.send(content: frame, completion: .contentProcessed { _ in })
+        return frame
+    }
+
+    /// Sends one client→server frame, masked as §5.3 requires.
+    func sendFrame(opcode: UInt8, fin: Bool, payload: Data) {
+        connection.send(content: Self.maskedFrame(opcode: opcode, fin: fin, payload: payload), completion: .contentProcessed { _ in })
     }
 
     /// Polls parsed server frames until one decodes to a JSON object satisfying

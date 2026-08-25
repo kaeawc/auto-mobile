@@ -1,32 +1,40 @@
 version: 2.1
 
-# AutoMobile — supplementary iOS CI lane on CircleCI.
+# AutoMobile — CircleCI is used ONLY for macOS/iOS runners.
 #
-# Purpose: run the Swift-package build+test on CircleCI's macOS executor so it
-# stops competing for GitHub Actions' 5-concurrent-macOS cap on a public repo.
-# This mirrors the `ios-swift-packages` job in
-# .github/workflows/pull_request.yml — it calls the SAME repo scripts
-# (scripts/ios/swift-build.sh, scripts/ios/swift-test.sh), so build logic stays
-# single-sourced. It does NOT replace GitHub Actions; it runs alongside it.
+# Everything else (Node/TypeScript, Android/Gradle, Python, docs) stays on
+# GitHub Actions, where it runs free and fast on Linux. CircleCI exists here for
+# one reason: AutoMobile is a public repo, so GitHub-hosted macOS minutes are
+# free but capped at 5 CONCURRENT macOS jobs, and the per-PR iOS matrix competes
+# for that cap. Running the iOS build/test on CircleCI's macOS executor adds a
+# parallel lane. (CircleCI's auto-generated Linux node/java/python jobs were
+# intentionally discarded — importing free-on-GitHub Linux work buys nothing.)
 #
-# Budget note: CircleCI's open-source plan includes ~30,000 macOS credits/month
-# (~150 macOS minutes at ~200 credits/min). To avoid burning that on non-iOS
-# commits, every job halts early unless ios/** or scripts/ios/** changed.
+# Scope: the two jobs below mirror `ios-swift-packages` and `ios-xcode-build`
+# in .github/workflows/pull_request.yml — the ones that feed the required
+# "iOS Build" gate. They call the SAME repo scripts, so build logic stays
+# single-sourced. The heavier simulator TESTS (Playground / XCTestRunner) are
+# left on GitHub Actions: they need a booted simulator, they cost more macOS
+# minutes, and they feed only the non-required "iOS" gate.
 #
-# Signing: swift-build.sh only signs when IOS_SIGNING_ENABLED / MACOS_SIGNING_
-# ENABLED are "true" (set from the presence of cert secrets). With no secrets
-# configured on CircleCI, it builds unsigned — which is what we want for a
-# fast build+test lane. Do not add signing secrets here unless a job needs them.
+# Budget: CircleCI's open-source plan includes ~30,000 macOS credits/month
+# (~150 macOS minutes at ~200 credits/min); paid overflow is ~$0.12-0.24/min.
+# Every job halts early unless ios/** or scripts/ios/** changed, so non-iOS
+# commits cost nothing. To trim spend further, drop `ios-xcode-build` from the
+# workflow and keep only `ios-swift-packages`.
+#
+# Signing: the scripts only sign when IOS_SIGNING_ENABLED / MACOS_SIGNING_ENABLED
+# are "true" (derived from cert-secret presence). No secrets are configured on
+# CircleCI, so these build unsigned — correct for a simulator build+test lane.
 
 executors:
   ios:
     macos:
-      # Verify/adjust to an available image at:
-      #   https://circleci.com/developer/machine/image/xcode
-      # PR CI pins Xcode 26.5 (see pull_request.yml); match it here.
+      # Match the Xcode pinned by pull_request.yml. Verify the exact image is
+      # offered at https://circleci.com/developer/machine/image/xcode and adjust.
       xcode: "26.5"
-    # OSS-tier Apple-silicon class. macos.m2pro.medium ≈ 180 credits/min;
-    # drop to a smaller class if CircleCI offers a cheaper OSS macOS option.
+    # OSS-tier Apple-silicon class (~200 credits/min). Use the smallest macOS
+    # class CircleCI offers your plan; larger classes burn the free budget faster.
     resource_class: macos.m2pro.medium
 
 commands:
@@ -37,7 +45,7 @@ commands:
           name: "Halt if no iOS changes"
           command: |
             set -euo pipefail
-            # First build on a branch has no HEAD~1 — don't halt in that case.
+            # First build on a branch has no HEAD~1 — don't halt then.
             if ! git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
               echo "No previous commit to diff against — running."
               exit 0
@@ -48,13 +56,8 @@ commands:
               echo "No ios/** or scripts/ios/** changes — halting to save macOS credits."
               circleci step halt
             fi
-
-jobs:
-  ios-swift-packages:
-    executor: ios
+  restore_spm_cache:
     steps:
-      - checkout
-      - halt_if_no_ios_changes
       - run:
           name: "Compute SwiftPM cache key"
           command: cat ios/*/Package.swift > /tmp/spm-lock.txt
@@ -62,6 +65,14 @@ jobs:
           keys:
             - spm-v1-{{ checksum "/tmp/spm-lock.txt" }}
             - spm-v1-
+
+jobs:
+  ios-swift-packages:
+    executor: ios
+    steps:
+      - checkout
+      - halt_if_no_ios_changes
+      - restore_spm_cache
       - run:
           name: "Report toolchain"
           command: xcodebuild -version && swift --version
@@ -80,7 +91,26 @@ jobs:
             - ios/screen-capture/.build
             - ios/XCTestRunner/.build
 
+  ios-xcode-build:
+    executor: ios
+    steps:
+      - checkout
+      - halt_if_no_ios_changes
+      - run:
+          name: "Install XcodeGen"
+          command: ./scripts/ios/install-xcodegen.sh
+      - run:
+          name: "Check XcodeGen project drift"
+          command: ./scripts/ios/xcodegen-drift-check.sh --all
+      - run:
+          name: "Ensure iOS Simulator runtime"
+          command: ./scripts/ios/ensure-simulator-runtime.sh
+      - run:
+          name: "Build Xcode projects (iOS Simulator)"
+          command: ./scripts/ios/xcode-build.sh
+
 workflows:
-  ios:
+  ios-macos:
     jobs:
       - ios-swift-packages
+      - ios-xcode-build

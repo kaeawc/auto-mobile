@@ -256,6 +256,10 @@ jobs:
               # rewired this action and only ran the emulator jobs incidentally,
               # because it also touched scripts/android/** (see #4237).
               - '.github/actions/android-emulator/**'
+              # Same reasoning for the Gradle-run composite: Android jobs (the
+              # SDK Debug Inspector Consumer publication guard among them) drive
+              # it, so an edit to it must exercise them rather than be skipped.
+              - '.github/actions/gradle-task-run/**'
               - 'scripts/local-dev/hot-reload.sh'
               - '.github/workflows/android*.yml'
               # This workflow controls Android-job gating, so changes to it
@@ -2451,6 +2455,32 @@ jobs:
           name: playground-app-apk
           path: android/playground/app/build/outputs/apk/debug/playground-app-debug.apk
 
+  sdk-debug-inspector-consumer:
+    timeout-minutes: 20
+    name: "SDK Debug Inspector Consumer"
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.android_should_run == 'true'
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      # Publish both SDK variants to the local Maven repo. The storage-inspection
+      # ContentProviders ship in the debug variant only (#5714); this proves a
+      # Maven consumer -- not an in-repo project() dependency -- can obtain them.
+      - uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":auto-mobile-sdk:publishToMavenLocal"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Verify published debug inspection providers"
+        run: bash scripts/android/validate-sdk-debug-inspector-consumer.sh --skip-publish
+
   # =============================================================================
   # MCP Benchmarks
   # =============================================================================
@@ -3050,6 +3080,7 @@ jobs:
       - build-android-control-proxy
       - build-junit-runner-library
       - build-playground-app
+      - sdk-debug-inspector-consumer
       - junit-runner-kotlin-consumer-compatibility
       - junit-runner-unit-tests
       - junit-runner-emulator-tests
@@ -3065,6 +3096,7 @@ jobs:
             "${{ needs.build-android-control-proxy.result }}" \
             "${{ needs.build-junit-runner-library.result }}" \
             "${{ needs.build-playground-app.result }}" \
+            "${{ needs.sdk-debug-inspector-consumer.result }}" \
             "${{ needs.junit-runner-kotlin-consumer-compatibility.result }}" \
             "${{ needs.junit-runner-unit-tests.result }}" \
             "${{ needs.junit-runner-emulator-tests.result }}" \

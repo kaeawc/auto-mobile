@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+# bats file_tags=serial
+# Rewrites the real root package.json (backup -> mutate -> restore) in the repo
+# root (no cd to a temp dir), so it races any concurrent test that reads or
+# rewrites package.json. Runs in the serial pass; see scripts/ci/run-bats.sh and
+# test/scripts/batsSerialTags.test.ts.
 #
 # Guards the hermetic drift-check of the pinned runtime dependency graph (#5421).
 # The pure pin/partition logic is covered by test/release/runtimePins.test.ts;

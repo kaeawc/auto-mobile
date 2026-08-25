@@ -10,8 +10,8 @@
 #
 # Two passes:
 #
-#   1. Parallel pass — everything EXCEPT files tagged `serial-boundary`. We
-#      parallelize ACROSS files but keep each file's tests SERIAL
+#   1. Parallel pass — everything EXCEPT files tagged `serial`. We parallelize
+#      ACROSS files but keep each file's tests SERIAL
 #      (`--no-parallelize-within-files`): tests inside one file share `setup()`
 #      / `teardown()`, so serializing within a file is the conservative default
 #      while still spreading the files across every core.
@@ -28,25 +28,40 @@
 #
 # `bats --jobs` requires GNU parallel; this script installs it when missing and
 # suppresses its first-run citation notice so it does not spam CI logs.
-set -euo pipefail
+#
+# The functions are defined unconditionally but main() only runs when the script
+# is executed, not sourced, so test/bats/run-bats.bats can source it and probe
+# individual functions (e.g. is_gnu_parallel) without triggering an install.
 
-BATS_DIR="${1:-test/bats}"
 SERIAL_TAG="serial"
 
 log() { printf '%s\n' "$*" >&2; }
 
+# `bats --jobs` requires *GNU* parallel specifically. A bare `command -v
+# parallel` is not enough: the unrelated moreutils `parallel` is also named
+# `parallel` and would satisfy it while breaking bats. Only GNU parallel prints
+# a "GNU parallel" banner from `--version`, so probe that capability.
+is_gnu_parallel() {
+  parallel --version 2> /dev/null | head -1 | grep -q "GNU parallel"
+}
+
 ensure_gnu_parallel() {
-  if command -v parallel > /dev/null 2>&1; then
+  if is_gnu_parallel; then
     return 0
   fi
-  log "GNU parallel not found; installing"
+  log "GNU parallel not found (or a non-GNU 'parallel' is on PATH); installing"
   if command -v brew > /dev/null 2>&1; then
     brew install parallel
   elif command -v apt-get > /dev/null 2>&1; then
     sudo apt-get update -qq
+    # The Debian/Ubuntu 'parallel' package IS GNU parallel.
     sudo apt-get install -y -qq parallel
   else
     log "ERROR: cannot install GNU parallel (no brew or apt-get)"
+    return 1
+  fi
+  if ! is_gnu_parallel; then
+    log "ERROR: GNU parallel still not available after install (a non-GNU 'parallel' may be shadowing it on PATH)"
     return 1
   fi
 }
@@ -59,18 +74,43 @@ silence_parallel_citation() {
   touch "$home_dir/will-cite"
 }
 
-ensure_gnu_parallel
-silence_parallel_citation
-
 # _NPROCESSORS_ONLN is portable across the Linux and macOS runners; fall back to
 # 2 if the host does not expose it.
-jobs="$(getconf _NPROCESSORS_ONLN 2> /dev/null || echo 2)"
-if ! [[ "$jobs" =~ ^[0-9]+$ ]] || [[ "$jobs" -lt 1 ]]; then
-  jobs=2
+job_count() {
+  local jobs
+  jobs="$(getconf _NPROCESSORS_ONLN 2> /dev/null || echo 2)"
+  if ! [[ "$jobs" =~ ^[0-9]+$ ]] || [[ "$jobs" -lt 1 ]]; then
+    jobs=2
+  fi
+  printf '%s\n' "$jobs"
+}
+
+main() {
+  # errexit is deliberately NOT set: this script branches on the exit status of
+  # helper functions (ensure_gnu_parallel, is_gnu_parallel) and of each bats
+  # pass, which under `set -e` both trips SC2310 (set -e is suppressed inside a
+  # function invoked in a condition) and would abort before the serial pass.
+  # Errors are handled explicitly instead, and rc aggregates both passes.
+  set -uo pipefail
+  local bats_dir="${1:-test/bats}"
+
+  ensure_gnu_parallel || exit 1
+  silence_parallel_citation
+
+  local jobs
+  jobs="$(job_count)"
+
+  local rc=0
+  log "Parallel pass: bats --jobs $jobs --no-parallelize-within-files (excluding $SERIAL_TAG) over $bats_dir"
+  bats --jobs "$jobs" --no-parallelize-within-files --filter-tags "!$SERIAL_TAG" "$bats_dir" || rc=1
+
+  log "Serial pass: bats (only $SERIAL_TAG) over $bats_dir"
+  bats --filter-tags "$SERIAL_TAG" "$bats_dir" || rc=1
+
+  return "$rc"
+}
+
+# Only run when executed directly; sourcing (from tests) just loads the functions.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  main "$@"
 fi
-
-log "Parallel pass: bats --jobs $jobs --no-parallelize-within-files (excluding $SERIAL_TAG) over $BATS_DIR"
-bats --jobs "$jobs" --no-parallelize-within-files --filter-tags "!$SERIAL_TAG" "$BATS_DIR"
-
-log "Serial pass: bats (only $SERIAL_TAG) over $BATS_DIR"
-bats --filter-tags "$SERIAL_TAG" "$BATS_DIR"

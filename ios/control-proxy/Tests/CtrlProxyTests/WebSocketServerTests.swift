@@ -931,6 +931,43 @@ final class WebSocketServerTests: XCTestCase {
 
     // MARK: - Frame pipelined with the upgrade handshake (#5678)
 
+    /// AC5 deterministic: a complete masked text frame already sitting in the
+    /// connection's inbound buffer — exactly the residual left when a frame is
+    /// pipelined in the same TCP segment as the upgrade request — is parsed and
+    /// delivered through the real frame path with **no** socket read. This pins
+    /// the residual-carry behavior without depending on TCP segment coalescing, so
+    /// it cannot false-pass the way a real-socket test can if the stack splits the
+    /// segment (the socket tests below remain as integration coverage). Against the
+    /// pre-fix implementation — where `receiveWebSocketFrame` issued a fresh
+    /// `connection.receive` and ignored buffered bytes — `onMessage` never fires
+    /// and this times out.
+    func testBufferedResidualFrameIsDeliveredWithoutSocketRead() {
+        let command = #"{"type":"request_press_back","requestId":"buffered-1"}"#
+        let frame = RawWebSocketClient.maskedFrame(opcode: 0x01, fin: true, payload: Data(command.utf8))
+
+        let delivered = expectation(description: "buffered residual frame delivered via onMessage")
+        let payloadBox = Box<Data?>(nil)
+        // An NWConnection that is never started: the buffered drain path must
+        // deliver the whole frame without ever touching it.
+        let nwConnection = NWConnection(host: "127.0.0.1", port: 1, using: .tcp)
+        let connection = WebSocketConnection(
+            id: 1,
+            connection: nwConnection,
+            queue: DispatchQueue(label: "test.ws.buffered"),
+            boundPort: 8765,
+            onMessage: { data in
+                payloadBox.value = data
+                delivered.fulfill()
+            },
+            onClose: {}
+        )
+
+        connection.deliverBufferedFramesForTesting(frame)
+
+        wait(for: [delivered], timeout: 3)
+        XCTAssertEqual(payloadBox.value, Data(command.utf8), "the buffered residual frame must be delivered verbatim")
+    }
+
     /// AC1 end-to-end over a real socket: a masked WebSocket data frame delivered
     /// in the **same TCP segment** as the upgrade request (pipelined) must be
     /// carried into the frame parser after the handshake slice, not stranded in

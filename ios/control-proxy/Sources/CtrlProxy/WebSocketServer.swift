@@ -977,6 +977,19 @@ class WebSocketConnection: WebSocketResponding {
                 return
             }
 
+            // Fast path — the common post-upgrade case: nothing buffered and the
+            // socket delivered the whole read in one piece. Hand it straight to
+            // `onData` without routing through `inboundBuffer`. Buffering an
+            // accepted frame here (up to `maxFramePayloadLength`) would add a
+            // full-payload copy on the hot wire path and can spike RSS enough to
+            // jetsam the runner, whereas the pre-refactor code passed complete
+            // receive data through directly (issue #5678 review). This also covers
+            // the final frame delivered together with `isComplete` (below).
+            if self.inboundBuffer.isEmpty, let data = data, data.count == count {
+                onData(data)
+                return
+            }
+
             // Consume whatever arrived before acting on EOF. The socket can
             // deliver the final `needed` bytes together with `isComplete` when a
             // client sends a complete frame and half-closes its write side, and
@@ -1016,6 +1029,19 @@ class WebSocketConnection: WebSocketResponding {
         receiveFrameBytes(2) { [weak self] headerData in
             self?.parseWebSocketFrame(headerData)
         }
+    }
+
+    /// Test seam (issue #5678): inject bytes that were already received before
+    /// frame reading began — e.g. a WebSocket frame pipelined in the same TCP
+    /// segment as the upgrade request — into `inboundBuffer`, then start the frame
+    /// reader exactly as the post-upgrade transition does. Because the whole frame
+    /// is buffered, the drain path delivers it through the real parser with **no**
+    /// `connection.receive`, so `WebSocketServerTests` can pin the residual-carry
+    /// behavior deterministically, without depending on TCP segment coalescing.
+    /// Internal, not private, so the test target can drive it via `@testable`.
+    func deliverBufferedFramesForTesting(_ residual: Data) {
+        inboundBuffer.append(residual)
+        receiveWebSocketFrame()
     }
 
     private func parseWebSocketFrame(_ header: Data) {

@@ -163,6 +163,7 @@ fun DeviceStreamView(
       stallReconnectMs = if (column.platform == Platform.Android) LIVE_STALL_RECONNECT_MS else null,
     )
   val state by source.state.collectAsState()
+  val droppedFrames by source.droppedFrames.collectAsState(initial = null)
   val controlSnapshot = control?.interactionSnapshot
   var settingsLaunchFailure by remember(column.deviceId) { mutableStateOf(false) }
   // Perf span T3: mark each newly rendered video frame so the tracer can time the first frame after
@@ -174,6 +175,9 @@ fun DeviceStreamView(
       control?.tracer?.videoFrameRendered(column.deviceId)
       qualityController?.onFrame(liveFrame.receivedAtMs)
     }
+  }
+  LaunchedEffect(droppedFrames) {
+    droppedFrames?.let { qualityController?.onDroppedFrames(it) }
   }
   Box(Modifier.fillMaxSize()) {
     DeviceStreamContent(

@@ -24,6 +24,11 @@ export const PACKET_FLAG_KEY_FRAME = 1n << 62n;
  * (control fails closed).
  */
 export const PACKET_FLAG_ROTATION_PRESENT = 1n << 61n;
+/**
+ * A zero-payload telemetry packet carries the source encoder's cumulative dropped-frame count in
+ * its low 59 bits. It shares bit 61 with rotation presence only when CONFIG is clear.
+ */
+export const PACKET_FLAG_DROPPED_FRAMES = 1n << 61n;
 
 /** Attested display rotation (0..3) occupies bits 60-59 of a CONFIG packet (issue #4786). */
 export const ROTATION_SHIFT = 59n;
@@ -86,6 +91,14 @@ export function encodePacketHeader(ptsAndFlags: bigint, size: number): Buffer {
 /** A framed packet: header followed by the Annex-B payload. */
 export function encodePacket(ptsAndFlags: bigint, payload: Buffer): Buffer {
   return Buffer.concat([encodePacketHeader(ptsAndFlags, payload.length), payload]);
+}
+
+/** Encode source-side encoder-drop telemetry without injecting bytes into the H.264 decoder. */
+export function encodeDroppedFrames(droppedFrames: number): Buffer {
+  return encodePacket(
+    PACKET_FLAG_DROPPED_FRAMES | (BigInt(droppedFrames) & PTS_MASK),
+    Buffer.alloc(0),
+  );
 }
 
 /**

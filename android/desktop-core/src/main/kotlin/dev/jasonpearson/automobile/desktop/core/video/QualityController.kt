@@ -31,13 +31,9 @@ import kotlinx.coroutines.flow.StateFlow
  *   [samplesToDowngrade]/[samplesToUpgrade] (hysteresis) plus [minDwellMs] then keep a brief dip or
  *   a flapping rate from thrashing the encode.
  *
- * **Known limit:** a *severe* sustained drop (roughly ≤ the idle cadence, ~11fps or below) is
- * indistinguishable from a static screen by inter-frame timing alone, so it lands in the idle band
- * and is not auto-downgraded — the deliberate safe choice (never degrade a still screen) over
- * downgrading every idle screen. Auto-adjust therefore covers the common moderate-degradation band
- * (~12fps up to target); catching severe drops needs a signal timing cannot supply — the on-device
- * `VideoStatsAccumulator` dropped-frame count plumbed to the client, or content-change detection —
- * tracked as a follow-up.
+ * A source-side encoder dropped-frame counter supplies the severe-degradation signal timing cannot:
+ * Android repeat frames and iOS idle suppression leave the counter flat, while a saturated encoder
+ * advances it regardless of which capture source supplied the frames.
  *
  * The displayed [actualFps] is computed as frames-over-elapsed across a trailing [rateWindowMs]
  * window — an unbiased rate. (Averaging instantaneous `1000/dt` values would overstate throughput
@@ -113,6 +109,7 @@ class QualityController(
         samples = 0
         lowStreak = 0
         highStreak = 0
+        dropStreak = 0
       }
       field = value
     }
@@ -127,7 +124,12 @@ class QualityController(
   private val droppingMinDtMs: Double
     get() = 1000.0 / (downgradeRatio * targetFps)
 
-  /** Records a decoded frame's arrival time, updates the live rate, and maybe adjusts quality. */
+  /**
+   * Records a decoded frame's arrival time, updates the live rate, and maybe adjusts quality.
+   *
+   * Delivery timing still drives the moderate-degradation and recovery bands. Severe drops use
+   * [onDroppedFrames], whose source-side counter is not confounded by idle capture behavior.
+   */
   fun onFrame(receivedAtMs: Long) {
     window.addLast(receivedAtMs)
     while (window.size > 1 && receivedAtMs - window.first() > rateWindowMs) window.removeFirst()
@@ -173,8 +175,7 @@ class QualityController(
   /** Buckets one inter-frame interval into healthy / dropping / idle and advances the streaks. */
   private fun classify(dt: Long) {
     when {
-      // Idle: consistent with a static screen's repeat cadence or a suppression/reconnect gap.
-      // Not degradation — clear the streaks and do not count it as a decision sample.
+      // Idle: Android repeat frame, or iOS suppression/reconnect gap. Not degradation.
       dt >= idleIntervalMs -> {
         lowStreak = 0
         highStreak = 0
@@ -196,6 +197,41 @@ class QualityController(
         highStreak = 0
         samples++
       }
+    }
+  }
+
+  private var lastDroppedFrames: Long? = null
+  private var dropStreak = 0
+
+  /**
+   * Records the source encoder's cumulative dropped-frame count. Counter growth proves encoder
+   * overload even when frame timing is indistinguishable from an idle screen.
+   *
+   * Encoder-drop evidence lives in its own [dropStreak], deliberately kept separate from the
+   * timing-driven [lowStreak]/[highStreak]. Telemetry arrives far less often than frames — Android
+   * reports every ~5s, iOS every ~1s — so between two counter reports many ordinary frames run
+   * through [classify] and reset the timing streaks. Sharing the low streak would let those frames
+   * erase the drop evidence before it ever reaches [samplesToDowngrade], leaving an actively
+   * delivering severe-drop stream stuck at High. A dedicated streak that only
+   * [classify]-independent counter increases advance closes that gap.
+   */
+  fun onDroppedFrames(droppedFrames: Long) {
+    val previous = lastDroppedFrames
+    lastDroppedFrames = droppedFrames
+    if (!autoAdjustEnabled || previous == null || droppedFrames <= previous) return
+    dropStreak++
+    // A counter increase is direct encoder-overload evidence, unlike a timing sample; it also
+    // forbids climbing back up while the encoder is behind.
+    highStreak = 0
+    maybeDowngradeForDrops(lastFrameMs ?: 0L)
+  }
+
+  /** Downgrades once encoder-drop evidence clears the hysteresis, independent of frame timing. */
+  private fun maybeDowngradeForDrops(nowMs: Long) {
+    val dwellElapsed = lastChangeAtMs?.let { nowMs - it >= minDwellMs } ?: true
+    if (!dwellElapsed) return
+    if (dropStreak >= samplesToDowngrade && _quality.value != VideoStreamQuality.Low) {
+      change(_quality.value.lower(), nowMs)
     }
   }
 
@@ -229,5 +265,7 @@ class QualityController(
     samples = 0
     lowStreak = 0
     highStreak = 0
+    dropStreak = 0
+    lastDroppedFrames = null
   }
 }

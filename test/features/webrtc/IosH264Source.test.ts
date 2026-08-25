@@ -2561,3 +2561,51 @@ describe("defaultIosBitrateBps (#4349)", () => {
     expect(bitrate).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe("IosH264Source encoder-drop telemetry", () => {
+  test("forwards the native writer's cumulative encoder-drop counter", async () => {
+    const droppedFrames: number[] = [];
+    const { source, helper } = createHarness(IOS_DEVICE, {
+      onDroppedFrames: (value) => droppedFrames.push(value),
+    });
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    // The default encoded Simulator path advances only the native writer counter, delivered via
+    // captureMetrics — VideoToolbox overload must reach the relay through this event.
+    helper.emit("captureMetrics", {
+      captureTimestampMs: 1,
+      frameQueueAgeMs: 0,
+      frameQueueDepth: 0,
+      droppedFrames: 7,
+      bytesQueued: 0,
+      highWaterMarkBytes: 0,
+      lastOutputWriteDurationMs: null,
+    });
+
+    expect(droppedFrames).toEqual([7]);
+    await source.stop();
+  });
+
+  test("does not forward the raw-frame queue counter as encoder drops", async () => {
+    const droppedFrames: number[] = [];
+    const { source, helper } = createHarness(IOS_DEVICE, {
+      onDroppedFrames: (value) => droppedFrames.push(value),
+    });
+    await startWithFrame(source, helper, frame(1, 1, 0x11));
+
+    // frameMetrics is the TypeScript raw-frame backpressure queue's counter, not encoder overload;
+    // the encoded path never emits it, so it must not be mistaken for a source encoder drop.
+    helper.emit("frameMetrics", {
+      captureTimestampMs: 1,
+      frameAgeMs: 0,
+      queueDepth: 0,
+      droppedFrames: 7,
+      bytesQueued: 0,
+      highWaterMarkBytes: 0,
+      maxFrameBytes: 0,
+    });
+
+    expect(droppedFrames).toEqual([]);
+    await source.stop();
+  });
+});

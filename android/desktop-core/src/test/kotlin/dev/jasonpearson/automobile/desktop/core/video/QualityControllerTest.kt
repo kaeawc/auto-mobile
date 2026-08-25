@@ -86,6 +86,67 @@ class QualityControllerTest {
   }
 
   @Test
+  fun `sustained encoder drops downgrade quality regardless of delivery cadence`() {
+    val controller =
+      QualityController(
+        initialQuality = VideoStreamQuality.High,
+        targetFps = 30,
+        samplesToDowngrade = 3,
+        minDwellMs = 0,
+      )
+
+    repeat(10) { dropped -> controller.onDroppedFrames((dropped + 1).toLong()) }
+
+    assertEquals(VideoStreamQuality.Low, controller.quality.value)
+  }
+
+  @Test
+  fun `encoder drops still downgrade when healthy frames arrive between telemetry reports`() {
+    val controller =
+      QualityController(
+        initialQuality = VideoStreamQuality.High,
+        targetFps = 30,
+        samplesToDowngrade = 3,
+        minDwellMs = 0,
+      )
+
+    // An actively delivering stream: healthy frames stream in between each drop report. Those
+    // frames reset the timing streaks in classify; the separate drop streak must survive them so
+    // sustained counter increases still downgrade (regression for the shared-streak bug). The
+    // first counter report only establishes a baseline, so four reports = one prime + three
+    // increases = one downgrade step.
+    var now = 0L
+    var dropped = 0L
+    repeat(4) {
+      repeat(5) {
+        now += 33
+        controller.onFrame(now)
+      }
+      controller.onDroppedFrames(++dropped)
+    }
+
+    assertEquals(VideoStreamQuality.Medium, controller.quality.value)
+  }
+
+  @Test
+  fun `static Android and iOS sources do not downgrade while encoder drops stay flat`() {
+    val controller =
+      QualityController(
+        initialQuality = VideoStreamQuality.High,
+        targetFps = 30,
+        samplesToDowngrade = 1,
+        minSamplesForDecision = 1,
+        minDwellMs = 0,
+      )
+
+    // Android may repeat frames and iOS may suppress them. Neither behavior increments the source
+    // encoder's dropped-frame counter, so neither can trigger a downgrade.
+    repeat(10) { controller.onDroppedFrames(0) }
+
+    assertEquals(VideoStreamQuality.High, controller.quality.value)
+  }
+
+  @Test
   fun `does not downgrade a brief dip shorter than the hysteresis window`() {
     val controller =
       QualityController(

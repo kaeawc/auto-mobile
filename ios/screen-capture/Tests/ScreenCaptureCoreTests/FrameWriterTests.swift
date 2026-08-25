@@ -49,6 +49,14 @@ final class BlockingPayloadSink: FrameSink {
 }
 
 final class FrameWriterTests: XCTestCase {
+    func testRecordsEncoderDroppedFrameInMetrics() {
+        let writer = FrameWriter(sink: BufferSink())
+
+        writer.recordEncoderDroppedFrame()
+
+        XCTAssertEqual(writer.metrics().droppedFrames, 1)
+    }
+
     func testWritesHeaderFollowedByPayload() {
         let sink = BufferSink()
         let start = Date(timeIntervalSince1970: 0)

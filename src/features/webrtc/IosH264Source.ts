@@ -1250,6 +1250,11 @@ export class IosH264Source implements H264CaptureSource {
     helper.on("captureMetrics", (metrics) => {
       if (this.helper === helper && this.isActive()) {
         this.nativeFrameMetrics = metrics;
+        // The native writer's cumulative counter is the only one the encoded Simulator path (the
+        // default) advances on VideoToolbox overload — the raw-frame queue's `frameMetrics` counter
+        // never fires there because that path bypasses enqueueFrame. Forward the native counter so
+        // encoder saturation actually reaches the desktop quality controller.
+        this.options.onDroppedFrames?.(metrics.droppedFrames);
         this.reportFrameMetrics();
       }
     });

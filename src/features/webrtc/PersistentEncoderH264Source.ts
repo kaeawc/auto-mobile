@@ -61,6 +61,7 @@ const SESSION_READY_PATTERN =
   /^VIDEO_SESSION_READY token=([^ ]+) pid=(\d+) socket=([^ ]+?)(?: proto=(\d+))?$/;
 /** Server stdout line printed after capture has fully started. */
 const STREAMING_STARTED_MARKER = "Streaming started";
+const VIDEO_STATS_PATTERN = /(?:^|\s)dropped=(\d+)(?:\s|$)/;
 
 /**
  * Host→device command byte written back over the (bidirectional) socket to ask
@@ -271,6 +272,8 @@ export interface PersistentEncoderH264SourceOptions {
    * relay records this so it can re-attest rotation to desktop clients.
    */
   onRotation?: (rotation: number) => void;
+  /** Receives cumulative dropped frames from the on-device VideoStatsAccumulator. */
+  onDroppedFrames?: (droppedFrames: number) => void;
   /** Called when the source fails fatally after a successful start. */
   onError?: (error: Error) => void;
   bitrateBps?: number;
@@ -2224,6 +2227,16 @@ export class PersistentEncoderH264Source implements H264CaptureSource {
       this.serverOutputBuffer = lines.pop() ?? "";
       if (lines.includes(STREAMING_STARTED_MARKER)) {
         this.sawStreamingStarted = true;
+      }
+      for (const line of lines) {
+        if (!line.startsWith("VIDEO_STATS ")) {
+          continue;
+        }
+        const match = VIDEO_STATS_PATTERN.exec(line);
+        const droppedFrames = match ? Number(match[1]) : NaN;
+        if (Number.isSafeInteger(droppedFrames) && droppedFrames >= 0) {
+          this.options.onDroppedFrames?.(droppedFrames);
+        }
       }
     };
     this.serverOutputObserver = observer;

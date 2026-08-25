@@ -102,6 +102,9 @@ final class EncodePipeline {
             diagnosticSink: diagnosticSink,
             onFatalError: { [weak self] message in
                 self?.onFatalError(EncoderOutputOverflowError(message: message))
+            },
+            onDroppedFrame: { [weak self] in
+                self?.writer.recordEncoderDroppedFrame()
             }
         )
         do {

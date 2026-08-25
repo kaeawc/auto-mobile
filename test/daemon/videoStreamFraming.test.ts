@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   CODEC_ID_H264,
+  encodeDroppedFrames,
   encodePacket,
   encodePacketHeader,
   encodePtsAndFlags,
@@ -95,6 +96,13 @@ describe("videoStreamFraming", () => {
   });
 
   describe("packet header", () => {
+    test("encodes cumulative dropped-frame telemetry as a zero-payload record", () => {
+      const packet = encodeDroppedFrames(42);
+
+      expect(packet.length).toBe(12);
+      expect(packet.readInt32BE(8)).toBe(0);
+      expect(BigInt.asUintN(64, packet.readBigInt64BE(0)) & PTS_MASK).toBe(42n);
+    });
     test("is 12 bytes of ptsAndFlags then size", () => {
       const header = encodePacketHeader(42n, 1024);
 

@@ -241,6 +241,14 @@ public final class FrameWriter {
         )
     }
 
+    /// Records a frame rejected before VideoToolbox accepted it because the encoder was behind.
+    /// This shares the source-side cumulative drop counter reported to the desktop relay.
+    public func recordEncoderDroppedFrame() {
+        stateLock.lock()
+        droppedFrames += 1
+        stateLock.unlock()
+    }
+
     /// Waits for all records scheduled before this call. Intended for tests and
     /// orderly shutdown; production capture never blocks its callback on this.
     public func flush() {

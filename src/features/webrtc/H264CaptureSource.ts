@@ -59,6 +59,8 @@ export interface H264CaptureSourceOptions {
   audioEnabled?: boolean;
   /** Receives bounded iOS capture-pipeline metrics when the source supports them. */
   onFrameMetrics?: (metrics: H264CaptureSourceMetrics) => void;
+  /** Cumulative source-encoder drops; unchanged while a static source is healthy. */
+  onDroppedFrames?: (droppedFrames: number) => void;
 }
 
 /**

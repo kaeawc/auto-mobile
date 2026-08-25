@@ -92,6 +92,8 @@ enum class VideoStreamQuality(internal val wire: String) {
 /** A live view of a device's screen. */
 interface VideoStreamSource {
   val frames: SharedFlow<LiveVideoFrame>
+  /** Cumulative source-encoder drops, when the relay provides telemetry. */
+  val droppedFrames: SharedFlow<Long>
   val state: StateFlow<VideoStreamState>
 
   fun connect(deviceId: String?)
@@ -180,6 +182,8 @@ class VideoStreamClient(
       onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
   override val frames: SharedFlow<LiveVideoFrame> = _frames.asSharedFlow()
+  private val _droppedFrames = MutableSharedFlow<Long>(replay = 1, extraBufferCapacity = 1)
+  override val droppedFrames: SharedFlow<Long> = _droppedFrames.asSharedFlow()
 
   private val _state = MutableStateFlow<VideoStreamState>(VideoStreamState.Idle)
   override val state: StateFlow<VideoStreamState> = _state.asStateFlow()
@@ -336,6 +340,10 @@ class VideoStreamClient(
           LOG.info("Live mirroring started (${header.width}x${header.height} advertised)")
         },
         onPacket = { packet ->
+          packet.droppedFrames?.let {
+            _droppedFrames.tryEmit(it)
+            return@onBytes
+          }
           if (packet.isConfig && packet.rotation != null) {
             currentRotation = packet.rotation
           }
@@ -454,6 +462,8 @@ class FakeVideoStreamSource(
       onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
   override val frames: SharedFlow<LiveVideoFrame> = _frames.asSharedFlow()
+  private val _droppedFrames = MutableSharedFlow<Long>(replay = 1, extraBufferCapacity = 1)
+  override val droppedFrames: SharedFlow<Long> = _droppedFrames.asSharedFlow()
 
   private val _state = MutableStateFlow<VideoStreamState>(VideoStreamState.Idle)
   override val state: StateFlow<VideoStreamState> = _state.asStateFlow()
@@ -511,7 +521,11 @@ class FakeVideoStreamSource(
   }
 
   /** Publishes a ready-to-draw frame to collectors, as the real client would. */
-  fun emitFrame(width: Int = 1080, height: Int = 2400, rotation: Int? = null) {
+  fun emitFrame(
+    width: Int = 1080,
+    height: Int = 2400,
+    rotation: Int? = null,
+  ) {
     _frames.tryEmit(
       LiveVideoFrame(
         bitmap = ImageBitmap(width, height),
@@ -520,5 +534,10 @@ class FakeVideoStreamSource(
         rotation = rotation,
       )
     )
+  }
+
+  /** Publishes source-side encoder-drop telemetry for quality-controller tests. */
+  fun emitDroppedFrames(droppedFrames: Long) {
+    _droppedFrames.tryEmit(droppedFrames)
   }
 }

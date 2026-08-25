@@ -10,6 +10,7 @@ import {
   resetDeviceSnapshotManagerDependencies,
   restoreDeviceSnapshot,
   setDeviceSnapshotManagerDependencies,
+  updateDeviceSnapshotConfig,
 } from "../../src/server/deviceSnapshotManager";
 import { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -334,5 +335,62 @@ describe("deviceSnapshotManager", () => {
 
     expect(config.vmSnapshotTimeoutMs).toBeGreaterThan(0);
     expect(config.vmSnapshotTimeoutMs).toBe(30000);
+  });
+
+  test("evicting an Android emulator snapshot deletes its AVD-scoped directory (#5707)", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-avd-"));
+    try {
+      const realStore = new DeviceSnapshotStore(tempRoot);
+      await realStore.ensureSnapshotsDirectory();
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+      const snapshotName = "evict-me";
+      const avdName = "Pixel_5";
+      const emulatorDeviceId = "emulator-5554";
+      const androidOptions = { platform: "android" as const, avdName };
+
+      // Write the snapshot on disk at the AVD-scoped path — where capture puts it.
+      const scopedDir = realStore.getSnapshotPathWithOptions(snapshotName, androidOptions);
+      await fs.mkdir(scopedDir, { recursive: true });
+      await fs.writeFile(path.join(scopedDir, "settings.json"), "{}");
+      // The legacy flat path must NOT be where this snapshot lives.
+      const flatDir = realStore.getSnapshotPath(snapshotName);
+      expect(scopedDir).not.toBe(flatDir);
+
+      const timestamp = new Date(fakeTimer.now()).toISOString();
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName,
+        timestamp,
+        deviceId: emulatorDeviceId,
+        deviceName: avdName,
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: false,
+        includeSettings: true,
+      };
+      await repository.insertSnapshot({
+        snapshotName,
+        deviceId: emulatorDeviceId,
+        deviceName: avdName,
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: false,
+        includeSettings: true,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: 5 * 1024 * 1024,
+        manifest,
+      });
+
+      // Force eviction by lowering the archive limit below the record size.
+      await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+
+      // The AVD-scoped directory is deleted — the manager resolved the path from
+      // the record's deviceName (the AVD name), not the flat/legacy path.
+      expect(await realStore.snapshotDirectoryExists(snapshotName, androidOptions)).toBe(false);
+      expect(await repository.getSnapshot(snapshotName)).toBeNull();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
   });
 });

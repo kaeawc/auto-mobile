@@ -78,11 +78,23 @@ interface DeviceSnapshotManagerDependencies {
 let moduleDependencies: DeviceSnapshotManagerDependencies | null = null;
 const LEGACY_MANIFEST_FILENAME = "manifest.json";
 
-function getSnapshotPathOptions(
-  context: Pick<BootedDevice, "platform" | "deviceId">,
-): SnapshotPathOptions | undefined {
+function getSnapshotPathOptions(context: {
+  platform?: string;
+  deviceId?: string;
+  avdName?: string;
+}): SnapshotPathOptions | undefined {
   if (context.platform === "ios") {
     return { platform: "ios", deviceId: context.deviceId };
+  }
+  // Android emulator snapshots are scoped on disk by AVD name (stable + unique),
+  // never the port-based serial. Physical Android devices have no AVD name and
+  // fall through to the unscoped path (#5707).
+  if (
+    context.platform === "android" &&
+    context.deviceId?.startsWith("emulator-") &&
+    context.avdName
+  ) {
+    return { platform: "android", avdName: context.avdName };
   }
   return undefined;
 }
@@ -370,7 +382,12 @@ async function ensureSnapshotAvailable(
 
 async function deleteDeviceSnapshotRecord(record: DeviceSnapshotRecord): Promise<boolean> {
   const { snapshotRepository, snapshotStore } = await getDeviceSnapshotDependencies();
-  const pathOptions = getSnapshotPathOptions(record);
+  const pathOptions = getSnapshotPathOptions({
+    platform: record.platform,
+    deviceId: record.deviceId,
+    // For Android, deviceName holds the AVD name (see the capture manifest).
+    avdName: record.deviceName,
+  });
   await snapshotStore.deleteSnapshotData(record.snapshotName, pathOptions);
   const deleted = await snapshotRepository.deleteSnapshot(record.snapshotName);
   return deleted;
@@ -475,7 +492,13 @@ export async function captureDeviceSnapshot(
 
   const baseConfig = await getDeviceSnapshotConfig();
   const snapshotName = args.snapshotName ?? snapshotStore.generateSnapshotName(device.name);
-  const pathOptions = getSnapshotPathOptions(device);
+  const pathOptions = getSnapshotPathOptions({
+    platform: device.platform,
+    deviceId: device.deviceId,
+    // For an Android emulator, BootedDevice.name is the AVD name resolved via
+    // `adb emu avd name` during discovery.
+    avdName: device.name,
+  });
 
   await ensureSnapshotAvailable(snapshotName, snapshotStore, snapshotRepository, pathOptions);
 

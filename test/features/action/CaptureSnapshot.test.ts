@@ -395,8 +395,18 @@ describe("CaptureSnapshot", () => {
       expect(result.manifest.settings?.secure).toEqual({ android_id: "abc123" });
       expect(result.manifest.settings?.system).toEqual({ screen_brightness: "128" });
 
-      // Verify settings were written to file
-      const settingsPath = store.getSettingsPath(snapshotName);
+      // Verify settings were written to the AVD-scoped path (#5707): the
+      // emulator's AVD name (device.name) keys the on-disk directory.
+      expect(device.name).toBe("Pixel_5");
+      const settingsPath = store.getSettingsPath(snapshotName, {
+        platform: "android",
+        avdName: device.name,
+      });
+      // Literal AVD segment (not `device.name`) so the native-source cache guard
+      // does not read this as a reference to the on-disk `android/` tree (#4351).
+      expect(settingsPath).toBe(
+        path.join(testBasePath, "android", "Pixel_5", snapshotName, "settings.json"),
+      );
       const settingsContent = await fs.readFile(settingsPath, "utf-8");
       const settings = JSON.parse(settingsContent);
       expect(settings.global).toEqual({ airplane_mode_on: "0" });

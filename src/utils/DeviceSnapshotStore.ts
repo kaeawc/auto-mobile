@@ -7,6 +7,13 @@ import type { Platform } from "../models";
 export interface SnapshotPathOptions {
   platform?: Platform;
   deviceId?: string;
+  /**
+   * Android AVD name. Android snapshots are keyed by AVD name — unique
+   * (avdmanager enforces one AVD per name) and stable across reboots, unlike the
+   * port-based emulator serial. Only set for emulator snapshots; physical
+   * Android devices have no AVD name and fall back to the unscoped path (#5707).
+   */
+  avdName?: string;
 }
 
 export class DeviceSnapshotStore {
@@ -36,6 +43,12 @@ export class DeviceSnapshotStore {
   getSnapshotPathWithOptions(snapshotName: string, options?: SnapshotPathOptions): string {
     if (options?.platform === "ios" && options.deviceId) {
       return path.join(this.basePath, "ios", options.deviceId, snapshotName);
+    }
+
+    // Android emulators scope by AVD name so the same snapshot name can be
+    // reused across AVDs without a filesystem collision (#5707).
+    if (options?.platform === "android" && options.avdName) {
+      return path.join(this.basePath, "android", options.avdName, snapshotName);
     }
 
     return this.getSnapshotPath(snapshotName);

@@ -129,7 +129,6 @@
 1	src/utils/android-cmdline-tools/AvdConfigReader.ts	eslint(complexity)
 1	src/utils/android-cmdline-tools/vmSnapshot.ts	eslint(complexity)
 1	src/utils/describeUnknownError.ts	auto-mobile(catch-convention)
-1	src/utils/deviceUtils.ts	auto-mobile(catch-convention)
 1	src/utils/envBootstrap.ts	auto-mobile(catch-convention)
 1	src/utils/fileLock.ts	eslint(complexity)
 1	src/utils/hostAppearance.ts	eslint(complexity)

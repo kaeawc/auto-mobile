@@ -94,10 +94,7 @@ describe("DefaultElementGeometry.isPointInElement (property-based)", () => {
 });
 
 describe("DefaultElementGeometry.getVisibleBounds (property-based)", () => {
-  const screen = fc.tuple(
-    fc.integer({ min: 1, max: 4000 }),
-    fc.integer({ min: 1, max: 4000 }),
-  );
+  const screen = fc.tuple(fc.integer({ min: 1, max: 4000 }), fc.integer({ min: 1, max: 4000 }));
 
   test("returns null exactly when the element is not visible", () => {
     fc.assert(

@@ -426,4 +426,130 @@ class HierarchyDiffTest {
     assertEquals(0, diff.onlyInA)
     assertEquals(0, diff.onlyInB)
   }
+
+  // --- Cross-platform structural-role keying (issue #4872) ---
+
+  /** An Android screen: content frame → list → [title label, action button]. */
+  private fun androidScreen(title: String, action: String): UIElementInfo =
+    node(
+      "android.widget.FrameLayout",
+      "android:id/content",
+      children =
+        listOf(
+          node(
+            "androidx.recyclerview.widget.RecyclerView",
+            "com.app:id/list",
+            children =
+              listOf(
+                node("android.widget.TextView", "com.app:id/title", text = title),
+                node("androidx.appcompat.widget.AppCompatButton", "com.app:id/cta", text = action),
+              ),
+          )
+        ),
+    )
+
+  /** The iOS rendering of the same screen: application → table → [static text, button]. */
+  private fun iosScreen(title: String, action: String): UIElementInfo =
+    node(
+      "XCUIElementTypeApplication",
+      children =
+        listOf(
+          node(
+            "XCUIElementTypeTable",
+            children =
+              listOf(
+                node("XCUIElementTypeStaticText", text = title),
+                node("XCUIElementTypeButton", text = action),
+              ),
+          )
+        ),
+    )
+
+  @Test
+  fun `class-name mode makes a cross-platform pair a meaningless all-OnlyIn diff`() {
+    val diff = diffHierarchies(androidScreen("Inbox", "Compose"), iosScreen("Inbox", "Compose"))
+
+    // Disjoint class names: every Android node is OnlyInA and every iOS node is OnlyInB, with no
+    // Equal/Changed — the very failure #4872 describes.
+    assertEquals(4, diff.onlyInA)
+    assertEquals(4, diff.onlyInB)
+    assertEquals(0, diff.equal)
+    assertEquals(0, diff.changed)
+  }
+
+  @Test
+  fun `role mode pairs a structurally-equal cross-platform screen as all-equal`() {
+    val diff =
+      diffHierarchies(
+        androidScreen("Inbox", "Compose"),
+        iosScreen("Inbox", "Compose"),
+        DiffKeyMode.StructuralRole,
+      )
+
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(0, diff.changed)
+    assertEquals(4, diff.equal)
+    assertFalse(diff.hasDifferences)
+    // Keys are keyed by role, not raw class.
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Button#"))
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "List#"))
+  }
+
+  @Test
+  fun `role mode reports a differing label as Changed, not OnlyIn`() {
+    val diff =
+      diffHierarchies(
+        androidScreen("Inbox", "Compose"),
+        iosScreen("Sent", "Compose"),
+        DiffKeyMode.StructuralRole,
+      )
+
+    assertEquals(NodeDiffStatus.Changed, statusOf(diff, "Text#"))
+    assertEquals(1, diff.changed)
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(3, diff.equal)
+  }
+
+  @Test
+  fun `role mode isolates a genuinely-extra node as OnlyIn`() {
+    // The Android side has an extra image trailing the button; the rest still pairs by role.
+    val android =
+      node(
+        "android.widget.FrameLayout",
+        "android:id/content",
+        children =
+          listOf(
+            node("android.widget.TextView", "com.app:id/title", text = "Inbox"),
+            node("android.widget.ImageView", "com.app:id/avatar"),
+          ),
+      )
+    val ios =
+      node(
+        "XCUIElementTypeApplication",
+        children = listOf(node("XCUIElementTypeStaticText", text = "Inbox")),
+      )
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(NodeDiffStatus.OnlyInA, statusOf(diff, "Image#"))
+    assertEquals(1, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(2, diff.equal)
+  }
+
+  @Test
+  fun `role mode is symmetric under A-B swap`() {
+    val android = androidScreen("Inbox", "Compose")
+    val ios = iosScreen("Sent", "Compose")
+
+    val forward = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+    val backward = diffHierarchies(ios, android, DiffKeyMode.StructuralRole)
+
+    assertEquals(forward.onlyInA, backward.onlyInB)
+    assertEquals(forward.onlyInB, backward.onlyInA)
+    assertEquals(forward.changed, backward.changed)
+    assertEquals(forward.equal, backward.equal)
+  }
 }

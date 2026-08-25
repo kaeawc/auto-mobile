@@ -49,6 +49,20 @@ data class HierarchyDiff(val entries: List<HierarchyDiffEntry>) {
 private const val PATH_SEPARATOR = "/"
 
 /**
+ * How [diffHierarchies] forms a node's structural key segment.
+ * - [ClassName]: the raw platform-specific `className` (plus `resourceId`). The honest identity for
+ *   a **same-platform** diff, where classes and ids line up.
+ * - [StructuralRole]: the cross-platform [structuralRole] of the class, with `resourceId` dropped
+ *   (ids are platform-specific and never match across Android↔iOS). Lets an Android and an iOS
+ *   rendering of the same screen pair by role + tree position and produce a meaningful diff instead
+ *   of two disjoint OnlyIn trees (issue #4872).
+ */
+enum class DiffKeyMode {
+  ClassName,
+  StructuralRole,
+}
+
+/**
  * Diff two view hierarchies into a flat, deterministic classification.
  *
  * Node identity is a **structural path key**: each node contributes the segment
@@ -67,13 +81,25 @@ private const val PATH_SEPARATOR = "/"
  * The result is deterministic (stable pre-order) and symmetric in classification: `diffHierarchies(
  * a, b)` and `diffHierarchies(b, a)` agree once A/B roles are swapped (an `OnlyInA` key in one is
  * exactly an `OnlyInB` key in the other; `Changed`/`Equal` key sets are identical).
+ *
+ * [keyMode] selects how each key segment is formed. The default [DiffKeyMode.ClassName] keeps the
+ * raw platform-specific identity for a same-platform diff; [DiffKeyMode.StructuralRole] keys on the
+ * cross-platform [structuralRole] instead so an Android↔iOS pair diffs meaningfully. The mode only
+ * changes the *segment* (className/resourceId → role); every other property above — window
+ * alignment, pre-order determinism, the attribute-only Changed test, and the A/B symmetry — is
+ * mode-independent because it is threaded identically through both the diff index and the
+ * window-alignment signatures.
  */
-fun diffHierarchies(a: UIElementInfo, b: UIElementInfo): HierarchyDiff {
+fun diffHierarchies(
+  a: UIElementInfo,
+  b: UIElementInfo,
+  keyMode: DiffKeyMode = DiffKeyMode.ClassName,
+): HierarchyDiff {
   val windowsA = windowsOf(a)
   val windowsB = windowsOf(b)
-  val (slotsA, slotsB) = alignWindowSlots(windowsA, windowsB)
-  val mapA = indexWindows(windowsA, slotsA)
-  val mapB = indexWindows(windowsB, slotsB)
+  val (slotsA, slotsB) = alignWindowSlots(windowsA, windowsB, keyMode)
+  val mapA = indexWindows(windowsA, slotsA, keyMode)
+  val mapB = indexWindows(windowsB, slotsB, keyMode)
   val entries = ArrayList<HierarchyDiffEntry>(mapA.size + mapB.size)
   for ((key, nodeA) in mapA) {
     val nodeB = mapB[key]
@@ -123,10 +149,11 @@ private fun windowsOf(root: UIElementInfo): List<UIElementInfo> =
 private fun indexWindows(
   windows: List<UIElementInfo>,
   slots: IntArray,
+  keyMode: DiffKeyMode,
 ): LinkedHashMap<String, UIElementInfo> {
   val map = LinkedHashMap<String, UIElementInfo>()
   windows.forEachIndexed { index, window ->
-    addSubtree(map, window, parentKey = "", siblingIndex = slots[index])
+    addSubtree(map, window, parentKey = "", siblingIndex = slots[index], keyMode = keyMode)
   }
   return map
 }
@@ -160,6 +187,7 @@ private fun indexWindows(
 private fun alignWindowSlots(
   windowsA: List<UIElementInfo>,
   windowsB: List<UIElementInfo>,
+  keyMode: DiffKeyMode,
 ): Pair<IntArray, IntArray> {
   val n = windowsA.size
   val m = windowsB.size
@@ -171,8 +199,8 @@ private fun alignWindowSlots(
     return slotsA to slotsB
   }
 
-  val signaturesA = windowsA.map { signatureKeys(it) }
-  val signaturesB = windowsB.map { signatureKeys(it) }
+  val signaturesA = windowsA.map { signatureKeys(it, keyMode) }
+  val signaturesB = windowsB.map { signatureKeys(it, keyMode) }
   // A canonical, side-independent ordering key per window (its sorted signature). Used only to
   // break a skipA-vs-skipB tie deterministically by window *content* rather than by side, so the
   // choice is transposition-invariant (see the backtrack below).
@@ -254,9 +282,9 @@ private fun alignWindowSlots(
  * (structure **and** compared attributes) produce identical key sets, so [jaccard] overlap measures
  * subtree similarity for [alignWindowSlots]. See [collectSignatureKeys].
  */
-private fun signatureKeys(window: UIElementInfo): Set<String> {
+private fun signatureKeys(window: UIElementInfo, keyMode: DiffKeyMode): Set<String> {
   val keys = LinkedHashSet<String>()
-  collectSignatureKeys(keys, window, parentKey = "", siblingIndex = 0)
+  collectSignatureKeys(keys, window, parentKey = "", siblingIndex = 0, keyMode = keyMode)
   return keys
 }
 
@@ -276,11 +304,12 @@ private fun collectSignatureKeys(
   node: UIElementInfo,
   parentKey: String,
   siblingIndex: Int,
+  keyMode: DiffKeyMode,
 ) {
-  val structural = pathKey(parentKey, node, siblingIndex)
+  val structural = pathKey(parentKey, node, siblingIndex, keyMode)
   keys.add("$structural::${semanticDigest(node)}")
   node.children.forEachIndexed { index, child ->
-    collectSignatureKeys(keys, child, structural, index)
+    collectSignatureKeys(keys, child, structural, index, keyMode)
   }
 }
 
@@ -323,14 +352,26 @@ private fun addSubtree(
   node: UIElementInfo,
   parentKey: String,
   siblingIndex: Int,
+  keyMode: DiffKeyMode,
 ) {
-  val key = pathKey(parentKey, node, siblingIndex)
+  val key = pathKey(parentKey, node, siblingIndex, keyMode)
   map[key] = node
-  node.children.forEachIndexed { index, child -> addSubtree(map, child, key, index) }
+  node.children.forEachIndexed { index, child -> addSubtree(map, child, key, index, keyMode) }
 }
 
-private fun pathKey(parentKey: String, node: UIElementInfo, siblingIndex: Int): String {
-  val segment = "${node.className}:${node.resourceId ?: ""}#$siblingIndex"
+private fun pathKey(
+  parentKey: String,
+  node: UIElementInfo,
+  siblingIndex: Int,
+  keyMode: DiffKeyMode,
+): String {
+  val segment =
+    when (keyMode) {
+      DiffKeyMode.ClassName -> "${node.className}:${node.resourceId ?: ""}#$siblingIndex"
+      // Role mode drops the platform-specific resourceId: it never matches across Android↔iOS, so
+      // keeping it would defeat the whole point of role keying.
+      DiffKeyMode.StructuralRole -> "${structuralRole(node.className)}#$siblingIndex"
+    }
   return if (parentKey.isEmpty()) segment else "$parentKey$PATH_SEPARATOR$segment"
 }
 

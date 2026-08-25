@@ -36,6 +36,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
+import dev.jasonpearson.automobile.desktop.core.layout.DiffKeyMode
 import dev.jasonpearson.automobile.desktop.core.layout.HierarchyDiff
 import dev.jasonpearson.automobile.desktop.core.layout.HierarchyDiffEntry
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorDashboard
@@ -97,10 +98,15 @@ fun TwoDeviceCompareView(
   var hierarchyA by remember(columnA.deviceId) { mutableStateOf<ParsedHierarchy?>(null) }
   var hierarchyB by remember(columnB.deviceId) { mutableStateOf<ParsedHierarchy?>(null) }
   val diff =
-    remember(hierarchyA, hierarchyB) {
+    remember(hierarchyA, hierarchyB, columnA.platform, columnB.platform) {
       val a = hierarchyA
       val b = hierarchyB
-      if (a != null && b != null) diffHierarchies(a.root, b.root) else null
+      // A cross-platform pair keys by structural role (issue #4872); a same-platform pair keeps the
+      // raw-class identity, which lines up class names and resource ids exactly.
+      val keyMode =
+        if (columnA.platform == columnB.platform) DiffKeyMode.ClassName
+        else DiffKeyMode.StructuralRole
+      if (a != null && b != null) diffHierarchies(a.root, b.root, keyMode) else null
     }
 
   Column(modifier.fillMaxSize().semantics { contentDescription = "Two-device compare" }) {

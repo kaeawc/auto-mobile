@@ -463,12 +463,32 @@ public final class AutoMobileNetwork: @unchecked Sendable {
 
 // MARK: - URLProtocol Implementation
 
+#if DEBUG
+/// Seam for scheduling a delayed network fault (issue #5697), so tests can fire it
+/// deterministically instead of waiting on a real timer. Production schedules the work
+/// item on a global queue via `asyncAfter`.
+protocol FaultScheduling {
+    func schedule(delayMs: Int, work: DispatchWorkItem)
+}
+
+struct RealFaultScheduler: FaultScheduling {
+    func schedule(delayMs: Int, work: DispatchWorkItem) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(delayMs), execute: work)
+    }
+}
+#endif
+
 /// A URLProtocol subclass that intercepts network requests for monitoring.
 ///
 /// This is an implementation detail -- consumers should register it via
 /// ``AutoMobileNetwork/protocolClass()`` rather than referencing this type directly.
 public class AutoMobileURLProtocol: URLProtocol {
     private static let handledKey = "dev.jasonpearson.automobile.sdk.handled"
+    #if DEBUG
+    /// Injectable delayed-fault scheduler; tests override it to fire the fault on demand
+    /// (no real timer). Reset to `RealFaultScheduler()` in `tearDown`.
+    static var faultScheduler: FaultScheduling = RealFaultScheduler()
+    #endif
     private var startTime: Date?
     private var urlSession: URLSession?
     private var dataTask: URLSessionDataTask?
@@ -477,9 +497,10 @@ public class AutoMobileURLProtocol: URLProtocol {
     private var totalBytesReceived = 0
     /// Guards the delayed-fault lifecycle across `stopLoading()` (called by the URL
     /// loading system) and the global-queue timer block that serves a delayed fault.
+    /// `serveFault` checks `stopped` under this lock and delivers under it too, so the
+    /// check is atomic with delivery: stopLoading() cannot slip in between.
     private let faultLock = NSLock()
     private var stopped = false
-    private var faultWorkItem: DispatchWorkItem?
 
     private static let supportedSchemes: Set<String> = ["http", "https"]
 
@@ -521,16 +542,14 @@ public class AutoMobileURLProtocol: URLProtocol {
            !fault.dryRun
         {
             if let delayMs = fault.delayMs, delayMs > 0 {
-                // Schedule as a cancellable work item stored on the protocol so
-                // stopLoading() can cancel it — otherwise the timer fires serveFault()
-                // (client callbacks) after the protocol has been torn down.
+                // The delayed serveFault checks `stopped` under faultLock before delivering,
+                // so a fault whose timer fires after stopLoading() never touches the client
+                // (the guard also covers the case where the timer already began executing —
+                // which a work-item cancel could not). No cancellation needed.
                 let workItem = DispatchWorkItem { [weak self] in
                     self?.serveFault(fault, url: url)
                 }
-                faultLock.lock()
-                faultWorkItem = workItem
-                faultLock.unlock()
-                DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(delayMs), execute: workItem)
+                Self.faultScheduler.schedule(delayMs: delayMs, work: workItem)
             } else {
                 serveFault(fault, url: url)
             }
@@ -609,13 +628,10 @@ public class AutoMobileURLProtocol: URLProtocol {
     }
 
     public override func stopLoading() {
-        // Cancel a pending delayed fault and mark the protocol stopped so neither the
-        // timer block (if not yet started) nor an already-running serveFault invokes the
-        // client after teardown.
+        // Mark the protocol stopped so a delayed fault whose timer fires later (or is
+        // mid-serveFault) sees it under faultLock and does not invoke the client.
         faultLock.lock()
         stopped = true
-        faultWorkItem?.cancel()
-        faultWorkItem = nil
         faultLock.unlock()
 
         dataTask?.cancel()
@@ -627,12 +643,15 @@ public class AutoMobileURLProtocol: URLProtocol {
 
     #if DEBUG
     private func serveFault(_ fault: NetworkMockRuleStore.FaultDecision, url: URL) {
-        // If the protocol was stopped (e.g. the delayed-fault timer began executing just
-        // as stopLoading() ran), do not invoke the client on a torn-down protocol.
+        // Hold faultLock across the whole delivery so the stopped-check is ATOMIC with the
+        // client callbacks: stopLoading() (which sets `stopped` under the same lock) can no
+        // longer slip in between the check and the callbacks. Safe against deadlock — this
+        // body never re-enters faultLock, and the URL loading system does not synchronously
+        // call stopLoading() from a completion callback (didFinish/didFail), so the client
+        // calls here cannot re-enter this lock on the same thread.
         faultLock.lock()
-        let isStopped = stopped
-        faultLock.unlock()
-        if isStopped { return }
+        defer { faultLock.unlock() }
+        if stopped { return }
 
         let method = request.httpMethod ?? "GET"
         let error: URLError

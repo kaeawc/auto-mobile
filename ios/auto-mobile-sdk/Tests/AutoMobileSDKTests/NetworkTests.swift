@@ -922,7 +922,7 @@ final class NetworkCaptureRecorderTests: XCTestCase {
     }
 
     #if DEBUG
-    func testDelayedFaultCancelledByStopLoadingDoesNotCallClient() {
+    private func makeDelayedFaultProtocol(client: RecordingURLProtocolClient) -> AutoMobileURLProtocol {
         AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: SdkEventBuffer { _ in })
         NetworkMockRuleStore.shared.setFaultRules([
             NetworkFaultRuleDTO(
@@ -934,29 +934,61 @@ final class NetworkCaptureRecorderTests: XCTestCase {
                 expiresAtEpochMs: nil, scope: nil, dryRun: false
             ),
         ])
-        defer { NetworkMockRuleStore.shared.setFaultRules([]) }
-
         let request = URLRequest(url: URL(string: "https://api.example.com/v1/x")!)
+        return AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+    }
+
+    // The delayed fault fires normally when the protocol has NOT been stopped.
+    func testDelayedFaultFiresWhenNotStopped() {
+        let scheduler = FakeFaultScheduler()
+        AutoMobileURLProtocol.faultScheduler = scheduler
+        defer {
+            AutoMobileURLProtocol.faultScheduler = RealFaultScheduler()
+            NetworkMockRuleStore.shared.setFaultRules([])
+        }
+
         let client = RecordingURLProtocolClient()
-        let proto = AutoMobileURLProtocol(request: request, cachedResponse: nil, client: client)
+        let proto = makeDelayedFaultProtocol(client: client)
+        proto.startLoading() // schedules the fault via the fake scheduler (captured, not fired)
 
-        proto.startLoading() // schedules the 100ms-delayed fault as a work item
-        proto.stopLoading() // synchronously cancels the work item + marks the protocol stopped
+        scheduler.captured?.perform() // fire the delayed fault
 
-        // The cancelled work item must never fire serveFault, so the client stays untouched.
-        // Deterministic: stopLoading ran synchronously well before the 100ms delay, so the
-        // work item is cancelled; we wait past the delay only to prove nothing fired.
-        let waited = expectation(description: "past the fault delay")
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { waited.fulfill() }
-        wait(for: [waited], timeout: 1.0)
+        XCTAssertEqual(client.calls, ["didFail"], "an un-stopped delayed fault serves the client")
+    }
+
+    // A fault whose work item fires AFTER stopLoading — the already-running interleaving —
+    // must not invoke the client, because serveFault's stopped-check is atomic with delivery.
+    func testDelayedFaultFiringAfterStopDoesNotCallClient() {
+        let scheduler = FakeFaultScheduler()
+        AutoMobileURLProtocol.faultScheduler = scheduler
+        defer {
+            AutoMobileURLProtocol.faultScheduler = RealFaultScheduler()
+            NetworkMockRuleStore.shared.setFaultRules([])
+        }
+
+        let client = RecordingURLProtocolClient()
+        let proto = makeDelayedFaultProtocol(client: client)
+        proto.startLoading() // captures the work item
+        proto.stopLoading() // marks the protocol stopped (and cancels the work item)
+
+        scheduler.captured?.perform() // fire the (now stale) work item anyway
 
         XCTAssertTrue(
             client.calls.isEmpty,
-            "a delayed fault cancelled by stopLoading() must not invoke the client after stop"
+            "a delayed fault that fires after stopLoading() must not invoke the client"
         )
     }
     #endif
 }
+
+#if DEBUG
+/// Captures the delayed-fault work item so a test can fire it deterministically, instead
+/// of waiting on the real timer.
+private final class FakeFaultScheduler: FaultScheduling {
+    var captured: DispatchWorkItem?
+    func schedule(delayMs _: Int, work: DispatchWorkItem) { captured = work }
+}
+#endif
 
 /// Records `URLProtocolClient` callbacks so a test can assert a stopped protocol makes none.
 private final class RecordingURLProtocolClient: NSObject, URLProtocolClient {

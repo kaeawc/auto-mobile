@@ -36,6 +36,8 @@ function connectedIphone(overrides: Record<string, unknown> = {}): Record<string
 const TEMP_DIR = join("/tmp", "automobile-devicectl-devices-abc123");
 const JSON_PATH = join(TEMP_DIR, "devices.json");
 
+const DEVICE_LIST_CACHE_TTL_MS = 3_000;
+
 const okExec: ExecResult = { stdout: "", stderr: "", toString: () => "" } as ExecResult;
 
 function makeLister(overrides: Record<string, unknown>): DevicectlDeviceLister {
@@ -53,7 +55,7 @@ function makeLister(overrides: Record<string, unknown>): DevicectlDeviceLister {
 
 describe("parseDevicectlDeviceList", () => {
   test("maps a connected physical device to a BootedDevice", () => {
-    expect(parseDevicectlDeviceList(devicectlPayload([connectedIphone()]))).toEqual([
+    expect(parseDevicectlDeviceList(devicectlPayload([connectedIphone()])).devices).toEqual([
       {
         name: "Jason's iPhone",
         platform: "ios",
@@ -66,7 +68,7 @@ describe("parseDevicectlDeviceList", () => {
   });
 
   test("infers the tablet form factor from an iPad product type", () => {
-    const devices = parseDevicectlDeviceList(
+    const { devices } = parseDevicectlDeviceList(
       devicectlPayload([
         connectedIphone({
           deviceProperties: { name: "Test iPad" },
@@ -81,7 +83,7 @@ describe("parseDevicectlDeviceList", () => {
   });
 
   test("drops devices devicectl reports as unreachable", () => {
-    const devices = parseDevicectlDeviceList(
+    const { devices } = parseDevicectlDeviceList(
       devicectlPayload([
         connectedIphone({ connectionProperties: { tunnelState: "unavailable" } }),
         connectedIphone({
@@ -95,7 +97,7 @@ describe("parseDevicectlDeviceList", () => {
   });
 
   test("keeps devices whose tunnel state is missing or unrecognized", () => {
-    const devices = parseDevicectlDeviceList(
+    const { devices } = parseDevicectlDeviceList(
       devicectlPayload([
         connectedIphone({ connectionProperties: {} }),
         connectedIphone({
@@ -110,7 +112,7 @@ describe("parseDevicectlDeviceList", () => {
   });
 
   test("rejects connected non-iOS CoreDevices (Watch, TV, Vision)", () => {
-    const devices = parseDevicectlDeviceList(
+    const { devices } = parseDevicectlDeviceList(
       devicectlPayload([
         connectedIphone({
           hardwareProperties: { udid: LEGACY_UDID, platform: "watchOS", productType: "Watch7,1" },
@@ -125,7 +127,7 @@ describe("parseDevicectlDeviceList", () => {
   });
 
   test("keeps iPadOS records and records that omit the platform field", () => {
-    const devices = parseDevicectlDeviceList(
+    const { devices } = parseDevicectlDeviceList(
       devicectlPayload([
         connectedIphone({
           hardwareProperties: { udid: LEGACY_UDID, platform: "iPadOS", productType: "iPad14,3" },
@@ -140,7 +142,7 @@ describe("parseDevicectlDeviceList", () => {
   });
 
   test("rejects records whose udid is not a physical iOS udid", () => {
-    const devices = parseDevicectlDeviceList(
+    const { devices } = parseDevicectlDeviceList(
       devicectlPayload([
         connectedIphone({ hardwareProperties: { udid: SIMULATOR_UDID } }),
         connectedIphone({ hardwareProperties: { udid: "emulator-5554" } }),
@@ -153,7 +155,7 @@ describe("parseDevicectlDeviceList", () => {
   });
 
   test("falls back through name sources when deviceProperties has no name", () => {
-    const devices = parseDevicectlDeviceList(
+    const { devices } = parseDevicectlDeviceList(
       devicectlPayload([
         connectedIphone({ deviceProperties: {} }),
         connectedIphone({
@@ -168,11 +170,23 @@ describe("parseDevicectlDeviceList", () => {
     );
   });
 
-  test("returns an empty list for payload shapes it does not understand", () => {
-    expect(parseDevicectlDeviceList(null)).toEqual([]);
-    expect(parseDevicectlDeviceList({ result: {} })).toEqual([]);
-    expect(parseDevicectlDeviceList({ result: { devices: "nope" } })).toEqual([]);
-    expect(parseDevicectlDeviceList([connectedIphone()])).toHaveLength(1);
+  test("marks payload shapes it does not understand as incomplete, not empty", () => {
+    // An unrecognized envelope reported as an authoritative empty list is what
+    // would let the disconnect monitor drop a still-connected iPhone.
+    expect(parseDevicectlDeviceList(null)).toEqual({ devices: [], complete: false });
+    expect(parseDevicectlDeviceList({ result: {} })).toEqual({ devices: [], complete: false });
+    expect(parseDevicectlDeviceList({ result: { devices: "nope" } })).toEqual({
+      devices: [],
+      complete: false,
+    });
+    expect(
+      parseDevicectlDeviceList({ info: { outcome: "failure" }, result: { devices: [] } }),
+    ).toEqual({ devices: [], complete: false });
+  });
+
+  test("a recognized empty listing is authoritative", () => {
+    expect(parseDevicectlDeviceList(devicectlPayload([]))).toEqual({ devices: [], complete: true });
+    expect(parseDevicectlDeviceList([connectedIphone()]).devices).toHaveLength(1);
   });
 });
 
@@ -230,7 +244,7 @@ describe("DevicectlDeviceLister", () => {
     expect(await lister.listConnectedDevices()).toEqual({ devices: [], complete: false });
   });
 
-  test("bounds the devicectl invocation and forwards the ambient abort signal", async () => {
+  test("bounds the devicectl invocation without binding it to one caller's abort", async () => {
     let options: { timeoutMs?: number; signal?: AbortSignal } | undefined;
     const controller = new AbortController();
     const lister = makeLister({
@@ -243,8 +257,43 @@ describe("DevicectlDeviceLister", () => {
 
     await runWithAbortSignal(controller.signal, () => lister.listConnectedDevices());
 
+    // The listing is shared between concurrent callers, so it must not inherit
+    // the first caller's cancellation; the timeout is what bounds it.
     expect(options?.timeoutMs).toBe(15_000);
-    expect(options?.signal).toBe(controller.signal);
+    expect(options?.signal).toBeUndefined();
+  });
+
+  test("retains the last good listing across a failing sweep, then lets it go stale", async () => {
+    const timer = new FakeTimer();
+    let shouldFail = false;
+    const lister = makeLister({
+      timer,
+      execute: async () => {
+        if (shouldFail) {
+          throw new Error("devicectl blipped");
+        }
+        return okExec;
+      },
+      readFile: async () => JSON.stringify(devicectlPayload([connectedIphone()])),
+    });
+
+    expect((await lister.listConnectedDevices()).devices).toHaveLength(1);
+
+    shouldFail = true;
+    timer.advanceTime(DEVICE_LIST_CACHE_TTL_MS);
+    const blipped = await lister.listConnectedDevices();
+
+    // The iPhone did not go anywhere, so it stays in the discovered list; the
+    // sweep is still flagged non-authoritative.
+    expect(blipped.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
+    expect(blipped.complete).toBe(false);
+
+    timer.advanceTime(60_000);
+    const stale = await lister.listConnectedDevices();
+
+    // A permanently broken devicectl must eventually stop asserting hardware
+    // that may well have been unplugged.
+    expect(stale).toEqual({ devices: [], complete: false });
   });
 
   test("removes its temp directory on both success and failure", async () => {

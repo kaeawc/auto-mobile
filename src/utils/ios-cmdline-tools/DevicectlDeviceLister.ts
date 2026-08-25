@@ -5,7 +5,6 @@ import type { ExecResult } from "../../models";
 import type { BootedDevice } from "../../models/DeviceInfo";
 import { errorMessage } from "../describeUnknownError";
 import { DefaultHostCommandExecutor, type HostCommandOptions } from "../HostCommandExecutor";
-import { getAbortSignal } from "../AbortContext";
 import { logger, type Logger } from "../logger";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { inferIosFormFactor, isIosPhysicalUdid } from "./iosDeviceType";
@@ -83,17 +82,20 @@ function asString(value: unknown): string | undefined {
  * a top-level array so a future envelope change degrades to "no devices" rather
  * than a crash.
  */
-function extractDeviceEntries(data: unknown): unknown[] {
+function extractDeviceEntries(data: unknown): unknown[] | null {
   if (Array.isArray(data)) {
     return data;
   }
   const root = asRecord(data);
   if (!root) {
-    return [];
+    return null;
   }
-  const result = asRecord(root.result);
-  const devices = result?.devices ?? root.devices;
-  return Array.isArray(devices) ? devices : [];
+  const outcome = asString(asRecord(root.info)?.outcome)?.toLowerCase();
+  if (outcome && outcome !== "success") {
+    return null;
+  }
+  const devices = asRecord(root.result)?.devices ?? root.devices;
+  return Array.isArray(devices) ? devices : null;
 }
 
 /**
@@ -189,15 +191,25 @@ function toBootedDevice(entry: unknown): BootedDevice | null {
  * physical iOS devices it reports, sorted by UDID to match
  * `SimCtlClient.getBootedSimulatorsChecked`'s stable ordering.
  *
+ * `complete` separates a *recognized* empty listing ("nothing is plugged in",
+ * authoritative) from an envelope this parser does not understand — a failed
+ * `info.outcome`, a missing/non-array `devices`, or a future rename. Reporting
+ * the latter as an authoritative empty list is what would let the disconnect
+ * monitor drop a still-connected iPhone.
+ *
  * Exported separately from the client so the payload shape can be pinned by
  * fast unit tests with no host tooling involved.
  */
-export function parseDevicectlDeviceList(data: unknown): BootedDevice[] {
-  const devices = extractDeviceEntries(data)
+export function parseDevicectlDeviceList(data: unknown): PhysicalIosDeviceDiscovery {
+  const entries = extractDeviceEntries(data);
+  if (!entries) {
+    return { devices: [], complete: false };
+  }
+  const devices = entries
     .map(toBootedDevice)
     .filter((device): device is BootedDevice => device !== null);
   devices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
-  return devices;
+  return { devices, complete: true };
 }
 
 /**
@@ -218,6 +230,19 @@ const DEVICE_LIST_CACHE_TTL_MS = 3_000;
  * wedge each later sweep behind it.
  */
 const DEVICE_LIST_TIMEOUT_MS = 15_000;
+
+/**
+ * How long a failing sweep keeps reporting the devices the last good sweep
+ * found.
+ *
+ * Without this, a single devicectl blip makes a connected iPhone vanish from
+ * discovery, and the daemon's disconnect monitor starts counting misses against
+ * a device that never went anywhere. Retaining last-known devices keeps the
+ * iPhone in the discovered list while `complete: false` still tells callers the
+ * sweep was not authoritative. The window is bounded so a permanently broken
+ * devicectl eventually stops asserting hardware that may well be unplugged.
+ */
+const LAST_GOOD_RETENTION_MS = 60_000;
 
 interface DevicectlDeviceListerDependencies {
   platform: () => NodeJS.Platform;
@@ -254,6 +279,7 @@ const defaultDependencies: DevicectlDeviceListerDependencies = {
 export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
   private readonly deps: DevicectlDeviceListerDependencies;
   private cache: { discovery: PhysicalIosDeviceDiscovery; expiresAt: number } | null = null;
+  private lastGood: { devices: BootedDevice[]; staleAfter: number } | null = null;
   private inFlight: Promise<PhysicalIosDeviceDiscovery> | null = null;
 
   constructor(dependencies: Partial<DevicectlDeviceListerDependencies> = {}) {
@@ -282,13 +308,14 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
       await this.deps.execute(
         "xcrun",
         ["devicectl", "list", "devices", "--json-output", jsonPath, "--quiet"],
-        { timeoutMs: DEVICE_LIST_TIMEOUT_MS, signal: getAbortSignal() },
+        // Deliberately NOT wired to the ambient abort signal: this listing is
+        // shared across concurrent callers, so honoring one caller's
+        // cancellation would cancel the process out from under the others. The
+        // timeout is what bounds it.
+        { timeoutMs: DEVICE_LIST_TIMEOUT_MS },
       );
       const raw = await this.deps.readFile(jsonPath);
-      return this.remember({
-        devices: parseDevicectlDeviceList(JSON.parse(raw) as unknown),
-        complete: true,
-      });
+      return this.remember(parseDevicectlDeviceList(JSON.parse(raw) as unknown));
     } catch (error) {
       // A host without Xcode 15+, without paired hardware, or with a devicectl
       // that failed still has working simulator discovery; degrade to
@@ -296,9 +323,8 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
       this.deps.logger.debug(
         `[DevicectlDeviceLister] physical iOS device discovery unavailable: ${errorMessage(error)}`,
       );
-      // Cache the empty result too: a host with no Xcode must not pay for a
-      // failing process spawn on every sweep. `complete: false` keeps callers
-      // from reading the emptiness as "the iPhone went away".
+      // Cache the failure too: a host with no Xcode must not pay for a failing
+      // process spawn on every sweep.
       return this.remember({ devices: [], complete: false });
     } finally {
       if (tempDir) {
@@ -314,7 +340,28 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
   }
 
   private remember(discovery: PhysicalIosDeviceDiscovery): PhysicalIosDeviceDiscovery {
-    this.cache = { discovery, expiresAt: this.deps.timer.now() + DEVICE_LIST_CACHE_TTL_MS };
+    const now = this.deps.timer.now();
+    const resolved = discovery.complete
+      ? this.recordLastGood(discovery, now)
+      : { devices: this.retainedDevices(now), complete: false };
+    this.cache = { discovery: resolved, expiresAt: now + DEVICE_LIST_CACHE_TTL_MS };
+    return resolved;
+  }
+
+  private recordLastGood(
+    discovery: PhysicalIosDeviceDiscovery,
+    now: number,
+  ): PhysicalIosDeviceDiscovery {
+    this.lastGood = { devices: discovery.devices, staleAfter: now + LAST_GOOD_RETENTION_MS };
     return discovery;
+  }
+
+  /** Devices the last good sweep found, while still inside the retention window. */
+  private retainedDevices(now: number): BootedDevice[] {
+    if (!this.lastGood || now >= this.lastGood.staleAfter) {
+      this.lastGood = null;
+      return [];
+    }
+    return this.lastGood.devices;
   }
 }

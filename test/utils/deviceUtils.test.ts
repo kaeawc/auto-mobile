@@ -132,25 +132,25 @@ describe("MultiPlatformDeviceManager", () => {
       });
     });
 
-    test("an incomplete physical sweep keeps iOS out of succeededPlatforms", async () => {
+    test("an incomplete physical sweep still leaves simulators authoritative", async () => {
       await withProcessPlatform("darwin", async () => {
-        // A devicectl blip must not let the disconnect monitor prune a
-        // still-connected iPhone just because simctl answered.
+        // `succeededPlatforms` has no room for "simulators yes, physical no", and
+        // clearing it on a devicectl blip would make every idle simulator
+        // unassignable. The lister retains last-known physical devices instead.
         const manager = makeManager({
           simulators: [simulator],
-          physical: [],
+          physical: [physicalDevice],
           physicalComplete: false,
         });
 
         const discovery = await manager.getBootedDevicesDetailed("ios");
 
-        expect(discovery.devices).toEqual([simulator]);
-        expect(discovery.succeededPlatforms.has("ios")).toBe(false);
-        expect(discovery.discoveryErrors.ios?.code).toBe("failed");
+        expect(discovery.devices).toEqual([simulator, physicalDevice]);
+        expect(discovery.succeededPlatforms.has("ios")).toBe(true);
       });
     });
 
-    test("a lister that throws is reported as an incomplete sweep, not an empty one", async () => {
+    test("a lister that throws does not take simulator discovery down", async () => {
       await withProcessPlatform("darwin", async () => {
         const manager = makeManager({
           simulators: [simulator],
@@ -160,7 +160,7 @@ describe("MultiPlatformDeviceManager", () => {
         const discovery = await manager.getBootedDevicesDetailed("ios");
 
         expect(discovery.devices).toEqual([simulator]);
-        expect(discovery.succeededPlatforms.has("ios")).toBe(false);
+        expect(discovery.succeededPlatforms.has("ios")).toBe(true);
       });
     });
 

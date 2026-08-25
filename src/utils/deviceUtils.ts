@@ -556,21 +556,18 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     const physical = await this.listPhysicalIosDevices();
     try {
       const simulators = await this.simctl.getBootedSimulatorsChecked();
-      const devices = mergeIosDevices(simulators, physical.devices);
-      // An incomplete physical sweep leaves iOS un-discovered even though simctl
-      // answered: the disconnect monitor prunes on this flag, and a devicectl
-      // blip must not evict a still-connected iPhone.
-      return physical.complete
-        ? { devices, succeeded: true }
-        : {
-            devices,
-            succeeded: false,
-            error: {
-              code: "failed",
-              message:
-                "iOS physical-device discovery failed; retaining tracked physical iOS devices.",
-            },
-          };
+      // `succeeded` stays tied to simctl alone. It is a per-platform flag with
+      // no room for "simulators are authoritative but physical devices are
+      // not", and clearing it on a devicectl blip would make every idle
+      // simulator unassignable. The lister keeps a failing sweep from dropping a
+      // connected device by retaining its last-known devices instead.
+      if (!physical.complete) {
+        logger.warn(
+          "[DeviceManager] iOS physical-device discovery was incomplete; " +
+            "reporting last-known physical devices alongside authoritative simulators.",
+        );
+      }
+      return { devices: mergeIosDevices(simulators, physical.devices), succeeded: true };
     } catch (error) {
       logger.warn(
         `[DeviceManager] iOS booted-device discovery failed; retaining tracked iOS devices: ${error}`,

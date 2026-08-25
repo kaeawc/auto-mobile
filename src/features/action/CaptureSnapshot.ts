@@ -353,13 +353,27 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
    * Save settings to snapshot directory
    */
   private async saveSettings(snapshotName: string, settings: any): Promise<void> {
-    // Ensure snapshot directory exists before writing
-    const snapshotDir = this.store.getSnapshotPath(snapshotName);
+    // Ensure snapshot directory exists before writing. Android emulator
+    // snapshots are scoped by AVD name so the same name can be reused across
+    // AVDs without colliding on disk (#5707).
+    const pathOptions = this.getAndroidPathOptions();
+    const snapshotDir = this.store.getSnapshotPathWithOptions(snapshotName, pathOptions);
     await fs.mkdir(snapshotDir, { recursive: true });
 
-    const settingsPath = this.store.getSettingsPath(snapshotName);
+    const settingsPath = this.store.getSettingsPath(snapshotName, pathOptions);
     await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
     logger.info(`Saved settings to ${settingsPath}`);
+  }
+
+  /**
+   * AVD-scoped path options for Android emulator snapshots. Returns undefined
+   * for physical Android devices (no AVD name), which keep the unscoped path.
+   */
+  private getAndroidPathOptions(): SnapshotPathOptions | undefined {
+    if (this.device.deviceId.startsWith("emulator-")) {
+      return { platform: "android", avdName: this.device.name };
+    }
+    return undefined;
   }
 
   private async executeIos(args: CaptureSnapshotArgs): Promise<CaptureSnapshotResult> {

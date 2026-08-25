@@ -11,6 +11,7 @@ import {
   resetDeviceSnapshotManagerDependencies,
   restoreDeviceSnapshot,
   setDeviceSnapshotManagerDependencies,
+  updateDeviceSnapshotConfig,
 } from "../../src/server/deviceSnapshotManager";
 import { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -356,5 +357,173 @@ describe("deviceSnapshotManager", () => {
 
     expect(config.vmSnapshotTimeoutMs).toBeGreaterThan(0);
     expect(config.vmSnapshotTimeoutMs).toBe(30000);
+  });
+
+  test("evicting an Android emulator snapshot deletes its AVD-scoped directory (#5707)", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-avd-"));
+    try {
+      const realStore = new DeviceSnapshotStore(tempRoot);
+      await realStore.ensureSnapshotsDirectory();
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+      const snapshotName = "evict-me";
+      const avdName = "Pixel_5";
+      const emulatorDeviceId = "emulator-5554";
+      const androidOptions = { platform: "android" as const, avdName };
+
+      // Write the snapshot on disk at the AVD-scoped path — where capture puts it.
+      const scopedDir = realStore.getSnapshotPathWithOptions(snapshotName, androidOptions);
+      await fs.mkdir(scopedDir, { recursive: true });
+      await fs.writeFile(path.join(scopedDir, "settings.json"), "{}");
+      // The legacy flat path must NOT be where this snapshot lives.
+      const flatDir = realStore.getSnapshotPath(snapshotName);
+      expect(scopedDir).not.toBe(flatDir);
+
+      const timestamp = new Date(fakeTimer.now()).toISOString();
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName,
+        timestamp,
+        deviceId: emulatorDeviceId,
+        deviceName: avdName,
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: false,
+        includeSettings: true,
+      };
+      await repository.insertSnapshot({
+        snapshotName,
+        deviceId: emulatorDeviceId,
+        deviceName: avdName,
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: false,
+        includeSettings: true,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: 5 * 1024 * 1024,
+        manifest,
+      });
+
+      // Force eviction by lowering the archive limit below the record size.
+      await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+
+      // The AVD-scoped directory is deleted — the manager resolved the path from
+      // the record's deviceName (the AVD name), not the flat/legacy path.
+      expect(await realStore.snapshotDirectoryExists(snapshotName, androidOptions)).toBe(false);
+      expect(await repository.getSnapshot(snapshotName)).toBeNull();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("evicting a legacy FLAT Android emulator snapshot reclaims the flat directory (#5707/#5724)", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-legacy-flat-"));
+    try {
+      const realStore = new DeviceSnapshotStore(tempRoot);
+      await realStore.ensureSnapshotsDirectory();
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+      const snapshotName = "legacy-flat";
+      const avdName = "Pixel_5";
+      const emulatorDeviceId = "emulator-5554";
+
+      // Pre-scoping data lives at the UNSCOPED flat path. Eviction computes the
+      // scoped path from the record; without the flat-path fallback it would
+      // fs.rm a nonexistent dir, delete the row, report bytes reclaimed, and
+      // leave this directory (and its re-importable manifest) on disk.
+      const flatDir = realStore.getSnapshotPath(snapshotName);
+      await fs.mkdir(flatDir, { recursive: true });
+      await fs.writeFile(path.join(flatDir, "settings.json"), "{}");
+
+      const timestamp = new Date(fakeTimer.now()).toISOString();
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName,
+        timestamp,
+        deviceId: emulatorDeviceId,
+        deviceName: avdName,
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: false,
+        includeSettings: true,
+      };
+      await repository.insertSnapshot({
+        snapshotName,
+        deviceId: emulatorDeviceId,
+        deviceName: avdName,
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: false,
+        includeSettings: true,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: 5 * 1024 * 1024,
+        manifest,
+      });
+
+      await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+
+      // The flat directory is actually gone — eviction did not silently under-reclaim.
+      expect(await realStore.snapshotDirectoryExists(snapshotName)).toBe(false);
+      expect(await repository.getSnapshot(snapshotName)).toBeNull();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("captureDeviceSnapshot rejects a reserved scope-root name (#5707)", async () => {
+    for (const reserved of ["android", "ios"]) {
+      await expect(captureDeviceSnapshot(TEST_DEVICE, { snapshotName: reserved })).rejects.toThrow(
+        /reserved/i,
+      );
+    }
+  });
+
+  test("legacy flat-path cleanup never deletes a reserved scope root (#5707)", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-reserved-"));
+    try {
+      const realStore = new DeviceSnapshotStore(tempRoot);
+      await realStore.ensureSnapshotsDirectory();
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+      // A different AVD's real snapshot living under the "android" scope root.
+      const other = { platform: "android" as const, avdName: "Pixel_7" };
+      const otherDir = realStore.getSnapshotPathWithOptions("keep-me", other);
+      await fs.mkdir(otherDir, { recursive: true });
+      await fs.writeFile(path.join(otherDir, "settings.json"), "{}");
+
+      // A pathological snapshot literally named "android": its flat path is the
+      // scope root that holds `otherDir`. Evicting it must not wipe that tree.
+      const timestamp = new Date(fakeTimer.now()).toISOString();
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName: "android",
+        timestamp,
+        deviceId: "emulator-5554",
+        deviceName: "Pixel_5",
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: false,
+        includeSettings: true,
+      };
+      await repository.insertSnapshot({
+        snapshotName: "android",
+        deviceId: "emulator-5554",
+        deviceName: "Pixel_5",
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: false,
+        includeSettings: true,
+        createdAt: timestamp,
+        lastAccessedAt: timestamp,
+        sizeBytes: 5 * 1024 * 1024,
+        manifest,
+      });
+
+      await updateDeviceSnapshotConfig({ maxArchiveSizeMb: 1 });
+
+      // The unrelated AVD's snapshot under the scope root survives.
+      expect(await realStore.snapshotDirectoryExists("keep-me", other)).toBe(true);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
   });
 });

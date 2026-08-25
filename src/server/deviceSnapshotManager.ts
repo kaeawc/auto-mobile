@@ -78,11 +78,23 @@ interface DeviceSnapshotManagerDependencies {
 let moduleDependencies: DeviceSnapshotManagerDependencies | null = null;
 const LEGACY_MANIFEST_FILENAME = "manifest.json";
 
-function getSnapshotPathOptions(
-  context: Pick<BootedDevice, "platform" | "deviceId">,
-): SnapshotPathOptions | undefined {
+function getSnapshotPathOptions(context: {
+  platform?: string;
+  deviceId?: string;
+  avdName?: string;
+}): SnapshotPathOptions | undefined {
   if (context.platform === "ios") {
     return { platform: "ios", deviceId: context.deviceId };
+  }
+  // Android emulator snapshots are scoped on disk by AVD name (stable + unique),
+  // never the port-based serial. Physical Android devices have no AVD name and
+  // fall through to the unscoped path (#5707).
+  if (
+    context.platform === "android" &&
+    context.deviceId?.startsWith("emulator-") &&
+    context.avdName
+  ) {
+    return { platform: "android", avdName: context.avdName };
   }
   return undefined;
 }
@@ -354,6 +366,17 @@ async function ensureSnapshotAvailable(
   snapshotRepository: DeviceSnapshotRepository,
   pathOptions?: SnapshotPathOptions,
 ): Promise<void> {
+  // "android"/"ios" are the platform scope roots under the snapshots dir. An
+  // unscoped (physical / fallback) snapshot with one of those names would take
+  // the scope directory itself, so deleting it later would recursively remove
+  // every scoped snapshot nested under it. Reject the collision at the source
+  // (#5707); broader snapshotName sanitization is tracked in #5705.
+  if (isReservedScopeSegment(snapshotName)) {
+    throw new ActionableError(
+      `Snapshot name '${snapshotName}' is reserved. Please choose a different name.`,
+    );
+  }
+
   const existing = await snapshotRepository.getSnapshot(snapshotName);
   if (existing) {
     throw new ActionableError(
@@ -370,10 +393,35 @@ async function ensureSnapshotAvailable(
 
 async function deleteDeviceSnapshotRecord(record: DeviceSnapshotRecord): Promise<boolean> {
   const { snapshotRepository, snapshotStore } = await getDeviceSnapshotDependencies();
-  const pathOptions = getSnapshotPathOptions(record);
+  const pathOptions = getSnapshotPathOptions({
+    platform: record.platform,
+    deviceId: record.deviceId,
+    // For Android, deviceName holds the AVD name (see the capture manifest).
+    avdName: record.deviceName,
+  });
   await snapshotStore.deleteSnapshotData(record.snapshotName, pathOptions);
+  // Snapshots captured before AVD-scoping (#5707) — including any created in the
+  // ~/.auto-mobile base-path window between #5716 and this change — keep their
+  // data at the unscoped flat path. Eviction now computes the scoped path, which
+  // misses that data: the row would be deleted and its bytes reported reclaimed
+  // while the flat directory survives (and, if it holds a legacy manifest.json,
+  // listDeviceSnapshots re-imports it, so the archive limit can never evict it).
+  // When scoping applied, also clear the flat path — but never a reserved scope
+  // root (a snapshot literally named "android"/"ios", whose flat path IS the
+  // scope tree); name sanitization is tracked separately (#5705).
+  if (pathOptions && !isReservedScopeSegment(record.snapshotName)) {
+    await snapshotStore.deleteSnapshotData(record.snapshotName);
+  }
   const deleted = await snapshotRepository.deleteSnapshot(record.snapshotName);
   return deleted;
+}
+
+// Top-level segments the store uses to scope snapshots by platform/device. A
+// snapshot whose name equals one of these resolves its flat path to the scope
+// root, so the legacy flat-path cleanup must skip it to avoid deleting the whole
+// scope tree.
+function isReservedScopeSegment(snapshotName: string): boolean {
+  return snapshotName === "android" || snapshotName === "ios";
 }
 
 async function enforceDeviceSnapshotArchiveLimit(
@@ -475,7 +523,13 @@ export async function captureDeviceSnapshot(
 
   const baseConfig = await getDeviceSnapshotConfig();
   const snapshotName = args.snapshotName ?? snapshotStore.generateSnapshotName(device.name);
-  const pathOptions = getSnapshotPathOptions(device);
+  const pathOptions = getSnapshotPathOptions({
+    platform: device.platform,
+    deviceId: device.deviceId,
+    // For an Android emulator, BootedDevice.name is the AVD name resolved via
+    // `adb emu avd name` during discovery.
+    avdName: device.name,
+  });
 
   await ensureSnapshotAvailable(snapshotName, snapshotStore, snapshotRepository, pathOptions);
 

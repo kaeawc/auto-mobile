@@ -73,6 +73,50 @@ describe("DeviceSnapshotStore", () => {
     );
   });
 
+  it("should return Android snapshot paths scoped by AVD name (#5707)", () => {
+    const options = { platform: "android" as const, avdName: "Pixel_5" };
+    expect(store.getSnapshotPathWithOptions("test-snapshot", options)).toBe(
+      path.join(testBasePath, "android", "Pixel_5", "test-snapshot"),
+    );
+    expect(store.getSettingsPath("test-snapshot", options)).toBe(
+      path.join(testBasePath, "android", "Pixel_5", "test-snapshot", "settings.json"),
+    );
+    expect(store.getMetadataPath("test-snapshot", options)).toBe(
+      path.join(testBasePath, "android", "Pixel_5", "test-snapshot", "metadata.json"),
+    );
+    expect(store.getAppDataPath("test-snapshot", options)).toBe(
+      path.join(testBasePath, "android", "Pixel_5", "test-snapshot", "app_data"),
+    );
+  });
+
+  it("falls back to the unscoped path for Android without an AVD name (physical device) (#5707)", () => {
+    const options = { platform: "android" as const };
+    expect(store.getSnapshotPathWithOptions("test-snapshot", options)).toBe(
+      path.join(testBasePath, "test-snapshot"),
+    );
+  });
+
+  it("isolates same-named Android snapshots across two AVDs on disk (#5707)", async () => {
+    const snapshotName = "shared-name";
+    const avdA = { platform: "android" as const, avdName: "Pixel_5" };
+    const avdB = { platform: "android" as const, avdName: "Pixel_7" };
+
+    // Capture "shared-name" on AVD A only.
+    await fs.mkdir(store.getSnapshotPathWithOptions(snapshotName, avdA), { recursive: true });
+
+    // AVD A sees it; AVD B does not — the name is reusable across devices.
+    expect(await store.snapshotDirectoryExists(snapshotName, avdA)).toBe(true);
+    expect(await store.snapshotDirectoryExists(snapshotName, avdB)).toBe(false);
+
+    // Deleting AVD B's (nonexistent) snapshot must not remove AVD A's data.
+    await store.deleteSnapshotData(snapshotName, avdB);
+    expect(await store.snapshotDirectoryExists(snapshotName, avdA)).toBe(true);
+
+    // Deleting AVD A's snapshot removes only AVD A's data.
+    await store.deleteSnapshotData(snapshotName, avdA);
+    expect(await store.snapshotDirectoryExists(snapshotName, avdA)).toBe(false);
+  });
+
   it("should detect snapshot directories", async () => {
     const snapshotName = "snapshot-exists";
     expect(await store.snapshotDirectoryExists(snapshotName)).toBe(false);

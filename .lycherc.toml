@@ -17,9 +17,11 @@ exclude = [
   "^https://hub\\.docker\\.com/",
   # WebAIM contrast checker has unreliable uptime / timeouts in CI
   "^https://webaim\\.org/",
-  # Contributor Covenant pages intermittently reset CI connections
-  "^https://www\\.contributor-covenant\\.org/?$",
-  "^https://www\\.contributor-covenant\\.org/translations/?$",
+  # Contributor Covenant intermittently resets CI connections; exclude every
+  # path under the host (the /faq page reset On Merge run 32703978446, #5622),
+  # not just the root and /translations pages that the old narrow patterns
+  # covered.
+  "^https://www\\.contributor-covenant\\.org/",
 ]
 
 # Exclude specific paths
@@ -46,11 +48,19 @@ accept = [
   "503", # Service Unavailable (temporary for Anthropic URLs under load)
 ]
 
-# Timeout for each request in seconds
-timeout = 20
+# Timeout for each request in seconds. Raised from 20 to give slow, rate-limited
+# responses (e.g. github.com's own issue URLs) headroom before they time out and
+# redden the merge workflow (#5622).
+timeout = 30
 
 # Number of retries per link
 max_retries = 3
+
+# Minimum wait (seconds) between retries. Without a backoff, max_retries fires
+# immediately against a rate-limited/slow endpoint and still fails; the wait lets
+# a transient timeout or connection reset recover before the final verdict
+# (#5622).
+retry_wait_time = 2
 
 # HTTP method to use for checking links
 method = "get"

@@ -3,6 +3,7 @@ import { promises as fs } from "fs";
 import * as path from "path";
 import * as os from "os";
 import type { BootedDevice, DeviceSnapshotConfig, DeviceSnapshotManifest } from "../../src/models";
+import { ActionableError } from "../../src/models";
 import {
   captureDeviceSnapshot,
   getDeviceSnapshotConfig,
@@ -137,6 +138,27 @@ describe("deviceSnapshotManager", () => {
 
     const inserted = await repository.getSnapshot("new-snapshot");
     expect(inserted?.sizeBytes).toBe(700 * 1024);
+  });
+
+  test("captureDeviceSnapshot inserts no record when the capture fails (#5710)", async () => {
+    // A capture that fails (e.g. iOS 0-packages-captured) throws before the
+    // manager shapes a result, so no snapshot record must be persisted.
+    store.queueGeneratedName("doomed-snapshot");
+    await setDeviceSnapshotManagerDependencies({
+      createCaptureProvider: () => ({
+        capture: async () => {
+          throw new ActionableError("iOS app-data capture backed up 0 of 1 requested app(s)");
+        },
+      }),
+    });
+
+    await expect(
+      captureDeviceSnapshot(TEST_DEVICE, { includeAppData: true }),
+    ).rejects.toThrow(/backed up 0 of 1/i);
+
+    expect(await repository.getSnapshot("doomed-snapshot")).toBeNull();
+    const listed = await repository.listSnapshots();
+    expect(listed).toEqual([]);
   });
 
   test("restoreDeviceSnapshot touches lastAccessedAt and forwards manifest", async () => {

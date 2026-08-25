@@ -722,6 +722,86 @@ describe("CaptureSnapshot (iOS)", () => {
     ).rejects.toThrow("Failed to backup app data");
   });
 
+  it("fails the capture when every requested bundle is not installed (0 captured)", async () => {
+    // No installed apps: com.fake.doesnotexist resolves to not-installed, so
+    // backedUpPackages is empty. Before #5710 this "succeeded" with an empty
+    // backup; now it must be an ActionableError that names what failed.
+    simctl.setInstalledApps([{ CFBundleIdentifier: "com.example.other" }]);
+    const captureSnapshot = makeCapture();
+
+    const promise = captureSnapshot.execute({
+      snapshotName: "all-failed",
+      includeAppData: true,
+      appBundleIds: ["com.fake.doesnotexist"],
+    });
+
+    await expect(promise).rejects.toThrow(/com\.fake\.doesnotexist/);
+    // Names what was requested vs. what failed (AC3).
+    await expect(promise).rejects.toThrow(/backed up 0 of 1/i);
+  });
+
+  it("fails the capture when the only requested bundle has no data container (0 captured)", async () => {
+    // A system app that is installed but exposes no simctl-accessible container
+    // (e.g. com.apple.Preferences). It is skipped, not failed, but 0 packages
+    // are captured, so the capture must fail rather than report success.
+    simctl.setInstalledApps([{ CFBundleIdentifier: "com.apple.Preferences" }]);
+    const captureSnapshot = makeCapture();
+
+    const promise = captureSnapshot.execute({
+      snapshotName: "no-container",
+      includeAppData: true,
+      appBundleIds: ["com.apple.Preferences"],
+    });
+
+    await expect(promise).rejects.toThrow(/com\.apple\.Preferences/);
+    await expect(promise).rejects.toThrow(/backed up 0 of 1/i);
+  });
+
+  it("succeeds when at least one bundle is captured in a mixed set", async () => {
+    // Mixed/partial policy (non-strict): one captured, one skipped-no-container,
+    // one not-installed. backedUpPackages is non-empty, so the capture succeeds.
+    const captured = "com.example.captured";
+    const noContainer = "com.example.nocontainer";
+    const notInstalled = "com.example.missing";
+
+    const containerRoot = path.join(testBasePath, "containers", captured);
+    await fs.mkdir(path.join(containerRoot, "Documents"), { recursive: true });
+    await fs.writeFile(path.join(containerRoot, "Documents", "data.txt"), "hello");
+
+    simctl.setContainerPath(captured, containerRoot);
+    simctl.setInstalledApps([
+      { CFBundleIdentifier: captured },
+      { CFBundleIdentifier: noContainer },
+    ]);
+
+    const captureSnapshot = makeCapture();
+    const result = await captureSnapshot.execute({
+      snapshotName: "mixed",
+      includeAppData: true,
+      includeSettings: false,
+      appBundleIds: [captured, noContainer, notInstalled],
+    });
+
+    expect(result.manifest.appDataBackup?.backedUpPackages).toEqual([captured]);
+    expect(result.manifest.appDataBackup?.failedPackages).toEqual([notInstalled]);
+  });
+
+  it("succeeds for a settings-only capture even when no app data would back up", async () => {
+    // includeAppData:false never touches captureIosAppData, so the 0-captured
+    // guard must not fire for legitimate settings-only snapshots (AC2).
+    simctl.setInstalledApps([]);
+    const captureSnapshot = makeCapture();
+
+    const result = await captureSnapshot.execute({
+      snapshotName: "settings-only",
+      includeAppData: false,
+      includeSettings: true,
+    });
+
+    expect(result.manifest.includeAppData).toBe(false);
+    expect(result.manifest.appDataBackup).toBeUndefined();
+  });
+
   it("captures iOS settings (locale + UI) into the manifest when includeSettings", async () => {
     simctl.setCommandArgsResult(
       ["spawn", device.deviceId, "defaults", "read", ".GlobalPreferences", "AppleLocale"],

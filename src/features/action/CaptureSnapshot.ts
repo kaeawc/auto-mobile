@@ -499,6 +499,29 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
       );
     }
 
+    // When app data was requested but nothing was actually captured, the
+    // snapshot is empty — reporting "success" hides the failure until the caller
+    // digs into manifest.appDataBackup. Fail loudly instead (issue #5710). This
+    // fires regardless of strictBackupMode: an all-skipped set (e.g. a system app
+    // with no data container) has no failedPackages yet still captures nothing.
+    if (backedUpPackages.length === 0) {
+      const parts = [
+        `iOS app-data capture backed up 0 of ${sanitized.length} requested app(s) ` +
+          `(${sanitized.join(", ")}).`,
+      ];
+      if (failedPackages.length > 0) {
+        parts.push(`Failed: ${failedPackages.join(", ")}.`);
+      }
+      if (skippedPackages.length > 0) {
+        parts.push(`Skipped (no data container): ${skippedPackages.join(", ")}.`);
+      }
+      parts.push(
+        "Pass appBundleIds for installed apps that have a data container, or set " +
+          "includeAppData:false for a settings-only snapshot.",
+      );
+      throw new ActionableError(parts.join(" "));
+    }
+
     return {
       backupMethod: "simctl_copy",
       totalPackages: sanitized.length,

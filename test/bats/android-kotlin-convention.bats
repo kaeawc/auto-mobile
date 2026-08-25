@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+# bats file_tags=serial
+# Writes a fixture into the real source tree and scans it, so this file cannot
+# run concurrently with the rest of the suite. scripts/ci/run-bats.sh runs all
+# serial-tagged files in a dedicated serial pass (scripts/ci/run-bats.sh);
+# the tag is enforced by test/scripts/batsSerialTags.test.ts.
 #
 # Tests for scripts/android/validate-kotlin-convention.sh (issue #5027).
 

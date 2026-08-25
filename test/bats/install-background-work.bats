@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+# bats file_tags=serial
+# Spawns real (sometimes SIGTERM-ignoring, CPU-spinning) helper processes and
+# asserts they are reaped within a bounded time. Under parallel CPU
+# oversubscription the reap misses its deadline and the test flakes, so
+# scripts/ci/run-bats.sh runs this file in the serial pass.
 
 setup() {
   TEST_DIR="$(mktemp -d)"

@@ -1,4 +1,9 @@
 #!/usr/bin/env bats
+# bats file_tags=serial
+# Writes a fixture into the real source tree (src/utils/GitMetadataBoundaryFixture.ts)
+# and scans the tree, so this file cannot run concurrently with the rest of the
+# suite. scripts/ci/run-bats.sh runs serial-tagged files in a dedicated serial
+# pass; the tag is enforced by test/scripts/batsSerialTags.test.ts.
 
 setup() {
   fixture="src/utils/GitMetadataBoundaryFixture.ts"

@@ -33,11 +33,12 @@ executors:
       # Match the Xcode pinned by pull_request.yml. Verify the exact image is
       # offered at https://circleci.com/developer/machine/image/xcode and adjust.
       xcode: "26.5"
-    # OSS-tier Apple-silicon class (~200 credits/min). Use the smallest macOS
-    # class CircleCI offers your plan; larger classes burn the free budget faster.
+    # m4pro.medium is the ONLY macOS class available on the Free plan (all
+    # Free-plan macOS jobs run on it since 2025-11-10) and it is ~200 credits/min.
     # Apple-silicon classes take NO `macos.` prefix (that prefix is only on the
-    # legacy m1/Intel classes, e.g. macos.m1.medium.gen1).
-    resource_class: m2pro.medium
+    # legacy m1/Intel classes, e.g. macos.m1.medium.gen1). Do NOT use m1/m2 — they
+    # reached end-of-life 2026-02-16 and are rejected as invalid resource classes.
+    resource_class: m4pro.medium
 
 commands:
   halt_if_no_ios_changes:
@@ -71,12 +72,13 @@ commands:
             fi
             # --no-renames so a move OUT of ios/** (e.g. `git mv ios/a docs/a`)
             # still reports the ios/ source path, not just the destination.
-            # Capture the list first, then match with a here-string (no pipe):
-            # piping into `grep -q` lets grep exit on the first match while
-            # `git diff` is still writing, and under `pipefail` that SIGPIPE (141)
-            # would wrongly divert an early match into the halt branch.
-            CHANGED="$(git diff --no-renames --name-only "${BASE}" HEAD)"
-            if grep -qE '^(ios/|scripts/ios/|\.circleci/)' <<<"${CHANGED}"; then
+            # Write the list to a file and grep the file — NOT `git diff | grep`
+            # (grep exits on first match while git diff is still writing, and
+            # under pipefail that SIGPIPE (141) would divert a real match into
+            # the halt branch) and NOT a `<<<` here-string (CircleCI's config
+            # processor parses `<<` as a parameter-tag delimiter and rejects it).
+            git diff --no-renames --name-only "${BASE}" HEAD > /tmp/ios_changed.txt || true
+            if grep -qE '^(ios/|scripts/ios/|\.circleci/)' /tmp/ios_changed.txt; then
               echo "iOS changes in this branch vs main — continuing."
             else
               echo "No ios/**, scripts/ios/**, or .circleci/ changes vs main — halting to save macOS credits."

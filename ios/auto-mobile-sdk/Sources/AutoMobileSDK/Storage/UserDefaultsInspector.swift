@@ -15,11 +15,6 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     private var buffer: SdkEventBuffer?
     private var sequenceCounter: Int64 = 0
     private var kvoObserver: NSObjectProtocol?
-    /// Monotonic listen generation, bumped by `stopListening()`. `startListening()`
-    /// captures it after its own stop and publishes only if it still matches, so a
-    /// stop (or newer start) that interleaves with an in-flight registration invalidates
-    /// it rather than leaving an observer live after teardown or leaking a duplicate.
-    private var listenGeneration = 0
 
     /// Last-observed key→value snapshot per suite, keyed by ``suiteKey(_:)``.
     /// `UserDefaults.didChangeNotification` does not identify which key changed,
@@ -122,17 +117,24 @@ public final class UserDefaultsInspector: @unchecked Sendable {
         // would wrongly succeed and publish an observer after that stop. Bumping and
         // capturing together means only a stop/start that runs AFTER this point can
         // invalidate us — exactly what the store-time guard checks.
-        lock.lock()
-        listenGeneration += 1
-        let generation = listenGeneration
-        if let observer = kvoObserver {
-            NotificationCenter.default.removeObserver(observer)
-            kvoObserver = nil
-        }
-        lock.unlock()
-
         let defaults = suiteName.map { UserDefaults(suiteName: $0) } ?? UserDefaults.standard
         guard let defaults = suiteName != nil ? defaults : UserDefaults.standard else { return }
+
+        // Do the whole transition (remove old observer, seed baseline, register+publish the
+        // new observer) in ONE critical section. A concurrent stopListening()/
+        // startListening() takes `lock` and so runs entirely before or after this: it can
+        // never leave our observer live past a stop, leak a duplicate, or (with `queue: nil`
+        // synchronous delivery) fire a callback before we publish — such a callback blocks
+        // on `lock` until we finish. addObserver and the baseline read call back only later,
+        // so holding the lock across them cannot re-enter it.
+        lock.lock()
+        defer { lock.unlock() }
+
+        // Remove any existing observer before registering a new one.
+        if let existing = kvoObserver {
+            NotificationCenter.default.removeObserver(existing)
+            kvoObserver = nil
+        }
 
         // Seed the baseline BEFORE registering the observer. If a write on
         // another thread raced observer installation, the notification could
@@ -141,39 +143,20 @@ public final class UserDefaultsInspector: @unchecked Sendable {
         // closes that window; a write in the (now inverted) gap between seeding
         // and registration is simply picked up as a normal change on the next
         // notification rather than a burst of phantom adds.
-        captureBaseline(suiteName: suiteName)
+        captureBaselineLocked(suiteName: suiteName)
 
-        let observer = NotificationCenter.default.addObserver(
+        kvoObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
             object: defaults,
             queue: nil
         ) { [weak self] _ in
             self?.handleDidChange(suiteName: suiteName)
         }
-
-        lock.lock()
-        // Reject our publication if the generation moved since we captured it — a
-        // stopListening() (stop-during-start: don't leave an observer live after a stop)
-        // or a newer startListening() (don't leak a duplicate) ran in between. Remove the
-        // observer we just registered instead of storing it.
-        guard generation == listenGeneration else {
-            lock.unlock()
-            NotificationCenter.default.removeObserver(observer)
-            return
-        }
-        // Belt-and-suspenders: remove any observer a same-generation racer stored.
-        if let existing = kvoObserver {
-            NotificationCenter.default.removeObserver(existing)
-        }
-        kvoObserver = observer
-        lock.unlock()
     }
 
-    /// Stop listening for changes. Bumps `listenGeneration` so any startListening()
-    /// registration still in flight is rejected rather than left live after the stop.
+    /// Stop listening for changes.
     public func stopListening() {
         lock.lock()
-        listenGeneration += 1
         if let observer = kvoObserver {
             NotificationCenter.default.removeObserver(observer)
             kvoObserver = nil
@@ -195,6 +178,12 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     func captureBaseline(suiteName: String?) {
         lock.lock()
         defer { lock.unlock() }
+        captureBaselineLocked(suiteName: suiteName)
+    }
+
+    /// Baseline capture without taking `lock` — for callers that already hold it
+    /// (`startListening` registers under the lock). MUST be called with `lock` held.
+    private func captureBaselineLocked(suiteName: String?) {
         guard let driver = _driver else { return }
         lastSnapshots[Self.suiteKey(suiteName)] = Self.snapshotDict(driver.getValues(suiteName: suiteName))
     }

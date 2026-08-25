@@ -15,11 +15,6 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
     private var _isInitialized = false
     private var _isEnabled = true
     private var observers: [NSObjectProtocol] = []
-    /// Monotonic initialization generation, bumped on every `initialize()`/`shutdown()`.
-    /// The registering code captures it and only publishes its observers if it still
-    /// matches — so a shutdown+reinitialize (ABA) that happens while registration is in
-    /// flight can't let a stale init's observers land in a newer init's session.
-    private var _initGeneration = 0
 
     private init() {}
 
@@ -44,24 +39,23 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
 
     func initialize(bundleId: String?, buffer: SdkEventBuffer) {
         lock.lock()
-        guard !_isInitialized else {
-            lock.unlock()
-            return
-        }
+        defer { lock.unlock() }
+        guard !_isInitialized else { return }
         _isInitialized = true
-        _initGeneration += 1
-        let generation = _initGeneration
         self.bundleId = bundleId
         self.buffer = buffer
-        lock.unlock()
-
-        registerObservers(generation: generation)
+        // Register the observers WHILE holding the lock so registration and publication
+        // are one critical section: a shutdown() (which also takes `lock`) cannot
+        // interleave between building an observer and storing it, so nothing can fire in
+        // — or leak through — a register-vs-shutdown gap. addObserver is fast and its
+        // callbacks fire only on later notification delivery (never synchronously here),
+        // so there is no re-entrancy while the lock is held.
+        registerObserversLocked()
     }
 
     func shutdown() {
         lock.lock()
         _isInitialized = false
-        _initGeneration += 1
         _isEnabled = true
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
@@ -74,7 +68,9 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
 
     // MARK: - Observer Registration
 
-    private func registerObservers(generation: Int) {
+    /// Builds and stores the observers. MUST be called with `lock` held (see
+    /// `initialize`), so registration is atomic with respect to `shutdown()`.
+    private func registerObserversLocked() {
         let notificationsToMonitor: [(Notification.Name, String)] = [
             (NSLocale.currentLocaleDidChangeNotification, "locale_changed"),
             (.NSSystemTimeZoneDidChange, "timezone_changed"),
@@ -104,41 +100,15 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
             newObservers.append(observer)
         }
 
-        storeObservers(newObservers, generation: generation)
+        observers = newObservers
     }
 
     /// Number of currently-stored observers. Internal so tests can assert the
-    /// register-vs-shutdown guard without reaching into `NotificationCenter`.
+    /// initialize/shutdown observer lifecycle.
     var observerCount: Int {
         lock.lock()
         defer { lock.unlock() }
         return observers.count
-    }
-
-    /// Current initialization generation — internal so tests can capture it and drive an
-    /// A→shutdown→B→A publication race deterministically.
-    var initGeneration: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return _initGeneration
-    }
-
-    /// Publishes the just-registered observers only if `generation` is still the current
-    /// initialization generation — i.e. no `shutdown()` (nor a shutdown+reinitialize ABA)
-    /// interleaved since these observers were built. Otherwise removes them so they can't
-    /// fire after teardown or leak into a newer init's session. Internal so tests can
-    /// drive the drop path deterministically.
-    func storeObservers(_ newObservers: [NSObjectProtocol], generation: Int) {
-        lock.lock()
-        guard generation == _initGeneration else {
-            lock.unlock()
-            for observer in newObservers {
-                NotificationCenter.default.removeObserver(observer)
-            }
-            return
-        }
-        observers = newObservers
-        lock.unlock()
     }
 
     private func handleNotification(action: String, notification: Notification) {

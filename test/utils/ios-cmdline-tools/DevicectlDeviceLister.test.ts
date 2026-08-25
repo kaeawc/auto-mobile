@@ -5,6 +5,7 @@ import {
 } from "../../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import type { ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { join } from "path";
 
 const PHYSICAL_UDID = "00008120-001C2D3E1234567A";
 const LEGACY_UDID = "a".repeat(40);
@@ -28,6 +29,11 @@ function connectedIphone(overrides: Record<string, unknown> = {}): Record<string
     ...overrides,
   };
 }
+
+// Built with `join` rather than literal "/" so the assertions hold on Windows,
+// where the production code's `join(tmpdir(), ...)` yields backslashes.
+const TEMP_DIR = join("/tmp", "automobile-devicectl-devices-abc123");
+const JSON_PATH = join(TEMP_DIR, "devices.json");
 
 const okExec: ExecResult = { stdout: "", stderr: "", toString: () => "" } as ExecResult;
 
@@ -162,7 +168,7 @@ describe("DevicectlDeviceLister", () => {
         return okExec;
       },
       readFile: async (path: string) => {
-        expect(path).toBe("/tmp/automobile-devicectl-devices-abc123/devices.json");
+        expect(path).toBe(JSON_PATH);
         return JSON.stringify(devicectlPayload([connectedIphone()]));
       },
     });
@@ -171,7 +177,7 @@ describe("DevicectlDeviceLister", () => {
 
     expect(devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
     expect(args.slice(0, 3)).toEqual(["devicectl", "list", "devices"]);
-    expect(args).toContain("/tmp/automobile-devicectl-devices-abc123/devices.json");
+    expect(args).toContain(JSON_PATH);
   });
 
   test("degrades to an empty list when devicectl is unavailable", async () => {
@@ -210,10 +216,7 @@ describe("DevicectlDeviceLister", () => {
     await succeeding.listConnectedDevices();
     await failing.listConnectedDevices();
 
-    expect(removed).toEqual([
-      "/tmp/automobile-devicectl-devices-abc123",
-      "/tmp/automobile-devicectl-devices-abc123",
-    ]);
+    expect(removed).toEqual([TEMP_DIR, TEMP_DIR]);
   });
 
   test("reuses a listing within the cache window and re-shells out after it", async () => {

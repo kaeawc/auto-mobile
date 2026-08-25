@@ -1045,6 +1045,18 @@ describe("RestoreSnapshot (iOS)", () => {
     return new RestoreSnapshot(device, undefined, undefined, undefined, store, simctl as any);
   }
 
+  it("rejects a physical iOS device instead of driving simctl against it", async () => {
+    // iOS restore drives simctl for settings/app-container operations, which only works
+    // on a Simulator. Reject a physical iPhone up front rather than half-applying a
+    // restore over a failing simctl transport (#5620).
+    device = { deviceId: "00008030-001C2D3E1234567A", name: "iPhone 15 Pro", platform: "ios" };
+
+    await expect(makeRestore().execute({ snapshotName: "physical" })).rejects.toThrow(
+      /physical iOS device/i,
+    );
+    expect(simctl.getMethodCalls("launchApp").length).toBe(0);
+  });
+
   it("restores app data using fallback device path", async () => {
     const snapshotName = "restore-snapshot";
     const bundleId = "com.example.app";

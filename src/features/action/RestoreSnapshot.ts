@@ -19,6 +19,7 @@ import {
 } from "../../utils/android-cmdline-tools/vmSnapshot";
 import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import {
   getAppDataContainerPath,
   IOS_APP_DATA_FOLDERS,
@@ -93,6 +94,16 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
       case "android":
         return this.executeAndroid(args);
       case "ios":
+        // Physical iOS devices are discoverable now, but iOS snapshot restore drives
+        // simctl for settings and app-container operations, which only works on a
+        // Simulator. Reject a physical iPhone with an actionable error rather than
+        // half-applying a restore over a failing simctl transport.
+        if (isIosPhysicalUdid(this.device.deviceId)) {
+          throw new ActionableError(
+            `Device snapshots are not supported on physical iOS devices (${this.device.deviceId}); ` +
+              "they require a Simulator (simctl).",
+          );
+        }
         return this.executeIos(args);
       default:
         throw new ActionableError(

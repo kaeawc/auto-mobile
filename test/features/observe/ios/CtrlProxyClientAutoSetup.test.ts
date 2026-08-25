@@ -260,6 +260,71 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     }
   });
 
+  test("updatePort eagerly aborts a hung in-flight handshake so the new-port connect proceeds immediately (#5656)", async function () {
+    // Frozen manual timer: it is NEVER advanced, so neither the 5s connection
+    // timeout nor the "connection already in progress" poll interval can fire.
+    // The new-port connect can therefore only proceed if updatePort() eagerly
+    // aborts the hung handshake and clears isConnecting — not by waiting out the
+    // connectionTimeoutMs.
+    const manualTimer = new FakeTimer();
+    const sockets: { url: string; socket: ManualCloseWebSocket }[] = [];
+    const wsFactory = (url: string): WebSocket => {
+      // "timeout" mode + a never-advanced timer keeps the socket in CONNECTING
+      // forever, emitting NEITHER "open" NOR "error" — a wedged handshake.
+      const socket = new ManualCloseWebSocket(url, "timeout", 60_000, manualTimer);
+      sockets.push({ url, socket });
+      return socket as unknown as WebSocket;
+    };
+    const client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      wsFactory,
+      manualTimer,
+      createManagerFactory(),
+    );
+    const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
+      .connectWebSocket;
+    const updatePort = (
+      client as unknown as { updatePort: (port: number) => void }
+    ).updatePort.bind(client);
+    try {
+      // Start a connect and let it reach the in-flight state: socket CONNECTING,
+      // this.ws still null, isConnecting true, emitting nothing.
+      const connectPromise = connect.call(client);
+      await flushPromises(8);
+      expect(sockets.length).toBe(1);
+      expect(sockets[0].url).toBe("ws://localhost:8765/ws");
+      expect(client.isConnected()).toBe(false);
+
+      // A port reallocation races the wedged handshake.
+      updatePort(8767);
+      await flushPromises(8);
+
+      // AC1: the hung handshake is aborted eagerly — its connect resolves as a
+      // failure instead of hanging until connectionTimeoutMs (which never fires
+      // here because the timer is frozen).
+      await expect(connectPromise).resolves.toBe(false);
+
+      // AC2: a fresh connect dials the NEW port IMMEDIATELY, without waiting out
+      // any 5s stall. Before the fix, isConnecting stayed true, so this connect
+      // took the "connection already in progress, waiting…" branch and polled a
+      // frozen timer forever — no second socket would ever be created.
+      const secondPromise = connect.call(client);
+      await flushPromises(8);
+      expect(sockets.length).toBe(2);
+      const latest = sockets[sockets.length - 1];
+      expect(latest.url).toBe("ws://localhost:8767/ws");
+
+      latest.socket.readyState = WebSocketState.OPEN;
+      latest.socket.emit("open");
+      await flushPromises(8);
+      expect(await secondPromise).toBe(true);
+      expect(client.isConnected()).toBe(true);
+    } finally {
+      await client.close();
+    }
+  });
+
   test("a port change resets the per-endpoint attempt budget so the new port is not cooldown-blocked (#5645)", async function () {
     // Frozen manual timer: the cooldown window never elapses on its own, so only a
     // budget reset (not the passage of time) can let the new-port connect through.

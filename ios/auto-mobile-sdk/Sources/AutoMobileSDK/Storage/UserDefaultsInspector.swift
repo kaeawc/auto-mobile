@@ -130,6 +130,11 @@ public final class UserDefaultsInspector: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
 
+        // Re-check enabled state UNDER the lock: the `isEnabled` guard above is outside the
+        // lock, so a reset()/setEnabled(false) could have run in the gap between it and
+        // here. Without this, a stale start would install an observer after teardown.
+        guard _isEnabled else { return }
+
         // Remove any existing observer before registering a new one.
         if let existing = kvoObserver {
             NotificationCenter.default.removeObserver(existing)

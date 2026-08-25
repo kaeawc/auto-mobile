@@ -68,7 +68,9 @@ requires_lychee() {
   requires_lychee
 
   local fixture
-  fixture="$(mktemp -t lychee-fixture.XXXXXX.md)"
+  # Plain mktemp (no -t template) for GNU/BSD portability; lychee parses markdown
+  # link syntax from the file content, so no .md extension is required.
+  fixture="$(mktemp)"
   cat > "$fixture" <<'EOF'
 # fixture
 [faq](https://www.contributor-covenant.org/faq)

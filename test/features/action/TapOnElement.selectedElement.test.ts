@@ -72,6 +72,54 @@ describe("TapOnElement selectedElement metadata", () => {
     expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
   });
 
+  // Regression: the uniqueness count must span window subtrees, because the owner
+  // is resolved and natively activated across every window — not just the main
+  // hierarchy. Counting only the main tree both mis-passes an ambiguous owner and
+  // rejects a valid owner that lives inside a dialog/popup/overlay window (#5618).
+  test("rejects an owner duplicated in another window (ambiguous across windows)", () => {
+    const tapOnElement = createTapOnElement();
+    const owner = ResultFaker.element({
+      text: "Account B",
+      "resource-id": "com.example:id/account_row",
+    });
+    const duplicateInWindow = ResultFaker.element({
+      text: "Account A",
+      "resource-id": "com.example:id/account_row",
+    });
+    const hierarchy = {
+      hierarchy: { node: [{ ...owner, children: [] }] },
+      windows: [
+        {
+          isActive: true,
+          isFocused: true,
+          hierarchy: { node: [{ ...duplicateInWindow, children: [] }] },
+        },
+      ],
+    };
+
+    expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(false);
+  });
+
+  test("accepts a unique owner that lives inside a window subtree", () => {
+    const tapOnElement = createTapOnElement();
+    const owner = ResultFaker.element({
+      text: "Terms and privacy",
+      "resource-id": "com.example:id/legal_row",
+    });
+    const hierarchy = {
+      hierarchy: { node: [] },
+      windows: [
+        {
+          isActive: true,
+          isFocused: true,
+          hierarchy: { node: [{ ...owner, children: [] }] },
+        },
+      ],
+    };
+
+    expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
+  });
+
   test("uses Android's complete stable selector for duplicate resource IDs", () => {
     const tapOnElement = createTapOnElement();
     const owner = ResultFaker.element({

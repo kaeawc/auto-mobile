@@ -152,9 +152,9 @@ describe("deviceSnapshotManager", () => {
       }),
     });
 
-    await expect(
-      captureDeviceSnapshot(TEST_DEVICE, { includeAppData: true }),
-    ).rejects.toThrow(/backed up 0 of 1/i);
+    await expect(captureDeviceSnapshot(TEST_DEVICE, { includeAppData: true })).rejects.toThrow(
+      /backed up 0 of 1/i,
+    );
 
     expect(await repository.getSnapshot("doomed-snapshot")).toBeNull();
     const listed = await repository.listSnapshots();

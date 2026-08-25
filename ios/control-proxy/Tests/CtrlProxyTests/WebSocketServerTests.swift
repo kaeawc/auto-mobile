@@ -836,6 +836,22 @@ final class WebSocketServerTests: XCTestCase {
         )
     }
 
+    /// AC4: the total-size budget is enforced from the continuation frame's
+    /// declared header length *before* its payload is received/unmasked, so an
+    /// oversized continuation is rejected without allocating ~3× the cap. The cap
+    /// is inclusive (filling it exactly is allowed).
+    func testContinuationBudgetIsCheckedFromHeaderInclusive() {
+        // Exactly filling the remaining budget is allowed.
+        XCTAssertFalse(WebSocketConnection.continuationExceedsReassemblyBudget(payloadLength: 10, alreadyBuffered: 0, maxTotal: 10))
+        XCTAssertFalse(WebSocketConnection.continuationExceedsReassemblyBudget(payloadLength: 4, alreadyBuffered: 6, maxTotal: 10))
+        // One byte over the remaining budget is rejected.
+        XCTAssertTrue(WebSocketConnection.continuationExceedsReassemblyBudget(payloadLength: 5, alreadyBuffered: 6, maxTotal: 10))
+        // The real vector: a second ~64 MiB continuation on top of a full buffer.
+        let max = WebSocketConnection.maxFramePayloadLength
+        XCTAssertTrue(WebSocketConnection.continuationExceedsReassemblyBudget(payloadLength: max, alreadyBuffered: Int(max)))
+        XCTAssertFalse(WebSocketConnection.continuationExceedsReassemblyBudget(payloadLength: max, alreadyBuffered: 0))
+    }
+
     /// AC1/AC2/AC3 end-to-end over a real socket: a client command split across
     /// two masked WebSocket fragments — with a ping interleaved between them — is
     /// reassembled by the server and dispatched, so its typed response still comes

@@ -1023,6 +1023,22 @@ class WebSocketConnection: WebSocketResponding {
         return Int(payloadLength) + (isMasked ? 4 : 0)
     }
 
+    /// Whether appending a continuation frame of `payloadLength` declared bytes to
+    /// the `alreadyBuffered` accumulated bytes would exceed the total reassembly
+    /// budget. Evaluated from the frame header **before** the payload is received
+    /// and unmasked, so an oversized continuation is rejected without first
+    /// allocating (and copying, when unmasking) its bytes — otherwise a connection
+    /// could transiently hold the prior fragment plus the masked and unmasked
+    /// copies of the new one (~3× the cap) before the post-append bound in
+    /// `accumulate` fires (issue #5674 review).
+    static func continuationExceedsReassemblyBudget(
+        payloadLength: UInt64,
+        alreadyBuffered: Int,
+        maxTotal: UInt64 = maxFramePayloadLength
+    ) -> Bool {
+        UInt64(alreadyBuffered) + payloadLength > maxTotal
+    }
+
     /// Unmask a masked WebSocket frame whose first 4 bytes are the masking key and
     /// whose remaining bytes are the masked payload (RFC 6455 §5.3).
     ///
@@ -1168,6 +1184,21 @@ class WebSocketConnection: WebSocketResponding {
     private func readPayload(length: UInt64, isMasked: Bool, opcode: UInt8, isFinal: Bool) {
         guard let totalLength = Self.frameReadLength(payloadLength: length, isMasked: isMasked) else {
             print("[WebSocketConnection] Frame payload too large (\(length) bytes), closing connection")
+            onClose()
+            return
+        }
+
+        // Reject a continuation that would overflow the total reassembly budget
+        // from its header, before receiving/unmasking its payload, so a malformed
+        // peer cannot make the runner allocate ~3× the cap per connection (§5.4;
+        // issue #5674 review). The post-append bound in `accumulate` still guards
+        // correctness for the paths that do read.
+        if opcode == 0x00,
+           fragmentedOpcode != nil,
+           Self.continuationExceedsReassemblyBudget(payloadLength: length, alreadyBuffered: fragmentBuffer.count) {
+            print("[WebSocketConnection] Continuation would exceed reassembly budget (\(fragmentBuffer.count) + \(length) > \(Self.maxFramePayloadLength)), closing connection")
+            fragmentedOpcode = nil
+            fragmentBuffer = Data()
             onClose()
             return
         }

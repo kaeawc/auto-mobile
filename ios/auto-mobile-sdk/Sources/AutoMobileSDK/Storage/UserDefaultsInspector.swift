@@ -15,6 +15,11 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     private var buffer: SdkEventBuffer?
     private var sequenceCounter: Int64 = 0
     private var kvoObserver: NSObjectProtocol?
+    /// Monotonic listen generation, bumped by `stopListening()`. `startListening()`
+    /// captures it after its own stop and publishes only if it still matches, so a
+    /// stop (or newer start) that interleaves with an in-flight registration invalidates
+    /// it rather than leaving an observer live after teardown or leaking a duplicate.
+    private var listenGeneration = 0
 
     /// Last-observed key→value snapshot per suite, keyed by ``suiteKey(_:)``.
     /// `UserDefaults.didChangeNotification` does not identify which key changed,
@@ -110,8 +115,15 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     public func startListening(suiteName: String? = nil) {
         guard isEnabled else { return }
 
-        // Remove any existing observer before registering a new one
+        // Remove any existing observer before registering a new one. stopListening()
+        // bumps listenGeneration; capture it AFTER, so a concurrent stopListening() (or a
+        // newer startListening()) that runs while we register below bumps it again and our
+        // publication is rejected — otherwise a stop that "wins" the race would leave our
+        // just-registered observer live after teardown.
         stopListening()
+        lock.lock()
+        let generation = listenGeneration
+        lock.unlock()
 
         let defaults = suiteName.map { UserDefaults(suiteName: $0) } ?? UserDefaults.standard
         guard let defaults = suiteName != nil ? defaults : UserDefaults.standard else { return }
@@ -134,11 +146,16 @@ public final class UserDefaultsInspector: @unchecked Sendable {
         }
 
         lock.lock()
-        // A concurrent startListening (two setEnabled(true)/initialize racers can both
-        // pass the `kvoObserver == nil` gate) may have installed an observer between our
-        // stopListening() above and here. Remove it before storing ours so we never leak
-        // a duplicate NotificationCenter observer — which would emit duplicate
-        // storage_changed events forever. Last writer wins; exactly one observer stays.
+        // Reject our publication if the generation moved since we captured it — a
+        // stopListening() (stop-during-start: don't leave an observer live after a stop)
+        // or a newer startListening() (don't leak a duplicate) ran in between. Remove the
+        // observer we just registered instead of storing it.
+        guard generation == listenGeneration else {
+            lock.unlock()
+            NotificationCenter.default.removeObserver(observer)
+            return
+        }
+        // Belt-and-suspenders: remove any observer a same-generation racer stored.
         if let existing = kvoObserver {
             NotificationCenter.default.removeObserver(existing)
         }
@@ -146,9 +163,11 @@ public final class UserDefaultsInspector: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// Stop listening for changes.
+    /// Stop listening for changes. Bumps `listenGeneration` so any startListening()
+    /// registration still in flight is rejected rather than left live after the stop.
     public func stopListening() {
         lock.lock()
+        listenGeneration += 1
         if let observer = kvoObserver {
             NotificationCenter.default.removeObserver(observer)
             kvoObserver = nil

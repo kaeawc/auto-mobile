@@ -128,7 +128,7 @@ describe("MultiPlatformDeviceManager", () => {
 
         expect(discovery.devices).toEqual([physicalDevice]);
         expect(discovery.succeededPlatforms.has("ios")).toBe(false);
-        expect(discovery.discoveryErrors.ios?.code).toBe("failed");
+        expect(discovery.discoveryErrors?.ios?.code).toBe("failed");
       });
     });
 

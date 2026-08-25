@@ -1272,6 +1272,321 @@ final class WebSocketServerTests: XCTestCase {
 
         XCTAssertEqual(Array(WebSocketConnection.unmaskFrame(slice)), payload)
     }
+
+    // MARK: - Deterministic byte-receive seam (#5680)
+
+    /// A well-formed WebSocket upgrade request, byte-for-byte as a client sends it.
+    /// Used to drive `WebSocketConnection` through the real handshake with a
+    /// scripted channel, so framing tests reach the upgraded frame-reading state
+    /// without a live socket (issue #5680).
+    private static func upgradeRequestBytes() -> Data {
+        let request = [
+            "GET / HTTP/1.1",
+            "Host: 127.0.0.1",
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+            "Sec-WebSocket-Version: 13",
+            "",
+            "",
+        ].joined(separator: "\r\n")
+        return Data(request.utf8)
+    }
+
+    /// Wires a `WebSocketConnection` to a `ScriptedByteChannel` playing `segments`,
+    /// so a test can feed exact bytes and observe framing behavior via `onMessage`
+    /// / `onClose` and the channel's captured `sent` / `didCancel`.
+    private func makeScriptedConnection(
+        segments: [ScriptedByteChannel.Segment],
+        onMessage: @escaping (Data) -> Void,
+        onClose: @escaping () -> Void = {}
+    )
+        -> (connection: WebSocketConnection, channel: ScriptedByteChannel)
+    {
+        let channel = ScriptedByteChannel(segments: segments)
+        let connection = WebSocketConnection(
+            id: 1,
+            channel: channel,
+            queue: DispatchQueue(label: "test.ws.scripted.conn"),
+            boundPort: 8765,
+            onMessage: onMessage,
+            onClose: onClose
+        )
+        return (connection, channel)
+    }
+
+    /// AC (deterministic handshake→frame handoff): a masked data frame pipelined in
+    /// the **same** receive as the upgrade request is carried past the handshake
+    /// slice and delivered — pinned without any dependence on TCP segmentation. The
+    /// scripted channel returns `request + frame` in one `receive`, exactly the
+    /// residual case #5678 fixed; pre-fix (`receiveWebSocketFrame` starting a fresh
+    /// socket read that ignores the buffered residual) `onMessage` never fires and
+    /// this times out. This is the deterministic counterpart to the real-socket
+    /// `testFramePipelinedWithUpgradeIsDelivered`, which can false-pass if the
+    /// stack splits the segment.
+    func testHandshakeWithPipelinedFrameDeliveredThroughByteChannelSeam() {
+        let command = #"{"type":"request_press_back","requestId":"seam-pipe-1"}"#
+        let frame = RawWebSocketClient.maskedFrame(opcode: 0x01, fin: true, payload: Data(command.utf8))
+        var pipelined = Self.upgradeRequestBytes()
+        pipelined.append(frame)
+
+        let delivered = expectation(description: "pipelined frame delivered via onMessage")
+        let payloadBox = Box<Data?>(nil)
+        let (connection, _) = makeScriptedConnection(
+            segments: [.init(bytes: pipelined, isComplete: false)],
+            onMessage: { data in
+                payloadBox.value = data
+                delivered.fulfill()
+            }
+        )
+        connection.start()
+
+        wait(for: [delivered], timeout: 3)
+        XCTAssertEqual(payloadBox.value, Data(command.utf8), "the pipelined frame must be delivered verbatim")
+    }
+
+    /// AC (EOF-coalescing, #5679): a complete final frame delivered by the socket
+    /// **together with** `isComplete` must still be parsed and delivered, not
+    /// dropped as EOF. The scripted channel hands the frame's payload bytes back on
+    /// the same `receive` callback that reports `isComplete=true` — the exact
+    /// coalescing PR #5679 fixed, which cannot be forced reliably over a real
+    /// socket. Against a pre-#5679 frame reader that acts on `isComplete` before
+    /// consuming the delivered bytes, `onMessage` never fires and this times out.
+    func testFinalFrameDeliveredWhenReceivedTogetherWithEOF() {
+        let command = #"{"type":"request_press_back","requestId":"seam-eof-1"}"#
+        let frame = RawWebSocketClient.maskedFrame(opcode: 0x01, fin: true, payload: Data(command.utf8))
+
+        let delivered = expectation(description: "final frame delivered despite coincident EOF")
+        let payloadBox = Box<Data?>(nil)
+        let (connection, _) = makeScriptedConnection(
+            segments: [
+                .init(bytes: Self.upgradeRequestBytes(), isComplete: false),
+                // The frame's remaining bytes (mask + payload) are handed over on the
+                // same callback that reports isComplete — the coalesced-EOF case.
+                .init(bytes: frame, isComplete: true),
+            ],
+            onMessage: { data in
+                payloadBox.value = data
+                delivered.fulfill()
+            }
+        )
+        connection.start()
+
+        wait(for: [delivered], timeout: 3)
+        XCTAssertEqual(
+            payloadBox.value,
+            Data(command.utf8),
+            "a complete frame delivered together with isComplete must still be parsed (issue #5679)"
+        )
+    }
+
+    /// AC (ping consume, #5669): a masked ping frame's mask + payload bytes are
+    /// consumed and a pong is echoed, so the **following** data frame still decodes
+    /// on the re-synced wire. Scripted deterministically: ping segment, then data
+    /// segment. Pre-fix the ping branch read the next 2 bytes as a header, mis-read
+    /// the mask bytes, and the data frame never decodes.
+    func testPingConsumedThenDataFrameStillDecodesThroughSeam() {
+        let ping = RawWebSocketClient.maskedFrame(opcode: 0x09, fin: true, payload: Data("ka".utf8))
+        let command = #"{"type":"request_press_back","requestId":"seam-ping-1"}"#
+        let dataFrame = RawWebSocketClient.maskedFrame(opcode: 0x01, fin: true, payload: Data(command.utf8))
+
+        let delivered = expectation(description: "data frame after ping delivered")
+        let payloadBox = Box<Data?>(nil)
+        let (connection, channel) = makeScriptedConnection(
+            segments: [
+                .init(bytes: Self.upgradeRequestBytes(), isComplete: false),
+                .init(bytes: ping, isComplete: false),
+                .init(bytes: dataFrame, isComplete: false),
+            ],
+            onMessage: { data in
+                payloadBox.value = data
+                delivered.fulfill()
+            }
+        )
+        connection.start()
+
+        wait(for: [delivered], timeout: 3)
+        XCTAssertEqual(
+            payloadBox.value,
+            Data(command.utf8),
+            "the data frame after a ping must still decode once the ping's mask/payload are consumed (#5669)"
+        )
+        let expectedPong = WebSocketConnection.createWebSocketFrame(data: Data("ka".utf8), opcode: 0x0A)
+        XCTAssertTrue(channel.sent.contains(expectedPong), "the server must reply to the ping with a pong echo")
+    }
+
+    /// AC (fragmentation reassembly, #5674): a command split across a non-final
+    /// text fragment and a final continuation — with a ping interleaved — is
+    /// reassembled and delivered. Scripted deterministically frame-by-frame, no
+    /// socket. Pre-fix the continuation payload is discarded and no message is
+    /// delivered.
+    func testFragmentedMessageReassemblesThroughByteChannelSeam() {
+        let command = #"{"type":"request_press_back","requestId":"seam-frag-1"}"#
+        let bytes = Array(command.utf8)
+        let mid = bytes.count / 2
+        let first = RawWebSocketClient.maskedFrame(opcode: 0x01, fin: false, payload: Data(bytes[0 ..< mid]))
+        let ping = RawWebSocketClient.maskedFrame(opcode: 0x09, fin: true, payload: Data("ka".utf8))
+        let second = RawWebSocketClient.maskedFrame(opcode: 0x00, fin: true, payload: Data(bytes[mid ..< bytes.count]))
+
+        let delivered = expectation(description: "fragmented message reassembled")
+        let payloadBox = Box<Data?>(nil)
+        let (connection, _) = makeScriptedConnection(
+            segments: [
+                .init(bytes: Self.upgradeRequestBytes(), isComplete: false),
+                .init(bytes: first, isComplete: false),
+                .init(bytes: ping, isComplete: false),
+                .init(bytes: second, isComplete: false),
+            ],
+            onMessage: { data in
+                payloadBox.value = data
+                delivered.fulfill()
+            }
+        )
+        connection.start()
+
+        wait(for: [delivered], timeout: 3)
+        XCTAssertEqual(payloadBox.value, Data(command.utf8), "the reassembled command must be delivered verbatim")
+    }
+
+    /// AC (close-path cancel, #5677): a client close frame makes the server echo a
+    /// close frame, cancel the channel (so the peer observes EOF), and fire
+    /// `onClose` exactly once. Scripted deterministically; the fake channel's
+    /// `cancel()` drives the `.cancelled` transition just as `NWConnection` does.
+    func testCloseFrameCancelsChannelAndFiresCloseOnceThroughSeam() {
+        let close = RawWebSocketClient.maskedFrame(opcode: 0x08, fin: true, payload: Data())
+
+        let closed = expectation(description: "onClose fired after close frame")
+        let closeCount = Box<Int>(0)
+        let (connection, channel) = makeScriptedConnection(
+            segments: [
+                .init(bytes: Self.upgradeRequestBytes(), isComplete: false),
+                .init(bytes: close, isComplete: false),
+            ],
+            onMessage: { _ in XCTFail("a close frame must not surface as an application message") },
+            onClose: {
+                closeCount.value += 1
+                closed.fulfill()
+            }
+        )
+        connection.start()
+
+        wait(for: [closed], timeout: 3)
+        XCTAssertTrue(channel.didCancel, "a close frame must cancel the channel so the peer observes EOF (#5677)")
+        XCTAssertEqual(closeCount.value, 1, "onClose must fire exactly once")
+        let serverClose = WebSocketConnection.createWebSocketFrame(data: Data(), opcode: 0x08)
+        XCTAssertTrue(channel.sent.contains(serverClose), "the server must echo a close frame before teardown")
+    }
+}
+
+/// A deterministic `ByteChannel` for framing tests (issue #5680). It plays a
+/// scripted list of receive segments back to the connection's readers — each
+/// segment delivered honoring the caller's `maximumLength`, exactly as
+/// `NWConnection` does, and a `receive` never reads across a segment boundary
+/// (mirroring one TCP segment). A segment may carry `isComplete`, so a test can
+/// land EOF on the very callback that hands over the segment's final bytes — the
+/// coalesced-EOF case (#5679) that cannot be forced over a real socket. It
+/// captures every outbound `send` and records `cancel()`, driving the
+/// `.cancelled` transition once so the connection's guarded `fireOnClose` runs
+/// just as production does. Feeding exact bytes pins the handshake→frame handoff,
+/// EOF coalescing, ping consume, fragmentation reassembly, and close-path
+/// teardown without a live socket or any dependence on TCP segmentation.
+private final class ScriptedByteChannel: ByteChannel, @unchecked Sendable {
+    /// One scripted receive segment: up to `maximumLength` of `bytes` is returned
+    /// per `receive`, and `isComplete` is reported only when the segment's final
+    /// bytes are handed over.
+    struct Segment {
+        var bytes: Data
+        var isComplete: Bool
+    }
+
+    var onState: ((ByteChannelState) -> Void)?
+
+    private let lock = NSLock()
+    private var segments: [Segment]
+    private var _sent: [Data] = []
+    private var _didCancel = false
+    /// The connection's serial queue, adopted in `start` so every completion runs
+    /// there — matching the no-lock, single-queue invariant the real code relies on.
+    private var queue = DispatchQueue(label: "test.scripted.channel.placeholder")
+
+    init(segments: [Segment]) {
+        self.segments = segments
+    }
+
+    /// Outbound frames the connection handed to `send`, in order.
+    var sent: [Data] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _sent
+    }
+
+    /// Whether `cancel()` was called at least once.
+    var didCancel: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _didCancel
+    }
+
+    func start(queue: DispatchQueue) {
+        lock.lock()
+        self.queue = queue
+        lock.unlock()
+        // Mirror NWConnection reaching `.ready`, which kicks off the handshake read.
+        queue.async { [weak self] in self?.onState?(.ready) }
+    }
+
+    func receive(
+        minimumIncompleteLength _: Int,
+        maximumLength: Int,
+        completion: @escaping (Data?, Bool, Error?) -> Void
+    ) {
+        lock.lock()
+        let deliveryQueue = queue
+        let data: Data?
+        let isComplete: Bool
+        if segments.isEmpty {
+            // Stream exhausted — model the peer having closed its write side (EOF).
+            data = nil
+            isComplete = true
+        } else {
+            var head = segments[0]
+            let take = min(head.bytes.count, maximumLength)
+            let chunk = Data(head.bytes.prefix(take))
+            head.bytes.removeFirst(take)
+            if head.bytes.isEmpty {
+                segments.removeFirst()
+                data = chunk.isEmpty ? nil : chunk
+                isComplete = head.isComplete
+            } else {
+                segments[0] = head
+                data = chunk
+                isComplete = false
+            }
+        }
+        lock.unlock()
+        deliveryQueue.async { completion(data, isComplete, nil) }
+    }
+
+    func send(_ data: Data, completion: @escaping (Error?) -> Void) {
+        lock.lock()
+        _sent.append(data)
+        let deliveryQueue = queue
+        lock.unlock()
+        deliveryQueue.async { completion(nil) }
+    }
+
+    func cancel() {
+        lock.lock()
+        let firstCancel = !_didCancel
+        _didCancel = true
+        let deliveryQueue = queue
+        lock.unlock()
+        // A real NWConnection.cancel() eventually drives a `.cancelled` transition;
+        // deliver it once so the connection's guarded `fireOnClose` runs.
+        if firstCancel {
+            deliveryQueue.async { [weak self] in self?.onState?(.cancelled) }
+        }
+    }
 }
 
 /// A minimal raw-socket WebSocket client for tests that need to drive frame-level

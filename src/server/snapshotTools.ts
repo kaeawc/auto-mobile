@@ -55,6 +55,10 @@ export function registerSnapshotTools() {
           deviceId: device.deviceId,
           deviceName: device.name,
           manifest: result.manifest,
+          // Surface iOS per-bundle capture status at the top level so callers
+          // don't have to dig into the manifest to see what was actually
+          // captured vs skipped/not-installed (issue #5712).
+          bundleStatuses: result.manifest.appDataBackup?.bundleStatuses,
           evictedSnapshotNames: evictedSnapshotNames.length > 0 ? evictedSnapshotNames : undefined,
         });
       }

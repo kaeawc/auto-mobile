@@ -2,9 +2,15 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import {
   BootedDevice,
   ActionableError,
+  toActionableError,
   DeviceSnapshotManifest,
   DeviceSnapshotType,
+  IosBundleCaptureStatus,
 } from "../../models";
+import {
+  getIosInstalledAppBundleId,
+  type IosInstalledAppRecord,
+} from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import type { SnapshotCaptureProvider } from "../../utils/interfaces/SnapshotProvider";
 import {
   AdbClientFactory,
@@ -721,50 +727,67 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
     strictBackupMode: boolean,
     pathOptions: SnapshotPathOptions,
   ): Promise<DeviceSnapshotManifest["appDataBackup"]> {
+    // Sanitize first: trim, drop blank entries, and de-dupe while preserving order.
+    const sanitized = Array.from(
+      new Set((appBundleIds ?? []).map((value) => value.trim()).filter(Boolean)),
+    );
+
+    // Empty `appBundleIds` with `includeAppData:true` used to "succeed" while
+    // capturing nothing. That is a caller mistake — fail loudly instead of
+    // producing an empty backup (issue #5712).
+    if (sanitized.length === 0) {
+      throw new ActionableError(
+        "No app bundle IDs provided for iOS app-data capture. Pass appBundleIds " +
+          "with at least one installed app, or set includeAppData:false for a " +
+          "settings-only snapshot.",
+      );
+    }
+
     logger.info("[iOS] Capturing app data containers");
 
     const appDataPath = this.store.getAppDataPath(snapshotName, pathOptions);
     await fs.mkdir(appDataPath, { recursive: true });
 
-    if (!appBundleIds || appBundleIds.length === 0) {
-      logger.warn("[iOS] No appBundleIds provided; skipping app data capture");
-    }
+    // Validate installation up front so an unknown bundle is reported as
+    // not-installed rather than silently "succeeding".
+    const installedBundleIds = await this.getInstalledIosBundleIds();
 
-    const { bundleIds, skippedBundles, totalBundles } =
-      await this.resolveIosBundleIds(appBundleIds);
-
-    if (bundleIds.length === 0) {
-      logger.warn("[iOS] No app bundle IDs available for backup");
-      return {
-        backupMethod: "none",
-        totalPackages: totalBundles,
-        backedUpPackages: [],
-        skippedPackages: skippedBundles,
-        failedPackages: [],
-      };
-    }
-
+    const bundleStatuses: IosBundleCaptureStatus[] = [];
     const backedUpPackages: string[] = [];
+    const skippedPackages: string[] = [];
     const failedPackages: string[] = [];
 
-    for (const bundleId of bundleIds) {
+    for (const bundleId of sanitized) {
+      if (!installedBundleIds.has(bundleId)) {
+        logger.warn(`[iOS] ${bundleId} is not installed; skipping app data capture`);
+        failedPackages.push(bundleId);
+        bundleStatuses.push({ bundleId, status: "not-installed" });
+        continue;
+      }
+
       try {
-        logger.info(`[iOS] Backing up app data: ${bundleId}`);
         const containerPath = await getAppDataContainerPath(
           this.simctl,
           this.device.deviceId,
           bundleId,
         );
         if (!containerPath) {
-          failedPackages.push(bundleId);
+          logger.warn(`[iOS] ${bundleId} has no data container; skipping app data capture`);
+          skippedPackages.push(bundleId);
+          bundleStatuses.push({ bundleId, status: "skipped-no-container" });
           continue;
         }
 
+        logger.info(`[iOS] Backing up app data: ${bundleId}`);
         await this.copyIosAppContainer(containerPath, appDataPath, bundleId);
         backedUpPackages.push(bundleId);
+        bundleStatuses.push({ bundleId, status: "captured" });
       } catch (error) {
+        // A container that resolved but failed to copy is a genuine capture
+        // failure, not a missing app; count it as failed so strict mode rejects.
         logger.warn(`[iOS] Failed to backup app data for ${bundleId}: ${error}`);
         failedPackages.push(bundleId);
+        bundleStatuses.push({ bundleId, status: "skipped-no-container" });
       }
     }
 
@@ -776,37 +799,36 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
 
     return {
       backupMethod: "simctl_copy",
-      totalPackages: totalBundles,
+      totalPackages: sanitized.length,
       backedUpPackages,
-      skippedPackages: skippedBundles,
+      skippedPackages,
       failedPackages,
+      bundleStatuses,
     };
   }
 
-  private async resolveIosBundleIds(appBundleIds?: string[]): Promise<{
-    bundleIds: string[];
-    skippedBundles: string[];
-    totalBundles: number;
-  }> {
-    if (!appBundleIds || appBundleIds.length === 0) {
-      return {
-        bundleIds: [],
-        skippedBundles: [],
-        totalBundles: 0,
-      };
+  /**
+   * Resolve the set of installed bundle identifiers on the simulator. Uses the
+   * strict `listAppsOrThrow` so a listing failure surfaces as an error (we can
+   * no longer validate installation) instead of being collapsed into "no apps
+   * installed" and mislabeling every requested bundle as not-installed.
+   */
+  private async getInstalledIosBundleIds(): Promise<Set<string>> {
+    let apps: IosInstalledAppRecord[];
+    try {
+      apps = await this.simctl.listAppsOrThrow(this.device.deviceId);
+    } catch (error) {
+      throw toActionableError(error, "Failed to list installed iOS apps to validate appBundleIds");
     }
 
-    const sanitized = Array.from(
-      new Set(appBundleIds.map((value) => value.trim()).filter(Boolean)),
-    );
-    const bundleIds = sanitized.filter((bundleId) => !bundleId.startsWith("com.apple."));
-    const skippedBundles = sanitized.filter((bundleId) => !bundleIds.includes(bundleId));
-
-    return {
-      bundleIds,
-      skippedBundles,
-      totalBundles: sanitized.length,
-    };
+    const installed = new Set<string>();
+    for (const app of apps) {
+      const bundleId = getIosInstalledAppBundleId(app);
+      if (bundleId) {
+        installed.add(bundleId);
+      }
+    }
+    return installed;
   }
 
   private async copyIosAppContainer(

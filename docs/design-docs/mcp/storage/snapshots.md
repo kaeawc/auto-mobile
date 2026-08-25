@@ -34,7 +34,7 @@ Capture or restore device snapshots.
 **Parameters:**
 
 - `action` (required): `"capture"` or `"restore"`
-- `snapshotName` (capture: optional, restore: required): Name for the snapshot
+- `snapshotName` (capture: optional, restore: required): Name for the snapshot. Must be a single path segment: names containing a path separator (`/` or `\`), a `.`/`..` traversal segment, or an absolute path are rejected with an `ActionableError` before any filesystem or `adb emu avd snapshot save`/`simctl` use, so a name can never escape the snapshots directory (issue #5705)
 - `includeAppData` (capture only): Include app data. Honored by VM snapshots (emulators) and iOS app-container backups. **Ignored on non-VM Android** (physical devices / `useVmSnapshot: false`), which is settings-only — the captured manifest records `includeAppData: false`.
 - `includeSettings` (capture only): Include system settings (global/secure/system)
 - `useVmSnapshot` (capture/restore): Use emulator VM snapshot if available (faster for emulators)

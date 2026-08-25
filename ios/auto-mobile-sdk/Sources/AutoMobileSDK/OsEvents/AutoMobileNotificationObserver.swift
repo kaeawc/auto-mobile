@@ -15,6 +15,11 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
     private var _isInitialized = false
     private var _isEnabled = true
     private var observers: [NSObjectProtocol] = []
+    /// Monotonic initialization generation, bumped on every `initialize()`/`shutdown()`.
+    /// The registering code captures it and only publishes its observers if it still
+    /// matches — so a shutdown+reinitialize (ABA) that happens while registration is in
+    /// flight can't let a stale init's observers land in a newer init's session.
+    private var _initGeneration = 0
 
     private init() {}
 
@@ -44,16 +49,19 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
             return
         }
         _isInitialized = true
+        _initGeneration += 1
+        let generation = _initGeneration
         self.bundleId = bundleId
         self.buffer = buffer
         lock.unlock()
 
-        registerObservers()
+        registerObservers(generation: generation)
     }
 
     func shutdown() {
         lock.lock()
         _isInitialized = false
+        _initGeneration += 1
         _isEnabled = true
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
@@ -66,7 +74,7 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
 
     // MARK: - Observer Registration
 
-    private func registerObservers() {
+    private func registerObservers(generation: Int) {
         let notificationsToMonitor: [(Notification.Name, String)] = [
             (NSLocale.currentLocaleDidChangeNotification, "locale_changed"),
             (.NSSystemTimeZoneDidChange, "timezone_changed"),
@@ -96,7 +104,7 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
             newObservers.append(observer)
         }
 
-        storeObservers(newObservers)
+        storeObservers(newObservers, generation: generation)
     }
 
     /// Number of currently-stored observers. Internal so tests can assert the
@@ -107,14 +115,22 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
         return observers.count
     }
 
-    /// Stores just-registered observers only if a `shutdown()` has not interleaved
-    /// between `initialize()` releasing the lock and here — otherwise it cleared
-    /// `observers` and set `_isInitialized = false`, and storing now would leak them
-    /// (they'd fire after shutdown and never be removed). Remove them instead. Internal
-    /// so tests can drive the drop-when-not-initialized path deterministically.
-    func storeObservers(_ newObservers: [NSObjectProtocol]) {
+    /// Current initialization generation — internal so tests can capture it and drive an
+    /// A→shutdown→B→A publication race deterministically.
+    var initGeneration: Int {
         lock.lock()
-        guard _isInitialized else {
+        defer { lock.unlock() }
+        return _initGeneration
+    }
+
+    /// Publishes the just-registered observers only if `generation` is still the current
+    /// initialization generation — i.e. no `shutdown()` (nor a shutdown+reinitialize ABA)
+    /// interleaved since these observers were built. Otherwise removes them so they can't
+    /// fire after teardown or leak into a newer init's session. Internal so tests can
+    /// drive the drop path deterministically.
+    func storeObservers(_ newObservers: [NSObjectProtocol], generation: Int) {
+        lock.lock()
+        guard generation == _initGeneration else {
             lock.unlock()
             for observer in newObservers {
                 NotificationCenter.default.removeObserver(observer)

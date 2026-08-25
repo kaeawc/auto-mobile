@@ -25,6 +25,11 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
     private var lastBatteryCharging: Bool?
     private var observers: [NSObjectProtocol] = []
     private var _isEnabled = true
+    /// Monotonic initialization generation, bumped on every `initialize()`/`shutdown()`.
+    /// The setup code captures it and only publishes its observers / path-monitor if it
+    /// still matches — so a shutdown+reinitialize (ABA) during setup can't let a stale
+    /// init's resources land in a newer init's session.
+    private var _initGeneration = 0
 
     private init() {}
 
@@ -54,24 +59,27 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
             return
         }
         _isInitialized = true
+        _initGeneration += 1
+        let generation = _initGeneration
         self.bundleId = bundleId
         self.buffer = buffer
         lock.unlock()
 
         #if canImport(UIKit) && !os(watchOS)
-        setupLifecycleTracking()
-        setupBatteryTracking()
-        setupScreenTracking()
+        setupLifecycleTracking(generation: generation)
+        setupBatteryTracking(generation: generation)
+        setupScreenTracking(generation: generation)
         #endif
 
         #if canImport(Network)
-        setupConnectivityTracking()
+        setupConnectivityTracking(generation: generation)
         #endif
     }
 
     func shutdown() {
         lock.lock()
         _isInitialized = false
+        _initGeneration += 1
         _isEnabled = true
 
         for observer in observers {
@@ -104,14 +112,22 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
         return observers.count
     }
 
-    /// Stores just-registered observers only if a `shutdown()` has not interleaved
-    /// since `initialize()` released the lock; otherwise removes them so they cannot
-    /// fire after teardown. The `addObserver` calls happen outside the lock, so this
-    /// re-check under the lock closes the register-vs-shutdown window. Internal so
-    /// tests can drive the drop-when-not-initialized path deterministically.
-    func storeObservers(_ newObservers: [NSObjectProtocol]) {
+    /// Current initialization generation — internal so tests can capture it and drive an
+    /// A→shutdown→B→A publication race deterministically.
+    var initGeneration: Int {
         lock.lock()
-        guard _isInitialized else {
+        defer { lock.unlock() }
+        return _initGeneration
+    }
+
+    /// Publishes the just-registered observers only if `generation` is still the current
+    /// initialization generation — i.e. no `shutdown()` (nor a shutdown+reinitialize ABA)
+    /// interleaved since these observers were built. Otherwise removes them so they can't
+    /// fire after teardown or leak into a newer init's session. Internal so tests can
+    /// drive the drop path deterministically.
+    func storeObservers(_ newObservers: [NSObjectProtocol], generation: Int) {
+        lock.lock()
+        guard generation == _initGeneration else {
             lock.unlock()
             for observer in newObservers {
                 NotificationCenter.default.removeObserver(observer)
@@ -125,7 +141,7 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
     // MARK: - Lifecycle Tracking
 
     #if canImport(UIKit) && !os(watchOS)
-    private func setupLifecycleTracking() {
+    private func setupLifecycleTracking(generation: Int) {
         let fgObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification,
             object: nil,
@@ -158,12 +174,12 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
             self?.postEvent(state: "terminated")
         }
 
-        storeObservers([fgObserver, bgObserver, willResignObserver, willTerminateObserver])
+        storeObservers([fgObserver, bgObserver, willResignObserver, willTerminateObserver], generation: generation)
     }
 
     // MARK: - Battery Tracking
 
-    private func setupBatteryTracking() {
+    private func setupBatteryTracking(generation: Int) {
         UIDevice.current.isBatteryMonitoringEnabled = true
 
         let levelObserver = NotificationCenter.default.addObserver(
@@ -182,7 +198,7 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
             self?.reportBatteryChange()
         }
 
-        storeObservers([levelObserver, stateObserver])
+        storeObservers([levelObserver, stateObserver], generation: generation)
     }
 
     private func reportBatteryChange() {
@@ -212,7 +228,7 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
 
     // MARK: - Screen Tracking
 
-    private func setupScreenTracking() {
+    private func setupScreenTracking(generation: Int) {
         let brightnessObserver = NotificationCenter.default.addObserver(
             forName: UIScreen.brightnessDidChangeNotification,
             object: nil,
@@ -224,14 +240,14 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
             ])
         }
 
-        storeObservers([brightnessObserver])
+        storeObservers([brightnessObserver], generation: generation)
     }
     #endif
 
     // MARK: - Connectivity Tracking
 
     #if canImport(Network)
-    private func setupConnectivityTracking() {
+    private func setupConnectivityTracking(generation: Int) {
         let monitor = NWPathMonitor()
         let queue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.network-monitor")
 
@@ -255,9 +271,10 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
         }
 
         lock.lock()
-        // If a shutdown() interleaved since initialize() released the lock, don't store
-        // or start the monitor — it would run after teardown. Cancel it instead.
-        guard _isInitialized else {
+        // If a shutdown() (or shutdown+reinitialize ABA) interleaved since initialize()
+        // released the lock, this generation no longer matches — don't store or start the
+        // monitor, it would run after teardown / in a newer init's session. Cancel it.
+        guard generation == _initGeneration else {
             lock.unlock()
             monitor.cancel()
             return

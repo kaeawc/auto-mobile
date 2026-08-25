@@ -152,14 +152,13 @@ public final class NetworkCaptureRecorder: @unchecked Sendable {
         responseHeaders: [String: String]? = nil,
         responseBodySize: Int? = nil
     ) {
-        update(requestId) { request in
+        complete(requestId, mutate: { request in
             request.responseHeaders = responseHeaders.map(headerRedactor) ?? request.responseHeaders
             if let responseBodySize {
                 request.responseBodySize = responseBodySize
             }
-        }
-        finish(requestId) { request in
-            return NetworkRequestRecord(
+        }) { request in
+            NetworkRequestRecord(
                 url: request.url,
                 method: request.method,
                 requestId: request.requestId,
@@ -245,24 +244,52 @@ public final class NetworkCaptureRecorder: @unchecked Sendable {
         _ requestId: String,
         _ makeRecord: (InFlightRequest) -> NetworkRequestRecord
     ) {
+        complete(requestId, mutate: { _ in }, makeRecord)
+    }
+
+    /// Applies a final `mutate` and snapshots the record in ONE critical section, so a
+    /// concurrent chunk cannot land between a completion mutation and the record snapshot
+    /// (torn `responseBodySize`/`responseBody`). `emitRecord` runs outside the lock.
+    private func complete(
+        _ requestId: String,
+        mutate: (inout InFlightRequest) -> Void,
+        _ makeRecord: (InFlightRequest) -> NetworkRequestRecord
+    ) {
         lock.lock()
         guard var request = requests.removeValue(forKey: requestId), !request.terminal else {
             lock.unlock()
             return
         }
+        mutate(&request)
         request.terminal = true
+        let record = request.sampled ? makeRecord(request) : nil
         lock.unlock()
-        guard request.sampled else { return }
-        emitRecord(makeRecord(request))
+        if let record {
+            emitRecord(record)
+        }
     }
 
     private func emitRecord(_ record: NetworkRequestRecord) {
+        // Assign the monotonic sequence number under the lock, then RELEASE it before
+        // calling the caller-supplied `emit`. Holding the non-recursive emissionLock across
+        // `emit` — which reaches AutoMobileNetwork.lock -> buffer.add and could re-enter
+        // emitRecord — would self-deadlock or invert lock order.
+        //
+        // `emit` is called SYNCHRONOUSLY (not via a recorder-owned queue): a completion is
+        // therefore fully delivered to the sink before `recordCompletion` returns — nothing
+        // is left queued to be dropped if `AutoMobileSDK.shutdown()` then clears the buffer —
+        // and backpressure/bounding stays the sink's responsibility (`SdkEventBuffer`'s
+        // `maxPendingEvents`) rather than a second, unbounded recorder-level queue. The one
+        // cost is that two genuinely-concurrent emits may reach the sink out of order; every
+        // record carries `sequenceNumber`, which exists precisely so a consumer can restore
+        // the total order. Preserving strict delivery order here would require either holding
+        // the lock across `emit` (the deadlock above) or an unbounded in-recorder queue.
         emissionLock.lock()
         nextSequenceNumber += 1
         var sequencedRecord = record
         sequencedRecord.sequenceNumber = nextSequenceNumber
-        emit(sequencedRecord)
         emissionLock.unlock()
+        emit(sequencedRecord)
     }
 
     private func truncate(_ value: String?) -> String? {

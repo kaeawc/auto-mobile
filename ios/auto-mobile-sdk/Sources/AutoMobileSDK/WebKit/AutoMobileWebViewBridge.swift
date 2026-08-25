@@ -316,6 +316,16 @@ public final class AutoMobileWebViewBridge: NSObject, WKScriptMessageHandler, WK
     }
 
     public func perform(_ action: AutoMobileWebAction, completion: @escaping (Result<Void, Error>) -> Void) {
+        // WKWebView (evaluateJavaScript, url, navigationDelegate) is main-thread only, but a
+        // host app may call this from any thread. Assert in debug to surface the misuse, and
+        // in any build re-dispatch to the main thread when off it rather than touching WebKit
+        // off-main. `perform` is already completion-based, so an async hop preserves its
+        // contract and cannot deadlock.
+        assert(Thread.isMainThread, "AutoMobileWebViewBridge.perform must be called on the main thread")
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { self.perform(action, completion: completion) }
+            return
+        }
         guard policy.validates(action) || (ifEvaluate(action) && policy.allows(url: webView?.url, frameId: nil)) else {
             completion(.failure(NSError(domain: "AutoMobileWebViewBridge", code: 1, userInfo: [NSLocalizedDescriptionKey: "Stale or disallowed web action"])))
             return

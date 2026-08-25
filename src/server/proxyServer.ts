@@ -88,7 +88,11 @@ function noActiveDeviceSessionResult(error: DaemonConnectionSessionReleasedError
 }
 
 function noActiveDeviceSessionError(error: DaemonConnectionSessionReleasedError): McpError {
-  return new McpError(-32603, noActiveDeviceSessionMessage(error), noActiveDeviceSessionPayload(error));
+  return new McpError(
+    -32603,
+    noActiveDeviceSessionMessage(error),
+    noActiveDeviceSessionPayload(error),
+  );
 }
 
 function deviceControlTransportFailureResult(error: DeviceControlTransportError): CallToolResult {

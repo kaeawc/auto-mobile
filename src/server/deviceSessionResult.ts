@@ -7,11 +7,7 @@ import { logger } from "../utils/logger";
  * bind the session these tools mint — the proxy additionally heartbeats it so
  * the daemon does not reap a result-minted session (issue #5689).
  */
-export const DEVICE_SESSION_ACQUISITION_TOOLS = [
-  "getAndroid",
-  "getApple",
-  "startDevice",
-] as const;
+export const DEVICE_SESSION_ACQUISITION_TOOLS = ["getAndroid", "getApple", "startDevice"] as const;
 
 /** Whether `name` is a device-session acquisition tool (see above). */
 export function isDeviceSessionAcquisitionTool(name: string): boolean {

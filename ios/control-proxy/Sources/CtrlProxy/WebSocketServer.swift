@@ -977,27 +977,36 @@ class WebSocketConnection: WebSocketResponding {
                 return
             }
 
+            // Consume whatever arrived before acting on EOF. The socket can
+            // deliver the final `needed` bytes together with `isComplete` when a
+            // client sends a complete frame and half-closes its write side, and
+            // those bytes still complete a valid frame that must be parsed rather
+            // than dropped (issue #5678 review). `minimumIncompleteLength: needed`
+            // means a read shorter than `needed` only happens at EOF.
+            if let data = data, !data.isEmpty {
+                self.inboundBuffer.append(data)
+            }
+
+            if self.inboundBuffer.count >= count {
+                // Enough bytes for this read; slice exactly `count`, keeping any
+                // surplus for the next read. This completion is already an async
+                // break, so `onData` runs inline here — only the buffered
+                // fast-path above trampolines to bound recursion depth.
+                let chunk = Data(self.inboundBuffer.prefix(count))
+                self.inboundBuffer.removeFirst(count)
+                onData(chunk)
+                return
+            }
+
+            // Still short of a full frame. EOF here means the peer closed
+            // mid-frame, so nothing more is coming — close.
             if isComplete {
                 self.onClose()
                 return
             }
 
-            guard let data = data else {
-                // No error and not complete but no bytes yet — wait for the socket
-                // to supply the shortfall.
-                self.receiveFrameBytes(count, onData: onData)
-                return
-            }
-
-            // `minimumIncompleteLength: needed` guarantees the socket delivered
-            // exactly `needed` bytes, so the buffer now holds exactly `count`;
-            // slice them out. (This completion is already an async break, so no
-            // extra hop is needed here — only the buffered fast-path above adds
-            // one to bound recursion depth.)
-            self.inboundBuffer.append(data)
-            let chunk = Data(self.inboundBuffer.prefix(count))
-            self.inboundBuffer.removeFirst(count)
-            onData(chunk)
+            // No usable bytes yet and not at EOF — wait for the shortfall.
+            self.receiveFrameBytes(count, onData: onData)
         }
     }
 

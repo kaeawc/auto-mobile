@@ -54,10 +54,6 @@ export class DeviceSnapshotStore {
     return path.join(this.getSnapshotPathWithOptions(snapshotName, options), folderName);
   }
 
-  getBackupFilePath(snapshotName: string, options?: SnapshotPathOptions): string {
-    return path.join(this.getAppDataPath(snapshotName, options), "backup.ab");
-  }
-
   async snapshotDirectoryExists(
     snapshotName: string,
     options?: SnapshotPathOptions,

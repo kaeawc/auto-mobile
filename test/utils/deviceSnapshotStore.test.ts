@@ -50,9 +50,6 @@ describe("DeviceSnapshotStore", () => {
     expect(store.getAppDataPath("test-snapshot")).toBe(
       path.join(testBasePath, "test-snapshot", "app_data"),
     );
-    expect(store.getBackupFilePath("test-snapshot")).toBe(
-      path.join(testBasePath, "test-snapshot", "app_data", "backup.ab"),
-    );
   });
 
   it("should return iOS snapshot paths scoped by device", () => {

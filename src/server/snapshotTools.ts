@@ -9,12 +9,15 @@ const snapshotNameRequiredMessage = "snapshotName is required when action is res
 const optionalSnapshotNameSchema = z.string().min(1).optional().describe("Snapshot name");
 
 const deviceSnapshotCommonShape = {
-  includeAppData: z.boolean().optional().describe("Include app data"),
+  includeAppData: z
+    .boolean()
+    .optional()
+    .describe(
+      "Include app data (iOS app containers; ignored on non-VM Android, which is settings-only)",
+    ),
   includeSettings: z.boolean().optional().describe("Include settings"),
   useVmSnapshot: z.boolean().optional().describe("Use emulator VM snapshot"),
-  strictBackupMode: z.boolean().optional().describe("Fail if app data backup fails"),
-  backupTimeoutMs: z.number().optional().describe("adb backup confirmation timeout ms"),
-  userApps: z.enum(["current", "all"]).optional().describe("Apps to back up: current or all"),
+  strictBackupMode: z.boolean().optional().describe("iOS-only: fail if app container backup fails"),
   vmSnapshotTimeoutMs: z.number().optional().describe("VM snapshot timeout ms"),
   appBundleIds: z.array(z.string()).optional().describe("iOS bundle IDs for app data snapshot"),
 };

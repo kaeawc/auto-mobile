@@ -2,7 +2,16 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** `deviceSnapshot` MCP tool is fully implemented. VM snapshots (emulators), ADB snapshots (all Android devices), and iOS simulator app container backups are all supported. See the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Current state:** `deviceSnapshot` MCP tool is fully implemented. VM snapshots (emulators), settings-only snapshots (all other Android devices), and iOS simulator app container backups are all supported. See the [Status Glossary](../../status-glossary.md) for chip definitions.
+>
+> **App data on Android:** The deprecated `adb backup` app-data path was removed
+> in #5708. `adb backup` is deprecated since Android 12 (API 31), requires
+> interactive on-device confirmation, and produced no `backup.ab` in practice on
+> API 34. App data is now captured only by VM snapshots (emulators, which capture
+> the entire emulator state); for targeted app-data inspection use the DataStore,
+> shared-storage, `sqlQuery`, and preferences tools. **Physical Android devices
+> and non-VM emulator snapshots no longer capture app data** — they capture device
+> settings and foreground-app state only.
 
 ## Overview
 
@@ -10,11 +19,10 @@ The snapshot feature provides deterministic device state management for mobile t
 
 ## Features
 
-- **VM Snapshots for Emulators**: Instant snapshot/restore using Android emulator's built-in snapshot feature
-- **ADB-based Snapshots**: Portable snapshots for both emulators and physical devices
+- **VM Snapshots for Emulators**: Instant snapshot/restore using Android emulator's built-in snapshot feature (captures full app data)
+- **Settings-only Snapshots**: Portable device-settings snapshots for physical Android devices and non-VM emulator captures (no app data)
 - **iOS App Container Backups**: Portable app-scoped snapshots for iOS simulators
 - **Auto-generated Naming**: Automatic timestamp-based snapshot names with optional custom naming
-- **Comprehensive State Capture**: Includes app data, system settings, package list, and foreground app state
 - **Host-based Storage**: Snapshots stored in `~/.automobile/snapshots/` for fast access and easy management
 
 ## MCP Tool
@@ -27,13 +35,11 @@ Capture or restore device snapshots.
 
 - `action` (required): `"capture"` or `"restore"`
 - `snapshotName` (capture: optional, restore: required): Name for the snapshot
-- `includeAppData` (capture only): Include app data directories in snapshot
+- `includeAppData` (capture only): Include app data. Honored by VM snapshots (emulators) and iOS app-container backups. **Ignored on non-VM Android** (physical devices / `useVmSnapshot: false`), which is settings-only — the captured manifest records `includeAppData: false`.
 - `includeSettings` (capture only): Include system settings (global/secure/system)
 - `useVmSnapshot` (capture/restore): Use emulator VM snapshot if available (faster for emulators)
 - `vmSnapshotTimeoutMs` (capture/restore): Timeout in milliseconds for emulator VM snapshot commands
-- `strictBackupMode` (capture only): If true, fail entire snapshot if app data backup fails or times out
-- `backupTimeoutMs` (capture only): Timeout in milliseconds for adb backup user confirmation
-- `userApps` (capture only): Which apps to backup - `"current"` (foreground app only) or `"all"` (all user-installed apps)
+- `strictBackupMode` (capture only, **iOS-only**): If true, fail the snapshot when an iOS app-container backup fails. No effect on Android now that the adb-backup path is gone.
 - `appBundleIds` (capture only): iOS bundle IDs to include in app container backups
 - `sessionUuid` (optional): Session UUID for multi-device targeting
 - `device` (optional): Device label for multi-device control
@@ -125,9 +131,7 @@ Device snapshot defaults can be read or updated via the Unix socket at `~/.auto-
 - `includeAppData`: `true`
 - `includeSettings`: `true`
 - `useVmSnapshot`: `true`
-- `strictBackupMode`: `false`
-- `backupTimeoutMs`: `30000`
-- `userApps`: `"current"`
+- `strictBackupMode`: `false` (iOS-only)
 - `vmSnapshotTimeoutMs`: `30000`
 - `maxArchiveSizeMb`: `100`
 
@@ -135,9 +139,10 @@ Device snapshot defaults can be read or updated via the Unix socket at `~/.auto-
 
 The response `snapshotType` field reflects how the snapshot was taken. The type
 union (`DeviceSnapshotType` in `src/models/DeviceSnapshot.ts`) is `vm` (emulator
-VM snapshot), `adb` (Android app-data via adb), `app_data` (iOS app-container
-copy), and `simctl` (reserved for a simulator-level type; not currently emitted
-by the capture paths).
+VM snapshot), `adb` (non-VM Android settings-only snapshot), `app_data` (iOS
+app-container copy), and `simctl` (reserved for a simulator-level type; not
+currently emitted by the capture paths). The `adb` type is retained for backward
+compatibility with existing archived snapshots; it no longer carries app data.
 
 ### VM Snapshots (Emulators Only)
 
@@ -160,41 +165,41 @@ by the capture paths).
 - Snapshots stored in emulator's AVD directory (typically `~/.android/avd/<avd>.avd/snapshots/`)
 - Metadata stored in `~/.automobile/snapshots/` for management
 
-### ADB Snapshots (All Devices)
+### Settings-only Snapshots (Non-VM Android)
+
+Used for physical Android devices and for emulator captures with
+`useVmSnapshot: false`. The `snapshotType` is `adb`.
 
 **Pros:**
 
 - Works with both emulators and physical devices
 - Portable across device types
-- Fine-grained control over what gets captured
+- Fast — no app-data transfer or user confirmation
 
 **Cons:**
 
-- Slower than VM snapshots
-- Requires clearing app data individually
-- App data backup requires root access or user confirmation
+- Does **not** capture app data (see the note below)
 
 **What Gets Captured:**
 
-- Package list (`pm list packages`)
-- System settings (global/secure/system via `settings list`)
+- System settings (global/secure/system via the CtrlProxy settings namespaces,
+  with a `settings list` ADB fallback)
 - Foreground app state
-- App data via `adb backup`:
-  - Only user-installed apps (system apps excluded)
-  - Only apps that allow backup (`android:allowBackup="true"`)
-  - Defaults to current foreground app only (`userApps: "current"`)
-  - Can backup all user apps with `userApps: "all"`
-  - Requires user confirmation on device (30s timeout by default)
-  - Apps with `android:allowBackup="false"` are automatically skipped
 
 **What Gets Restored:**
 
-- Clears app data for all packages via `pm clear`
-- Restores system settings via `settings put`
-- Restores app data via `adb restore` (if backup was successful)
-  - Requires user confirmation on device (30s timeout by default)
-  - Only restores apps that were successfully backed up
-- Relaunches foreground app
+- Restores system settings via the CtrlProxy `settings put` path (with a
+  `settings put` ADB fallback)
+- Relaunches the foreground app
+
+> **App data is not captured or restored here.** The deprecated `adb backup` /
+> `adb restore` path was removed in #5708 (deprecated since API 31, required
+> interactive on-device confirmation, and produced no `backup.ab` on API 34). No
+> `pm clear`, `adb backup`, or `adb restore` commands are issued. To snapshot app
+> data on an emulator, use a VM snapshot; for targeted app-data inspection use the
+> DataStore, shared-storage, `sqlQuery`, and preferences tools. Legacy archived
+> snapshots that still carry `adb backup` metadata are restored as settings-only —
+> the stale app-data metadata is ignored.
 
 ### iOS App Container Backups (Current)
 
@@ -220,15 +225,12 @@ by the capture paths).
 
 ## Storage Location
 
-Snapshot payloads are stored in `~/.automobile/snapshots/` (ADB snapshots), and metadata is tracked in SQLite at `~/.auto-mobile/auto-mobile.db`:
+Snapshot payloads are stored in `~/.automobile/snapshots/` (settings-only Android snapshots), and metadata is tracked in SQLite at `~/.auto-mobile/auto-mobile.db`:
 
 ```text
 ~/.automobile/snapshots/
 ├── Pixel_5_2026-01-08_12-30-45/
-│   ├── settings.json          # Device settings (ADB snapshots only)
-│   └── app_data/              # App data directory (ADB snapshots only)
-│       ├── packages.txt       # List of installed packages
-│       └── backup.ab          # ADB backup file (if backup succeeded)
+│   └── settings.json          # Device settings (settings-only snapshots)
 └── another-snapshot/
     └── ...
 ```
@@ -315,95 +317,45 @@ const v1 = await loadManifest("v1.0-baseline");
 const v2 = await loadManifest("v1.1-baseline");
 ```
 
-## App Data Backup Details
+## App Data on Android
 
-### How It Works
+App data on Android is captured **only** by VM snapshots (emulators), which
+snapshot the entire emulator state as a superset of app data. The previous
+`adb backup` / `adb restore` app-data path for non-VM Android was removed in
+#5708:
 
-The ADB snapshot feature uses Android's native `adb backup` and `adb restore` commands to capture and restore app data:
+- `adb backup` is deprecated since Android 12 (API 31) and requires interactive
+  on-device confirmation, so it cannot be automated.
+- In practice it produced no `backup.ab` on API 34 while still reporting success.
+- It is redundant with VM snapshots and with the targeted app-data tools
+  (DataStore, shared-storage resources, `sqlQuery`, preferences).
 
-1. **Filtering**: Only user-installed apps are backed up (system apps are excluded)
-2. **Backup Eligibility**: Apps must have `android:allowBackup="true"` in their manifest
-3. **Scope**: By default, only the current foreground app is backed up (`userApps: "current"`)
-4. **User Confirmation**: The device will prompt the user to confirm the backup/restore operation
-5. **Timeout**: If the user doesn't confirm within 30 seconds (configurable), the backup continues without app data
+**Consequence:** physical Android devices, and emulator captures taken with
+`useVmSnapshot: false`, no longer snapshot app data — they capture device
+settings and foreground-app state only. To capture app data, take a VM snapshot
+on an emulator; to inspect a specific app's data, use the targeted tools above.
 
-### Backup Metadata
-
-The snapshot manifest includes detailed backup information:
-
-```json
-{
-  "appDataBackup": {
-    "backupFile": "backup.ab",
-    "backupMethod": "adb_backup",
-    "totalPackages": 150,
-    "backedUpPackages": ["com.example.app"],
-    "skippedPackages": ["com.example.nobackup"],
-    "failedPackages": [],
-    "backupTimedOut": false
-  }
-}
-```
-
-### Backup Modes
-
-**Current App Only (default)**:
-
-```javascript
-await deviceSnapshot({
-  action: "capture",
-  userApps: "current", // Only backup foreground app
-  includeAppData: true,
-});
-```
-
-**All User Apps**:
-
-```javascript
-await deviceSnapshot({
-  action: "capture",
-  userApps: "all", // Backup all user-installed apps
-  includeAppData: true,
-});
-```
-
-**Strict Mode** (fail if backup times out):
-
-```javascript
-await deviceSnapshot({
-  action: "capture",
-  strictBackupMode: true, // Fail entire snapshot if backup fails
-  backupTimeoutMs: 60000, // Wait 60 seconds for user confirmation
-});
-```
-
-### Limitations
-
-- **User Confirmation Required**: Cannot automate without user interaction
-- **allowBackup Flag**: Apps with `android:allowBackup="false"` cannot be backed up
-- **APKs Not Included**: Only app data is backed up, not the APK files themselves
-- **Timeout**: If user doesn't confirm, snapshot continues without app data (unless strictBackupMode is enabled)
+The iOS app-container backups (`snapshotType: "app_data"`) are unaffected and
+still honor `strictBackupMode`.
 
 ## Limitations
 
 - **Android + iOS Simulator Only**: iOS snapshots are app container backups for simulators
-- **App Data Backup**: Requires user confirmation on device for each backup/restore operation
+- **App Data on Android**: Captured only by VM snapshots (emulators); non-VM Android snapshots are settings-only (#5708)
 - **VM Snapshots**: Only available for emulators, not physical devices
 - **Storage Space**: Snapshots can be large (especially VM snapshots), manage storage accordingly
-- **Backup Scope**: By default, only current app is backed up (set `userApps: "all"` for all apps)
 - **iOS Simulator Snapshot**: `simctl snapshot` is intentionally not used; app container backups are the current choice
 
 ## Performance
 
 - **VM Snapshot Capture**: ~2-5 seconds
 - **VM Snapshot Restore**: ~3-8 seconds (includes emulator stabilization)
-- **ADB Snapshot Capture**: ~10-30 seconds (depends on number of apps and settings)
-- **ADB Snapshot Restore**: ~15-45 seconds (depends on number of apps to clear)
+- **Settings-only Snapshot Capture/Restore**: ~1-3 seconds (settings only, no app data)
 - **iOS App Container Backup**: Varies with app data size
 
 ## Best Practices
 
-1. **Use VM Snapshots for Emulators**: Significantly faster than ADB snapshots
+1. **Use VM Snapshots for Emulators**: Significantly faster, and the only way to snapshot app data on Android
 2. **Manage Archive Size**: Automatic cleanup enforces `maxArchiveSizeMb` (adjust via the device snapshot socket config)
 3. **Descriptive Names**: Use meaningful snapshot names for easier management
 4. **Base Snapshots**: Create a "golden" base snapshot and restore from it
@@ -428,6 +380,5 @@ await deviceSnapshot({
 
 ### Snapshot Too Large
 
-- Disable `includeAppData` for smaller snapshots
-- Use ADB snapshots instead of VM snapshots
+- Use a settings-only (non-VM) snapshot instead of a VM snapshot when app data is not needed
 - Adjust `maxArchiveSizeMb` to control archive size

@@ -924,7 +924,7 @@
           "minLength": 1
         },
         "includeAppData": {
-          "description": "Include app data",
+          "description": "Include app data (iOS app containers; ignored on non-VM Android, which is settings-only)",
           "type": "boolean"
         },
         "includeSettings": {
@@ -936,17 +936,8 @@
           "type": "boolean"
         },
         "strictBackupMode": {
-          "description": "Fail if app data backup fails",
+          "description": "iOS-only: fail if app container backup fails",
           "type": "boolean"
-        },
-        "backupTimeoutMs": {
-          "description": "adb backup confirmation timeout ms",
-          "type": "number"
-        },
-        "userApps": {
-          "description": "Apps to back up: current or all",
-          "type": "string",
-          "enum": ["current", "all"]
         },
         "vmSnapshotTimeoutMs": {
           "description": "VM snapshot timeout ms",

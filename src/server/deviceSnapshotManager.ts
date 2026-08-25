@@ -36,8 +36,6 @@ interface DeviceSnapshotCaptureArgs {
   includeSettings?: boolean;
   useVmSnapshot?: boolean;
   strictBackupMode?: boolean;
-  backupTimeoutMs?: number;
-  userApps?: "current" | "all";
   vmSnapshotTimeoutMs?: number;
   appBundleIds?: string[];
 }
@@ -134,8 +132,6 @@ function configToInput(config: DeviceSnapshotConfig): DeviceSnapshotConfigInput 
     includeSettings: config.includeSettings,
     useVmSnapshot: config.useVmSnapshot,
     strictBackupMode: config.strictBackupMode,
-    backupTimeoutMs: config.backupTimeoutMs,
-    userApps: config.userApps,
     vmSnapshotTimeoutMs: config.vmSnapshotTimeoutMs,
     maxArchiveSizeMb: config.maxArchiveSizeMb,
   };
@@ -150,8 +146,6 @@ function mergeConfigInput(
     includeSettings: overrides.includeSettings ?? base.includeSettings,
     useVmSnapshot: overrides.useVmSnapshot ?? base.useVmSnapshot,
     strictBackupMode: overrides.strictBackupMode ?? base.strictBackupMode,
-    backupTimeoutMs: overrides.backupTimeoutMs ?? base.backupTimeoutMs,
-    userApps: overrides.userApps ?? base.userApps,
     vmSnapshotTimeoutMs: overrides.vmSnapshotTimeoutMs ?? base.vmSnapshotTimeoutMs,
     maxArchiveSizeMb: overrides.maxArchiveSizeMb ?? base.maxArchiveSizeMb,
   };
@@ -491,8 +485,6 @@ export async function captureDeviceSnapshot(
     includeSettings: args.includeSettings ?? baseConfig.includeSettings,
     useVmSnapshot: args.useVmSnapshot ?? baseConfig.useVmSnapshot,
     strictBackupMode: args.strictBackupMode ?? baseConfig.strictBackupMode,
-    backupTimeoutMs: args.backupTimeoutMs ?? baseConfig.backupTimeoutMs,
-    userApps: args.userApps ?? baseConfig.userApps,
     vmSnapshotTimeoutMs: args.vmSnapshotTimeoutMs ?? baseConfig.vmSnapshotTimeoutMs,
   };
 
@@ -503,8 +495,6 @@ export async function captureDeviceSnapshot(
     includeSettings: mergedConfig.includeSettings,
     useVmSnapshot: mergedConfig.useVmSnapshot,
     strictBackupMode: mergedConfig.strictBackupMode,
-    backupTimeoutMs: mergedConfig.backupTimeoutMs,
-    userApps: mergedConfig.userApps,
     vmSnapshotTimeoutMs: mergedConfig.vmSnapshotTimeoutMs,
     appBundleIds: args.appBundleIds,
   });

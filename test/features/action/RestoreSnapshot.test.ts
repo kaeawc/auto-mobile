@@ -476,542 +476,91 @@ describe("RestoreSnapshot", () => {
         }),
       ).rejects.toThrow("Snapshot platform 'ios' does not match device platform 'android'");
     });
-
-    it("should handle app clear failures gracefully", async () => {
-      const snapshotName = "test-clear-fail";
-
-      // Create manifest with packages
-      const manifest: DeviceSnapshotManifest = {
-        snapshotName,
-        timestamp: new Date().toISOString(),
-        deviceId: device.deviceId,
-        deviceName: device.name,
-        platform: "android",
-        snapshotType: "adb",
-        includeAppData: true,
-        includeSettings: false,
-        packages: ["com.example.app1", "com.example.app2"],
-        appDataBackup: {
-          backupFile: "backup.ab",
-          backupMethod: "adb_backup",
-          totalPackages: 2,
-          backedUpPackages: ["com.example.app1", "com.example.app2"],
-          skippedPackages: [],
-          failedPackages: [],
-        },
-      };
-
-      // Setup clear commands - one succeeds, one fails
-      fakeAdb.setCommandResult("shell pm clear com.example.app1", "Success");
-      fakeAdb.setCommandResult("shell pm clear com.example.app2", "Failed");
-
-      // Should not throw, just log warnings
-      await restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: false,
-      });
-
-      expect(fakeAdb.wasCommandExecuted("shell pm clear com.example.app1")).toBe(true);
-      expect(fakeAdb.wasCommandExecuted("shell pm clear com.example.app2")).toBe(true);
-    });
   });
 
-  describe("edge cases", () => {
-    it("should not clear app data when includeAppData is false", async () => {
-      const snapshotName = "test-no-clear";
-
-      // Create manifest without app data
-      const manifest: DeviceSnapshotManifest = {
-        snapshotName,
-        timestamp: new Date().toISOString(),
-        deviceId: device.deviceId,
-        deviceName: device.name,
-        platform: "android",
-        snapshotType: "adb",
-        includeAppData: false,
-        includeSettings: false,
-        packages: ["com.example.app"],
-      };
-
-      await restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: false,
-      });
-
-      // Verify pm clear was not called
-      expect(fakeAdb.wasCommandExecuted("shell pm clear")).toBe(false);
-    });
-
-    it("should not clear app data when packages list is empty", async () => {
-      const snapshotName = "test-empty-packages";
-
-      // Create manifest with empty packages
-      const manifest: DeviceSnapshotManifest = {
-        snapshotName,
-        timestamp: new Date().toISOString(),
-        deviceId: device.deviceId,
-        deviceName: device.name,
-        platform: "android",
-        snapshotType: "adb",
-        includeAppData: true,
-        includeSettings: false,
-        packages: [],
-      };
-
-      await restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: false,
-      });
-
-      // Verify pm clear was not called
-      expect(fakeAdb.wasCommandExecuted("shell pm clear")).toBe(false);
-    });
-
-    it("should skip foreground app restore when not in manifest", async () => {
-      const snapshotName = "test-no-foreground";
-
-      // Create manifest without foreground app
-      const manifest: DeviceSnapshotManifest = {
-        snapshotName,
-        timestamp: new Date().toISOString(),
-        deviceId: device.deviceId,
-        deviceName: device.name,
-        platform: "android",
-        snapshotType: "adb",
-        includeAppData: false,
-        includeSettings: false,
-      };
-
-      await restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: false,
-      });
-
-      // Verify app launch was not called
-      expect(fakeAdb.wasCommandExecuted("shell am start")).toBe(false);
-    });
-
-    it("should handle missing backup file gracefully", async () => {
-      const snapshotName = "test-missing-backup";
-
-      // Create manifest with backup metadata but no actual file
-      const manifest: DeviceSnapshotManifest = {
-        snapshotName,
-        timestamp: new Date().toISOString(),
-        deviceId: device.deviceId,
-        deviceName: device.name,
-        platform: "android",
-        snapshotType: "adb",
-        includeAppData: true,
-        includeSettings: false,
-        packages: ["com.example.app"],
-        appDataBackup: {
-          backupFile: "backup.ab",
-          backupMethod: "adb_backup",
-          totalPackages: 1,
-          backedUpPackages: ["com.example.app"],
-          skippedPackages: [],
-          failedPackages: [],
-        },
-      };
-
-      // Should not throw, just skip restore
-      const result = await restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: false,
-      });
-
-      expect(result.snapshotType).toBe("adb");
-      expect(fakeAdb.wasCommandExecuted("restore")).toBe(false);
-    });
-
-    it("should skip restore for empty backup file", async () => {
-      const snapshotName = "test-empty-backup";
-
-      // Create manifest with backup
-      const manifest: DeviceSnapshotManifest = {
-        snapshotName,
-        timestamp: new Date().toISOString(),
-        deviceId: device.deviceId,
-        deviceName: device.name,
-        platform: "android",
-        snapshotType: "adb",
-        includeAppData: true,
-        includeSettings: false,
-        packages: ["com.example.app"],
-        appDataBackup: {
-          backupFile: "backup.ab",
-          backupMethod: "adb_backup",
-          totalPackages: 1,
-          backedUpPackages: ["com.example.app"],
-          skippedPackages: [],
-          failedPackages: [],
-        },
-      };
-
-      // Create empty backup file
-      const appDataPath = store.getAppDataPath(snapshotName);
-      await fs.mkdir(appDataPath, { recursive: true });
-      const backupFilePath = store.getBackupFilePath(snapshotName);
-      await fs.writeFile(backupFilePath, "", "utf-8"); // Empty file
-
-      const result = await restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: false,
-      });
-
-      expect(result.snapshotType).toBe("adb");
-      expect(fakeAdb.wasCommandExecuted("restore")).toBe(false);
-    });
-  });
-
-  describe("app data restore with timeout", () => {
-    it("should clear the pending timeout when the restore command throws (regression #2866)", async () => {
-      // Regression guard: timeoutHandle used to be declared inside the try block
-      // but referenced in the catch block, causing a ReferenceError instead of a
-      // graceful failure when adb executeCommand throws mid-restore.
-      const backupFilePath = "/tmp/backup.ab";
-      fakeAdb.setCommandError(`restore "${backupFilePath}"`, new Error("adb connection dropped"));
-
-      const result = await (restoreSnapshot as any).performAdbRestore(backupFilePath, 30000);
-
-      // Catch path returns a graceful failure, no ReferenceError thrown.
-      expect(result).toEqual({ success: false, timedOut: false });
-      // The timeout scheduled before the throw must be cleared to avoid a leak.
-      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
-    });
-
-    it("should restore successfully when user confirms within timeout", async () => {
-      const snapshotName = "test-snapshot";
-
-      // Create manifest with backup data
-      const manifest: DeviceSnapshotManifest = {
-        snapshotName,
-        timestamp: new Date().toISOString(),
-        deviceId: device.deviceId,
-        deviceName: device.name,
-        platform: "android",
-        snapshotType: "adb",
-        includeAppData: true,
-        includeSettings: false,
-        packages: ["com.example.app"],
-        appDataBackup: {
-          backupFile: "backup.ab",
-          backupMethod: "adb_backup",
-          totalPackages: 1,
-          backedUpPackages: ["com.example.app"],
-          skippedPackages: [],
-          failedPackages: [],
-          backupTimedOut: false,
-        },
-      };
-
-      // Create backup file
-      const appDataPath = store.getAppDataPath(snapshotName);
-      await fs.mkdir(appDataPath, { recursive: true });
-      const backupFilePath = store.getBackupFilePath(snapshotName);
-      await fs.writeFile(backupFilePath, "backup data", "utf-8");
-
-      // Setup restore command result
-      fakeAdb.setCommandResult(`restore "${backupFilePath}"`, "");
-
-      const result = await restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: false,
-      });
-
-      expect(result.snapshotType).toBe("adb");
-      expect(result.restoredAt).toBeDefined();
-
-      // Verify restore command was called
-      expect(fakeAdb.wasCommandExecuted(`restore "${backupFilePath}"`)).toBe(true);
-
-      // Verify timer was used for timeout
-      expect(fakeTimer.getPendingTimeoutCount()).toBe(0); // Should be cleared after completion
-    });
-
-    it("should skip restore if no backup file exists", async () => {
-      const snapshotName = "test-no-backup";
-
-      // Create manifest without backup data
-      const manifest: DeviceSnapshotManifest = {
-        snapshotName,
-        timestamp: new Date().toISOString(),
-        deviceId: device.deviceId,
-        deviceName: device.name,
-        platform: "android",
-        snapshotType: "adb",
-        includeAppData: true,
-        includeSettings: false,
-        packages: ["com.example.app"],
-        appDataBackup: {
-          backupMethod: "none",
-          totalPackages: 1,
-          backedUpPackages: [],
-          skippedPackages: [],
-          failedPackages: [],
-        },
-      };
-
-      // Create app data directory but no backup file
-      const appDataPath = store.getAppDataPath(snapshotName);
-      await fs.mkdir(appDataPath, { recursive: true });
-
-      const result = await restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: false,
-      });
-
-      expect(result.snapshotType).toBe("adb");
-
-      // Verify restore command was not called
-      expect(fakeAdb.wasCommandExecuted("restore")).toBe(false);
-    });
-
-    it("should clear app data before restore", async () => {
-      const snapshotName = "test-clear";
-
-      // Create manifest with packages
-      const manifest: DeviceSnapshotManifest = {
-        snapshotName,
-        timestamp: new Date().toISOString(),
-        deviceId: device.deviceId,
-        deviceName: device.name,
-        platform: "android",
-        snapshotType: "adb",
-        includeAppData: true,
-        includeSettings: false,
-        packages: ["com.example.app1", "com.example.app2"],
-        appDataBackup: {
-          backupFile: "backup.ab",
-          backupMethod: "adb_backup",
-          totalPackages: 2,
-          backedUpPackages: ["com.example.app1"],
-          skippedPackages: [],
-          failedPackages: [],
-          backupTimedOut: false,
-        },
-      };
-
-      // Create backup file
-      const appDataPath = store.getAppDataPath(snapshotName);
-      await fs.mkdir(appDataPath, { recursive: true });
-      const backupFilePath = store.getBackupFilePath(snapshotName);
-      await fs.writeFile(backupFilePath, "backup data", "utf-8");
-
-      // Setup clear commands
-      fakeAdb.setCommandResult("shell pm clear com.example.app1", "Success");
-      fakeAdb.setCommandResult("shell pm clear com.example.app2", "Success");
-      fakeAdb.setCommandResult(`restore "${backupFilePath}"`, "");
-
-      await restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: false,
-      });
-
-      // Only the backed-up package is cleared. app2 was never captured
-      // (backedUpPackages is [app1]), so clearing it would wipe data that
-      // cannot be restored (#4236).
-      expect(fakeAdb.wasCommandExecuted("shell pm clear com.example.app1")).toBe(true);
-      expect(fakeAdb.wasCommandExecuted("shell pm clear com.example.app2")).toBe(false);
-    });
-
-    it("should restore foreground app after data restore", async () => {
-      const snapshotName = "test-foreground";
-      const foregroundApp = "com.example.app";
-
-      // Create manifest with foreground app
-      const manifest: DeviceSnapshotManifest = {
-        snapshotName,
-        timestamp: new Date().toISOString(),
-        deviceId: device.deviceId,
-        deviceName: device.name,
-        platform: "android",
-        snapshotType: "adb",
-        includeAppData: true,
-        includeSettings: false,
-        packages: [foregroundApp],
-        foregroundApp,
-        appDataBackup: {
-          backupFile: "backup.ab",
-          backupMethod: "adb_backup",
-          totalPackages: 1,
-          backedUpPackages: [foregroundApp],
-          skippedPackages: [],
-          failedPackages: [],
-          backupTimedOut: false,
-        },
-      };
-
-      // Create backup file
-      const appDataPath = store.getAppDataPath(snapshotName);
-      await fs.mkdir(appDataPath, { recursive: true });
-      const backupFilePath = store.getBackupFilePath(snapshotName);
-      await fs.writeFile(backupFilePath, "backup data", "utf-8");
-
-      fakeAdb.setCommandResult(`restore "${backupFilePath}"`, "");
-
-      await restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: false,
-      });
-
-      // Verify foreground app was launched
-      expect(
-        fakeAdb.wasCommandExecuted(
-          `shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${foregroundApp}`,
-        ),
-      ).toBe(true);
-    });
-
-    it("should restore VM snapshot with timer sleep", async () => {
-      const snapshotName = "test-vm";
-
-      // Create VM snapshot manifest
-      const manifest: DeviceSnapshotManifest = {
-        snapshotName,
-        timestamp: new Date().toISOString(),
-        deviceId: device.deviceId,
-        deviceName: device.name,
-        platform: "android",
-        snapshotType: "vm",
-        includeAppData: true,
-        includeSettings: false,
-      };
-
-      // Setup VM snapshot load command
-      fakeAdb.setCommandResult(`emu avd snapshot load ${snapshotName}`, "OK");
-
-      await restoreSnapshot.execute({
-        snapshotName,
-        manifest,
-        useVmSnapshot: true,
-      });
-
-      // Verify sleep was called for stabilization
-      expect(fakeTimer.wasSleepCalled(2000)).toBe(true);
-
-      // Verify VM restore command was called
-      expect(fakeAdb.wasCommandExecuted(`emu avd snapshot load ${snapshotName}`)).toBe(true);
-    });
-  });
-});
-
-describe("RestoreSnapshot restores settings before the slow app-data phase (#4236)", () => {
-  let device: BootedDevice;
-  let fakeAdb: FakeAdbClient;
-  let fakeAdbFactory: AdbClientFactory;
-  let fakeTimer: FakeTimer;
-  let restoreSnapshot: RestoreSnapshot;
-  let store: DeviceSnapshotStore;
-  let basePath: string;
-
-  beforeEach(async () => {
-    device = {
-      deviceId: "emulator-5554",
-      name: "Pixel_5",
-      platform: "android",
-      isEmulator: true,
-    } as BootedDevice;
-    fakeAdb = new FakeAdbClient();
-    fakeAdbFactory = { create: () => fakeAdb as any };
-    fakeTimer = new FakeTimer();
-    fakeTimer.enableAutoAdvance();
-    basePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-scope-test-"));
-    store = new DeviceSnapshotStore(basePath);
-    restoreSnapshot = new RestoreSnapshot(device, fakeAdbFactory, undefined, fakeTimer, store);
-  });
-
-  afterEach(async () => {
-    try {
-      await fs.rm(basePath, { recursive: true, force: true });
-    } catch {
-      /* ignore */
-    }
-    fakeTimer.reset();
-  });
-
-  // manifest.packages is every installed package (getInstalledPackages), while
-  // only appDataBackup.backedUpPackages was actually captured. Clearing the
-  // former wipes data that can never be restored, and the volume of pm clear
-  // calls is what exhausted the request budget before restoreSettings ran.
-  const manifestWith = (allPackages: string[], backedUp: string[]): DeviceSnapshotManifest =>
-    ({
-      snapshotName: "scope-test",
+  // #5708: the deprecated adb backup/restore app-data path was dropped. Non-VM
+  // Android restore now reapplies settings and relaunches the foreground app
+  // only -- `pm clear` and `adb restore` are never issued.
+  describe("settings-only Android restore (#5708)", () => {
+    const androidManifest = (
+      overrides: Partial<DeviceSnapshotManifest> = {},
+    ): DeviceSnapshotManifest => ({
+      snapshotName: "settings-only",
       timestamp: new Date().toISOString(),
       deviceId: device.deviceId,
       deviceName: device.name,
       platform: "android",
       snapshotType: "adb",
-      includeAppData: true,
+      includeAppData: false,
       includeSettings: true,
-      packages: allPackages,
-      settings: { system: { screen_off_timeout: "60000" }, global: {}, secure: {} },
-      appDataBackup: {
-        backedUpPackages: backedUp,
-        skippedPackages: [],
-        totalPackages: allPackages.length,
-      },
-    }) as unknown as DeviceSnapshotManifest;
+      ...overrides,
+    });
 
-  it("clears only the backed-up packages, not every installed package (#4236 P1)", async () => {
-    // The default restore path: manifest.packages is every installed package but
-    // only a subset was backed up. Clearing all of them is what exhausted the
-    // request budget before the restore could finish.
-    const manifest = manifestWith(
-      ["com.example.app", "com.android.systemui", "com.google.android.gms"],
-      ["com.example.app"],
-    );
+    it("restores settings and relaunches the foreground app, never clearing app data", async () => {
+      const manifest = androidManifest({
+        settings: { global: { airplane_mode_on: "1" }, secure: {}, system: {} },
+        foregroundApp: "com.example.app",
+      });
+      fakeAdb.setCommandResult("shell settings put global airplane_mode_on '1'", "");
 
-    await restoreSnapshot
-      .execute({ snapshotName: "scope-test", manifest, useVmSnapshot: false })
-      .catch(() => undefined);
+      const result = await restoreSnapshot.execute({
+        snapshotName: "settings-only",
+        manifest,
+        useVmSnapshot: false,
+      });
 
-    expect(fakeAdb.getCommandCount("pm clear com.example.app")).toBeGreaterThan(0);
-    expect(fakeAdb.getCommandCount("pm clear com.android.systemui")).toBe(0);
-    expect(fakeAdb.getCommandCount("pm clear com.google.android.gms")).toBe(0);
-  });
+      expect(result.snapshotType).toBe("adb");
+      expect(fakeAdb.wasCommandExecuted("shell settings put global airplane_mode_on '1'")).toBe(
+        true,
+      );
+      expect(
+        fakeAdb.wasCommandExecuted(
+          "shell am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER com.example.app",
+        ),
+      ).toBe(true);
 
-  it("clears nothing when no packages were backed up (#4236 P1)", async () => {
-    const manifest = manifestWith(["com.example.app", "com.android.systemui"], []);
+      // No app-data phase: neither `pm clear` nor `adb restore` is issued, even
+      // if a legacy manifest still carries backup metadata.
+      expect(fakeAdb.wasCommandExecuted("pm clear")).toBe(false);
+      expect(fakeAdb.wasCommandExecuted("restore")).toBe(false);
+    });
 
-    await restoreSnapshot
-      .execute({ snapshotName: "scope-test", manifest, useVmSnapshot: false })
-      .catch(() => undefined);
+    it("ignores legacy app-data backup metadata without clearing or restoring", async () => {
+      // A snapshot captured before #5708 may still carry appDataBackup with a
+      // backedUpPackages list. Restore must not act on it.
+      const manifest = androidManifest({
+        includeAppData: true,
+        foregroundApp: "com.example.app",
+        packages: ["com.example.app", "com.android.systemui"],
+        appDataBackup: {
+          backupFile: "backup.ab",
+          backedUpPackages: ["com.example.app"],
+          skippedPackages: [],
+          totalPackages: 2,
+        },
+      });
 
-    expect(fakeAdb.getCommandCount("pm clear")).toBe(0);
-  });
+      await restoreSnapshot.execute({
+        snapshotName: "settings-only",
+        manifest,
+        useVmSnapshot: false,
+      });
 
-  it("restores settings before clearing app data, so a slow clear cannot cost the settings", async () => {
-    // Ordering is the fix: on a real device the clear phase spans every installed
-    // package and exhausts the request budget, so settings restored afterwards
-    // never happened. Fakes are instant, so assert the command *sequence* rather
-    // than timing -- otherwise the test passes with either order.
-    const manifest = manifestWith(["com.example.app"], ["com.example.app"]);
+      expect(fakeAdb.wasCommandExecuted("pm clear")).toBe(false);
+      expect(fakeAdb.wasCommandExecuted("restore")).toBe(false);
+    });
 
-    await restoreSnapshot
-      .execute({ snapshotName: "scope-test", manifest, useVmSnapshot: false })
-      .catch(() => undefined);
+    it("skips foreground relaunch when the manifest has no foreground app", async () => {
+      const manifest = androidManifest({ includeSettings: false });
 
-    const commands = fakeAdb.getAllCommands();
-    const settingsAt = commands.findIndex((c) =>
-      c.includes("settings put system screen_off_timeout"),
-    );
-    const clearAt = commands.findIndex((c) => c.includes("pm clear"));
+      await restoreSnapshot.execute({
+        snapshotName: "settings-only",
+        manifest,
+        useVmSnapshot: false,
+      });
 
-    expect(settingsAt).toBeGreaterThanOrEqual(0);
-    expect(clearAt).toBeGreaterThanOrEqual(0);
-    expect(settingsAt).toBeLessThan(clearAt);
+      expect(fakeAdb.wasCommandExecuted("shell am start")).toBe(false);
+    });
   });
 });
 

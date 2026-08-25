@@ -105,8 +105,6 @@ describe("KeyedJsonConfigRepository", () => {
       includeSettings: true,
       useVmSnapshot: false,
       strictBackupMode: true,
-      backupTimeoutMs: 12000,
-      userApps: "all",
       vmSnapshotTimeoutMs: 34000,
       maxArchiveSizeMb: 12,
     });

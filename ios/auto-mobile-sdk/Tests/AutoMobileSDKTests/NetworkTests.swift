@@ -844,7 +844,12 @@ final class NetworkCaptureRecorderTests: XCTestCase {
         threadA.start()
 
         // Wait until record 1's emit is blocked, THEN enqueue record 2 (assigned seq 2).
-        XCTAssertEqual(harness.firstEmitEntered.wait(timeout: .now() + 5), .success)
+        // Bail if thread A never entered emit: continuing would let record 2 become seq 1,
+        // whose synchronous emit would block forever on the unsignaled gate and hang the job.
+        guard harness.firstEmitEntered.wait(timeout: .now() + 5) == .success else {
+            XCTFail("record 1's emit did not start within the timeout")
+            return
+        }
         let id2 = recorder.beginRequest(url: "https://example.com/2")
         recorder.recordCompletion(requestId: id2, statusCode: 200)
 

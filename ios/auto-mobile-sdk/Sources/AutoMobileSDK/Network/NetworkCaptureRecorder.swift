@@ -45,10 +45,12 @@ public final class NetworkCaptureRecorder: @unchecked Sendable {
     private let headerRedactor: @Sendable ([String: String]) -> [String: String]
     private var requests: [String: InFlightRequest] = [:]
     private var nextSequenceNumber: UInt64 = 0
-    /// FIFO of records awaiting delivery, and whether a drainer is currently running.
-    /// Both guarded by `emissionLock`; the drainer calls `emit` outside the lock. See
-    /// `emitRecord`.
+    /// FIFO of records awaiting delivery, a head index into it, and whether a drainer is
+    /// currently running. All guarded by `emissionLock`; the drainer calls `emit` outside
+    /// the lock. The head index makes dequeue amortized O(1) (no `removeFirst` element
+    /// shift under the lock); the buffer is reset once fully drained. See `emitRecord`.
     private var pendingEmits: [NetworkRequestRecord] = []
+    private var pendingHead = 0
     private var draining = false
     private let maxBodyBytes: Int
 
@@ -296,12 +298,16 @@ public final class NetworkCaptureRecorder: @unchecked Sendable {
 
         while true {
             emissionLock.lock()
-            guard !pendingEmits.isEmpty else {
+            guard pendingHead < pendingEmits.count else {
+                // Fully drained: reset the buffer so it doesn't grow unbounded.
+                pendingEmits.removeAll(keepingCapacity: true)
+                pendingHead = 0
                 draining = false
                 emissionLock.unlock()
                 return
             }
-            let next = pendingEmits.removeFirst()
+            let next = pendingEmits[pendingHead]
+            pendingHead += 1
             emissionLock.unlock()
             emit(next)
         }

@@ -1,0 +1,86 @@
+version: 2.1
+
+# AutoMobile — supplementary iOS CI lane on CircleCI.
+#
+# Purpose: run the Swift-package build+test on CircleCI's macOS executor so it
+# stops competing for GitHub Actions' 5-concurrent-macOS cap on a public repo.
+# This mirrors the `ios-swift-packages` job in
+# .github/workflows/pull_request.yml — it calls the SAME repo scripts
+# (scripts/ios/swift-build.sh, scripts/ios/swift-test.sh), so build logic stays
+# single-sourced. It does NOT replace GitHub Actions; it runs alongside it.
+#
+# Budget note: CircleCI's open-source plan includes ~30,000 macOS credits/month
+# (~150 macOS minutes at ~200 credits/min). To avoid burning that on non-iOS
+# commits, every job halts early unless ios/** or scripts/ios/** changed.
+#
+# Signing: swift-build.sh only signs when IOS_SIGNING_ENABLED / MACOS_SIGNING_
+# ENABLED are "true" (set from the presence of cert secrets). With no secrets
+# configured on CircleCI, it builds unsigned — which is what we want for a
+# fast build+test lane. Do not add signing secrets here unless a job needs them.
+
+executors:
+  ios:
+    macos:
+      # Verify/adjust to an available image at:
+      #   https://circleci.com/developer/machine/image/xcode
+      # PR CI pins Xcode 26.5 (see pull_request.yml); match it here.
+      xcode: "26.5"
+    # OSS-tier Apple-silicon class. macos.m2pro.medium ≈ 180 credits/min;
+    # drop to a smaller class if CircleCI offers a cheaper OSS macOS option.
+    resource_class: macos.m2pro.medium
+
+commands:
+  halt_if_no_ios_changes:
+    description: "Save macOS credits: stop the job unless iOS sources changed."
+    steps:
+      - run:
+          name: "Halt if no iOS changes"
+          command: |
+            set -euo pipefail
+            # First build on a branch has no HEAD~1 — don't halt in that case.
+            if ! git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+              echo "No previous commit to diff against — running."
+              exit 0
+            fi
+            if git diff --name-only HEAD~1 HEAD | grep -qE '^(ios/|scripts/ios/)'; then
+              echo "iOS changes detected — continuing."
+            else
+              echo "No ios/** or scripts/ios/** changes — halting to save macOS credits."
+              circleci step halt
+            fi
+
+jobs:
+  ios-swift-packages:
+    executor: ios
+    steps:
+      - checkout
+      - halt_if_no_ios_changes
+      - run:
+          name: "Compute SwiftPM cache key"
+          command: cat ios/*/Package.swift > /tmp/spm-lock.txt
+      - restore_cache:
+          keys:
+            - spm-v1-{{ checksum "/tmp/spm-lock.txt" }}
+            - spm-v1-
+      - run:
+          name: "Report toolchain"
+          command: xcodebuild -version && swift --version
+      - run:
+          name: "Build Swift packages"
+          command: ./scripts/ios/swift-build.sh
+      - run:
+          name: "Test Swift packages"
+          command: ./scripts/ios/swift-test.sh
+      - save_cache:
+          key: spm-v1-{{ checksum "/tmp/spm-lock.txt" }}
+          paths:
+            - ~/Library/Caches/org.swift.swiftpm
+            - ios/auto-mobile-sdk/.build
+            - ios/control-proxy/.build
+            - ios/screen-capture/.build
+            - ios/XCTestRunner/.build
+
+workflows:
+  ios:
+    jobs:
+      - ios-swift-packages

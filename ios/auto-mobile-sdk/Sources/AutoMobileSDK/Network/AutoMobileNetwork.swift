@@ -643,15 +643,18 @@ public class AutoMobileURLProtocol: URLProtocol {
 
     #if DEBUG
     private func serveFault(_ fault: NetworkMockRuleStore.FaultDecision, url: URL) {
-        // Hold faultLock across the whole delivery so the stopped-check is ATOMIC with the
-        // client callbacks: stopLoading() (which sets `stopped` under the same lock) can no
-        // longer slip in between the check and the callbacks. Safe against deadlock — this
-        // body never re-enters faultLock, and the URL loading system does not synchronously
-        // call stopLoading() from a completion callback (didFinish/didFail), so the client
-        // calls here cannot re-enter this lock on the same thread.
+        // Snapshot `stopped` under the lock, then RELEASE the lock before any client
+        // callbacks. The lock must NOT be held across the callouts: a client whose
+        // didFailWithError synchronously calls stopLoading() would deadlock on this
+        // non-recursive lock. The stopped-check drops the delayed fault once stopLoading()
+        // has run; a callback that races an in-progress stopLoading() (delivered in the
+        // sub-microsecond window after this check) is the ordinary "response arrives as the
+        // task is cancelled" race the URL loading system already tolerates — making it
+        // fully atomic is not possible without reintroducing the deadlock above.
         faultLock.lock()
-        defer { faultLock.unlock() }
-        if stopped { return }
+        let isStopped = stopped
+        faultLock.unlock()
+        if isStopped { return }
 
         let method = request.httpMethod ?? "GET"
         let error: URLError

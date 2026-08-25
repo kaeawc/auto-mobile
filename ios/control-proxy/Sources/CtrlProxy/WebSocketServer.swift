@@ -1023,20 +1023,52 @@ class WebSocketConnection: WebSocketResponding {
         return Int(payloadLength) + (isMasked ? 4 : 0)
     }
 
-    /// Whether appending a continuation frame of `payloadLength` declared bytes to
-    /// the `alreadyBuffered` accumulated bytes would exceed the total reassembly
-    /// budget. Evaluated from the frame header **before** the payload is received
-    /// and unmasked, so an oversized continuation is rejected without first
-    /// allocating (and copying, when unmasking) its bytes — otherwise a connection
-    /// could transiently hold the prior fragment plus the masked and unmasked
-    /// copies of the new one (~3× the cap) before the post-append bound in
-    /// `accumulate` fires (issue #5674 review).
-    static func continuationExceedsReassemblyBudget(
-        payloadLength: UInt64,
+    /// Whether a data/continuation frame may be received, decided from the frame
+    /// header alone.
+    enum FramePreReadDecision: Equatable {
+        /// The frame is admissible — receive its payload, then hand to `accumulate`.
+        case read
+        /// The frame is malformed or would overflow the reassembly budget — close
+        /// the connection without receiving it.
+        case reject(String)
+    }
+
+    /// Decides, from the frame header **before** any payload is received or
+    /// unmasked, whether a data (0x1/0x2) or continuation (0x0) frame can legally
+    /// be accepted into the current reassembly state. This mirrors `accumulate`'s
+    /// rejection conditions but runs pre-read, so a malformed or oversized frame is
+    /// rejected without ever allocating (and, when masked, copying) a payload the
+    /// server would immediately discard — bounding per-connection memory to ~1× the
+    /// cap instead of ~3× (issue #5674 review). Only frames this returns `.read`
+    /// for reach `accumulate`, which stays the post-read authority for the accepted
+    /// paths (defense in depth).
+    static func preReadDataFrameDecision(
+        opcode: UInt8,
+        declaredPayloadLength: UInt64,
+        inProgressOpcode: UInt8?,
         alreadyBuffered: Int,
         maxTotal: UInt64 = maxFramePayloadLength
-    ) -> Bool {
-        UInt64(alreadyBuffered) + payloadLength > maxTotal
+    ) -> FramePreReadDecision {
+        switch opcode {
+        case 0x01, 0x02:
+            if inProgressOpcode != nil {
+                return .reject("new data frame (opcode 0x\(String(opcode, radix: 16))) while a fragmented message is open")
+            }
+            guard declaredPayloadLength <= maxTotal else {
+                return .reject("frame payload exceeds \(maxTotal) bytes")
+            }
+            return .read
+        case 0x00:
+            guard inProgressOpcode != nil else {
+                return .reject("continuation frame with no message in progress")
+            }
+            guard UInt64(alreadyBuffered) + declaredPayloadLength <= maxTotal else {
+                return .reject("reassembled message exceeds \(maxTotal) bytes")
+            }
+            return .read
+        default:
+            return .reject("unsupported opcode 0x\(String(opcode, radix: 16))")
+        }
     }
 
     /// Unmask a masked WebSocket frame whose first 4 bytes are the masking key and
@@ -1188,15 +1220,19 @@ class WebSocketConnection: WebSocketResponding {
             return
         }
 
-        // Reject a continuation that would overflow the total reassembly budget
-        // from its header, before receiving/unmasking its payload, so a malformed
-        // peer cannot make the runner allocate ~3× the cap per connection (§5.4;
-        // issue #5674 review). The post-append bound in `accumulate` still guards
-        // correctness for the paths that do read.
-        if opcode == 0x00,
-           fragmentedOpcode != nil,
-           Self.continuationExceedsReassemblyBudget(payloadLength: length, alreadyBuffered: fragmentBuffer.count) {
-            print("[WebSocketConnection] Continuation would exceed reassembly budget (\(fragmentBuffer.count) + \(length) > \(Self.maxFramePayloadLength)), closing connection")
+        // Reject any malformed or over-budget data/continuation frame from its
+        // header, before receiving/unmasking its payload, so a malformed peer
+        // cannot make the runner allocate a frame it would immediately discard
+        // (§5.4; issue #5674 review). `accumulate` still enforces the same
+        // conditions post-read as defense in depth for the accepted paths.
+        if Self.isDataOrContinuation(opcode),
+           case let .reject(reason) = Self.preReadDataFrameDecision(
+               opcode: opcode,
+               declaredPayloadLength: length,
+               inProgressOpcode: fragmentedOpcode,
+               alreadyBuffered: fragmentBuffer.count
+           ) {
+            print("[WebSocketConnection] Fragmentation protocol error (pre-read): \(reason), closing connection")
             fragmentedOpcode = nil
             fragmentBuffer = Data()
             onClose()

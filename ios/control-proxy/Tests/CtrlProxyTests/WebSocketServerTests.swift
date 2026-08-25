@@ -836,20 +836,43 @@ final class WebSocketServerTests: XCTestCase {
         )
     }
 
-    /// AC4: the total-size budget is enforced from the continuation frame's
-    /// declared header length *before* its payload is received/unmasked, so an
-    /// oversized continuation is rejected without allocating ~3× the cap. The cap
-    /// is inclusive (filling it exactly is allowed).
-    func testContinuationBudgetIsCheckedFromHeaderInclusive() {
-        // Exactly filling the remaining budget is allowed.
-        XCTAssertFalse(WebSocketConnection.continuationExceedsReassemblyBudget(payloadLength: 10, alreadyBuffered: 0, maxTotal: 10))
-        XCTAssertFalse(WebSocketConnection.continuationExceedsReassemblyBudget(payloadLength: 4, alreadyBuffered: 6, maxTotal: 10))
-        // One byte over the remaining budget is rejected.
-        XCTAssertTrue(WebSocketConnection.continuationExceedsReassemblyBudget(payloadLength: 5, alreadyBuffered: 6, maxTotal: 10))
-        // The real vector: a second ~64 MiB continuation on top of a full buffer.
+    /// AC4/AC5: malformed or over-budget data/continuation frames are rejected
+    /// from the header, *before* the payload is received/unmasked, so a malformed
+    /// peer cannot make the runner allocate a frame it will immediately discard.
+    /// This mirrors `accumulate`'s rejections but pre-read, and covers every
+    /// admissible/inadmissible header combination.
+    func testPreReadDataFrameDecisionRejectsBeforeAllocating() {
+        typealias Decision = WebSocketConnection.FramePreReadDecision
         let max = WebSocketConnection.maxFramePayloadLength
-        XCTAssertTrue(WebSocketConnection.continuationExceedsReassemblyBudget(payloadLength: max, alreadyBuffered: Int(max)))
-        XCTAssertFalse(WebSocketConnection.continuationExceedsReassemblyBudget(payloadLength: max, alreadyBuffered: 0))
+
+        // Admissible: a fresh single/opening data frame within the cap.
+        XCTAssertEqual(
+            WebSocketConnection.preReadDataFrameDecision(opcode: 0x01, declaredPayloadLength: 100, inProgressOpcode: nil, alreadyBuffered: 0),
+            Decision.read
+        )
+        // Admissible: a continuation that fits the remaining budget exactly.
+        XCTAssertEqual(
+            WebSocketConnection.preReadDataFrameDecision(opcode: 0x00, declaredPayloadLength: 4, inProgressOpcode: 0x01, alreadyBuffered: 6, maxTotal: 10),
+            Decision.read
+        )
+
+        // The Codex vector: a new data frame declared while a fragment is open —
+        // illegal, and must be rejected before its ~64 MiB payload is read.
+        guard case .reject = WebSocketConnection.preReadDataFrameDecision(opcode: 0x02, declaredPayloadLength: max, inProgressOpcode: 0x01, alreadyBuffered: Int(max)) else {
+            return XCTFail("a new data frame while a fragment is open must be rejected pre-read")
+        }
+        // A continuation that would overflow the total budget — rejected pre-read.
+        guard case .reject = WebSocketConnection.preReadDataFrameDecision(opcode: 0x00, declaredPayloadLength: 5, inProgressOpcode: 0x01, alreadyBuffered: 6, maxTotal: 10) else {
+            return XCTFail("an over-budget continuation must be rejected pre-read")
+        }
+        // A continuation with no message in progress — rejected pre-read.
+        guard case .reject = WebSocketConnection.preReadDataFrameDecision(opcode: 0x00, declaredPayloadLength: 1, inProgressOpcode: nil, alreadyBuffered: 0) else {
+            return XCTFail("an orphan continuation must be rejected pre-read")
+        }
+        // A single data frame larger than the whole cap — rejected pre-read.
+        guard case .reject = WebSocketConnection.preReadDataFrameDecision(opcode: 0x01, declaredPayloadLength: max + 1, inProgressOpcode: nil, alreadyBuffered: 0) else {
+            return XCTFail("an over-cap opening frame must be rejected pre-read")
+        }
     }
 
     /// AC1/AC2/AC3 end-to-end over a real socket: a client command split across

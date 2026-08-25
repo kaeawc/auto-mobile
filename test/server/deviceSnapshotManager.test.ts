@@ -89,8 +89,6 @@ describe("deviceSnapshotManager", () => {
       includeSettings: true,
       useVmSnapshot: true,
       strictBackupMode: false,
-      backupTimeoutMs: 10000,
-      userApps: "current",
       vmSnapshotTimeoutMs: 12000,
       maxArchiveSizeMb: 1,
     };
@@ -327,8 +325,6 @@ describe("deviceSnapshotManager", () => {
       includeSettings: true,
       useVmSnapshot: true,
       strictBackupMode: false,
-      backupTimeoutMs: 0,
-      userApps: "current",
       vmSnapshotTimeoutMs: 0,
       maxArchiveSizeMb: 100,
     };
@@ -336,9 +332,7 @@ describe("deviceSnapshotManager", () => {
 
     const config = await getDeviceSnapshotConfig();
 
-    expect(config.backupTimeoutMs).toBeGreaterThan(0);
     expect(config.vmSnapshotTimeoutMs).toBeGreaterThan(0);
-    expect(config.backupTimeoutMs).toBe(30000);
     expect(config.vmSnapshotTimeoutMs).toBe(30000);
   });
 });

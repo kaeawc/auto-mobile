@@ -54,7 +54,7 @@ export interface DeviceSnapshotManifest {
     failedPackages?: string[];
     totalPackages?: number;
     backupTimedOut?: boolean;
-    backupMethod?: "adb_backup" | "root_pull" | "none" | "simctl_copy";
+    backupMethod?: "root_pull" | "none" | "simctl_copy";
     /**
      * iOS-only per-bundle outcome for each requested `appBundleIds` entry, so a
      * caller can tell an installed-and-captured app apart from one that was
@@ -72,8 +72,6 @@ export interface DeviceSnapshotConfig {
   includeSettings: boolean;
   useVmSnapshot: boolean;
   strictBackupMode: boolean;
-  backupTimeoutMs: number;
-  userApps: "current" | "all";
   vmSnapshotTimeoutMs: number;
   maxArchiveSizeMb: number;
 }
@@ -83,8 +81,6 @@ export interface DeviceSnapshotConfigInput {
   includeSettings?: boolean | string;
   useVmSnapshot?: boolean | string;
   strictBackupMode?: boolean | string;
-  backupTimeoutMs?: number | string;
-  userApps?: "current" | "all" | string;
   vmSnapshotTimeoutMs?: number | string;
   maxArchiveSizeMb?: number | string;
 }

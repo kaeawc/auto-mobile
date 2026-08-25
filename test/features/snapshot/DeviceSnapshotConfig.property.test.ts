@@ -21,9 +21,6 @@ const positiveNumber = fc.oneof(
 
 describe("parseDeviceSnapshotConfig (property-based)", () => {
   test("the (0, 0.5) rounding-to-zero repro no longer returns 0", () => {
-    expect(parseDeviceSnapshotConfig({ backupTimeoutMs: 0.3 }).backupTimeoutMs).toBe(
-      DEFAULT_DEVICE_SNAPSHOT_CONFIG.backupTimeoutMs,
-    );
     expect(parseDeviceSnapshotConfig({ vmSnapshotTimeoutMs: 0.3 }).vmSnapshotTimeoutMs).toBe(
       DEFAULT_DEVICE_SNAPSHOT_CONFIG.vmSnapshotTimeoutMs,
     );
@@ -31,17 +28,11 @@ describe("parseDeviceSnapshotConfig (property-based)", () => {
 
   test("integer timeout fields are always positive integers for positive input", () => {
     fc.assert(
-      fc.property(positiveNumber, positiveNumber, (backup, vm) => {
+      fc.property(positiveNumber, (vm) => {
         const config = parseDeviceSnapshotConfig({
-          backupTimeoutMs: backup,
           vmSnapshotTimeoutMs: vm,
         });
-        return (
-          Number.isInteger(config.backupTimeoutMs) &&
-          config.backupTimeoutMs > 0 &&
-          Number.isInteger(config.vmSnapshotTimeoutMs) &&
-          config.vmSnapshotTimeoutMs > 0
-        );
+        return Number.isInteger(config.vmSnapshotTimeoutMs) && config.vmSnapshotTimeoutMs > 0;
       }),
       RUN_OPTIONS,
     );
@@ -58,15 +49,13 @@ describe("parseDeviceSnapshotConfig (property-based)", () => {
 
   test("parsing is idempotent: parse(parse(x)) === parse(x)", () => {
     fc.assert(
-      fc.property(positiveNumber, positiveNumber, positiveNumber, (backup, vm, size) => {
+      fc.property(positiveNumber, positiveNumber, (vm, size) => {
         const once = parseDeviceSnapshotConfig({
-          backupTimeoutMs: backup,
           vmSnapshotTimeoutMs: vm,
           maxArchiveSizeMb: size,
         });
         const twice = parseDeviceSnapshotConfig(once);
         return (
-          twice.backupTimeoutMs === once.backupTimeoutMs &&
           twice.vmSnapshotTimeoutMs === once.vmSnapshotTimeoutMs &&
           twice.maxArchiveSizeMb === once.maxArchiveSizeMb
         );
@@ -83,12 +72,10 @@ describe("parseDeviceSnapshotConfig (property-based)", () => {
     fc.assert(
       fc.property(nonPositive, (value) => {
         const config = parseDeviceSnapshotConfig({
-          backupTimeoutMs: value,
           vmSnapshotTimeoutMs: value,
           maxArchiveSizeMb: value,
         });
         return (
-          config.backupTimeoutMs === DEFAULT_DEVICE_SNAPSHOT_CONFIG.backupTimeoutMs &&
           config.vmSnapshotTimeoutMs === DEFAULT_DEVICE_SNAPSHOT_CONFIG.vmSnapshotTimeoutMs &&
           config.maxArchiveSizeMb === DEFAULT_DEVICE_SNAPSHOT_CONFIG.maxArchiveSizeMb
         );

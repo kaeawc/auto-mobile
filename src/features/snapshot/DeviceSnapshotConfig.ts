@@ -5,13 +5,9 @@ export const DEFAULT_DEVICE_SNAPSHOT_CONFIG: DeviceSnapshotConfig = {
   includeSettings: true,
   useVmSnapshot: true,
   strictBackupMode: false,
-  backupTimeoutMs: 30000,
-  userApps: "current",
   vmSnapshotTimeoutMs: 30000,
   maxArchiveSizeMb: 100,
 };
-
-const USER_APPS_VALUES = new Set(["current", "all"]);
 
 function parseBoolean(value: boolean | string | undefined, fallback: boolean): boolean {
   if (typeof value === "boolean") {
@@ -50,17 +46,6 @@ function parsePositiveNumber(
   return result > 0 ? result : fallback;
 }
 
-function parseUserApps(value: string | undefined, fallback: "current" | "all"): "current" | "all" {
-  if (!value) {
-    return fallback;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (USER_APPS_VALUES.has(normalized)) {
-    return normalized as "current" | "all";
-  }
-  return fallback;
-}
-
 export function parseDeviceSnapshotConfig(
   input: DeviceSnapshotConfigInput | null | undefined,
 ): DeviceSnapshotConfig {
@@ -82,15 +67,6 @@ export function parseDeviceSnapshotConfig(
     strictBackupMode: parseBoolean(
       safeInput.strictBackupMode,
       DEFAULT_DEVICE_SNAPSHOT_CONFIG.strictBackupMode,
-    ),
-    backupTimeoutMs: parsePositiveNumber(
-      safeInput.backupTimeoutMs,
-      DEFAULT_DEVICE_SNAPSHOT_CONFIG.backupTimeoutMs,
-      false,
-    ),
-    userApps: parseUserApps(
-      typeof safeInput.userApps === "string" ? safeInput.userApps : undefined,
-      DEFAULT_DEVICE_SNAPSHOT_CONFIG.userApps,
     ),
     vmSnapshotTimeoutMs: parsePositiveNumber(
       safeInput.vmSnapshotTimeoutMs,

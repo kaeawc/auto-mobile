@@ -71,8 +71,6 @@ describe("config manager default repositories", () => {
       includeSettings: true,
       useVmSnapshot: false,
       strictBackupMode: true,
-      backupTimeoutMs: 12000,
-      userApps: "all",
       vmSnapshotTimeoutMs: 34000,
       maxArchiveSizeMb: 12,
     };

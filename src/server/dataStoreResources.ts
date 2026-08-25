@@ -1,4 +1,4 @@
-import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
+import { ResourceRegistry, ResourceContent, getRequestedResourceUri } from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
@@ -135,6 +135,32 @@ function jsonContent(uri: string, body: Record<string, unknown>): ResourceConten
   return { uri, mimeType: "application/json", text: JSON.stringify(body, null, 2) };
 }
 
+// Decode a percent-encoded path segment, returning null when the encoding is
+// malformed. A host-defined adapter or store name may contain a literal `%`
+// that is not valid percent-encoding; letting decodeURIComponent's URIError
+// escape would bypass the JSON diagnostic envelope, exactly the failure mode
+// #5686 fixed for query params — here for path params.
+function safeDecodeSegment(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    logger.debug(`[DataStoreResources] Malformed URI segment '${value}': ${error}`);
+    return null;
+  }
+}
+
+// Structured diagnostic for a URI whose path segments are not valid
+// percent-encoding, served on the originally-requested URI so the client still
+// gets a typed JSON envelope rather than a raw MCP error.
+function malformedUriContent(params: Record<string, string>): ResourceContent {
+  return jsonContent(getRequestedResourceUri(params) ?? "", {
+    status: "unavailable",
+    kind: RESOURCE_KIND,
+    deviceId: params.deviceId,
+    reason: "Malformed resource URI: a path segment is not valid percent-encoding.",
+  });
+}
+
 // Resolve the key_value capability for one operation from the storage-capabilities
 // model (#5602), so DataStore diagnostics stay consistent with the capability
 // resource a client would otherwise negotiate against.
@@ -212,8 +238,11 @@ async function getDataStoresResource(
   reader: DataStoreResourceReader,
 ): Promise<ResourceContent> {
   const deviceId = params.deviceId;
-  const packageName = decodeURIComponent(params.packageName);
-  const adapterName = decodeURIComponent(params.adapterName);
+  const packageName = safeDecodeSegment(params.packageName);
+  const adapterName = safeDecodeSegment(params.adapterName);
+  if (packageName === null || adapterName === null) {
+    return malformedUriContent(params);
+  }
   const uri = buildStoresUri(deviceId, packageName, adapterName);
 
   const gate = await resolveReadable(deviceId, packageName, adapterName, "list");
@@ -267,9 +296,12 @@ async function getDataStoreEntriesResource(
   reader: DataStoreResourceReader,
 ): Promise<ResourceContent> {
   const deviceId = params.deviceId;
-  const packageName = decodeURIComponent(params.packageName);
-  const adapterName = decodeURIComponent(params.adapterName);
-  const storeName = decodeURIComponent(params.storeName);
+  const packageName = safeDecodeSegment(params.packageName);
+  const adapterName = safeDecodeSegment(params.adapterName);
+  const storeName = safeDecodeSegment(params.storeName);
+  if (packageName === null || adapterName === null || storeName === null) {
+    return malformedUriContent(params);
+  }
   const uri = buildEntriesUri(deviceId, packageName, adapterName, storeName);
 
   const gate = await resolveReadable(deviceId, packageName, adapterName, "read");

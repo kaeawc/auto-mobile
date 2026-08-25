@@ -196,6 +196,21 @@ describe("dataStoreResources", () => {
     expect(String(body.reason)).toContain("adapter");
   });
 
+  test("returns a structured envelope for a malformed percent-encoded segment (not a raw throw)", async () => {
+    // A host-defined adapter name with a literal `%` that is not valid
+    // percent-encoding must yield a typed JSON diagnostic, not a URIError that
+    // escapes the resource handler (cf. #5686 for query params).
+    setup([androidEmulator]);
+    const uri = "automobile:devices/emulator-5554/storage/com.example.app/datastore/wei%rd/stores";
+    const content = await readResource(uri);
+    expect(content.mimeType).toBe("application/json");
+    expect(content.uri).toBe(uri);
+    const body = JSON.parse(content.text ?? "{}");
+    expect(body.status).toBe("unavailable");
+    expect(body.kind).toBe("datastore");
+    expect(String(body.reason)).toContain("percent-encoding");
+  });
+
   // --- Update behavior (AC3) -------------------------------------------------
 
   test("notifies subscribers when the DataStore listing changes between reads", async () => {

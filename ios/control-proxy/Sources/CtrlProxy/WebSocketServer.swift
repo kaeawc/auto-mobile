@@ -628,12 +628,97 @@ public class WebSocketServer: WebSocketServing {
     }
 }
 
+// MARK: - Byte transport seam
+
+/// The lifecycle transitions `WebSocketConnection` reacts to, distilled from the
+/// `NWConnection.State` cases it actually acts on (`.ready` starts the handshake
+/// read; `.failed`/`.cancelled` fire the one-shot close). Modeling only these
+/// keeps the test seam small while preserving the exact behavior.
+enum ByteChannelState {
+    case ready
+    case failed
+    case cancelled
+}
+
+/// The minimal byte-transport surface `WebSocketConnection` needs from its
+/// socket: start, a state callback, length-bounded receive, framed send, and
+/// cancel. `NWByteChannel` is the production implementation (a 1:1 forward to
+/// `NWConnection`); `WebSocketServerTests` injects a scripted fake so framing
+/// tests can drive the handshake→frame handoff, the EOF-coalescing path, ping
+/// consume, fragmentation reassembly, and close-path teardown with exact byte
+/// chunks — without a live `NWConnection` or any dependence on TCP segmentation
+/// (issue #5680). The `receive` signature mirrors `NWConnection.receive`'s
+/// completion shape (data, isComplete, error), dropping only the unused
+/// `ContentContext`.
+protocol ByteChannel: AnyObject {
+    /// Invoked on each lifecycle transition the connection cares about. Set
+    /// before `start` and delivered on the channel's queue in production.
+    var onState: ((ByteChannelState) -> Void)? { get set }
+    func start(queue: DispatchQueue)
+    func receive(
+        minimumIncompleteLength: Int,
+        maximumLength: Int,
+        completion: @escaping (Data?, Bool, Error?) -> Void
+    )
+    func send(_ data: Data, completion: @escaping (Error?) -> Void)
+    func cancel()
+}
+
+/// Production `ByteChannel` backed by a real `NWConnection`. Forwards every call
+/// unchanged so the wire behavior is identical to talking to `NWConnection`
+/// directly; the only reason it exists is to let tests substitute a scripted
+/// channel at the same seam (issue #5680).
+final class NWByteChannel: ByteChannel {
+    private let connection: NWConnection
+    var onState: ((ByteChannelState) -> Void)?
+
+    init(_ connection: NWConnection) {
+        self.connection = connection
+    }
+
+    func start(queue: DispatchQueue) {
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready:
+                self?.onState?(.ready)
+            case .failed:
+                self?.onState?(.failed)
+            case .cancelled:
+                self?.onState?(.cancelled)
+            default:
+                break
+            }
+        }
+        connection.start(queue: queue)
+    }
+
+    func receive(
+        minimumIncompleteLength: Int,
+        maximumLength: Int,
+        completion: @escaping (Data?, Bool, Error?) -> Void
+    ) {
+        connection.receive(minimumIncompleteLength: minimumIncompleteLength, maximumLength: maximumLength) { data, _, isComplete, error in
+            completion(data, isComplete, error)
+        }
+    }
+
+    func send(_ data: Data, completion: @escaping (Error?) -> Void) {
+        connection.send(content: data, completion: .contentProcessed { error in
+            completion(error)
+        })
+    }
+
+    func cancel() {
+        connection.cancel()
+    }
+}
+
 // MARK: - WebSocket Connection
 
 /// Handles a single WebSocket connection with handshake and framing
 class WebSocketConnection: WebSocketResponding {
     let id: Int
-    private let connection: NWConnection
+    private let channel: ByteChannel
     private let queue: DispatchQueue
     private let onMessage: (Data) -> Void
     private let onClose: () -> Void
@@ -675,7 +760,35 @@ class WebSocketConnection: WebSocketResponding {
     /// `queue`, so it needs no lock (same invariant as the reassembly state).
     private var didFireClose = false
 
+    /// Designated initializer over the `ByteChannel` seam. Production wraps a real
+    /// `NWConnection` (see the `connection:` convenience init); tests inject a
+    /// scripted channel to drive framing deterministically (issue #5680).
     init(
+        id: Int,
+        channel: ByteChannel,
+        queue: DispatchQueue,
+        boundPort: UInt16,
+        sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
+        onSdkHierarchyUpdated: (() -> Void)? = nil,
+        onUpgrade: (() -> Void)? = nil,
+        onMessage: @escaping (Data) -> Void,
+        onClose: @escaping () -> Void
+    ) {
+        self.id = id
+        self.channel = channel
+        self.queue = queue
+        self.boundPort = boundPort
+        self.sdkHierarchyCache = sdkHierarchyCache
+        self.onSdkHierarchyUpdated = onSdkHierarchyUpdated
+        self.onUpgrade = onUpgrade
+        self.onMessage = onMessage
+        self.onClose = onClose
+    }
+
+    /// Production convenience initializer: wraps a real `NWConnection` in an
+    /// `NWByteChannel`. Keeps the call site in `handleNewConnection` (and the
+    /// existing socket-free tests that pass an unstarted `NWConnection`) unchanged.
+    convenience init(
         id: Int,
         connection: NWConnection,
         queue: DispatchQueue,
@@ -686,34 +799,34 @@ class WebSocketConnection: WebSocketResponding {
         onMessage: @escaping (Data) -> Void,
         onClose: @escaping () -> Void
     ) {
-        self.id = id
-        self.connection = connection
-        self.queue = queue
-        self.boundPort = boundPort
-        self.sdkHierarchyCache = sdkHierarchyCache
-        self.onSdkHierarchyUpdated = onSdkHierarchyUpdated
-        self.onUpgrade = onUpgrade
-        self.onMessage = onMessage
-        self.onClose = onClose
+        self.init(
+            id: id,
+            channel: NWByteChannel(connection),
+            queue: queue,
+            boundPort: boundPort,
+            sdkHierarchyCache: sdkHierarchyCache,
+            onSdkHierarchyUpdated: onSdkHierarchyUpdated,
+            onUpgrade: onUpgrade,
+            onMessage: onMessage,
+            onClose: onClose
+        )
     }
 
     func start() {
-        connection.stateUpdateHandler = { [weak self] state in
+        channel.onState = { [weak self] state in
             switch state {
             case .ready:
                 self?.receiveHTTPUpgrade()
             case .failed, .cancelled:
                 self?.fireOnClose()
-            default:
-                break
             }
         }
 
-        connection.start(queue: queue)
+        channel.start(queue: queue)
     }
 
     func close() {
-        connection.cancel()
+        channel.cancel()
     }
 
     /// Deterministically tears the socket down on an error/close path by
@@ -726,7 +839,7 @@ class WebSocketConnection: WebSocketResponding {
     /// `.cancelled` stays safe. Runs on the server `queue` (every receive/send
     /// completion does), so it needs no lock.
     private func closeConnection() {
-        connection.cancel()
+        channel.cancel()
     }
 
     /// Invokes the `onClose` callback at most once per connection. Called only from
@@ -744,17 +857,17 @@ class WebSocketConnection: WebSocketResponding {
 
     func send(_ data: Data) {
         let frame = Self.createWebSocketFrame(data: data, opcode: 0x01) // Text frame
-        connection.send(content: frame, completion: .contentProcessed { error in
+        channel.send(frame) { error in
             if let error = error {
                 print("[WebSocketConnection] Send error: \(error)")
             }
-        })
+        }
     }
 
     // MARK: - WebSocket Handshake
 
     private func receiveHTTPUpgrade() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: Self.maximumHTTPRequestLength) { [weak self] data, _, isComplete, error in
+        channel.receive(minimumIncompleteLength: 1, maximumLength: Self.maximumHTTPRequestLength) { [weak self] data, isComplete, error in
             guard let self = self else { return }
 
             if let error = error {
@@ -776,7 +889,7 @@ class WebSocketConnection: WebSocketResponding {
             self.inboundBuffer.append(data)
             guard self.inboundBuffer.count <= Self.maximumHTTPRequestLength else {
                 print("[WebSocketConnection] HTTP request exceeds maximum length")
-                self.connection.cancel()
+                self.channel.cancel()
                 return
             }
 
@@ -788,7 +901,7 @@ class WebSocketConnection: WebSocketResponding {
             let requestData = Data(self.inboundBuffer.prefix(requestLength))
             self.inboundBuffer.removeFirst(requestLength)
             guard let request = String(data: requestData, encoding: .utf8) else {
-                self.connection.cancel()
+                self.channel.cancel()
                 return
             }
 
@@ -864,9 +977,9 @@ class WebSocketConnection: WebSocketResponding {
         let header = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\n\r\n"
         var response = Data(header.utf8)
         response.append(body)
-        connection.send(content: response, completion: .contentProcessed { [weak self] _ in
-            self?.connection.cancel()
-        })
+        channel.send(response) { [weak self] _ in
+            self?.channel.cancel()
+        }
     }
 
     private static func currentDeviceId() -> String? {
@@ -895,9 +1008,9 @@ class WebSocketConnection: WebSocketResponding {
             print("[CtrlProxy] POST /sdk-events: no header separator found in \(request.count) chars")
         }
         let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 13\r\n\r\n{\"ok\":true}\r\n"
-        connection.send(content: response.data(using: .utf8), completion: .contentProcessed { [weak self] _ in
-            self?.connection.cancel()
-        })
+        channel.send(Data(response.utf8)) { [weak self] _ in
+            self?.channel.cancel()
+        }
     }
 
     private func handleSdkEventsGet() {
@@ -912,9 +1025,9 @@ class WebSocketConnection: WebSocketResponding {
         let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(bodyData.count)\r\n\r\n"
         var responseData = response.data(using: .utf8) ?? Data()
         responseData.append(bodyData)
-        connection.send(content: responseData, completion: .contentProcessed { [weak self] _ in
-            self?.connection.cancel()
-        })
+        channel.send(responseData) { [weak self] _ in
+            self?.channel.cancel()
+        }
     }
 
     private func handleWebSocketUpgrade(_ request: String) {
@@ -924,7 +1037,7 @@ class WebSocketConnection: WebSocketResponding {
             let key = keyLine.split(separator: ":").last?.trimmingCharacters(in: .whitespaces)
         else {
             print("[WebSocketConnection] Missing Sec-WebSocket-Key")
-            connection.cancel()
+            channel.cancel()
             return
         }
 
@@ -943,7 +1056,7 @@ class WebSocketConnection: WebSocketResponding {
 
         """
 
-        connection.send(content: response.data(using: .utf8), completion: .contentProcessed { [weak self] error in
+        channel.send(Data(response.utf8)) { [weak self] error in
             if let error = error {
                 print("[WebSocketConnection] Upgrade send error: \(error)")
                 self?.closeConnection()
@@ -954,7 +1067,7 @@ class WebSocketConnection: WebSocketResponding {
             self?.onUpgrade?()
             self?.sendConnectedEvent()
             self?.receiveWebSocketFrame()
-        })
+        }
     }
 
     private func sendConnectedEvent() {
@@ -1004,7 +1117,7 @@ class WebSocketConnection: WebSocketResponding {
         }
 
         let needed = count - inboundBuffer.count
-        connection.receive(minimumIncompleteLength: needed, maximumLength: needed) { [weak self] data, _, isComplete, error in
+        channel.receive(minimumIncompleteLength: needed, maximumLength: needed) { [weak self] data, isComplete, error in
             guard let self = self else { return }
 
             if let error = error {
@@ -1405,7 +1518,7 @@ class WebSocketConnection: WebSocketResponding {
             case let .pong(applicationData):
                 // Echo the ping application data back in the pong (§5.5.3).
                 let pongFrame = Self.createWebSocketFrame(data: applicationData, opcode: 0x0A)
-                self.connection.send(content: pongFrame, completion: .contentProcessed { _ in })
+                self.channel.send(pongFrame) { _ in }
             case .ignore:
                 break
             }
@@ -1477,9 +1590,9 @@ class WebSocketConnection: WebSocketResponding {
         // Cancel from the send completion — as the HTTP responders do — so the
         // close frame reaches the peer before the TCP teardown; the resulting
         // `.cancelled` transition fires `onClose` exactly once (issue #5677).
-        connection.send(content: frame, completion: .contentProcessed { [weak self] _ in
-            self?.connection.cancel()
-        })
+        channel.send(frame) { [weak self] _ in
+            self?.channel.cancel()
+        }
     }
 }
 

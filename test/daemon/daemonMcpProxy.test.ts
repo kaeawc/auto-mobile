@@ -466,6 +466,152 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    describe("in-progress daemon startup (issue #5664)", () => {
+      // The daemon writes an "early owner" PID record (daemon.ts writeEarlyOwnerRecord)
+      // BEFORE publishing its Unix socket — the socket appears seconds later after DB
+      // init, device-pool discovery, and iOS services come up. During that window
+      // status().running is true but the socket does not exist yet, so a client's
+      // first request must WAIT for socket publication behind the bounded readiness
+      // path instead of failing immediately with "Daemon socket not found".
+      class StartingDaemonManager extends FakeDaemonManager {
+        socketPublished = false;
+        waitForReadyCalls = 0;
+        publishOnWaitForReady = true;
+
+        override async waitForReady(_timeout: number): Promise<boolean> {
+          this.waitForReadyCalls++;
+          if (this.publishOnWaitForReady) {
+            // Model the bounded readiness path observing the socket become
+            // connectable once the starting daemon finishes publishing it.
+            this.socketPublished = true;
+            return true;
+          }
+          return false;
+        }
+      }
+
+      // A client that mirrors the real DaemonClient: connecting before the socket is
+      // published throws the terminal "Daemon socket not found" error.
+      class SocketGatedClient implements DaemonClientLike {
+        connectCallCount = 0;
+        closeCallCount = 0;
+        constructor(private readonly manager: StartingDaemonManager) {}
+        async connect(): Promise<void> {
+          this.connectCallCount++;
+          if (!this.manager.socketPublished) {
+            throw new DaemonUnavailableError("Daemon socket not found: /tmp/test.sock");
+          }
+        }
+        async close(): Promise<void> {
+          this.closeCallCount++;
+        }
+        async callTool(): Promise<any> {
+          return { content: [{ type: "text", text: "success" }] };
+        }
+        async readResource(): Promise<any> {
+          return { contents: [] };
+        }
+        async callDaemonMethod(): Promise<any> {
+          return { tools: [] };
+        }
+      }
+
+      test("waits for socket publication when the daemon reports running but the socket is not yet published", async () => {
+        const fakeManager = new StartingDaemonManager();
+        fakeManager.statusResult = {
+          running: true,
+          pid: 1234,
+          port: 3000,
+          socketPath: "/tmp/test.sock",
+          version: DAEMON_VERSION,
+        };
+        const client = new SocketGatedClient(fakeManager);
+        // The socket is not published yet, so the observation-only availability
+        // probe fails and auto-start engages.
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
+
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => client,
+          daemonManager: fakeManager,
+          autoStartDaemon: true,
+        });
+
+        try {
+          await proxy.listTools();
+
+          // The bounded readiness path was consulted before connecting, and the
+          // client connected successfully once the socket was published.
+          expect(fakeManager.waitForReadyCalls).toBeGreaterThanOrEqual(1);
+          expect(client.connectCallCount).toBe(1);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("throws an actionable startup error when the socket is never published", async () => {
+        const fakeManager = new StartingDaemonManager();
+        fakeManager.publishOnWaitForReady = false;
+        fakeManager.statusResult = {
+          running: true,
+          pid: 1234,
+          port: 3000,
+          socketPath: "/tmp/test.sock",
+          version: DAEMON_VERSION,
+        };
+        const client = new SocketGatedClient(fakeManager);
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
+
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => client,
+          daemonManager: fakeManager,
+          autoStartDaemon: true,
+        });
+
+        try {
+          await expect(proxy.listTools()).rejects.toThrow(/failed to start within \d+ms/);
+          // The readiness deadline gates the connect: the client is never asked to
+          // connect against a socket that was never published.
+          expect(fakeManager.waitForReadyCalls).toBeGreaterThanOrEqual(1);
+          expect(client.connectCallCount).toBe(0);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("coalesces concurrent first requests through a single readiness wait", async () => {
+        const fakeManager = new StartingDaemonManager();
+        fakeManager.statusResult = {
+          running: true,
+          pid: 1234,
+          port: 3000,
+          socketPath: "/tmp/test.sock",
+          version: DAEMON_VERSION,
+        };
+        const client = new SocketGatedClient(fakeManager);
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
+
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => client,
+          daemonManager: fakeManager,
+          autoStartDaemon: true,
+        });
+
+        try {
+          // Two concurrent first requests must share one readiness wait rather than
+          // racing independent launches or probes.
+          await Promise.all([proxy.listTools(), proxy.listTools()]);
+
+          expect(fakeManager.waitForReadyCalls).toBe(1);
+          expect(client.connectCallCount).toBe(1);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+    });
+
     describe("version-mismatch handling", () => {
       function makeProxy(
         opts: {

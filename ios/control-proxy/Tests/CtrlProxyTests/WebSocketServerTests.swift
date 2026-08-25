@@ -1,4 +1,5 @@
 @testable import CtrlProxy
+import Network
 import XCTest
 
 /// Locks the decode-failure → error-response path #2854 moved *out* of
@@ -673,6 +674,248 @@ final class WebSocketServerTests: XCTestCase {
         XCTAssertFalse(WebSocketConnection.isValidControlFramePayloadLength(127))
     }
 
+    // MARK: - Fragmented message reassembly (#5674)
+
+    /// AC2: a single unfragmented frame (FIN=1, text/binary opcode, nothing in
+    /// progress) is delivered verbatim, exactly as before the fragmentation fix.
+    func testSingleUnfragmentedFrameDeliversUnchanged() {
+        let payload = Data("hello".utf8)
+        XCTAssertEqual(
+            WebSocketConnection.reassemble(
+                opcode: 0x01,
+                isFinal: true,
+                payload: payload,
+                inProgressOpcode: nil,
+                accumulated: Data()
+            ),
+            .deliver(payload)
+        )
+    }
+
+    /// AC1/AC6: a two-fragment message (initial FIN=0 text, final FIN=1
+    /// continuation) buffers the first fragment then delivers the ordered
+    /// concatenation once complete.
+    func testTwoFragmentMessageReassembles() {
+        let first = Data("Hello, ".utf8)
+        let second = Data("world!".utf8)
+
+        let initialDecision = WebSocketConnection.reassemble(
+            opcode: 0x01,
+            isFinal: false,
+            payload: first,
+            inProgressOpcode: nil,
+            accumulated: Data()
+        )
+        XCTAssertEqual(initialDecision, .buffered(opcode: 0x01, buffer: first))
+
+        let finalDecision = WebSocketConnection.reassemble(
+            opcode: 0x00,
+            isFinal: true,
+            payload: second,
+            inProgressOpcode: 0x01,
+            accumulated: first
+        )
+        XCTAssertEqual(finalDecision, .deliver(first + second))
+    }
+
+    /// AC1/AC6: a three-fragment binary message (initial FIN=0 binary, a middle
+    /// FIN=0 continuation, a final FIN=1 continuation) reassembles in order and
+    /// carries the initial opcode forward through each continuation.
+    func testThreeFragmentMessageReassemblesInOrder() {
+        let partA = Data("aaa".utf8)
+        let partB = Data("bbb".utf8)
+        let partC = Data("ccc".utf8)
+
+        let initialDecision = WebSocketConnection.reassemble(
+            opcode: 0x02,
+            isFinal: false,
+            payload: partA,
+            inProgressOpcode: nil,
+            accumulated: Data()
+        )
+        XCTAssertEqual(initialDecision, .buffered(opcode: 0x02, buffer: partA))
+
+        let middleDecision = WebSocketConnection.reassemble(
+            opcode: 0x00,
+            isFinal: false,
+            payload: partB,
+            inProgressOpcode: 0x02,
+            accumulated: partA
+        )
+        XCTAssertEqual(middleDecision, .buffered(opcode: 0x02, buffer: partA + partB))
+
+        let finalDecision = WebSocketConnection.reassemble(
+            opcode: 0x00,
+            isFinal: true,
+            payload: partC,
+            inProgressOpcode: 0x02,
+            accumulated: partA + partB
+        )
+        XCTAssertEqual(finalDecision, .deliver(partA + partB + partC))
+    }
+
+    /// AC2: a non-final data frame does not trigger delivery — it is buffered
+    /// with the in-progress opcode recorded.
+    func testNonFinalStartFrameDoesNotDeliver() {
+        let payload = Data("partial".utf8)
+        let decision = WebSocketConnection.reassemble(
+            opcode: 0x01,
+            isFinal: false,
+            payload: payload,
+            inProgressOpcode: nil,
+            accumulated: Data()
+        )
+        XCTAssertEqual(decision, .buffered(opcode: 0x01, buffer: payload))
+        if case .deliver = decision {
+            XCTFail("a non-final frame must not deliver")
+        }
+    }
+
+    /// AC3: a control frame between fragments is handled independently
+    /// (`frameAction` → pong/ignore) and never fed to `reassemble`, so the
+    /// in-progress opcode + accumulated buffer are untouched and the following
+    /// continuation still reassembles into the full message.
+    func testControlFrameBetweenFragmentsDoesNotCorruptReassembly() {
+        let first = Data("frag-".utf8)
+        let initialDecision = WebSocketConnection.reassemble(
+            opcode: 0x01,
+            isFinal: false,
+            payload: first,
+            inProgressOpcode: nil,
+            accumulated: Data()
+        )
+        XCTAssertEqual(initialDecision, .buffered(opcode: 0x01, buffer: first))
+
+        // A ping arriving here routes through frameAction, not reassemble.
+        XCTAssertEqual(WebSocketConnection.frameAction(opcode: 0x09, unmaskedPayload: Data()), .pong(Data()))
+
+        // The continuation resumes from the unchanged in-progress state.
+        let second = Data("done".utf8)
+        let finalDecision = WebSocketConnection.reassemble(
+            opcode: 0x00,
+            isFinal: true,
+            payload: second,
+            inProgressOpcode: 0x01,
+            accumulated: first
+        )
+        XCTAssertEqual(finalDecision, .deliver(first + second))
+    }
+
+    /// AC5/AC6: a continuation frame with no message in progress is a protocol
+    /// error, so the caller closes the connection rather than mis-delivering.
+    func testContinuationWithNoMessageInProgressIsRejected() {
+        let decision = WebSocketConnection.reassemble(
+            opcode: 0x00,
+            isFinal: true,
+            payload: Data("x".utf8),
+            inProgressOpcode: nil,
+            accumulated: Data()
+        )
+        guard case .protocolError = decision else {
+            return XCTFail("a continuation with no in-progress message must be a protocol error")
+        }
+    }
+
+    /// AC5: a new non-control data frame while a fragmented message is still open
+    /// is a protocol error (interleaved data messages are not permitted, §5.4).
+    func testNewDataFrameWhileFragmentOpenIsRejected() {
+        let decision = WebSocketConnection.reassemble(
+            opcode: 0x01,
+            isFinal: false,
+            payload: Data("y".utf8),
+            inProgressOpcode: 0x01,
+            accumulated: Data("open".utf8)
+        )
+        guard case .protocolError = decision else {
+            return XCTFail("a new data frame during an open fragment must be a protocol error")
+        }
+    }
+
+    /// AC4: reassembly is bounded by the total accumulated size — a continuation
+    /// that would push the message past `maxTotal` is a protocol error rather than
+    /// growing the buffer unboundedly.
+    func testReassemblyTotalSizeBoundExceededIsRejected() {
+        let decision = WebSocketConnection.reassemble(
+            opcode: 0x00,
+            isFinal: true,
+            payload: Data("world".utf8), // 5
+            inProgressOpcode: 0x01,
+            accumulated: Data("hello".utf8), // 5, total 10
+            maxTotal: 8
+        )
+        guard case .protocolError = decision else {
+            return XCTFail("exceeding the total reassembled size bound must be a protocol error")
+        }
+    }
+
+    /// AC4: a message whose total lands exactly on the bound is accepted — the
+    /// cap is inclusive, matching `frameReadLength`'s per-frame bound.
+    func testReassemblyAtExactBoundIsAccepted() {
+        let decision = WebSocketConnection.reassemble(
+            opcode: 0x00,
+            isFinal: true,
+            payload: Data("lo".utf8), // 2
+            inProgressOpcode: 0x01,
+            accumulated: Data("hel".utf8), // 3, total 5
+            maxTotal: 5
+        )
+        XCTAssertEqual(decision, .deliver(Data("hello".utf8)))
+    }
+
+    /// AC1/AC2/AC3 end-to-end over a real socket: a client command split across
+    /// two masked WebSocket fragments — with a ping interleaved between them — is
+    /// reassembled by the server and dispatched, so its typed response still comes
+    /// back. Pre-fix the first fragment alone is not valid JSON (or is dropped) and
+    /// the continuation payload is discarded, so no `press_back_result` arrives and
+    /// the wait times out.
+    func testFragmentedCommandReassemblesEndToEnd() throws {
+        let fakeTimeProvider = FakeTimeProvider(initialTime: 1000)
+        perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
+        let handler = CommandHandler.createForTesting(
+            elementLocator: FakeElementLocator(),
+            gesturePerformer: FakeGesturePerformer(),
+            perfProvider: perfProvider
+        )
+        let (server, port) = startServerOnFreePort(commandHandler: handler, perfProvider: perfProvider)
+        defer { server.stop() }
+
+        let client = RawWebSocketClient(port: port)
+        defer { client.close() }
+        try client.connectAndUpgrade(timeout: 10)
+
+        let command = #"{"type":"request_press_back","requestId":"frag-1"}"#
+        let bytes = Array(command.utf8)
+        let mid = bytes.count / 2
+        let first = Data(bytes[0 ..< mid])
+        let second = Data(bytes[mid ..< bytes.count])
+
+        // Initial text fragment (FIN=0, opcode 0x1), an interleaved ping (a
+        // control frame, FIN=1, opcode 0x9), then the final continuation
+        // (FIN=1, opcode 0x0).
+        client.sendFrame(opcode: 0x01, fin: false, payload: first)
+        client.sendFrame(opcode: 0x09, fin: true, payload: Data("ka".utf8))
+        client.sendFrame(opcode: 0x00, fin: true, payload: second)
+
+        // The command dispatches through `runOnMainThread` (`DispatchQueue.main.sync`),
+        // so the main thread must stay in `wait(for:)` pumping its run loop for the
+        // response to be produced — the frame polling therefore runs on a background
+        // queue and reports back via the expectation (mirroring the ping test).
+        let responseBox = Box<[String: Any]?>(nil)
+        let received = expectation(description: "fragmented command response decodes")
+        DispatchQueue.global().async {
+            let object = try? client.waitForMessage(timeout: 12) { object in
+                object["type"] as? String == "press_back_result"
+            }
+            responseBox.value = object
+            received.fulfill()
+        }
+        wait(for: [received], timeout: 15)
+
+        let response = try XCTUnwrap(responseBox.value, "expected a press_back_result response")
+        XCTAssertEqual(response["requestId"] as? String, "frag-1")
+        XCTAssertEqual(response["success"] as? Bool, true)
+    }
+
     // MARK: - Client presence gating (#5477)
 
     /// Presence tracks only upgraded WebSocket clients and fires the hook exactly
@@ -758,6 +1001,190 @@ final class WebSocketServerTests: XCTestCase {
         let slice = full.suffix(from: 2)
 
         XCTAssertEqual(Array(WebSocketConnection.unmaskFrame(slice)), payload)
+    }
+}
+
+/// A minimal raw-socket WebSocket client for tests that need to drive frame-level
+/// behavior `URLSession.webSocketTask` cannot express — specifically sending a
+/// **fragmented** message (FIN=0 initial + continuation frames) with a control
+/// frame interleaved (issue #5674). It performs the HTTP upgrade by hand, then
+/// sends properly masked client frames (RFC 6455 §5.3) and parses the server's
+/// unmasked reply frames back into JSON objects.
+private final class RawWebSocketClient: @unchecked Sendable {
+    enum ClientError: Error {
+        case timeout(String)
+        case handshake(String)
+    }
+
+    private let connection: NWConnection
+    private let queue = DispatchQueue(label: "test.rawws.client")
+    private let lock = NSLock()
+    private var buffer = Data()
+
+    init(port: UInt16) {
+        let params = NWParameters.tcp
+        connection = NWConnection(
+            host: "127.0.0.1",
+            port: NWEndpoint.Port(integerLiteral: port),
+            using: params
+        )
+    }
+
+    func close() {
+        connection.cancel()
+    }
+
+    /// Opens the TCP connection, sends a WebSocket upgrade request, and blocks
+    /// until the `101` response headers are received. Any bytes after the header
+    /// separator (e.g. the server's `connected` event frame) are retained for
+    /// later frame parsing, then a background receive loop is started.
+    func connectAndUpgrade(timeout: TimeInterval) throws {
+        let ready = DispatchSemaphore(value: 0)
+        connection.stateUpdateHandler = { state in
+            if case .ready = state { ready.signal() }
+        }
+        connection.start(queue: queue)
+        guard ready.wait(timeout: .now() + timeout) == .success else {
+            throw ClientError.timeout("connection not ready")
+        }
+
+        let request = [
+            "GET / HTTP/1.1",
+            "Host: 127.0.0.1",
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+            "Sec-WebSocket-Version: 13",
+            "",
+            "",
+        ].joined(separator: "\r\n")
+        connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in })
+
+        let deadline = Date().addingTimeInterval(timeout)
+        var httpBuffer = Data()
+        let separator = Data("\r\n\r\n".utf8)
+        while Date() < deadline {
+            let chunk = try receiveOnce(timeout: deadline.timeIntervalSinceNow)
+            httpBuffer.append(chunk)
+            guard let sepRange = httpBuffer.range(of: separator) else { continue }
+
+            let headerData = httpBuffer.subdata(in: httpBuffer.startIndex ..< sepRange.upperBound)
+            guard let header = String(data: headerData, encoding: .utf8), header.contains("101") else {
+                let headerText = String(data: headerData, encoding: .utf8) ?? "<non-utf8 header>"
+                throw ClientError.handshake("expected 101 Switching Protocols, got: \(headerText)")
+            }
+            let leftover = httpBuffer.subdata(in: sepRange.upperBound ..< httpBuffer.endIndex)
+            lock.lock()
+            buffer.append(leftover)
+            lock.unlock()
+            startReceiveLoop()
+            return
+        }
+        throw ClientError.timeout("handshake headers not received")
+    }
+
+    /// Sends one client→server frame, masked as §5.3 requires. Test payloads are
+    /// all < 126 bytes, so only the 7-bit length form is emitted.
+    func sendFrame(opcode: UInt8, fin: Bool, payload: Data) {
+        var frame = Data()
+        frame.append((fin ? 0x80 : 0x00) | opcode)
+        frame.append(0x80 | UInt8(payload.count)) // mask bit set + 7-bit length
+        let mask: [UInt8] = [0x12, 0x34, 0x56, 0x78]
+        frame.append(contentsOf: mask)
+        for (i, byte) in payload.enumerated() {
+            frame.append(byte ^ mask[i % 4])
+        }
+        connection.send(content: frame, completion: .contentProcessed { _ in })
+    }
+
+    /// Polls parsed server frames until one decodes to a JSON object satisfying
+    /// `predicate`, or the timeout elapses.
+    func waitForMessage(
+        timeout: TimeInterval,
+        where predicate: ([String: Any]) -> Bool
+    ) throws -> [String: Any] {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let object = nextMatchingMessage(predicate) {
+                return object
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        throw ClientError.timeout("no matching message within \(timeout)s")
+    }
+
+    private func receiveOnce(timeout: TimeInterval) throws -> Data {
+        let sem = DispatchSemaphore(value: 0)
+        var received = Data()
+        var caught: Error?
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, _, error in
+            if let error = error { caught = error }
+            if let data = data { received = data }
+            sem.signal()
+        }
+        guard sem.wait(timeout: .now() + max(timeout, 0.1)) == .success else {
+            throw ClientError.timeout("receive timed out")
+        }
+        if let caught = caught { throw caught }
+        return received
+    }
+
+    private func startReceiveLoop() {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
+            guard let self = self else { return }
+            if let data = data, !data.isEmpty {
+                self.lock.lock()
+                self.buffer.append(data)
+                self.lock.unlock()
+            }
+            if error != nil || isComplete { return }
+            self.startReceiveLoop()
+        }
+    }
+
+    /// Consumes complete frames from the head of the buffer, returning the first
+    /// text/binary frame whose JSON body satisfies `predicate`. Control and
+    /// non-matching frames are skipped. Returns nil when no complete matching
+    /// frame is available yet.
+    private func nextMatchingMessage(_ predicate: ([String: Any]) -> Bool) -> [String: Any]? {
+        while true {
+            lock.lock()
+            // Convert to a 0-based array so indexing is safe regardless of the
+            // Data's start index after prior `removeFirst` calls.
+            let bytes = [UInt8](buffer)
+            lock.unlock()
+            guard bytes.count >= 2 else { return nil }
+
+            let firstByte = bytes[0]
+            let secondByte = bytes[1]
+            let opcode = firstByte & 0x0F
+            var payloadLength = Int(secondByte & 0x7F)
+            var headerLength = 2
+            if payloadLength == 126 {
+                guard bytes.count >= 4 else { return nil }
+                payloadLength = Int(bytes[2]) << 8 | Int(bytes[3])
+                headerLength = 4
+            } else if payloadLength == 127 {
+                return nil // not produced by the server for test-sized payloads
+            }
+            let maskLength = (secondByte & 0x80) != 0 ? 4 : 0
+            let totalLength = headerLength + maskLength + payloadLength
+            guard bytes.count >= totalLength else { return nil }
+
+            let payload = Data(bytes[(headerLength + maskLength) ..< totalLength])
+            lock.lock()
+            buffer.removeFirst(totalLength)
+            lock.unlock()
+
+            if opcode == 0x01 || opcode == 0x02 {
+                if let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+                   predicate(object) {
+                    return object
+                }
+            }
+            // Otherwise (control frame, or non-matching data frame) keep parsing.
+            // Otherwise (control frame, or non-matching data frame) keep parsing.
+        }
     }
 }
 

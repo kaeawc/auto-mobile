@@ -5,6 +5,11 @@ import type { DaemonNotification } from "../../src/daemon/types";
 
 export interface FakeDaemonClientOptions {
   toolResult?: any;
+  // Per-tool result override. When it returns a value for a given call, that
+  // value is the tool result instead of `toolResult`; returning undefined falls
+  // back to `toolResult`. Lets a test model a device-acquisition tool minting a
+  // session id in its RESULT (issue #5689) while other tools return "success".
+  toolResultFor?: (toolName: string, params: Record<string, any>) => any;
   resourceResult?: any;
   daemonMethodResults?: Map<string, any>;
   // Invoked inside callTool AFTER the call is recorded but BEFORE it resolves, so
@@ -25,6 +30,7 @@ export class FakeDaemonClient implements DaemonClientLike {
   readonly callDaemonMethodCalls: Array<{ method: string; params: Record<string, any> }> = [];
   private connected = false;
   private toolResult: any;
+  private readonly toolResultFor?: (toolName: string, params: Record<string, any>) => any;
   private resourceResult: any;
   private daemonMethodResults: Map<string, any>;
   private readonly onCallTool?: (
@@ -42,6 +48,7 @@ export class FakeDaemonClient implements DaemonClientLike {
 
   constructor(options: FakeDaemonClientOptions = {}) {
     this.toolResult = options.toolResult ?? { content: [{ type: "text", text: "success" }] };
+    this.toolResultFor = options.toolResultFor;
     this.resourceResult = options.resourceResult ?? { contents: [{ uri: "test", text: "test" }] };
     this.daemonMethodResults = options.daemonMethodResults ?? new Map();
     this.onCallTool = options.onCallTool;
@@ -66,7 +73,8 @@ export class FakeDaemonClient implements DaemonClientLike {
     if (this.onCallTool) {
       await this.onCallTool(toolName, params);
     }
-    return this.toolResult;
+    const perToolResult = this.toolResultFor?.(toolName, params);
+    return perToolResult ?? this.toolResult;
   }
 
   async readResource(uri: string, params: Record<string, any> = {}): Promise<any> {

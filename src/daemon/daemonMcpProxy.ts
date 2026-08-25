@@ -22,6 +22,10 @@ import type { DaemonNotification, DaemonOptions } from "./types";
 import { listChangedKindForMethod, type ListChangedKind } from "../server/listChangedBroadcast";
 import { SESSION_RELEASED_NOTIFICATION_METHOD } from "../server/sessionReleaseBroadcast";
 import {
+  getDeviceSessionIdFromResult,
+  isDeviceSessionAcquisitionTool,
+} from "../server/deviceSessionResult";
+import {
   toolSelectionProfileUuidFromResponse,
   SET_TOOL_ENABLED_TOOL_NAME,
 } from "../features/toolSelection/toolSelectionControl";
@@ -189,6 +193,27 @@ export class DaemonBoundSessionExpiredError extends Error {
     this.sessionUuid = sessionUuid;
     this.reason = reason;
     this.release = release;
+  }
+}
+
+/**
+ * Raised when a call that does NOT reference a specific device session reaches a
+ * connection whose only binding — one MINTED by a device-acquisition RESULT, and
+ * therefore never named by the client — has been terminally released. Naming a
+ * stale UUID the caller never referenced would misattribute the loss; instead
+ * this reports the CURRENT connection state and directs the caller to acquire a
+ * fresh session (issue #5689).
+ */
+export class DaemonConnectionSessionReleasedError extends Error {
+  readonly reason: string;
+
+  constructor(reason: string) {
+    super(
+      `This MCP connection has no active device session (the previous session was released: ${reason}). ` +
+        "Call getAndroid, getApple, or startDevice to acquire a new device session.",
+    );
+    this.name = "DaemonConnectionSessionReleasedError";
+    this.reason = reason;
   }
 }
 
@@ -582,11 +607,25 @@ export class DaemonMcpProxy {
   // refreshing it, the remembered UUID is treated as retired so a sessionless
   // call is not rewritten to a released session (issue #4610).
   private boundSessionUuidAt: number | undefined;
+  // Whether the current binding was minted by a device-acquisition RESULT
+  // (getAndroid/getApple/startDevice), i.e. never named by the client, versus
+  // client-declared (an explicit `sessionUuid` arg, or a startup
+  // `initialSessionUuid`). Governs how a fenced sessionless call is reported: a
+  // client-declared binding keeps the ownership-lost-for-UUID error, while a
+  // result-minted one reports the connection state instead of a stale UUID the
+  // caller never referenced (issue #5689).
+  private boundSessionFromResultMint = false;
   // Once the daemon confirms this transport's bound session is gone, preserve
   // that terminal identity instead of clearing it and allowing the same UUID to
-  // acquire another device.
+  // acquire another device. `fromResultMint` records the binding's provenance at
+  // fence time (see boundSessionFromResultMint).
   private terminalBoundSession:
-    | { sessionUuid: string; reason: string; release?: SessionReleaseSnapshot }
+    | {
+        sessionUuid: string;
+        reason: string;
+        fromResultMint: boolean;
+        release?: SessionReleaseSnapshot;
+      }
     | undefined;
   // Startup bindings remain authoritative until the daemon signals release.
   // Replay expiration only protects bindings inferred from ordinary calls.
@@ -1273,11 +1312,19 @@ export class DaemonMcpProxy {
    * Call a tool on the daemon
    */
   async callTool(name: string, args: Record<string, unknown>): Promise<any> {
+    // Device-session acquisition (getAndroid/getApple/startDevice) mints a NEW
+    // session in its RESULT and is never routed to — or fenced by — the connection's
+    // bound session: it must be admitted even on a terminally fenced connection so
+    // the client can recover in-band (issue #5689). Forward its raw args and bind
+    // the minted session from the result afterwards.
+    const isSessionAcquisition = isDeviceSessionAcquisitionTool(name);
     // An omitted `sessionUuid` on the control tool means the connection profile,
     // not the proxy's retained device-routing session. Preserve that distinction
     // after a device has been bound.
     const routingArgs =
-      name === SET_TOOL_ENABLED_TOOL_NAME ? args : this.withBoundSessionUuid(args);
+      name === SET_TOOL_ENABLED_TOOL_NAME || isSessionAcquisition
+        ? args
+        : this.withBoundSessionUuid(args);
     const forwardedArgs = this.withToolSelectionProfile(routingArgs);
     const forwardedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     this.retainReleaseEpochReference(forwardedSessionUuid);
@@ -1289,11 +1336,21 @@ export class DaemonMcpProxy {
     // so it does not block remembering the session this call forwarded.
     const callReleaseEpoch = this.releaseEpoch;
     try {
-      const result = await this.withRecoverableReconnect(() => {
-        this.throwIfForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch);
-        return this.client!.callTool(name, forwardedArgs);
-      }, forwardedSessionUuid);
+      const result = await this.withRecoverableReconnect(
+        () => {
+          this.throwIfForwardedSessionReleasedSince(forwardedArgs, callReleaseEpoch);
+          return this.client!.callTool(name, forwardedArgs);
+        },
+        forwardedSessionUuid,
+        // Acquisition is admitted while fenced; the terminal fence is cleared once
+        // the result-minted session establishes a fresh binding.
+        isSessionAcquisition,
+      );
       this.rememberToolSelectionProfile(name, args, result);
+      if (isSessionAcquisition) {
+        await this.bindResultMintedDeviceSession(name, result);
+        return result;
+      }
       // Remember what was actually forwarded, not the caller's raw args. An
       // implicit sessionless call injects the bound UUID into forwardedArgs and
       // extends the live daemon session in getOrCreateSession(); refreshing the
@@ -1332,7 +1389,6 @@ export class DaemonMcpProxy {
   }
 
   private withBoundSessionUuid(args: Record<string, unknown>): Record<string, unknown> {
-    this.throwIfBoundSessionUnavailable();
     // A daemon session released by ordinary heartbeat/idle expiry leaves this
     // remembered binding dangling; replaying its UUID on a later sessionless call
     // would silently recreate the session and reacquire a device without the
@@ -1340,6 +1396,7 @@ export class DaemonMcpProxy {
     // no forwarded call (explicit or implicit) refreshing the binding, treat it
     // as retired.
     const explicitSessionUuid = this.sessionUuidFromArgs(args);
+    this.throwIfBoundSessionUnavailable(explicitSessionUuid);
     const normalizedArgs =
       explicitSessionUuid && explicitSessionUuid !== args.sessionUuid
         ? { ...args, sessionUuid: explicitSessionUuid }
@@ -1369,13 +1426,33 @@ export class DaemonMcpProxy {
     };
   }
 
-  private throwIfBoundSessionUnavailable(): void {
-    this.throwIfBoundSessionFenced();
+  private throwIfBoundSessionUnavailable(explicitSessionUuid?: string): void {
+    this.throwIfFencedForCaller(explicitSessionUuid);
     if (!this.isBoundSessionReplayExpired()) {
       return;
     }
     this.fenceBoundSessionUuid(this.boundSessionUuid!, "replay-lease-expired");
-    throw this.boundSessionExpiredError();
+    this.throwIfFencedForCaller(explicitSessionUuid);
+  }
+
+  // Surface a terminal fence to a caller, distinguishing whether the caller
+  // referenced the fenced session. A client-declared binding (explicit
+  // `sessionUuid`, or the same UUID named again) — or any explicit reference to
+  // the fenced UUID — yields the ownership-lost-for-UUID error. A call that never
+  // named the session and whose binding was minted by a device-acquisition RESULT
+  // instead gets the current connection state, not a stale UUID (issue #5689).
+  private throwIfFencedForCaller(explicitSessionUuid?: string): void {
+    const terminal = this.terminalBoundSession;
+    if (!terminal) {
+      return;
+    }
+    const callerReferencedTerminal =
+      !terminal.fromResultMint ||
+      (explicitSessionUuid !== undefined && explicitSessionUuid === terminal.sessionUuid);
+    if (callerReferencedTerminal) {
+      throw this.boundSessionExpiredError();
+    }
+    throw new DaemonConnectionSessionReleasedError(terminal.reason);
   }
 
   private sessionUuidFromArgs(args: Record<string, unknown>): string | undefined {
@@ -1428,6 +1505,7 @@ export class DaemonMcpProxy {
     this.boundSessionUuid = undefined;
     this.boundSessionUuidAt = undefined;
     this.initialSessionBindingConfigured = false;
+    this.boundSessionFromResultMint = false;
   }
 
   private fenceBoundSessionUuid(
@@ -1444,7 +1522,12 @@ export class DaemonMcpProxy {
       }
       return;
     }
-    this.terminalBoundSession = { sessionUuid, reason, ...(release ? { release } : {}) };
+    this.terminalBoundSession = {
+      sessionUuid,
+      reason,
+      fromResultMint: this.boundSessionFromResultMint,
+      ...(release ? { release } : {}),
+    };
     // A terminal release changes the scope of in-flight discovery and prevents
     // its stale response from repopulating a cleared cache.
     this.discoveryEpoch += 1;
@@ -1674,6 +1757,37 @@ export class DaemonMcpProxy {
     throw new DaemonBoundSessionExpiredError(forwardedUuid, reason);
   }
 
+  // Bind and heartbeat the device session a getAndroid/getApple/startDevice call
+  // minted in its RESULT — the proxy equivalent of the direct-path bind in
+  // src/server/index.ts. Without this the daemon never sees an ownership heartbeat
+  // for a result-minted session and reaps it under the pre-first-heartbeat grace
+  // (issue #5689). Acquisition also clears any terminal fence: the connection is
+  // usable again once a fresh session is established (AC2).
+  private async bindResultMintedDeviceSession(name: string, result: unknown): Promise<void> {
+    if (!isDeviceSessionAcquisitionTool(name)) {
+      return;
+    }
+    const mintedSessionUuid = getDeviceSessionIdFromResult(result);
+    if (!mintedSessionUuid || mintedSessionUuid === this.boundSessionUuid) {
+      return;
+    }
+    // A prior binding's keeper must not outlive the rebind to a fresh session.
+    // (A terminal fence already stopped it; this covers re-acquiring over a live
+    // binding.)
+    if (this.heartbeatKeeperStarted) {
+      await this.stopBoundSessionHeartbeat();
+    }
+    this.terminalBoundSession = undefined;
+    this.boundSessionUuid = mintedSessionUuid;
+    this.boundSessionUuidAt = this.timer.now();
+    this.boundSessionFromResultMint = true;
+    this.initialSessionBindingConfigured = false;
+    // Deliver the first ownership heartbeat as part of the acquisition so the
+    // daemon records ownership before the pre-first-heartbeat grace fires
+    // (mirrors the establishment guarantee in issue #5637).
+    await this.establishBoundSessionHeartbeat();
+  }
+
   // Called with the FORWARDED args (post-withBoundSessionUuid), so an implicit
   // sessionless call that had the bound UUID injected refreshes the replay lease
   // just like an explicit-sessionUuid call, matching the daemon session it just
@@ -1705,10 +1819,21 @@ export class DaemonMcpProxy {
     }
     const rememberedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     if (rememberedSessionUuid) {
-      this.boundSessionUuid = rememberedSessionUuid;
-      this.boundSessionUuidAt = this.timer.now();
+      this.updateBoundSessionUuid(rememberedSessionUuid);
       this.startBoundSessionHeartbeat();
     }
+  }
+
+  // Bind `sessionUuid`, refreshing the replay lease. A change to a different UUID
+  // marks the binding client-declared: the new UUID came from a call's args, not
+  // a device-acquisition result. A sessionless refresh re-binds the same
+  // result-minted UUID and preserves its provenance (issue #5689).
+  private updateBoundSessionUuid(sessionUuid: string): void {
+    if (sessionUuid !== this.boundSessionUuid) {
+      this.boundSessionFromResultMint = false;
+    }
+    this.boundSessionUuid = sessionUuid;
+    this.boundSessionUuidAt = this.timer.now();
   }
 
   // Refresh the replay lease for a call that was ADMITTED and forwarded to the
@@ -1749,8 +1874,7 @@ export class DaemonMcpProxy {
     }
     const admittedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
     if (admittedSessionUuid) {
-      this.boundSessionUuid = admittedSessionUuid;
-      this.boundSessionUuidAt = this.timer.now();
+      this.updateBoundSessionUuid(admittedSessionUuid);
       this.startBoundSessionHeartbeat();
     }
   }

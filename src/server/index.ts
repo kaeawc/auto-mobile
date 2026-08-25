@@ -58,6 +58,10 @@ import { registerAccessibilityTools } from "./accessibilityTools";
 import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { registerNetworkTools } from "./networkTools";
 import { registerToolSelectionTools, SET_TOOL_ENABLED_TOOL_NAME } from "./toolSelectionTools";
+import {
+  getDeviceSessionIdFromResult,
+  isDeviceSessionAcquisitionTool,
+} from "./deviceSessionResult";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 
 // Import resource registration functions
@@ -177,37 +181,6 @@ function stripInternalToolParams(params: unknown): unknown {
   delete rest[INTERNAL_EXECUTION_START_TIME_PARAM];
   delete rest[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
   return rest;
-}
-
-function getDeviceSessionIdFromResult(result: unknown): string | undefined {
-  if (!result || typeof result !== "object" || !("content" in result)) {
-    return undefined;
-  }
-  const content = (result as { content?: unknown }).content;
-  if (!Array.isArray(content)) {
-    return undefined;
-  }
-  const text = content.find(
-    (item) =>
-      item &&
-      typeof item === "object" &&
-      "type" in item &&
-      (item as { type?: unknown }).type === "text" &&
-      "text" in item &&
-      typeof (item as { text?: unknown }).text === "string",
-  ) as { text: string } | undefined;
-  if (!text) {
-    return undefined;
-  }
-  try {
-    const payload = JSON.parse(text.text) as { sessionId?: unknown };
-    return typeof payload.sessionId === "string" && payload.sessionId.trim().length > 0
-      ? payload.sessionId
-      : undefined;
-  } catch (error) {
-    logger.debug("[MCP] Device-start response did not contain JSON", { error });
-    return undefined;
-  }
 }
 
 function flattenZodIssues(issues: ZodIssue[]): ZodIssue[] {
@@ -725,7 +698,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         ),
       );
       if (
-        (name === "getAndroid" || name === "getApple" || name === "startDevice") &&
+        isDeviceSessionAcquisitionTool(name) &&
         sessionToolBinding.bind(sessionId, getDeviceSessionIdFromResult(result))
       ) {
         ToolRegistry.notifyToolListChanged();

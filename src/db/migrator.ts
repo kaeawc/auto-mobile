@@ -174,8 +174,18 @@ async function rebuildMigrationTable(
  * sorts at or before the newest known migration (out-of-order / renamed /
  * middle-inserted) — is NOT forward skew and falls through to the existing
  * destructive rebuild/reset recovery. `availableNames` must be sorted (Kysely's
- * `Migrator.getMigrations()` guarantees this); comparison uses the same
- * lexicographic ordering Kysely applies to migration names.
+ * `Migrator.getMigrations()` guarantees this).
+ *
+ * Two conventions this repo already upholds keep the no-op safe; a future
+ * maintainer must not break either (issue #5684):
+ *   1. A shipped migration's body is immutable given its name. Like Kysely
+ *      itself (which never re-runs an applied name), this trusts name == applied;
+ *      re-bodying a released migration would let the no-op accept a divergent
+ *      schema silently.
+ *   2. Migration names are globally monotonic and append-only across releases,
+ *      so a newer mainline build's migrations always sort AFTER an older build's
+ *      newest. Branch divergence that interleaves names is deliberately treated
+ *      as corruption (condition 2 returns false), not forward skew.
  */
 export function isBenignForwardSkew(availableNames: string[], executedNames: string[]): boolean {
   // A build that ships no migrations cannot distinguish "newer build ran ahead"
@@ -195,10 +205,13 @@ export function isBenignForwardSkew(availableNames: string[], executedNames: str
   }
 
   // (2) Every executed row this build does not recognize must be strictly newer
-  //     than the newest migration it ships.
+  //     than the newest migration it ships. Compare with the same default
+  //     code-unit ordering that selected `newestKnown` (Kysely sorts the
+  //     available set with `Array#sort`); using `localeCompare` here could
+  //     disagree on case/diacritics against a code-unit-chosen `newestKnown`.
   const newestKnown = availableNames[availableNames.length - 1];
   for (const name of executedNames) {
-    if (!availableSet.has(name) && name.localeCompare(newestKnown) <= 0) {
+    if (!availableSet.has(name) && name <= newestKnown) {
       return false;
     }
   }

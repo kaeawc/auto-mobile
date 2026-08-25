@@ -79,6 +79,16 @@ describe("runMigrations recovery", () => {
     delete process.env.AUTOMOBILE_MIGRATION_RECOVERY;
   });
 
+  // Smoke test against the REAL on-disk migration folder (no injected provider):
+  // the whole shipped set applies cleanly on a fresh DB. Every other test in this
+  // file uses a fake provider, so this is the file's only guard that the real
+  // migration set is internally consistent.
+  test("applies the real migration folder on a fresh DB", async () => {
+    await runMigrations(db);
+    const names = await migrationNames(db);
+    expect(names.length).toBeGreaterThan(0);
+  });
+
   // Forward version-skew (issue #5684): a NEWER build ran ahead against the same
   // shared DB, recording a migration this (older) build does not ship, lexically
   // newer than everything it knows. All of this build's migrations are already
@@ -549,5 +559,16 @@ describe("isBenignForwardSkew", () => {
 
   test("false when this build ships no migrations (cannot classify)", () => {
     expect(isBenignForwardSkew([], [M1])).toBe(false);
+  });
+
+  // Guards the ordering-primitive choice: `newestKnown` is the max under the
+  // default code-unit sort Kysely uses for the available set, and condition (2)
+  // must compare with that same ordering. Uppercase letters sort BEFORE lowercase
+  // in code-unit order, so an unknown row starting with an uppercase letter is
+  // NOT newer than a lowercase newestKnown and must be rejected — localeCompare
+  // would wrongly rank it after and accept it.
+  test("uses code-unit ordering consistently for the newer-than check", () => {
+    // "Z..." (0x5A) sorts before "a..." (0x61) in code-unit order.
+    expect(isBenignForwardSkew(["a_known"], ["a_known", "Z_unknown"])).toBe(false);
   });
 });

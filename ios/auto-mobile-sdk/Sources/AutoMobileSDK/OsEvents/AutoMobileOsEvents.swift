@@ -96,6 +96,32 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Number of currently-stored observers. Internal so tests can assert the
+    /// register-vs-shutdown guard without reaching into `NotificationCenter`.
+    var observerCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return observers.count
+    }
+
+    /// Stores just-registered observers only if a `shutdown()` has not interleaved
+    /// since `initialize()` released the lock; otherwise removes them so they cannot
+    /// fire after teardown. The `addObserver` calls happen outside the lock, so this
+    /// re-check under the lock closes the register-vs-shutdown window. Internal so
+    /// tests can drive the drop-when-not-initialized path deterministically.
+    func storeObservers(_ newObservers: [NSObjectProtocol]) {
+        lock.lock()
+        guard _isInitialized else {
+            lock.unlock()
+            for observer in newObservers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            return
+        }
+        observers.append(contentsOf: newObservers)
+        lock.unlock()
+    }
+
     // MARK: - Lifecycle Tracking
 
     #if canImport(UIKit) && !os(watchOS)
@@ -132,9 +158,7 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
             self?.postEvent(state: "terminated")
         }
 
-        lock.lock()
-        observers.append(contentsOf: [fgObserver, bgObserver, willResignObserver, willTerminateObserver])
-        lock.unlock()
+        storeObservers([fgObserver, bgObserver, willResignObserver, willTerminateObserver])
     }
 
     // MARK: - Battery Tracking
@@ -158,9 +182,7 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
             self?.reportBatteryChange()
         }
 
-        lock.lock()
-        observers.append(contentsOf: [levelObserver, stateObserver])
-        lock.unlock()
+        storeObservers([levelObserver, stateObserver])
     }
 
     private func reportBatteryChange() {
@@ -202,9 +224,7 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
             ])
         }
 
-        lock.lock()
-        observers.append(brightnessObserver)
-        lock.unlock()
+        storeObservers([brightnessObserver])
     }
     #endif
 
@@ -235,6 +255,13 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
         }
 
         lock.lock()
+        // If a shutdown() interleaved since initialize() released the lock, don't store
+        // or start the monitor — it would run after teardown. Cancel it instead.
+        guard _isInitialized else {
+            lock.unlock()
+            monitor.cancel()
+            return
+        }
         pathMonitor = monitor
         monitorQueue = queue
         lock.unlock()

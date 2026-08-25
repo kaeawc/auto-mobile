@@ -96,7 +96,31 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
             newObservers.append(observer)
         }
 
+        storeObservers(newObservers)
+    }
+
+    /// Number of currently-stored observers. Internal so tests can assert the
+    /// register-vs-shutdown guard without reaching into `NotificationCenter`.
+    var observerCount: Int {
         lock.lock()
+        defer { lock.unlock() }
+        return observers.count
+    }
+
+    /// Stores just-registered observers only if a `shutdown()` has not interleaved
+    /// between `initialize()` releasing the lock and here — otherwise it cleared
+    /// `observers` and set `_isInitialized = false`, and storing now would leak them
+    /// (they'd fire after shutdown and never be removed). Remove them instead. Internal
+    /// so tests can drive the drop-when-not-initialized path deterministically.
+    func storeObservers(_ newObservers: [NSObjectProtocol]) {
+        lock.lock()
+        guard _isInitialized else {
+            lock.unlock()
+            for observer in newObservers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            return
+        }
         observers = newObservers
         lock.unlock()
     }

@@ -134,6 +134,14 @@ public final class UserDefaultsInspector: @unchecked Sendable {
         }
 
         lock.lock()
+        // A concurrent startListening (two setEnabled(true)/initialize racers can both
+        // pass the `kvoObserver == nil` gate) may have installed an observer between our
+        // stopListening() above and here. Remove it before storing ours so we never leak
+        // a duplicate NotificationCenter observer — which would emit duplicate
+        // storage_changed events forever. Last writer wins; exactly one observer stays.
+        if let existing = kvoObserver {
+            NotificationCenter.default.removeObserver(existing)
+        }
         kvoObserver = observer
         lock.unlock()
     }

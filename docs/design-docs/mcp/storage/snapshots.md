@@ -222,6 +222,7 @@ Used for physical Android devices and for emulator captures with
 - Simulator-wide `simctl snapshot` is intentionally not used for portability
 - Each requested bundle ID is validated up front (installed via `simctl listapps`, has a data container via `get_app_container … data`) and reported with a per-bundle status — `captured`, `skipped-no-container`, `not-installed`, or `failed` — in `appDataBackup.bundleStatuses` and at the top level of the capture tool result (`bundleStatuses`), rather than silently "succeeding"
 - Capture with `includeAppData: true` but no usable `appBundleIds` (empty or all blank) is rejected with an `ActionableError` — pass explicit bundle IDs, or set `includeAppData: false` for a settings-only snapshot
+- Capture with `includeAppData: true` where **0** of the requested bundles are actually backed up (every one not-installed, container-less, or failed) is rejected with an `ActionableError` naming the requested set and what failed/was skipped — this holds regardless of `strictBackupMode`, so an empty backup can no longer report "captured successfully" (issue #5710). A mixed set with at least one captured bundle still succeeds; settings-only captures (`includeAppData: false`) are unaffected
 
 ## Storage Location
 

@@ -94,6 +94,17 @@ classify_versioned() {
   case "$work" in
     *.asc) sig=1; work="${work%.asc}" ;;
   esac
+  # AndroidMultiVariantLibrary (auto-mobile-sdk, #5714) uploads one AAR per build
+  # type -- `<prefix>-debug.aar` / `<prefix>-release.aar` (and matching sources) --
+  # routed by Gradle Module Metadata. These per-variant classifiers are known ONLY
+  # for that one coordinate: accepting them for every module would let an unrelated
+  # module silently drift into multi-variant without the #4853 guard noticing. Any
+  # other coordinate emitting a `-debug.aar` still lands in `unexpected`.
+  local variant_prefix=""
+  if [ "$art" = "auto-mobile-sdk" ]; then
+    variant_prefix="$prefix"
+  fi
+
   local kind
   case "$work" in
     "$prefix.jar") kind=main-jar ;;
@@ -104,6 +115,12 @@ classify_versioned() {
     "$prefix.module") kind=module ;;
     *) kind=unexpected ;;
   esac
+  if [ "$kind" = unexpected ] && [ -n "$variant_prefix" ]; then
+    case "$work" in
+      "$variant_prefix-debug.aar" | "$variant_prefix-release.aar") kind=main-aar ;;
+      "$variant_prefix-debug-sources.jar" | "$variant_prefix-release-sources.jar") kind=sources-jar ;;
+    esac
+  fi
   if [ "$kind" = unexpected ]; then echo unexpected; return; fi
   if [ -n "$sig" ] && [ -n "$checksum" ]; then echo signature-checksum; return; fi
   if [ -n "$sig" ]; then echo signature; return; fi

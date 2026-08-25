@@ -18,7 +18,7 @@ Android library SDK for tracking navigation events across various navigation fra
 
 ```kotlin
 dependencies {
-    implementation("dev.jasonpearson.auto-mobile:auto-mobile-sdk:0.0.1-SNAPSHOT")
+    implementation("dev.jasonpearson.auto-mobile:auto-mobile-sdk:<version>")
 }
 ```
 
@@ -26,9 +26,19 @@ dependencies {
 
 ```groovy
 dependencies {
-    implementation 'dev.jasonpearson.auto-mobile:auto-mobile-sdk:0.0.1-SNAPSHOT'
+    implementation 'dev.jasonpearson.auto-mobile:auto-mobile-sdk:<version>'
 }
 ```
+
+The SDK publishes both a debug and a release variant. For the standard `debug` /
+`release` build types no extra dependency configuration is required: a debug
+build automatically resolves the debug variant, which registers the database and
+shared-preference inspection `ContentProvider`s, while a release build resolves
+the release variant, which packages no exported inspection components. A consumer
+with a custom build type (e.g. `staging`) must set `matchingFallbacks`, as with
+any multi-variant Android library. See
+[Storage Inspection packaging](../../docs/design-docs/plat/android/auto-mobile-sdk.md#packaging-how-the-providers-reach-maven-consumers-5714)
+for details.
 
 ## Usage
 

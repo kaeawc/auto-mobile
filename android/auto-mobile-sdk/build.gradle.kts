@@ -1,4 +1,4 @@
-import com.vanniktech.maven.publish.AndroidSingleVariantLibrary
+import com.vanniktech.maven.publish.AndroidMultiVariantLibrary
 import com.vanniktech.maven.publish.JavadocJar
 import java.util.concurrent.TimeUnit
 import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
@@ -68,8 +68,6 @@ dependencies {
   implementation(platform(libs.compose.bom))
   implementation("androidx.compose.runtime:runtime")
   implementation(libs.bundles.compose.sdk)
-  debugImplementation(libs.compose.ui.tooling)
-  debugImplementation(libs.compose.ui.tooling.preview)
 
   // Navigation3 support for Compose navigation tracking
   implementation(libs.navigation3.runtime)
@@ -183,12 +181,20 @@ tasks.register("apiCheck") {
 }
 
 mavenPublishing {
-  // Publish an empty (Central-compliant) Javadoc jar instead of the ~1.78 MB
-  // Dokka HTML site (#4852). Maven Central requires a -javadoc.jar to exist, but
-  // we do not ship HTML API docs. The single-arg form keeps vanniktech's defaults
-  // for everything else -- the release aar and the real sources jar are unchanged
-  // -- and Dokka stays applied for local/hosted doc generation.
-  configure(AndroidSingleVariantLibrary(javadocJar = JavadocJar.Empty()))
+  // Publish BOTH the release and debug variants (#5714). The storage-inspection
+  // ContentProviders and their manifest entries live in `src/debug` only, so a
+  // single-variant (release) publication left Maven consumers unable to install
+  // database / shared-preference inspection endpoints even in a debug build.
+  // AndroidMultiVariantLibrary publishes the debug AAR (with those providers) and
+  // release AAR under Gradle Module Metadata, so a consumer's debug build resolves
+  // the provider-bearing debug variant while its release build resolves the release
+  // variant that carries no exported inspection components.
+  //
+  // Publish an empty (Central-compliant) Javadoc jar instead of the ~1.78 MB Dokka
+  // HTML site (#4852). Maven Central requires a -javadoc.jar to exist, but we do
+  // not ship HTML API docs. The remaining defaults keep the real sources jar, and
+  // Dokka stays applied for local/hosted doc generation.
+  configure(AndroidMultiVariantLibrary(javadocJar = JavadocJar.Empty()))
 
   // Coordinates: group and version from root, artifact from local gradle.properties
   coordinates(

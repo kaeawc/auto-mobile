@@ -910,6 +910,30 @@ jobs:
           path: scratch/junit-runner-kotlin-consumer/logs/
           if-no-files-found: ignore
 
+  sdk-debug-inspector-consumer:
+    name: "SDK Debug Inspector Consumer"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      # Publish both SDK variants to the local Maven repo and prove a Maven
+      # consumer's debug build receives the storage-inspection providers that
+      # ship in the debug variant only (#5714), while release packages none.
+      - uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":auto-mobile-sdk:publishToMavenLocal"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Verify published debug inspection providers"
+        run: bash scripts/android/validate-sdk-debug-inspector-consumer.sh --skip-publish
+
   # The two emulator jobs below stay disabled on merge (runner-heavy, ~15 min
   # each) and run nightly instead. That left the CI emulator boot path with no
   # main-push signal at all: #4199 broke it and main stayed green (#4237). This

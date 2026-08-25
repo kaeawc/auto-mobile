@@ -312,6 +312,34 @@ Provides SharedPreferences read access for debug builds. Same enable/disable pat
 
 Both inspectors follow the pattern: `initialize(context)` at SDK init, `setEnabled(true)` in debug builds, lazy driver creation on first access.
 
+### Packaging: how the providers reach Maven consumers (#5714)
+
+The `DatabaseInspectorProvider` / `SharedPreferencesInspectorProvider` `ContentProvider`s and their `<provider>` manifest entries live in the SDK's `src/debug` source set, so they are absent from the release AAR. The SDK is published to Maven Central with `AndroidMultiVariantLibrary`, which uploads **both** the debug and release AARs under Gradle Module Metadata. A consumer resolving the published coordinate needs no special dependency configuration and no separate artifact:
+
+```kotlin
+dependencies {
+  implementation("dev.jasonpearson.auto-mobile:auto-mobile-sdk:<version>")
+}
+```
+
+Gradle's variant-aware resolution then routes each build type to the matching variant: a **debug** build resolves the debug AAR and merges the two exported inspection providers into the app manifest (authorities `<applicationId>.automobile.database` and `<applicationId>.automobile.sharedprefs`), while a **release** build resolves the release AAR, which declares and packages no exported inspection components. The providers are still gated at runtime by `DebugInspectorAccess` (shell/root/own-UID/control-proxy only) and by each inspector's `setEnabled(true)` switch.
+
+Consumers using only the standard `debug` / `release` build types need no extra configuration. A consumer with a **custom build type** (for example `staging` or `qa`) must, as with any multi-variant Android library, tell Gradle which published build type to fall back to:
+
+```kotlin
+android {
+  buildTypes {
+    create("staging") {
+      matchingFallbacks += listOf("debug") // or "release" for a non-inspectable build
+    }
+  }
+}
+```
+
+This is the standard trade-off of publishing per-build-type variants: the earlier single-variant (release-only) artifact resolved for any consumer build type because it carried no `BuildTypeAttr`, whereas the multi-variant publication tags each variant and therefore needs an explicit fallback for build types it does not itself define.
+
+The published-consumer path is regression-tested by `scripts/android/validate-sdk-debug-inspector-consumer.sh` (wired into CI as the "SDK Debug Inspector Consumer" job): it publishes the SDK to the local Maven repository and asserts the debug AAR carries both providers and their classes, the release AAR carries neither, and the module metadata routes debug/release consumers to the correct AAR.
+
 ### DataStore Inspection (`DataStoreInspector`)
 
 Storage inspection is otherwise blind to applications that keep preferences in [Jetpack DataStore](https://developer.android.com/topic/libraries/architecture/datastore) rather than conventional `SharedPreferences` files. `DataStoreInspector` closes that gap with an explicit, read-only, application-provided adapter contract so DataStore state is inspected through a documented interface instead of by inferring it from implementation-specific files (#5192).

@@ -116,6 +116,34 @@ build_release() {
   [[ "$output" == *"main-aar=1"* ]]
 }
 
+@test "multi-variant per-build-type AARs and sources are known, not unexpected" {
+  # auto-mobile-sdk publishes both variants (#5714), so its release upload set
+  # carries `-debug.aar` / `-release.aar` and `-debug-sources.jar` /
+  # `-release-sources.jar` instead of a single `<prefix>.aar`. The classifier
+  # must count these as main-aar / sources-jar or --strict would false-positive.
+  stage_primary auto-mobile-sdk 0.0.47 "auto-mobile-sdk-0.0.47-debug.aar" 900
+  stage_primary auto-mobile-sdk 0.0.47 "auto-mobile-sdk-0.0.47-release.aar" 900
+  stage_primary auto-mobile-sdk 0.0.47 "auto-mobile-sdk-0.0.47-debug-sources.jar" 100
+  stage_primary auto-mobile-sdk 0.0.47 "auto-mobile-sdk-0.0.47-release-sources.jar" 100
+  run bash "$SCRIPT" "$STAGE" --strict
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"main-aar auto-mobile-sdk-0.0.47-debug.aar"* ]]
+  [[ "$output" == *"main-aar auto-mobile-sdk-0.0.47-release.aar"* ]]
+  [[ "$output" == *"main-aar=2"* ]]
+  [[ "$output" == *"sources-jar auto-mobile-sdk-0.0.47-debug-sources.jar"* ]]
+  [[ "$output" == *"sources-jar auto-mobile-sdk-0.0.47-release-sources.jar"* ]]
+}
+
+@test "per-variant classifiers are SDK-scoped: a non-SDK -debug.aar is unexpected" {
+  # The multi-variant classifiers are intentional only for auto-mobile-sdk. If
+  # another coordinate drifts into multi-variant, the #4853 guard must still flag
+  # it rather than silently accept the new topology.
+  stage_primary auto-mobile-protocol 0.0.47 "auto-mobile-protocol-0.0.47-debug.aar" 900
+  run bash "$SCRIPT" "$STAGE" --strict
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"unexpected auto-mobile-protocol-0.0.47-debug.aar"* ]]
+}
+
 @test "manifest generation is deterministic" {
   run bash "$SCRIPT" "$STAGE"
   local first="$output"

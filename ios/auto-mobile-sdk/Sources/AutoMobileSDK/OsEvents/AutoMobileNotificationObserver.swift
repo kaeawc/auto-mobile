@@ -39,16 +39,18 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
 
     func initialize(bundleId: String?, buffer: SdkEventBuffer) {
         lock.lock()
-        guard !_isInitialized else {
-            lock.unlock()
-            return
-        }
+        defer { lock.unlock() }
+        guard !_isInitialized else { return }
         _isInitialized = true
         self.bundleId = bundleId
         self.buffer = buffer
-        lock.unlock()
-
-        registerObservers()
+        // Register the observers WHILE holding the lock so registration and publication
+        // are one critical section: a shutdown() (which also takes `lock`) cannot
+        // interleave between building an observer and storing it, so nothing can fire in
+        // — or leak through — a register-vs-shutdown gap. addObserver is fast and its
+        // callbacks fire only on later notification delivery (never synchronously here),
+        // so there is no re-entrancy while the lock is held.
+        registerObserversLocked()
     }
 
     func shutdown() {
@@ -66,7 +68,9 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
 
     // MARK: - Observer Registration
 
-    private func registerObservers() {
+    /// Builds and stores the observers. MUST be called with `lock` held (see
+    /// `initialize`), so registration is atomic with respect to `shutdown()`.
+    private func registerObserversLocked() {
         let notificationsToMonitor: [(Notification.Name, String)] = [
             (NSLocale.currentLocaleDidChangeNotification, "locale_changed"),
             (.NSSystemTimeZoneDidChange, "timezone_changed"),
@@ -96,9 +100,15 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
             newObservers.append(observer)
         }
 
-        lock.lock()
         observers = newObservers
-        lock.unlock()
+    }
+
+    /// Number of currently-stored observers. Internal so tests can assert the
+    /// initialize/shutdown observer lifecycle.
+    var observerCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return observers.count
     }
 
     private func handleNotification(action: String, notification: Notification) {

@@ -110,11 +110,36 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     public func startListening(suiteName: String? = nil) {
         guard isEnabled else { return }
 
-        // Remove any existing observer before registering a new one
-        stopListening()
-
+        // Atomically remove any current observer and claim this start's generation in a
+        // SINGLE critical section. Capturing the generation in a separate lock after
+        // stopListening() would be a TOCTOU: a concurrent stopListening() in the gap would
+        // bump the generation and we'd capture *its* value, so our later equality guard
+        // would wrongly succeed and publish an observer after that stop. Bumping and
+        // capturing together means only a stop/start that runs AFTER this point can
+        // invalidate us — exactly what the store-time guard checks.
         let defaults = suiteName.map { UserDefaults(suiteName: $0) } ?? UserDefaults.standard
         guard let defaults = suiteName != nil ? defaults : UserDefaults.standard else { return }
+
+        // Do the whole transition (remove old observer, seed baseline, register+publish the
+        // new observer) in ONE critical section. A concurrent stopListening()/
+        // startListening() takes `lock` and so runs entirely before or after this: it can
+        // never leave our observer live past a stop, leak a duplicate, or (with `queue: nil`
+        // synchronous delivery) fire a callback before we publish — such a callback blocks
+        // on `lock` until we finish. addObserver and the baseline read call back only later,
+        // so holding the lock across them cannot re-enter it.
+        lock.lock()
+        defer { lock.unlock() }
+
+        // Re-check enabled state UNDER the lock: the `isEnabled` guard above is outside the
+        // lock, so a reset()/setEnabled(false) could have run in the gap between it and
+        // here. Without this, a stale start would install an observer after teardown.
+        guard _isEnabled else { return }
+
+        // Remove any existing observer before registering a new one.
+        if let existing = kvoObserver {
+            NotificationCenter.default.removeObserver(existing)
+            kvoObserver = nil
+        }
 
         // Seed the baseline BEFORE registering the observer. If a write on
         // another thread raced observer installation, the notification could
@@ -123,19 +148,15 @@ public final class UserDefaultsInspector: @unchecked Sendable {
         // closes that window; a write in the (now inverted) gap between seeding
         // and registration is simply picked up as a normal change on the next
         // notification rather than a burst of phantom adds.
-        captureBaseline(suiteName: suiteName)
+        captureBaselineLocked(suiteName: suiteName)
 
-        let observer = NotificationCenter.default.addObserver(
+        kvoObserver = NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification,
             object: defaults,
             queue: nil
         ) { [weak self] _ in
             self?.handleDidChange(suiteName: suiteName)
         }
-
-        lock.lock()
-        kvoObserver = observer
-        lock.unlock()
     }
 
     /// Stop listening for changes.
@@ -162,6 +183,12 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     func captureBaseline(suiteName: String?) {
         lock.lock()
         defer { lock.unlock() }
+        captureBaselineLocked(suiteName: suiteName)
+    }
+
+    /// Baseline capture without taking `lock` — for callers that already hold it
+    /// (`startListening` registers under the lock). MUST be called with `lock` held.
+    private func captureBaselineLocked(suiteName: String?) {
         guard let driver = _driver else { return }
         lastSnapshots[Self.suiteKey(suiteName)] = Self.snapshotDict(driver.getValues(suiteName: suiteName))
     }

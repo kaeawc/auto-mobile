@@ -29,19 +29,21 @@ final class SdkHierarchyServer: @unchecked Sendable {
     // MARK: - Lifecycle
 
     func start() {
+        // Hold the lock across the entire start — assign, configure, and `start()` —
+        // so a concurrent `stop()` cannot interleave between the `listener` assignment
+        // and `nwListener.start()`, which would cancel the listener yet leave it
+        // started (and `listener == nil`, so a later `start()` re-binds port 8766). The
+        // handlers only fire asynchronously on `queue`, never synchronously here, so
+        // there is no re-entrancy while the lock is held.
         lock.lock()
-        guard listener == nil else {
-            lock.unlock()
-            return
-        }
+        defer { lock.unlock() }
+        guard listener == nil else { return }
 
         let parameters = NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
 
         do {
             let nwListener = try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: Self.port))
-            listener = nwListener
-            lock.unlock()
 
             nwListener.stateUpdateHandler = { state in
                 switch state {
@@ -59,8 +61,8 @@ final class SdkHierarchyServer: @unchecked Sendable {
             }
 
             nwListener.start(queue: queue)
+            listener = nwListener
         } catch {
-            lock.unlock()
             InternalLogger.debug("[SdkHierarchyServer] Failed to create listener: \(error)")
         }
     }

@@ -49,23 +49,26 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
 
     func initialize(bundleId: String?, buffer: SdkEventBuffer) {
         lock.lock()
-        guard !_isInitialized else {
-            lock.unlock()
-            return
-        }
+        defer { lock.unlock() }
+        guard !_isInitialized else { return }
         _isInitialized = true
         self.bundleId = bundleId
         self.buffer = buffer
-        lock.unlock()
 
+        // Register all observers and the path monitor WHILE holding the lock, so setup is
+        // one critical section with respect to shutdown(): a shutdown() cannot interleave
+        // between building a resource and storing it, so no observer, path monitor, or the
+        // `isBatteryMonitoringEnabled` side-effect can outlive a teardown that races setup.
+        // addObserver / NWPathMonitor.start deliver only asynchronously, so holding the
+        // lock across them cannot re-enter it.
         #if canImport(UIKit) && !os(watchOS)
-        setupLifecycleTracking()
-        setupBatteryTracking()
-        setupScreenTracking()
+        setupLifecycleTrackingLocked()
+        setupBatteryTrackingLocked()
+        setupScreenTrackingLocked()
         #endif
 
         #if canImport(Network)
-        setupConnectivityTracking()
+        setupConnectivityTrackingLocked()
         #endif
     }
 
@@ -96,10 +99,18 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// Number of currently-stored observers. Internal so tests can assert the
+    /// register-vs-shutdown guard without reaching into `NotificationCenter`.
+    var observerCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return observers.count
+    }
+
     // MARK: - Lifecycle Tracking
 
     #if canImport(UIKit) && !os(watchOS)
-    private func setupLifecycleTracking() {
+    private func setupLifecycleTrackingLocked() {
         let fgObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification,
             object: nil,
@@ -132,14 +143,12 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
             self?.postEvent(state: "terminated")
         }
 
-        lock.lock()
         observers.append(contentsOf: [fgObserver, bgObserver, willResignObserver, willTerminateObserver])
-        lock.unlock()
     }
 
     // MARK: - Battery Tracking
 
-    private func setupBatteryTracking() {
+    private func setupBatteryTrackingLocked() {
         UIDevice.current.isBatteryMonitoringEnabled = true
 
         let levelObserver = NotificationCenter.default.addObserver(
@@ -158,9 +167,7 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
             self?.reportBatteryChange()
         }
 
-        lock.lock()
         observers.append(contentsOf: [levelObserver, stateObserver])
-        lock.unlock()
     }
 
     private func reportBatteryChange() {
@@ -190,7 +197,7 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
 
     // MARK: - Screen Tracking
 
-    private func setupScreenTracking() {
+    private func setupScreenTrackingLocked() {
         let brightnessObserver = NotificationCenter.default.addObserver(
             forName: UIScreen.brightnessDidChangeNotification,
             object: nil,
@@ -202,16 +209,14 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
             ])
         }
 
-        lock.lock()
         observers.append(brightnessObserver)
-        lock.unlock()
     }
     #endif
 
     // MARK: - Connectivity Tracking
 
     #if canImport(Network)
-    private func setupConnectivityTracking() {
+    private func setupConnectivityTrackingLocked() {
         let monitor = NWPathMonitor()
         let queue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.network-monitor")
 
@@ -234,11 +239,10 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
             ])
         }
 
-        lock.lock()
+        // Caller holds `lock`, so storing and starting the monitor is atomic with
+        // shutdown() (which cancels it under the same lock).
         pathMonitor = monitor
         monitorQueue = queue
-        lock.unlock()
-
         monitor.start(queue: queue)
     }
     #endif

@@ -158,4 +158,46 @@ describe("storageCapabilityResources", () => {
       serverConfig.setEmbeddedSdkEnabled(previous);
     }
   });
+
+  // Regression: the resource registry already percent-decodes query params via
+  // URLSearchParams, so the handler must NOT decode appId a second time (#5686).
+  describe("appId query param is not double-decoded (#5686)", () => {
+    test("registry hands the handler an already-decoded query param (mechanism)", () => {
+      setDevices([androidEmulator]);
+      const match = ResourceRegistry.matchTemplate(
+        "automobile:devices/emulator-5554/storage/capabilities?appId=%2541",
+      );
+      // URI value %2541 → registry decodes once → "%41". A handler decode would
+      // wrongly turn this into "A".
+      expect(match?.params.appId).toBe("%41");
+    });
+
+    test("a %-bearing appId round-trips through the report (identity contract)", async () => {
+      const previous = serverConfig.isEmbeddedSdkEnabled();
+      serverConfig.setEmbeddedSdkEnabled(true);
+      try {
+        setDevices([androidEmulator]);
+        const intended = "%41";
+        const content = await readResource(
+          `automobile:devices/emulator-5554/storage/capabilities?appId=${encodeURIComponent(intended)}`,
+        );
+        const body = JSON.parse(content.text ?? "{}");
+        expect(body.appId).toBe(intended);
+      } finally {
+        serverConfig.setEmbeddedSdkEnabled(previous);
+      }
+    });
+
+    test("a literal-% appId returns a graceful JSON envelope, not an unhandled throw", async () => {
+      setDevices([androidEmulator]);
+      // URI value 100%25 → registry decodes → "100%". A second decodeURIComponent
+      // would throw URIError outside the try/catch, bypassing the error envelope.
+      const content = await readResource(
+        "automobile:devices/emulator-5554/storage/capabilities?appId=100%25",
+      );
+      expect(content.mimeType).toBe("application/json");
+      const body = JSON.parse(content.text ?? "{}");
+      expect(body.appId).toBe("100%");
+    });
+  });
 });

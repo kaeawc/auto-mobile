@@ -84,7 +84,11 @@ export async function getStorageCapabilitiesResource(
   params: Record<string, string>,
 ): Promise<ResourceContent> {
   const { deviceId } = params;
-  const appId = params.appId ? decodeURIComponent(params.appId) : undefined;
+  // The resource registry already percent-decodes query params via URLSearchParams
+  // (resourceRegistry.ts), so appId arrives decoded. Decoding again here would be a
+  // double-decode: it corrupts %-bearing ids and throws URIError on a literal `%`
+  // (which, being outside the try/catch, would bypass the JSON error envelope). See #5686.
+  const appId = params.appId ? params.appId : undefined;
   const uri = buildUri(deviceId, appId);
 
   try {

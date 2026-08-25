@@ -582,6 +582,49 @@ describe("deviceSnapshotManager", () => {
     expect(restoreCalls).toEqual([]);
   });
 
+  test("captureDeviceSnapshot rejects a name ending in the reserved '.replacing' suffix (#5713)", async () => {
+    // The atomic overwrite uses a sibling `<name>.replacing` dir; a snapshot
+    // literally named `<x>.replacing` would let one capture's set-aside path
+    // collide with — and delete — this real snapshot's directory.
+    await expect(
+      captureDeviceSnapshot(TEST_DEVICE, { snapshotName: "foo.replacing" }),
+    ).rejects.toThrow(/reserved/i);
+    // The capture provider must never run for a rejected name.
+    expect(captureCalls).toEqual([]);
+  });
+
+  test("listDeviceSnapshots skips a leftover '.replacing' set-aside directory (#5713)", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-replacing-"));
+    try {
+      const realStore = new DeviceSnapshotStore(tempRoot);
+      await realStore.ensureSnapshotsDirectory();
+      await setDeviceSnapshotManagerDependencies({ snapshotStore: realStore as any });
+
+      // A leftover set-aside dir from an interrupted overwrite: it holds the
+      // prior snapshot's manifest.json at the flat base level. Importing it would
+      // resurrect a phantom snapshot named "ghost.replacing" over stale data.
+      const asideDir = path.join(tempRoot, "ghost.replacing");
+      await fs.mkdir(asideDir, { recursive: true });
+      const manifest: DeviceSnapshotManifest = {
+        snapshotName: "ghost",
+        timestamp: new Date(0).toISOString(),
+        deviceId: "emulator-5554",
+        deviceName: "Pixel_5",
+        platform: "android",
+        snapshotType: "adb",
+        includeAppData: false,
+        includeSettings: true,
+      };
+      await fs.writeFile(path.join(asideDir, "manifest.json"), JSON.stringify(manifest));
+
+      const { snapshots } = await listDeviceSnapshots();
+      expect(snapshots.some((entry) => entry.snapshotName === "ghost.replacing")).toBe(false);
+      expect(await repository.getSnapshot("ghost.replacing")).toBeNull();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test("legacy flat-path cleanup never deletes a reserved scope root (#5707)", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-reserved-"));
     try {

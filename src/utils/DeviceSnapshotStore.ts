@@ -4,6 +4,15 @@ import * as os from "os";
 import { logger } from "./logger";
 import type { Platform } from "../models";
 
+/**
+ * Suffix of the sibling directory that {@link DeviceSnapshotStore.replaceSnapshotData}
+ * moves an existing snapshot into while a fresh capture writes. Reserved: capture
+ * rejects any snapshotName ending in it (see `assertSnapshotNameWritable`) and the
+ * legacy-archive scan skips directories bearing it, so this internal set-aside path
+ * can never collide with — or be re-imported as — a real user snapshot (issue #5713).
+ */
+export const SNAPSHOT_REPLACING_SUFFIX = ".replacing";
+
 export interface SnapshotPathOptions {
   platform?: Platform;
   deviceId?: string;
@@ -100,7 +109,7 @@ export class DeviceSnapshotStore {
     capture: () => Promise<T>,
   ): Promise<T> {
     const snapshotPath = this.getSnapshotPathWithOptions(snapshotName, options);
-    const asidePath = `${snapshotPath}.replacing`;
+    const asidePath = `${snapshotPath}${SNAPSHOT_REPLACING_SUFFIX}`;
 
     // Clear any set-aside leftover from a prior interrupted overwrite so the
     // rename below can't collide with stale state.
@@ -119,18 +128,42 @@ export class DeviceSnapshotStore {
       }
     }
 
+    let result: T;
     try {
-      const result = await capture();
-      await fs.rm(asidePath, { recursive: true, force: true });
-      return result;
+      result = await capture();
     } catch (error) {
-      // Discard the partial fresh capture and restore the prior snapshot.
-      await fs.rm(snapshotPath, { recursive: true, force: true });
-      if (hadExisting) {
-        await fs.rename(asidePath, snapshotPath);
+      // Capture (and the record write it wraps) failed: discard the partial
+      // fresh capture and restore the prior snapshot. A cleanup step failing
+      // here must not mask the real capture error, so log-and-continue and
+      // rethrow the original (CLAUDE.md catch convention).
+      try {
+        await fs.rm(snapshotPath, { recursive: true, force: true });
+        if (hadExisting) {
+          await fs.rename(asidePath, snapshotPath);
+        }
+      } catch (rollbackError) {
+        logger.warn(
+          `Failed to roll back snapshot '${snapshotName}' after a failed overwrite; ` +
+            `prior data may be stranded at '${asidePath}': ${rollbackError}`,
+        );
       }
       throw error;
     }
+
+    // Capture succeeded and the record is already committed. Removing the
+    // set-aside copy is best-effort cleanup — its failure must NOT roll back the
+    // committed snapshot (that would leave the DB record describing the fresh
+    // capture while the directory reverted to the old data). Log and continue;
+    // the next overwrite clears it and the legacy scan skips *.replacing dirs.
+    try {
+      await fs.rm(asidePath, { recursive: true, force: true });
+    } catch (cleanupError) {
+      logger.warn(
+        `Failed to remove set-aside snapshot copy '${asidePath}' after a successful ` +
+          `overwrite; it will be cleaned up on the next capture: ${cleanupError}`,
+      );
+    }
+    return result;
   }
 
   async deleteSnapshotData(snapshotName: string, options?: SnapshotPathOptions): Promise<void> {

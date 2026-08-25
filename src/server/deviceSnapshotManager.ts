@@ -16,7 +16,11 @@ import {
   createDeviceSnapshotConfigRepository,
   type ConfigRepository,
 } from "../db/keyedJsonConfigRepository";
-import { DeviceSnapshotStore, type SnapshotPathOptions } from "../utils/DeviceSnapshotStore";
+import {
+  DeviceSnapshotStore,
+  SNAPSHOT_REPLACING_SUFFIX,
+  type SnapshotPathOptions,
+} from "../utils/DeviceSnapshotStore";
 import { assertSafeSnapshotName } from "../utils/snapshotNameValidation";
 import { parseDeviceSnapshotConfig } from "../features/snapshot";
 import { serverConfig } from "../utils/ServerConfig";
@@ -361,6 +365,14 @@ async function importLegacySnapshotArchive(
     }
 
     const snapshotName = entry.name;
+    // A `<name>${SNAPSHOT_REPLACING_SUFFIX}` directory is an interrupted-overwrite
+    // set-aside copy (holding the prior snapshot's manifest.json), never a real
+    // snapshot — importing it would resurrect stale data as a phantom snapshot
+    // that consumes archive budget and is "restorable" against dead contents
+    // (#5713). Skip it; the next overwrite of the base name clears it.
+    if (snapshotName.endsWith(SNAPSHOT_REPLACING_SUFFIX)) {
+      continue;
+    }
     if (existingSnapshots.has(snapshotName)) {
       continue;
     }
@@ -406,6 +418,17 @@ function assertSnapshotNameWritable(snapshotName: string): void {
   if (isReservedScopeSegment(snapshotName)) {
     throw new ActionableError(
       `Snapshot name '${snapshotName}' is reserved. Please choose a different name.`,
+    );
+  }
+
+  // The atomic overwrite moves the existing snapshot into a sibling
+  // `<name>${SNAPSHOT_REPLACING_SUFFIX}` directory. Allowing a snapshot to BE
+  // named with that suffix would let one capture's set-aside path collide with
+  // another real snapshot's directory and delete it. Reserve the suffix (#5713).
+  if (snapshotName.endsWith(SNAPSHOT_REPLACING_SUFFIX)) {
+    throw new ActionableError(
+      `Snapshot name '${snapshotName}' ends with the reserved '${SNAPSHOT_REPLACING_SUFFIX}' ` +
+        "suffix. Please choose a different name.",
     );
   }
 }

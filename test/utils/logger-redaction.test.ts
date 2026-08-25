@@ -67,6 +67,29 @@ describe("safeStringify redacts sensitive data", () => {
     circular.self = circular;
     expect(safeStringify(circular)).toBe('{"self":"[circular]"}');
   });
+
+  // Regression: cycle detection tracked every visited object instead of just the
+  // ancestor path, so a shared (non-cyclic) child was mis-flagged "[circular]" at
+  // its second sibling position, dropping real log data (#5617).
+  test("renders a shared child fully at both sibling positions (diamond, not a cycle)", () => {
+    const shared = { x: 1 };
+    expect(safeStringify({ a: shared, b: shared })).toBe('{"a":{"x":1},"b":{"x":1}}');
+  });
+
+  test("renders a shared child fully across array elements", () => {
+    const shared = { x: 1 };
+    // Arrays serialize as index-keyed objects (see above); both entries keep the child.
+    expect(safeStringify([shared, shared])).toBe('{"0":{"x":1},"1":{"x":1}}');
+  });
+
+  test("still detects a true cycle nested under a shared sibling", () => {
+    const shared: { x: number } = { x: 1 };
+    const cyclic: { child?: unknown; self?: unknown } = { child: shared };
+    cyclic.self = cyclic;
+    expect(safeStringify({ a: shared, b: cyclic })).toBe(
+      '{"a":{"x":1},"b":{"child":{"x":1},"self":"[circular]"}}',
+    );
+  });
 });
 
 describe("SENSITIVE_ENV_KEYS", () => {

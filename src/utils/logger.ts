@@ -299,14 +299,24 @@ const safeStringify = (obj: any): string => {
     return String(obj);
   }
 
-  const seen = new WeakSet<object>();
+  // Track only the current ancestor path (not every object ever visited) so a
+  // shared child referenced from two sibling positions — a DAG/diamond, which is
+  // NOT a cycle — renders fully at both, instead of the second occurrence being
+  // mis-flagged as "[circular]". Each entry pairs the filtered object we return
+  // (which becomes `this`, the holder, in the child calls) with the original value
+  // it was built from (whose identity a true cycle repeats on the path). See #5617.
+  const ancestors: Array<{ holder: object; original: object }> = [];
   try {
-    return JSON.stringify(obj, (_key, value) => {
+    return JSON.stringify(obj, function (this: unknown, _key, value) {
       if (typeof value === "object" && value !== null) {
-        if (seen.has(value)) {
+        // Unwind the path back to this value's holder before testing/pushing, so
+        // siblings don't inherit each other's descendants as false ancestors.
+        while (ancestors.length > 0 && ancestors[ancestors.length - 1].holder !== this) {
+          ancestors.pop();
+        }
+        if (ancestors.some((entry) => entry.original === value)) {
           return "[circular]";
         }
-        seen.add(value);
         // Filter sensitive environment-like keys
         const filtered: any = {};
         for (const [k, v] of Object.entries(value)) {
@@ -314,6 +324,7 @@ const safeStringify = (obj: any): string => {
             filtered[k] = v;
           }
         }
+        ancestors.push({ holder: filtered, original: value });
         return filtered;
       }
       return value;

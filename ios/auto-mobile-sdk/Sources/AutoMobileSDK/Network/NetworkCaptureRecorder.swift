@@ -45,6 +45,11 @@ public final class NetworkCaptureRecorder: @unchecked Sendable {
     private let headerRedactor: @Sendable ([String: String]) -> [String: String]
     private var requests: [String: InFlightRequest] = [:]
     private var nextSequenceNumber: UInt64 = 0
+    /// FIFO of records awaiting delivery, and whether a drainer is currently running.
+    /// Both guarded by `emissionLock`; the drainer calls `emit` outside the lock. See
+    /// `emitRecord`.
+    private var pendingEmits: [NetworkRequestRecord] = []
+    private var draining = false
     private let maxBodyBytes: Int
 
     public init(
@@ -270,18 +275,36 @@ public final class NetworkCaptureRecorder: @unchecked Sendable {
     }
 
     private func emitRecord(_ record: NetworkRequestRecord) {
-        // Assign the monotonic sequence number under the lock, then RELEASE it before
-        // calling the caller-supplied `emit`. `emit` reaches other locks/state
-        // (AutoMobileNetwork.lock -> buffer.add) and could re-enter emitRecord; holding
-        // the non-recursive emissionLock across it would self-deadlock or invert lock
-        // order. Records carry `sequenceNumber`, so consumers can restore ordering even if
-        // two concurrent emits deliver out of order.
+        // Assign the monotonic sequence number and enqueue under emissionLock, then drain
+        // the FIFO calling `emit` OUTSIDE the lock. This preserves assigned order — the
+        // consumer (SdkEventBuffer) appends in arrival order and does not re-sort by
+        // sequenceNumber — while never holding the non-recursive lock across `emit`, which
+        // reaches other locks/state (AutoMobileNetwork.lock -> buffer.add) and can re-enter
+        // emitRecord. A single drainer runs at a time: a re-entrant or concurrent emit just
+        // appends to the queue and returns, and the active drainer delivers it in order.
         emissionLock.lock()
         nextSequenceNumber += 1
         var sequencedRecord = record
         sequencedRecord.sequenceNumber = nextSequenceNumber
+        pendingEmits.append(sequencedRecord)
+        if draining {
+            emissionLock.unlock()
+            return
+        }
+        draining = true
         emissionLock.unlock()
-        emit(sequencedRecord)
+
+        while true {
+            emissionLock.lock()
+            guard !pendingEmits.isEmpty else {
+                draining = false
+                emissionLock.unlock()
+                return
+            }
+            let next = pendingEmits.removeFirst()
+            emissionLock.unlock()
+            emit(next)
+        }
     }
 
     private func truncate(_ value: String?) -> String? {

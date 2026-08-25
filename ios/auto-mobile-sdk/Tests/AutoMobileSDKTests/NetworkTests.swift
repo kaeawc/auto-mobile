@@ -801,6 +801,60 @@ final class NetworkCaptureRecorderTests: XCTestCase {
         XCTAssertEqual(harness.sequences, [1, 2], "sequence numbers stay monotonic across the re-entrant emit")
     }
 
+    /// Thread-safe delivery-order recorder with a gate that blocks the first emit while a
+    /// second, concurrently-assigned record is enqueued.
+    private final class OrderHarness: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _delivered: [UInt64] = []
+        let firstEmitEntered = DispatchSemaphore(value: 0)
+        let gate = DispatchSemaphore(value: 0)
+        let done = DispatchSemaphore(value: 0)
+
+        func recordDelivery(_ seq: UInt64) {
+            lock.lock(); _delivered.append(seq); lock.unlock()
+        }
+
+        var delivered: [UInt64] {
+            lock.lock(); defer { lock.unlock() }; return _delivered
+        }
+    }
+
+    /// When two completions overlap, records must be DELIVERED in assigned-sequence order —
+    /// `SdkEventBuffer` appends in arrival order and does not re-sort by `sequenceNumber`.
+    /// This forces record 1's emit to block while record 2 (assigned later) is enqueued;
+    /// the single drainer must still deliver 1 then 2. On the pre-FIFO code the second
+    /// thread emits 2 immediately, producing `[2, 1]`.
+    func testConcurrentEmitsDeliverInAssignedSequenceOrder() {
+        let harness = OrderHarness()
+        let recorder = NetworkCaptureRecorder(emit: { [harness] record in
+            let seq = record.sequenceNumber ?? 0
+            if seq == 1 {
+                harness.firstEmitEntered.signal() // record 1 is inside emit…
+                harness.gate.wait() // …and blocks here before recording delivery
+            }
+            harness.recordDelivery(seq)
+        }, idGenerator: { UUID().uuidString })
+
+        // Thread A begins + completes request 1; its emit blocks on the gate.
+        let threadA = Thread {
+            let id = recorder.beginRequest(url: "https://example.com/1")
+            recorder.recordCompletion(requestId: id, statusCode: 200)
+            harness.done.signal()
+        }
+        threadA.start()
+
+        // Wait until record 1's emit is blocked, THEN enqueue record 2 (assigned seq 2).
+        XCTAssertEqual(harness.firstEmitEntered.wait(timeout: .now() + 5), .success)
+        let id2 = recorder.beginRequest(url: "https://example.com/2")
+        recorder.recordCompletion(requestId: id2, statusCode: 200)
+
+        // Release record 1's emit; the drainer then delivers record 2.
+        harness.gate.signal()
+        XCTAssertEqual(harness.done.wait(timeout: .now() + 5), .success)
+
+        XCTAssertEqual(harness.delivered, [1, 2], "records are delivered in assigned sequence order")
+    }
+
     func testRecorderEmitsOneCompletedRequestWithStableIdentityAndBoundedBody() {
         let collector = NetworkRecordCollector()
         let recorder = NetworkCaptureRecorder(

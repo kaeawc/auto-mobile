@@ -1441,6 +1441,14 @@ export class DaemonMcpProxy {
   // the fenced UUID — yields the ownership-lost-for-UUID error. A call that never
   // named the session and whose binding was minted by a device-acquisition RESULT
   // instead gets the current connection state, not a stale UUID (issue #5689).
+  //
+  // This is the entry-gate check for calls arriving at an ALREADY-fenced
+  // connection. A session released WHILE a call is actively holding it (the
+  // narrow mid-flight-release race) still surfaces the generic ownership-lost
+  // error for that UUID via the in-flight fence checks in
+  // withRecoverableReconnect — consistent with the established mid-flight-release
+  // semantics for every binding — and self-heals: the next call reaches this gate
+  // and gets the provenance-aware error.
   private throwIfFencedForCaller(explicitSessionUuid?: string): void {
     const terminal = this.terminalBoundSession;
     if (!terminal) {

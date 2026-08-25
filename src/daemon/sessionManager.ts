@@ -949,7 +949,11 @@ export class SessionManager {
           hasReceivedHeartbeat: session.hasReceivedHeartbeat,
           // A missing-first-heartbeat reap fires on the pre-first-heartbeat grace,
           // not the session's heartbeat timeout; report the deadline that actually
-          // governed the release so `ageMs` stays coherent (issue #5689).
+          // governed the release so `ageMs` stays coherent (issue #5689). The grace
+          // is resolved from the shared env/default here — matching the daemon's
+          // monitor, which is constructed with default config. (A monitor given an
+          // explicit `preFirstHeartbeatGraceMs`, as in tests, would diverge; drive
+          // the grace via env to keep the snapshot consistent.)
           timeoutMs:
             releaseReason === "missing-first-heartbeat"
               ? getDefaultPreFirstHeartbeatGraceMs()

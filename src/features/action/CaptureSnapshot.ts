@@ -24,6 +24,7 @@ import {
   formatVmSnapshotExecutionError,
 } from "../../utils/android-cmdline-tools/vmSnapshot";
 import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
+import { assertSafeSnapshotName } from "../../utils/snapshotNameValidation";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import {
@@ -100,6 +101,10 @@ export class CaptureSnapshot implements SnapshotCaptureProvider {
    * Execute snapshot capture
    */
   async execute(args: CaptureSnapshotArgs): Promise<CaptureSnapshotResult> {
+    // Reject a traversal/absolute snapshotName before any filesystem write or
+    // `adb emu avd snapshot save`/`simctl` call can act on it (issue #5705).
+    assertSafeSnapshotName(args.snapshotName);
+
     switch (this.device.platform) {
       case "android":
         return this.executeAndroid(args);

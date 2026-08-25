@@ -18,6 +18,7 @@ import {
   formatVmSnapshotExecutionError,
 } from "../../utils/android-cmdline-tools/vmSnapshot";
 import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
+import { assertSafeSnapshotName } from "../../utils/snapshotNameValidation";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import {
@@ -91,6 +92,10 @@ export class RestoreSnapshot implements SnapshotRestoreProvider {
    * Execute snapshot restoration
    */
   async execute(args: RestoreSnapshotArgs): Promise<RestoreSnapshotResult> {
+    // Reject a traversal/absolute snapshotName before any filesystem read or
+    // `adb emu avd snapshot load`/`simctl` call resolves a path from it (#5705).
+    assertSafeSnapshotName(args.snapshotName);
+
     switch (this.device.platform) {
       case "android":
         return this.executeAndroid(args);

@@ -17,6 +17,7 @@ import {
   type ConfigRepository,
 } from "../db/keyedJsonConfigRepository";
 import { DeviceSnapshotStore, type SnapshotPathOptions } from "../utils/DeviceSnapshotStore";
+import { assertSafeSnapshotName } from "../utils/snapshotNameValidation";
 import { parseDeviceSnapshotConfig } from "../features/snapshot";
 import { serverConfig } from "../utils/ServerConfig";
 import { ResourceRegistry } from "./resourceRegistry";
@@ -523,6 +524,9 @@ export async function captureDeviceSnapshot(
 
   const baseConfig = await getDeviceSnapshotConfig();
   const snapshotName = args.snapshotName ?? snapshotStore.generateSnapshotName(device.name);
+  // Reject a traversal/absolute name before any filesystem probe (this runs
+  // `fs.access` via ensureSnapshotAvailable) or capture command (issue #5705).
+  assertSafeSnapshotName(snapshotName);
   const pathOptions = getSnapshotPathOptions({
     platform: device.platform,
     deviceId: device.deviceId,
@@ -585,6 +589,10 @@ export async function restoreDeviceSnapshot(
 }> {
   const { snapshotRepository, snapshotStore, timer, now, createRestoreProvider } =
     await getDeviceSnapshotDependencies();
+
+  // Reject a traversal/absolute name before any snapshot lookup or legacy
+  // manifest read resolves a path from it (issue #5705).
+  assertSafeSnapshotName(args.snapshotName);
 
   let record = await snapshotRepository.getSnapshot(args.snapshotName);
   if (!record) {

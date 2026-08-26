@@ -108,6 +108,7 @@ nav:
       - "Image Backend": design-docs/image-backend.md
       - "Runtime Dependency Pinning": design-docs/release/runtime-dependency-pinning.md
       - "Playground Design System": design-docs/playground-design-system.md
+      - "Codex Automation Thread Report": design-docs/codex-automation-thread-spam-report.md
       - "Sharp Bun 0.35 Repro": reproductions/sharp-bun-035/README.md
       - "API Surface":
           - "Autocomplete Audit": design-docs/api-surface/autocomplete-audit.md
@@ -231,7 +232,6 @@ nav:
           - "oxc-parser": decisions/oxc-parser.md
           - "oxlint-tsgolint": decisions/oxlint-tsgolint.md
           - "oxfmt": decisions/oxfmt.md
-      - "Codex Automation Thread Report": codex-automation-thread-spam-report.md
   - "GitHub Discussions": https://github.com/kaeawc/auto-mobile/discussions
   - "FAQ": faq.md
   - "Change Log": changelog.md

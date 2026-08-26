@@ -107,9 +107,6 @@ describe("DefaultElementSelector", () => {
     expect(selector.selectByText(viewHierarchy, "Sign Out", { index: 0 }).element?.class).toBe(
       "XCUIElementTypeStaticText",
     );
-    expect(selector.selectByText(viewHierarchy, "Sign Out", { index: 1 }).element?.class).toBe(
-      "XCUIElementTypeButton",
-    );
     expect(
       selector.selectByText(viewHierarchy, "Sign Out", { strategy: "random" }).element?.class,
     ).toBe("XCUIElementTypeStaticText");

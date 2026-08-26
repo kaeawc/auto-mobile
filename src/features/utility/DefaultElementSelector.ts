@@ -11,7 +11,7 @@ function shouldIncludeWindowsForTextSelection(
   index: number | undefined,
   strategy: ElementSelectionStrategy,
 ): boolean {
-  return index !== undefined || strategy === "first";
+  return index === undefined && strategy === "first";
 }
 
 export class DefaultElementSelector implements ElementSelector {

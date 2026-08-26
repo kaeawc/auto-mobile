@@ -119,6 +119,21 @@ class StructuralRoleTest {
     assertEquals(StructuralRole.Checkbox, structuralRole("android.widget.CheckBox"))
   }
 
+  /**
+   * The live Android compare root is a class-less synthetic wrapper: both extraction paths wrap the
+   * capture in a class-less node and `HierarchyParser` defaults that to `android.view.View`. It
+   * must map to [StructuralRole.Container] like the iOS `XCUIApplication`/`UIView` root, or every
+   * descendant key (which includes the root segment) would be disjoint across a live Android↔iOS
+   * pair (issue #4872 review).
+   */
+  @Test
+  fun `the class-less android root maps to Container like the ios root`() {
+    assertEquals(StructuralRole.Container, structuralRole("android.view.View"))
+    assertEquals(StructuralRole.Container, structuralRole("View"))
+    assertEquals(structuralRole("android.view.View"), structuralRole("XCUIApplication"))
+    assertEquals(structuralRole("android.view.View"), structuralRole("UIView"))
+  }
+
   @Test
   fun `unknown classes fall back to Other`() {
     assertEquals(StructuralRole.Other, structuralRole("com.example.CustomThing"))

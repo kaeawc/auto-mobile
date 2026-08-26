@@ -103,7 +103,7 @@ fun diffHierarchies(
   val entries = ArrayList<HierarchyDiffEntry>(mapA.size + mapB.size)
   for ((key, nodeA) in mapA) {
     val nodeB = mapB[key]
-    entries.add(HierarchyDiffEntry(key, classifyMatched(nodeA, nodeB), nodeA, nodeB))
+    entries.add(HierarchyDiffEntry(key, classifyMatched(nodeA, nodeB, keyMode), nodeA, nodeB))
   }
   for ((key, nodeB) in mapB) {
     if (!mapA.containsKey(key)) {
@@ -114,10 +114,14 @@ fun diffHierarchies(
 }
 
 /** Classify a node from A against its same-key counterpart in B (null when absent from B). */
-private fun classifyMatched(nodeA: UIElementInfo, nodeB: UIElementInfo?): NodeDiffStatus =
+private fun classifyMatched(
+  nodeA: UIElementInfo,
+  nodeB: UIElementInfo?,
+  keyMode: DiffKeyMode,
+): NodeDiffStatus =
   when {
     nodeB == null -> NodeDiffStatus.OnlyInA
-    nodeAttributesDiffer(nodeA, nodeB) -> NodeDiffStatus.Changed
+    nodeAttributesDiffer(nodeA, nodeB, keyMode) -> NodeDiffStatus.Changed
     else -> NodeDiffStatus.Equal
   }
 
@@ -307,17 +311,26 @@ private fun collectSignatureKeys(
   keyMode: DiffKeyMode,
 ) {
   val structural = pathKey(parentKey, node, siblingIndex, keyMode)
-  keys.add("$structural::${semanticDigest(node)}")
+  keys.add("$structural::${semanticDigest(node, keyMode)}")
   node.children.forEachIndexed { index, child ->
     collectSignatureKeys(keys, child, structural, index, keyMode)
   }
 }
 
-/** The compared semantic attributes of a node, joined — the [nodeAttributesDiffer] surface. */
-private fun semanticDigest(node: UIElementInfo): String =
-  listOf(
-      node.text ?: "",
-      node.contentDescription ?: "",
+/**
+ * The compared semantic attributes of a node, joined — the [nodeAttributesDiffer] surface, and it
+ * must track that surface per [keyMode]. Same-platform keeps `text` and `contentDescription` as two
+ * fields; cross-platform collapses them to the single normalized [accessibleName] so the alignment
+ * signatures agree with the role-mode Changed test.
+ */
+private fun semanticDigest(node: UIElementInfo, keyMode: DiffKeyMode): String {
+  val label =
+    when (keyMode) {
+      DiffKeyMode.ClassName -> "${node.text ?: ""}|${node.contentDescription ?: ""}"
+      DiffKeyMode.StructuralRole -> accessibleName(node) ?: ""
+    }
+  return listOf(
+      label,
       node.isClickable,
       node.isEnabled,
       node.isFocused,
@@ -327,6 +340,7 @@ private fun semanticDigest(node: UIElementInfo): String =
       node.isChecked,
     )
     .joinToString("|")
+}
 
 /**
  * A canonical, order-independent string for a window's signature key set: its keys sorted and
@@ -370,19 +384,53 @@ private fun pathKey(
       DiffKeyMode.ClassName -> "${node.className}:${node.resourceId ?: ""}#$siblingIndex"
       // Role mode drops the platform-specific resourceId: it never matches across Android↔iOS, so
       // keeping it would defeat the whole point of role keying.
-      DiffKeyMode.StructuralRole -> "${structuralRole(node.className)}#$siblingIndex"
+      DiffKeyMode.StructuralRole -> "${structuralRoleOf(node)}#$siblingIndex"
     }
   return if (parentKey.isEmpty()) segment else "$parentKey$PATH_SEPARATOR$segment"
+}
+
+/**
+ * The cross-platform [StructuralRole] of a full node. Starts from the class-name mapping, then
+ * applies the semantic signals a class name alone cannot carry:
+ * - A checkable node whose class maps only to a generic [StructuralRole.Container] or
+ *   [StructuralRole.Other] is promoted to [StructuralRole.Checkbox]. The live iOS runner reports a
+ *   checkbox as the bare `UIView` class (`ElementLocator.mapElementType` has no `.checkBox` case)
+ *   while still setting `isCheckable`, so without this an iOS checkbox keys as Container and never
+ *   pairs with Android's `CheckBox`. The promotion is gated on the generic roles so a `UISwitch`
+ *   (also checkable, but already keyed [StructuralRole.Switch] by class) is left alone (issue #4872
+ *   review).
+ */
+private fun structuralRoleOf(node: UIElementInfo): StructuralRole {
+  val byClass = structuralRole(node.className)
+  val isGeneric = byClass == StructuralRole.Container || byClass == StructuralRole.Other
+  return if (node.isCheckable && isGeneric) StructuralRole.Checkbox else byClass
 }
 
 /**
  * Whether two same-key nodes differ in a compared semantic attribute. Bounds and children are
  * deliberately excluded (see [diffHierarchies]); className and resourceId are already equal because
  * they are part of the key.
+ *
+ * [keyMode] governs the label comparison. A same-platform diff ([DiffKeyMode.ClassName]) compares
+ * `text` and `contentDescription` field-by-field, the honest identity where both platforms fill the
+ * same fields. A cross-platform diff ([DiffKeyMode.StructuralRole]) compares a single normalized
+ * [accessibleName] instead: Android puts an icon control's label in `content-desc` and a visible
+ * label in `text`, whereas iOS puts every accessibility label in `text` and leaves `content-desc`
+ * null — so comparing the fields separately reports equivalent controls (an Android
+ * `content-desc="Add"` vs an iOS `text="Add"`) as Changed. The boolean state flags are compared
+ * identically in both modes (issue #4872 review).
  */
-private fun nodeAttributesDiffer(a: UIElementInfo, b: UIElementInfo): Boolean =
-  a.text != b.text ||
-    a.contentDescription != b.contentDescription ||
+private fun nodeAttributesDiffer(
+  a: UIElementInfo,
+  b: UIElementInfo,
+  keyMode: DiffKeyMode,
+): Boolean {
+  val labelsDiffer =
+    when (keyMode) {
+      DiffKeyMode.ClassName -> a.text != b.text || a.contentDescription != b.contentDescription
+      DiffKeyMode.StructuralRole -> accessibleName(a) != accessibleName(b)
+    }
+  return labelsDiffer ||
     a.isClickable != b.isClickable ||
     a.isEnabled != b.isEnabled ||
     a.isFocused != b.isFocused ||
@@ -390,3 +438,12 @@ private fun nodeAttributesDiffer(a: UIElementInfo, b: UIElementInfo): Boolean =
     a.isScrollable != b.isScrollable ||
     a.isCheckable != b.isCheckable ||
     a.isChecked != b.isChecked
+}
+
+/**
+ * The cross-platform accessible name of a node: its visible `text` if present, otherwise its
+ * `contentDescription`. Collapses the Android convention (icon controls carry the label in
+ * `content-desc`, text controls in `text`) onto the iOS convention (every label in `text`) so the
+ * same control reads the same across platforms (issue #4872 review).
+ */
+private fun accessibleName(node: UIElementInfo): String? = node.text ?: node.contentDescription

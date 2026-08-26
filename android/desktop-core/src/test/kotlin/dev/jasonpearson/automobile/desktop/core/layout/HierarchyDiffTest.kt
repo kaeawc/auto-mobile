@@ -17,11 +17,12 @@ class HierarchyDiffTest {
     contentDescription: String? = null,
     bounds: ElementBounds = ElementBounds(0, 0, 10, 10),
     isClickable: Boolean = false,
+    isCheckable: Boolean = false,
     isChecked: Boolean = false,
     children: List<UIElementInfo> = emptyList(),
   ): UIElementInfo =
     UIElementInfo(
-      id = "$className:${resourceId ?: ""}:${text ?: ""}",
+      id = "$className:${resourceId ?: ""}:${text ?: ""}:${contentDescription ?: ""}",
       className = className,
       resourceId = resourceId,
       text = text,
@@ -32,7 +33,7 @@ class HierarchyDiffTest {
       isFocused = false,
       isSelected = false,
       isScrollable = false,
-      isCheckable = false,
+      isCheckable = isCheckable,
       isChecked = isChecked,
       children = children,
       depth = 0,
@@ -548,5 +549,114 @@ class HierarchyDiffTest {
     assertEquals(forward.onlyInB, backward.onlyInA)
     assertEquals(forward.changed, backward.changed)
     assertEquals(forward.equal, backward.equal)
+  }
+
+  // --- Production-shaped cross-platform pairing (issue #4872 review) ---
+
+  /**
+   * The Android compare root as `HierarchyParser` actually produces it: a class-less synthetic
+   * wrapper defaulting to `android.view.View`, not the idealized `FrameLayout`. It must pair with
+   * the iOS `XCUIApplication` root, or the shared root segment diverges and every descendant key is
+   * disjoint — the two live trees would read as wholly OnlyIn.
+   */
+  @Test
+  fun `role mode pairs the production class-less android root with the ios root`() {
+    val android =
+      node(
+        "android.view.View",
+        children = listOf(node("android.widget.TextView", "com.app:id/title", text = "Inbox")),
+      )
+    val ios = node("XCUIApplication", children = listOf(node("UILabel", text = "Inbox")))
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(0, diff.changed)
+    assertEquals(2, diff.equal)
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Container#"))
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Text#"))
+  }
+
+  /**
+   * An icon button carries its label in Android's `content-desc` but in iOS's `text`. Role mode
+   * normalizes to a single accessible name, so the equivalent controls read Equal instead of being
+   * flagged Changed by a field-by-field text/content-desc comparison.
+   */
+  @Test
+  fun `role mode treats an android content-desc and an ios text label as the same accessible name`() {
+    val android =
+      node(
+        "android.view.View",
+        children = listOf(node("android.widget.ImageButton", contentDescription = "Add")),
+      )
+    val ios = node("XCUIApplication", children = listOf(node("UIButton", text = "Add")))
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(0, diff.changed)
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(2, diff.equal)
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Button#"))
+  }
+
+  /** A genuinely different accessible name is still Changed under the normalized comparison. */
+  @Test
+  fun `role mode still reports a differing accessible name as Changed`() {
+    val android =
+      node(
+        "android.view.View",
+        children = listOf(node("android.widget.ImageButton", contentDescription = "Add")),
+      )
+    val ios = node("XCUIApplication", children = listOf(node("UIButton", text = "Remove")))
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(1, diff.changed)
+    assertEquals(NodeDiffStatus.Changed, statusOf(diff, "Button#"))
+  }
+
+  /**
+   * The live iOS runner reports a checkbox as the bare `UIView` class (its `mapElementType` has no
+   * `.checkBox` case) while still setting `isCheckable`. Role mode promotes that checkable generic
+   * node to Checkbox so it pairs with Android's `CheckBox` instead of surfacing as OnlyIn on each
+   * side.
+   */
+  @Test
+  fun `role mode pairs an ios checkbox reported as a checkable UIView with an android CheckBox`() {
+    val android =
+      node(
+        "android.view.View",
+        children = listOf(node("android.widget.CheckBox", isCheckable = true)),
+      )
+    val ios = node("XCUIApplication", children = listOf(node("UIView", isCheckable = true)))
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(2, diff.equal)
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Checkbox#"))
+  }
+
+  /**
+   * The checkable promotion is gated on generic roles: a `UISwitch` is checkable too but already
+   * keys as Switch by class, so it must not be pulled into Checkbox and mis-pair with a checkbox.
+   */
+  @Test
+  fun `role mode leaves a checkable switch keyed as Switch`() {
+    val androidSwitch =
+      node(
+        "android.view.View",
+        children = listOf(node("androidx.appcompat.widget.SwitchCompat", isCheckable = true)),
+      )
+    val iosSwitch = node("XCUIApplication", children = listOf(node("UISwitch", isCheckable = true)))
+
+    val diff = diffHierarchies(androidSwitch, iosSwitch, DiffKeyMode.StructuralRole)
+
+    assertEquals(2, diff.equal)
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Switch#"))
+    assertNull(statusOf(diff, "Checkbox#"))
   }
 }

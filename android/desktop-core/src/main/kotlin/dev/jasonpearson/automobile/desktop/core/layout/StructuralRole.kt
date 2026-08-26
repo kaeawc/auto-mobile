@@ -103,7 +103,17 @@ fun structuralRole(className: String): StructuralRole =
     // runner emits XCUIApplication + UIWindow for the mandatory root and window and UIView for any
     // non-semantic wrapper, so these must land in the same role as Android's FrameLayout/ViewGroup
     // or the two roots would never pair. The XCUIElementType* names are the XCUITest-native forms.
-    className.contains("Layout") ||
+    //
+    // The bare `android.view.View` (and its short `View` form) is folded in here too: both Android
+    // extraction paths wrap the capture in a class-less synthetic root, and `HierarchyParser`
+    // defaults a class-less node to `android.view.View` — so that is the class the live Android
+    // compare root actually carries. Without this it would map to Other while the iOS root maps to
+    // Container, and since every descendant key includes the root segment the two live trees would
+    // stay wholly disjoint (issue #4872 review). A plain `View` is a generic wrapper regardless, so
+    // this also mirrors iOS's `UIView -> Container` for non-root spacers.
+    className == "android.view.View" ||
+      className == "View" ||
+      className.contains("Layout") ||
       className.contains("ViewGroup") ||
       className.contains("ComposeView") ||
       className.contains("XCUIApplication") ||

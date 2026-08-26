@@ -103,7 +103,7 @@ export class AppPreferences {
       return this.getAndroidSharedPreference(input);
     }
 
-    return this.getIosUserDefault(input, this.iosDefaultsDeadline());
+    return this.getIosUserDefault(input);
   }
 
   async setPreference(input: SetPreferenceInput): Promise<PreferenceResult> {
@@ -223,7 +223,7 @@ export class AppPreferences {
 
   private async getIosUserDefault(
     input: GetPreferenceInput,
-    deadlineMs: number,
+    deadlineMs?: number,
   ): Promise<PreferenceResult> {
     if (!isIosSimulatorDevice(this.device)) {
       throw unsupportedPhysicalIosUserDefaultsError();
@@ -269,7 +269,7 @@ export class AppPreferences {
 
   private async readIosDefaultsType(
     input: GetPreferenceInput,
-    deadlineMs: number,
+    deadlineMs?: number,
   ): Promise<PreferenceValueType | undefined> {
     const domain = iosDefaultsDomain(input);
     try {
@@ -298,12 +298,13 @@ export class AppPreferences {
 
   private async executeIosDefaultsCommand(
     args: string[],
-    deadlineMs: number,
+    deadlineMs?: number,
   ): Promise<{ stdout: string; stderr: string }> {
     let finalError: unknown;
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const remainingMs = deadlineMs - this.timer.now();
+      const remainingMs =
+        deadlineMs === undefined ? IOS_DEFAULTS_COMMAND_TIMEOUT_MS : deadlineMs - this.timer.now();
       if (remainingMs <= 0) {
         if (finalError) {
           throw finalError;

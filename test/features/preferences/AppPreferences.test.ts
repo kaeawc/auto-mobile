@@ -910,6 +910,36 @@ describe("AppPreferences", () => {
     ]);
   });
 
+  test("preserves the type-read retry for a direct iOS UserDefaults read", async () => {
+    const timer = new FakeTimer();
+    const simctl = new ScriptedSimCtlClient(
+      [
+        { elapsedMs: 10_000, error: new Error("Command timed out after 10000ms") },
+        { elapsedMs: 10_000, stdout: "enabled\n" },
+        { elapsedMs: 10_000, error: new Error("Command timed out after 10000ms") },
+        { elapsedMs: 10_000, stdout: "Type is string\n" },
+      ],
+      timer,
+    );
+    const preferences = new AppPreferences(iosSimulator, { simctl, timer });
+
+    const result = await preferences.getPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "featureFlag",
+    });
+
+    expect(result.value).toBe("enabled");
+    expect(timer.now()).toBe(40_000);
+    expect(simctl.calls.map((call) => call.args[3])).toEqual([
+      "read",
+      "read",
+      "read-type",
+      "read-type",
+    ]);
+    expect(simctl.calls.map((call) => call.timeoutMs)).toEqual([10_000, 10_000, 10_000, 10_000]);
+  });
+
   test("bounds the full iOS UserDefaults write and verification operation to 30 seconds", async () => {
     const timer = new FakeTimer();
     const simctl = new ScriptedSimCtlClient(

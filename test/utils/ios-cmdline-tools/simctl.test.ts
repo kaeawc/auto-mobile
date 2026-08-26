@@ -306,7 +306,7 @@ describe("Simctl", function () {
       resolveCommand?.(createExecResult("late bootstatus", ""));
     });
 
-    test("applies the command timeout while the simctl availability probe is pending", async function () {
+    test("aborts an in-flight availability probe without poisoning future commands", async function () {
       const timer = new FakeTimer();
       const commands: string[] = [];
       let availabilityAttempts = 0;
@@ -330,7 +330,7 @@ describe("Simctl", function () {
         }
         return createExecResult("", "");
       };
-      simctl = new Simctl(mockDevice, mockExecAsync, timer);
+      simctl = new Simctl(mockDevice, mockExecAsync, timer, "darwin");
       forceStaticAvailabilityPath(simctl);
 
       const command = simctl.executeCommandArgs(["list", "devices"], 1234);
@@ -358,6 +358,48 @@ describe("Simctl", function () {
         stdout: "",
       });
       expect(commands).toEqual(["simctl --version", "simctl --version", "simctl list devices"]);
+    });
+
+    test("does not share cancellation between concurrent availability probes", async function () {
+      const timer = new FakeTimer();
+      let availabilityAttempts = 0;
+      let firstProbeSignal: AbortSignal | undefined;
+      mockExecAsync = async (
+        _file: string,
+        args: string[],
+        _maxBuffer?: number,
+        signal?: AbortSignal,
+      ): Promise<ExecResult> => {
+        if (args.join(" ") === "simctl --version") {
+          availabilityAttempts += 1;
+          if (availabilityAttempts === 1) {
+            firstProbeSignal = signal;
+            return new Promise<ExecResult>((_resolve, reject) => {
+              signal?.addEventListener("abort", () => reject(new Error("first probe aborted")));
+            });
+          }
+          return createExecResult("simctl version 1.0.0", "");
+        }
+        return createExecResult("", "");
+      };
+      simctl = new Simctl(mockDevice, mockExecAsync, timer, "darwin");
+      forceStaticAvailabilityPath(simctl);
+
+      const first = simctl.executeCommandArgs(["list", "devices"], 1234);
+      await waitForCondition(
+        () => firstProbeSignal !== undefined,
+        "first availability probe dispatch",
+      );
+
+      await expect(simctl.executeCommandArgs(["list", "devices"], 1234)).resolves.toMatchObject({
+        stdout: "",
+      });
+      timer.advanceTime(1234);
+
+      await expect(first).rejects.toThrow(
+        "Command timed out after 1234ms: xcrun simctl list devices",
+      );
+      expect(firstProbeSignal?.aborted).toBe(true);
     });
 
     test("applies the default timeout to the bootstatus wait", async function () {

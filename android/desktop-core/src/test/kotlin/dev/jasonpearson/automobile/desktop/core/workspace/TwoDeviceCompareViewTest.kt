@@ -61,21 +61,25 @@ class TwoDeviceCompareViewTest {
   }
 
   /**
-   * The iOS side's counterpart, emitting real `XCUIElementType*` classes. Its `title` maps to the
-   * same `Text` role as Android's `TextView` (so those pair and stay Equal), while its second child
-   * is an **Image** (a different role than Android's Button) so the role diff reports it as
-   * only-in-B rather than pairing it against the button.
+   * The iOS side's counterpart, emitting the **UIKit** class names the runner actually reports
+   * (`ElementLocator.mapElementType` → `XCUIApplication`, `UILabel`, `UIImageView`, …), not the
+   * fabricated `XCUIElementType*` forms — so this exercises the live cross-platform path. Its
+   * `title` (`UILabel`) maps to the same `Text` role as Android's `TextView` (so those pair and
+   * stay Equal), while its second child is an **Image** (`UIImageView`, a different role than
+   * Android's Button) so the role diff reports it as only-in-B rather than pairing it against the
+   * button. The `XCUIApplication` root maps to the same `Container` role as Android's
+   * `FrameLayout`, so the roots pair instead of leaving the whole tree disjoint (issue #4872).
    */
   private fun iosHierarchyJson(secondChildResourceId: String): JsonElement {
     val raw =
       """
       {"hierarchy":{"node":{
-        "class":"XCUIElementTypeApplication","resource-id":"root",
+        "class":"XCUIApplication","resource-id":"root",
         "bounds":{"left":0,"top":0,"right":100,"bottom":200},
         "node":[
-          {"class":"XCUIElementTypeStaticText","resource-id":"title","text":"Hi",
+          {"class":"UILabel","resource-id":"title","text":"Hi",
            "bounds":{"left":0,"top":0,"right":50,"bottom":20}},
-          {"class":"XCUIElementTypeImage","resource-id":"$secondChildResourceId",
+          {"class":"UIImageView","resource-id":"$secondChildResourceId",
            "bounds":{"left":0,"top":30,"right":50,"bottom":60}}
         ]
       }}}

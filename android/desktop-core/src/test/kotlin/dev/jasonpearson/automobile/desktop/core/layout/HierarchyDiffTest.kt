@@ -185,7 +185,7 @@ class HierarchyDiffTest {
   fun `same-platform trees with realistic class names yield a mixed non-disjoint diff`() {
     // Real Android class names on BOTH sides: the shared structure matches by key, so the diff is a
     // meaningful mix of equal/changed/only-in rather than the all-disjoint result a cross-platform
-    // pair (android.widget.* vs XCUIElementType*) would produce.
+    // pair (android.widget.* vs the iOS runner's UIKit names) would produce.
     val a =
       node(
         "android.widget.FrameLayout",
@@ -448,19 +448,20 @@ class HierarchyDiffTest {
         ),
     )
 
-  /** The iOS rendering of the same screen: application → table → [static text, button]. */
+  /**
+   * The iOS rendering of the same screen: application → table → [static text, button]. Uses the
+   * UIKit class names the runner actually reports (`ElementLocator.mapElementType`), not the
+   * fabricated `XCUIElementType*` forms, so the cross-platform role diff is exercised on the live
+   * vocabulary.
+   */
   private fun iosScreen(title: String, action: String): UIElementInfo =
     node(
-      "XCUIElementTypeApplication",
+      "XCUIApplication",
       children =
         listOf(
           node(
-            "XCUIElementTypeTable",
-            children =
-              listOf(
-                node("XCUIElementTypeStaticText", text = title),
-                node("XCUIElementTypeButton", text = action),
-              ),
+            "UITableView",
+            children = listOf(node("UILabel", text = title), node("UIButton", text = action)),
           )
         ),
     )
@@ -525,11 +526,7 @@ class HierarchyDiffTest {
             node("android.widget.ImageView", "com.app:id/avatar"),
           ),
       )
-    val ios =
-      node(
-        "XCUIElementTypeApplication",
-        children = listOf(node("XCUIElementTypeStaticText", text = "Inbox")),
-      )
+    val ios = node("XCUIApplication", children = listOf(node("UILabel", text = "Inbox")))
 
     val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
 

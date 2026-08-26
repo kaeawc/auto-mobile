@@ -212,26 +212,23 @@ fun WorkspaceShell(
 }
 
 /**
- * Pick the two device columns to compare: the focused column plus the first other observed column
- * **of the same platform**. Returns null when there is no same-platform second device, so the ⧉
- * Compare entry stays hidden and the overlay never opens with an incomparable pair. If more than
- * two same-platform devices are observed, only the focused device and one other are compared (N-way
- * compare is deferred).
+ * Pick the two device columns to compare: the focused column plus the first other observed column.
+ * Returns null when there is no second device, so the ⧉ Compare entry stays hidden. If more than
+ * two devices are observed, only the focused device and one other are compared (N-way compare is
+ * deferred).
  *
- * Same-platform only because the structural diff key embeds `className`, which is platform-specific
- * (`android.widget.FrameLayout` vs `XCUIElementTypeApplication`): an Android-to-iOS pair would
- * share no keys and every node would read as only-in-one, a meaningless diff. Cross-platform
- * structural-role normalization is deferred to issue #4872.
+ * A cross-platform (Android↔iOS) pair is allowed: [TwoDeviceCompareView] keys such a diff by the
+ * cross-platform [structuralRole][dev.jasonpearson.automobile.desktop.core.layout.structuralRole]
+ * of each node (issue #4872) rather than by the platform-specific `className`, so the two trees
+ * pair by role + tree position and produce a meaningful diff instead of two disjoint only-in trees.
+ * A same-platform pair keeps the raw-class identity.
  */
 internal fun compareColumns(content: WorkspaceUiState.Content): Pair<DeviceColumn, DeviceColumn>? {
   val focused =
     content.columns.firstOrNull { it.deviceId == content.focusedDeviceId }
       ?: content.columns.firstOrNull()
       ?: return null
-  val other =
-    content.columns.firstOrNull {
-      it.deviceId != focused.deviceId && it.platform == focused.platform
-    } ?: return null
+  val other = content.columns.firstOrNull { it.deviceId != focused.deviceId } ?: return null
   return focused to other
 }
 

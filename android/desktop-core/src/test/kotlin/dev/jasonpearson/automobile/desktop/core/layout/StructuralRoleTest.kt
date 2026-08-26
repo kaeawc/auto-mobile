@@ -52,6 +52,35 @@ class StructuralRoleTest {
     assertEquals(StructuralRole.ScrollView, structuralRole("XCUIElementTypeScrollView"))
   }
 
+  /**
+   * The class names the live iOS runner actually reports are the UIKit names emitted by
+   * `ElementLocator.mapElementType` (e.g. `XCUIApplication`, `UILabel`, `UITableView`), not the
+   * `XCUIElementType*` forms tested above. These must map to the same roles or a live Android↔iOS
+   * diff keys on mismatched roots and reads as two disjoint trees (issue #4872).
+   */
+  @Test
+  fun `ios UIKit class names emitted by the runner map to their roles`() {
+    assertEquals(StructuralRole.Container, structuralRole("XCUIApplication"))
+    assertEquals(StructuralRole.Container, structuralRole("UIWindow"))
+    assertEquals(StructuralRole.Container, structuralRole("UIView"))
+    assertEquals(StructuralRole.Text, structuralRole("UILabel"))
+    assertEquals(StructuralRole.TextField, structuralRole("UITextField"))
+    assertEquals(StructuralRole.TextField, structuralRole("UISecureTextField"))
+    assertEquals(StructuralRole.TextField, structuralRole("UITextView"))
+    assertEquals(StructuralRole.TextField, structuralRole("UISearchBar"))
+    assertEquals(StructuralRole.Button, structuralRole("UIButton"))
+    assertEquals(StructuralRole.Image, structuralRole("UIImageView"))
+    assertEquals(StructuralRole.List, structuralRole("UITableView"))
+    assertEquals(StructuralRole.List, structuralRole("UICollectionView"))
+    assertEquals(StructuralRole.ListItem, structuralRole("UITableViewCell"))
+    assertEquals(StructuralRole.Switch, structuralRole("UISwitch"))
+    assertEquals(StructuralRole.Toolbar, structuralRole("UIToolbar"))
+    assertEquals(StructuralRole.Toolbar, structuralRole("UINavigationBar"))
+    assertEquals(StructuralRole.Toolbar, structuralRole("UITabBar"))
+    assertEquals(StructuralRole.ScrollView, structuralRole("UIScrollView"))
+    assertEquals(StructuralRole.WebView, structuralRole("WKWebView"))
+  }
+
   @Test
   fun `android and ios classes for the same widget share a role`() {
     assertEquals(structuralRole("android.widget.Button"), structuralRole("XCUIElementTypeButton"))
@@ -67,6 +96,20 @@ class StructuralRoleTest {
       structuralRole("android.widget.EditText"),
       structuralRole("XCUIElementTypeTextField"),
     )
+  }
+
+  /** The same widget families align on the UIKit names the runner actually emits. */
+  @Test
+  fun `android and ios UIKit classes for the same widget share a role`() {
+    assertEquals(structuralRole("android.widget.FrameLayout"), structuralRole("XCUIApplication"))
+    assertEquals(structuralRole("android.widget.Button"), structuralRole("UIButton"))
+    assertEquals(structuralRole("android.widget.TextView"), structuralRole("UILabel"))
+    assertEquals(structuralRole("android.widget.EditText"), structuralRole("UITextField"))
+    assertEquals(
+      structuralRole("androidx.recyclerview.widget.RecyclerView"),
+      structuralRole("UITableView"),
+    )
+    assertEquals(structuralRole("android.widget.ImageView"), structuralRole("UIImageView"))
   }
 
   @Test

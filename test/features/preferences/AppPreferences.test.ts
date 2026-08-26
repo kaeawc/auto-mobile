@@ -837,12 +837,7 @@ describe("AppPreferences", () => {
       "read",
       "read-type",
     ]);
-    expect(simctl.calls.map((call) => call.timeoutMs)).toEqual([
-      10_000,
-      10_000,
-      10_000,
-      10_000,
-    ]);
+    expect(simctl.calls.map((call) => call.timeoutMs)).toEqual([10_000, 10_000, 10_000, 10_000]);
   });
 
   test("preserves the final iOS UserDefaults command error after one retry", async () => {

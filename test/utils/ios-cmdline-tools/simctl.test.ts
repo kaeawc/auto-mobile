@@ -306,6 +306,31 @@ describe("Simctl", function () {
       resolveCommand?.(createExecResult("late bootstatus", ""));
     });
 
+    test("applies the command timeout while the simctl availability probe is pending", async function () {
+      const timer = new FakeTimer();
+      const commands: string[] = [];
+      mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+        commands.push(args.join(" "));
+        if (args.join(" ") === "simctl --version") {
+          return new Promise<ExecResult>(() => {});
+        }
+        return createExecResult("", "");
+      };
+      simctl = new Simctl(mockDevice, mockExecAsync, timer);
+
+      const command = simctl.executeCommandArgs(["list", "devices"], 1234);
+      await waitForCondition(
+        () => commands.includes("simctl --version"),
+        "simctl availability probe dispatch",
+      );
+      timer.advanceTime(1234);
+
+      await expect(command).rejects.toThrow(
+        "Command timed out after 1234ms: xcrun simctl list devices",
+      );
+      expect(commands).toEqual(["simctl --version"]);
+    });
+
     test("applies the default timeout to the bootstatus wait", async function () {
       const timer = new FakeTimer();
       let resolveCommand: ((result: ExecResult) => void) | undefined;

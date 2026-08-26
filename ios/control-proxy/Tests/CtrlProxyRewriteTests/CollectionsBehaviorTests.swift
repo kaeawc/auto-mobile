@@ -96,7 +96,7 @@ final class CollectionsBehaviorTests: XCTestCase {
         registry.set(1, forId: 1)
         registry.set(2, forId: 2)
         let snapshot = registry.values()
-        registry.removeAll()
+        _ = registry.removeAll()
         XCTAssertEqual(snapshot.sorted(), [1, 2], "snapshot must not reflect later mutation")
     }
 }

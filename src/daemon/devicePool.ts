@@ -135,6 +135,11 @@ export interface PooledDevice {
    * snapshot that would otherwise revert it (#5690).
    */
   nameRefreshGeneration?: number;
+  /**
+   * Discovery timestamp that last wrote the mutable display name. When both
+   * observations carry a stamp, the newer one wins regardless of its path.
+   */
+  nameObservedAt?: number;
   /** Authoritative AVD name captured when this pool starts an Android emulator. */
   avdName?: string;
   /** Source image metadata used to evaluate allocation criteria during recovery. */
@@ -557,6 +562,7 @@ export class DevicePool {
         errorCount: 0,
         iosVersion: device.iosVersion,
         simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
+        ...(device.observedAt !== undefined ? { nameObservedAt: device.observedAt } : {}),
         incarnation: this.nextDeviceIncarnation(),
       });
       this.deviceSessionStarts.set(device.deviceId, now);
@@ -657,6 +663,7 @@ export class DevicePool {
             errorCount: 0,
             iosVersion: device.iosVersion,
             simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
+            ...(device.observedAt !== undefined ? { nameObservedAt: device.observedAt } : {}),
             incarnation: this.nextDeviceIncarnation(),
           });
           this.deviceSessionStarts.set(device.deviceId, now);
@@ -762,6 +769,7 @@ export class DevicePool {
         errorCount: 0,
         iosVersion: device.iosVersion,
         simulatorType: this.criteriaMatcher.getBootedDeviceSimulatorType(device),
+        ...(device.observedAt !== undefined ? { nameObservedAt: device.observedAt } : {}),
         incarnation: this.nextDeviceIncarnation(),
       });
       this.recordSourceAndroidAvd(device.deviceId, sourceImage);
@@ -4803,7 +4811,10 @@ export class DevicePool {
    */
   async reserveDeviceForReadiness(
     deviceId: string,
-    expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId">,
+    expectedIdentity: Pick<
+      BootedDevice,
+      "deviceId" | "name" | "platform" | "transportId" | "observedAt"
+    >,
     stableRuntimeName = expectedIdentity.name,
     verifiedAndroidAvdName?: string,
   ): Promise<DeviceReadinessReservation> {
@@ -5002,7 +5013,7 @@ export class DevicePool {
     platform: Platform,
     sourceImage?: DeviceInfo,
     childProcess?: ChildProcess | null,
-    expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     allowSessionRebind = false,
     readinessReservationOwners?: ReadonlySet<symbol>,
     verifiedAndroidAvdIdentity?: DeviceInfo,
@@ -5146,7 +5157,9 @@ export class DevicePool {
 
   private async validateOrReloadIdlePooledDevice(
     device: PooledDevice,
-    expectedIdentity: Pick<BootedDevice, "deviceId" | "name" | "platform"> | undefined,
+    expectedIdentity:
+      | Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">
+      | undefined,
     unavailableMessage: string,
     readinessReservationOwners?: ReadonlySet<symbol>,
   ): Promise<PooledDevice> {
@@ -5211,7 +5224,9 @@ export class DevicePool {
 
   private assertRuntimeIdentity(
     pooled: PooledDevice,
-    expected: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId"> | undefined,
+    expected:
+      | Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId" | "observedAt">
+      | undefined,
   ): void {
     if (!expected || this.matchesRuntimeIdentity(pooled, expected)) {
       // A tolerated match is still an opportunity to reconcile: every caller
@@ -5259,25 +5274,46 @@ export class DevicePool {
    */
   private applyMutableRuntimeMetadata(
     pooled: PooledDevice,
-    discovered: Pick<BootedDevice, "name">,
+    discovered: Pick<BootedDevice, "name" | "observedAt">,
     source: MutableMetadataSource,
   ): void {
-    if (pooled.name === discovered.name || !this.hasMutableDisplayName(pooled)) {
+    if (!this.hasMutableDisplayName(pooled)) {
       return;
     }
-    // A start-path snapshot can predate a refresh that already folded in a
-    // newer name: the assignment mutex serializes the writes but establishes no
-    // ordering between the two observations. Such a snapshot may therefore only
-    // fill in a name no refresh has ever spoken for, never overwrite one (#5690).
-    if (source === "snapshot" && pooled.nameRefreshGeneration !== undefined) {
+    if (
+      discovered.observedAt !== undefined &&
+      pooled.nameObservedAt !== undefined &&
+      discovered.observedAt <= pooled.nameObservedAt
+    ) {
       logger.debug(
-        `Ignoring '${discovered.name}' for ${pooled.id}: a refresh already observed '${pooled.name}'`,
+        `Ignoring '${discovered.name}' for ${pooled.id}: observation ${discovered.observedAt} ` +
+          `is not newer than ${pooled.nameObservedAt}`,
       );
       return;
     }
-    logger.info(`Device ${pooled.id} renamed from '${pooled.name}' to '${discovered.name}'`);
-    pooled.name = discovered.name;
-    if (source === "refresh") {
+    // An unstamped start-path snapshot cannot be ordered against either a
+    // legacy refresh latch or a timestamped write. Keep both as a conservative
+    // boundary for legacy callers and test fakes; a stamped snapshot still uses
+    // the newer-wins comparison above.
+    if (
+      source === "snapshot" &&
+      (pooled.nameRefreshGeneration !== undefined ||
+        (discovered.observedAt === undefined && pooled.nameObservedAt !== undefined))
+    ) {
+      logger.debug(
+        `Ignoring '${discovered.name}' for ${pooled.id}: an unorderable snapshot cannot replace '${pooled.name}'`,
+      );
+      return;
+    }
+    if (pooled.name !== discovered.name) {
+      logger.info(`Device ${pooled.id} renamed from '${pooled.name}' to '${discovered.name}'`);
+      pooled.name = discovered.name;
+    }
+    if (discovered.observedAt !== undefined) {
+      pooled.nameObservedAt = discovered.observedAt;
+      delete pooled.nameRefreshGeneration;
+    } else if (source === "refresh") {
+      delete pooled.nameObservedAt;
       pooled.nameRefreshGeneration = this.refreshGeneration;
     }
   }
@@ -5329,7 +5365,7 @@ export class DevicePool {
     mcpSessionId?: string,
     sourceImage?: DeviceInfo,
     childProcess?: ChildProcess | null,
-    expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     readinessReservationOwners?: ReadonlySet<symbol>,
     verifiedAndroidAvdIdentity?: DeviceInfo,
   ): Promise<string | undefined> {
@@ -5356,7 +5392,7 @@ export class DevicePool {
     mcpSessionId?: string,
     sourceImage?: DeviceInfo,
     childProcess?: ChildProcess | null,
-    expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform">,
+    expectedIdentity?: Pick<BootedDevice, "deviceId" | "name" | "platform" | "observedAt">,
     readinessReservationOwners?: ReadonlySet<symbol>,
     verifiedAndroidAvdIdentity?: DeviceInfo,
   ): Promise<string> {

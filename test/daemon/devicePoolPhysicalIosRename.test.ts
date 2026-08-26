@@ -24,10 +24,16 @@ describe("DevicePool physical iOS rename (#5690)", () => {
   let fakeTimer: FakeTimer;
   let fakeDeviceManager: FakeDeviceManager;
 
-  const booted = (deviceId: string, platform: Platform, name: string): BootedDevice => ({
+  const booted = (
+    deviceId: string,
+    platform: Platform,
+    name: string,
+    observedAt?: number,
+  ): BootedDevice => ({
     name,
     platform,
     deviceId,
+    ...(observedAt !== undefined ? { observedAt } : {}),
   });
 
   const initialize = async (device: BootedDevice): Promise<void> => {
@@ -138,12 +144,33 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     expect(devicePool.getDevice(SIMULATOR_UDID)?.name).toBe("iPhone 15");
   });
 
-  test("a stale start snapshot never reverts a name a refresh already folded in", async () => {
-    await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone"));
+  test("a newer start-path observation updates a name a refresh already folded in", async () => {
+    fakeTimer.advanceTime(1);
+    await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone", fakeTimer.now()));
+    fakeTimer.advanceTime(1);
+    await republishAs(booted(PHYSICAL_IPHONE_UDID, "ios", "Refresh iPhone", fakeTimer.now()));
+    fakeTimer.advanceTime(1);
+
+    await devicePool.bindOrReuseDeviceSession(
+      "owner-session",
+      PHYSICAL_IPHONE_UDID,
+      "ios",
+      undefined,
+      undefined,
+      booted(PHYSICAL_IPHONE_UDID, "ios", "Start-path iPhone", fakeTimer.now()),
+    );
+
+    expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("Start-path iPhone");
+  });
+
+  test("an older start snapshot never reverts a name a refresh already folded in", async () => {
+    fakeTimer.advanceTime(1);
+    await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone", fakeTimer.now()));
     // Capture the snapshot the start path will carry, then let a refresh land
     // the newer observation first.
-    const staleSnapshot = booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone");
-    await republishAs(booted(PHYSICAL_IPHONE_UDID, "ios", "New iPhone"));
+    const staleSnapshot = booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone", fakeTimer.now());
+    fakeTimer.advanceTime(1);
+    await republishAs(booted(PHYSICAL_IPHONE_UDID, "ios", "New iPhone", fakeTimer.now()));
     expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
 
     // The start path now acquires the assignment mutex with its older snapshot.
@@ -156,6 +183,41 @@ describe("DevicePool physical iOS rename (#5690)", () => {
       undefined,
       undefined,
       staleSnapshot,
+    );
+
+    expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
+  });
+
+  test("an unstamped start snapshot cannot revert an unstamped refresh", async () => {
+    await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone"));
+    const staleSnapshot = booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone");
+    await republishAs(booted(PHYSICAL_IPHONE_UDID, "ios", "New iPhone"));
+
+    await devicePool.bindOrReuseDeviceSession(
+      "owner-session",
+      PHYSICAL_IPHONE_UDID,
+      "ios",
+      undefined,
+      undefined,
+      staleSnapshot,
+    );
+
+    expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
+  });
+
+  test("an unstamped start snapshot cannot revert a stamped refresh", async () => {
+    fakeTimer.advanceTime(1);
+    await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone", fakeTimer.now()));
+    fakeTimer.advanceTime(1);
+    await republishAs(booted(PHYSICAL_IPHONE_UDID, "ios", "New iPhone", fakeTimer.now()));
+
+    await devicePool.bindOrReuseDeviceSession(
+      "owner-session",
+      PHYSICAL_IPHONE_UDID,
+      "ios",
+      undefined,
+      undefined,
+      booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone"),
     );
 
     expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");

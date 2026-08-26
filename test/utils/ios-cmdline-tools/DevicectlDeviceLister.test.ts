@@ -446,6 +446,31 @@ describe("DevicectlDeviceLister", () => {
     expect(executions).toBe(2);
   });
 
+  test("preserves an observation stamp for cached and retained physical devices", async () => {
+    const timer = new FakeTimer();
+    let shouldFail = false;
+    const lister = makeLister({
+      timer,
+      execute: async () => {
+        if (shouldFail) {
+          throw new Error("devicectl blipped");
+        }
+        return okExec;
+      },
+      readFile: async () => JSON.stringify(devicectlPayload([connectedIphone()])),
+    });
+
+    const initial = await lister.listConnectedDevices();
+    expect(initial.devices[0]?.observedAt).toBe(0);
+
+    timer.advanceTime(1_000);
+    expect((await lister.listConnectedDevices()).devices[0]?.observedAt).toBe(0);
+
+    shouldFail = true;
+    timer.advanceTime(DEVICE_LIST_CACHE_TTL_MS);
+    expect((await lister.listConnectedDevices()).devices[0]?.observedAt).toBe(0);
+  });
+
   test("caches an unavailable host so every sweep does not respawn devicectl", async () => {
     let executions = 0;
     const lister = makeLister({

@@ -62,28 +62,62 @@ fi
 
 snapshot_version="${new_version}-SNAPSHOT"
 
-update_json_version() {
+# Rewrite a version string *in place* rather than reserializing the document.
+# json.dump(indent=2) re-indents the whole file and explodes short arrays onto
+# one element per line, which oxfmt then collapses again — so every release
+# commit (which carries [skip ci]) landed a formatter failure on main (#5743).
+#
+# `pointer` is a dot path to the canonical version, e.g. "version" or
+# "plugins.0.version". Every `"<key>": "<old version>"` pair in the file is
+# rewritten, which is what server.json's packages[] entries want; keys holding a
+# different value (marketplace.json's own schema version) are left alone.
+update_json_version_at() {
   local path="$1"
-  local version="$2"
-  local dry="$3"
+  local pointer="$2"
+  local version="$3"
+  local dry="$4"
   if [[ "$dry" == true ]]; then
     return 0
   fi
-  python3 - "$path" "$version" <<'PY'
+  python3 - "$path" "$pointer" "$version" <<'PY'
 import json
+import re
 import sys
 
 path = sys.argv[1]
-version = sys.argv[2]
+pointer = sys.argv[2]
+version = sys.argv[3]
+
+
+def resolve(document, dotted):
+    node = document
+    for part in dotted.split("."):
+        node = node[int(part)] if isinstance(node, list) else node[part]
+    return node
+
 
 with open(path, "r", encoding="utf-8") as handle:
-    data = json.load(handle)
+    raw = handle.read()
 
-data["version"] = version
+current = resolve(json.loads(raw), pointer)
+if current == version:
+    sys.exit(0)
+
+key = pointer.rsplit(".", 1)[-1]
+pattern = re.compile(
+    r'("{}"\s*:\s*){}'.format(re.escape(key), re.escape(json.dumps(current)))
+)
+updated, count = pattern.subn(lambda match: match.group(1) + json.dumps(version), raw)
+
+if count == 0:
+    raise SystemExit(f"No {key!r} entry with value {current!r} found in {path}")
+
+# Reparse so a bad substitution fails the release rather than shipping broken JSON.
+if resolve(json.loads(updated), pointer) != version:
+    raise SystemExit(f"Failed to set {pointer} to {version} in {path}")
 
 with open(path, "w", encoding="utf-8") as handle:
-    json.dump(data, handle, indent=2)
-    handle.write("\n")
+    handle.write(updated)
 PY
 }
 
@@ -121,39 +155,12 @@ if not dry:
 PY
 }
 
-update_json_version "package.json" "$new_version" "$dry_run"
-update_json_version ".claude-plugin/plugin.json" "$new_version" "$dry_run"
+update_json_version_at "package.json" "version" "$new_version" "$dry_run"
+update_json_version_at ".claude-plugin/plugin.json" "version" "$new_version" "$dry_run"
 
-# Update server.json top-level version and packages[0].version for MCP registry
-update_server_json_version() {
-  local path="$1"
-  local version="$2"
-  local dry="$3"
-  if [[ "$dry" == true ]]; then
-    return 0
-  fi
-  python3 - "$path" "$version" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-version = sys.argv[2]
-
-with open(path, "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-
-data["version"] = version
-
-if "packages" in data:
-    for pkg in data["packages"]:
-        pkg["version"] = version
-
-with open(path, "w", encoding="utf-8") as handle:
-    json.dump(data, handle, indent=2)
-    handle.write("\n")
-PY
-}
-update_server_json_version "server.json" "$new_version" "$dry_run"
+# server.json carries the same version at the top level and on every packages[]
+# entry, so rewriting the shared value covers both.
+update_json_version_at "server.json" "version" "$new_version" "$dry_run"
 
 # Update VERSION_NAME in android/gradle.properties. This is the Android
 # dev/Maven coordinate version, so local source builds intentionally keep the
@@ -174,33 +181,10 @@ update_gradle_properties_version() {
 }
 update_gradle_properties_version "android/gradle.properties" "${snapshot_version}" "$dry_run"
 
-# Update marketplace.json plugin version (nested in plugins[0].version)
-update_marketplace_plugin_version() {
-  local path="$1"
-  local version="$2"
-  local dry="$3"
-  if [[ "$dry" == true ]]; then
-    return 0
-  fi
-  python3 - "$path" "$version" <<'PY'
-import json
-import sys
-
-path = sys.argv[1]
-version = sys.argv[2]
-
-with open(path, "r", encoding="utf-8") as handle:
-    data = json.load(handle)
-
-if "plugins" in data and len(data["plugins"]) > 0:
-    data["plugins"][0]["version"] = version
-
-with open(path, "w", encoding="utf-8") as handle:
-    json.dump(data, handle, indent=2)
-    handle.write("\n")
-PY
-}
-update_marketplace_plugin_version ".claude-plugin/marketplace.json" "$new_version" "$dry_run"
+# marketplace.json nests the plugin version under plugins[0]; its own top-level
+# "version" is the marketplace schema version and must not move.
+update_json_version_at ".claude-plugin/marketplace.json" "plugins.0.version" \
+  "$new_version" "$dry_run"
 
 # Keep daemon consumer documentation aligned with the CtrlProxy artifacts that
 # ship in the release. These references are intentionally updated as part of

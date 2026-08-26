@@ -124,20 +124,26 @@ for issue in issues:
     item = f"- {title} ([#{number}]({url})){label_suffix}"
     sections[category].append(item)
 
-lines = [f"## [{current_tag}] - {date}"]
+# A blank line after every heading keeps the generated entry oxfmt-clean. The
+# release commit carries [skip ci], so unformatted output here lands on main
+# unobserved and reddens Check Formatting for the next contributor (#5743).
+lines = [f"## [{current_tag}] - {date}", ""]
 
 for section in SECTION_ORDER:
     items = sections[section]
     if not items:
         continue
     lines.append(f"### {SECTION_TITLES[section]}")
+    lines.append("")
     lines.extend(items)
+    lines.append("")
 
 if not any(sections.values()):
     lines.append("### Other")
+    lines.append("")
     lines.append("- No changes.")
 
-section = "\n".join(lines) + "\n"
+section = "\n".join(lines).rstrip("\n") + "\n"
 
 if not content:
     new_content = f"# Changelog\n\n{section}"

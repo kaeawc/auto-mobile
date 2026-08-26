@@ -209,3 +209,61 @@ run_bump() {
   # Guard against a vacuous pass: the bump must have visibly rewritten files.
   (("$rewritten_count" > 0))
 }
+
+@test "bumping a version preserves the surrounding JSON formatting (#5743)" {
+  # Reserializing with json.dump re-indents the whole file, exploding short
+  # arrays onto one line per element. oxfmt collapses them back, so every
+  # release commit landed a formatter failure on main.
+  cat > "${TEST_ROOT}/package.json" <<'JSON'
+{
+  "name": "@kaeawc/auto-mobile",
+  "version": "0.0.1",
+  "keywords": ["mobile", "android", "ios"]
+}
+JSON
+
+  cat > "${TEST_ROOT}/.claude-plugin/plugin.json" <<'JSON'
+{
+  "name": "auto-mobile",
+  "version": "0.0.1",
+  "commands": ["./skills/"]
+}
+JSON
+
+  cat > "${TEST_ROOT}/.claude-plugin/marketplace.json" <<'JSON'
+{
+  "name": "auto-mobile",
+  "version": "1.0.0",
+  "plugins": [
+    {
+      "name": "auto-mobile",
+      "version": "0.0.1",
+      "tags": ["android", "ios"]
+    }
+  ]
+}
+JSON
+
+  cat > "${TEST_ROOT}/server.json" <<'JSON'
+{
+  "version": "0.0.1",
+  "packages": [{ "identifier": "@kaeawc/auto-mobile", "version": "0.0.1" }]
+}
+JSON
+
+  run_bump
+  [ "$status" -eq 0 ]
+
+  grep -qF '"keywords": ["mobile", "android", "ios"]' "${TEST_ROOT}/package.json"
+  grep -qF '"commands": ["./skills/"]' "${TEST_ROOT}/.claude-plugin/plugin.json"
+  grep -qF '"tags": ["android", "ios"]' "${TEST_ROOT}/.claude-plugin/marketplace.json"
+  grep -qF '"packages": [{ "identifier": "@kaeawc/auto-mobile", "version": "1.2.3" }]' \
+    "${TEST_ROOT}/server.json"
+
+  # The marketplace *schema* version is not the plugin version and must not move.
+  [ "$(json_field "${TEST_ROOT}/.claude-plugin/marketplace.json" 'data["version"]')" = "1.0.0" ]
+  [ "$(json_field "${TEST_ROOT}/.claude-plugin/marketplace.json" 'data["plugins"][0]["version"]')" = "$VERSION" ]
+  [ "$(json_field "${TEST_ROOT}/package.json" 'data["version"]')" = "$VERSION" ]
+  [ "$(json_field "${TEST_ROOT}/.claude-plugin/plugin.json" 'data["version"]')" = "$VERSION" ]
+  [ "$(json_field "${TEST_ROOT}/server.json" 'data["version"]')" = "$VERSION" ]
+}

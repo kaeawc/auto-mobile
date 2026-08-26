@@ -268,10 +268,9 @@ JSON
   [ "$(json_field "${TEST_ROOT}/server.json" 'data["version"]')" = "$VERSION" ]
 }
 
-@test "fails loudly when a server.json packages[] version has diverged (#5743)" {
-  # The old writer reserialized server.json and silently force-synced every
-  # packages[] entry. Rewriting in place cannot do that, so a diverged entry
-  # must fail the release rather than ship mismatched registry metadata.
+@test "syncs a diverged server.json packages[] version (#5743)" {
+  # server.json's packages[] entries are named pointers, so a diverged entry is
+  # brought back in line exactly as the old reserializing writer did.
   cat > "${TEST_ROOT}/server.json" <<'JSON'
 {
   "version": "0.0.1",
@@ -280,6 +279,25 @@ JSON
 JSON
 
   run_bump
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"packages.0.version"* ]]
+  [ "$status" -eq 0 ]
+  [ "$(json_field "${TEST_ROOT}/server.json" 'data["version"]')" = "$VERSION" ]
+  [ "$(json_field "${TEST_ROOT}/server.json" 'data["packages"][0]["version"]')" = "$VERSION" ]
+}
+
+@test "bumps only the pointed-at version when a sibling key shares its value (#5743)" {
+  # marketplace.json's own schema version is a fixed "1.0.0". Once the plugin
+  # reaches 1.0.0 the two values collide, and a value-matching rewrite would
+  # drag the schema version along with the plugin version.
+  cat > "${TEST_ROOT}/.claude-plugin/marketplace.json" <<'JSON'
+{
+  "name": "auto-mobile",
+  "version": "1.0.0",
+  "plugins": [{ "name": "auto-mobile", "version": "1.0.0" }]
+}
+JSON
+
+  run_bump
+  [ "$status" -eq 0 ]
+  [ "$(json_field "${TEST_ROOT}/.claude-plugin/marketplace.json" 'data["version"]')" = "1.0.0" ]
+  [ "$(json_field "${TEST_ROOT}/.claude-plugin/marketplace.json" 'data["plugins"][0]["version"]')" = "$VERSION" ]
 }

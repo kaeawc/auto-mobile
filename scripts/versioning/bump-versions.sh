@@ -62,68 +62,126 @@ fi
 
 snapshot_version="${new_version}-SNAPSHOT"
 
-# Rewrite a version string *in place* rather than reserializing the document.
+# Rewrite version strings *in place* rather than reserializing the document.
 # json.dump(indent=2) re-indents the whole file and explodes short arrays onto
 # one element per line, which oxfmt then collapses again — so every release
 # commit (which carries [skip ci]) landed a formatter failure on main (#5743).
 #
-# `pointer` is a dot path to the canonical version, e.g. "version" or
-# "plugins.0.version". Every `"<key>": "<old version>"` pair in the file is
-# rewritten, which is what server.json's packages[] entries want; keys holding a
-# different value (marketplace.json's own schema version) are left alone.
-#
-# Any trailing arguments are extra pointers that must also hold the new version
-# once the rewrite is done. The previous reserializing writer force-synced
-# server.json's packages[] entries, so name them here: a diverged entry now
-# fails the release loudly instead of being silently corrected or silently left
-# behind.
+# Every argument after the dry-run flag is a dot path to a version string, e.g.
+# "version", "plugins.0.version", or "packages.*.version" (`*` covers every
+# element of a list or every value of an object). Only the pointed-at leaves are
+# rewritten: marketplace.json's own schema version must survive the release
+# where the plugin version happens to equal it.
 update_json_version_at() {
   local path="$1"
-  local pointer="$2"
-  local version="$3"
-  local dry="$4"
-  shift 4
+  local version="$2"
+  local dry="$3"
+  shift 3
   if [[ "$dry" == true ]]; then
     return 0
   fi
-  python3 - "$path" "$pointer" "$version" "$@" <<'PY'
+  python3 - "$path" "$version" "$@" <<'PY'
 import json
 import re
 import sys
 
 path = sys.argv[1]
-pointer = sys.argv[2]
-version = sys.argv[3]
+version = sys.argv[2]
+pointers = sys.argv[3:]
 
 
-def resolve(document, dotted):
-    node = document
-    for part in dotted.split("."):
-        node = node[int(part)] if isinstance(node, list) else node[part]
-    return node
+def child(node, part):
+    return node[int(part)] if isinstance(node, list) else node[part]
+
+
+def expand(node, parts, prefix=()):
+    """Concrete paths for a dot pointer, resolving `*` against the document."""
+    if not parts:
+        yield prefix
+        return
+    head, rest = parts[0], parts[1:]
+    if head == "*":
+        keys = range(len(node)) if isinstance(node, list) else node.keys()
+        for key in keys:
+            yield from expand(child(node, str(key)), rest, prefix + (str(key),))
+    else:
+        yield from expand(child(node, head), rest, prefix + (head,))
+
+
+def string_entries(node, prefix=()):
+    """Every string-valued object entry, in document order.
+
+    json.loads preserves source order, so this enumerates exactly the
+    `"key": "value"` pairs the regex below finds, in the same order.
+    """
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if isinstance(value, str):
+                yield prefix + (key,), key, value
+            else:
+                yield from string_entries(value, prefix + (key,))
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            if not isinstance(value, str):
+                yield from string_entries(value, prefix + (str(index),))
 
 
 with open(path, "r", encoding="utf-8") as handle:
     raw = handle.read()
 
-current = resolve(json.loads(raw), pointer)
-if current == version:
-    sys.exit(0)
+document = json.loads(raw)
 
-key = pointer.rsplit(".", 1)[-1]
-pattern = re.compile(
-    r'("{}"\s*:\s*){}'.format(re.escape(key), re.escape(json.dumps(current)))
-)
-updated, count = pattern.subn(lambda match: match.group(1) + json.dumps(version), raw)
+targets = []
+for pointer in pointers:
+    concrete = list(expand(document, pointer.split(".")))
+    if not concrete:
+        raise SystemExit(f"Pointer {pointer!r} matched nothing in {path}")
+    targets.extend(concrete)
 
-if count == 0:
-    raise SystemExit(f"No {key!r} entry with value {current!r} found in {path}")
+# Group by (key, current value): entries sharing both are indistinguishable to
+# the regex, so they must be located together and selected by position.
+groups = {}
+for target in targets:
+    current = document
+    for part in target:
+        current = child(current, part)
+    if not isinstance(current, str):
+        raise SystemExit(f"Pointer {'.'.join(target)} in {path} is not a string")
+    groups.setdefault((target[-1], current), []).append(target)
+
+edits = []
+for (key, current), selected in groups.items():
+    if current == version:
+        continue
+    occurrences = [
+        found for found, name, value in string_entries(document)
+        if name == key and value == current
+    ]
+    pattern = re.compile(
+        r'("{}"\s*:\s*){}'.format(re.escape(key), re.escape(json.dumps(current)))
+    )
+    matches = list(pattern.finditer(raw))
+    if len(matches) != len(occurrences):
+        raise SystemExit(
+            f"Found {len(matches)} textual {key!r} matches for {current!r} in "
+            f"{path} but {len(occurrences)} in the parsed document"
+        )
+    for target in selected:
+        match = matches[occurrences.index(target)]
+        edits.append((match.start(), match.end(), match.group(1) + json.dumps(version)))
+
+updated = raw
+for begin, finish, replacement in sorted(edits, reverse=True):
+    updated = updated[:begin] + replacement + updated[finish:]
 
 # Reparse so a bad substitution fails the release rather than shipping broken JSON.
-document = json.loads(updated)
-for expected in [pointer, *sys.argv[4:]]:
-    if resolve(document, expected) != version:
-        raise SystemExit(f"Failed to set {expected} to {version} in {path}")
+rewritten = json.loads(updated)
+for target in targets:
+    current = rewritten
+    for part in target:
+        current = child(current, part)
+    if current != version:
+        raise SystemExit(f"Failed to set {'.'.join(target)} to {version} in {path}")
 
 with open(path, "w", encoding="utf-8") as handle:
     handle.write(updated)
@@ -164,14 +222,13 @@ if not dry:
 PY
 }
 
-update_json_version_at "package.json" "version" "$new_version" "$dry_run"
-update_json_version_at ".claude-plugin/plugin.json" "version" "$new_version" "$dry_run"
+update_json_version_at "package.json" "$new_version" "$dry_run" "version"
+update_json_version_at ".claude-plugin/plugin.json" "$new_version" "$dry_run" "version"
 
-# server.json carries the same version at the top level and on every packages[]
-# entry, so rewriting the shared value covers both; verify the entry the MCP
-# registry reads.
-update_json_version_at "server.json" "version" "$new_version" "$dry_run" \
-  "packages.0.version"
+# server.json carries the version at the top level and on every packages[]
+# entry the MCP registry reads.
+update_json_version_at "server.json" "$new_version" "$dry_run" \
+  "version" "packages.*.version"
 
 # Update VERSION_NAME in android/gradle.properties. This is the Android
 # dev/Maven coordinate version, so local source builds intentionally keep the
@@ -194,8 +251,8 @@ update_gradle_properties_version "android/gradle.properties" "${snapshot_version
 
 # marketplace.json nests the plugin version under plugins[0]; its own top-level
 # "version" is the marketplace schema version and must not move.
-update_json_version_at ".claude-plugin/marketplace.json" "plugins.0.version" \
-  "$new_version" "$dry_run"
+update_json_version_at ".claude-plugin/marketplace.json" "$new_version" "$dry_run" \
+  "plugins.*.version"
 
 # Keep daemon consumer documentation aligned with the CtrlProxy artifacts that
 # ship in the release. These references are intentionally updated as part of

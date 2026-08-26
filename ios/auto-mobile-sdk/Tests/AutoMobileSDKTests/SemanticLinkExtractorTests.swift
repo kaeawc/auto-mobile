@@ -53,6 +53,20 @@ final class SemanticLinkExtractorTests: XCTestCase {
         XCTAssertNotEqual(links[0].start, links[2].start)
     }
 
+    func testMixedCaseDuplicateLinkTextGetsDistinctOccurrences() {
+        let text = "Read the Terms of Service, then the terms of service."
+        let ns = text as NSString
+        let first = ns.range(of: "Terms of Service")
+        let second = ns.range(of: "terms of service")
+        let links = SemanticLinkExtractor.links(from: linked(text, ranges: [
+            (first, "https://x/terms-first"),
+            (second, "https://x/terms-second"),
+        ]))
+
+        XCTAssertEqual(links.map(\.text), ["Terms of Service", "terms of service"])
+        XCTAssertEqual(links.map(\.occurrence), [0, 1])
+    }
+
     func testStringValuedLinkAttributeIsAlsoDiscovered() {
         let text = "See Support here."
         let range = (text as NSString).range(of: "Support")
@@ -79,6 +93,15 @@ final class SemanticLinkExtractorTests: XCTestCase {
         XCTAssertEqual(links.map(\.occurrence), [0, 0, 1])
         XCTAssertNil(links[0].start)
         XCTAssertNil(links[0].end)
+    }
+
+    func testAccessibilityLinkLabelsAssignMixedCaseDuplicatesDistinctOccurrences() {
+        let links = SemanticLinkExtractor.links(fromAccessibilityLinkLabels: [
+            "Terms of Service", "terms of service",
+        ])
+
+        XCTAssertEqual(links.map(\.text), ["Terms of Service", "terms of service"])
+        XCTAssertEqual(links.map(\.occurrence), [0, 1])
     }
 
     func testAccessibilityLinkLabelsSkipBlankEntries() {

@@ -54,8 +54,9 @@ public enum SemanticLinkExtractor {
         attributed.enumerateAttribute(.link, in: fullRange) { value, range, _ in
             guard value != nil, range.length > 0 else { return }
             let text = nsText.substring(with: range)
-            let occurrence = occurrenceByText[text, default: 0]
-            occurrenceByText[text] = occurrence + 1
+            let occurrenceKey = text.lowercased()
+            let occurrence = occurrenceByText[occurrenceKey, default: 0]
+            occurrenceByText[occurrenceKey] = occurrence + 1
             links.append(
                 SdkSemanticLink(
                     text: text,
@@ -77,8 +78,9 @@ public enum SemanticLinkExtractor {
         for label in labels {
             let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
-            let occurrence = occurrenceByText[trimmed, default: 0]
-            occurrenceByText[trimmed] = occurrence + 1
+            let occurrenceKey = trimmed.lowercased()
+            let occurrence = occurrenceByText[occurrenceKey, default: 0]
+            occurrenceByText[occurrenceKey] = occurrence + 1
             links.append(SdkSemanticLink(text: trimmed, occurrence: occurrence))
         }
         return links

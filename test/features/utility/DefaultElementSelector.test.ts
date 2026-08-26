@@ -112,6 +112,63 @@ describe("DefaultElementSelector", () => {
     ).toBe("XCUIElementTypeStaticText");
   });
 
+  test("preserves window z-order before preferring actionable matches", () => {
+    const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
+    const viewHierarchy = {
+      hierarchy: { node: [] },
+      windows: [
+        {
+          windowLayer: 2,
+          hierarchy: {
+            node: {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+                class: "XCUIElementTypeAlert",
+              },
+              node: [
+                {
+                  $: {
+                    bounds: { left: 10, top: 10, right: 90, bottom: 40 },
+                    class: "XCUIElementTypeStaticText",
+                    text: "Delete",
+                  },
+                },
+              ],
+            },
+          },
+        },
+        {
+          windowLayer: 1,
+          hierarchy: {
+            node: {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+                class: "XCUIElementTypeWindow",
+              },
+              node: [
+                {
+                  $: {
+                    bounds: { left: 10, top: 50, right: 90, bottom: 80 },
+                    class: "XCUIElementTypeButton",
+                    text: "Delete",
+                    actions: ["click"],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      ],
+      screenWidth: 100,
+      screenHeight: 100,
+    } as unknown as ViewHierarchyResult;
+
+    const match = selector.selectByText(viewHierarchy, "Delete");
+
+    expect(match.element?.class).toBe("XCUIElementTypeStaticText");
+    expect(match.totalMatches).toBe(2);
+  });
+
   test("first strategy skips off-screen matches before selecting", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
     const viewHierarchy = createViewHierarchy([

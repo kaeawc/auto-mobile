@@ -267,3 +267,19 @@ JSON
   [ "$(json_field "${TEST_ROOT}/.claude-plugin/plugin.json" 'data["version"]')" = "$VERSION" ]
   [ "$(json_field "${TEST_ROOT}/server.json" 'data["version"]')" = "$VERSION" ]
 }
+
+@test "fails loudly when a server.json packages[] version has diverged (#5743)" {
+  # The old writer reserialized server.json and silently force-synced every
+  # packages[] entry. Rewriting in place cannot do that, so a diverged entry
+  # must fail the release rather than ship mismatched registry metadata.
+  cat > "${TEST_ROOT}/server.json" <<'JSON'
+{
+  "version": "0.0.1",
+  "packages": [{ "identifier": "@kaeawc/auto-mobile", "version": "0.0.0" }]
+}
+JSON
+
+  run_bump
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"packages.0.version"* ]]
+}

@@ -71,15 +71,22 @@ snapshot_version="${new_version}-SNAPSHOT"
 # "plugins.0.version". Every `"<key>": "<old version>"` pair in the file is
 # rewritten, which is what server.json's packages[] entries want; keys holding a
 # different value (marketplace.json's own schema version) are left alone.
+#
+# Any trailing arguments are extra pointers that must also hold the new version
+# once the rewrite is done. The previous reserializing writer force-synced
+# server.json's packages[] entries, so name them here: a diverged entry now
+# fails the release loudly instead of being silently corrected or silently left
+# behind.
 update_json_version_at() {
   local path="$1"
   local pointer="$2"
   local version="$3"
   local dry="$4"
+  shift 4
   if [[ "$dry" == true ]]; then
     return 0
   fi
-  python3 - "$path" "$pointer" "$version" <<'PY'
+  python3 - "$path" "$pointer" "$version" "$@" <<'PY'
 import json
 import re
 import sys
@@ -113,8 +120,10 @@ if count == 0:
     raise SystemExit(f"No {key!r} entry with value {current!r} found in {path}")
 
 # Reparse so a bad substitution fails the release rather than shipping broken JSON.
-if resolve(json.loads(updated), pointer) != version:
-    raise SystemExit(f"Failed to set {pointer} to {version} in {path}")
+document = json.loads(updated)
+for expected in [pointer, *sys.argv[4:]]:
+    if resolve(document, expected) != version:
+        raise SystemExit(f"Failed to set {expected} to {version} in {path}")
 
 with open(path, "w", encoding="utf-8") as handle:
     handle.write(updated)
@@ -159,8 +168,10 @@ update_json_version_at "package.json" "version" "$new_version" "$dry_run"
 update_json_version_at ".claude-plugin/plugin.json" "version" "$new_version" "$dry_run"
 
 # server.json carries the same version at the top level and on every packages[]
-# entry, so rewriting the shared value covers both.
-update_json_version_at "server.json" "version" "$new_version" "$dry_run"
+# entry, so rewriting the shared value covers both; verify the entry the MCP
+# registry reads.
+update_json_version_at "server.json" "version" "$new_version" "$dry_run" \
+  "packages.0.version"
 
 # Update VERSION_NAME in android/gradle.properties. This is the Android
 # dev/Maven coordinate version, so local source builds intentionally keep the

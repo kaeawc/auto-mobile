@@ -334,10 +334,7 @@ describe("Simctl", function () {
       forceStaticAvailabilityPath(simctl);
 
       const command = simctl.executeCommandArgs(["list", "devices"], 1234);
-      await waitForCondition(
-        () => commands.includes("simctl --version"),
-        "simctl availability probe dispatch",
-      );
+      expect(commands).toEqual(["simctl --version"]);
       timer.advanceTime(1234);
 
       await expect(command).rejects.toThrow(
@@ -364,6 +361,7 @@ describe("Simctl", function () {
       const timer = new FakeTimer();
       let availabilityAttempts = 0;
       let firstProbeSignal: AbortSignal | undefined;
+      let firstProbeStarted = false;
       mockExecAsync = async (
         _file: string,
         args: string[],
@@ -374,6 +372,7 @@ describe("Simctl", function () {
           availabilityAttempts += 1;
           if (availabilityAttempts === 1) {
             firstProbeSignal = signal;
+            firstProbeStarted = true;
             return new Promise<ExecResult>((_resolve, reject) => {
               signal?.addEventListener("abort", () => reject(new Error("first probe aborted")));
             });
@@ -386,10 +385,7 @@ describe("Simctl", function () {
       forceStaticAvailabilityPath(simctl);
 
       const first = simctl.executeCommandArgs(["list", "devices"], 1234);
-      await waitForCondition(
-        () => firstProbeSignal !== undefined,
-        "first availability probe dispatch",
-      );
+      expect(firstProbeStarted).toBe(true);
 
       await expect(simctl.executeCommandArgs(["list", "devices"], 1234)).resolves.toMatchObject({
         stdout: "",

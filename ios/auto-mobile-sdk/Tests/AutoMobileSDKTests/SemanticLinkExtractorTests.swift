@@ -67,6 +67,21 @@ final class SemanticLinkExtractorTests: XCTestCase {
         XCTAssertEqual(links.map(\.occurrence), [0, 1])
     }
 
+    func testUnicodeCaseInsensitiveDuplicateLinkTextGetsDistinctOccurrences() {
+        let text = "Read Σ, then ς."
+        let ns = text as NSString
+        let first = ns.range(of: "Σ")
+        let second = ns.range(of: "ς")
+        let links = SemanticLinkExtractor.links(from: linked(text, ranges: [
+            (first, "https://x/sigma-first"),
+            (second, "https://x/sigma-second"),
+        ]))
+
+        XCTAssertEqual("Σ".caseInsensitiveCompare("ς"), .orderedSame)
+        XCTAssertEqual(links.map(\.text), ["Σ", "ς"])
+        XCTAssertEqual(links.map(\.occurrence), [0, 1])
+    }
+
     func testStringValuedLinkAttributeIsAlsoDiscovered() {
         let text = "See Support here."
         let range = (text as NSString).range(of: "Support")
@@ -101,6 +116,14 @@ final class SemanticLinkExtractorTests: XCTestCase {
         ])
 
         XCTAssertEqual(links.map(\.text), ["Terms of Service", "terms of service"])
+        XCTAssertEqual(links.map(\.occurrence), [0, 1])
+    }
+
+    func testAccessibilityLinkLabelsAssignUnicodeCaseInsensitiveDuplicatesDistinctOccurrences() {
+        let links = SemanticLinkExtractor.links(fromAccessibilityLinkLabels: ["Σ", "ς"])
+
+        XCTAssertEqual("Σ".caseInsensitiveCompare("ς"), .orderedSame)
+        XCTAssertEqual(links.map(\.text), ["Σ", "ς"])
         XCTAssertEqual(links.map(\.occurrence), [0, 1])
     }
 

@@ -5199,6 +5199,13 @@ export class DevicePool {
     expected: Pick<BootedDevice, "deviceId" | "name" | "platform" | "transportId"> | undefined,
   ): void {
     if (!expected || this.matchesRuntimeIdentity(pooled, expected)) {
+      // A tolerated match is still an opportunity to reconcile: every caller
+      // runs under the assignment mutex, and leaving the mutable name stale
+      // would make pool consumers (DeviceCriteriaMatcher.filterDevices) match
+      // the obsolete label until the next refresh (#5690).
+      if (expected) {
+        this.applyMutableRuntimeMetadata(pooled, expected);
+      }
       return;
     }
     throw new ActionableError(

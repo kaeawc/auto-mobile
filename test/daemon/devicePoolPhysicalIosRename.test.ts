@@ -86,6 +86,58 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     expect(pooled?.name).toBe("iPhone 8");
   });
 
+  test("reconciles the pooled name when startDevice tolerates a rename before any refresh", async () => {
+    const original = booted(PHYSICAL_IPHONE_UDID, "ios", "Jason's iPhone");
+    await initialize(original);
+
+    // The iPhone is renamed in Settings; discovery reports the new label to the
+    // public start path while the pooled snapshot still carries the old one.
+    const renamed = booted(PHYSICAL_IPHONE_UDID, "ios", "iPhone 15 Pro");
+    fakeDeviceManager.bootedDevices = [renamed];
+    await devicePool.bindOrReuseDeviceSession(
+      "owner-session",
+      PHYSICAL_IPHONE_UDID,
+      "ios",
+      undefined,
+      undefined,
+      renamed,
+    );
+
+    // Tolerating the rename must also fold it in: a stale PooledDevice.name
+    // makes DeviceCriteriaMatcher match the obsolete label (#5690).
+    expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("iPhone 15 Pro");
+  });
+
+  test("reconciles the pooled name when readiness reservation tolerates a rename", async () => {
+    await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Jason's iPhone"));
+
+    const renamed = booted(PHYSICAL_IPHONE_UDID, "ios", "iPhone 15 Pro");
+    fakeDeviceManager.bootedDevices = [renamed];
+    await devicePool.reserveDeviceForReadiness(PHYSICAL_IPHONE_UDID, renamed);
+
+    expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("iPhone 15 Pro");
+  });
+
+  test("does not rewrite a simulator's pooled name through the tolerated-match path", async () => {
+    await initialize(booted(SIMULATOR_UDID, "ios", "iPhone 15"));
+
+    // A simulator rename is a genuine identity change, so it must not be
+    // quietly folded in behind a tolerated match.
+    const renamed = booted(SIMULATOR_UDID, "ios", "iPhone 16");
+    fakeDeviceManager.bootedDevices = [renamed];
+    await expect(
+      devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        SIMULATOR_UDID,
+        "ios",
+        undefined,
+        undefined,
+        renamed,
+      ),
+    ).rejects.toThrow(/identity mismatch/i);
+    expect(devicePool.getDevice(SIMULATOR_UDID)?.name).toBe("iPhone 15");
+  });
+
   test("still replaces a physical iOS UDID whose platform changes", async () => {
     await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Jason's iPhone"));
     const incarnation = devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.incarnation;

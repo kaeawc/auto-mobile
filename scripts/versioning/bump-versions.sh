@@ -250,9 +250,10 @@ update_gradle_properties_version() {
 update_gradle_properties_version "android/gradle.properties" "${snapshot_version}" "$dry_run"
 
 # marketplace.json nests the plugin version under plugins[0]; its own top-level
-# "version" is the marketplace schema version and must not move.
+# "version" is the marketplace schema version and must not move, and any sibling
+# plugin entry is independently versioned — hence the index rather than `*`.
 update_json_version_at ".claude-plugin/marketplace.json" "$new_version" "$dry_run" \
-  "plugins.*.version"
+  "plugins.0.version"
 
 # Keep daemon consumer documentation aligned with the CtrlProxy artifacts that
 # ship in the release. These references are intentionally updated as part of

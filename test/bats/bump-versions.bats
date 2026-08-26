@@ -301,3 +301,24 @@ JSON
   [ "$(json_field "${TEST_ROOT}/.claude-plugin/marketplace.json" 'data["version"]')" = "1.0.0" ]
   [ "$(json_field "${TEST_ROOT}/.claude-plugin/marketplace.json" 'data["plugins"][0]["version"]')" = "$VERSION" ]
 }
+
+@test "bumps only the AutoMobile marketplace entry, not a sibling plugin (#5743)" {
+  # marketplace.json may list other, independently versioned plugins; the bump
+  # owns plugins[0] only. server.json's packages[] entries are different — they
+  # all describe this package, so they are all synced.
+  cat > "${TEST_ROOT}/.claude-plugin/marketplace.json" <<'JSON'
+{
+  "name": "auto-mobile",
+  "version": "1.0.0",
+  "plugins": [
+    { "name": "auto-mobile", "version": "0.0.1" },
+    { "name": "somebody-elses-plugin", "version": "7.8.9" }
+  ]
+}
+JSON
+
+  run_bump
+  [ "$status" -eq 0 ]
+  [ "$(json_field "${TEST_ROOT}/.claude-plugin/marketplace.json" 'data["plugins"][0]["version"]')" = "$VERSION" ]
+  [ "$(json_field "${TEST_ROOT}/.claude-plugin/marketplace.json" 'data["plugins"][1]["version"]')" = "7.8.9" ]
+}

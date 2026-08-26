@@ -365,6 +365,7 @@ export class DefaultElementFinder implements ElementFinder {
     partialMatch: boolean = true,
     caseSensitive: boolean = false,
     preserveTraversalOrder: boolean = false,
+    includeWindows: boolean = false,
   ): Element[] {
     if (!viewHierarchy || !text) {
       return [];
@@ -393,24 +394,57 @@ export class DefaultElementFinder implements ElementFinder {
     }
 
     const rootNodes = this.parser.extractRootNodes(viewHierarchy);
-    const mainMatches = selectMatches(
-      this.collectTextMatchesInRoots(rootNodes, text, matchesText, !preserveTraversalOrder),
+    const mainMatches = this.collectTextMatchesInRoots(
+      rootNodes,
+      text,
+      matchesText,
+      !preserveTraversalOrder,
     );
-    if (mainMatches.length > 0) {
-      return mainMatches;
-    }
-
-    const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
-    for (const windowRoots of windowRootGroups) {
-      const windowMatches = selectMatches(
-        this.collectTextMatchesInRoots(windowRoots, text, matchesText, !preserveTraversalOrder),
-      );
-      if (windowMatches.length > 0) {
-        return windowMatches;
+    if (!includeWindows) {
+      const selectedMainMatches = selectMatches(mainMatches);
+      if (selectedMainMatches.length > 0) {
+        return selectedMainMatches;
       }
     }
 
-    return [];
+    const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
+    const windowMatches = windowRootGroups.map((windowRoots) => {
+      return this.collectTextMatchesInRoots(
+        windowRoots,
+        text,
+        matchesText,
+        !preserveTraversalOrder,
+      );
+    });
+
+    if (!includeWindows) {
+      for (const matches of windowMatches) {
+        const selectedWindowMatches = selectMatches(matches);
+        if (selectedWindowMatches.length > 0) {
+          return selectedWindowMatches;
+        }
+      }
+      return [];
+    }
+
+    if (preserveTraversalOrder) {
+      const exactMatches = [mainMatches, ...windowMatches].flatMap(
+        (matches) => matches.exactMatches,
+      );
+      if (exactMatches.length > 0) {
+        return exactMatches;
+      }
+      return [mainMatches, ...windowMatches].flatMap((matches) => matches.partialMatches);
+    }
+
+    const rankedGroups = [...windowMatches, mainMatches];
+    const exactMatches = rankedGroups.flatMap((matches) => matches.exactMatches);
+    const matches =
+      exactMatches.length > 0
+        ? exactMatches
+        : rankedGroups.flatMap((matches) => matches.partialMatches);
+    matches.sort((a, b) => Number(this.isClickableNode(b)) - Number(this.isClickableNode(a)));
+    return matches;
   }
 
   /**

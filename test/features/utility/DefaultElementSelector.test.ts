@@ -49,6 +49,72 @@ describe("DefaultElementSelector", () => {
     expect(match.strategy).toBe("first");
   });
 
+  test("prefers an actionable match in the topmost dialog window over an identically named title", () => {
+    const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
+    const viewHierarchy = {
+      hierarchy: {
+        node: {
+          $: {
+            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            class: "XCUIElementTypeWindow",
+          },
+          node: [
+            {
+              $: {
+                bounds: { left: 10, top: 10, right: 90, bottom: 30 },
+                class: "XCUIElementTypeStaticText",
+                text: "Sign Out",
+              },
+            },
+          ],
+        },
+      },
+      windows: [
+        {
+          isActive: true,
+          isFocused: true,
+          hierarchy: {
+            node: {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+                class: "XCUIElementTypeAlert",
+              },
+              node: [
+                {
+                  $: {
+                    bounds: { left: 10, top: 60, right: 90, bottom: 90 },
+                    class: "XCUIElementTypeButton",
+                    text: "Sign Out",
+                    actions: ["click"],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      ],
+      screenWidth: 100,
+      screenHeight: 100,
+    } as unknown as ViewHierarchyResult;
+
+    const match = selector.selectByText(viewHierarchy, "Sign Out");
+
+    expect(match.element?.class).toBe("XCUIElementTypeButton");
+    expect(match.element?.actions).toEqual(["click"]);
+    expect(match.indexInMatches).toBe(0);
+    expect(match.totalMatches).toBe(2);
+
+    expect(selector.selectByText(viewHierarchy, "Sign Out", { index: 0 }).element?.class).toBe(
+      "XCUIElementTypeStaticText",
+    );
+    expect(selector.selectByText(viewHierarchy, "Sign Out", { index: 1 }).element?.class).toBe(
+      "XCUIElementTypeButton",
+    );
+    expect(
+      selector.selectByText(viewHierarchy, "Sign Out", { strategy: "random" }).element?.class,
+    ).toBe("XCUIElementTypeStaticText");
+  });
+
   test("first strategy skips off-screen matches before selecting", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
     const viewHierarchy = createViewHierarchy([

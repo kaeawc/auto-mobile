@@ -616,9 +616,9 @@ export class SimCtlClient implements SimCtl {
     return this.spawnProcess("xcrun", fullArgs, options);
   }
 
-  private async ensureAvailableForCommand(): Promise<void> {
+  private async ensureAvailableForCommand(signal?: AbortSignal): Promise<void> {
     try {
-      await this.ensureLocalSimctlAvailable();
+      await this.ensureLocalSimctlAvailable(signal);
     } catch (error) {
       const detail = errorMessage(error);
       const message =
@@ -675,7 +675,7 @@ export class SimCtlClient implements SimCtl {
       // Availability is an xcrun invocation too, so it must consume the same
       // command budget instead of leaving a caller waiting before the actual
       // simctl child process starts.
-      const availabilityPromise = this.ensureAvailableForCommand();
+      const availabilityPromise = this.ensureAvailableForCommand(signal);
       availabilityPromise.catch(() => {
         /* consumed by the race below, including after a timeout */
       });
@@ -762,9 +762,9 @@ export class SimCtlClient implements SimCtl {
     return this.isLocalSimctlAvailable();
   }
 
-  private async ensureLocalSimctlAvailable(): Promise<void> {
+  private async ensureLocalSimctlAvailable(signal?: AbortSignal): Promise<void> {
     if (this.usesInjectedExecAsync) {
-      await this.execAsync("xcrun", ["simctl", "--version"]);
+      await this.execAsync("xcrun", ["simctl", "--version"], undefined, signal);
       return;
     }
 
@@ -773,16 +773,30 @@ export class SimCtlClient implements SimCtl {
     }
 
     if (!SimCtlClient.localSimctlAvailability) {
-      SimCtlClient.localSimctlAvailability = this.execAsync("xcrun", ["simctl", "--version"])
+      const availability = this.execAsync("xcrun", ["simctl", "--version"], undefined, signal)
         .then(() => undefined)
         .catch((err) => {
-          SimCtlClient.localSimctlAvailability = null;
+          if (SimCtlClient.localSimctlAvailability === availability) {
+            SimCtlClient.localSimctlAvailability = null;
+          }
           logger.debug(`[iOS] simctl unavailable: ${errorMessage(err)}`);
           throw err;
         });
+      SimCtlClient.localSimctlAvailability = availability;
     }
 
-    await SimCtlClient.localSimctlAvailability;
+    const availability = SimCtlClient.localSimctlAvailability;
+    const clearAbortedAvailability = () => {
+      if (SimCtlClient.localSimctlAvailability === availability) {
+        SimCtlClient.localSimctlAvailability = null;
+      }
+    };
+    signal?.addEventListener("abort", clearAbortedAvailability, { once: true });
+    try {
+      await availability;
+    } finally {
+      signal?.removeEventListener("abort", clearAbortedAvailability);
+    }
   }
 
   private async isLocalSimctlAvailable(): Promise<boolean> {

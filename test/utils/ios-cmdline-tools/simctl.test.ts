@@ -309,14 +309,29 @@ describe("Simctl", function () {
     test("applies the command timeout while the simctl availability probe is pending", async function () {
       const timer = new FakeTimer();
       const commands: string[] = [];
-      mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+      let availabilityAttempts = 0;
+      let probeSignal: AbortSignal | undefined;
+      mockExecAsync = async (
+        _file: string,
+        args: string[],
+        _maxBuffer?: number,
+        signal?: AbortSignal,
+      ): Promise<ExecResult> => {
         commands.push(args.join(" "));
         if (args.join(" ") === "simctl --version") {
-          return new Promise<ExecResult>(() => {});
+          availabilityAttempts += 1;
+          if (availabilityAttempts === 1) {
+            probeSignal = signal;
+            return new Promise<ExecResult>((_resolve, reject) => {
+              signal?.addEventListener("abort", () => reject(new Error("probe aborted")));
+            });
+          }
+          return createExecResult("simctl version 1.0.0", "");
         }
         return createExecResult("", "");
       };
       simctl = new Simctl(mockDevice, mockExecAsync, timer);
+      forceStaticAvailabilityPath(simctl);
 
       const command = simctl.executeCommandArgs(["list", "devices"], 1234);
       await waitForCondition(
@@ -328,7 +343,21 @@ describe("Simctl", function () {
       await expect(command).rejects.toThrow(
         "Command timed out after 1234ms: xcrun simctl list devices",
       );
-      expect(commands).toEqual(["simctl --version"]);
+      expect(probeSignal?.aborted).toBe(true);
+      await waitForCondition(
+        () =>
+          (
+            Simctl as unknown as {
+              localSimctlAvailability: Promise<void> | null;
+            }
+          ).localSimctlAvailability === null,
+        "aborted availability probe cache reset",
+      );
+
+      await expect(simctl.executeCommandArgs(["list", "devices"], 1234)).resolves.toMatchObject({
+        stdout: "",
+      });
+      expect(commands).toEqual(["simctl --version", "simctl --version", "simctl list devices"]);
     });
 
     test("applies the default timeout to the bootstatus wait", async function () {

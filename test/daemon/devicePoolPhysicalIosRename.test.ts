@@ -138,6 +138,29 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     expect(devicePool.getDevice(SIMULATOR_UDID)?.name).toBe("iPhone 15");
   });
 
+  test("a stale start snapshot never reverts a name a refresh already folded in", async () => {
+    await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone"));
+    // Capture the snapshot the start path will carry, then let a refresh land
+    // the newer observation first.
+    const staleSnapshot = booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone");
+    await republishAs(booted(PHYSICAL_IPHONE_UDID, "ios", "New iPhone"));
+    expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
+
+    // The start path now acquires the assignment mutex with its older snapshot.
+    // The mutex serializes the writes but says nothing about which observation
+    // is newer, so reconciliation must not write the obsolete label back.
+    await devicePool.bindOrReuseDeviceSession(
+      "owner-session",
+      PHYSICAL_IPHONE_UDID,
+      "ios",
+      undefined,
+      undefined,
+      staleSnapshot,
+    );
+
+    expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
+  });
+
   test("still replaces a physical iOS UDID whose platform changes", async () => {
     await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Jason's iPhone"));
     const incarnation = devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.incarnation;

@@ -49,13 +49,12 @@ public enum SemanticLinkExtractor {
     public static func links(from attributed: NSAttributedString) -> [SdkSemanticLink] {
         let nsText = attributed.string as NSString
         var links: [SdkSemanticLink] = []
-        var occurrenceByText: [String: Int] = [:]
+        var occurrenceGroups: [(text: String, nextOccurrence: Int)] = []
         let fullRange = NSRange(location: 0, length: attributed.length)
         attributed.enumerateAttribute(.link, in: fullRange) { value, range, _ in
             guard value != nil, range.length > 0 else { return }
             let text = nsText.substring(with: range)
-            let occurrence = occurrenceByText[text, default: 0]
-            occurrenceByText[text] = occurrence + 1
+            let occurrence = nextOccurrence(for: text, occurrenceGroups: &occurrenceGroups)
             links.append(
                 SdkSemanticLink(
                     text: text,
@@ -73,14 +72,31 @@ public enum SemanticLinkExtractor {
     /// character range — occurrence is still assigned in document order.
     public static func links(fromAccessibilityLinkLabels labels: [String]) -> [SdkSemanticLink] {
         var links: [SdkSemanticLink] = []
-        var occurrenceByText: [String: Int] = [:]
+        var occurrenceGroups: [(text: String, nextOccurrence: Int)] = []
         for label in labels {
             let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
-            let occurrence = occurrenceByText[trimmed, default: 0]
-            occurrenceByText[trimmed] = occurrence + 1
+            let occurrence = nextOccurrence(for: trimmed, occurrenceGroups: &occurrenceGroups)
             links.append(SdkSemanticLink(text: trimmed, occurrence: occurrence))
         }
         return links
+    }
+
+    private static func nextOccurrence(
+        for text: String,
+        occurrenceGroups: inout [(text: String, nextOccurrence: Int)]
+    )
+        -> Int
+    {
+        if let index = occurrenceGroups.firstIndex(where: {
+            $0.text.caseInsensitiveCompare(text) == .orderedSame
+        }) {
+            let occurrence = occurrenceGroups[index].nextOccurrence
+            occurrenceGroups[index].nextOccurrence += 1
+            return occurrence
+        }
+
+        occurrenceGroups.append((text: text, nextOccurrence: 1))
+        return 0
     }
 }

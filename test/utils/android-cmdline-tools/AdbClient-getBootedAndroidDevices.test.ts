@@ -8,6 +8,7 @@ import {
 } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import type { ExecResult } from "../../../src/models";
 import { isAdbMissingDeviceError } from "../../../src/utils/android-cmdline-tools/AdbDeviceHealth";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 function createExecResult(stdout: string, stderr: string = ""): ExecResult {
   return {
@@ -66,7 +67,9 @@ describe("AdbClient.getBootedAndroidDevices", () => {
       }
       return createExecResult("");
     };
-    const adb = new AdbClient(null, execAsync);
+    const timer = new FakeTimer();
+    timer.advanceTime(42);
+    const adb = new AdbClient(null, execAsync, null, undefined, timer);
 
     const devices = await adb.getBootedAndroidDevices();
 
@@ -75,6 +78,7 @@ describe("AdbClient.getBootedAndroidDevices", () => {
         name: "emulator-5554",
         platform: "android",
         deviceId: "emulator-5554",
+        observedAt: timer.now(),
         transportId: "42",
       },
     ]);

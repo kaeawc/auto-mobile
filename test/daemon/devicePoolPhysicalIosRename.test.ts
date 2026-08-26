@@ -205,6 +205,24 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
   });
 
+  test("an unstamped start snapshot cannot revert a stamped refresh", async () => {
+    fakeTimer.advanceTime(1);
+    await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone", fakeTimer.now()));
+    fakeTimer.advanceTime(1);
+    await republishAs(booted(PHYSICAL_IPHONE_UDID, "ios", "New iPhone", fakeTimer.now()));
+
+    await devicePool.bindOrReuseDeviceSession(
+      "owner-session",
+      PHYSICAL_IPHONE_UDID,
+      "ios",
+      undefined,
+      undefined,
+      booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone"),
+    );
+
+    expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
+  });
+
   test("still replaces a physical iOS UDID whose platform changes", async () => {
     await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Jason's iPhone"));
     const incarnation = devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.incarnation;

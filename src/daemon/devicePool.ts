@@ -5291,13 +5291,17 @@ export class DevicePool {
       );
       return;
     }
-    // A refresh that predates observation stamps still establishes a name-order
-    // boundary. Do not let an otherwise-orderable snapshot cross it: its age
-    // cannot be compared to that refresh, so retaining the #5742 latch is the
-    // conservative fallback for legacy callers and test fakes.
-    if (source === "snapshot" && pooled.nameRefreshGeneration !== undefined) {
+    // An unstamped start-path snapshot cannot be ordered against either a
+    // legacy refresh latch or a timestamped write. Keep both as a conservative
+    // boundary for legacy callers and test fakes; a stamped snapshot still uses
+    // the newer-wins comparison above.
+    if (
+      source === "snapshot" &&
+      (pooled.nameRefreshGeneration !== undefined ||
+        (discovered.observedAt === undefined && pooled.nameObservedAt !== undefined))
+    ) {
       logger.debug(
-        `Ignoring '${discovered.name}' for ${pooled.id}: an unstamped refresh already observed '${pooled.name}'`,
+        `Ignoring '${discovered.name}' for ${pooled.id}: an unorderable snapshot cannot replace '${pooled.name}'`,
       );
       return;
     }

@@ -336,6 +336,18 @@ export class DefaultElementFinder implements ElementFinder {
     return isClickableElementProperties(props);
   }
 
+  private selectAndRankTextMatches(matches: {
+    exactMatches: Element[];
+    partialMatches: Element[];
+  }): Element[] {
+    const selectedMatches =
+      matches.exactMatches.length > 0 ? matches.exactMatches : matches.partialMatches;
+    selectedMatches.sort(
+      (a, b) => Number(this.isClickableNode(b)) - Number(this.isClickableNode(a)),
+    );
+    return selectedMatches;
+  }
+
   private isCollectionNode(props: Record<string, unknown>): boolean {
     const className = typeof props.class === "string" ? props.class : "";
     const scrollable = props.scrollable === "true" || props.scrollable === true;
@@ -437,14 +449,9 @@ export class DefaultElementFinder implements ElementFinder {
       return [mainMatches, ...windowMatches].flatMap((matches) => matches.partialMatches);
     }
 
-    const rankedGroups = [...windowMatches, mainMatches];
-    const exactMatches = rankedGroups.flatMap((matches) => matches.exactMatches);
-    const matches =
-      exactMatches.length > 0
-        ? exactMatches
-        : rankedGroups.flatMap((matches) => matches.partialMatches);
-    matches.sort((a, b) => Number(this.isClickableNode(b)) - Number(this.isClickableNode(a)));
-    return matches;
+    return [...windowMatches, mainMatches].flatMap((matches) =>
+      this.selectAndRankTextMatches(matches),
+    );
   }
 
   /**

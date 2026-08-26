@@ -7,6 +7,10 @@ import { errorMessage } from "../describeUnknownError";
 import { DefaultHostCommandExecutor, type HostCommandOptions } from "../HostCommandExecutor";
 import { logger, type Logger } from "../logger";
 import { defaultTimer, type Timer } from "../SystemTimer";
+import {
+  defaultDiscoveryObservationSequence,
+  type DiscoveryObservationSequence,
+} from "../DiscoveryObservationSequence";
 import { inferIosFormFactor, isIosPhysicalUdid } from "./iosDeviceType";
 
 /**
@@ -277,6 +281,7 @@ const LAST_GOOD_RETENTION_MS = 60_000;
 interface DevicectlDeviceListerDependencies {
   platform: () => NodeJS.Platform;
   timer: Pick<Timer, "now">;
+  observationSequence: DiscoveryObservationSequence;
   execute: (file: string, args: string[], options: HostCommandOptions) => Promise<ExecResult>;
   readFile: (path: string) => Promise<string>;
   mkdtemp: (prefix: string) => Promise<string>;
@@ -295,6 +300,7 @@ const defaultDependencies: DevicectlDeviceListerDependencies = {
   tmpdir,
   logger,
   timer: defaultTimer,
+  observationSequence: defaultDiscoveryObservationSequence,
 };
 
 /**
@@ -371,13 +377,14 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
 
   private remember(discovery: PhysicalIosDeviceDiscovery): PhysicalIosDeviceDiscovery {
     const now = this.deps.timer.now();
+    const observedAt = this.deps.observationSequence.next();
     // A cache hit or retained result must retain when it was observed, rather
     // than appear newer merely because a later caller read it.
     const stamped = {
       ...discovery,
       devices: discovery.devices.map((device) => ({
         ...device,
-        observedAt: device.observedAt ?? now,
+        observedAt: device.observedAt ?? observedAt,
       })),
     };
     const resolved = stamped.complete

@@ -5,6 +5,7 @@ import {
 } from "../../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 import type { ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeDiscoveryObservationSequence } from "../../fakes/FakeDiscoveryObservationSequence";
 import { runWithAbortSignal } from "../../../src/utils/AbortContext";
 import { join } from "path";
 
@@ -49,6 +50,7 @@ function makeLister(overrides: Record<string, unknown>): DevicectlDeviceLister {
     execute: async () => okExec,
     logger: { debug: () => {}, warn: () => {} },
     timer: new FakeTimer(),
+    observationSequence: new FakeDiscoveryObservationSequence(),
     ...overrides,
   } as ConstructorParameters<typeof DevicectlDeviceLister>[0]);
 }
@@ -461,14 +463,14 @@ describe("DevicectlDeviceLister", () => {
     });
 
     const initial = await lister.listConnectedDevices();
-    expect(initial.devices[0]?.observedAt).toBe(0);
+    expect(initial.devices[0]?.observedAt).toBe(1);
 
     timer.advanceTime(1_000);
-    expect((await lister.listConnectedDevices()).devices[0]?.observedAt).toBe(0);
+    expect((await lister.listConnectedDevices()).devices[0]?.observedAt).toBe(1);
 
     shouldFail = true;
     timer.advanceTime(DEVICE_LIST_CACHE_TTL_MS);
-    expect((await lister.listConnectedDevices()).devices[0]?.observedAt).toBe(0);
+    expect((await lister.listConnectedDevices()).devices[0]?.observedAt).toBe(1);
   });
 
   test("caches an unavailable host so every sweep does not respawn devicectl", async () => {

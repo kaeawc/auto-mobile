@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDiscoveryObservationSequence } from "../fakes/FakeDiscoveryObservationSequence";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -22,6 +23,7 @@ describe("DevicePool physical iOS rename (#5690)", () => {
   let devicePool: DevicePool;
   let sessionManager: SessionManager;
   let fakeTimer: FakeTimer;
+  let observations: FakeDiscoveryObservationSequence;
   let fakeDeviceManager: FakeDeviceManager;
 
   const booted = (
@@ -48,6 +50,7 @@ describe("DevicePool physical iOS rename (#5690)", () => {
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
+    observations = new FakeDiscoveryObservationSequence();
     sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
     fakeDeviceManager = new FakeDeviceManager();
     devicePool = new DevicePool(
@@ -184,6 +187,15 @@ describe("DevicePool physical iOS rename (#5690)", () => {
       undefined,
       staleSnapshot,
     );
+
+    expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
+  });
+
+  test("a later observation wins after the wall clock rolls back", async () => {
+    fakeTimer.setCurrentTime(100);
+    await initialize(booted(PHYSICAL_IPHONE_UDID, "ios", "Old iPhone", observations.next()));
+    fakeTimer.setCurrentTime(1);
+    await republishAs(booted(PHYSICAL_IPHONE_UDID, "ios", "New iPhone", observations.next()));
 
     expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
   });

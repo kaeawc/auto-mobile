@@ -1,7 +1,9 @@
 # Changelog
 
 ## [v0.0.64] - 2026-08-25
+
 ### Added
+
 - fix(storage): guard decodeURIComponent in key-value storageResources handlers against malformed URIs ([#5734](https://github.com/kaeawc/auto-mobile/issues/5734))
 - Add bounded iOS device-log capture to bug reports ([#5641](https://github.com/kaeawc/auto-mobile/issues/5641)) (ios, devxp)
 - feat(storage): project Android DataStore reads into MCP resources ([#5603](https://github.com/kaeawc/auto-mobile/issues/5603)) (android)
@@ -10,10 +12,14 @@
 - Screen streaming: severe-drop detection for auto-adjust via on-device dropped-frame stats ([#5582](https://github.com/kaeawc/auto-mobile/issues/5582))
 - feat(desktop): show the update affordance on the picker/onboarding surfaces, not only the workspace ([#5271](https://github.com/kaeawc/auto-mobile/issues/5271)) (desktop)
 - feat(ios): listApps/ListInstalledApps physical-device parity via devicectl device info apps ([#2883](https://github.com/kaeawc/auto-mobile/issues/2883)) (ios)
+
 ### Changed
+
 - deviceSnapshot: drop the deprecated adb-backup app-data path on Android ([#5708](https://github.com/kaeawc/auto-mobile/issues/5708)) (android)
 - Harden file-backed DB anti-pattern guard toward AST if a non-inline variant recurs (#3081/#3094 follow-up) ([#3103](https://github.com/kaeawc/auto-mobile/issues/3103)) (testing, database)
+
 ### Fixed
+
 - deviceSnapshot: failed iOS capture leaves an orphan snapshot directory that blocks explicit-name retry ([#5723](https://github.com/kaeawc/auto-mobile/issues/5723))
 - bug(android): publish debug inspection providers for Maven consumers ([#5714](https://github.com/kaeawc/auto-mobile/issues/5714)) (android, database)
 - deviceSnapshot: auto-overwrite existing snapshot names and close the check→create TOCTOU ([#5713](https://github.com/kaeawc/auto-mobile/issues/5713))
@@ -28,7 +34,9 @@
 - Hold concurrent ensureConnected() callers behind the bound-session first heartbeat ([#5643](https://github.com/kaeawc/auto-mobile/issues/5643))
 - Fix proxy-bound sessions that expire before their first heartbeat ([#5637](https://github.com/kaeawc/auto-mobile/issues/5637)) (android)
 - Audit and fix Android user/profile targeting across the codebase ([#5599](https://github.com/kaeawc/auto-mobile/issues/5599)) (android)
+
 ### Other
+
 - fix(ios-sdk): enforce main-thread on public UIKit/WebKit entry points (ViewHierarchyWalker.walk, WebViewBridge.perform) ([#5719](https://github.com/kaeawc/auto-mobile/issues/5719)) (ios)
 - fix(ios-sdk): NetworkCaptureRecorder — don't hold emissionLock across emit, and make recordCompletion atomic ([#5701](https://github.com/kaeawc/auto-mobile/issues/5701)) (ios)
 - fix(ios-sdk): cancel the delayed network fault on stopLoading (no client re-entry after stop) ([#5697](https://github.com/kaeawc/auto-mobile/issues/5697)) (ios, testing)

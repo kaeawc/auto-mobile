@@ -66,3 +66,48 @@ teardown() {
   run grep -nE '(^|[^0-9a-zA-Z_.])python([^3a-zA-Z]|$)' "$SCRIPT"
   [ "$status" -ne 0 ]
 }
+
+@test "emits oxfmt-clean markdown: a blank line follows every heading (#5743)" {
+  # The release commit carries [skip ci], so unformatted generator output lands
+  # on main unobserved and reddens Check Formatting for the next contributor.
+  run env \
+    PATH="$STUB_DIR:/usr/bin:/bin" \
+    GITHUB_REPOSITORY="kaeawc/auto-mobile" \
+    CURRENT_TAG="v9.9.9" \
+    SINCE_TAG="v9.9.8" \
+    CHANGELOG_FILE="$WORK_DIR/CHANGELOG.md" \
+    bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+
+  run awk '/^#/ { heading = NR; next } heading && NR == heading + 1 && $0 != "" { print NR": "$0; found = 1 } END { exit found ? 0 : 1 }' \
+    "$WORK_DIR/CHANGELOG.md"
+  [ "$status" -ne 0 ]
+}
+
+@test "keeps existing entries blank-line separated when prepending (#5743)" {
+  cat > "$WORK_DIR/CHANGELOG.md" <<'PRIOR'
+# Changelog
+
+## [v9.9.8] - 2020-01-01
+
+### Fixed
+
+- An older thing ([#0](https://example.com/0))
+PRIOR
+
+  run env \
+    PATH="$STUB_DIR:/usr/bin:/bin" \
+    GITHUB_REPOSITORY="kaeawc/auto-mobile" \
+    CURRENT_TAG="v9.9.9" \
+    SINCE_TAG="v9.9.8" \
+    CHANGELOG_FILE="$WORK_DIR/CHANGELOG.md" \
+    bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  grep -q '## \[v9.9.8\]' "$WORK_DIR/CHANGELOG.md"
+
+  run awk '/^#/ { heading = NR; next } heading && NR == heading + 1 && $0 != "" { found = 1 } END { exit found ? 0 : 1 }' \
+    "$WORK_DIR/CHANGELOG.md"
+  [ "$status" -ne 0 ]
+}

@@ -9,6 +9,7 @@ export interface ElementFinder {
     partialMatch?: boolean,
     caseSensitive?: boolean,
     preserveTraversalOrder?: boolean,
+    includeWindows?: boolean,
   ): Element[];
 
   findElementByText(

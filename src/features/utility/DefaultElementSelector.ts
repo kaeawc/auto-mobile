@@ -7,6 +7,13 @@ import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { defaultRandom } from "../../utils/Random";
 import { DefaultElementFinder } from "./ElementFinder";
 
+function shouldIncludeWindowsForTextSelection(
+  index: number | undefined,
+  strategy: ElementSelectionStrategy,
+): boolean {
+  return index === undefined && strategy === "first";
+}
+
 export class DefaultElementSelector implements ElementSelector {
   private finder: ElementFinder;
   private random: () => number;
@@ -31,6 +38,7 @@ export class DefaultElementSelector implements ElementSelector {
     },
   ): ElementSelectionResult {
     const strategy = options?.strategy ?? "first";
+    const includeWindows = shouldIncludeWindowsForTextSelection(options?.index, strategy);
     const matches = this.finder.findElementsByText(
       viewHierarchy,
       text,
@@ -38,6 +46,7 @@ export class DefaultElementSelector implements ElementSelector {
       options?.partialMatch ?? true,
       options?.caseSensitive ?? false,
       options?.index !== undefined,
+      includeWindows,
     );
     return this.pickMatch(matches, strategy, viewHierarchy, options?.index);
   }

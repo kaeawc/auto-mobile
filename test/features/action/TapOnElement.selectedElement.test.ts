@@ -144,6 +144,66 @@ describe("TapOnElement selectedElement metadata", () => {
     expect((tapOnElement as any).hasUniqueSemanticLinkOwner(owner, hierarchy)).toBe(true);
   });
 
+  test("reports the actionable dialog button in selected-element metadata", () => {
+    const tapOnElement = createTapOnElement("ios");
+    const hierarchy = {
+      hierarchy: {
+        node: {
+          $: {
+            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            class: "XCUIElementTypeWindow",
+          },
+          node: [
+            {
+              $: {
+                bounds: { left: 10, top: 10, right: 90, bottom: 30 },
+                class: "XCUIElementTypeStaticText",
+                text: "Sign Out",
+                "resource-id": "dialog-title",
+              },
+            },
+          ],
+        },
+      },
+      windows: [
+        {
+          isActive: true,
+          isFocused: true,
+          hierarchy: {
+            node: {
+              $: {
+                bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+                class: "XCUIElementTypeAlert",
+              },
+              node: [
+                {
+                  $: {
+                    bounds: { left: 10, top: 60, right: 90, bottom: 90 },
+                    class: "XCUIElementTypeButton",
+                    text: "Sign Out",
+                    "resource-id": "dialog-confirm",
+                    actions: ["click"],
+                  },
+                },
+              ],
+            },
+          },
+        },
+      ],
+      screenWidth: 100,
+      screenHeight: 100,
+    };
+
+    const { selection } = (tapOnElement as any).findElementInHierarchy(
+      { text: "Sign Out", action: "tap" },
+      hierarchy,
+    );
+    const selectedElement = (tapOnElement as any).buildSelectedElementMetadata(selection);
+
+    expect(selectedElement.resourceId).toBe("dialog-confirm");
+    expect(selectedElement.bounds.centerY).toBe(75);
+  });
+
   test("populates selection metadata and computes bounds centers", () => {
     const tapOnElement = createTapOnElement();
     const element: Element = {

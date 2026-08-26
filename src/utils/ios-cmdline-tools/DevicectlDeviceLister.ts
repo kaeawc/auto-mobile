@@ -371,14 +371,23 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
 
   private remember(discovery: PhysicalIosDeviceDiscovery): PhysicalIosDeviceDiscovery {
     const now = this.deps.timer.now();
-    const resolved = discovery.complete
-      ? this.recordLastGood(discovery, now)
+    // A cache hit or retained result must retain when it was observed, rather
+    // than appear newer merely because a later caller read it.
+    const stamped = {
+      ...discovery,
+      devices: discovery.devices.map((device) => ({
+        ...device,
+        observedAt: device.observedAt ?? now,
+      })),
+    };
+    const resolved = stamped.complete
+      ? this.recordLastGood(stamped, now)
       : {
           // A partial sweep and the retained listing are both incomplete views of
           // the same hardware, so neither may evict the other's device: union
           // them. When the sweep failed outright its half is empty and this
           // degrades to pure retention.
-          devices: mergeById(discovery.devices, this.retainedDevices(now)),
+          devices: mergeById(stamped.devices, this.retainedDevices(now)),
           complete: false,
         };
     this.cache = { discovery: resolved, expiresAt: now + DEVICE_LIST_CACHE_TTL_MS };

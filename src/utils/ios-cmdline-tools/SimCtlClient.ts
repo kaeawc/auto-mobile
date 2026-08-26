@@ -1420,6 +1420,7 @@ export class SimCtlClient implements SimCtl {
       name: simulator.name,
       platform: simulator.platform,
       deviceId: simulator.deviceId,
+      observedAt: this.timer.now(),
     } as BootedDevice;
   }
 
@@ -1522,6 +1523,7 @@ export class SimCtlClient implements SimCtl {
             name: device.name,
             platform: "ios",
             deviceId: device.udid,
+            observedAt: this.timer.now(),
             iosVersion,
             osVersion: iosVersion,
             formFactor: inferIosFormFactor(device.deviceTypeIdentifier),

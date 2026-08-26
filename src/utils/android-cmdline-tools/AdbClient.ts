@@ -1156,6 +1156,7 @@ export class AdbClient implements AdbExecutor {
             name: deviceId,
             platform: "android",
             deviceId,
+            observedAt: this.timer.now(),
             ...(transportId ? { transportId } : {}),
           } satisfies BootedDevice,
         ];

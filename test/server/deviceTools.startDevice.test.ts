@@ -1874,6 +1874,80 @@ describe("startDevice handler", () => {
     expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe("stale-session");
   });
 
+  it("tolerates a renamed physical iOS device instead of reporting a stale pool identity", async () => {
+    // A physical iPhone's display name is mutable metadata (#5690): the user can
+    // rename it in Settings, and a devicectl payload that omits
+    // deviceProperties.name republishes the same hardware under its marketing
+    // name. Neither is a stale pool entry, so startDevice must reuse the session.
+    const physicalIphone: BootedDevice = {
+      name: "iPhone 15 Pro",
+      platform: "ios",
+      deviceId: "00008030-001C2D3E1234567A",
+      iosVersion: "17.2",
+      osVersion: "17.2",
+      formFactor: "phone",
+    };
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const originalName = { ...physicalIphone, name: "Jason's iPhone" };
+    fakeDeviceUtils.setBootedDevices("ios", [originalName]);
+    await pool.initializeWithDevices([originalName]);
+    await pool.bindOrReuseDeviceSession("owner-session", physicalIphone.deviceId, "ios");
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    // The same hardware comes back under a different display name.
+    fakeDeviceUtils.setBootedDevices("ios", [physicalIphone]);
+    fakeMatcher.setBootedResult(physicalIphone);
+
+    const result = await callStartDevice({
+      platform: "ios",
+      deviceId: physicalIphone.deviceId,
+    });
+
+    expect(result.deviceId).toBe(physicalIphone.deviceId);
+    expect(pool.getDevice(physicalIphone.deviceId)?.sessionId).toBe("owner-session");
+  });
+
+  it("still reports a stale pool identity when a renamed iOS simulator is re-resolved", async () => {
+    // Simulators are deliberately outside the rename tolerance: simctl publishes
+    // one authoritative name with no fallback chain, so this stays a hard error.
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    const simulator: BootedDevice = {
+      ...iosDevice,
+      deviceId: "1E2A3B4C-5D6E-4F70-8192-A3B4C5D6E7F8",
+    };
+    const originalName = { ...simulator, name: "iPhone 15" };
+    fakeDeviceUtils.setBootedDevices("ios", [originalName]);
+    await pool.initializeWithDevices([originalName]);
+    await pool.bindOrReuseDeviceSession("stale-session", simulator.deviceId, "ios");
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    fakeDeviceUtils.setBootedDevices("ios", [{ ...simulator, name: "iPhone 16" }]);
+    fakeMatcher.setBootedResult({ ...simulator, name: "iPhone 16" });
+
+    await expect(
+      callStartDevice({
+        platform: "ios",
+        deviceId: simulator.deviceId,
+      }),
+    ).rejects.toThrow(/phase=pool-match.*stale pool identity conflicts/);
+  });
+
   it("reuses the returned sessionId for repeated startDevice calls when autolock is disabled", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());

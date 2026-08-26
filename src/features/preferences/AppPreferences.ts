@@ -11,6 +11,7 @@ import type { BootedDevice } from "../../models";
 import { ActionableError } from "../../models";
 import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
 import { logger } from "../../utils/logger";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 
 export type PreferenceScope = "systemProperty" | "sharedPreferences" | "userDefaults";
 export type PreferenceValueType = "string" | "bool" | "int" | "float";
@@ -56,6 +57,7 @@ interface IosSimulatorPreferenceClient {
 export interface AppPreferencesDependencies {
   adbFactory?: AdbClientFactory;
   simctl?: IosSimulatorPreferenceClient | null;
+  timer?: Timer;
 }
 
 type AndroidPreferenceTag = "string" | "boolean" | "int" | "float";
@@ -65,7 +67,8 @@ interface AndroidPreferenceEntry {
   type: PreferenceResultType;
 }
 
-const IOS_DEFAULTS_TIMEOUT_MS = 5000;
+const IOS_DEFAULTS_COMMAND_TIMEOUT_MS = 10_000;
+const IOS_DEFAULTS_OPERATION_TIMEOUT_MS = 30_000;
 const ANDROID_INT_MIN = -2147483648;
 const ANDROID_INT_MAX = 2147483647;
 
@@ -79,6 +82,7 @@ const ANDROID_TYPE_TO_TAG: Record<PreferenceValueType, AndroidPreferenceTag> = {
 export class AppPreferences {
   private readonly adbFactory: AdbClientFactory;
   private readonly simctl: IosSimulatorPreferenceClient | null | undefined;
+  private readonly timer: Timer;
 
   constructor(
     private readonly device: BootedDevice,
@@ -86,6 +90,7 @@ export class AppPreferences {
   ) {
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
     this.simctl = dependencies.simctl;
+    this.timer = dependencies.timer ?? defaultTimer;
   }
 
   async getPreference(input: GetPreferenceInput): Promise<PreferenceResult> {
@@ -114,10 +119,21 @@ export class AppPreferences {
         await this.setAndroidSharedPreference({ ...input, value: normalizedValue });
       }
     } else {
-      await this.setIosUserDefault({ ...input, value: normalizedValue });
+      const deadlineMs = this.iosDefaultsDeadline();
+      await this.setIosUserDefault({ ...input, value: normalizedValue }, deadlineMs);
+      const readBack = await this.getIosUserDefault(input, deadlineMs);
+      return this.verifiedWriteResult(input, normalizedValue, readBack);
     }
 
     const readBack = await this.getPreference(input);
+    return this.verifiedWriteResult(input, normalizedValue, readBack);
+  }
+
+  private verifiedWriteResult(
+    input: SetPreferenceInput,
+    normalizedValue: PreferenceValue,
+    readBack: PreferenceResult,
+  ): PreferenceResult {
     return {
       ...readBack,
       type: input.type,
@@ -205,18 +221,21 @@ export class AppPreferences {
     }
   }
 
-  private async getIosUserDefault(input: GetPreferenceInput): Promise<PreferenceResult> {
+  private async getIosUserDefault(
+    input: GetPreferenceInput,
+    deadlineMs?: number,
+  ): Promise<PreferenceResult> {
     if (!isIosSimulatorDevice(this.device)) {
       throw unsupportedPhysicalIosUserDefaultsError();
     }
 
     const domain = iosDefaultsDomain(input);
     try {
-      const result = await this.getSimctl().executeCommandArgs(
+      const result = await this.executeIosDefaultsCommand(
         ["spawn", this.device.deviceId, "defaults", "read", domain, input.key],
-        IOS_DEFAULTS_TIMEOUT_MS,
+        deadlineMs,
       );
-      const type = await this.readIosDefaultsType(input);
+      const type = await this.readIosDefaultsType(input, deadlineMs);
       return this.result(input, true, parseIosDefaultsValue(result.stdout, type), type ?? "string");
     } catch (error) {
       if (looksLikeMissingIosDefault(error)) {
@@ -226,14 +245,14 @@ export class AppPreferences {
     }
   }
 
-  private async setIosUserDefault(input: SetPreferenceInput): Promise<void> {
+  private async setIosUserDefault(input: SetPreferenceInput, deadlineMs: number): Promise<void> {
     if (!isIosSimulatorDevice(this.device)) {
       throw unsupportedPhysicalIosUserDefaultsError();
     }
 
     const domain = iosDefaultsDomain(input);
     const typeFlag = iosDefaultsTypeFlag(input.type);
-    await this.getSimctl().executeCommandArgs(
+    await this.executeIosDefaultsCommand(
       [
         "spawn",
         this.device.deviceId,
@@ -244,29 +263,69 @@ export class AppPreferences {
         typeFlag,
         stringValue(input.value),
       ],
-      IOS_DEFAULTS_TIMEOUT_MS,
+      deadlineMs,
     );
   }
 
   private async readIosDefaultsType(
     input: GetPreferenceInput,
+    deadlineMs?: number,
   ): Promise<PreferenceValueType | undefined> {
     const domain = iosDefaultsDomain(input);
     try {
-      const result = await this.getSimctl().executeCommandArgs(
+      const result = await this.executeIosDefaultsCommand(
         ["spawn", this.device.deviceId, "defaults", "read-type", domain, input.key],
-        IOS_DEFAULTS_TIMEOUT_MS,
+        deadlineMs,
       );
       return parseIosDefaultsType(result.stdout);
     } catch (error) {
       // `defaults read-type` fails when the key doesn't exist yet, which is a
       // normal "no preference set" state; undefined lets callers fall back.
-      logger.debug(
-        `src/features/preferences/AppPreferences.ts defaults type parse failed: ${error}`,
-        error,
-      );
-      return undefined;
+      if (looksLikeMissingIosDefault(error)) {
+        logger.debug(
+          `src/features/preferences/AppPreferences.ts defaults type read found no value: ${error}`,
+          error,
+        );
+        return undefined;
+      }
+      throw new ActionableError(`Failed to read iOS UserDefaults type with defaults: ${error}`);
     }
+  }
+
+  private iosDefaultsDeadline(): number {
+    return this.timer.now() + IOS_DEFAULTS_OPERATION_TIMEOUT_MS;
+  }
+
+  private async executeIosDefaultsCommand(
+    args: string[],
+    deadlineMs?: number,
+  ): Promise<{ stdout: string; stderr: string }> {
+    let finalError: unknown;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const remainingMs =
+        deadlineMs === undefined ? IOS_DEFAULTS_COMMAND_TIMEOUT_MS : deadlineMs - this.timer.now();
+      if (remainingMs <= 0) {
+        if (finalError) {
+          throw finalError;
+        }
+        throw iosDefaultsOperationTimeoutError();
+      }
+
+      try {
+        return await this.getSimctl().executeCommandArgs(
+          args,
+          Math.min(IOS_DEFAULTS_COMMAND_TIMEOUT_MS, remainingMs),
+        );
+      } catch (error) {
+        finalError = error;
+        if (attempt === 1 || !isRetryableIosDefaultsError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    throw finalError;
   }
 
   private getSimctl(): IosSimulatorPreferenceClient {
@@ -645,6 +704,23 @@ function looksLikeMissingAndroidPrefsFile(error: unknown): boolean {
 function looksLikeMissingIosDefault(error: unknown): boolean {
   const message = errorMessage(error);
   return /does not exist|Domain .* does not exist|does not contain/i.test(message);
+}
+
+function isRetryableIosDefaultsError(error: unknown): boolean {
+  const message = errorMessage(error);
+  return (
+    /timed out/i.test(message) ||
+    /(?:core ?simulator|simctl).*(?:connection|service)|(?:connection|service).*(?:core ?simulator|simctl)/i.test(
+      message,
+    ) ||
+    /connection (?:refused|reset|interrupted|invalidated)/i.test(message)
+  );
+}
+
+function iosDefaultsOperationTimeoutError(): ActionableError {
+  return new ActionableError(
+    `iOS UserDefaults preference operation timed out after ${IOS_DEFAULTS_OPERATION_TIMEOUT_MS}ms.`,
+  );
 }
 
 function preferenceWriteWarning(

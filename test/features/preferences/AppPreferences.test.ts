@@ -6,6 +6,7 @@ import { createExecResult } from "../../../src/utils/execResult";
 import { AppPreferences } from "../../../src/features/preferences/AppPreferences";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 const androidDevice: BootedDevice = {
   name: "Pixel",
@@ -47,6 +48,43 @@ function decodeBase64WritePayload(command: string): string {
   const match = command.match(/([A-Za-z0-9+/=]{24,})/);
   expect(match).toBeTruthy();
   return Buffer.from(match![1], "base64").toString("utf8");
+}
+
+interface ScriptedSimCtlOutcome {
+  stdout?: string;
+  error?: Error;
+  elapsedMs?: number;
+}
+
+class ScriptedSimCtlClient {
+  readonly calls: Array<{ args: string[]; timeoutMs?: number }> = [];
+
+  constructor(
+    private readonly outcomes: ScriptedSimCtlOutcome[],
+    private readonly timer?: FakeTimer,
+  ) {}
+
+  async executeCommand(): Promise<{ stdout: string; stderr: string }> {
+    return { stdout: "", stderr: "" };
+  }
+
+  async executeCommandArgs(
+    args: string[],
+    timeoutMs?: number,
+  ): Promise<{ stdout: string; stderr: string }> {
+    this.calls.push({ args, timeoutMs });
+    const outcome = this.outcomes.shift();
+    if (!outcome) {
+      throw new Error("Unexpected simctl command");
+    }
+    if (outcome.elapsedMs) {
+      this.timer?.advanceTime(outcome.elapsedMs);
+    }
+    if (outcome.error) {
+      throw outcome.error;
+    }
+    return { stdout: outcome.stdout ?? "", stderr: "" };
+  }
 }
 
 describe("AppPreferences", () => {
@@ -456,7 +494,7 @@ describe("AppPreferences", () => {
           "-bool",
           "true",
         ],
-        timeoutMs: 5000,
+        timeoutMs: 10_000,
       },
       {
         args: [
@@ -467,7 +505,7 @@ describe("AppPreferences", () => {
           "com.example.app",
           "onboardingComplete",
         ],
-        timeoutMs: 5000,
+        timeoutMs: 10_000,
       },
       {
         args: [
@@ -478,7 +516,7 @@ describe("AppPreferences", () => {
           "com.example.app",
           "onboardingComplete",
         ],
-        timeoutMs: 5000,
+        timeoutMs: 10_000,
       },
     ]);
   });
@@ -522,7 +560,7 @@ describe("AppPreferences", () => {
         "-string",
         "C:\\tmp",
       ],
-      timeoutMs: 5000,
+      timeoutMs: 10_000,
     });
     expect(argvCalls).toContainEqual({
       args: [
@@ -535,7 +573,7 @@ describe("AppPreferences", () => {
         "-string",
         "",
       ],
-      timeoutMs: 5000,
+      timeoutMs: 10_000,
     });
   });
 
@@ -597,7 +635,7 @@ describe("AppPreferences", () => {
           "group\\com.example",
           "path\\key",
         ],
-        timeoutMs: 5000,
+        timeoutMs: 10_000,
       },
       {
         args: [
@@ -608,7 +646,7 @@ describe("AppPreferences", () => {
           "group\\com.example",
           "path\\key",
         ],
-        timeoutMs: 5000,
+        timeoutMs: 10_000,
       },
     ]);
   });
@@ -711,7 +749,7 @@ describe("AppPreferences", () => {
           "com.example.app",
           "onboardingComplete",
         ],
-        timeoutMs: 5000,
+        timeoutMs: 10_000,
       },
       {
         args: [
@@ -722,7 +760,7 @@ describe("AppPreferences", () => {
           "com.example.app",
           "onboardingComplete",
         ],
-        timeoutMs: 5000,
+        timeoutMs: 10_000,
       },
     ]);
   });
@@ -773,6 +811,159 @@ describe("AppPreferences", () => {
       value: null,
       key: "missingKey",
     });
+    expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
+  });
+
+  test("retries a timed-out iOS UserDefaults write once", async () => {
+    const simctl = new ScriptedSimCtlClient([
+      { error: new Error("Command timed out after 10000ms") },
+      {},
+      { stdout: "enabled\n" },
+      { stdout: "Type is string\n" },
+    ]);
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+
+    await preferences.setPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "featureFlag",
+      value: "enabled",
+      type: "string",
+    });
+
+    expect(simctl.calls.map((call) => call.args[3])).toEqual([
+      "write",
+      "write",
+      "read",
+      "read-type",
+    ]);
+    expect(simctl.calls.map((call) => call.timeoutMs)).toEqual([10_000, 10_000, 10_000, 10_000]);
+  });
+
+  test("preserves the final iOS UserDefaults command error after one retry", async () => {
+    const simctl = new ScriptedSimCtlClient([
+      { error: new Error("first defaults command timed out") },
+      { error: new Error("final defaults timeout") },
+    ]);
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+
+    await expect(
+      preferences.setPreference({
+        scope: "userDefaults",
+        appId: "com.example.app",
+        key: "featureFlag",
+        value: "enabled",
+        type: "string",
+      }),
+    ).rejects.toThrow("final defaults timeout");
+    expect(simctl.calls.map((call) => call.args[3])).toEqual(["write", "write"]);
+  });
+
+  test("retries a transient CoreSimulator connection failure for UserDefaults reads once", async () => {
+    const simctl = new ScriptedSimCtlClient([
+      {},
+      { error: new Error("Failed to connect to the CoreSimulator service") },
+      { stdout: "enabled\n" },
+      { stdout: "Type is string\n" },
+    ]);
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+
+    const result = await preferences.setPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "featureFlag",
+      value: "enabled",
+      type: "string",
+    });
+
+    expect(result.verified).toBeTrue();
+    expect(simctl.calls.map((call) => call.args[3])).toEqual([
+      "write",
+      "read",
+      "read",
+      "read-type",
+    ]);
+  });
+
+  test("retries a timed-out iOS UserDefaults type-read once", async () => {
+    const simctl = new ScriptedSimCtlClient([
+      {},
+      { stdout: "enabled\n" },
+      { error: new Error("Command timed out after 10000ms") },
+      { stdout: "Type is string\n" },
+    ]);
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+
+    await preferences.setPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "featureFlag",
+      value: "enabled",
+      type: "string",
+    });
+
+    expect(simctl.calls.map((call) => call.args[3])).toEqual([
+      "write",
+      "read",
+      "read-type",
+      "read-type",
+    ]);
+  });
+
+  test("preserves the type-read retry for a direct iOS UserDefaults read", async () => {
+    const timer = new FakeTimer();
+    const simctl = new ScriptedSimCtlClient(
+      [
+        { elapsedMs: 10_000, error: new Error("Command timed out after 10000ms") },
+        { elapsedMs: 10_000, stdout: "enabled\n" },
+        { elapsedMs: 10_000, error: new Error("Command timed out after 10000ms") },
+        { elapsedMs: 10_000, stdout: "Type is string\n" },
+      ],
+      timer,
+    );
+    const preferences = new AppPreferences(iosSimulator, { simctl, timer });
+
+    const result = await preferences.getPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "featureFlag",
+    });
+
+    expect(result.value).toBe("enabled");
+    expect(timer.now()).toBe(40_000);
+    expect(simctl.calls.map((call) => call.args[3])).toEqual([
+      "read",
+      "read",
+      "read-type",
+      "read-type",
+    ]);
+    expect(simctl.calls.map((call) => call.timeoutMs)).toEqual([10_000, 10_000, 10_000, 10_000]);
+  });
+
+  test("bounds the full iOS UserDefaults write and verification operation to 30 seconds", async () => {
+    const timer = new FakeTimer();
+    const simctl = new ScriptedSimCtlClient(
+      [
+        { elapsedMs: 10_000 },
+        { elapsedMs: 10_000, error: new Error("Command timed out after 10000ms") },
+        { elapsedMs: 10_000, stdout: "enabled\n" },
+      ],
+      timer,
+    );
+    const preferences = new AppPreferences(iosSimulator, { simctl, timer });
+
+    await expect(
+      preferences.setPreference({
+        scope: "userDefaults",
+        appId: "com.example.app",
+        key: "featureFlag",
+        value: "enabled",
+        type: "string",
+      }),
+    ).rejects.toThrow("timed out after 30000ms");
+
+    expect(timer.now()).toBe(30_000);
+    expect(simctl.calls.map((call) => call.args[3])).toEqual(["write", "read", "read"]);
   });
 
   test("rejects physical iOS UserDefaults instead of reading the runner process defaults", async () => {

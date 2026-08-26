@@ -616,9 +616,9 @@ export class SimCtlClient implements SimCtl {
     return this.spawnProcess("xcrun", fullArgs, options);
   }
 
-  private async ensureAvailableForCommand(): Promise<void> {
+  private async ensureAvailableForCommand(signal?: AbortSignal): Promise<void> {
     try {
-      await this.ensureLocalSimctlAvailable();
+      await this.ensureLocalSimctlAvailable(signal);
     } catch (error) {
       const detail = errorMessage(error);
       const message =
@@ -648,8 +648,6 @@ export class SimCtlClient implements SimCtl {
 
     logger.debug(`[iOS] Executing command: ${fullCommand}`);
 
-    await this.ensureAvailableForCommand();
-
     const callerSignal = explicitSignal ?? getAbortSignal();
     const runCommand = (signal?: AbortSignal) =>
       this.execAsync("xcrun", localArgs, undefined, signal);
@@ -660,6 +658,7 @@ export class SimCtlClient implements SimCtl {
     if (timeoutMs) {
       let timeoutId: NodeJS.Timeout;
       let timeoutError: Error | undefined;
+      let runPromise: Promise<ExecResult> | undefined;
       const controller = new AbortController();
       const signal = callerSignal
         ? AbortSignal.any([callerSignal, controller.signal])
@@ -673,20 +672,28 @@ export class SimCtlClient implements SimCtl {
         }, timeoutMs);
       });
 
-      const runPromise = runCommand(signal);
-      // Once the timeout wins the race the aborted run promise rejects with an
-      // AbortError; keep it handled so it can't surface as an unhandledRejection.
-      runPromise.catch(() => {
-        /* settled after timeout; result consumed via race */
+      // Availability is an xcrun invocation too, so it must consume the same
+      // command budget instead of leaving a caller waiting before the actual
+      // simctl child process starts.
+      const availabilityPromise = this.ensureAvailableForCommand(signal);
+      availabilityPromise.catch(() => {
+        /* consumed by the race below, including after a timeout */
       });
 
       try {
+        await Promise.race([availabilityPromise, timeoutPromise]);
+        runPromise = runCommand(signal);
+        // Once the timeout wins the race the aborted run promise rejects with an
+        // AbortError; keep it handled so it can't surface as an unhandledRejection.
+        runPromise.catch(() => {
+          /* settled after timeout; result consumed via race */
+        });
         const result = await Promise.race([runPromise, timeoutPromise]);
         const duration = this.timer.now() - startTime;
         logger.debug(`[iOS] Command completed in ${duration}ms: ${command}`);
         return result;
       } catch (error) {
-        if (waitForTimedOutCommandSettlement && error === timeoutError) {
+        if (waitForTimedOutCommandSettlement && runPromise && error === timeoutError) {
           await this.waitForCommandSettlement(runPromise, command);
         }
         const duration = this.timer.now() - startTime;
@@ -701,6 +708,7 @@ export class SimCtlClient implements SimCtl {
 
     // No timeout specified
     try {
+      await this.ensureAvailableForCommand();
       const result = await runCommand(callerSignal);
       const duration = this.timer.now() - startTime;
       logger.debug(`[iOS] Command completed in ${duration}ms: ${command}`);
@@ -754,9 +762,9 @@ export class SimCtlClient implements SimCtl {
     return this.isLocalSimctlAvailable();
   }
 
-  private async ensureLocalSimctlAvailable(): Promise<void> {
+  private async ensureLocalSimctlAvailable(signal?: AbortSignal): Promise<void> {
     if (this.usesInjectedExecAsync) {
-      await this.execAsync("xcrun", ["simctl", "--version"]);
+      await this.execAsync("xcrun", ["simctl", "--version"], undefined, signal);
       return;
     }
 
@@ -765,13 +773,15 @@ export class SimCtlClient implements SimCtl {
     }
 
     if (!SimCtlClient.localSimctlAvailability) {
-      SimCtlClient.localSimctlAvailability = this.execAsync("xcrun", ["simctl", "--version"])
-        .then(() => undefined)
-        .catch((err) => {
-          SimCtlClient.localSimctlAvailability = null;
-          logger.debug(`[iOS] simctl unavailable: ${errorMessage(err)}`);
-          throw err;
-        });
+      try {
+        await this.execAsync("xcrun", ["simctl", "--version"], undefined, signal);
+        // Do not share an in-flight probe: each caller must own its cancellation
+        // signal. Cache only confirmation that simctl is available.
+        SimCtlClient.localSimctlAvailability = Promise.resolve();
+      } catch (error) {
+        logger.debug(`[iOS] simctl unavailable: ${errorMessage(error)}`);
+        throw error;
+      }
     }
 
     await SimCtlClient.localSimctlAvailability;

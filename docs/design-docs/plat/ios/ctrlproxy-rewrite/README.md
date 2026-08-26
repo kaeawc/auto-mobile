@@ -3,9 +3,13 @@
 Working notes for the `ios/control-proxy` Swift-6 concurrency rewrite
 (`CtrlProxyRewrite` target). These are **temporary planning docs**: they capture
 design decisions and deferred improvements uncovered while porting, and should be
-pruned as the work they describe lands. The authoritative running status lives in
-the assistant's project memory (`ctrlproxy-swift6-rewrite`); this directory is the
-place for anything too detailed for a one-liner.
+pruned as the work they describe lands.
+
+**To resume the work (incl. from a fresh session): start with [STATUS.md](STATUS.md)** —
+the authoritative "where we are / how to continue" doc (current phase, commits, build/test
+gate, parity technique, archetype decisions, race ledger, and the next phase's plan). A
+new session can be pointed at it with minimal guidance. (An abbreviated running status is
+also mirrored in the assistant's project memory `ctrlproxy-swift6-rewrite`.)
 
 ## Approach (recap)
 

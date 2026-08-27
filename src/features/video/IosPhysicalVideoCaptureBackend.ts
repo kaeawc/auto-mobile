@@ -388,7 +388,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       recordingId: handle.recordingId,
       outputPath: handle.outputPath,
       startedAt: handle.startedAt,
-      endedAt: state.encoderTracker?.exitState.endedAt ?? new Date().toISOString(),
+      endedAt: new Date(stopRequestedAtMs).toISOString(),
       sizeBytes,
       codec: "h264",
     };
@@ -399,11 +399,12 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     if (!backendHandle || backendHandle.kind !== "ios-physical") {
       throw new Error("Missing backend handle for physical iOS video recording.");
     }
-    await backendHandle.helper.stop();
+    const helperStop = backendHandle.helper.stop();
     const encoder = backendHandle.state.encoder;
     if (encoder && encoder.exitCode === null && !encoder.killed) {
       encoder.kill("SIGKILL");
     }
+    await helperStop;
   }
 
   private onFrame(frame: DecodedFrame, state: CaptureState, config: VideoCaptureConfig): void {

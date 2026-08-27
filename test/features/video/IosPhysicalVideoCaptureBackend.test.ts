@@ -389,6 +389,20 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     expect(written / frameBytes).toBe(6);
   });
 
+  test("reports the stop boundary rather than the encoder's delayed exit", async function () {
+    let clockMs = 10_000;
+    const harness = makeHarness({ now: () => clockMs });
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.emitFrame(2, 2);
+    harness.helper.onStop = () => {
+      clockMs += 2_000;
+    };
+
+    const result = await harness.backend.stop(handle);
+
+    expect(result.endedAt).toBe(new Date(10_000).toISOString());
+  });
+
   test("stop closes ffmpeg stdin so the moov atom is finalized instead of killing the encoder", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig());
@@ -911,6 +925,19 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     await harness.backend.forceStop(handle);
 
     expect(harness.helper.stopped).toBe(1);
+    expect(harness.ffmpeg.processes[0].killSignals).toEqual(["SIGKILL"]);
+  });
+
+  test("forceStop kills the encoder even when helper shutdown rejects", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.emitFrame(2, 2);
+    harness.helper.onStop = () => {
+      throw new Error("helper shutdown failed");
+    };
+
+    await expect(harness.backend.forceStop(handle)).rejects.toThrow("helper shutdown failed");
+
     expect(harness.ffmpeg.processes[0].killSignals).toEqual(["SIGKILL"]);
   });
 

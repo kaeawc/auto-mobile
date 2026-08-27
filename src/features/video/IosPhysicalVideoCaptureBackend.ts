@@ -236,6 +236,9 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     }
 
     const sizeBytes = await this.fileSize(handle.outputPath);
+    logger.info(
+      `[IosPhysicalVideo] recording ${handle.recordingId} wrote ${state.framesWritten} frame(s) to ${handle.outputPath}.`,
+    );
     if (state.framesDropped > 0) {
       logger.warn(
         `[IosPhysicalVideo] dropped ${state.framesDropped} frame(s) whose geometry differed from the locked ` +
@@ -279,6 +282,14 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
 
     const encoder = state.encoder;
     if (!encoder?.stdin || encoder.stdin.writableEnded) {
+      state.framesDropped += 1;
+      return;
+    }
+    if (encoder.stdin.writableNeedDrain) {
+      // Frames arrive from an event emitter, so there is no upstream backpressure
+      // to apply: buffering them while the encoder is behind would grow without
+      // bound over a long capture. Dropping the newest frame is what the helper's
+      // own bounded handoff does, and keeps latency from compounding.
       state.framesDropped += 1;
       return;
     }

@@ -282,6 +282,28 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     await harness.backend.stop(handle);
   });
 
+  test("drops frames instead of buffering without bound while the encoder is behind", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.emitFrame(4, 2);
+
+    const encoder = harness.ffmpeg.processes[0];
+    encoder.stdin.pause();
+    encoder.stdin.cork();
+    // Overfill the encoder's stdin so it reports needing a drain.
+    while (!encoder.stdin.writableNeedDrain) {
+      encoder.stdin.write(Buffer.alloc(64 * 1024));
+    }
+    const bufferedBefore = encoder.stdin.writableLength;
+
+    harness.helper.emitFrame(4, 2);
+
+    expect(encoder.stdin.writableLength).toBe(bufferedBefore);
+    encoder.stdin.uncork();
+    encoder.stdin.resume();
+    await harness.backend.stop(handle);
+  });
+
   test("honors resolution and maxDuration like the simulator path", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(

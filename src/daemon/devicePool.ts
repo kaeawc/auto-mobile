@@ -4139,18 +4139,25 @@ export class DevicePool {
     const discovery = await this.deviceManager.getBootedDevicesDetailed("ios");
     const sources = discovery.succeededSources;
     const platformSucceeded = discovery.succeededPlatforms.has("ios");
-    // Presence only proves liveness when the source that listed the device
-    // completed. A failed devicectl sweep still returns its retained last-good
-    // iPhones (`DevicectlDeviceLister.retainedDevices`), and treating those as
-    // fresh would hand an unplugged device to a session instead of raising the
-    // intended unable-to-verify error.
+    // Presence alone does not prove liveness: a failed devicectl sweep replays
+    // its retained last-good iPhones, and treating those as fresh would hand an
+    // unplugged device to a session instead of raising the intended
+    // unable-to-verify error. Freshness is decided per device rather than per
+    // source, because devicectl also reports source-wide incompleteness for a
+    // sweep in which a device WAS freshly parsed beside one unreadable record —
+    // dropping that device would reject a connected iPhone.
+    const fresh = discovery.freshDeviceIds;
     return {
       discoverySucceeded: sources ? sources.has("ios-simulator") : platformSucceeded,
       physicalDiscoverySucceeded: sources ? sources.has("ios-physical") : platformSucceeded,
       bootedDeviceIds: new Set(
         discovery.devices
-          .filter((booted) => didSourceSucceedForDevice(discovery, "ios", booted.deviceId))
-          .map((booted) => booted.deviceId),
+          .map((booted) => booted.deviceId)
+          .filter((deviceId) =>
+            // Producers that do not report freshness fall back to the source
+            // aggregate, which is what they meant before #5683.
+            fresh ? fresh.has(deviceId) : didSourceSucceedForDevice(discovery, "ios", deviceId),
+          ),
       ),
     };
   }

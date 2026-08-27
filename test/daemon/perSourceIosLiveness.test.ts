@@ -145,6 +145,47 @@ describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)
     expect(discovery.succeededSources!.has("ios-physical")).toBe(false);
   });
 
+  test("a freshly parsed iPhone is fresh even when a sibling record is unreadable", async () => {
+    // `parseDevicectlDeviceList` reports source-wide `complete: false` when any
+    // entry is malformed, while still returning the devices it did parse.
+    const manager = new MultiPlatformDeviceManager(
+      null,
+      new FakeBootedSimctl([SIMULATOR]) as unknown as SimCtlClient,
+      new FakeBootedEmulator() as unknown as AndroidEmulatorClient,
+      undefined,
+      undefined,
+      { listConnectedDevices: async () => ({ devices: [PHYSICAL], complete: false }) },
+    );
+
+    const discovery = await manager.getBootedDevicesDetailed("ios");
+
+    // The source is incomplete, but this device was observed just now.
+    expect(discovery.succeededSources!.has("ios-physical")).toBe(false);
+    expect(discovery.freshDeviceIds!.has(PHYSICAL_UDID)).toBe(true);
+  });
+
+  test("a replayed iPhone is reported but not fresh", async () => {
+    const manager = new MultiPlatformDeviceManager(
+      null,
+      new FakeBootedSimctl([SIMULATOR]) as unknown as SimCtlClient,
+      new FakeBootedEmulator() as unknown as AndroidEmulatorClient,
+      undefined,
+      undefined,
+      {
+        listConnectedDevices: async () => ({
+          devices: [PHYSICAL],
+          complete: false,
+          retainedDeviceIds: new Set([PHYSICAL_UDID]),
+        }),
+      },
+    );
+
+    const discovery = await manager.getBootedDevicesDetailed("ios");
+
+    expect(discovery.devices.map((device) => device.deviceId)).toContain(PHYSICAL_UDID);
+    expect(discovery.freshDeviceIds!.has(PHYSICAL_UDID)).toBe(false);
+  });
+
   test("both sources fail: no source is complete", async () => {
     const discovery = await manager({
       simctlOk: false,
@@ -241,6 +282,18 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     ).rejects.toThrow(/Unable to verify iOS device/);
     // Unverifiable, never proven gone: retained, not pruned.
     expect(devicePool.getDevice(PHYSICAL_UDID)).toBeDefined();
+  });
+
+  test("a freshly parsed iPhone stays assignable when its source is incomplete", async () => {
+    await pool([PHYSICAL, SIMULATOR]);
+    // devicectl parsed this iPhone but choked on a sibling record, so the
+    // source is incomplete while the device itself was seen just now.
+    deviceManager.incompleteSources.add("ios-physical");
+
+    await expect(
+      devicePool.bindOrReuseDeviceSession("session-g", PHYSICAL_UDID, "ios"),
+    ).resolves.toBeDefined();
+    expect(devicePool.getDevice(PHYSICAL_UDID)?.sessionId).toBe("session-g");
   });
 
   test("a complete sweep that no longer lists an iPhone still prunes it", async () => {

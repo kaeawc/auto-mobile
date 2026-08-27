@@ -22,6 +22,11 @@ export class FakeDeviceManager implements PlatformDeviceManager {
   // `succeededSources`, so a consumer that mistakes presence for a fresh
   // observation is caught.
   retainedSources: Set<DiscoverySource> = new Set();
+  // Sources that did not complete but whose reported devices were still
+  // observed this sweep — devicectl's partial-parse state, where one malformed
+  // record makes the whole listing incomplete while the devices it did parse
+  // are fresh. Contributes devices AND freshness, but not `succeededSources`.
+  incompleteSources: Set<DiscoverySource> = new Set();
 
   constructor(images: DeviceInfo[] = [], booted: BootedDevice[] = []) {
     this.deviceImages = images;
@@ -55,7 +60,8 @@ export class FakeDeviceManager implements PlatformDeviceManager {
       const source = discoverySourceFor(device.platform, device.deviceId);
       return (
         (!this.failedPlatforms.has(device.platform) && !this.failedSources.has(source)) ||
-        this.retainedSources.has(source)
+        this.retainedSources.has(source) ||
+        this.incompleteSources.has(source)
       );
     });
   }
@@ -65,25 +71,37 @@ export class FakeDeviceManager implements PlatformDeviceManager {
     const devices: BootedDevice[] = [];
     const succeededPlatforms = new Set<Platform>();
     const succeededSources = new Set<DiscoverySource>();
+    const freshDeviceIds = new Set<string>();
     const discoveryErrors: BootedDeviceDiscovery["discoveryErrors"] = {};
     const sourceFailed = (source: DiscoverySource, p: Platform): boolean =>
-      this.failedPlatforms.has(p) || this.failedSources.has(source);
+      this.failedPlatforms.has(p) ||
+      this.failedSources.has(source) ||
+      this.incompleteSources.has(source);
     for (const p of requested) {
       const platformSources: DiscoverySource[] =
         p === "android" ? ["android"] : ["ios-simulator", "ios-physical"];
       for (const source of platformSources) {
         const failed = sourceFailed(source, p);
-        if (failed && !this.retainedSources.has(source)) {
+        const reportsDevices =
+          !failed || this.retainedSources.has(source) || this.incompleteSources.has(source);
+        if (!reportsDevices) {
           continue;
         }
         if (!failed) {
           succeededSources.add(source);
         }
-        devices.push(
-          ...this.bootedDevices.filter(
-            (device) => device.platform === p && discoverySourceFor(p, device.deviceId) === source,
-          ),
+        const fromSource = this.bootedDevices.filter(
+          (device) => device.platform === p && discoverySourceFor(p, device.deviceId) === source,
         );
+        devices.push(...fromSource);
+        // A retained source replays devices it saw earlier; they are reported
+        // but were not observed this sweep. An incomplete source's devices WERE
+        // observed this sweep, even though the source did not complete.
+        if (!failed || this.incompleteSources.has(source)) {
+          for (const device of fromSource) {
+            freshDeviceIds.add(device.deviceId);
+          }
+        }
       }
       // Mirrors production: the platform aggregate tracks the simulator source
       // for iOS, so platform-level consumers keep their pre-#5683 meaning.
@@ -97,7 +115,7 @@ export class FakeDeviceManager implements PlatformDeviceManager {
         };
       }
     }
-    return { devices, succeededPlatforms, succeededSources, discoveryErrors };
+    return { devices, succeededPlatforms, succeededSources, freshDeviceIds, discoveryErrors };
   }
 
   async startDevice(

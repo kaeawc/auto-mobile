@@ -157,6 +157,13 @@ describe("disconnect monitor miss counting", () => {
     expect(misses.has("device-1")).toBe(false);
   });
 
+  // These three exercise the miss-counting mechanism itself. They simulate an
+  // Android device ("ADB returning some devices but not ours"), so they name
+  // its platform: a candidate with no platform at all is unverifiable by
+  // construction and is deliberately never aged out (see below).
+  const ANDROID_CANDIDATE = new Map([["device-1", "android"]]);
+  const ANDROID_SUCCEEDED = new Set(["android"]);
+
   test("increments miss count when device is absent", () => {
     const misses = new Map<string, number>();
 
@@ -165,10 +172,22 @@ describe("disconnect monitor miss counting", () => {
     expect(misses.has("device-1")).toBe(false);
 
     // Simulate ADB returning some devices but not ours
-    runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
+    runDisconnectPoll(
+      misses,
+      new Set(["other"]),
+      new Set(["device-1"]),
+      ANDROID_SUCCEEDED,
+      ANDROID_CANDIDATE,
+    );
     expect(misses.get("device-1")).toBe(1);
 
-    runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
+    runDisconnectPoll(
+      misses,
+      new Set(["other"]),
+      new Set(["device-1"]),
+      ANDROID_SUCCEEDED,
+      ANDROID_CANDIDATE,
+    );
     expect(misses.get("device-1")).toBe(2);
   });
 
@@ -176,12 +195,51 @@ describe("disconnect monitor miss counting", () => {
     const misses = new Map<string, number>();
 
     for (let i = 1; i < DEVICE_DISCONNECT_MISS_THRESHOLD; i++) {
-      const result = runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
+      const result = runDisconnectPoll(
+        misses,
+        new Set(["other"]),
+        new Set(["device-1"]),
+        ANDROID_SUCCEEDED,
+        ANDROID_CANDIDATE,
+      );
       expect(result.disconnected).toEqual([]);
     }
 
-    const result = runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
+    const result = runDisconnectPoll(
+      misses,
+      new Set(["other"]),
+      new Set(["device-1"]),
+      ANDROID_SUCCEEDED,
+      ANDROID_CANDIDATE,
+    );
     expect(result.disconnected).toEqual(["device-1"]);
+  });
+
+  /**
+   * A device still assigned to a session but detached from the pool (ADB-reset
+   * recovery) is added to the candidate set by id alone, with no
+   * `candidatePlatforms` entry — `daemon.ts` cannot name a platform it no
+   * longer tracks. No discovery source can be asked about such a candidate, so
+   * ageing it out would disconnect a live session on the strength of a sweep
+   * that never covered it (#5683 review).
+   */
+  test("never ages out a candidate whose platform is unknown", () => {
+    const misses = new Map<string, number>();
+
+    for (let i = 0; i <= DEVICE_DISCONNECT_MISS_THRESHOLD; i++) {
+      const result = runDisconnectPoll(
+        misses,
+        new Set(["other"]),
+        new Set(["orphaned-session-device"]),
+        // Only devicectl completed: enough to clear the all-failed early
+        // return, and still no way to verify a platformless candidate.
+        new Set(),
+        new Map(),
+      );
+      expect(result.disconnected).toEqual([]);
+    }
+
+    expect(misses.has("orphaned-session-device")).toBe(false);
   });
 
   test("miss-counts an Android candidate when Android discovery succeeds empty", () => {
@@ -324,15 +382,23 @@ describe("disconnect monitor miss counting", () => {
 
   test("miss count resets after device reappears then starts over", () => {
     const misses = new Map<string, number>();
+    const poll = (booted: Set<string>) =>
+      runDisconnectPoll(
+        misses,
+        booted,
+        new Set(["device-1"]),
+        ANDROID_SUCCEEDED,
+        ANDROID_CANDIDATE,
+      );
 
-    runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
-    runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
+    poll(new Set(["other"]));
+    poll(new Set(["other"]));
     expect(misses.get("device-1")).toBe(2);
 
-    runDisconnectPoll(misses, new Set(["device-1"]), new Set(["device-1"]));
+    poll(new Set(["device-1"]));
     expect(misses.has("device-1")).toBe(false);
 
-    runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
+    poll(new Set(["other"]));
     expect(misses.get("device-1")).toBe(1);
   });
 

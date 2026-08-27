@@ -130,8 +130,14 @@ export function evaluateDeviceDisconnects(
     // Only the source that would have listed this device can call it missing:
     // a failed simctl sweep must not age out a devicectl-confirmed iPhone, and
     // a failed devicectl sweep must not age out a booted simulator (#5683).
+    //
+    // A candidate with no known platform is maximally unverifiable: a device
+    // still assigned to a session but detached from the pool (ADB-reset
+    // recovery) is added by id alone, so no source can be asked about it.
+    // Ageing it out would disconnect a live session on the strength of a sweep
+    // that never covered it.
     const platform = input.candidatePlatforms.get(deviceId);
-    if (platform && !didSourceSucceedForDevice(input, platform, deviceId)) {
+    if (!platform || !didSourceSucceedForDevice(input, platform, deviceId)) {
       clearMiss(deviceId);
       continue;
     }

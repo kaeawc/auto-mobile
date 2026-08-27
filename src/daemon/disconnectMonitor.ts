@@ -1,4 +1,5 @@
 import type { Platform } from "../models";
+import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
 
 export type DisconnectCandidateIncarnation = number | string;
 
@@ -42,6 +43,12 @@ export interface DisconnectMonitorEvaluationInput {
   bootedDeviceIds: Set<string>;
   candidateDeviceIds: Set<string>;
   succeededPlatforms: Set<Platform>;
+  /**
+   * Per-source completeness (#5683). Optional: absent, every check falls back
+   * to the platform aggregate, which is what callers did before iOS grew a
+   * second discovery source.
+   */
+  succeededSources?: Set<DiscoverySource>;
   candidatePlatforms: Map<string, Platform>;
   candidateIncarnations?: Map<string, DisconnectCandidateIncarnation>;
   deviceDisconnectMissIncarnations?: Map<string, DisconnectCandidateIncarnation>;
@@ -98,7 +105,8 @@ export function evaluateDeviceDisconnects(
   if (
     input.bootedDeviceIds.size === 0 &&
     input.candidateDeviceIds.size > 0 &&
-    input.succeededPlatforms.size === 0
+    input.succeededPlatforms.size === 0 &&
+    (input.succeededSources?.size ?? 0) === 0
   ) {
     return { disconnected, missed, skippedAllDiscoveryFailed: true };
   }
@@ -119,8 +127,11 @@ export function evaluateDeviceDisconnects(
       continue;
     }
 
+    // Only the source that would have listed this device can call it missing:
+    // a failed simctl sweep must not age out a devicectl-confirmed iPhone, and
+    // a failed devicectl sweep must not age out a booted simulator (#5683).
     const platform = input.candidatePlatforms.get(deviceId);
-    if (platform && !input.succeededPlatforms.has(platform)) {
+    if (platform && !didSourceSucceedForDevice(input, platform, deviceId)) {
       clearMiss(deviceId);
       continue;
     }

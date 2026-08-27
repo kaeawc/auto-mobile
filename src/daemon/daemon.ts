@@ -1600,6 +1600,7 @@ export class Daemon {
             bootedDeviceIds,
             candidateDeviceIds,
             succeededPlatforms,
+            succeededSources: discovery.succeededSources,
             candidatePlatforms,
             candidateIncarnations,
             deviceDisconnectMissIncarnations: this.deviceDisconnectMissIncarnations,

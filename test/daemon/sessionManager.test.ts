@@ -773,6 +773,29 @@ describe("SessionManager", () => {
       }
     });
 
+    test("does not admit device-state setup while a rebind is pending", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        const session = await manager.createSession("session-1", "emulator-old", "android");
+        repository.deferNextUpsert();
+
+        const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
+        await repository.waitForUpsert();
+        let setupStarted = false;
+        await manager.trackSessionSetup(session, async () => {
+          setupStarted = true;
+        });
+
+        expect(setupStarted).toBe(false);
+        repository.finishUpsert();
+        await rebinding;
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("serializes expiry cleanup with a pending rebind", async () => {
       const repository = new DeferredDeviceSessionPersistence();
       const manager = new SessionManager(fakeTimer, repository, () => new FakeDbWriteBarrier());

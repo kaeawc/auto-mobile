@@ -390,6 +390,7 @@ export function registerUtilityTools() {
     const result = await runSessionBiometricMutation(
       capture.sessionManager,
       args.sessionUuid,
+      device.deviceId,
       capture.initialEnrollment,
       () =>
         deviceState.setState({

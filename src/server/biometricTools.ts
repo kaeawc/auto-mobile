@@ -95,6 +95,7 @@ export function registerBiometricTools() {
       const result = await runSessionBiometricMutation(
         capture.sessionManager,
         args.sessionUuid,
+        device.deviceId,
         capture.initialEnrollment,
         () =>
           biometricAuth.execute(

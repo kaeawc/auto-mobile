@@ -903,7 +903,7 @@ export class SessionManager {
    * Release waits for this work so restoration sees the final cached state.
    */
   trackSessionSetup(session: Session, createSetup: () => Promise<void>): Promise<void> {
-    if (this.releasingSessions.has(session) || this.sessions.get(session.sessionId) !== session) {
+    if (!this.canStartSessionSetup(session)) {
       return Promise.resolve();
     }
 
@@ -926,6 +926,14 @@ export class SessionManager {
       () => this.clearSessionSetup(tracked),
     );
     return setup;
+  }
+
+  private canStartSessionSetup(session: Session): boolean {
+    return (
+      !this.releasingSessions.has(session) &&
+      this.pendingSessionRebinds.get(session.sessionId)?.session !== session &&
+      this.sessions.get(session.sessionId) === session
+    );
   }
 
   /** Wait a bounded amount of time for releases already started by monitors. */
@@ -975,10 +983,9 @@ export class SessionManager {
       const pendingSetups =
         setups.length > 0 ? (await this.waitForSessionSetup(sessionId, setups)).pending : null;
       const pendingRestoration = (await this.restoreKeepScreenAwakeBestEffort(session)).pending;
-      const pendingBiometricRestoration = await this.getPendingBiometricRestoration(
-        session,
-        pendingSetups,
-      );
+      const pendingBiometricRestoration = session.cacheData.biometricEnrollment
+        ? await this.getPendingBiometricRestoration(session, pendingSetups)
+        : null;
       const pendingCleanup = [
         pendingSetups,
         pendingRestoration,
@@ -1010,13 +1017,7 @@ export class SessionManager {
         },
       };
 
-      if (releaseSnapshot.terminal) {
-        // Fence the UUID before durable persistence. If the write fails, callers
-        // must still stop routing tools to a device that is already confirmed
-        // lost; a later release retry can persist and complete removal.
-        this.terminalReleaseSnapshots.set(sessionId, releaseSnapshot);
-        await this.persistSessionRelease(releaseSnapshot);
-      }
+      await this.persistTerminalReleaseIfNeeded(releaseSnapshot);
       if (!this.removeSession(sessionId, session)) {
         if (pendingCleanup.length > 0) {
           this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
@@ -1077,6 +1078,17 @@ export class SessionManager {
         );
       }
     }
+  }
+
+  private async persistTerminalReleaseIfNeeded(snapshot: SessionReleaseSnapshot): Promise<void> {
+    if (!snapshot.terminal) {
+      return;
+    }
+    // Fence the UUID before durable persistence. If the write fails, callers
+    // must still stop routing tools to a device that is already confirmed
+    // lost; a later release retry can persist and complete removal.
+    this.terminalReleaseSnapshots.set(snapshot.sessionId, snapshot);
+    await this.persistSessionRelease(snapshot);
   }
 
   private clearSessionSetup(tracked: { session: Session; promise: Promise<void> }): void {

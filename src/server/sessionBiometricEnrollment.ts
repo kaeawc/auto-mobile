@@ -10,20 +10,26 @@ import type { SessionManager } from "../daemon/sessionManager";
 export async function runSessionBiometricMutation<T>(
   sessionManager: SessionManager | undefined,
   sessionUuid: string | undefined,
+  deviceId: string,
   initialEnrollment: BiometricEnrollment | undefined,
   mutation: () => Promise<T>,
 ): Promise<T> {
   if (!sessionManager || !sessionUuid) {
     return await mutation();
   }
-  if (initialEnrollment) {
-    sessionManager.setBiometricEnrollment(sessionUuid, { initialEnrollment });
-  }
   const session = sessionManager.getSession(sessionUuid);
   if (!session) {
     throw new Error(
       `Cannot mutate biometric enrollment: session ${sessionUuid} is no longer active.`,
     );
+  }
+  if (session.assignedDevice !== deviceId) {
+    throw new Error(
+      `Cannot mutate biometric enrollment: session ${sessionUuid} is bound to ${session.assignedDevice}, not ${deviceId}.`,
+    );
+  }
+  if (initialEnrollment) {
+    sessionManager.setBiometricEnrollment(sessionUuid, { initialEnrollment });
   }
 
   let completed = false;

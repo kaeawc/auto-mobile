@@ -23,6 +23,7 @@ describe("runSessionBiometricMutation", () => {
       const mutation = runSessionBiometricMutation(
         manager,
         "session-1",
+        "sim-1",
         "not_enrolled",
         async () => {
           started.resolve();
@@ -40,6 +41,30 @@ describe("runSessionBiometricMutation", () => {
       await release;
 
       expect(restored).toEqual(["not_enrolled"]);
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("does not mutate an old simulator after the session rebinds", async () => {
+    const manager = new SessionManager(
+      new FakeTimer(),
+      new FakeDeviceSessionPersistence(),
+      () => new FakeDbWriteBarrier(),
+    );
+    let mutationStarted = false;
+    try {
+      await manager.createSession("session-1", "sim-a", "ios");
+      await manager.rebindSession("session-1", "sim-b", "ios");
+
+      await expect(
+        runSessionBiometricMutation(manager, "session-1", "sim-a", "enrolled", async () => {
+          mutationStarted = true;
+        }),
+      ).rejects.toThrow("bound to sim-b, not sim-a");
+
+      expect(mutationStarted).toBe(false);
+      expect(manager.getBiometricEnrollment("session-1")).toBeUndefined();
     } finally {
       manager.stopCleanupTimer();
     }

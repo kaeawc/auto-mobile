@@ -33,8 +33,8 @@ Critical path (the rewrite's actual goal — concurrency correctness + parity):
 4. `@MainActor` UI domain (ElementLocator, GesturePerformer, HierarchyDebouncer,
    DisplayLinkFPSMonitor, VoiceOver) ✅
 5. PerfProvider (TaskLocal call-tree + confined pool) ✅
-6. CommandHandler (Sendable POD router) + CtrlProxy coordinator ⟵ **NEXT**
-7. Cutover (point the runner/app at the rewrite; retire the reference)
+6. CommandHandler (Sendable POD router, async) + async serial dispatch + CtrlProxy coordinator ✅
+7. Cutover (point the runner/app at the rewrite; retire the reference; XcodeGen) ⟵ **NEXT**
 
 **8. Post-concurrency fixups (NEW).** Pure, off-critical-path improvements that we
 deliberately defer so the concurrency migration lands *parity-first*. Each is

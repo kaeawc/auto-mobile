@@ -424,7 +424,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       state.framesDropped += 1;
       return;
     }
-    // Congestion is checked BEFORE admission on purpose. Frames arrive from an
+    // Backlog is checked BEFORE admission on purpose. Frames arrive from an
     // event emitter, so there is no upstream backpressure to apply and buffering
     // would grow without bound — but consuming the pacing slot for a frame that
     // never reaches stdin would silently shorten the timeline. Dropping before
@@ -547,6 +547,17 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
    * True when the encoder already holds {@link MAX_BUFFERED_FRAMES} frames of
    * input. Deliberately not `writableNeedDrain` — see {@link MAX_BUFFERED_FRAMES}.
    */
+  private isEncoderCongested(
+    state: CaptureState,
+    stdin: NonNullable<FfmpegProcess["stdin"]>,
+  ): boolean {
+    const frameBytes = state.frameBytes;
+    if (!frameBytes) {
+      return stdin.writableNeedDrain;
+    }
+    return stdin.writableLength >= frameBytes * MAX_BUFFERED_FRAMES;
+  }
+
   /**
    * Admission-side backlog check. Stricter than {@link isEncoderCongested}: the
    * buffered-frame budget only measures the stream, so consuming one buffered
@@ -561,17 +572,6 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     stdin: NonNullable<FfmpegProcess["stdin"]>,
   ): boolean {
     return state.pendingWrites.length > 0 || this.isEncoderCongested(state, stdin);
-  }
-
-  private isEncoderCongested(
-    state: CaptureState,
-    stdin: NonNullable<FfmpegProcess["stdin"]>,
-  ): boolean {
-    const frameBytes = state.frameBytes;
-    if (!frameBytes) {
-      return stdin.writableNeedDrain;
-    }
-    return stdin.writableLength >= frameBytes * MAX_BUFFERED_FRAMES;
   }
 
   /**

@@ -22,16 +22,16 @@ final class TimerSeamTests: XCTestCase {
         XCTAssertEqual(provider.currentTimeMillis(), 0)
     }
 
-    // MARK: - FakeTimer: instant mode
+    // MARK: - FakeProxyTimer: instant mode
 
     func testInstantModeWaitAdvancesTimeImmediately() async {
-        let timer = FakeTimer(mode: .instant, initialTime: 1000)
+        let timer = FakeProxyTimer(mode: .instant, initialTime: 1000)
         await timer.wait(milliseconds: 250)
         XCTAssertEqual(timer.now(), 1250)
     }
 
     func testInstantModeScheduleFiresImmediately() {
-        let timer = FakeTimer(mode: .instant)
+        let timer = FakeProxyTimer(mode: .instant)
         let fired = OSAllocatedUnfairLock<Int>(initialState: 0)
         timer.schedule(after: 100) { fired.withLock { $0 += 1 } }
         XCTAssertEqual(fired.withLock { $0 }, 1, "instant mode fires the callback synchronously")
@@ -39,10 +39,10 @@ final class TimerSeamTests: XCTestCase {
         XCTAssertEqual(timer.now(), 100)
     }
 
-    // MARK: - FakeTimer: manual mode
+    // MARK: - FakeProxyTimer: manual mode
 
     func testManualModeScheduleFiresAtTargetTime() {
-        let timer = FakeTimer(mode: .manual)
+        let timer = FakeProxyTimer(mode: .manual)
         let fired = OSAllocatedUnfairLock<Int>(initialState: 0)
         timer.schedule(after: 100) { fired.withLock { $0 += 1 } }
         XCTAssertEqual(timer.pendingCallbackCount, 1)
@@ -58,7 +58,7 @@ final class TimerSeamTests: XCTestCase {
     }
 
     func testManualModeAdvanceFiresDueCallbacksInTimeOrder() {
-        let timer = FakeTimer(mode: .manual)
+        let timer = FakeProxyTimer(mode: .manual)
         let order = OSAllocatedUnfairLock<[Int]>(initialState: [])
         timer.schedule(after: 300) { order.withLock { $0.append(300) } }
         timer.schedule(after: 100) { order.withLock { $0.append(100) } }
@@ -75,7 +75,7 @@ final class TimerSeamTests: XCTestCase {
     }
 
     func testManualModeWaiterResumesOnAdvance() async {
-        let timer = FakeTimer(mode: .manual)
+        let timer = FakeProxyTimer(mode: .manual)
         let done = XCTestExpectation(description: "waiter resumed")
         Task {
             await timer.wait(milliseconds: 50)

@@ -659,4 +659,134 @@ class HierarchyDiffTest {
     assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Switch#"))
     assertNull(statusOf(diff, "Checkbox#"))
   }
+
+  /**
+   * Production Android blanks `android.widget.TextView` (it is in the extractor's
+   * `GENERIC_CLASS_NAMES`) to a class-less node that `HierarchyParser` defaults to
+   * `android.view.View`, so an ordinary label arrives as a generic node — not the idealized
+   * `TextView` the earlier tests use. Role mode must still promote a non-interactive text-bearing
+   * generic node to Text so it pairs with the iOS `UILabel`; otherwise ubiquitous labels and their
+   * subtrees read as OnlyIn (issue #4872 review).
+   */
+  @Test
+  fun `role mode promotes a class-erased android label to Text so it pairs with an ios UILabel`() {
+    val android =
+      node(
+        "android.view.View",
+        children = listOf(node("android.view.View", "com.app:id/title", text = "Inbox")),
+      )
+    val ios = node("XCUIApplication", children = listOf(node("UILabel", text = "Inbox")))
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(0, diff.changed)
+    assertEquals(2, diff.equal)
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Text#"))
+  }
+
+  /**
+   * The text promotion is gated on the node being non-interactive: a clickable generic node that
+   * carries text is left in its structural Container role on both sides rather than mis-promoted to
+   * Text, so an interactive control is never keyed as a static label (issue #4872 review).
+   */
+  @Test
+  fun `role mode leaves a clickable text-bearing generic node keyed as Container`() {
+    val android =
+      node(
+        "android.view.View",
+        children = listOf(node("android.view.View", text = "Go", isClickable = true)),
+      )
+    val ios =
+      node("XCUIApplication", children = listOf(node("UIView", text = "Go", isClickable = true)))
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(2, diff.equal)
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Container#"))
+    assertNull(statusOf(diff, "Text#"))
+  }
+
+  /**
+   * Android keeps `android.widget.RadioButton` (it is not erased), which contains the `Button`
+   * substring, while the iOS runner reports a radio as a checkable generic `UIView`. Role mode
+   * folds the Android radio into Checkbox so it pairs with iOS's promoted checkable node instead of
+   * surfacing as two OnlyIn entries (issue #4872 review).
+   */
+  @Test
+  fun `role mode pairs an android RadioButton with an ios checkable radio view`() {
+    val android =
+      node(
+        "android.view.View",
+        children = listOf(node("android.widget.RadioButton", isCheckable = true)),
+      )
+    val ios = node("XCUIApplication", children = listOf(node("UIView", isCheckable = true)))
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(2, diff.equal)
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Checkbox#"))
+  }
+
+  /**
+   * A custom Android View subclass (`com.example.ProfileView`) and its whole subtree must pair with
+   * the iOS runner's custom `.other -> UIView` container. Without the `*View` container catch-all
+   * the Android node keys as Other and the iOS node as Container, making the entire custom subtree
+   * disjoint (issue #4872 review).
+   */
+  @Test
+  fun `role mode pairs a custom android View container with an ios UIView container`() {
+    val android =
+      node(
+        "android.view.View",
+        children =
+          listOf(
+            node(
+              "com.example.ProfileView",
+              children = listOf(node("android.widget.TextView", text = "Name")),
+            )
+          ),
+      )
+    val ios =
+      node(
+        "XCUIApplication",
+        children = listOf(node("UIView", children = listOf(node("UILabel", text = "Name")))),
+      )
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(3, diff.equal)
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Container#"))
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Text#"))
+  }
+
+  /**
+   * An Android icon control can carry an empty `text` alongside a real `content-desc`. The
+   * normalized accessible name treats empty text as absent and falls back to `content-desc`, so it
+   * reads the same as the iOS `text` label instead of comparing `""` against the label and
+   * reporting Changed (issue #4872 review).
+   */
+  @Test
+  fun `role mode treats empty android text as absent and falls back to content-desc`() {
+    val android =
+      node(
+        "android.view.View",
+        children =
+          listOf(node("android.widget.ImageButton", text = "", contentDescription = "Add")),
+      )
+    val ios = node("XCUIApplication", children = listOf(node("UIButton", text = "Add")))
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(0, diff.changed)
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(2, diff.equal)
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Button#"))
+  }
 }

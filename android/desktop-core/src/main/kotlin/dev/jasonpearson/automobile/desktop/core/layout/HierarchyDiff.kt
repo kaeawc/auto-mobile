@@ -399,11 +399,24 @@ private fun pathKey(
  *   pairs with Android's `CheckBox`. The promotion is gated on the generic roles so a `UISwitch`
  *   (also checkable, but already keyed [StructuralRole.Switch] by class) is left alone (issue #4872
  *   review).
+ * - A non-interactive generic node that carries visible `text` is promoted to
+ *   [StructuralRole.Text]. Android's `ViewHierarchyExtractor` blanks `android.widget.TextView` to a
+ *   class-less node (it is in `GENERIC_CLASS_NAMES`), which `HierarchyParser` then defaults to
+ *   `android.view.View` — so an ordinary Android label reaches here as a generic Container and
+ *   would never pair with the iOS runner's `UILabel -> Text`, leaving ubiquitous labels and their
+ *   whole subtrees as OnlyIn. The promotion recovers the label the producer erased. It is gated on
+ *   non-empty text and on the node being neither clickable nor scrollable, so a genuine interactive
+ *   control or scroll container that merely happens to carry text is left in its structural role
+ *   (issue #4872 review).
  */
 private fun structuralRoleOf(node: UIElementInfo): StructuralRole {
   val byClass = structuralRole(node.className)
   val isGeneric = byClass == StructuralRole.Container || byClass == StructuralRole.Other
-  return if (node.isCheckable && isGeneric) StructuralRole.Checkbox else byClass
+  if (!isGeneric) return byClass
+  if (node.isCheckable) return StructuralRole.Checkbox
+  val hasVisibleText = !node.text.isNullOrEmpty()
+  if (hasVisibleText && !node.isClickable && !node.isScrollable) return StructuralRole.Text
+  return byClass
 }
 
 /**
@@ -441,9 +454,12 @@ private fun nodeAttributesDiffer(
 }
 
 /**
- * The cross-platform accessible name of a node: its visible `text` if present, otherwise its
+ * The cross-platform accessible name of a node: its visible `text` if non-empty, otherwise its
  * `contentDescription`. Collapses the Android convention (icon controls carry the label in
  * `content-desc`, text controls in `text`) onto the iOS convention (every label in `text`) so the
- * same control reads the same across platforms (issue #4872 review).
+ * same control reads the same across platforms. An empty `text` is treated as absent so an Android
+ * icon control (`text = ""`, `content-desc = "Add"`) still falls back to its content-desc and reads
+ * the same as an iOS `text = "Add"` instead of comparing `""` against `"Add"` (issue #4872 review).
  */
-private fun accessibleName(node: UIElementInfo): String? = node.text ?: node.contentDescription
+private fun accessibleName(node: UIElementInfo): String? =
+  node.text?.takeIf { it.isNotEmpty() } ?: node.contentDescription

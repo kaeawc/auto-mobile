@@ -134,6 +134,40 @@ class StructuralRoleTest {
     assertEquals(structuralRole("android.view.View"), structuralRole("UIView"))
   }
 
+  /**
+   * A radio button contains the `Button` substring but is a single-choice checkable control. It
+   * folds into [StructuralRole.Checkbox] so it pairs with the iOS runner's radio, which arrives as
+   * a checkable generic node that `structuralRoleOf` promotes to Checkbox (issue #4872 review).
+   */
+  @Test
+  fun `radio buttons win over the button substring and fold into Checkbox`() {
+    assertEquals(StructuralRole.Checkbox, structuralRole("android.widget.RadioButton"))
+    assertEquals(
+      StructuralRole.Checkbox,
+      structuralRole("androidx.appcompat.widget.AppCompatRadioButton"),
+    )
+    assertEquals(
+      structuralRole("android.widget.RadioButton"),
+      structuralRole("android.widget.CheckBox"),
+    )
+  }
+
+  /**
+   * Custom Android View subclasses (and iOS structural views like `UIStackView`) fold into
+   * [StructuralRole.Container] via the `*View` suffix catch-all, mirroring the iOS runner's custom
+   * `.other -> UIView -> Container`, so a bespoke container subtree is not disjoint (issue #4872
+   * review).
+   */
+  @Test
+  fun `custom View subclasses map to Container`() {
+    assertEquals(StructuralRole.Container, structuralRole("com.example.ProfileView"))
+    assertEquals(StructuralRole.Container, structuralRole("UIStackView"))
+    assertEquals(structuralRole("com.example.ProfileView"), structuralRole("UIView"))
+    // The specific *View families are still matched first, not swallowed by the catch-all.
+    assertEquals(StructuralRole.Text, structuralRole("com.example.BannerTextView"))
+    assertEquals(StructuralRole.Image, structuralRole("com.example.AvatarImageView"))
+  }
+
   @Test
   fun `unknown classes fall back to Other`() {
     assertEquals(StructuralRole.Other, structuralRole("com.example.CustomThing"))

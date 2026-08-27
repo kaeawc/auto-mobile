@@ -39,11 +39,12 @@ enum class StructuralRole {
  * vendor-prefixed or `Compat`/`Material` variants (e.g. `SwitchCompat`, `MaterialButton`,
  * `AppCompatImageView`) fall into the right role without an exhaustive table.
  *
- * Order matters: more specific families are tested before broader ones. In particular toggles and
- * checkboxes are matched before [Button] because Android's `ToggleButton`/`CompoundButton` contain
- * the substring `Button`; a list cell is matched before [List] because `UITableViewCell` contains
- * `TableView`; and iOS's editable `UITextView` is matched before static [Text] because it contains
- * `TextView` (Android's static label). Unrecognised classes map to [Other].
+ * Order matters: more specific families are tested before broader ones. In particular toggles,
+ * checkboxes, and radio buttons are matched before [Button] because Android's
+ * `ToggleButton`/`CompoundButton`/`RadioButton` contain the substring `Button`; a list cell is
+ * matched before [List] because `UITableViewCell` contains `TableView`; and iOS's editable
+ * `UITextView` is matched before static [Text] because it contains `TextView` (Android's static
+ * label). Unrecognised classes map to [Other].
  */
 fun structuralRole(className: String): StructuralRole =
   when {
@@ -56,10 +57,14 @@ fun structuralRole(className: String): StructuralRole =
       className.contains("SearchBar") ||
       className.contains("UITextView") ||
       className.contains("XCUIElementTypeTextView") -> StructuralRole.TextField
-    // Checkboxes and toggles/switches — before Button, since ToggleButton/CompoundButton contain
-    // the "Button" substring.
-    className.contains("CheckBox") || className.contains("XCUIElementTypeCheckBox") ->
-      StructuralRole.Checkbox
+    // Checkboxes, radio buttons, and toggles/switches — before Button, since
+    // ToggleButton/CompoundButton/RadioButton all contain the "Button" substring. Android's
+    // RadioButton folds into Checkbox: the iOS runner reports a radio as a checkable `UIView` with
+    // no distinct class, which structuralRoleOf promotes to Checkbox, so a shared checkable role is
+    // the only one that pairs the two (issue #4872 review).
+    className.contains("CheckBox") ||
+      className.contains("XCUIElementTypeCheckBox") ||
+      className.contains("RadioButton") -> StructuralRole.Checkbox
     // "Switch" also matches iOS UISwitch and XCUIElementTypeSwitch.
     className.contains("Switch") ||
       className.contains("ToggleButton") ||
@@ -123,6 +128,14 @@ fun structuralRole(className: String): StructuralRole =
       className.contains("XCUIElementTypeWindow") ||
       className.contains("XCUIElementTypeGroup") ||
       className.contains("XCUIElementTypeOther") ||
+      // Catch-all for custom Android View subclasses (e.g. `com.example.ProfileView`) and iOS
+      // structural views like `UIStackView`: the specific `*View` families (TextView, ImageView,
+      // ScrollView, WebView, RecyclerView, …) are matched above, so anything else ending in `View`
+      // is a bespoke container. It lands in Container to mirror the iOS runner, which reports an
+      // equivalent custom `.other` element as `UIView -> Container`; otherwise the custom subtree
+      // keys as Other on one side and Container on the other and reads as disjoint (issue #4872
+      // review).
+      className.endsWith("View") ||
       className == MULTI_WINDOW_ROOT_CLASS_NAME -> StructuralRole.Container
     else -> StructuralRole.Other
   }

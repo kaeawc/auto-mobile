@@ -3,7 +3,9 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import {
   buildRawVideoFfmpegArgs,
+  clampCaptureFps,
   IosPhysicalVideoCaptureBackend,
+  MAX_CAPTURE_FPS,
   packFrame,
   parseCaptureDeviceList,
   SOFTWARE_H264_ENCODER,
@@ -66,6 +68,27 @@ class FakeFfmpegProcess extends EventEmitter {
   get bytesWritten(): number {
     return this.written.reduce((total, chunk) => total + chunk.length, 0);
   }
+
+  /**
+   * Resolve once the encoder has actually received `bytes` of input. An explicit
+   * condition rather than a scheduler turn: `PassThrough` drain handlers and the
+   * backend's queued writes settle over an unspecified number of turns, so a
+   * single `setImmediate` can observe a partial `written` list.
+   */
+  waitForBytes(bytes: number): Promise<void> {
+    if (this.bytesWritten >= bytes) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      const onData = (): void => {
+        if (this.bytesWritten >= bytes) {
+          this.stdin.off("data", onData);
+          resolve();
+        }
+      };
+      this.stdin.on("data", onData);
+    });
+  }
 }
 
 class FakeFfmpegClient implements FfmpegClient {
@@ -110,9 +133,13 @@ class FakeCaptureHelper extends EventEmitter implements PhysicalIosCaptureHelper
 
   exited = false;
 
+  /** Runs inside stop(), modelling the real helper's SIGTERM grace period. */
+  onStop?: () => void;
+
   /** The real helper SIGTERMs the process and awaits its exit. */
   async stop(): Promise<unknown> {
     this.stopped += 1;
+    this.onStop?.();
     if (!this.exited) {
       this.exitWith({ code: null, signal: "SIGTERM" });
     }
@@ -338,6 +365,30 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     expect(written / frameBytes).toBe(21);
   });
 
+  // The helper SIGTERMs its capture process and waits out a grace period, so
+  // sampling the clock after that await would encode the shutdown latency as
+  // trailing video — up to 30 extra frames at the default 15fps.
+  test("pads to the stop request, not to the end of the helper's shutdown", async function () {
+    let clockMs = 10_000;
+    const harness = makeHarness({ now: () => clockMs });
+    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
+    // A slow helper: two seconds of shutdown grace after stop is requested.
+    harness.helper.onStop = () => {
+      clockMs += 2000;
+    };
+
+    harness.helper.emitFrame(2, 2, 8, 0x11, 0);
+    clockMs += 500; // real stall the user saw, before stop was requested
+
+    await harness.backend.stop(handle);
+
+    const frameBytes = 2 * 2 * 4;
+    const written = harness.ffmpeg.processes[0].written.reduce((n, c) => n + c.length, 0);
+    // The frame plus the five 100ms slots of real stall — the shutdown grace
+    // period contributes nothing.
+    expect(written / frameBytes).toBe(6);
+  });
+
   test("stop closes ffmpeg stdin so the moov atom is finalized instead of killing the encoder", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig());
@@ -516,8 +567,10 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
 
     encoder.stdin.uncork();
     encoder.stdin.resume();
-    // Draining is asynchronous; let the stream flush before measuring.
-    await new Promise((resolve) => setImmediate(resolve));
+    // Draining is asynchronous: wait for the filler plus the one real frame to
+    // actually reach the encoder rather than for a scheduler turn.
+    const realFrameBytes = 2 * 2 * 4;
+    await encoder.waitForBytes(congestedBytes + realFrameBytes);
     const drainedBytes = encoder.written.reduce((n, c) => n + c.length, 0);
 
     // The next frame pads the two slots the congestion owed, then its own.
@@ -573,29 +626,44 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
 
     encoder.stdin.uncork();
     encoder.stdin.resume();
-    await new Promise((resolve) => setImmediate(resolve));
+    // 1 + 4 pads + 1: wait for the queue to actually land, not for one turn.
+    await encoder.waitForBytes(6 * frameBytes);
 
-    // Everything owed reaches the encoder once it drains: 1 + 4 pads + 1.
+    // Everything owed reaches the encoder once it drains, and nothing extra.
     const written = encoder.written.reduce((n, c) => n + c.length, 0);
     expect(written / frameBytes).toBe(6);
     await harness.backend.stop(handle);
   });
 
-  // fps has no upper bound in the recording config, and a 2-second fill budget
-  // scales with it: at an absurd rate two ordinary frames would enqueue tens of
-  // thousands of multi-megabyte duplicate encodes.
-  test("caps gap-fill work in absolute frames, not just seconds of fps", async function () {
+  // fps has no upper bound in the recording config, and gap fill is owed on
+  // EVERY source frame: at an absurd rate each ordinary frame would enqueue
+  // another batch of multi-megabyte duplicates for the whole recording, so the
+  // rate is clamped once at start rather than bounded per gap.
+  test("clamps an unsupported capture fps to the device ceiling", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig({ fps: 1_000_000 }));
 
     harness.helper.emitFrame(2, 2, 8, 0x11, 0);
     harness.helper.emitFrame(2, 2, 8, 0x22, 100);
 
+    // The encoder is labelled with the rate the pacing actually used, or the
+    // encoded timeline would not match its own timestamps.
+    const args = harness.ffmpeg.startRequests[0].args;
+    expect(args[args.indexOf("-framerate") + 1]).toBe(String(MAX_CAPTURE_FPS));
+
     const frameBytes = 2 * 2 * 4;
     const written = harness.ffmpeg.processes[0].written.reduce((n, c) => n + c.length, 0);
-    // 1 initial + the 120-frame absolute cap + the frame itself.
-    expect(written / frameBytes).toBe(122);
+    // 1 initial + the four 16.67ms slots the 100ms gap skipped + the frame.
+    expect(written / frameBytes).toBe(6);
     await harness.backend.stop(handle);
+  });
+
+  test("clamps a non-finite fps request rather than pacing on NaN", function () {
+    expect(clampCaptureFps(Number.NaN)).toBe(MAX_CAPTURE_FPS);
+    expect(clampCaptureFps(0)).toBe(MAX_CAPTURE_FPS);
+    expect(clampCaptureFps(-30)).toBe(MAX_CAPTURE_FPS);
+    expect(clampCaptureFps(15)).toBe(15);
+    expect(clampCaptureFps(MAX_CAPTURE_FPS + 1)).toBe(MAX_CAPTURE_FPS);
   });
 
   test("honors resolution and maxDuration like the simulator path", async function () {

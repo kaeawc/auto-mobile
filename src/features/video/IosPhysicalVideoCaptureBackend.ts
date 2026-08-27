@@ -60,12 +60,21 @@ const MAX_BUFFERED_FRAMES = 2;
 
 /**
  * Absolute ceiling on repeat writes for one gap, independent of fps. The 2-second
- * budget alone scales with the requested rate, and `parseVideoRecordingConfig()`
- * puts no upper bound on fps — at an absurd rate two ordinary frames could enqueue
- * tens of thousands of multi-megabyte duplicate encodes, starving live frames.
- * 120 is 2 seconds at 60fps, past any rate a device recording sensibly uses.
+ * budget alone scales with the requested rate, so it is a per-gap backstop behind
+ * {@link MAX_CAPTURE_FPS}: 120 is 2 seconds at the capture ceiling.
  */
 const MAX_GAP_FILL_FRAMES = 120;
+
+/**
+ * Highest cadence physical capture will honor. `parseVideoRecordingConfig()`
+ * accepts any positive fps, but no CoreMediaIO device streams past 60, and an
+ * absurd rate is not merely wasted: every incoming source frame owes gap-fill
+ * repeats for the slots it skipped, so the encoder stays saturated with
+ * duplicate multi-megabyte frames for the whole recording while the output
+ * timeline compresses. Clamping once at start keeps pacing and the ffmpeg
+ * `-framerate` label describing the same timeline.
+ */
+export const MAX_CAPTURE_FPS = 60;
 
 /** Stderr lines retained from the helper for failure diagnostics. */
 const HELPER_STDERR_TAIL = 20;
@@ -245,6 +254,18 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     const uniqueId = await this.resolveCaptureUniqueId(binaryPath, device);
     throwIfCaptureStartAborted(abortSignal);
 
+    const captureFps = clampCaptureFps(config.fps);
+    if (captureFps !== config.fps) {
+      logger.warn(
+        `[IosPhysicalVideo] requested ${config.fps} fps is not supported for physical capture; ` +
+          `recording at ${captureFps} fps instead.`,
+      );
+    }
+    // Everything downstream — pacing, gap fill, trailing padding and the ffmpeg
+    // `-framerate` label — must read the SAME rate, or the encoded timeline
+    // stops matching the timestamps it is labelled with.
+    const captureConfig: VideoCaptureConfig = { ...config, fps: captureFps };
+
     const state: CaptureState = {
       encoderName,
       framesWritten: 0,
@@ -283,7 +304,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       state.helperError ??= error instanceof Error ? error : new Error(String(error));
       logger.warn(`[IosPhysicalVideo] capture helper error: ${errorMessage(error)}`);
     });
-    helper.on("frame", (frame) => this.onFrame(frame, state, config));
+    helper.on("frame", (frame) => this.onFrame(frame, state, captureConfig));
 
     try {
       await helper.start();
@@ -303,14 +324,14 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     }
 
     return {
-      recordingId: config.recordingId,
-      outputPath: config.outputPath,
-      startedAt: config.startedAt,
+      recordingId: captureConfig.recordingId,
+      outputPath: captureConfig.outputPath,
+      startedAt: captureConfig.startedAt,
       backendHandle: {
         kind: "ios-physical",
         helper,
         state,
-        config,
+        config: captureConfig,
       } satisfies IosPhysicalBackendHandle,
     };
   }
@@ -323,6 +344,10 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     const { helper, state, config } = backendHandle;
 
     state.stopRequested = true;
+    // Sample the clock BEFORE the helper shutdown: it SIGTERMs the capture
+    // process and waits out a grace period, and padding to a post-shutdown
+    // clock would encode that latency as trailing video the user never saw.
+    const stopRequestedAtMs = this.now();
     await helper.stop();
 
     const encoder = state.encoder;
@@ -330,7 +355,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       throw new ActionableError(this.buildNoFramesMessage(state));
     }
 
-    this.padTrailingStall(state, config.fps);
+    this.padTrailingStall(state, config.fps, stopRequestedAtMs);
     if (encoder.stdin) {
       // Only MAX_BUFFERED_FRAMES fit synchronously, so with real frame sizes most
       // of the padding is still queued here. Let the encoder drain it before
@@ -590,16 +615,17 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
    * whose screen is static (or a helper that stalled) delivers nothing during
    * that window, so without this the file ends at the last frame's slot — one
    * frame followed by a 500ms wait would encode ~0.1s of video. Wall clock is
-   * used rather than capture timestamps, which are in the helper's own timebase.
+   * used rather than capture timestamps, which are in the helper's own timebase,
+   * and the boundary is when stop was REQUESTED — see {@link stop}.
    */
-  private padTrailingStall(state: CaptureState, fps: number): void {
+  private padTrailingStall(state: CaptureState, fps: number, stopRequestedAtMs: number): void {
     const payload = state.lastPayload;
     const lastWriteAtMs = state.lastWriteAtMs;
     if (!payload || lastWriteAtMs === undefined) {
       return;
     }
     const intervalMs = 1000 / fps;
-    const elapsedSlots = Math.floor((this.now() - lastWriteAtMs) / intervalMs);
+    const elapsedSlots = Math.floor((stopRequestedAtMs - lastWriteAtMs) / intervalMs);
     if (elapsedSlots <= 0) {
       return;
     }
@@ -884,6 +910,18 @@ function throwIfCaptureStartAborted(abortSignal: AbortSignal | undefined): void 
   if (abortSignal?.aborted) {
     throw new ActionableError("Physical iOS recording start was cancelled during shutdown.");
   }
+}
+
+/**
+ * Cadence physical capture will actually run at. A non-finite or non-positive
+ * request cannot describe a timeline at all, so it falls back to the ceiling
+ * rather than poisoning every pacing computation with NaN.
+ */
+export function clampCaptureFps(fps: number): number {
+  if (!Number.isFinite(fps) || fps <= 0) {
+    return MAX_CAPTURE_FPS;
+  }
+  return Math.min(fps, MAX_CAPTURE_FPS);
 }
 
 /** Repeat writes allowed for one gap: 2 seconds of frames, hard-capped. */

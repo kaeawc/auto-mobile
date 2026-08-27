@@ -37,10 +37,12 @@ class TwoDeviceCompareViewTest {
   private fun columnB() = DeviceColumn(deviceId = "dev-b", name = "iPhone", platform = Platform.Ios)
 
   /**
-   * A minimal two-child hierarchy: a shared `title` node plus a second child whose resource-id
-   * distinguishes the two devices, yielding one only-in-A and one only-in-B node in the diff.
+   * The Android side's minimal hierarchy: a shared `title` label plus a **Button** whose
+   * resource-id distinguishes it. Paired against [iosHierarchyJson], whose second child is a
+   * different structural role, so the compare's cross-platform role diff (issue #4872) surfaces the
+   * button as only-in-A.
    */
-  private fun hierarchyJson(secondChildResourceId: String): JsonElement {
+  private fun androidHierarchyJson(secondChildResourceId: String): JsonElement {
     val raw =
       """
       {"hierarchy":{"node":{
@@ -58,10 +60,39 @@ class TwoDeviceCompareViewTest {
     return Json.parseToJsonElement(raw)
   }
 
+  /**
+   * The iOS side's counterpart, emitting the **UIKit** class names the runner actually reports
+   * (`ElementLocator.mapElementType` → `XCUIApplication`, `UILabel`, `UIImageView`, …), not the
+   * fabricated `XCUIElementType*` forms — so this exercises the live cross-platform path. Its
+   * `title` (`UILabel`) maps to the same `Text` role as Android's `TextView` (so those pair and
+   * stay Equal), while its second child is an **Image** (`UIImageView`, a different role than
+   * Android's Button) so the role diff reports it as only-in-B rather than pairing it against the
+   * button. The `XCUIApplication` root maps to the same `Container` role as Android's
+   * `FrameLayout`, so the roots pair instead of leaving the whole tree disjoint (issue #4872).
+   */
+  private fun iosHierarchyJson(secondChildResourceId: String): JsonElement {
+    val raw =
+      """
+      {"hierarchy":{"node":{
+        "class":"XCUIApplication","resource-id":"root",
+        "bounds":{"left":0,"top":0,"right":100,"bottom":200},
+        "node":[
+          {"class":"UILabel","resource-id":"title","text":"Hi",
+           "bounds":{"left":0,"top":0,"right":50,"bottom":20}},
+          {"class":"UIImageView","resource-id":"$secondChildResourceId",
+           "bounds":{"left":0,"top":30,"right":50,"bottom":60}}
+        ]
+      }}}
+      """
+        .trimIndent()
+    return Json.parseToJsonElement(raw)
+  }
+
+  // dev-b is the iOS column ([columnB]); every other device emits the Android hierarchy.
   private fun emit(fake: FakeObservationStream, deviceId: String, resourceId: String) {
-    fake.emitHierarchy(
-      HierarchyStreamUpdate(deviceId = deviceId, timestamp = 1L, data = hierarchyJson(resourceId))
-    )
+    val data =
+      if (deviceId == "dev-b") iosHierarchyJson(resourceId) else androidHierarchyJson(resourceId)
+    fake.emitHierarchy(HierarchyStreamUpdate(deviceId = deviceId, timestamp = 1L, data = data))
   }
 
   @Test

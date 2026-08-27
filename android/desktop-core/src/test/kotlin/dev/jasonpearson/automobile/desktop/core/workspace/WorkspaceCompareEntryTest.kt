@@ -26,7 +26,7 @@ class WorkspaceCompareEntryTest {
   }
 
   @Test
-  fun `compareColumns pairs the focused device with the first same-platform other`() {
+  fun `compareColumns pairs the focused device with the first other`() {
     val content =
       WorkspaceUiState.Content(
         columns =
@@ -38,34 +38,36 @@ class WorkspaceCompareEntryTest {
         focusedDeviceId = "a",
       )
     val pair = compareColumns(content)
-    // Skips the iOS device b (cross-platform diff is meaningless) and pairs with the Android c.
+    // The first other device wins regardless of platform — the cross-platform iOS b, not the
+    // same-platform Android c — because the compare keys by structural role (issue #4872).
     assertEquals("a", pair?.first?.deviceId)
-    assertEquals("c", pair?.second?.deviceId)
+    assertEquals("b", pair?.second?.deviceId)
   }
 
   @Test
-  fun `compareColumns is null when the only other device is a different platform`() {
+  fun `compareColumns pairs a cross-platform other`() {
     val content =
       WorkspaceUiState.Content(
         columns = listOf(col("a", "Pixel", Platform.Android), col("b", "iPhone", Platform.Ios)),
         focusedDeviceId = "a",
       )
-    assertNull(compareColumns(content))
+    val pair = compareColumns(content)
+    assertEquals("a", pair?.first?.deviceId)
+    assertEquals("b", pair?.second?.deviceId)
   }
 
   @Test
-  fun `compare glyph is hidden when the only other device is a different platform`() =
-    runComposeUiTest {
-      val state =
-        WorkspaceUiState.Content(
-          columns = listOf(col("a", "Pixel", Platform.Android), col("b", "iPhone", Platform.Ios)),
-          focusedDeviceId = "a",
-        )
-      setContent {
-        MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) }
-      }
-      onNodeWithContentDescription("Compare two devices").assertDoesNotExist()
+  fun `compare glyph is shown for a cross-platform pair`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(col("a", "Pixel", Platform.Android), col("b", "iPhone", Platform.Ios)),
+        focusedDeviceId = "a",
+      )
+    setContent {
+      MaterialTheme { WorkspaceShell(state = state, onAction = {}, onOpenPicker = {}) }
     }
+    onNodeWithContentDescription("Compare two devices").assertIsDisplayed()
+  }
 
   @Test
   fun `compare glyph is hidden with a single device`() = runComposeUiTest {

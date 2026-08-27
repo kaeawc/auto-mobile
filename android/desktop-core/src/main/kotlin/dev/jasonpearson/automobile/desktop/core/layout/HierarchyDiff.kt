@@ -49,6 +49,20 @@ data class HierarchyDiff(val entries: List<HierarchyDiffEntry>) {
 private const val PATH_SEPARATOR = "/"
 
 /**
+ * How [diffHierarchies] forms a node's structural key segment.
+ * - [ClassName]: the raw platform-specific `className` (plus `resourceId`). The honest identity for
+ *   a **same-platform** diff, where classes and ids line up.
+ * - [StructuralRole]: the cross-platform [structuralRole] of the class, with `resourceId` dropped
+ *   (ids are platform-specific and never match across Android↔iOS). Lets an Android and an iOS
+ *   rendering of the same screen pair by role + tree position and produce a meaningful diff instead
+ *   of two disjoint OnlyIn trees (issue #4872).
+ */
+enum class DiffKeyMode {
+  ClassName,
+  StructuralRole,
+}
+
+/**
  * Diff two view hierarchies into a flat, deterministic classification.
  *
  * Node identity is a **structural path key**: each node contributes the segment
@@ -67,17 +81,33 @@ private const val PATH_SEPARATOR = "/"
  * The result is deterministic (stable pre-order) and symmetric in classification: `diffHierarchies(
  * a, b)` and `diffHierarchies(b, a)` agree once A/B roles are swapped (an `OnlyInA` key in one is
  * exactly an `OnlyInB` key in the other; `Changed`/`Equal` key sets are identical).
+ *
+ * [keyMode] selects how each key segment is formed. The default [DiffKeyMode.ClassName] keeps the
+ * raw platform-specific identity for a same-platform diff; [DiffKeyMode.StructuralRole] keys on the
+ * cross-platform [structuralRole] instead so an Android↔iOS pair diffs meaningfully. The mode only
+ * changes the *segment* (className/resourceId → role); every other property above — window
+ * alignment, pre-order determinism, the attribute-only Changed test, and the A/B symmetry — is
+ * mode-independent because it is threaded identically through both the diff index and the
+ * window-alignment signatures.
  */
-fun diffHierarchies(a: UIElementInfo, b: UIElementInfo): HierarchyDiff {
+fun diffHierarchies(
+  a: UIElementInfo,
+  b: UIElementInfo,
+  keyMode: DiffKeyMode = DiffKeyMode.ClassName,
+): HierarchyDiff {
   val windowsA = windowsOf(a)
   val windowsB = windowsOf(b)
-  val (slotsA, slotsB) = alignWindowSlots(windowsA, windowsB)
-  val mapA = indexWindows(windowsA, slotsA)
-  val mapB = indexWindows(windowsB, slotsB)
+  val (slotsA, slotsB) = alignWindowSlots(windowsA, windowsB, keyMode)
+  val (mapA, mapB) =
+    if (keyMode == DiffKeyMode.StructuralRole) {
+      indexAlignedWindows(windowsA, slotsA, windowsB, slotsB, keyMode)
+    } else {
+      indexWindows(windowsA, slotsA, keyMode) to indexWindows(windowsB, slotsB, keyMode)
+    }
   val entries = ArrayList<HierarchyDiffEntry>(mapA.size + mapB.size)
   for ((key, nodeA) in mapA) {
     val nodeB = mapB[key]
-    entries.add(HierarchyDiffEntry(key, classifyMatched(nodeA, nodeB), nodeA, nodeB))
+    entries.add(HierarchyDiffEntry(key, classifyMatched(nodeA, nodeB, keyMode), nodeA, nodeB))
   }
   for ((key, nodeB) in mapB) {
     if (!mapA.containsKey(key)) {
@@ -88,10 +118,14 @@ fun diffHierarchies(a: UIElementInfo, b: UIElementInfo): HierarchyDiff {
 }
 
 /** Classify a node from A against its same-key counterpart in B (null when absent from B). */
-private fun classifyMatched(nodeA: UIElementInfo, nodeB: UIElementInfo?): NodeDiffStatus =
+private fun classifyMatched(
+  nodeA: UIElementInfo,
+  nodeB: UIElementInfo?,
+  keyMode: DiffKeyMode,
+): NodeDiffStatus =
   when {
     nodeB == null -> NodeDiffStatus.OnlyInA
-    nodeAttributesDiffer(nodeA, nodeB) -> NodeDiffStatus.Changed
+    nodeAttributesDiffer(nodeA, nodeB, keyMode) -> NodeDiffStatus.Changed
     else -> NodeDiffStatus.Equal
   }
 
@@ -123,12 +157,132 @@ private fun windowsOf(root: UIElementInfo): List<UIElementInfo> =
 private fun indexWindows(
   windows: List<UIElementInfo>,
   slots: IntArray,
+  keyMode: DiffKeyMode,
 ): LinkedHashMap<String, UIElementInfo> {
   val map = LinkedHashMap<String, UIElementInfo>()
   windows.forEachIndexed { index, window ->
-    addSubtree(map, window, parentKey = "", siblingIndex = slots[index])
+    addSubtree(
+      map,
+      window,
+      parentKey = "",
+      siblingIndex = slots[index],
+      keyMode = keyMode,
+      parentRole = null,
+    )
   }
   return map
+}
+
+/** Index role-mode trees with order-preserving, cross-side child slots. */
+private fun indexAlignedWindows(
+  windowsA: List<UIElementInfo>,
+  slotsA: IntArray,
+  windowsB: List<UIElementInfo>,
+  slotsB: IntArray,
+  keyMode: DiffKeyMode,
+): Pair<LinkedHashMap<String, UIElementInfo>, LinkedHashMap<String, UIElementInfo>> {
+  val mapA = LinkedHashMap<String, UIElementInfo>()
+  val mapB = LinkedHashMap<String, UIElementInfo>()
+  addAlignedChildren(mapA, mapB, windowsA, slotsA, windowsB, slotsB, "", null, null, keyMode)
+  return mapA to mapB
+}
+
+private fun addAlignedChildren(
+  mapA: LinkedHashMap<String, UIElementInfo>,
+  mapB: LinkedHashMap<String, UIElementInfo>,
+  childrenA: List<UIElementInfo>,
+  slotsA: IntArray,
+  childrenB: List<UIElementInfo>,
+  slotsB: IntArray,
+  parentKey: String,
+  parentRoleA: StructuralRole?,
+  parentRoleB: StructuralRole?,
+  keyMode: DiffKeyMode,
+) {
+  val bySlotA = childrenA.indices.associateBy { slotsA[it] }
+  val bySlotB = childrenB.indices.associateBy { slotsB[it] }
+  (bySlotA.keys + bySlotB.keys).sorted().forEach { slot ->
+    val nodeA = bySlotA[slot]?.let(childrenA::get)
+    val nodeB = bySlotB[slot]?.let(childrenB::get)
+    val roleA = nodeA?.let { roleFor(it, keyMode, parentRoleA) }
+    val roleB = nodeB?.let { roleFor(it, keyMode, parentRoleB) }
+    nodeA?.let { mapA[pathKey(parentKey, it, slot, keyMode, roleA)] = it }
+    nodeB?.let { mapB[pathKey(parentKey, it, slot, keyMode, roleB)] = it }
+    val key =
+      nodeA?.let { pathKey(parentKey, it, slot, keyMode, roleA) }
+        ?: nodeB?.let { pathKey(parentKey, it, slot, keyMode, roleB) }
+        ?: return@forEach
+    val (childSlotsA, childSlotsB) =
+      alignChildSlots(nodeA?.children.orEmpty(), nodeB?.children.orEmpty(), roleA, roleB)
+    addAlignedChildren(
+      mapA,
+      mapB,
+      nodeA?.children.orEmpty(),
+      childSlotsA,
+      nodeB?.children.orEmpty(),
+      childSlotsB,
+      key,
+      roleA,
+      roleB,
+      keyMode,
+    )
+  }
+}
+
+/** Needleman-Wunsch alignment that only pairs siblings with the same structural role. */
+private fun alignChildSlots(
+  childrenA: List<UIElementInfo>,
+  childrenB: List<UIElementInfo>,
+  parentRoleA: StructuralRole?,
+  parentRoleB: StructuralRole?,
+): Pair<IntArray, IntArray> {
+  val slotsA = IntArray(childrenA.size)
+  val slotsB = IntArray(childrenB.size)
+  fun similarity(a: UIElementInfo, b: UIElementInfo): Double {
+    if (structuralRoleOf(a, parentRoleA) != structuralRoleOf(b, parentRoleB)) {
+      return Double.NEGATIVE_INFINITY
+    }
+    return if (accessibleName(a) == accessibleName(b)) 2.0 else 1.0
+  }
+  val score = Array(childrenA.size + 1) { DoubleArray(childrenB.size + 1) }
+  for (i in 1..childrenA.size) for (j in 1..childrenB.size) {
+    score[i][j] =
+      maxOf(
+        score[i - 1][j - 1] + similarity(childrenA[i - 1], childrenB[j - 1]),
+        score[i - 1][j],
+        score[i][j - 1],
+      )
+  }
+  val columnsA = ArrayList<Int>()
+  val columnsB = ArrayList<Int>()
+  var i = childrenA.size
+  var j = childrenB.size
+  while (i > 0 || j > 0) {
+    val diagonal =
+      if (i > 0 && j > 0) score[i - 1][j - 1] + similarity(childrenA[i - 1], childrenB[j - 1])
+      else Double.NEGATIVE_INFINITY
+    when {
+      i > 0 && j > 0 && diagonal >= score[i - 1][j] && diagonal >= score[i][j - 1] -> {
+        columnsA.add(--i)
+        columnsB.add(--j)
+      }
+      i > 0 && (j == 0 || score[i - 1][j] >= score[i][j - 1]) -> {
+        columnsA.add(--i)
+        columnsB.add(-1)
+      }
+      else -> {
+        columnsA.add(-1)
+        columnsB.add(--j)
+      }
+    }
+  }
+  var slot = 0
+  for (column in columnsA.indices.reversed()) {
+    columnsA[column].takeIf { it >= 0 }?.let { slotsA[it] = slot }
+    columnsB[column].takeIf { it >= 0 }?.let { slotsB[it] = slot }
+    slot++
+  }
+  return slotsA to slotsB
 }
 
 /**
@@ -160,6 +314,7 @@ private fun indexWindows(
 private fun alignWindowSlots(
   windowsA: List<UIElementInfo>,
   windowsB: List<UIElementInfo>,
+  keyMode: DiffKeyMode,
 ): Pair<IntArray, IntArray> {
   val n = windowsA.size
   val m = windowsB.size
@@ -171,8 +326,8 @@ private fun alignWindowSlots(
     return slotsA to slotsB
   }
 
-  val signaturesA = windowsA.map { signatureKeys(it) }
-  val signaturesB = windowsB.map { signatureKeys(it) }
+  val signaturesA = windowsA.map { signatureKeys(it, keyMode) }
+  val signaturesB = windowsB.map { signatureKeys(it, keyMode) }
   // A canonical, side-independent ordering key per window (its sorted signature). Used only to
   // break a skipA-vs-skipB tie deterministically by window *content* rather than by side, so the
   // choice is transposition-invariant (see the backtrack below).
@@ -254,9 +409,16 @@ private fun alignWindowSlots(
  * (structure **and** compared attributes) produce identical key sets, so [jaccard] overlap measures
  * subtree similarity for [alignWindowSlots]. See [collectSignatureKeys].
  */
-private fun signatureKeys(window: UIElementInfo): Set<String> {
+private fun signatureKeys(window: UIElementInfo, keyMode: DiffKeyMode): Set<String> {
   val keys = LinkedHashSet<String>()
-  collectSignatureKeys(keys, window, parentKey = "", siblingIndex = 0)
+  collectSignatureKeys(
+    keys,
+    window,
+    parentKey = "",
+    siblingIndex = 0,
+    keyMode = keyMode,
+    parentRole = null,
+  )
   return keys
 }
 
@@ -276,19 +438,31 @@ private fun collectSignatureKeys(
   node: UIElementInfo,
   parentKey: String,
   siblingIndex: Int,
+  keyMode: DiffKeyMode,
+  parentRole: StructuralRole?,
 ) {
-  val structural = pathKey(parentKey, node, siblingIndex)
-  keys.add("$structural::${semanticDigest(node)}")
+  val role = roleFor(node, keyMode, parentRole)
+  val structural = pathKey(parentKey, node, siblingIndex, keyMode, role)
+  keys.add("$structural::${semanticDigest(node, keyMode)}")
   node.children.forEachIndexed { index, child ->
-    collectSignatureKeys(keys, child, structural, index)
+    collectSignatureKeys(keys, child, structural, index, keyMode, role)
   }
 }
 
-/** The compared semantic attributes of a node, joined — the [nodeAttributesDiffer] surface. */
-private fun semanticDigest(node: UIElementInfo): String =
-  listOf(
-      node.text ?: "",
-      node.contentDescription ?: "",
+/**
+ * The compared semantic attributes of a node, joined — the [nodeAttributesDiffer] surface, and it
+ * must track that surface per [keyMode]. Same-platform keeps `text` and `contentDescription` as two
+ * fields; cross-platform collapses them to the single normalized [accessibleName] so the alignment
+ * signatures agree with the role-mode Changed test.
+ */
+private fun semanticDigest(node: UIElementInfo, keyMode: DiffKeyMode): String {
+  val label =
+    when (keyMode) {
+      DiffKeyMode.ClassName -> "${node.text ?: ""}|${node.contentDescription ?: ""}"
+      DiffKeyMode.StructuralRole -> accessibleName(node) ?: ""
+    }
+  return listOf(
+      label,
       node.isClickable,
       node.isEnabled,
       node.isFocused,
@@ -298,6 +472,7 @@ private fun semanticDigest(node: UIElementInfo): String =
       node.isChecked,
     )
     .joinToString("|")
+}
 
 /**
  * A canonical, order-independent string for a window's signature key set: its keys sorted and
@@ -323,25 +498,119 @@ private fun addSubtree(
   node: UIElementInfo,
   parentKey: String,
   siblingIndex: Int,
+  keyMode: DiffKeyMode,
+  parentRole: StructuralRole?,
 ) {
-  val key = pathKey(parentKey, node, siblingIndex)
+  val role = roleFor(node, keyMode, parentRole)
+  val key = pathKey(parentKey, node, siblingIndex, keyMode, role)
   map[key] = node
-  node.children.forEachIndexed { index, child -> addSubtree(map, child, key, index) }
+  node.children.forEachIndexed { index, child ->
+    addSubtree(map, child, key, index, keyMode, role)
+  }
 }
 
-private fun pathKey(parentKey: String, node: UIElementInfo, siblingIndex: Int): String {
-  val segment = "${node.className}:${node.resourceId ?: ""}#$siblingIndex"
+/**
+ * The resolved [StructuralRole] for a node in role mode, threaded to children as their parent role;
+ * null in class-name mode where roles are unused. Computed once per node so [pathKey] and the
+ * recursion share the value (and the [structuralRoleOf] parent-context inference).
+ */
+private fun roleFor(
+  node: UIElementInfo,
+  keyMode: DiffKeyMode,
+  parentRole: StructuralRole?,
+): StructuralRole? =
+  if (keyMode == DiffKeyMode.StructuralRole) structuralRoleOf(node, parentRole) else null
+
+private fun pathKey(
+  parentKey: String,
+  node: UIElementInfo,
+  siblingIndex: Int,
+  keyMode: DiffKeyMode,
+  role: StructuralRole?,
+): String {
+  val segment =
+    when (keyMode) {
+      DiffKeyMode.ClassName -> "${node.className}:${node.resourceId ?: ""}#$siblingIndex"
+      // Role mode drops the platform-specific resourceId: it never matches across Android↔iOS, so
+      // keeping it would defeat the whole point of role keying. [role] is the pre-resolved
+      // [roleFor] value (non-null in this mode).
+      DiffKeyMode.StructuralRole -> "${role}#$siblingIndex"
+    }
   return if (parentKey.isEmpty()) segment else "$parentKey$PATH_SEPARATOR$segment"
+}
+
+/**
+ * The cross-platform [StructuralRole] of a full node, given its [parentRole] (the resolved role of
+ * its parent, or null at a window root). Starts from the class-name mapping, then applies the
+ * semantic and positional signals a class name alone cannot carry:
+ * - A checkable node is promoted to [StructuralRole.Checkbox] unless its class already keyed it to
+ *   the sibling checkable role [StructuralRole.Switch]. The live iOS runner reports a checkbox as
+ *   the bare `UIView` class (`ElementLocator.mapElementType` has no `.checkBox` case) while still
+ *   setting `isCheckable`, so an iOS checkbox arrives as a generic Container; Android's
+ *   `CheckedTextView` instead keys as [StructuralRole.Text] by class (it contains the `TextView`
+ *   substring) yet is a standard checkable control. Promoting on `isCheckable` regardless of the
+ *   class-derived role — not only the generic ones — pairs both against Android's `CheckBox`
+ *   instead of leaving them as OnlyIn. `Switch` is exempt so a `UISwitch`/`SwitchCompat`/
+ *   `ToggleButton` (also checkable) keeps its own distinct role (issue #4872 review).
+ * - A generic node whose [parentRole] is [StructuralRole.List] is promoted to
+ *   [StructuralRole.ListItem]: it is the list's row wrapper. iOS emits a row as a `UITableViewCell
+ *   -> ListItem` by class, but an Android row is an ordinary `LinearLayout`/`ViewGroup ->
+ *   Container` whose collection-item metadata `HierarchyParser` drops, so inferring `ListItem` from
+ *   the `List` parent is what pairs the two rows (and thus their descendants) instead of leaving
+ *   every row as OnlyIn (issue #4872 review).
+ * - A non-interactive generic node that carries an accessible name is promoted to
+ *   [StructuralRole.Text]. Android's `ViewHierarchyExtractor` blanks `android.widget.TextView` to a
+ *   class-less node (it is in `GENERIC_CLASS_NAMES`), which `HierarchyParser` then defaults to
+ *   `android.view.View` — so an ordinary Android label reaches here as a generic Container and
+ *   would never pair with the iOS runner's `UILabel -> Text`, leaving ubiquitous labels and their
+ *   whole subtrees as OnlyIn. The promotion recovers the label the producer erased. It is gated on
+ *   non-empty accessible name and on the node being neither clickable nor scrollable, so a genuine
+ *   interactive control or scroll container that merely happens to carry a label is left in its
+ *   structural role (issue #4872 review).
+ * - A generic scrollable node is promoted to [StructuralRole.ScrollView]. Android's extractor also
+ *   clears `android.widget.ScrollView`, but retains `isScrollable`; without this recovery it
+ *   remains a Container and cannot pair with iOS's `UIScrollView -> ScrollView` role.
+ */
+private fun structuralRoleOf(node: UIElementInfo, parentRole: StructuralRole?): StructuralRole {
+  val byClass = structuralRole(node.className)
+  // Checkable controls key as Checkbox even when the class name mapped them elsewhere (e.g.
+  // CheckedTextView -> Text), so a checkable control pairs across platforms. Switch is left alone:
+  // it is a distinct checkable role that must not collapse into Checkbox.
+  if (node.isCheckable && byClass != StructuralRole.Switch) return StructuralRole.Checkbox
+  val isGeneric = byClass == StructuralRole.Container || byClass == StructuralRole.Other
+  if (!isGeneric) return byClass
+  if (parentRole == StructuralRole.List) return StructuralRole.ListItem
+  if (node.isScrollable) return StructuralRole.ScrollView
+  val hasAccessibleName = !accessibleName(node).isNullOrEmpty()
+  if (hasAccessibleName && !node.isClickable && !node.isScrollable) return StructuralRole.Text
+  return byClass
 }
 
 /**
  * Whether two same-key nodes differ in a compared semantic attribute. Bounds and children are
  * deliberately excluded (see [diffHierarchies]); className and resourceId are already equal because
  * they are part of the key.
+ *
+ * [keyMode] governs the label comparison. A same-platform diff ([DiffKeyMode.ClassName]) compares
+ * `text` and `contentDescription` field-by-field, the honest identity where both platforms fill the
+ * same fields. A cross-platform diff ([DiffKeyMode.StructuralRole]) compares a single normalized
+ * [accessibleName] instead: Android puts an icon control's label in `content-desc` and a visible
+ * label in `text`, whereas iOS puts every accessibility label in `text` and leaves `content-desc`
+ * null — so comparing the fields separately reports equivalent controls (an Android
+ * `content-desc="Add"` vs an iOS `text="Add"`) as Changed. The boolean state flags are compared
+ * identically in both modes (issue #4872 review).
  */
-private fun nodeAttributesDiffer(a: UIElementInfo, b: UIElementInfo): Boolean =
-  a.text != b.text ||
-    a.contentDescription != b.contentDescription ||
+private fun nodeAttributesDiffer(
+  a: UIElementInfo,
+  b: UIElementInfo,
+  keyMode: DiffKeyMode,
+): Boolean {
+  val labelsDiffer =
+    when (keyMode) {
+      DiffKeyMode.ClassName -> a.text != b.text || a.contentDescription != b.contentDescription
+      DiffKeyMode.StructuralRole -> accessibleName(a) != accessibleName(b)
+    }
+  return labelsDiffer ||
     a.isClickable != b.isClickable ||
     a.isEnabled != b.isEnabled ||
     a.isFocused != b.isFocused ||
@@ -349,3 +618,14 @@ private fun nodeAttributesDiffer(a: UIElementInfo, b: UIElementInfo): Boolean =
     a.isScrollable != b.isScrollable ||
     a.isCheckable != b.isCheckable ||
     a.isChecked != b.isChecked
+}
+
+/**
+ * The cross-platform accessible name of a node. Android's explicit content description is its
+ * accessibility label even when visible text is also present; iOS serializes that label in `text`
+ * and leaves `contentDescription` empty. Prefer the former when available, then fall back to text,
+ * so a production Android label such as `content-desc="Predicted app: AutoMobile Playground"` pairs
+ * with the equivalent iOS text instead of comparing the Android's separate visible label.
+ */
+private fun accessibleName(node: UIElementInfo): String? =
+  node.contentDescription?.takeIf { it.isNotEmpty() } ?: node.text?.takeIf { it.isNotEmpty() }

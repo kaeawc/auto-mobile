@@ -27,17 +27,35 @@ export interface VirtualDeviceCapabilityInventory {
 }
 
 const ANDROID_AVD_CAPABILITIES = [
-  ["hw.camera.back", "android.hardware.camera"],
-  ["hw.camera.front", "android.hardware.camera.front"],
-  ["hw.fingerprint", "android.hardware.fingerprint"],
-  ["hw.gps", "android.hardware.location.gps"],
-  ["hw.nfc", "android.hardware.nfc"],
+  { configKey: "hw.camera.back", id: "android.hardware.camera", kind: "camera" },
+  { configKey: "hw.camera.front", id: "android.hardware.camera.front", kind: "camera" },
+  { configKey: "hw.fingerprint", id: "android.hardware.fingerprint", kind: "boolean" },
+  { configKey: "hw.gps", id: "android.hardware.location.gps", kind: "boolean" },
+  { configKey: "hw.nfc", id: "android.hardware.nfc", kind: "boolean" },
 ] as const;
 
 const DISABLED_AVD_VALUES = new Set(["0", "false", "no", "none", "off"]);
+const ENABLED_BOOLEAN_AVD_VALUES = new Set(["1", "true", "yes"]);
+const ENABLED_CAMERA_AVD_VALUES = new Set(["emulated", "virtualscene"]);
 
-function avdCapabilityState(value: string): Exclude<VirtualDeviceCapabilityState, "unsupported"> {
-  return DISABLED_AVD_VALUES.has(value.trim().toLowerCase()) ? "unavailable" : "available";
+function avdCapabilityState(
+  value: string,
+  kind: (typeof ANDROID_AVD_CAPABILITIES)[number]["kind"],
+): Exclude<VirtualDeviceCapabilityState, "unsupported"> | undefined {
+  const normalized = value.trim().toLowerCase();
+  if (DISABLED_AVD_VALUES.has(normalized)) {
+    return "unavailable";
+  }
+  if (kind === "boolean" && ENABLED_BOOLEAN_AVD_VALUES.has(normalized)) {
+    return "available";
+  }
+  if (
+    kind === "camera" &&
+    (ENABLED_CAMERA_AVD_VALUES.has(normalized) || /^webcam\d+$/.test(normalized))
+  ) {
+    return "available";
+  }
+  return undefined;
 }
 
 /**
@@ -49,10 +67,11 @@ export function buildAndroidAvdCapabilityInventory(
   config: Readonly<Record<string, string | undefined>>,
 ): VirtualDeviceCapabilityInventory {
   const capabilities = new Map<string, VirtualDeviceCapability>();
-  for (const [configKey, id] of ANDROID_AVD_CAPABILITIES) {
-    const value = config[configKey];
-    if (value?.trim()) {
-      capabilities.set(id, { id, state: avdCapabilityState(value), source: "avd_config" });
+  for (const definition of ANDROID_AVD_CAPABILITIES) {
+    const value = config[definition.configKey];
+    const state = value && avdCapabilityState(value, definition.kind);
+    if (state) {
+      capabilities.set(definition.id, { id: definition.id, state, source: "avd_config" });
     }
   }
 
@@ -69,20 +88,35 @@ export function buildAndroidAvdCapabilityInventory(
  * from the device type.
  */
 export function iosSimulatorCapabilityInventory(
-  isAvailable: boolean = true,
-  availabilityError?: string,
+  options: {
+    isAvailable?: boolean;
+    availabilityError?: string;
+    runtime?: string;
+  } = {},
 ): VirtualDeviceCapabilityInventory {
+  const supportsBiometricControls =
+    options.runtime === undefined ||
+    options.runtime.startsWith("com.apple.CoreSimulator.SimRuntime.iOS-");
+  const biometricCapability: VirtualDeviceCapability = !supportsBiometricControls
+    ? {
+        id: "ios.simulator.biometric",
+        state: "unsupported",
+        source: "platform",
+        reason: "Biometric controls are only supported for iOS Simulator runtimes.",
+      }
+    : options.isAvailable === false
+      ? {
+          id: "ios.simulator.biometric",
+          state: "unavailable",
+          source: "platform",
+          reason: options.availabilityError ?? "The iOS Simulator runtime is unavailable.",
+        }
+      : { id: "ios.simulator.biometric", state: "available", source: "platform" };
+
   return {
     schemaVersion: VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION,
     capabilities: [
-      {
-        id: "ios.simulator.biometric",
-        state: isAvailable ? "available" : "unavailable",
-        source: "platform",
-        ...(isAvailable
-          ? {}
-          : { reason: availabilityError ?? "The iOS Simulator runtime is unavailable." }),
-      },
+      biometricCapability,
       {
         id: "ios.simulator.nfc",
         state: "unsupported",

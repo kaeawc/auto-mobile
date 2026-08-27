@@ -26,11 +26,14 @@ describe("virtual device capability inventories", () => {
     });
   });
 
-  test("returns an empty inventory when an AVD exposes no mapped hardware features", () => {
-    expect(buildAndroidAvdCapabilityInventory({ "hw.ramSize": "2048" })).toEqual({
-      schemaVersion: 1,
-      capabilities: [],
-    });
+  test("returns an empty inventory when an AVD exposes no mapped or recognized hardware features", () => {
+    expect(
+      buildAndroidAvdCapabilityInventory({
+        "hw.fingerprint": "disabled",
+        "hw.gps": "corrupted",
+        "hw.ramSize": "2048",
+      }),
+    ).toEqual({ schemaVersion: 1, capabilities: [] });
   });
 
   test("reports supported and unsupported iOS Simulator capabilities with stable identifiers", () => {
@@ -38,6 +41,30 @@ describe("virtual device capability inventories", () => {
       schemaVersion: 1,
       capabilities: [
         { id: "ios.simulator.biometric", state: "available", source: "platform" },
+        {
+          id: "ios.simulator.nfc",
+          state: "unsupported",
+          source: "platform",
+          reason: "iOS Simulator cannot emulate NFC hardware.",
+        },
+      ],
+    });
+  });
+
+  test("marks biometric controls unsupported outside an iOS Simulator runtime", () => {
+    expect(
+      iosSimulatorCapabilityInventory({
+        runtime: "com.apple.CoreSimulator.SimRuntime.tvOS-18-0",
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      capabilities: [
+        {
+          id: "ios.simulator.biometric",
+          state: "unsupported",
+          source: "platform",
+          reason: "Biometric controls are only supported for iOS Simulator runtimes.",
+        },
         {
           id: "ios.simulator.nfc",
           state: "unsupported",

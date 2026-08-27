@@ -423,7 +423,11 @@ function toDeviceImageInfo(device: DeviceInfo, avdInfo?: AvdInfo): DeviceImageIn
     capabilityInventory:
       device.capabilityInventory ??
       (device.platform === "ios"
-        ? iosSimulatorCapabilityInventory(device.isAvailable !== false, device.availabilityError)
+        ? iosSimulatorCapabilityInventory({
+            isAvailable: device.isAvailable,
+            availabilityError: device.availabilityError,
+            runtime: device.runtime,
+          })
         : buildAndroidAvdCapabilityInventory({})),
   };
 }

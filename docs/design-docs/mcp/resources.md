@@ -147,10 +147,10 @@ tools expose them. `catalogComplete` and per-platform `catalogObservations`
 show whether the catalog can safely be used for provisioning decisions.
 Each image also includes a versioned `capabilityInventory` that can be read
 before a session begins. Android reports recognized `android.hardware.*`
-identifiers from the AVD's configured image/profile settings; absent settings
-are not inferred. iOS Simulator reports its available `ios.simulator.biometric`
-control and marks `ios.simulator.nfc` as explicitly unsupported. Entries use
-`available`, `unavailable`, or `unsupported` states.
+identifiers from AVD configuration key/value pairs; absent, unrecognized, and
+malformed settings are not inferred. iOS-runtime Simulator reports its available
+`ios.simulator.biometric` control and marks `ios.simulator.nfc` as explicitly
+unsupported. Entries use `available`, `unavailable`, or `unsupported` states.
 
 **URI Template**: `automobile:devices/images/{platform}`
 

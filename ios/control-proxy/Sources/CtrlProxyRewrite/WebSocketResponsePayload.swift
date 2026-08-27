@@ -11,8 +11,9 @@ import Foundation
 /// for `perfTiming` injection (see `WebSocketServer.encodeResponse`); every other
 /// payload encodes straight through here.
 ///
-/// Response types conform as they are ported; the CommandHandler-built envelopes
-/// (Rotate/Keyboard/Storage/Sql/...) join in the CommandHandler phase.
+/// Every envelope `CommandHandler.handle` can return conforms below. `WebSocketResponse`
+/// and `HierarchyUpdateResponse` are special-cased in `encodeResponse` for `perfTiming`
+/// injection; the rest encode straight through.
 protocol WebSocketResponsePayload: Sendable, Encodable {}
 
 extension WebSocketResponsePayload {
@@ -21,5 +22,27 @@ extension WebSocketResponsePayload {
     }
 }
 
+// perfTiming-injection special cases (see WebSocketServer.encodeResponse).
 extension WebSocketResponse: WebSocketResponsePayload {}
 extension HierarchyUpdateResponse: WebSocketResponsePayload {}
+
+// Straight-through envelopes built by CommandHandler.
+extension ScreenshotResponse: WebSocketResponsePayload {}
+extension KeyboardResponse: WebSocketResponsePayload {}
+extension RotateResponse: WebSocketResponsePayload {}
+extension CurrentFocusResponse: WebSocketResponsePayload {}
+extension TraversalOrderResponse: WebSocketResponsePayload {}
+extension VoiceOverStateResponse: WebSocketResponsePayload {}
+extension VoiceOverSetResponse: WebSocketResponsePayload {}
+extension StorageFilesResponse: WebSocketResponsePayload {}
+extension StorageEntriesResponse: WebSocketResponsePayload {}
+extension StorageEntryResponse: WebSocketResponsePayload {}
+extension SetNetworkMockRulesResponse: WebSocketResponsePayload {}
+extension SetNetworkErrorSimulationResponse: WebSocketResponsePayload {}
+extension SetNetworkFaultRulesResponse: WebSocketResponsePayload {}
+extension ExecuteSqlResponse: WebSocketResponsePayload {}
+extension ListDatabasesResponse: WebSocketResponsePayload {}
+extension StorageCapabilitiesResponse: WebSocketResponsePayload {}
+extension ListTablesResponse: WebSocketResponsePayload {}
+extension TableDataResponse: WebSocketResponsePayload {}
+extension TableStructureResponse: WebSocketResponsePayload {}

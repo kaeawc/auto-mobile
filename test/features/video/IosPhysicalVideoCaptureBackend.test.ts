@@ -761,6 +761,7 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
 
     const args = harness.ffmpeg.startRequests[0].args;
     expect(args[args.indexOf("-vf") + 1]).toBe("scale=640:480");
+    expect(handle.effectiveConfig?.resolution).toEqual({ width: 640, height: 480 });
     await harness.backend.stop(handle);
   });
 

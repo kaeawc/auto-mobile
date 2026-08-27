@@ -264,7 +264,20 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     // Everything downstream — pacing, gap fill, trailing padding and the ffmpeg
     // `-framerate` label — must read the SAME rate, or the encoded timeline
     // stops matching the timestamps it is labelled with.
-    const captureConfig: VideoCaptureConfig = { ...config, fps: captureFps };
+    const captureConfig: VideoCaptureConfig = {
+      ...config,
+      fps: captureFps,
+      // yuv420p accepts only even dimensions. Keep the effective configuration
+      // aligned with the scale filter that the encoder will actually apply,
+      // while `buildRawVideoFfmpegArgs()` still uses the native frame geometry
+      // for rawvideo's input `-video_size`.
+      resolution: config.resolution
+        ? {
+            width: evenFloor(config.resolution.width),
+            height: evenFloor(config.resolution.height),
+          }
+        : undefined,
+    };
 
     const state: CaptureState = {
       encoderName,

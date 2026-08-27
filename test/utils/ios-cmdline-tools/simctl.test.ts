@@ -9,16 +9,10 @@ import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../../../src/utils/deviceTimeou
 function resetSimctlCaches(): void {
   const simctlClass = Simctl as unknown as {
     deviceListCache: { devices: unknown[]; timestamp: number } | null;
-    localSimctlAvailability: Promise<void> | null;
     simulatorBoots: Map<string, unknown>;
   };
   simctlClass.deviceListCache = null;
-  simctlClass.localSimctlAvailability = null;
   simctlClass.simulatorBoots.clear();
-}
-
-function forceStaticAvailabilityPath(instance: Simctl): void {
-  (instance as unknown as { usesInjectedExecAsync: boolean }).usesInjectedExecAsync = false;
 }
 
 async function waitForCondition(condition: () => boolean, description: string): Promise<void> {
@@ -82,22 +76,10 @@ describe("Simctl", function () {
   describe("isAvailable", function () {
     test("should return true when simctl is available", async function () {
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
-        if (file === "xcrun" && args.join(" ") === "simctl --version") {
-          return {
-            stdout: "simctl version 1.0.0",
-            stderr: "",
-            toString: () => "simctl version 1.0.0",
-            trim: () => "simctl version 1.0.0",
-            includes: () => false,
-          };
+        if (file === "xcrun" && args.join(" ") === "--find simctl") {
+          return createExecResult("/Applications/Xcode.app/usr/bin/simctl\n", "");
         }
-        return {
-          stdout: "",
-          stderr: "",
-          toString: () => "",
-          trim: () => "",
-          includes: () => false,
-        };
+        throw new Error(`Unexpected command: ${file} ${args.join(" ")}`);
       };
 
       simctl = new Simctl(null, mockExecAsync);
@@ -116,38 +98,73 @@ describe("Simctl", function () {
       const available = await simctl.isAvailable();
       expect(available).toBe(false);
     });
+
+    test("checks tool resolution without masking a device-health command error", async function () {
+      const commands: string[] = [];
+      mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
+        commands.push(args.join(" "));
+        if (args.join(" ") === "--find simctl") {
+          return createExecResult("/Applications/Xcode.app/usr/bin/simctl\n", "");
+        }
+        throw new Error("Unable to boot device in current state: Shutdown");
+      };
+      simctl = new Simctl(null, mockExecAsync);
+
+      await expect(simctl.isAvailable()).resolves.toBe(true);
+      await expect(simctl.executeCommandArgs(["boot", "test-ios-device-id"])).rejects.toThrow(
+        "Unable to boot device in current state: Shutdown",
+      );
+      expect(commands).toEqual(["--find simctl", "simctl boot test-ios-device-id"]);
+    });
+
+    test("bounds and aborts a stalled tool-resolution check", async function () {
+      const timer = new FakeTimer();
+      let probeSignal: AbortSignal | undefined;
+      mockExecAsync = async (
+        _file: string,
+        _args: string[],
+        _maxBuffer?: number,
+        signal?: AbortSignal,
+      ): Promise<ExecResult> => {
+        probeSignal = signal;
+        return new Promise<ExecResult>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new Error("probe aborted")));
+        });
+      };
+      simctl = new Simctl(null, mockExecAsync, timer);
+
+      const availability = simctl.isAvailable();
+      expect(probeSignal?.aborted).toBe(false);
+      timer.advanceTime(10_000);
+
+      await expect(availability).resolves.toBe(false);
+      expect(probeSignal?.aborted).toBe(true);
+    });
   });
 
   describe("executeCommand", function () {
-    test("should execute simctl commands with xcrun prefix", async function () {
-      let executedFile = "";
-      let executedArgs: string[] = [];
+    test("dispatches a simctl command once without a version preflight", async function () {
+      const commands: Array<{ file: string; args: string[] }> = [];
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
-        executedFile = file;
-        executedArgs = args;
-        if (file === "xcrun" && args.join(" ") === "simctl --version") {
-          return {
-            stdout: "simctl version 1.0.0",
-            stderr: "",
-            toString: () => "simctl version 1.0.0",
-            trim: () => "simctl version 1.0.0",
-            includes: () => false,
-          };
-        }
-        return {
-          stdout: "command executed",
-          stderr: "",
-          toString: () => "command executed",
-          trim: () => "command executed",
-          includes: () => false,
-        };
+        commands.push({ file, args });
+        return createExecResult("command executed", "");
       };
 
       simctl = new Simctl(mockDevice, mockExecAsync);
       await simctl.executeCommand("list devices");
 
-      expect(executedFile).toBe("xcrun");
-      expect(executedArgs).toEqual(["simctl", "list", "devices"]);
+      expect(commands).toEqual([{ file: "xcrun", args: ["simctl", "list", "devices"] }]);
+    });
+
+    test("maps a missing simctl utility to actionable Xcode guidance", async function () {
+      mockExecAsync = async (): Promise<ExecResult> => {
+        throw new Error('xcrun: error: unable to find utility "simctl", not a developer tool');
+      };
+      simctl = new Simctl(mockDevice, mockExecAsync, undefined, "darwin");
+
+      await expect(simctl.executeCommandArgs(["list", "devices"])).rejects.toThrow(
+        "Please install Xcode command line tools",
+      );
     });
 
     test("should execute pre-split simctl arguments without dropping empty strings or backslashes", async function () {
@@ -195,10 +212,9 @@ describe("Simctl", function () {
     test("starts a supervised simctl command with literal argv", async function () {
       const started: { command?: string; args?: readonly string[]; options?: SpawnOptions } = {};
       const child = {} as ChildProcess;
-      mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
-        if (args.join(" ") === "simctl --version") {
-          return createExecResult("simctl version 1.0.0", "");
-        }
+      let execCalls = 0;
+      mockExecAsync = async (): Promise<ExecResult> => {
+        execCalls += 1;
         return createExecResult("", "");
       };
       simctl = new Simctl(
@@ -229,6 +245,7 @@ describe("Simctl", function () {
         "/tmp/a path;$(safe).mov",
       ]);
       expect(started.options).toEqual({ stdio: ["ignore", "ignore", "pipe"] });
+      expect(execCalls).toBe(0);
     });
   });
 
@@ -304,98 +321,6 @@ describe("Simctl", function () {
         "Command timed out after 1234ms: xcrun simctl bootstatus test-ios-device-id -b",
       );
       resolveCommand?.(createExecResult("late bootstatus", ""));
-    });
-
-    test("aborts an in-flight availability probe without poisoning future commands", async function () {
-      const timer = new FakeTimer();
-      const commands: string[] = [];
-      let availabilityAttempts = 0;
-      let probeSignal: AbortSignal | undefined;
-      mockExecAsync = async (
-        _file: string,
-        args: string[],
-        _maxBuffer?: number,
-        signal?: AbortSignal,
-      ): Promise<ExecResult> => {
-        commands.push(args.join(" "));
-        if (args.join(" ") === "simctl --version") {
-          availabilityAttempts += 1;
-          if (availabilityAttempts === 1) {
-            probeSignal = signal;
-            return new Promise<ExecResult>((_resolve, reject) => {
-              signal?.addEventListener("abort", () => reject(new Error("probe aborted")));
-            });
-          }
-          return createExecResult("simctl version 1.0.0", "");
-        }
-        return createExecResult("", "");
-      };
-      simctl = new Simctl(mockDevice, mockExecAsync, timer, "darwin");
-      forceStaticAvailabilityPath(simctl);
-
-      const command = simctl.executeCommandArgs(["list", "devices"], 1234);
-      expect(commands).toEqual(["simctl --version"]);
-      timer.advanceTime(1234);
-
-      await expect(command).rejects.toThrow(
-        "Command timed out after 1234ms: xcrun simctl list devices",
-      );
-      expect(probeSignal?.aborted).toBe(true);
-      await waitForCondition(
-        () =>
-          (
-            Simctl as unknown as {
-              localSimctlAvailability: Promise<void> | null;
-            }
-          ).localSimctlAvailability === null,
-        "aborted availability probe cache reset",
-      );
-
-      await expect(simctl.executeCommandArgs(["list", "devices"], 1234)).resolves.toMatchObject({
-        stdout: "",
-      });
-      expect(commands).toEqual(["simctl --version", "simctl --version", "simctl list devices"]);
-    });
-
-    test("does not share cancellation between concurrent availability probes", async function () {
-      const timer = new FakeTimer();
-      let availabilityAttempts = 0;
-      let firstProbeSignal: AbortSignal | undefined;
-      let firstProbeStarted = false;
-      mockExecAsync = async (
-        _file: string,
-        args: string[],
-        _maxBuffer?: number,
-        signal?: AbortSignal,
-      ): Promise<ExecResult> => {
-        if (args.join(" ") === "simctl --version") {
-          availabilityAttempts += 1;
-          if (availabilityAttempts === 1) {
-            firstProbeSignal = signal;
-            firstProbeStarted = true;
-            return new Promise<ExecResult>((_resolve, reject) => {
-              signal?.addEventListener("abort", () => reject(new Error("first probe aborted")));
-            });
-          }
-          return createExecResult("simctl version 1.0.0", "");
-        }
-        return createExecResult("", "");
-      };
-      simctl = new Simctl(mockDevice, mockExecAsync, timer, "darwin");
-      forceStaticAvailabilityPath(simctl);
-
-      const first = simctl.executeCommandArgs(["list", "devices"], 1234);
-      expect(firstProbeStarted).toBe(true);
-
-      await expect(simctl.executeCommandArgs(["list", "devices"], 1234)).resolves.toMatchObject({
-        stdout: "",
-      });
-      timer.advanceTime(1234);
-
-      await expect(first).rejects.toThrow(
-        "Command timed out after 1234ms: xcrun simctl list devices",
-      );
-      expect(firstProbeSignal?.aborted).toBe(true);
     });
 
     test("applies the default timeout to the bootstatus wait", async function () {
@@ -567,8 +492,8 @@ describe("Simctl", function () {
   });
 
   describe("listSimulatorImages", function () {
-    test("should retry local simctl availability after a transient failed probe", async function () {
-      let versionProbeCalls = 0;
+    test("runs discovery directly without a tool-resolution preflight", async function () {
+      const commands: string[] = [];
       const payload = simulatorListPayload([
         {
           udid: "iphone-17-pro-udid",
@@ -581,27 +506,19 @@ describe("Simctl", function () {
       ]);
 
       mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
-        if (file === "xcrun" && args.join(" ") === "simctl --version") {
-          versionProbeCalls++;
-          if (versionProbeCalls === 1) {
-            throw new Error("transient xcrun failure");
-          }
-          return createExecResult("simctl version 1051.50", "");
-        }
+        commands.push(`${file} ${args.join(" ")}`);
         if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
           return createExecResult(payload, "");
         }
-        return createExecResult("", "");
+        throw new Error(`Unexpected command: ${file} ${args.join(" ")}`);
       };
 
       simctl = new Simctl(null, mockExecAsync, undefined, "darwin");
-      forceStaticAvailabilityPath(simctl);
 
-      await expect(simctl.listSimulatorImages()).rejects.toThrow(/transient xcrun failure/);
       const devices = await simctl.listSimulatorImages();
 
-      expect(versionProbeCalls).toBe(2);
       expect(devices.map((device) => device.name)).toEqual(["iPhone 17 Pro"]);
+      expect(commands).toEqual(["xcrun simctl list devices --json"]);
     });
 
     test("should not cache an empty simulator discovery result", async function () {
@@ -989,11 +906,7 @@ describe("Simctl", function () {
       expect(runtimes[0].isAvailable).toBe(true);
     });
 
-    // REWRITE (#4177 item 2): a bare `rejects.toThrow()` here passed on the
-    // availability-probe error, not the `list runtimes` command error, because
-    // `ensureLocalSimctlAvailable` fires first. Let the probe succeed so only the
-    // real command fails, and assert the *command's* message surfaces.
-    test("surfaces the runtimes command error, not the availability-probe error", async function () {
+    test("surfaces the runtimes command error", async function () {
       mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
         if (args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 0.0", "");
@@ -1062,9 +975,7 @@ describe("Simctl", function () {
       expect(types[0].name).toBe("iPhone 17 Pro");
     });
 
-    // REWRITE (#4177 item 2): as with getRuntimes, assert the command error and
-    // not the availability probe.
-    test("surfaces the devicetypes command error, not the availability-probe error", async function () {
+    test("surfaces the devicetypes command error", async function () {
       mockExecAsync = async (_file: string, args: string[]): Promise<ExecResult> => {
         if (args.join(" ") === "simctl --version") {
           return createExecResult("simctl version 0.0", "");

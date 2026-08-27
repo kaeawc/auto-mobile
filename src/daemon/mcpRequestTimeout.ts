@@ -65,6 +65,19 @@ export const MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS = 90_000;
 export const MIN_UNINSTALL_APP_MCP_TIMEOUT_MS = 60_000;
 
 /**
+ * Floor for preference tools — iOS `setPreference` has a 30s write/read-back
+ * deadline and direct `getPreference` permits independently retried value and
+ * type reads for up to 40s. The transport budget starts before queueing, so it
+ * needs headroom to return the feature's own terminal result.
+ */
+export const MIN_PREFERENCE_MCP_TIMEOUT_MS = 60_000;
+
+const PREFERENCE_TOOL_TIMEOUT_FLOORS: Readonly<Record<string, number>> = {
+  getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
+  setPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
+};
+
+/**
  * Floor for `openLink` — deep links can trigger sign-in, onboarding, data sync,
  * or other post-open navigation before the final observation settles. A sign-in
  * deeplink that launches the app and performs a backend token exchange was
@@ -105,6 +118,10 @@ function resolveEnvTimeoutFloorMs(
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
 }
 
+function resolvePreferenceToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
+  return PREFERENCE_TOOL_TIMEOUT_FLOORS[toolName ?? ""];
+}
+
 function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
   switch (toolName) {
     case "executePlan":
@@ -136,7 +153,7 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
         DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
       );
     default:
-      return undefined;
+      return resolvePreferenceToolTimeoutFloorMs(toolName);
   }
 }
 

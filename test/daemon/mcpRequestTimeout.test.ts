@@ -7,6 +7,7 @@ import {
   LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
   MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
   MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
+  MIN_PREFERENCE_MCP_TIMEOUT_MS,
   MIN_PROVISION_DEVICE_MCP_TIMEOUT_MS,
   MIN_START_DEVICE_MCP_TIMEOUT_MS,
   MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS,
@@ -110,6 +111,16 @@ describe("resolveMcpRequestTimeoutMs", () => {
       expected: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
     },
     {
+      name: "getPreference floor when timeoutMs omitted",
+      tool: "getPreference",
+      expected: MIN_PREFERENCE_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "setPreference floor when timeoutMs omitted",
+      tool: "setPreference",
+      expected: MIN_PREFERENCE_MCP_TIMEOUT_MS,
+    },
+    {
       name: "observe default floor when timeoutMs omitted",
       tool: "observe",
       expected: DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
@@ -162,6 +173,18 @@ describe("resolveMcpRequestTimeoutMs", () => {
       tool: "uninstallApp",
       timeoutMs: 30_000,
       expected: MIN_UNINSTALL_APP_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "raises short getPreference to floor",
+      tool: "getPreference",
+      timeoutMs: 30_000,
+      expected: MIN_PREFERENCE_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "raises short setPreference to floor",
+      tool: "setPreference",
+      timeoutMs: 30_000,
+      expected: MIN_PREFERENCE_MCP_TIMEOUT_MS,
     },
     {
       name: "raises short observe to floor",

@@ -37,10 +37,11 @@ Critical path (the rewrite's actual goal — concurrency correctness + parity):
 7. Cutover — **in progress**:
    - 7A ✅ wire rewrite into XcodeGen (additive `CtrlProxyRewriteUITests` target) + first green
      iOS-simulator compile (host-hidden `ElementLocator` init fixed).
-   - 7B ⟵ **NEXT** iOS strict-concurrency warning cleanup (~149 non-fatal warnings in the iOS-only
-     bodies — see [STATUS.md](STATUS.md) §5/§9; approach TBD, can't be runtime-validated here).
-   - 7C point primary runner/app at the rewrite; retire the reference; simulator validation
-     (gated on an iOS runtime).
+   - 7B ✅ iOS strict-concurrency warning cleanup (the ~149 non-fatal iOS-only warnings → 0;
+     `DeviceRotation`/`VoiceOverToggling` isolation; runtime-validated — `testServiceStarts` runs
+     green on an iOS 27 simulator).
+   - 7C ⟵ **NEXT** point primary runner/app at the rewrite; retire the reference; full
+     observe→gesture→hierarchy validation (iOS runtime now installed).
 
 **8. Post-concurrency fixups (NEW).** Pure, off-critical-path improvements that we
 deliberately defer so the concurrency migration lands *parity-first*. Each is

@@ -40,9 +40,10 @@ final class CtrlProxyRewriteUITests: XCTestCase {
         continueAfterFailure = true
     }
 
-    override func tearDownWithError() throws {
-        service?.stop()
-    }
+    // No `tearDownWithError` override: XCTest's teardown is nonisolated, so touching the
+    // `@MainActor` `service` from it forces an `assumeIsolated` that trips region isolation
+    // ("sending self"). Instead each `@MainActor` test method stops its service via `defer`
+    // (same safety-net cleanup, entirely in main-actor context).
 
     /// Main test that starts the WebSocket server. Runs indefinitely (or until timeout) to keep
     /// the server alive; the process is killed externally by the MCP stop() path.
@@ -65,6 +66,7 @@ final class CtrlProxyRewriteUITests: XCTestCase {
         print("========================================")
 
         service = CtrlProxy(port: port)
+        defer { service?.stop() }
 
         if let bundleId = bundleId {
             try service?.start(bundleId: bundleId)
@@ -99,6 +101,7 @@ final class CtrlProxyRewriteUITests: XCTestCase {
         }
 
         service = CtrlProxy(port: getPort())
+        defer { service?.stop() }
         try service?.start(bundleId: bundleId)
 
         let keepAlive = expectation(description: "CtrlProxy iOS keep-alive")

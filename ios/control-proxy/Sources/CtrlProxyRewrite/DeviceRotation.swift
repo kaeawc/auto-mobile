@@ -42,17 +42,29 @@ enum DeviceRotation {
             }()
             private var observer: NSObjectProtocol?
 
+            // `UIDevice` is `@MainActor`. `RotationChangeSignaling` is a nonisolated
+            // (host-compiled) protocol, so these bodies stay nonisolated and reach the
+            // main actor via `MainActor.assumeIsolated`. Safe: the single instance is
+            // realized from `DeviceRotation.changeMonitor` on first `startMonitoring()`,
+            // which is only called from the `@MainActor` `ElementLocator`/`GesturePerformer`
+            // inits — i.e. always on the main actor.
             init() {
-                UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+                MainActor.assumeIsolated {
+                    UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+                }
             }
 
             func startObserving(_ handler: @escaping @Sendable () -> Void) {
-                observer = NotificationCenter.default.addObserver(
-                    forName: UIDevice.orientationDidChangeNotification,
-                    object: UIDevice.current,
-                    queue: deliveryQueue
-                ) { _ in
-                    handler()
+                // Assign `observer` INSIDE the closure: the returned `any NSObjectProtocol`
+                // is not `Sendable`, so it cannot cross back out of the `@MainActor` region.
+                MainActor.assumeIsolated {
+                    observer = NotificationCenter.default.addObserver(
+                        forName: UIDevice.orientationDidChangeNotification,
+                        object: UIDevice.current,
+                        queue: deliveryQueue
+                    ) { _ in
+                        handler()
+                    }
                 }
             }
 
@@ -60,19 +72,33 @@ enum DeviceRotation {
                 if let observer {
                     NotificationCenter.default.removeObserver(observer)
                 }
-                UIDevice.current.endGeneratingDeviceOrientationNotifications()
+                // `changeMonitor` is a process-lifetime `static let`, so this `deinit` is
+                // unreachable in practice; the `assumeIsolated` documents the main-actor
+                // contract a nonisolated `deinit` cannot otherwise express, and keeps the
+                // `endGenerating…`/`beginGenerating…` pair symmetric for correctness were the
+                // object ever freed.
+                MainActor.assumeIsolated {
+                    UIDevice.current.endGeneratingDeviceOrientationNotifications()
+                }
             }
         }
 
         /// Stateless → genuinely `Sendable`; stored as the `rotationSampler` global.
         private final class XCUIDeviceRotationSampler: RotationSampling, Sendable {
             func currentRotation() -> Int? {
-                switch XCUIDevice.shared.orientation {
-                case .portrait: return 0
-                case .landscapeLeft: return 1
-                case .portraitUpsideDown: return 2
-                case .landscapeRight: return 3
-                default: return nil
+                // `XCUIDevice.shared` is `@MainActor`; `RotationSampling` is a nonisolated
+                // (host-compiled) protocol. This concrete is only invoked via
+                // `RotationChangeMonitor.capture`/`captureSample`, which are driven
+                // exclusively from the `@MainActor` `ElementLocator`/`GesturePerformer`, so
+                // the read always runs on the main actor.
+                MainActor.assumeIsolated {
+                    switch XCUIDevice.shared.orientation {
+                    case .portrait: return 0
+                    case .landscapeLeft: return 1
+                    case .portraitUpsideDown: return 2
+                    case .landscapeRight: return 3
+                    default: return nil
+                    }
                 }
             }
         }
@@ -101,6 +127,11 @@ enum DeviceRotation {
     #endif
 
     #if os(iOS)
+        // `@MainActor`: reads `UIApplication.shared`/`UIDevice.current` scene state (both
+        // `@MainActor`). Its only callers are the `@MainActor` `GesturePerformer` gesture
+        // ops, so this is a same-actor, hop-free, behavior-identical annotation (it makes
+        // explicit the main-thread execution the reference relied on implicitly).
+        @MainActor
         static func currentGestureInterfaceOrientation() -> UIInterfaceOrientation {
             let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             let activeSceneOrientation = scenes.first(where: {

@@ -1272,7 +1272,9 @@ final class CommandHandler: CommandHandling {
         }
 
         do {
-            try voiceOverToggle.setVoiceOver(enabled: enabled)
+            // `setVoiceOver` is `@MainActor` (it drives XCUITest); `await` hops this async
+            // `Sendable` handler onto the main actor, like its other UI-collaborator calls.
+            try await voiceOverToggle.setVoiceOver(enabled: enabled)
             return VoiceOverSetResponse(
                 requestId: request.requestId,
                 success: true,

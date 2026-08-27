@@ -14,6 +14,7 @@ struct DefaultVoiceOverToggle: VoiceOverToggling {
     private static let accessibilityDeepLink = "App-Prefs:root=ACCESSIBILITY"
     private static let switchExistenceTimeout: TimeInterval = 5
 
+    @MainActor
     func setVoiceOver(enabled _: Bool) throws {
         #if canImport(XCTest) && os(iOS)
             let settings = XCUIApplication(bundleIdentifier: Self.settingsBundleId)

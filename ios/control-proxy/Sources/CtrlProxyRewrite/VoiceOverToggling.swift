@@ -12,5 +12,10 @@ protocol VoiceOverToggling: Sendable {
     /// silent success. Callers must only invoke this when the current state already
     /// differs from `enabled` — once VoiceOver is on, a tap is a VoiceOver activation,
     /// not a toggle.
+    ///
+    /// `@MainActor`: the default impl drives XCUITest (`@MainActor`). The async `Sendable`
+    /// `CommandHandler` `await`s it, exactly as it `await`s its other `@MainActor` UI
+    /// collaborators (STATUS §6) — automating Settings is one. The protocol stays `Sendable`.
+    @MainActor
     func setVoiceOver(enabled: Bool) throws
 }

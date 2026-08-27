@@ -6,9 +6,10 @@ can be given minimal guidance — e.g. *"we just finished Phase 2; read
 and orient entirely from here. See [README.md](README.md) for the fixup-note index
 and the amended phase plan.
 
-Last updated after commit `12e7c80a1` (Phase 7A: rewrite wired into XcodeGen + first green
-iOS-simulator compile). Phase 7B (iOS strict-concurrency warning cleanup) is scoped below,
-pending an approach decision.
+Last updated after Phase 7B (iOS strict-concurrency warnings cleared; the rewrite compiles
+**and runs** on an iOS 27.0 simulator — `testServiceStarts` green). Cutover 7C (point the
+primary runner at the rewrite; retire the reference; full observe→gesture→hierarchy validation)
+is next.
 
 ---
 
@@ -87,8 +88,8 @@ wire fixture is `test/fixtures/ios-ctrlproxy-request-snapshots.json`.
 | 5 | PerfProvider (TaskLocal call-tree + confined pool) | `11d8e192a` | ✅ |
 | 6 | CommandHandler (Sendable POD router, `handle` async) + async serial dispatch + `CtrlProxy` coordinator | `5ce6c75bd` `333e236f8` `089e4e0da` `1fb695e35` `d49358121` | ✅ |
 | 7A | Wire rewrite into XcodeGen + first green iOS-sim compile (host-hidden `ElementLocator` init fixed) | `12e7c80a1` | ✅ |
-| 7B | iOS strict-concurrency warning cleanup (`DeviceRotation`/`DefaultVoiceOverToggle`/runner) | — | ◻️ **NEXT — approach TBD** |
-| 7C | Point primary runner/app at rewrite; retire reference; simulator validation | — | ◻️ (step 4 gated on an iOS runtime) |
+| 7B | iOS strict-concurrency warning cleanup (`DeviceRotation`/`DefaultVoiceOverToggle`/runner) — 0 warnings + runtime-validated on sim | — | ✅ |
+| 7C | Point primary runner/app at rewrite; retire reference; full observe→gesture→hierarchy validation | — | ◻️ **NEXT** |
 | 8 | Post-concurrency fixups (see README index) | — | ◻️ |
 
 **Ported so far** (all one-type-per-file, `Sendable`, differentially verified unless
@@ -194,38 +195,38 @@ fixed: `ElementLocator`'s iOS `init(application:perf:)` was `public` while `Perf
 (only constructed in-module; cross-module tests use fakes). SPM parity gate unchanged (229 green,
 reference host build green).
 
-**Phase 7B (NEXT) — iOS strict-concurrency warning cleanup.** The 7A iOS compile is *green* but
-carries **~149 non-fatal Swift-6 strict-concurrency warnings** in the iOS-only bodies that no gate
-catches: SPM never compiles them (macOS host), and Xcode keeps SDK-inferred main-actor-isolation
-violations *non-promotable* even under `SWIFT_TREAT_WARNINGS_AS_ERRORS = YES`. They are genuine
-concurrency-model gaps (nonisolated code touching `@MainActor` UIKit/XCUITest APIs) and the
-migration's bar is a warning-clean iOS compile. Located + scoped (all `DeviceRotation` callers —
-`ElementLocator`/`GesturePerformer` — are already `@MainActor`, and the `capture {}` operation
-closures already compile clean via region-based isolation, so the fix is localized):
-- `DeviceRotation` (iOS-only): mark `currentGestureInterfaceOrientation()` / `current()` `@MainActor`
-  (all callers `@MainActor`, hop-free, behavior-identical). `XCUIDeviceRotationSampler.currentRotation()`
-  reads `XCUIDevice.shared.orientation` (`@MainActor`) through the *host-compiled* nonisolated
-  `RotationSampling` protocol → wrap in `MainActor.assumeIsolated` (call-graph-provably main-thread:
-  only reached via `RotationChangeMonitor.capture` driven from `@MainActor` `ElementLocator`), avoiding
-  a host-protocol ripple. `DeviceOrientationChangeSignal.init`/`startObserving` touch `UIDevice.current`
-  (`@MainActor`) from a nonisolated `static let` initializer (provably main via `startMonitoring()` from
-  `@MainActor` `ElementLocator.init`) → `assumeIsolated`; its `deinit` also touches `UIDevice.current` —
-  **the one genuinely-awkward spot** (a nonisolated `deinit` can't hop; the object is a process-lifetime
-  `static let` so the `deinit` is unreachable dead code, but still type-checked).
-- `DefaultVoiceOverToggle.setVoiceOver` (iOS-only): drives XCUITest (`@MainActor`). The correct fix is to
-  make the *host-compiled* `VoiceOverToggling.setVoiceOver` requirement `@MainActor` and have the async
-  `Sendable` `CommandHandler.handleSetVoiceOverState` `await` it (consistent with §6 — the handler
-  already `await`s its `@MainActor` UI collaborators; VoiceOver-via-Settings is one). Ripple: the protocol,
-  the test fake in `RewriteVoiceOver.swift`, and the handler call site (no handler host tests exist).
-- Runner `tearDownWithError` (nonisolated XCTest override) reads the now-`@MainActor` `service` → wrap
-  `service?.stop()` in `MainActor.assumeIsolated` (XCUITest teardown runs on the main thread).
+**Phase 7B added** (iOS strict-concurrency warning cleanup — applied + runtime-validated). The 7A
+iOS compile was green but carried **~149 non-fatal Swift-6 strict-concurrency warnings** in the
+iOS-only bodies that no gate catches (SPM never compiles them on the macOS host; Xcode keeps
+SDK-inferred main-actor-isolation violations *non-promotable* even under
+`SWIFT_TREAT_WARNINGS_AS_ERRORS = YES`) — genuine concurrency-model gaps (nonisolated code touching
+`@MainActor` UIKit/XCUITest APIs). Now **0 source warnings** (only the benign "AppIntents metadata
+skipped" build note remains). All `DeviceRotation` callers (`ElementLocator`/`GesturePerformer`) are
+already `@MainActor`, and the `capture {}` operation closures already compiled clean via region-based
+isolation, so the fix was localized:
+- `DeviceRotation`: `currentGestureInterfaceOrientation()` → `@MainActor` (all callers `@MainActor`,
+  hop-free, behavior-identical). `XCUIDeviceRotationSampler.currentRotation()` reads
+  `XCUIDevice.shared.orientation` through the *host-compiled* nonisolated `RotationSampling` protocol →
+  wrapped in `MainActor.assumeIsolated` (call-graph-provably main-thread; avoids a host-protocol ripple).
+  `DeviceOrientationChangeSignal.init`/`startObserving`/`deinit` touch `UIDevice.current` from a
+  nonisolated `RotationChangeSignaling` conformance → `assumeIsolated` (init/startObserving provably
+  main via `startMonitoring()` from `@MainActor` `ElementLocator.init`; **`deinit` is unreachable dead
+  code** — process-lifetime `static let` — the `assumeIsolated` documents the contract a nonisolated
+  `deinit` can't express). `startObserving` assigns `observer` *inside* the closure — the returned
+  `any NSObjectProtocol` is not `Sendable` and can't cross back out of the `@MainActor` region.
+- `VoiceOverToggling.setVoiceOver` → `@MainActor` (the default impl drives XCUITest); the async
+  `Sendable` `CommandHandler.handleSetVoiceOverState` now `await`s it (consistent with §6 — the handler
+  already `await`s its `@MainActor` UI collaborators). Ripple absorbed: the protocol, `DefaultVoiceOverToggle`,
+  the test fake in `RewriteVoiceOver.swift` (one localized `assumeIsolated`).
+- Runner: dropped the `tearDownWithError` override (a nonisolated XCTest override touching the
+  `@MainActor` `service` forces an `assumeIsolated` that trips region isolation, "sending self") — each
+  `@MainActor` test method now stops its service via `defer` (same cleanup, all main-actor context).
 
-**Decision needed (why 7B is not yet applied):** the fix revises `Sendable`→`@MainActor` on protocols
-whose archetypes were approved (`VoiceOverToggling`; the lock-confined rotation path), introduces
-`assumeIsolated` thread-assumptions, and — critically — **cannot be runtime-validated in this
-environment (no iOS simulator runtime, only the SDK)**, so it is compile-verified only. Options: (a)
-apply the archetype-consistent fixes now, compile-verified; (b) defer 7B until a simulator runtime is
-available to validate on-device; (c) minimal (fix only the trivially-safe runner warning, document the rest).
+**Runtime-validated:** with an iOS 27.0 simulator runtime installed, `testServiceStarts` **runs green**
+on `iPhone 17` (`[CtrlProxy] Service started` → `Service stopped`), exercising the coordinator's
+`@MainActor` init path (incl. `DeviceRotation` signal init `assumeIsolated`) and the full server
+start→stop lifecycle on-device — so the `assumeIsolated` main-thread assumptions do not trap. SPM
+parity gate unchanged (229 green; host build 0 warnings).
 
 ## 6. Archetype map & load-bearing decisions
 
@@ -363,19 +364,22 @@ the shipping target and retires the reference oracle. This is the first phase th
 runs the `@MainActor`/XCUITest bodies **and** the `CtrlProxy` coordinator's iOS branch (all
 host-excluded so far — see §8), so expect the first real iOS-compile fixups here.
 
-**Environment note (this host):** Xcode 27.0 with the `iphonesimulator27.0` **SDK** is present, so
-the rewrite *compiles* for the simulator — but there is **no iOS simulator runtime/device**
-(`xcrun simctl list runtimes` shows no iOS entry), so UI tests **cannot be run** here. Steps 1–3
-(wire, compile, point-runner) are achievable; step 4 (live observe→gesture→hierarchy validation) is
-gated on installing an iOS runtime.
+**Environment note (this host):** Xcode 27.0 with the `iphonesimulator27.0` SDK **and** iOS
+runtimes 27.0 + 26.5 (installed via `xcodebuild -downloadPlatform iOS`; iPhone 17 sims available),
+so the rewrite now both **compiles and runs** on a simulator. All `swift`/`xcodebuild`/`xcodegen`
+invocations here need `dangerouslyDisableSandbox` (temp/DerivedData/CoreSimulator/SPM-manifest
+`sandbox-exec` writes are outside the sandbox allowlist). Run one test via
+`xcodebuild test-without-building -xctestrun <…>.xctestrun -destination 'platform=iOS
+Simulator,name=iPhone 17' -only-testing:CtrlProxyRewriteUITests/…` (never run `testRunService` —
+it waits forever).
 
 Suggested order:
 
 1. ✅ **Wire `CtrlProxyRewrite` into `project.yml` / XcodeGen** — done in 7A (additive
    `CtrlProxyRewriteUITests` target; regenerated `project.pbxproj` with pinned XcodeGen 2.46.0).
-2. ✅/🚧 **Full iOS compile.** 7A got a green `build-for-testing` (one host-hidden error fixed).
-   7B is the remaining warning cleanup (see the Phase-7B block above) to reach a *warning-clean*
-   iOS compile matching the SPM `-warnings-as-errors` bar.
+2. ✅ **Full iOS compile** — 7A green `build-for-testing` (one host-hidden error fixed); 7B cleared
+   the ~149 iOS strict-concurrency warnings → warning-clean, matching the SPM bar; `testServiceStarts`
+   runs green on the sim.
 3. **Point the runner/app at the rewrite.** Switch the XCUITest runner target to construct
    `CtrlProxyRewrite.CtrlProxy` instead of the reference; keep the reference target buildable
    until the UI-test smoke passes, then retire it (drop the per-target `.v5` language mode and

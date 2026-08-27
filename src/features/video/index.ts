@@ -16,3 +16,4 @@ export { DEFAULT_VIDEO_RECORDING_CONFIG, parseVideoRecordingConfig } from "./Vid
 export { PlatformVideoCaptureBackend } from "./PlatformVideoCaptureBackend";
 export { FfmpegVideoProcessingBackend } from "./FfmpegVideoProcessingBackend";
 export { HybridVideoCaptureBackend } from "./HybridVideoCaptureBackend";
+export { IosPhysicalVideoCaptureBackend } from "./IosPhysicalVideoCaptureBackend";

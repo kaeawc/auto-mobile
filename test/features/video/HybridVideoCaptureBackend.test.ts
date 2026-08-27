@@ -42,6 +42,7 @@ class FakeBackend implements VideoCaptureBackend {
 describe("HybridVideoCaptureBackend - Unit Tests", function () {
   let ffmpegBackend: FakeBackend;
   let platformBackend: FakeBackend;
+  let physicalIosBackend: FakeBackend;
   let backend: HybridVideoCaptureBackend;
   let baseConfig: VideoCaptureConfig;
 
@@ -53,7 +54,8 @@ describe("HybridVideoCaptureBackend - Unit Tests", function () {
     delete process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE;
     ffmpegBackend = new FakeBackend("ffmpeg");
     platformBackend = new FakeBackend("platform");
-    backend = new HybridVideoCaptureBackend(ffmpegBackend, platformBackend);
+    physicalIosBackend = new FakeBackend("ios-physical");
+    backend = new HybridVideoCaptureBackend(ffmpegBackend, platformBackend, physicalIosBackend);
 
     baseConfig = {
       recordingId: "test-recording",
@@ -130,8 +132,9 @@ describe("HybridVideoCaptureBackend - Unit Tests", function () {
     await expect(backend.start(configWithoutDevice)).rejects.toThrow("Device is required");
   });
 
-  // Physical iOS devices are discoverable now, but the iOS video path is simctl-only.
-  test("start rejects a physical iOS device (simctl recordVideo is simulator-only)", async function () {
+  // simctl recordVideo is Simulator-only, so a physical iPhone is captured through
+  // the CoreMediaIO screen-capture-helper backend instead (#2504).
+  test("routes a physical iOS device to the CoreMediaIO helper backend", async function () {
     const physicalConfig: VideoCaptureConfig = {
       ...baseConfig,
       device: {
@@ -139,11 +142,31 @@ describe("HybridVideoCaptureBackend - Unit Tests", function () {
         deviceId: "00008030-001C2D3E1234567A", // physical UDID (8-hex + 16-hex)
       } as BootedDevice,
     };
-    await expect(backend.start(physicalConfig)).rejects.toThrow(
-      "not supported on physical iOS devices",
-    );
+    const handle = await backend.start(physicalConfig);
+
+    expect(physicalIosBackend.startCalls.length).toBe(1);
     expect(ffmpegBackend.startCalls.length).toBe(0);
     expect(platformBackend.startCalls.length).toBe(0);
+
+    await backend.stop(handle);
+
+    expect(physicalIosBackend.stopCalls.length).toBe(1);
+    expect(ffmpegBackend.stopCalls.length).toBe(0);
+    expect(platformBackend.stopCalls.length).toBe(0);
+  });
+
+  test("routes a legacy 40-hex physical iOS UDID to the helper backend too", async function () {
+    const legacyConfig: VideoCaptureConfig = {
+      ...baseConfig,
+      device: {
+        platform: "ios",
+        deviceId: "a".repeat(40),
+      } as BootedDevice,
+    };
+    await backend.start(legacyConfig);
+
+    expect(physicalIosBackend.startCalls.length).toBe(1);
+    expect(ffmpegBackend.startCalls.length).toBe(0);
   });
 
   test("start routes a Simulator iOS device to the ffmpeg backend", async function () {

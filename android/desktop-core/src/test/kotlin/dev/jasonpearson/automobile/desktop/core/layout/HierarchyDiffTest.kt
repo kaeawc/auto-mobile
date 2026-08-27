@@ -17,6 +17,7 @@ class HierarchyDiffTest {
     contentDescription: String? = null,
     bounds: ElementBounds = ElementBounds(0, 0, 10, 10),
     isClickable: Boolean = false,
+    isScrollable: Boolean = false,
     isCheckable: Boolean = false,
     isChecked: Boolean = false,
     children: List<UIElementInfo> = emptyList(),
@@ -32,7 +33,7 @@ class HierarchyDiffTest {
       isEnabled = true,
       isFocused = false,
       isSelected = false,
-      isScrollable = false,
+      isScrollable = isScrollable,
       isCheckable = isCheckable,
       isChecked = isChecked,
       children = children,
@@ -706,6 +707,29 @@ class HierarchyDiffTest {
     assertEquals(2, diff.equal)
     assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Container#"))
     assertNull(statusOf(diff, "Text#"))
+  }
+
+  /**
+   * Production Android also blanks `android.widget.ScrollView` to `android.view.View`, while
+   * retaining its scrollable state. Role mode must recover ScrollView from that state so its
+   * subtree aligns with the iOS runner's `UIScrollView` instead of becoming OnlyIn entries.
+   */
+  @Test
+  fun `role mode promotes a class-erased android scroll container to ScrollView`() {
+    val android =
+      node(
+        "android.view.View",
+        children = listOf(node("android.view.View", isScrollable = true)),
+      )
+    val ios = node("XCUIApplication", children = listOf(node("UIScrollView", isScrollable = true)))
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(0, diff.changed)
+    assertEquals(2, diff.equal)
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "ScrollView#"))
   }
 
   /**

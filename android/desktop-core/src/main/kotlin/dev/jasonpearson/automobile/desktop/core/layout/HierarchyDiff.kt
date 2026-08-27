@@ -408,12 +408,16 @@ private fun pathKey(
  *   non-empty text and on the node being neither clickable nor scrollable, so a genuine interactive
  *   control or scroll container that merely happens to carry text is left in its structural role
  *   (issue #4872 review).
+ * - A generic scrollable node is promoted to [StructuralRole.ScrollView]. Android's extractor also
+ *   clears `android.widget.ScrollView`, but retains `isScrollable`; without this recovery it
+ *   remains a Container and cannot pair with iOS's `UIScrollView -> ScrollView` role.
  */
 private fun structuralRoleOf(node: UIElementInfo): StructuralRole {
   val byClass = structuralRole(node.className)
   val isGeneric = byClass == StructuralRole.Container || byClass == StructuralRole.Other
   if (!isGeneric) return byClass
   if (node.isCheckable) return StructuralRole.Checkbox
+  if (node.isScrollable) return StructuralRole.ScrollView
   val hasVisibleText = !node.text.isNullOrEmpty()
   if (hasVisibleText && !node.isClickable && !node.isScrollable) return StructuralRole.Text
   return byClass

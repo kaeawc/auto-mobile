@@ -15,6 +15,11 @@ import {
   type AppleDeviceRuntime,
   type AppleDeviceType,
 } from "../utils/ios-cmdline-tools/SimCtlClient";
+import {
+  buildAndroidAvdCapabilityInventory,
+  iosSimulatorCapabilityInventory,
+  type VirtualDeviceCapabilityInventory,
+} from "../features/device-control/virtualDeviceCapabilities";
 
 // Resource URIs
 export const DEVICE_IMAGE_RESOURCE_URIS = {
@@ -42,6 +47,12 @@ interface DeviceImageInfo {
   runtime?: string;
   model?: string;
   architecture?: string;
+  /**
+   * Versioned hardware feature inventory for this startable virtual device.
+   * Android entries are derived from its AVD config; iOS entries model the
+   * simulator platform independently of a started session.
+   */
+  capabilityInventory: VirtualDeviceCapabilityInventory;
 }
 
 interface ProvisioningRuntime {
@@ -409,6 +420,15 @@ function toDeviceImageInfo(device: DeviceInfo, avdInfo?: AvdInfo): DeviceImageIn
     runtime: device.runtime,
     model: device.model,
     architecture: device.architecture,
+    capabilityInventory:
+      device.capabilityInventory ??
+      (device.platform === "ios"
+        ? iosSimulatorCapabilityInventory({
+            isAvailable: device.isAvailable,
+            availabilityError: device.availabilityError,
+            runtime: device.runtime,
+          })
+        : buildAndroidAvdCapabilityInventory({})),
   };
 }
 

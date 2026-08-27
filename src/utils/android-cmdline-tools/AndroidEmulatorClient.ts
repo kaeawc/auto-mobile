@@ -721,6 +721,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             screenHeight: config.screenHeight ?? device.screenHeight,
             screenDensity: config.screenDensity ?? device.screenDensity,
             formFactor: inferAndroidFormFactor(config.deviceName) ?? device.formFactor,
+            capabilityInventory: config.capabilityInventory ?? device.capabilityInventory,
           };
         } catch (error) {
           logger.debug(`Failed to enrich AVD ${device.name}: ${error}`);

@@ -126,6 +126,93 @@ describe("Device Image Resources with Fakes", () => {
       });
     });
 
+    test("returns a pre-session capability inventory for each virtual device", async () => {
+      fakeDeviceUtils.setDeviceImages("android", [
+        {
+          name: "Pixel 9",
+          platform: "android",
+          isRunning: false,
+          capabilityInventory: {
+            schemaVersion: 1,
+            capabilities: [
+              { id: "android.hardware.nfc", state: "unavailable", source: "avd_config" },
+            ],
+          },
+        },
+      ]);
+      fakeDeviceUtils.setDeviceImages("ios", [
+        {
+          name: "iPhone 16",
+          platform: "ios",
+          isRunning: false,
+        },
+      ]);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        simctl: fakeSimCtl,
+      });
+
+      const result = await handler.getDeviceImagesForPlatforms(["android", "ios"]);
+
+      expect(
+        result.images.find((image) => image.platform === "android")?.capabilityInventory,
+      ).toEqual({
+        schemaVersion: 1,
+        capabilities: [{ id: "android.hardware.nfc", state: "unavailable", source: "avd_config" }],
+      });
+      expect(result.images.find((image) => image.platform === "ios")?.capabilityInventory).toEqual({
+        schemaVersion: 1,
+        capabilities: expect.arrayContaining([
+          { id: "ios.simulator.biometric", state: "available", source: "platform" },
+          {
+            id: "ios.simulator.nfc",
+            state: "unsupported",
+            source: "platform",
+            reason: "iOS Simulator cannot emulate NFC hardware.",
+          },
+        ]),
+      });
+    });
+
+    test("marks iOS Simulator capabilities unavailable when its runtime is unavailable", async () => {
+      fakeDeviceUtils.setDeviceImages("ios", [
+        {
+          name: "Unavailable iPhone",
+          platform: "ios",
+          isRunning: false,
+          isAvailable: false,
+          availabilityError: "iOS 18.0 runtime is not installed",
+        },
+      ]);
+
+      const handler = createDeviceImageResourcesHandler({
+        deviceManager: fakeDeviceUtils,
+        avdManager: fakeAvdManager,
+        simctl: fakeSimCtl,
+      });
+      const result = await handler.getDeviceImagesForPlatforms(["ios"]);
+
+      expect(result.images[0]?.capabilityInventory).toEqual({
+        schemaVersion: 1,
+        capabilities: [
+          {
+            id: "ios.simulator.biometric",
+            state: "unavailable",
+            source: "platform",
+            reason: "iOS 18.0 runtime is not installed",
+          },
+          {
+            id: "ios.simulator.nfc",
+            state: "unsupported",
+            source: "platform",
+            reason: "iOS Simulator cannot emulate NFC hardware.",
+          },
+        ],
+      });
+    });
+
     test("merges installed-only Android system images into the complete catalog", async () => {
       fakeDeviceUtils.setDeviceImages("android", []);
       const availableImage = {

@@ -1,5 +1,6 @@
 import { Platform } from "./Platform";
 import { FormFactor } from "./DeviceMatchCriteria";
+import type { VirtualDeviceCapabilityInventory } from "../features/device-control/virtualDeviceCapabilities";
 
 export interface DeviceInfo {
   name: string;
@@ -21,6 +22,8 @@ export interface DeviceInfo {
   runtime?: string;
   model?: string;
   architecture?: string;
+  /** Pre-session virtual hardware inventory when the platform can inspect it. */
+  capabilityInventory?: VirtualDeviceCapabilityInventory;
 }
 
 export interface BootedDevice {

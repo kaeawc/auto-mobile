@@ -65,6 +65,21 @@ describe("parseAvdConfig", () => {
     expect(config.tag).toBe("google_apis");
   });
 
+  it("derives a normalized hardware capability inventory", () => {
+    const config = parseAvdConfig(
+      ["hw.camera.back=virtualscene", "hw.fingerprint=yes", "hw.nfc=no"].join("\n"),
+    );
+
+    expect(config.capabilityInventory).toEqual({
+      schemaVersion: 1,
+      capabilities: [
+        { id: "android.hardware.camera", state: "available", source: "avd_config" },
+        { id: "android.hardware.fingerprint", state: "available", source: "avd_config" },
+        { id: "android.hardware.nfc", state: "unavailable", source: "avd_config" },
+      ],
+    });
+  });
+
   it("parses the configured RAM size in megabytes", () => {
     const config = parseAvdConfig("hw.ramSize=1536\n");
     expect(config.ramSizeMb).toBe(1536);
@@ -127,12 +142,14 @@ describe("parseAvdConfig", () => {
       "AvdId=Pixel_7_API_34",
       "PlayStore.enabled=true",
       "abi.type=arm64-v8a",
+      "hw.camera.back=virtualscene",
       "hw.cpu.arch=arm64",
       "hw.device.manufacturer=Google",
       "hw.device.name=pixel_7",
       "hw.lcd.density=420",
       "hw.lcd.height=2400",
       "hw.lcd.width=1080",
+      "hw.nfc=no",
       "image.sysdir.1=system-images/android-34/google_apis_playstore/arm64-v8a/",
       "tag.id=google_apis_playstore",
     ].join("\n");
@@ -146,6 +163,13 @@ describe("parseAvdConfig", () => {
     expect(config.screenDensity).toBe(420);
     expect(config.deviceName).toBe("pixel_7");
     expect(config.tag).toBe("google_apis_playstore");
+    expect(config.capabilityInventory).toEqual({
+      schemaVersion: 1,
+      capabilities: [
+        { id: "android.hardware.camera", state: "available", source: "avd_config" },
+        { id: "android.hardware.nfc", state: "unavailable", source: "avd_config" },
+      ],
+    });
   });
 });
 

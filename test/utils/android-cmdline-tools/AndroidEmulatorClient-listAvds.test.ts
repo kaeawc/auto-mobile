@@ -227,4 +227,44 @@ describe("AndroidEmulatorClient listAvds", () => {
       { name: "Pixel_Tablet", platform: "android", isRunning: false, source: "local" },
     ]);
   });
+
+  test("includes configured Android hardware capabilities in the AVD listing", async () => {
+    const configReader: AvdConfigReader = {
+      async readConfig() {
+        return {
+          capabilityInventory: {
+            schemaVersion: 1,
+            capabilities: [
+              { id: "android.hardware.camera", state: "available", source: "avd_config" },
+            ],
+          },
+        };
+      },
+    };
+    const execAsync = async (_command: string): Promise<ExecResult> =>
+      createExecResult("Pixel_9\n");
+    const client = new AndroidEmulatorClient(
+      execAsync,
+      null,
+      new FakeTimer(),
+      undefined,
+      configReader,
+    );
+    (client as any).ensureEmulatorPath = async () => "emulator";
+
+    await expect(client.listAvds()).resolves.toEqual([
+      {
+        name: "Pixel_9",
+        platform: "android",
+        isRunning: false,
+        source: "local",
+        capabilityInventory: {
+          schemaVersion: 1,
+          capabilities: [
+            { id: "android.hardware.camera", state: "available", source: "avd_config" },
+          ],
+        },
+      },
+    ]);
+  });
 });

@@ -194,6 +194,7 @@ function makeHarness(
     helperPath?: string | null;
     platform?: NodeJS.Platform;
     sizeBytes?: number;
+    now?: () => number;
   } = {},
 ): Harness {
   const ffmpeg = new FakeFfmpegClient();
@@ -216,6 +217,7 @@ function makeHarness(
     },
     platformProvider: () => options.platform ?? "darwin",
     fileSize: async () => options.sizeBytes ?? 4096,
+    now: options.now,
   });
 
   return { backend, ffmpeg, helper, lister, helperOptions };
@@ -270,6 +272,40 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
       sizeBytes: 4096,
       codec: "h264",
     });
+  });
+
+  // A static screen delivers no frames, so without trailing padding the file
+  // ends at the last frame's slot however long the recording actually ran.
+  test("pads the stall between the last frame and stop", async function () {
+    let clockMs = 10_000;
+    const harness = makeHarness({ now: () => clockMs });
+    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
+
+    harness.helper.emitFrame(2, 2, 8, 0x11, 0);
+    clockMs += 500; // screen static for half a second before stop
+
+    await harness.backend.stop(handle);
+
+    const frameBytes = 2 * 2 * 4;
+    const written = harness.ffmpeg.processes[0].written.reduce((n, c) => n + c.length, 0);
+    // The frame itself plus five 100ms slots of held picture.
+    expect(written / frameBytes).toBe(6);
+  });
+
+  test("caps trailing padding for a very long final stall", async function () {
+    let clockMs = 10_000;
+    const harness = makeHarness({ now: () => clockMs });
+    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
+
+    harness.helper.emitFrame(2, 2, 8, 0x11, 0);
+    clockMs += 60_000; // a minute of stillness must not write 600 duplicates
+
+    await harness.backend.stop(handle);
+
+    const frameBytes = 2 * 2 * 4;
+    const written = harness.ffmpeg.processes[0].written.reduce((n, c) => n + c.length, 0);
+    // 1 frame + the 2s cap at 10fps.
+    expect(written / frameBytes).toBe(21);
   });
 
   test("stop closes ffmpeg stdin so the moov atom is finalized instead of killing the encoder", async function () {
@@ -347,6 +383,26 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
 
     const framePayloadBytes = 4 * 2 * 4;
     expect(harness.ffmpeg.processes[0].bytesWritten / framePayloadBytes).toBe(4);
+    await harness.backend.stop(handle);
+  });
+
+  // Capture timestamps are integer milliseconds, so a 30fps source reports
+  // 0, 33, 66, 100... Rebasing the deadline on each admitted frame discards the
+  // sub-slot lateness and compounds it, settling well below the requested rate
+  // while ffmpeg still labels the output 15fps — the file plays fast and short.
+  test("holds the requested rate against integer-millisecond capture timestamps", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig({ fps: 15 }));
+
+    // 10 frames of a 30fps source spanning 300ms.
+    for (let i = 0; i < 10; i++) {
+      harness.helper.emitFrame(4, 2, 16, 0xaa, Math.round(i * (1000 / 30)));
+    }
+
+    const framePayloadBytes = 4 * 2 * 4;
+    // 300ms at 15fps is ~5 frames. Deadline rebasing yielded 4 and drifted
+    // further the longer the recording ran.
+    expect(harness.ffmpeg.processes[0].bytesWritten / framePayloadBytes).toBe(5);
     await harness.backend.stop(handle);
   });
 

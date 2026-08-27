@@ -116,6 +116,8 @@ export interface IosPhysicalVideoCaptureBackendOptions {
   /** Injectable so file-size reporting stays device- and disk-free in tests. */
   fileSize?: (filePath: string) => Promise<number | undefined>;
   encoderFinalizeTimeoutMs?: number;
+  /** Clock seam for trailing-stall padding; capture timestamps use another timebase. */
+  now?: () => number;
   /** Env seam so the developer override can be exercised without touching process.env. */
   env?: NodeJS.ProcessEnv;
   /** Existence seam for the overridden helper path. */
@@ -145,6 +147,8 @@ interface CaptureState {
   framesGapFilled: number;
   /** Last payload written, repeated across gap slots that precede a new frame. */
   lastPayload?: Buffer;
+  /** Wall-clock time of the last write, for trailing-stall padding. */
+  lastWriteAtMs?: number;
   /** Bytes in one packed frame; the unit for the encoder-buffer budget. */
   frameBytes?: number;
   /**
@@ -187,6 +191,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
   private readonly platformProvider: () => NodeJS.Platform;
   private readonly fileSize: (filePath: string) => Promise<number | undefined>;
   private readonly encoderFinalizeTimeoutMs: number;
+  private readonly now: () => number;
   private readonly env: NodeJS.ProcessEnv;
   private readonly helperPathExists?: (candidate: string) => boolean;
 
@@ -200,6 +205,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     this.fileSize = options.fileSize ?? getFileSize;
     this.encoderFinalizeTimeoutMs =
       options.encoderFinalizeTimeoutMs ?? IOS_PHYSICAL_ENCODER_FINALIZE_TIMEOUT_MS;
+    this.now = options.now ?? Date.now;
     this.env = options.env ?? process.env;
     this.helperPathExists = options.helperPathExists;
   }
@@ -310,6 +316,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       throw new ActionableError(this.buildNoFramesMessage(state));
     }
 
+    this.padTrailingStall(state, config.fps);
     if (encoder.stdin) {
       this.flushPendingWrites(state, encoder.stdin);
     }
@@ -414,6 +421,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     }
     state.pendingWrites.push({ payload, count: 1 });
     state.lastPayload = payload;
+    state.lastWriteAtMs = this.now();
     this.flushPendingWrites(state, stdin);
   }
 
@@ -484,24 +492,64 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       return 0;
     }
 
+    // Advance the EXISTING deadline by the slots that elapsed, rather than
+    // rebasing it on this frame's timestamp. Rebasing loses the fraction of a
+    // slot the frame arrived late, and with integer-millisecond capture
+    // timestamps that compounds: a 30fps source (0, 33, 66, 100, ...) paced to
+    // 15fps (66.67ms) would miss 66 by 0.67ms, admit 100, and rebase from there
+    // — settling at 10fps while ffmpeg still labels the result 15fps, so the
+    // recording plays ~1.5x fast and ends a third short.
+    const elapsedSlots = Math.floor((timestampMs - state.nextFrameDueMs) / intervalMs) + 1;
+    const missedSlots = elapsedSlots - 1;
+    const maxGapFill = Math.ceil(fps * MAX_GAP_FILL_SECONDS);
+
     // Slots that elapsed with nothing to encode: a helper stall, or a device
     // that idles while the screen is static. `-framerate` gives every written
     // frame a contiguous fixed-rate timestamp, so skipping those slots would
     // compress real time — a 5s freeze would play back in a fraction of a
     // second, and a duration-capped recording would end early. Repeat the frame
     // to keep the encoded timeline on wall clock.
-    const missedSlots = Math.floor((timestampMs - state.nextFrameDueMs) / intervalMs);
-    const maxGapFill = Math.ceil(fps * MAX_GAP_FILL_SECONDS);
-    const gapFill = Math.min(missedSlots, maxGapFill);
-    if (missedSlots > gapFill) {
+    if (missedSlots > maxGapFill) {
       // Padding an arbitrarily long stall would write unbounded duplicate frames,
       // so very long gaps stay compressed; the recording is shorter than wall
-      // clock by the excess, which the warning names.
-      state.framesGapTruncated += missedSlots - gapFill;
+      // clock by the excess, which the warning names. Time was deliberately
+      // dropped here, so the schedule restarts from this frame.
+      state.framesGapTruncated += missedSlots - maxGapFill;
+      state.framesGapFilled += maxGapFill;
+      state.nextFrameDueMs = timestampMs + intervalMs;
+      return maxGapFill + 1;
     }
-    state.framesGapFilled += gapFill;
-    state.nextFrameDueMs = timestampMs + intervalMs;
-    return gapFill + 1;
+
+    state.framesGapFilled += missedSlots;
+    state.nextFrameDueMs += elapsedSlots * intervalMs;
+    return elapsedSlots;
+  }
+
+  /**
+   * Pad the interval between the last delivered frame and `stop()`. A device
+   * whose screen is static (or a helper that stalled) delivers nothing during
+   * that window, so without this the file ends at the last frame's slot — one
+   * frame followed by a 500ms wait would encode ~0.1s of video. Wall clock is
+   * used rather than capture timestamps, which are in the helper's own timebase.
+   */
+  private padTrailingStall(state: CaptureState, fps: number): void {
+    const payload = state.lastPayload;
+    const lastWriteAtMs = state.lastWriteAtMs;
+    if (!payload || lastWriteAtMs === undefined) {
+      return;
+    }
+    const intervalMs = 1000 / fps;
+    const elapsedSlots = Math.floor((this.now() - lastWriteAtMs) / intervalMs);
+    if (elapsedSlots <= 0) {
+      return;
+    }
+    const maxGapFill = Math.ceil(fps * MAX_GAP_FILL_SECONDS);
+    const pads = Math.min(elapsedSlots, maxGapFill);
+    if (elapsedSlots > pads) {
+      state.framesGapTruncated += elapsedSlots - pads;
+    }
+    state.framesGapFilled += pads;
+    state.pendingWrites.push({ payload, count: pads });
   }
 
   private startEncoder(

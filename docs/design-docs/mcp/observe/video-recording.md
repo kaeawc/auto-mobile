@@ -105,8 +105,14 @@ Platform-specific capture sources:
     on the first frame, which pins `-video_size`; frames that later change size (device rotation)
     are dropped rather than skewing the picture.
   - Device capture is deliberately **not** fps-throttled by the helper, so the backend paces frames
-    against their capture timestamps to hold the requested rate, and repeats a frame across gap
-    slots (bounded at 2s) so a stalled or idle device does not compress the encoded timeline.
+    against their capture timestamps to hold the requested rate, advancing the deadline by whole
+    elapsed slots (rebasing it on each arrival loses sub-slot lateness and drifts below the target
+    with integer-millisecond timestamps). Gap slots — mid-recording and between the last frame and
+    `stop` — are padded with the held picture, bounded at 2s, so a stalled or idle device does not
+    compress the encoded timeline.
+  - Encoder backpressure is bounded in whole frames (`writableLength` vs `frameBytes`), not the
+    stream's own `writableNeedDrain`: a pipe's 16KB high-water mark is exceeded by every
+    multi-megabyte BGRA frame, so the stream signal would read as permanent congestion.
   - A helper that exits nonzero mid-recording (device unplugged, lost capture session) fails the
     `stop` with its stderr rather than archiving the truncated file as a complete recording.
   - The AutoMobile UDID is mapped onto the AVFoundation `uniqueID` via the helper's

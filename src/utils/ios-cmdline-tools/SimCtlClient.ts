@@ -753,7 +753,13 @@ export class SimCtlClient implements SimCtl {
     });
 
     try {
-      return await Promise.race([probe.then(() => true, () => false), timeout]);
+      return await Promise.race([
+        probe.then(
+          () => true,
+          () => false,
+        ),
+        timeout,
+      ]);
     } catch (error) {
       logger.debug(`src/utils/ios-cmdline-tools/SimCtlClient.ts fallback failed: ${error}`, error);
       return false;

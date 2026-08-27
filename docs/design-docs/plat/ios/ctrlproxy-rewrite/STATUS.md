@@ -6,7 +6,7 @@ can be given minimal guidance — e.g. *"we just finished Phase 2; read
 and orient entirely from here. See [README.md](README.md) for the fixup-note index
 and the amended phase plan.
 
-Last updated after commit `2b1373016` (Phase 4 `@MainActor` UI domain complete).
+Last updated after commit `11d8e192a` (Phase 5 `PerfProvider` complete).
 
 ---
 
@@ -36,7 +36,7 @@ swift test  -Xswiftc -warnings-as-errors --filter CtrlProxyRewriteTests   # the 
 
 CI runs `scripts/ios/swift-test.sh` = `swift test -Xswiftc -warnings-as-errors` over the
 package, so **warnings-as-errors is the real gate** (e.g. an unused `removeAll()` result
-fails it). Current: **216 rewrite tests, all green; full package 533 (reference) + 216
+fails it). Current: **227 rewrite tests, all green; full package 533 (reference) + 227
 (rewrite) green.** (There is a known pre-existing flake in the reference suite —
 `WebSocketServerTests.testFragmentedCommandReassemblesEndToEnd`, a `RealSocketClient`
 loopback timing flake — unrelated to the rewrite; passes in isolation.)
@@ -82,8 +82,8 @@ wire fixture is `test/fixtures/ios-ctrlproxy-request-snapshots.json`.
 | 2 | Networking core (queue-confinement) | `0a56900dc` `004e54279` `bae5cadaa` `84430e00d` | ✅ core |
 | 3 | Off-main SDK layer (cache lock-confined + transactional; SDK/DB clients async; OSLogReader) | `f705e31ca` `d291db66c` `54ec41e39` `8ba273873` `1d8c08ba1` (+ de-flake `be92b2628`) | ✅ |
 | 4 | `@MainActor` UI (ElementLocator, GesturePerformer, HierarchyDebouncer, DisplayLinkFPSMonitor, VoiceOver) | `a0646e713` `f715fc90a` `8c634c77a` `957916c1f` `400a3a42e` `d209ad95c` `e1f4c4d86` `2b1373016` | ✅ |
-| 5 | PerfProvider (TaskLocal call-tree + confined pool) | — | ◻️ **NEXT** |
-| 6 | CommandHandler (Sendable POD router, `handle` async) + `CtrlProxy` coordinator | — | ◻️ |
+| 5 | PerfProvider (TaskLocal call-tree + confined pool) | `11d8e192a` | ✅ |
+| 6 | CommandHandler (Sendable POD router, `handle` async) + `CtrlProxy` coordinator | — | ◻️ **NEXT** |
 | 7 | Cutover (point runner/app at rewrite; retire reference; XcodeGen) | — | ◻️ |
 | 8 | Post-concurrency fixups (see README index) | — | ◻️ |
 
@@ -133,6 +133,20 @@ members. The `@MainActor`/iOS-only bodies compile on the macOS host **only** thr
 `#else` stubs and the `nonisolated static` pure helpers; full iOS compile lands at Phase 7
 (Xcode). 216 rewrite tests (from 102), all green; full package 533 + 216 green.
 
+**Phase 5 added** (`PerfProvider` engine + `MutablePerfEntry`). The active call-tree
+moved from `Thread.current.threadDictionary` to a `@TaskLocal` bound per operation by a
+sync/async `withScope` (the approved §9.3 call — see §6); the completed-root pool +
+debounce counters moved from `NSLock` + fields to an `OSAllocatedUnfairLock<Shared>`
+(genuinely `Sendable`); the reference singleton was **dropped** (injected `any
+PerfTracking` + Phase-6-owned instance). Completed roots are snapshotted to immutable
+`PerfTiming` **eagerly** (before entering the pool) so no mutable node lives behind the
+lock. Verified by a differential parity harness (per-module driver + neither-import
+sorted-key encoded-byte diff) over a 15-script corpus, plus unit tests for the
+load-bearing `@TaskLocal` nesting across a real off-main→`@MainActor` executor hop,
+`track`/`trackAsync`, and out-of-scope no-op behavior. **Engine-level parity only** — it
+does not prove production *emits* `perfTiming`; that integration test is a Phase-6
+obligation (see §8). 227 rewrite tests (from 216), all green; full package 533 + 227 green.
+
 ## 6. Archetype map & load-bearing decisions
 
 - **iOS 17 floor rules out `Synchronization.Mutex`** (needs iOS 18). Use actors,
@@ -168,6 +182,31 @@ members. The `@MainActor`/iOS-only bodies compile on the macOS host **only** thr
   `JSONEncoder` smell; byte-identical since the config matches.
 - **`ObjCExceptionCatcher` survives** into the `@MainActor` phases — Swift still can't
   catch XCUITest `NSException`s; it just moves *inside* the `@MainActor` block.
+- **PerfProvider active call-tree = `@TaskLocal`, not thread-local (resolves §9.3;
+  approved by Paul).** The reference kept the open-entry stack per *thread* so an
+  operation on one thread never nested under an in-flight operation on another (#3635).
+  But the rewrite made `ElementLocator` `@MainActor`, so one hierarchy request now spans
+  the command queue *and* the main actor within a single task; a thread-local would split
+  the tree at that executor boundary (`getViewHierarchy` would land as a separate root). A
+  `@TaskLocal` propagates across the `await` into the `@MainActor` collaborator *within the
+  same task*, reproducing the reference's single-threaded tree shape — proven byte-identical
+  by the parity corpus and by the off-main→`@MainActor`-hop unit test. Bound per operation by
+  `withScope` (sync + `nonisolated(nonsending)` async overloads); outside any scope the
+  imperative calls are safe no-ops (perf timing is diagnostic, not wire-critical). The scope
+  is `@unchecked Sendable`, justified by single-task-serial mutation — production opens no
+  parallel perf blocks across child tasks. **Deliberately faithful port**: it is an
+  over-elaborate way to compute a handful of intervals; the `os_signpost`/direct-interval
+  simplification is a queued Phase-8 fixup (README index), not part of this migration.
+- **PerfProvider pool = `OSAllocatedUnfairLock<Shared>`, singleton dropped, eager
+  conversion.** The completed-root pool + debounce counters use the lock-confined-`Sendable`
+  archetype (no `@unchecked`), and `flush()` still drains the whole pool so command and
+  polling timings report together. The reference singleton (`nonisolated(unsafe) static` +
+  double-checked `NSLock`) is dropped — collaborators inject `any PerfTracking` and the
+  Phase-6 coordinator owns the one instance, so the task-local needs no per-instance key. A
+  completed root is snapshotted to an immutable `PerfTiming` *before* it enters the pool
+  (the reference converted lazily at flush; eager is behaviorally identical since a root and
+  its children are fully timed by the time the root completes) so no mutable node is stored
+  behind the lock.
 
 ## 7. Race ledger
 
@@ -180,6 +219,7 @@ members. The `@MainActor`/iOS-only bodies compile on the macOS host **only** thr
 | — | OSLogReader overlap (concurrent polls on a global queue; fresh store per poll) | serial-queue confinement + single reused `OSLogStore` | ✅ (Phase 3) |
 | — | DisplayLink orphan | `@MainActor` monitor owns the `CADisplayLink` lifecycle | ✅ (Phase 4E) |
 | — | FrameContext shared encoder | lock-confined `Sendable` + fresh-per-call coder | ✅ (Phase 4B) |
+| — | Perf call-tree mis-nest / cross-scope `end()` pop (#3635) — the reference used thread-local to prevent it; the rewrite's `@MainActor` `ElementLocator` reintroduces an executor hop within one request | `@TaskLocal` call-tree bound per operation by `withScope` (propagates across the hop, same task) | ✅ (Phase 5) |
 
 ## 8. Seams left open (to fill in later phases)
 
@@ -188,9 +228,19 @@ members. The `@MainActor`/iOS-only bodies compile on the macOS host **only** thr
   wiring is deferred to the Phase-6 coordinator:
   - `onSdkEventBatch: (@Sendable (Data) -> Void)?` → `{ SdkHierarchyExtractor.extractIfPresent(from:$0, into: cache, onHierarchyUpdated:) }`.
   - `drainLogEvents: (@Sendable () -> [Data])?` → `OSLogReaderHolder.shared.drain`.
-- `WebSocketServer` seams: `CommandHandling` (Phase 6) and `PerfTracking` (Phase 5) remain
-  open; `FrameContextRecording` is **implemented** (Phase 4B). All are wired to the
-  concrete collaborators by the `CtrlProxy` coordinator in Phase 6.
+- `WebSocketServer` seams: `CommandHandling` (Phase 6) remains open; `PerfTracking` now has
+  its concrete `PerfProvider` (Phase 5) and `FrameContextRecording` is **implemented**
+  (Phase 4B). All are wired to the concrete collaborators by the `CtrlProxy` coordinator in
+  Phase 6 — including the **`withScope` wiring**: the sync/async `withScope` must bracket the
+  command-handling entry point *and* the background hierarchy-polling entry point, or every
+  perf call is a silent no-op in production (the engine only accumulates inside a bound scope).
+- **Phase-6 integration-parity obligation (from the Phase-5 review):** the Phase-5 parity
+  proves the `PerfProvider` *engine* emits a byte-identical tree, but **not** that production
+  actually emits `perfTiming` on the wire. The reference's global singleton was live on every
+  thread; the rewrite only accumulates inside a `withScope`. Phase 6 must add an integration
+  parity test that drives a real request through `WebSocketServer.handleMessage` (both
+  modules) and diffs the `perfTiming` field on the response envelope — otherwise a missing
+  `withScope` wire-up would leave `perfTiming` empty with the engine tests still green.
 - **Deferred to Phase 6 (CommandHandler):** `WebSocketResponsePayload` conformance for the
   Phase-3 DB response envelopes (+ the other handler-built envelopes) — the structs are
   `Codable & Sendable` now; the marker conformances land with the router batch.
@@ -200,48 +250,38 @@ members. The `@MainActor`/iOS-only bodies compile on the macOS host **only** thr
   (frames/ping/close/fragmentation/HTTP) on the existing scripted-`ByteChannel` harness
   (`ReferenceConnectionDriver` / `RewriteConnectionDriver` / `ConnectionRecorder`).
 
-## 9. Phase 5 plan (NEXT) — PerfProvider
+## 9. Phase 6 plan (NEXT) — CommandHandler + `CtrlProxy` coordinator
 
-Read the reference first: `Sources/CtrlProxy/PerfProvider.swift` (~563 lines) and
-`Sources/CtrlProxy/PerformanceMetrics.swift` (~213 lines). The time/timer seams this phase
-builds on are **already ported** (Phase 4A): `TimeProvider.swift`, `SystemTimeProvider.swift`,
-`ProxyTimer.swift` (the `Timer`→`ProxyTimer` rename from the README fixup index is **done**),
-`SystemTimer.swift`, and the `PerfTracking.swift` protocol seam. So Phase 5 is the concrete
-`PerfProvider` engine plus its metrics model.
+Read the reference first: `Sources/CtrlProxy/CommandHandler.swift` and
+`Sources/CtrlProxy/CtrlProxy.swift` (the coordinator). Every collaborator this phase routes
+to is **already ported**: the wire models, `WebSocketServer`/`WebSocketConnection` (Phase 2),
+the off-main SDK layer + cache (Phase 3), the `@MainActor` UI domain (Phase 4), and the
+`PerfProvider` engine (Phase 5). Phase 6 is the router that ties them together plus the
+coordinator that owns the single instances and fills the open production seams.
 
-What the reference does (and the concurrency smells to close):
+Design commitments already recorded (do not re-litigate — see §6/§8):
 
-1. **Singleton via `nonisolated(unsafe) static var _instance` + `NSLock`** — the manual
-   double-checked-lock idiom. Port to a lock-confined `Sendable` (the established archetype:
-   `OSAllocatedUnfairLock<State>`, no `@unchecked`), or reconsider the singleton entirely
-   since Phase 6's `CommandHandler` can hold an injected instance.
-2. **Shared completed-entry pool + debounce counters** (`completedEntries: [MutablePerfEntry]`,
-   `debounceCount`, `lastDebounceTime`) guarded by one `NSLock`. `flush()` drains the whole
-   pool so command-handling and background-polling timings report together — this pooled-flush
-   behavior is **relied on** and must be preserved. Fold into the lock-confined state.
-3. **Per-thread active-entry state — the load-bearing design decision.** The reference keeps
-   the active-entry stack + current root in `Thread.current.threadDictionary` (`PerfLocalState`),
-   **not** task-local, deliberately: operations on one thread (background hierarchy polling on
-   the main thread) must not nest under an in-flight operation on another (command handling on
-   the server queue). A single shared stack mis-nested the tree and let `end()` pop another
-   thread's entry (#3635). **The amended plan's "TaskLocal call-tree" label conflicts with this**
-   — `@TaskLocal` is per-*task*, inherited by child tasks, and does not map 1:1 onto the
-   reference's per-*thread* isolation. Resolve this before porting: either (a) keep
-   thread-local semantics (a `ThreadLocal`-style seam) and match the tree shape exactly, or
-   (b) move to `@TaskLocal` only if the parity corpus proves the emitted timing tree is
-   byte-identical across the polling-vs-command interleavings. Treat as an approval-worthy
-   decision like the Phase-3 cache-lock call; record the outcome in §6.
-4. **`MutablePerfEntry` is a mutable reference type** built into a tree, then serialized. The
-   serialized shape (names, nesting, `isParallel`, durations) is the frozen wire surface —
-   `PerformanceMetrics` / `PerfEntry` feed `perfTiming` on responses. Keep the emitted JSON
-   byte-identical.
-5. **Wire the open seams:** `WebSocketServer`'s `PerfTracking` seam (still open) binds to this
-   port; `encodeResponse`'s `perfTiming` injection (already in the rewrite) consumes its
-   `flush()`. Production wiring is the Phase-6 coordinator.
-6. **Parity:** the `FakeTimeProvider` seam already exists, so drive deterministic start/end
-   sequences through a fake clock and diff the flushed timing tree (reference vs rewrite) via
-   the per-module-helper pattern — this is a *pure*, host-testable surface (no XCUITest), so it
-   parity-tests fully on the macOS gate unlike the Phase-4 UI domain.
+1. **`CommandHandler` stays a `Sendable` POD router, NOT `@MainActor`** (#5374): its blocking
+   SDK HTTP/DB calls must not freeze XCUITest or starve `/health`. It `await`s the `@MainActor`
+   UI collaborators (`ElementLocator`, `GesturePerformer`) and the off-main SDK clients.
+2. **`handle` returns `any WebSocketResponsePayload`** (`Sendable & Encodable`), replacing the
+   reference's `-> Any`. `encodeResponse` keeps the `WebSocketResponse`/`HierarchyUpdateResponse`
+   downcasts for `perfTiming` injection; everything else encodes straight through.
+3. **`WebSocketResponsePayload` conformances** for the Phase-3 DB response envelopes (+ the
+   other handler-built envelopes) land here — the structs are already `Codable & Sendable`.
+4. **Fill the open production seams** via the `CtrlProxy` coordinator: `WebSocketServer`'s
+   `CommandHandling` seam → this router; its `PerfTracking` seam → the Phase-5 `PerfProvider`;
+   `WebSocketConnection.onSdkEventBatch` → `SdkHierarchyExtractor.extractIfPresent`;
+   `drainLogEvents` → `OSLogReaderHolder.shared.drain`.
+5. **`withScope` wiring (load-bearing — see §8).** Bracket the command-handling entry point and
+   the background hierarchy-polling entry point in `PerfProvider.withScope`; without it every
+   perf call is a silent production no-op. Use the async overload on the async command path.
+6. **Parity:** two layers. (a) Per-command routing parity through the existing per-module-driver
+   pattern (reference vs rewrite `handle` for each command shape, diffing the response
+   envelope). (b) **The integration `perfTiming` parity test (§8):** drive a real request
+   through `WebSocketServer.handleMessage` in both modules and diff the `perfTiming` field —
+   this is what proves the `withScope` wiring actually emits timings on the wire, which the
+   Phase-5 engine parity cannot.
 
 ## 10. Conventions
 

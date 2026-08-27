@@ -32,8 +32,8 @@ Critical path (the rewrite's actual goal — concurrency correctness + parity):
    proposed here; see [STATUS.md](STATUS.md) §6 for the (approved) rationale.
 4. `@MainActor` UI domain (ElementLocator, GesturePerformer, HierarchyDebouncer,
    DisplayLinkFPSMonitor, VoiceOver) ✅
-5. PerfProvider (TaskLocal call-tree + confined pool) ⟵ **NEXT**
-6. CommandHandler (Sendable POD router) + CtrlProxy coordinator
+5. PerfProvider (TaskLocal call-tree + confined pool) ✅
+6. CommandHandler (Sendable POD router) + CtrlProxy coordinator ⟵ **NEXT**
 7. Cutover (point the runner/app at the rewrite; retire the reference)
 
 **8. Post-concurrency fixups (NEW).** Pure, off-critical-path improvements that we
@@ -48,7 +48,8 @@ cost of parity discipline).
 |---|---|---|---|
 | [hierarchy-merger-geometry](fixup-hierarchy-merger-geometry.md) | `HierarchyMerger` bounds matching | Mixed (containment: none; ±tol: intentional behavior change, approved) | Designed, deferred to Phase 8 |
 | dead API: `ElementLocator.getCachedElement` | ElementLocator | None (drop/internalize) | ✅ Resolved — dropped when porting `ElementLocator` (Phase 4F); not carried into the rewrite |
-| `Timer` protocol shadows `Foundation.Timer` | PerfProvider/scheduling | None (rename) | Noted; resolve when porting the timer seam (Phase 5) |
+| `Timer` protocol shadows `Foundation.Timer` | PerfProvider/scheduling | None (rename) | ✅ Resolved — renamed to `ProxyTimer` when porting the timer seam (Phase 4A) |
 | `GesturePerformer` keyboard-focus / keyboard-visibility polling | GesturePerformer | None (parity-preserving keep) | Noted (uncovered porting `GesturePerformer`, Phase 4G); `tapAndAwaitKeyboardFocus` / `waitForKeyboardVisibility` spin `RunLoop.current.run(until:)` on `Date()`-based deadlines, blocking the main actor for up to their timeout. Ported verbatim; replace with a non-blocking wait in Phase 8 |
+| PerfProvider is an over-elaborate interval accumulator | PerfProvider | None (external timing data stays equivalent) | Noted (porting `PerfProvider`, Phase 5). The whole `MutablePerfEntry` tree + `@TaskLocal` scope + pooled flush is an elaborate way to compute the handful of intervals actually reported. Ported faithfully to keep the emitted `perfTiming` byte-identical; replace with `os_signpost` / direct interval math in Phase 8 (external API/data equivalent, per Paul: "direct rewrite then refactor"). The reference singleton was already dropped in the port (injected `any PerfTracking`; see [STATUS.md](STATUS.md) §6) — do not restore it for parity |
 
 Append new entries here as they're uncovered.

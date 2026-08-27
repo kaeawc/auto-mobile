@@ -34,6 +34,13 @@ export interface BiometricEnrollmentSessionState {
   initialEnrollment: BiometricEnrollment;
 }
 
+/** What a pending restore must write, resolved before any await (see below). */
+interface BiometricRestoreTarget {
+  sessionId: string;
+  deviceId: string;
+  enrollment: BiometricEnrollment;
+}
+
 /** Narrow seam for restoring iOS Simulator biometric enrollment on release. */
 export interface BiometricEnrollmentRestorer {
   restore(enrollment: BiometricEnrollment): Promise<void>;
@@ -704,15 +711,16 @@ export class SessionManager {
         `Failed to restore keep-awake state for rebound session ${existing.sessionId}: ${error}`,
       );
     }
-    try {
-      await this.restoreBiometricEnrollment(existing);
-    } catch (error) {
-      logger.warn(
-        `Failed to restore biometric enrollment for rebound session ${existing.sessionId}: ${error}`,
-      );
-    }
+    // Same contract as release: a failed restore must not hand the old
+    // simulator back to the pool clean. Any outstanding retry is registered
+    // against that device below, so DevicePool.releaseDevice defers idling it.
+    const pendingBiometricRestoration = (await this.restoreBiometricEnrollmentBestEffort(existing))
+      .pending;
 
     const previousDevice = existing.assignedDevice;
+    if (pendingBiometricRestoration) {
+      this.trackPendingDeviceCleanup(previousDevice, [pendingBiometricRestoration]);
+    }
     // Preserve object identity so an already-started release observes the
     // rebinding and frees its live replacement rather than a stale snapshot.
     // Recreate the replacement after awaited work: activity and label-routing
@@ -1173,26 +1181,41 @@ export class SessionManager {
     }
   }
 
-  private async restoreBiometricEnrollment(session: Session): Promise<void> {
+  /**
+   * Snapshot of what a restore must write, taken before any await. A rebind
+   * reassigns `session.assignedDevice` while retries are still outstanding, so
+   * resolving the device lazily from the session would aim them at the new
+   * simulator and leave the old one dirty.
+   */
+  private biometricRestoreTarget(session: Session): BiometricRestoreTarget | null {
     const state = session.cacheData.biometricEnrollment;
     if (session.platform !== "ios" || !state) {
-      return;
+      return null;
     }
-    const device: BootedDevice = {
-      name: session.assignedDevice,
-      platform: session.platform,
+    return {
+      sessionId: session.sessionId,
       deviceId: session.assignedDevice,
+      enrollment: state.initialEnrollment,
     };
-    await this.biometricEnrollmentRestorerFactory(device).restore(state.initialEnrollment);
+  }
+
+  private async restoreBiometricEnrollment(target: BiometricRestoreTarget): Promise<void> {
+    const device: BootedDevice = {
+      name: target.deviceId,
+      platform: "ios",
+      deviceId: target.deviceId,
+    };
+    await this.biometricEnrollmentRestorerFactory(device).restore(target.enrollment);
   }
 
   private async restoreBiometricEnrollmentBestEffort(
     session: Session,
   ): Promise<{ pending: Promise<void> | null }> {
-    if (!session.cacheData.biometricEnrollment) {
+    const target = this.biometricRestoreTarget(session);
+    if (!target) {
       return { pending: null };
     }
-    const restoration = this.restoreBiometricEnrollment(session).then(
+    const restoration = this.restoreBiometricEnrollment(target).then(
       () => ({ outcome: "restored" as const }),
       (error) => ({ outcome: "failed" as const, error }),
     );
@@ -1211,13 +1234,13 @@ export class SessionManager {
         );
         // Quarantine the device until the retries below settle; a prompt
         // rejection otherwise returns a dirty simulator straight to the pool.
-        return { pending: this.retryBiometricEnrollmentRestore(session, result.error) };
+        return { pending: this.retryBiometricEnrollmentRestore(target, result.error) };
       }
       if (result.outcome === "timed-out") {
         logger.warn(
           `Timed out after ${BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS}ms restoring biometric enrollment for session ${session.sessionId}`,
         );
-        return { pending: this.settleBiometricEnrollmentRestore(session, restoration) };
+        return { pending: this.settleBiometricEnrollmentRestore(target, restoration) };
       }
       return { pending: null };
     } finally {
@@ -1229,7 +1252,7 @@ export class SessionManager {
 
   /** A slow restore can still fail; retry before the device leaves quarantine. */
   private async settleBiometricEnrollmentRestore(
-    session: Session,
+    target: BiometricRestoreTarget,
     restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
   ): Promise<void> {
     const result = await restoration;
@@ -1237,35 +1260,35 @@ export class SessionManager {
       return;
     }
     logger.warn(
-      `Failed to restore biometric enrollment for session ${session.sessionId}: ${result.error}`,
+      `Failed to restore biometric enrollment for session ${target.sessionId}: ${result.error}`,
     );
-    await this.retryBiometricEnrollmentRestore(session, result.error);
+    await this.retryBiometricEnrollmentRestore(target, result.error);
   }
 
   private async retryBiometricEnrollmentRestore(
-    session: Session,
+    target: BiometricRestoreTarget,
     initialError: unknown,
   ): Promise<void> {
     let lastError = initialError;
     for (let attempt = 1; attempt <= BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS; attempt++) {
       await this.timer.sleep(BIOMETRIC_ENROLLMENT_RESTORE_RETRY_DELAY_MS);
       try {
-        await this.restoreBiometricEnrollment(session);
+        await this.restoreBiometricEnrollment(target);
         logger.info(
-          `Restored biometric enrollment for session ${session.sessionId} on retry ${attempt}`,
+          `Restored biometric enrollment for session ${target.sessionId} on retry ${attempt}`,
         );
         return;
       } catch (error) {
         // Teardown is best-effort: keep retrying, then report the last failure.
         lastError = error;
         logger.debug(
-          `Retry ${attempt} restoring biometric enrollment for session ${session.sessionId} failed: ${error}`,
+          `Retry ${attempt} restoring biometric enrollment for session ${target.sessionId} failed: ${error}`,
         );
       }
     }
     logger.warn(
-      `Gave up restoring biometric enrollment for session ${session.sessionId} after ` +
-        `${BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS} retries; device ${session.assignedDevice} ` +
+      `Gave up restoring biometric enrollment for session ${target.sessionId} after ` +
+        `${BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS} retries; device ${target.deviceId} ` +
         `may hold session-modified enrollment: ${lastError}`,
     );
   }

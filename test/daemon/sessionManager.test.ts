@@ -1513,6 +1513,47 @@ describe("SessionManager", () => {
     });
   });
 
+  describe("biometric enrollment restoration on rebind", () => {
+    test("quarantines the old simulator and retries when the rebind restore fails", async () => {
+      const timer = new FakeTimer();
+      const attempts: string[] = [];
+      const manager = new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        (device) => ({
+          restore: async () => {
+            attempts.push(device.deviceId);
+            if (attempts.length === 1) {
+              throw new Error("simctl rejected the restore");
+            }
+          },
+        }),
+      );
+      try {
+        await manager.createSession("ios-rebind-dirty", "sim-old", "ios");
+        manager.setBiometricEnrollment("ios-rebind-dirty", { initialEnrollment: "not_enrolled" });
+
+        await manager.rebindSession("ios-rebind-dirty", "sim-new", "ios");
+
+        // The rebind must not complete by silently abandoning the old simulator.
+        const cleanup = manager.getPendingDeviceCleanup("sim-old");
+        expect(cleanup).not.toBeNull();
+        expect(manager.getPendingDeviceCleanup("sim-new")).toBeNull();
+
+        await timer.advanceTimeAsync(250);
+        await cleanup;
+
+        // The retry targets the OLD simulator even though the session has
+        // already been reassigned to the new one.
+        expect(attempts).toEqual(["sim-old", "sim-old"]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+  });
+
   describe("statistics", () => {
     test("should return correct session statistics", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");

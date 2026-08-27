@@ -257,7 +257,7 @@ const displayCutoutInfoSchema = z.object({
   classification: z.enum(["none", "notch", "dynamic_island", "hole_punch", "unknown"]),
   // Platform metadata reports a list of bounds objects. The tuple arm preserves
   // forward compatibility should a producer compact those rectangles.
-  bounds: z.array(elementBoundsSchema).optional(),
+  bounds: z.array(elementBoundsSchema).nullish(),
 });
 
 const systemChromeSchema = z.object({

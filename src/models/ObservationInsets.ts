@@ -26,7 +26,7 @@ export interface ObservationDisplayCutout {
     top: number;
     right: number;
     bottom: number;
-  }>;
+  }> | null;
 }
 
 /**

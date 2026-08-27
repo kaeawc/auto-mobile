@@ -169,6 +169,17 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
           available: true,
           source: "android-window-metrics",
           units: "physical-pixels",
+          displayCutoutInfo: { classification: "none", bounds: null },
+        },
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      observeResultSchema.parse({
+        insets: {
+          available: true,
+          source: "android-window-metrics",
+          units: "physical-pixels",
           displayCutoutInfo: { classification: "notch", bounds: [{ left: 0, top: 0, right: 1 }] },
         },
       }),

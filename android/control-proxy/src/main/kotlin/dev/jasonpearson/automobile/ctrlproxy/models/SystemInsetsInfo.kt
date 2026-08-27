@@ -19,8 +19,8 @@ data class SystemBarsInsetsInfo(
 )
 
 /**
- * Physical display-cutout metadata, separate from the aggregate [SystemInsetsInfo]
- * edge insets used for safe-area calculations.
+ * Physical display-cutout metadata, separate from the aggregate [SystemInsetsInfo] edge insets used
+ * for safe-area calculations.
  *
  * Bounds are in the screen coordinate system and rotation captured with the enclosing
  * [ViewHierarchy]. Android only classifies shapes it can distinguish from their geometry.
@@ -40,9 +40,9 @@ data class DisplayCutoutInfo(
     /**
      * Classify Android's [android.view.DisplayCutout.boundingRects] conservatively.
      *
-     * A broad shallow obstruction along an edge is a notch; a small edge obstruction is a
-     * hole-punch. Anything else (including multiple cutouts) remains explicit unknown rather
-     * than being guessed from camera capabilities or hardware model data.
+     * A broad shallow obstruction along an edge is a notch; a small contained obstruction that does
+     * not touch an edge is a hole-punch. Anything else (including multiple cutouts) remains
+     * explicit unknown rather than being guessed from camera capabilities or hardware model data.
      */
     fun fromBoundingRects(
       screenWidth: Int,
@@ -63,7 +63,7 @@ data class DisplayCutoutInfo(
       if (rect.isBroadEdgeObstruction(screenWidth, screenHeight)) {
         return DisplayCutoutInfo(classification = "notch", bounds = bounds)
       }
-      if (rect.isSmallEdgeObstruction(screenWidth, screenHeight)) {
+      if (rect.isSmallInsetObstruction(screenWidth, screenHeight)) {
         return DisplayCutoutInfo(classification = "hole_punch", bounds = bounds)
       }
       return DisplayCutoutInfo(classification = "unknown", bounds = bounds)
@@ -77,15 +77,18 @@ data class DisplayCutoutInfo(
         left >= 0 &&
         top >= 0 &&
         right <= screenWidth &&
-        bottom <= screenHeight &&
-        touchesDisplayEdge(screenWidth, screenHeight)
+        bottom <= screenHeight
 
     private fun ElementBounds.isBroadEdgeObstruction(screenWidth: Int, screenHeight: Int): Boolean =
       ((top == 0 || bottom == screenHeight) && width * MIN_NOTCH_EDGE_FRACTION >= screenWidth) ||
         ((left == 0 || right == screenWidth) && height * MIN_NOTCH_EDGE_FRACTION >= screenHeight)
 
-    private fun ElementBounds.isSmallEdgeObstruction(screenWidth: Int, screenHeight: Int): Boolean =
-      width * MAX_HOLE_PUNCH_DIMENSION_FRACTION <= screenWidth &&
+    private fun ElementBounds.isSmallInsetObstruction(
+      screenWidth: Int,
+      screenHeight: Int,
+    ): Boolean =
+      !touchesDisplayEdge(screenWidth, screenHeight) &&
+        width * MAX_HOLE_PUNCH_DIMENSION_FRACTION <= screenWidth &&
         height * MAX_HOLE_PUNCH_DIMENSION_FRACTION <= screenHeight &&
         width.toLong() * height.toLong() * 100 <=
           screenWidth.toLong() * screenHeight.toLong() * MAX_HOLE_PUNCH_AREA_PERCENT

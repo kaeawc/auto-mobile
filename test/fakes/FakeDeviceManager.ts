@@ -14,8 +14,14 @@ export class FakeDeviceManager implements PlatformDeviceManager {
   failedPlatforms: Set<Platform> = new Set();
   // Individual discovery sources that should report as failed. iOS has two
   // (simctl and devicectl) and either can fail alone (#5683); a source listed
-  // here contributes no devices and is absent from `succeededSources`.
+  // here is absent from `succeededSources`.
   failedSources: Set<DiscoverySource> = new Set();
+  // Failed sources that still replay their last-good listing, which is what
+  // `DevicectlDeviceLister` does for up to 60s behind `complete: false`. A
+  // source listed here contributes its devices while staying absent from
+  // `succeededSources`, so a consumer that mistakes presence for a fresh
+  // observation is caught.
+  retainedSources: Set<DiscoverySource> = new Set();
 
   constructor(images: DeviceInfo[] = [], booted: BootedDevice[] = []) {
     this.deviceImages = images;
@@ -40,10 +46,18 @@ export class FakeDeviceManager implements PlatformDeviceManager {
   }
 
   async getBootedDevices(platform: SomePlatform): Promise<BootedDevice[]> {
-    if (platform === "either") {
-      return this.bootedDevices;
-    }
-    return this.bootedDevices.filter((device) => device.platform === platform);
+    // Honour the same failure configuration as `getBootedDevicesDetailed`, so a
+    // test cannot bypass a configured source failure through this path.
+    return this.bootedDevices.filter((device) => {
+      if (platform !== "either" && device.platform !== platform) {
+        return false;
+      }
+      const source = discoverySourceFor(device.platform, device.deviceId);
+      return (
+        (!this.failedPlatforms.has(device.platform) && !this.failedSources.has(source)) ||
+        this.retainedSources.has(source)
+      );
+    });
   }
 
   async getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery> {
@@ -58,10 +72,13 @@ export class FakeDeviceManager implements PlatformDeviceManager {
       const platformSources: DiscoverySource[] =
         p === "android" ? ["android"] : ["ios-simulator", "ios-physical"];
       for (const source of platformSources) {
-        if (sourceFailed(source, p)) {
+        const failed = sourceFailed(source, p);
+        if (failed && !this.retainedSources.has(source)) {
           continue;
         }
-        succeededSources.add(source);
+        if (!failed) {
+          succeededSources.add(source);
+        }
         devices.push(
           ...this.bootedDevices.filter(
             (device) => device.platform === p && discoverySourceFor(p, device.deviceId) === source,

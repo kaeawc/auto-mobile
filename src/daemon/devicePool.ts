@@ -177,9 +177,13 @@ type SessionAssignmentSnapshot = Pick<
  * One iOS liveness sweep, carrying completeness per source (#5683).
  *
  * `discoverySucceeded` is the simulator (`simctl`) half and keeps its original
- * meaning; `physicalDiscoverySucceeded` is the devicectl half. `bootedDeviceIds`
- * holds every device either source positively observed, so a device present
- * there is proven live no matter which source failed.
+ * meaning; `physicalDiscoverySucceeded` is the devicectl half.
+ *
+ * `bootedDeviceIds` holds only devices a source **freshly** observed this
+ * sweep. That distinction is load-bearing: `DevicectlDeviceLister` replays its
+ * last-good listing for up to 60s behind `complete: false`, so a returned
+ * device is not by itself proof of liveness — only a returned device whose own
+ * source completed is.
  */
 interface IosLivenessSnapshot {
   discoverySucceeded: boolean;
@@ -4135,13 +4139,19 @@ export class DevicePool {
     const discovery = await this.deviceManager.getBootedDevicesDetailed("ios");
     const sources = discovery.succeededSources;
     const platformSucceeded = discovery.succeededPlatforms.has("ios");
-    // Every returned device was positively observed by whichever source ran, so
-    // the id set is kept even for a partial sweep. The per-source flags below
-    // decide only what an *absence* from that set means.
+    // Presence only proves liveness when the source that listed the device
+    // completed. A failed devicectl sweep still returns its retained last-good
+    // iPhones (`DevicectlDeviceLister.retainedDevices`), and treating those as
+    // fresh would hand an unplugged device to a session instead of raising the
+    // intended unable-to-verify error.
     return {
       discoverySucceeded: sources ? sources.has("ios-simulator") : platformSucceeded,
       physicalDiscoverySucceeded: sources ? sources.has("ios-physical") : platformSucceeded,
-      bootedDeviceIds: new Set(discovery.devices.map((booted) => booted.deviceId)),
+      bootedDeviceIds: new Set(
+        discovery.devices
+          .filter((booted) => didSourceSucceedForDevice(discovery, "ios", booted.deviceId))
+          .map((booted) => booted.deviceId),
+      ),
     };
   }
 
@@ -4162,9 +4172,10 @@ export class DevicePool {
       return "unknown";
     }
 
-    // Direct observation outranks both flags: a confirmed physical iPhone stays
-    // assignable through a failed simctl sweep, and an idle simulator stays
-    // assignable through a failed devicectl sweep (#5683).
+    // A fresh observation by either source outranks the other's failure: a
+    // devicectl-confirmed iPhone stays assignable through a failed simctl
+    // sweep, and an idle simulator through a failed devicectl sweep (#5683).
+    // The snapshot has already dropped retained-but-unverified ids.
     if (iosLiveness.bootedDeviceIds.has(device.id)) {
       return "assignable";
     }

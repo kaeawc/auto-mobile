@@ -34,30 +34,63 @@ const iosDevice = (deviceId: string, name: string): BootedDevice => ({
 const PHYSICAL = iosDevice(PHYSICAL_UDID, "Jason's iPhone");
 const SIMULATOR = iosDevice(SIMULATOR_UDID, "iPhone 16 Pro");
 
+/**
+ * The surface `MultiPlatformDeviceManager.getBootedDevicesDetailed` actually
+ * calls on each injected client. Naming them keeps the fakes checked against a
+ * real signature: the constructor takes the concrete classes, so the cast at
+ * the boundary is unavoidable, but it now covers a declared shape rather than
+ * an anonymous literal, and any drift in these two methods fails to compile.
+ */
+interface SimctlBootedDeviceSurface {
+  isAvailable(): Promise<boolean>;
+  getBootedSimulatorsChecked(): Promise<BootedDevice[]>;
+}
+
+interface EmulatorBootedDeviceSurface {
+  getBootedDevicesChecked(): Promise<BootedDevice[]>;
+}
+
+class FakeBootedSimctl implements SimctlBootedDeviceSurface {
+  constructor(private readonly simulators: BootedDevice[] | Error) {}
+
+  async isAvailable(): Promise<boolean> {
+    return true;
+  }
+
+  async getBootedSimulatorsChecked(): Promise<BootedDevice[]> {
+    if (this.simulators instanceof Error) {
+      throw this.simulators;
+    }
+    return this.simulators;
+  }
+}
+
+class FakeBootedEmulator implements EmulatorBootedDeviceSurface {
+  async getBootedDevicesChecked(): Promise<BootedDevice[]> {
+    return [];
+  }
+}
+
 describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)", () => {
   const manager = (options: {
     simctlOk: boolean;
     devicectlOk: boolean;
+    /** Mirrors `DevicectlDeviceLister` replaying its last-good listing. */
+    retainedPhysical?: boolean;
   }): MultiPlatformDeviceManager =>
     new MultiPlatformDeviceManager(
       null,
-      {
-        isAvailable: async () => true,
-        getBootedSimulatorsChecked: async () => {
-          if (!options.simctlOk) {
-            throw new Error("simctl list devices failed");
-          }
-          return [SIMULATOR];
-        },
-      } as unknown as SimCtlClient,
-      { getBootedDevicesChecked: async () => [] } as unknown as AndroidEmulatorClient,
+      new FakeBootedSimctl(
+        options.simctlOk ? [SIMULATOR] : new Error("simctl list devices failed"),
+      ) as unknown as SimCtlClient,
+      new FakeBootedEmulator() as unknown as AndroidEmulatorClient,
       undefined,
       undefined,
       {
         listConnectedDevices: async () =>
           options.devicectlOk
             ? { devices: [PHYSICAL], complete: true }
-            : { devices: [], complete: false },
+            : { devices: options.retainedPhysical ? [PHYSICAL] : [], complete: false },
       },
     );
 
@@ -95,6 +128,21 @@ describe("MultiPlatformDeviceManager reports iOS completeness per source (#5683)
     expect(discovery.succeededSources!.has("ios-physical")).toBe(false);
     expect(discovery.succeededPlatforms.has("ios")).toBe(true);
     expect(discovery.devices.map((device) => device.deviceId)).toEqual([SIMULATOR_UDID]);
+  });
+
+  test("a retained physical listing is reported without marking its source complete", async () => {
+    const discovery = await manager({
+      simctlOk: true,
+      devicectlOk: false,
+      retainedPhysical: true,
+    }).getBootedDevicesDetailed("ios");
+
+    // Retention exists so a devicectl blip cannot prune a connected iPhone, so
+    // the device is still reported -- but its source did not complete.
+    expect(discovery.devices.map((device) => device.deviceId).sort()).toEqual(
+      [PHYSICAL_UDID, SIMULATOR_UDID].sort(),
+    );
+    expect(discovery.succeededSources!.has("ios-physical")).toBe(false);
   });
 
   test("both sources fail: no source is complete", async () => {
@@ -176,6 +224,22 @@ describe("DevicePool idle assignability is decided per source (#5683)", () => {
     await expect(
       devicePool.bindOrReuseDeviceSession("session-d", PHYSICAL_UDID, "ios"),
     ).rejects.toThrow(/Unable to verify iOS device/);
+    expect(devicePool.getDevice(PHYSICAL_UDID)).toBeDefined();
+  });
+
+  test("a retained-but-unverified iPhone is not assignable when both sources fail", async () => {
+    await pool([PHYSICAL, SIMULATOR]);
+    // devicectl failed but replays its last-good listing, and simctl failed
+    // too. Nothing observed the iPhone this sweep, so presence in the returned
+    // list must not be read as proof it is still plugged in.
+    deviceManager.failedSources.add("ios-physical");
+    deviceManager.retainedSources.add("ios-physical");
+    deviceManager.failedSources.add("ios-simulator");
+
+    await expect(
+      devicePool.bindOrReuseDeviceSession("session-f", PHYSICAL_UDID, "ios"),
+    ).rejects.toThrow(/Unable to verify iOS device/);
+    // Unverifiable, never proven gone: retained, not pruned.
     expect(devicePool.getDevice(PHYSICAL_UDID)).toBeDefined();
   });
 

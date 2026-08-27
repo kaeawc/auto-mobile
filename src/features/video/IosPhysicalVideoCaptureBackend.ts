@@ -143,6 +143,10 @@ interface CaptureState {
   helperExit?: { code: number | null; signal: NodeJS.Signals | null };
   /** First error emitted by the helper process (spawn ENOENT/EACCES, etc.). */
   helperError?: Error;
+  /** True once we asked the helper to stop, so its exit is expected. */
+  stopRequested: boolean;
+  /** Whether the observed exit happened after we asked the helper to stop. */
+  helperExitWasRequested: boolean;
 }
 
 /**
@@ -210,6 +214,8 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       framesPacedOut: 0,
       framesGapFilled: 0,
       framesGapTruncated: 0,
+      stopRequested: false,
+      helperExitWasRequested: false,
       helperStderr: [],
     };
     const helper = this.createHelper({
@@ -225,6 +231,9 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     });
     helper.on("exit", (info) => {
       state.helperExit = info;
+      // Classify at the moment of exit: afterwards, `stopRequested` cannot tell
+      // an exit we caused from one that raced our stop.
+      state.helperExitWasRequested = state.stopRequested;
     });
     helper.on("error", (error) => {
       // A spawn failure (ENOENT/EACCES on the resolved binary) arrives here
@@ -237,7 +246,15 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     });
     helper.on("frame", (frame) => this.onFrame(frame, state, config));
 
-    await helper.start();
+    try {
+      await helper.start();
+    } catch (error) {
+      // The frame listener is already wired, so a helper that emitted a frame
+      // before rejecting may have spawned ffmpeg. No handle is returned here, so
+      // nothing else could ever stop it.
+      await this.abandonStartedCapture(helper, state);
+      throw error;
+    }
 
     if (abortSignal?.aborted) {
       // Shutdown landed while the helper was spawning: tear it down here, or the
@@ -266,6 +283,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     }
     const { helper, state, config } = backendHandle;
 
+    state.stopRequested = true;
     await helper.stop();
 
     const encoder = state.encoder;
@@ -326,24 +344,26 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       return;
     }
 
-    const copies = this.admitForPacing(frame, state, config.fps);
-    if (copies === 0) {
-      return;
-    }
-
     const encoder = state.encoder;
     if (!encoder?.stdin || encoder.stdin.writableEnded) {
       state.framesDropped += 1;
       return;
     }
+    // Congestion is checked BEFORE admission on purpose. Frames arrive from an
+    // event emitter, so there is no upstream backpressure to apply and buffering
+    // would grow without bound — but consuming the pacing slot for a frame that
+    // never reaches stdin would silently shorten the timeline. Dropping before
+    // admission leaves the slot owed, so the next frame pads it as a gap.
     if (encoder.stdin.writableNeedDrain) {
-      // Frames arrive from an event emitter, so there is no upstream backpressure
-      // to apply: buffering them while the encoder is behind would grow without
-      // bound over a long capture. Dropping the newest frame is what the helper's
-      // own bounded handoff does, and keeps latency from compounding.
       state.framesDropped += 1;
       return;
     }
+
+    const copies = this.admitForPacing(frame, state, config.fps);
+    if (copies === 0) {
+      return;
+    }
+
     this.writeFrameCopies(frame, state, encoder.stdin, copies);
   }
 
@@ -502,25 +522,37 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
   }
 
   /**
-   * A helper that exited nonzero on its own (device unplugged, AVCaptureSession
-   * failure) truncates the capture. ffmpeg still finalizes the frames it did
-   * receive and exits 0, so without this check a partial recording would be
-   * archived as complete. Checked after the encoder is finalized, so the file on
-   * disk is at least playable for diagnosis.
+   * A helper that terminated on its own truncates the capture: the device was
+   * unplugged, the capture session died, or the process crashed. ffmpeg still
+   * finalizes the frames it did receive and exits 0, so without this check a
+   * partial recording would be archived as complete. Checked after the encoder
+   * is finalized, so the file on disk stays playable for diagnosis.
    *
-   * Our own `stop()` sends SIGTERM, which surfaces as `signal`, not a nonzero
-   * exit code — only a code the helper chose itself counts as a failure.
+   * The discriminator is whether we had asked the helper to stop yet — not the
+   * exit code. Our own `stop()` produces `{ code: null, signal: "SIGTERM" }`,
+   * which is indistinguishable by shape from an external `SIGABRT` crash.
    */
   private assertHelperSucceeded(state: CaptureState, outputPath: string): void {
+    const stderr = state.helperStderr.join("").trim();
+    const stderrSuffix = stderr ? `\nscreen-capture-helper: ${stderr}` : "";
+
+    if (state.helperError) {
+      throw new ActionableError(
+        `The iOS capture helper failed during the recording, so ${outputPath} is truncated: ` +
+          `${errorMessage(state.helperError)}.${stderrSuffix}`,
+      );
+    }
+
     const exit = state.helperExit;
-    if (!exit || exit.code === null || exit.code === 0) {
+    if (!exit || state.helperExitWasRequested) {
       return;
     }
-    const stderr = state.helperStderr.join("").trim();
+    const cause =
+      exit.signal !== null ? `signal ${exit.signal}` : `exit code ${exit.code ?? "null"}`;
     throw new ActionableError(
-      `The iOS capture helper exited with code ${exit.code} during the recording, so ${outputPath} ` +
-        "is truncated. The device was most likely unplugged or lost its capture session." +
-        (stderr ? `\nscreen-capture-helper: ${stderr}` : ""),
+      `The iOS capture helper terminated with ${cause} before the recording was stopped, so ` +
+        `${outputPath} is truncated. The device was most likely unplugged or lost its capture ` +
+        `session.${stderrSuffix}`,
     );
   }
 
@@ -529,6 +561,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     helper: PhysicalIosCaptureHelper,
     state: CaptureState,
   ): Promise<void> {
+    state.stopRequested = true;
     try {
       await helper.stop();
     } catch (error) {

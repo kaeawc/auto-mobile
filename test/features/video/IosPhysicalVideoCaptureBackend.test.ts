@@ -108,9 +108,21 @@ class FakeCaptureHelper extends EventEmitter implements PhysicalIosCaptureHelper
     this.emit("started");
   }
 
+  exited = false;
+
+  /** The real helper SIGTERMs the process and awaits its exit. */
   async stop(): Promise<unknown> {
     this.stopped += 1;
-    return { code: 0, signal: null };
+    if (!this.exited) {
+      this.exitWith({ code: null, signal: "SIGTERM" });
+    }
+    return { code: null, signal: "SIGTERM" };
+  }
+
+  /** Terminate the helper process, as the OS or a crash would. */
+  exitWith(info: { code: number | null; signal: NodeJS.Signals | null }): void {
+    this.exited = true;
+    this.emit("exit", info);
   }
 
   /**
@@ -396,6 +408,40 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     await harness.backend.stop(handle);
   });
 
+  // A frame dropped for congestion must not consume its pacing slot, or the
+  // timeline silently compresses by exactly the congested interval.
+  test("owes a skipped slot when a frame is dropped under backpressure", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
+    harness.helper.emitFrame(2, 2, 8, 0x11, 0);
+
+    const encoder = harness.ffmpeg.processes[0];
+    encoder.stdin.pause();
+    encoder.stdin.cork();
+    while (!encoder.stdin.writableNeedDrain) {
+      encoder.stdin.write(Buffer.alloc(64 * 1024));
+    }
+    const congestedBytes = encoder.stdin.writableLength;
+
+    // Two due frames arrive while ffmpeg is behind and are dropped.
+    harness.helper.emitFrame(2, 2, 8, 0x22, 100);
+    harness.helper.emitFrame(2, 2, 8, 0x33, 200);
+    expect(encoder.stdin.writableLength).toBe(congestedBytes);
+
+    encoder.stdin.uncork();
+    encoder.stdin.resume();
+    // Draining is asynchronous; let the stream flush before measuring.
+    await new Promise((resolve) => setImmediate(resolve));
+    const drainedBytes = encoder.written.reduce((n, c) => n + c.length, 0);
+
+    // The next frame pads the two slots the congestion owed, then its own.
+    harness.helper.emitFrame(2, 2, 8, 0x44, 300);
+    const frameBytes = 2 * 2 * 4;
+    const writtenAfter = encoder.written.reduce((n, c) => n + c.length, 0) - drainedBytes;
+    expect(writtenAfter / frameBytes).toBe(3);
+    await harness.backend.stop(handle);
+  });
+
   test("honors resolution and maxDuration like the simulator path", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(
@@ -479,6 +525,30 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
       harness.backend.start(makeConfig({ abortSignal: controller.signal })),
     ).rejects.toThrow("cancelled during shutdown");
     expect(harness.helper.started).toBe(0);
+  });
+
+  test("start cleans up an encoder spawned before helper.start() rejected", async function () {
+    const ffmpeg = new FakeFfmpegClient();
+    const helper = new FakeCaptureHelper();
+    // A helper that emits a frame (spawning ffmpeg) and then fails to start.
+    helper.start = () => {
+      helper.started += 1;
+      helper.emitFrame(4, 2);
+      throw new Error("helper refused to start");
+    };
+    const backend = new IosPhysicalVideoCaptureBackend({
+      ffmpegClient: ffmpeg,
+      helperProvider: { ensure: async () => "/helpers/screen-capture-helper" },
+      deviceLister: new FakeDeviceLister([captureDevice(PHYSICAL_UDID)]),
+      createHelper: () => helper,
+      platformProvider: () => "darwin",
+      fileSize: async () => 1,
+    });
+
+    await expect(backend.start(makeConfig())).rejects.toThrow("helper refused to start");
+
+    expect(helper.stopped).toBe(1);
+    expect(ffmpeg.processes[0].killSignals).toEqual(["SIGKILL"]);
   });
 
   test("start stops the helper when shutdown lands while it is spawning", async function () {
@@ -593,21 +663,49 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     harness.helper.emitFrame(4, 2);
     // Device unplugged: the helper exits on its own while ffmpeg finalizes fine.
     harness.helper.emit("stderr", "error: iOS device capture failed");
-    harness.helper.emit("exit", { code: 3, signal: null });
+    harness.helper.exitWith({ code: 3, signal: null });
 
-    await expect(harness.backend.stop(handle)).rejects.toThrow("capture helper exited with code 3");
+    await expect(harness.backend.stop(handle)).rejects.toThrow(
+      "terminated with exit code 3 before the recording was stopped",
+    );
     // The partial file is still finalized so it can be inspected.
     expect(harness.ffmpeg.processes[0].stdin.writableEnded).toBe(true);
   });
 
-  test("a SIGTERM exit from our own stop is not treated as a helper failure", async function () {
+  // Our own stop() SIGTERMs the helper, so a signal exit is only a failure when
+  // it happened before we asked — the exit code alone cannot tell them apart.
+  test("a SIGTERM exit caused by our own stop is not treated as a helper failure", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig());
     harness.helper.emitFrame(4, 2);
-    harness.helper.emit("exit", { code: null, signal: "SIGTERM" });
 
     const result = await harness.backend.stop(handle);
+
+    expect(harness.helper.exited).toBe(true);
     expect(result.codec).toBe("h264");
+  });
+
+  test("stop rejects when the helper was killed by a signal before shutdown", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.emitFrame(4, 2);
+    // An external kill / crash looks identical in shape to our own SIGTERM.
+    harness.helper.exitWith({ code: null, signal: "SIGABRT" });
+
+    await expect(harness.backend.stop(handle)).rejects.toThrow(
+      "terminated with signal SIGABRT before the recording was stopped",
+    );
+  });
+
+  test("stop rejects when the helper errored after frames had already arrived", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.emitFrame(4, 2);
+    harness.helper.emit("error", new Error("capture session lost"));
+
+    await expect(harness.backend.stop(handle)).rejects.toThrow(
+      "failed during the recording, so /tmp/archive/rec-1/video.mp4 is truncated: capture session lost",
+    );
   });
 
   test("stop rejects a recording whose encoder exited nonzero", async function () {

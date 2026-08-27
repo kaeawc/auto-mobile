@@ -205,7 +205,7 @@ non-null contexts alongside `captureSequence`, then echoes that exact value on
 request. The token is opaque, device-specific, and must never be synthesized or
 compared across reconnects.
 
-The default `0.0.64` CtrlProxy artifacts predate this protocol. A client must
+The default `0.0.65` CtrlProxy artifacts predate this protocol. A client must
 treat those artifacts as legacy and remain in inspector mode until its runner
 publishes `frameContext`.
 

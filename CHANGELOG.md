@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.0.65] - 2026-08-27
+
+### Fixed
+
+- bug(tap): prefer an actionable text match over an identically named modal title ([#5638](https://github.com/kaeawc/auto-mobile/issues/5638)) (ios, a11y)
+
+### Other
+
+- fix(ios): give simulator UserDefaults commands a cold-start-safe timeout ([#5754](https://github.com/kaeawc/auto-mobile/issues/5754))
+- chore(ci): oxfmt format:check is red on main — release-automation drift in CHANGELOG.md and .claude-plugin/*.json ([#5743](https://github.com/kaeawc/auto-mobile/issues/5743))
+- chore(release): validate auto-mobile-sdk multi-variant bundle against Maven Central before re-enabling PUBLISH_TO_MAVEN ([#5735](https://github.com/kaeawc/auto-mobile/issues/5735)) (android, database)
+- fix(devices): physical iOS device rename evicts its pooled incarnation and active session ([#5690](https://github.com/kaeawc/auto-mobile/issues/5690))
+- fix(ios): case-insensitive occurrence assignment for inline semantic links (Android parity) ([#5595](https://github.com/kaeawc/auto-mobile/issues/5595)) (ios, a11y)
+- release: make SDK and CtrlProxy publication transactional ([#5230](https://github.com/kaeawc/auto-mobile/issues/5230)) (android, release engineering)
+
 ## [v0.0.64] - 2026-08-25
 
 ### Added

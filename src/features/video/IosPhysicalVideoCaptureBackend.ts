@@ -2,6 +2,7 @@ import { ActionableError, type BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { getFileSize, waitForExit, type ProcessTracker } from "../../utils/ChildProcessTracker";
+import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
   DefaultHostCommandExecutor,
   type HostCommandExecutor,
@@ -56,6 +57,15 @@ const MAX_GAP_FILL_SECONDS = 2;
  * permanent congestion — dropping nearly every frame of a real recording.
  */
 const MAX_BUFFERED_FRAMES = 2;
+
+/**
+ * Absolute ceiling on repeat writes for one gap, independent of fps. The 2-second
+ * budget alone scales with the requested rate, and `parseVideoRecordingConfig()`
+ * puts no upper bound on fps — at an absurd rate two ordinary frames could enqueue
+ * tens of thousands of multi-megabyte duplicate encodes, starving live frames.
+ * 120 is 2 seconds at 60fps, past any rate a device recording sensibly uses.
+ */
+const MAX_GAP_FILL_FRAMES = 120;
 
 /** Stderr lines retained from the helper for failure diagnostics. */
 const HELPER_STDERR_TAIL = 20;
@@ -118,6 +128,8 @@ export interface IosPhysicalVideoCaptureBackendOptions {
   encoderFinalizeTimeoutMs?: number;
   /** Clock seam for trailing-stall padding; capture timestamps use another timebase. */
   now?: () => number;
+  /** Timer seam for the bounded drain wait at stop. */
+  timer?: Timer;
   /** Env seam so the developer override can be exercised without touching process.env. */
   env?: NodeJS.ProcessEnv;
   /** Existence seam for the overridden helper path. */
@@ -192,6 +204,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
   private readonly fileSize: (filePath: string) => Promise<number | undefined>;
   private readonly encoderFinalizeTimeoutMs: number;
   private readonly now: () => number;
+  private readonly timer: Timer;
   private readonly env: NodeJS.ProcessEnv;
   private readonly helperPathExists?: (candidate: string) => boolean;
 
@@ -206,6 +219,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     this.encoderFinalizeTimeoutMs =
       options.encoderFinalizeTimeoutMs ?? IOS_PHYSICAL_ENCODER_FINALIZE_TIMEOUT_MS;
     this.now = options.now ?? Date.now;
+    this.timer = options.timer ?? defaultTimer;
     this.env = options.env ?? process.env;
     this.helperPathExists = options.helperPathExists;
   }
@@ -318,7 +332,10 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
 
     this.padTrailingStall(state, config.fps);
     if (encoder.stdin) {
-      this.flushPendingWrites(state, encoder.stdin);
+      // Only MAX_BUFFERED_FRAMES fit synchronously, so with real frame sizes most
+      // of the padding is still queued here. Let the encoder drain it before
+      // closing stdin, or the recording ends short by exactly that padding.
+      await this.drainPendingWrites(state, encoder.stdin);
     }
     this.discardPendingWrites(state);
 
@@ -446,6 +463,49 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
   }
 
   /**
+   * Wait for the encoder to consume everything still queued, bounded by the
+   * finalization timeout so a wedged ffmpeg cannot hang the stop.
+   */
+  private async drainPendingWrites(
+    state: CaptureState,
+    stdin: NonNullable<FfmpegProcess["stdin"]>,
+  ): Promise<void> {
+    this.flushPendingWrites(state, stdin);
+    if (state.pendingWrites.length === 0 || stdin.writableEnded) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = (): void => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        this.timer.clearTimeout(timeout);
+        stdin.off("drain", onDrain);
+        stdin.off("close", finish);
+        resolve();
+      };
+      const onDrain = (): void => {
+        // The encoder-start listener flushes first; this only observes the result.
+        if (state.pendingWrites.length === 0) {
+          finish();
+        }
+      };
+      const timeout = this.timer.setTimeout(() => {
+        logger.warn(
+          "[IosPhysicalVideo] encoder did not consume the queued padding before the finalize timeout; " +
+            "the recording will be short by the remainder.",
+        );
+        finish();
+      }, this.encoderFinalizeTimeoutMs);
+      stdin.on("drain", onDrain);
+      stdin.once("close", finish);
+    });
+  }
+
+  /**
    * Give up on writes still queued when the recording ends: they would land
    * after the encoder's input closed. Counted so the shortfall is reported.
    */
@@ -501,7 +561,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     // recording plays ~1.5x fast and ends a third short.
     const elapsedSlots = Math.floor((timestampMs - state.nextFrameDueMs) / intervalMs) + 1;
     const missedSlots = elapsedSlots - 1;
-    const maxGapFill = Math.ceil(fps * MAX_GAP_FILL_SECONDS);
+    const maxGapFill = gapFillLimit(fps);
 
     // Slots that elapsed with nothing to encode: a helper stall, or a device
     // that idles while the screen is static. `-framerate` gives every written
@@ -543,7 +603,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     if (elapsedSlots <= 0) {
       return;
     }
-    const maxGapFill = Math.ceil(fps * MAX_GAP_FILL_SECONDS);
+    const maxGapFill = gapFillLimit(fps);
     const pads = Math.min(elapsedSlots, maxGapFill);
     if (elapsedSlots > pads) {
       state.framesGapTruncated += elapsedSlots - pads;
@@ -824,6 +884,11 @@ function throwIfCaptureStartAborted(abortSignal: AbortSignal | undefined): void 
   if (abortSignal?.aborted) {
     throw new ActionableError("Physical iOS recording start was cancelled during shutdown.");
   }
+}
+
+/** Repeat writes allowed for one gap: 2 seconds of frames, hard-capped. */
+function gapFillLimit(fps: number): number {
+  return Math.min(Math.ceil(fps * MAX_GAP_FILL_SECONDS), MAX_GAP_FILL_FRAMES);
 }
 
 /** Largest even value <= `value`, floored at 2 so a scale filter stays valid. */

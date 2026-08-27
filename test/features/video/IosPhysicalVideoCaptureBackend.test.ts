@@ -292,6 +292,36 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     expect(written / frameBytes).toBe(6);
   });
 
+  // Only the 2-frame budget fits synchronously, so with real frame sizes most of
+  // the trailing padding is still queued when stop() runs. Discarding it there
+  // would shorten the recording by exactly that padding.
+  test("drains queued trailing padding before closing the encoder", async function () {
+    let clockMs = 10_000;
+    const harness = makeHarness({ now: () => clockMs });
+    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
+
+    // 64KB frames: the 2-frame budget cannot absorb the padding in one flush.
+    harness.helper.emitFrame(128, 128, 128 * 4, 0x11, 0);
+    const encoder = harness.ffmpeg.processes[0];
+    // Stop consuming so queued writes genuinely accumulate, as a busy encoder does.
+    encoder.stdin.pause();
+    clockMs += 500;
+
+    const stopPromise = harness.backend.stop(handle);
+    await new Promise((resolve) => setImmediate(resolve));
+    const frameBytes = 128 * 128 * 4;
+    // Only the budget made it in synchronously; the rest is still owed.
+    expect(encoder.written.reduce((n, c) => n + c.length, 0) / frameBytes).toBeLessThan(6);
+
+    encoder.stdin.resume();
+    const result = await stopPromise;
+
+    const written = encoder.written.reduce((n, c) => n + c.length, 0);
+    // 1 frame + five 100ms slots, none lost to the buffer budget.
+    expect(written / frameBytes).toBe(6);
+    expect(result.codec).toBe("h264");
+  });
+
   test("caps trailing padding for a very long final stall", async function () {
     let clockMs = 10_000;
     const harness = makeHarness({ now: () => clockMs });
@@ -548,6 +578,23 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     // Everything owed reaches the encoder once it drains: 1 + 4 pads + 1.
     const written = encoder.written.reduce((n, c) => n + c.length, 0);
     expect(written / frameBytes).toBe(6);
+    await harness.backend.stop(handle);
+  });
+
+  // fps has no upper bound in the recording config, and a 2-second fill budget
+  // scales with it: at an absurd rate two ordinary frames would enqueue tens of
+  // thousands of multi-megabyte duplicate encodes.
+  test("caps gap-fill work in absolute frames, not just seconds of fps", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig({ fps: 1_000_000 }));
+
+    harness.helper.emitFrame(2, 2, 8, 0x11, 0);
+    harness.helper.emitFrame(2, 2, 8, 0x22, 100);
+
+    const frameBytes = 2 * 2 * 4;
+    const written = harness.ffmpeg.processes[0].written.reduce((n, c) => n + c.length, 0);
+    // 1 initial + the 120-frame absolute cap + the frame itself.
+    expect(written / frameBytes).toBe(122);
     await harness.backend.stop(handle);
   });
 

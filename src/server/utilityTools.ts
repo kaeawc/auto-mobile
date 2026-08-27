@@ -21,7 +21,10 @@ import {
 } from "./toolSchemaHelpers";
 import { DaemonState } from "../daemon/daemonState";
 import type { SessionManager } from "../daemon/sessionManager";
-import { runSessionBiometricMutation } from "./sessionBiometricEnrollment";
+import {
+  applyStateAfterBiometricCaptureFailure,
+  runSessionBiometricMutation,
+} from "./sessionBiometricEnrollment";
 
 // Schema definitions
 export const setActiveDeviceSchema = addSessionUuidToSchema(
@@ -121,6 +124,7 @@ export const getDeviceStateSchema = addDeviceTargetingToSchema(
   z.object({
     include: z
       .array(z.enum(["doNotDisturb", "biometrics"]))
+      .min(1)
       .optional()
       .describe("State fields to read; supports doNotDisturb and biometrics"),
   }),
@@ -382,9 +386,14 @@ export function registerUtilityTools() {
     const deviceState = new DeviceState(device);
     const capture = await captureBiometricEnrollment(device, args, deviceState);
     if (capture.failure) {
+      const result = await applyStateAfterBiometricCaptureFailure(
+        deviceState,
+        { doNotDisturb: args.doNotDisturb, biometrics: args.biometrics },
+        capture.failure,
+      );
       return createJSONToolResponse({
-        message: capture.failure.error ?? "Failed to read biometric enrollment state",
-        ...capture.failure,
+        message: result.error ?? "Failed to read biometric enrollment state",
+        ...result,
       });
     }
     const result = await runSessionBiometricMutation(

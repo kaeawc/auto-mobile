@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
-import { DeviceState } from "../../../src/features/utility/DeviceState";
+import {
+  DeviceState,
+  EMPTY_STATE_SELECTION_ERROR,
+} from "../../../src/features/utility/DeviceState";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -632,5 +635,24 @@ describe("DeviceState", () => {
     expect(result.error).toContain("Focus Filter API");
     // Early return: no simctl/notifyutil command was ever issued.
     expect(simctl.getMethodCalls("executeCommand")).toEqual([]);
+  });
+
+  test("rejects an empty state selection instead of reporting a no-op success", async () => {
+    const simulator: BootedDevice = {
+      name: "iPhone 16 Pro",
+      platform: "ios",
+      deviceId: "7B3A3792-DB53-4654-BA94-27A1D305C3B7",
+      iosVersion: "18.6",
+    };
+    const simctl = new FakeSimCtlClient();
+    const deviceState = new DeviceState(simulator, { simctl });
+
+    const result = await deviceState.getState([]);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(EMPTY_STATE_SELECTION_ERROR);
+    expect(result.doNotDisturb).toBeUndefined();
+    expect(result.biometrics).toBeUndefined();
+    expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
   });
 });

@@ -253,6 +253,8 @@ function modeForInput(input: SetDeviceStateInput["doNotDisturb"]): DoNotDisturbM
   return input?.enabled === false ? "off" : "none";
 }
 
+export const EMPTY_STATE_SELECTION_ERROR = "At least one device state field must be included";
+
 function doNotDisturbInputError(input: SetDeviceStateInput["doNotDisturb"]): string | undefined {
   if (!input || input.enabled === undefined || input.mode === undefined) {
     return undefined;
@@ -282,6 +284,15 @@ export class DeviceState {
   async getState(
     include: ("doNotDisturb" | "biometrics")[] = ["doNotDisturb"],
   ): Promise<DeviceStateResult> {
+    // An empty selection would otherwise read nothing and report success.
+    if (include.length === 0) {
+      return {
+        success: false,
+        deviceId: this.device.deviceId,
+        platform: this.device.platform,
+        error: EMPTY_STATE_SELECTION_ERROR,
+      };
+    }
     const doNotDisturb = include.includes("doNotDisturb")
       ? this.device.platform === "android"
         ? await this.getAndroidDoNotDisturb()

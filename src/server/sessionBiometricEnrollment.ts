@@ -1,5 +1,41 @@
-import type { BiometricEnrollment } from "../features/utility/DeviceState";
+import type {
+  BiometricEnrollment,
+  DeviceStateResult,
+  SetDeviceStateInput,
+} from "../features/utility/DeviceState";
 import type { SessionManager } from "../daemon/sessionManager";
+
+/** Narrow seam over DeviceState so the merge below is testable without a device. */
+export interface DeviceStateSetter {
+  setState(input: SetDeviceStateInput): Promise<DeviceStateResult>;
+}
+
+/**
+ * A failed biometric pre-read must not swallow the other fields of a combined
+ * request. Session-scoped `setDeviceState` reads enrollment before mutating so
+ * release can restore it; when that read fails there is still nothing stopping
+ * the independent Do Not Disturb update, which the sessionless path applies.
+ * Apply it here too and report the biometric failure alongside it.
+ */
+export async function applyStateAfterBiometricCaptureFailure(
+  deviceState: DeviceStateSetter,
+  input: SetDeviceStateInput,
+  failure: DeviceStateResult,
+): Promise<DeviceStateResult> {
+  if (!input.doNotDisturb) {
+    return failure;
+  }
+  const applied = await deviceState.setState({ doNotDisturb: input.doNotDisturb });
+  const errors = [failure.error, applied.error].filter(
+    (error): error is string => error !== undefined,
+  );
+  return {
+    ...applied,
+    success: false,
+    ...(failure.biometrics ? { biometrics: failure.biometrics } : {}),
+    ...(errors.length > 0 ? { error: errors.join("; ") } : {}),
+  };
+}
 
 /**
  * Publish a newly captured enrollment state before mutating the simulator, then

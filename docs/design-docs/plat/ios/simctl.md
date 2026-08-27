@@ -111,6 +111,18 @@ from `automobile:devices/images`. It reports the versioned capability identifier
 and `biometrics.error`. Enrollment is supported; match/fail require an enrolled state;
 cancel/error are explicitly unsupported on iOS Simulator.
 
+The catalog lists every CoreSimulator device type and runtime, including watchOS
+and tvOS entries that have no BiometricKit at all, so the report first validates
+the selected pair and returns it as `selection: { valid, reason? }`. Only an
+iPhone or iPad device type on an iOS runtime is valid; anything else — a mismatched
+pair, a non-iOS runtime, or an unrecognized identifier — reports every biometric
+capability as `unsupported` with the reason, rather than advertising a contract the
+simulator cannot honor.
+
+Restoration on release is verified, and a failed restore is retried while the
+device stays quarantined, so a simulator never returns to the idle pool holding
+session-modified enrollment.
+
 ### How it works
 
 1. **Set enrollment** — `setDeviceState` accepts

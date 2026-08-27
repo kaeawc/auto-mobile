@@ -1438,6 +1438,79 @@ describe("SessionManager", () => {
         manager.stopCleanupTimer();
       }
     });
+
+    test("keeps the device quarantined and retries when the restore fails", async () => {
+      const timer = new FakeTimer();
+      let attempts = 0;
+      const manager = new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        () => ({
+          restore: async () => {
+            attempts += 1;
+            if (attempts === 1) {
+              throw new Error("simctl rejected the restore");
+            }
+          },
+        }),
+      );
+      try {
+        await manager.createSession("ios-restore-retry", "sim-dirty", "ios");
+        manager.setBiometricEnrollment("ios-restore-retry", { initialEnrollment: "not_enrolled" });
+
+        await manager.releaseSession("ios-restore-retry");
+
+        // The failed first attempt must leave post-release work outstanding, so
+        // DevicePool defers the device instead of idling it dirty.
+        const cleanup = manager.getPendingDeviceCleanup("sim-dirty");
+        expect(cleanup).not.toBeNull();
+        expect(attempts).toBe(1);
+
+        await timer.advanceTimeAsync(250);
+        await cleanup;
+        expect(attempts).toBe(2);
+        expect(manager.getPendingDeviceCleanup("sim-dirty")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("stops retrying the restore after the bounded attempts are exhausted", async () => {
+      const timer = new FakeTimer();
+      let attempts = 0;
+      const manager = new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        () => ({
+          restore: async () => {
+            attempts += 1;
+            throw new Error("simctl rejected the restore");
+          },
+        }),
+      );
+      try {
+        await manager.createSession("ios-restore-exhausted", "sim-dirty-2", "ios");
+        manager.setBiometricEnrollment("ios-restore-exhausted", {
+          initialEnrollment: "not_enrolled",
+        });
+
+        await manager.releaseSession("ios-restore-exhausted");
+        const cleanup = manager.getPendingDeviceCleanup("sim-dirty-2");
+        await timer.advanceTimeAsync(250);
+        await timer.advanceTimeAsync(250);
+        await cleanup;
+
+        // One initial attempt plus the bounded retries, then the device is freed
+        // rather than quarantined forever.
+        expect(attempts).toBe(3);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
   });
 
   describe("statistics", () => {

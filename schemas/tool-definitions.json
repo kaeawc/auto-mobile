@@ -1581,6 +1581,7 @@
       "properties": {
         "include": {
           "description": "State fields to read; supports doNotDisturb and biometrics",
+          "minItems": 1,
           "type": "array",
           "items": {
             "type": "string",

@@ -175,6 +175,14 @@ export interface RebindSessionOptions {
 
 const KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS = 1_000;
 const BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS = 1_000;
+/**
+ * A failed restore leaves the simulator holding session-modified enrollment, so
+ * the device must not return to the idle pool on the strength of one attempt.
+ * Retries run inside the pending-cleanup promise, which keeps the device
+ * quarantined until they settle.
+ */
+const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS = 2;
+const BIOMETRIC_ENROLLMENT_RESTORE_RETRY_DELAY_MS = 250;
 const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
 const EXPIRY_RELEASE_REASONS = new Set([
   "lazy-expiry",
@@ -984,7 +992,7 @@ export class SessionManager {
         setups.length > 0 ? (await this.waitForSessionSetup(sessionId, setups)).pending : null;
       const pendingRestoration = (await this.restoreKeepScreenAwakeBestEffort(session)).pending;
       const pendingBiometricRestoration = session.cacheData.biometricEnrollment
-        ? await this.getPendingBiometricRestoration(session, pendingSetups)
+        ? (await this.getPendingBiometricRestoration(session, pendingSetups)).pending
         : null;
       const pendingCleanup = [
         pendingSetups,
@@ -1201,11 +1209,15 @@ export class SessionManager {
         logger.warn(
           `Failed to restore biometric enrollment for session ${session.sessionId}: ${result.error}`,
         );
-      } else if (result.outcome === "timed-out") {
+        // Quarantine the device until the retries below settle; a prompt
+        // rejection otherwise returns a dirty simulator straight to the pool.
+        return { pending: this.retryBiometricEnrollmentRestore(session, result.error) };
+      }
+      if (result.outcome === "timed-out") {
         logger.warn(
           `Timed out after ${BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS}ms restoring biometric enrollment for session ${session.sessionId}`,
         );
-        return { pending: restoration.then(() => undefined) };
+        return { pending: this.settleBiometricEnrollmentRestore(session, restoration) };
       }
       return { pending: null };
     } finally {
@@ -1213,6 +1225,49 @@ export class SessionManager {
         this.timer.clearTimeout(timeoutHandle);
       }
     }
+  }
+
+  /** A slow restore can still fail; retry before the device leaves quarantine. */
+  private async settleBiometricEnrollmentRestore(
+    session: Session,
+    restoration: Promise<{ outcome: "restored" } | { outcome: "failed"; error: unknown }>,
+  ): Promise<void> {
+    const result = await restoration;
+    if (result.outcome === "restored") {
+      return;
+    }
+    logger.warn(
+      `Failed to restore biometric enrollment for session ${session.sessionId}: ${result.error}`,
+    );
+    await this.retryBiometricEnrollmentRestore(session, result.error);
+  }
+
+  private async retryBiometricEnrollmentRestore(
+    session: Session,
+    initialError: unknown,
+  ): Promise<void> {
+    let lastError = initialError;
+    for (let attempt = 1; attempt <= BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS; attempt++) {
+      await this.timer.sleep(BIOMETRIC_ENROLLMENT_RESTORE_RETRY_DELAY_MS);
+      try {
+        await this.restoreBiometricEnrollment(session);
+        logger.info(
+          `Restored biometric enrollment for session ${session.sessionId} on retry ${attempt}`,
+        );
+        return;
+      } catch (error) {
+        // Teardown is best-effort: keep retrying, then report the last failure.
+        lastError = error;
+        logger.debug(
+          `Retry ${attempt} restoring biometric enrollment for session ${session.sessionId} failed: ${error}`,
+        );
+      }
+    }
+    logger.warn(
+      `Gave up restoring biometric enrollment for session ${session.sessionId} after ` +
+        `${BIOMETRIC_ENROLLMENT_RESTORE_RETRY_ATTEMPTS} retries; device ${session.assignedDevice} ` +
+        `may hold session-modified enrollment: ${lastError}`,
+    );
   }
 
   /**
@@ -1229,14 +1284,19 @@ export class SessionManager {
     });
   }
 
+  /**
+   * Returned wrapped, never bare: `return somePromise` inside an async function
+   * adopts that promise, which would make the caller await the very cleanup it
+   * is trying to hand off and stall the release.
+   */
   private async getPendingBiometricRestoration(
     session: Session,
     pendingSetups: Promise<void> | null,
-  ): Promise<Promise<void> | null> {
+  ): Promise<{ pending: Promise<void> | null }> {
     if (pendingSetups && session.cacheData.biometricEnrollment) {
-      return this.restoreBiometricEnrollmentAfterSetups(session, pendingSetups);
+      return { pending: this.restoreBiometricEnrollmentAfterSetups(session, pendingSetups) };
     }
-    return (await this.restoreBiometricEnrollmentBestEffort(session)).pending;
+    return { pending: (await this.restoreBiometricEnrollmentBestEffort(session)).pending };
   }
 
   private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void {

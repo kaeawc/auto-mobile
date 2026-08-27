@@ -6,7 +6,7 @@ can be given minimal guidance — e.g. *"we just finished Phase 2; read
 and orient entirely from here. See [README.md](README.md) for the fixup-note index
 and the amended phase plan.
 
-Last updated after commit `11d8e192a` (Phase 5 `PerfProvider` complete).
+Last updated after commit `d49358121` (Phase 6 `CommandHandler` + coordinator complete).
 
 ---
 
@@ -36,7 +36,7 @@ swift test  -Xswiftc -warnings-as-errors --filter CtrlProxyRewriteTests   # the 
 
 CI runs `scripts/ios/swift-test.sh` = `swift test -Xswiftc -warnings-as-errors` over the
 package, so **warnings-as-errors is the real gate** (e.g. an unused `removeAll()` result
-fails it). Current: **227 rewrite tests, all green; full package 533 (reference) + 227
+fails it). Current: **229 rewrite tests, all green; full package 533 (reference) + 229
 (rewrite) green.** (There is a known pre-existing flake in the reference suite —
 `WebSocketServerTests.testFragmentedCommandReassemblesEndToEnd`, a `RealSocketClient`
 loopback timing flake — unrelated to the rewrite; passes in isolation.)
@@ -83,8 +83,8 @@ wire fixture is `test/fixtures/ios-ctrlproxy-request-snapshots.json`.
 | 3 | Off-main SDK layer (cache lock-confined + transactional; SDK/DB clients async; OSLogReader) | `f705e31ca` `d291db66c` `54ec41e39` `8ba273873` `1d8c08ba1` (+ de-flake `be92b2628`) | ✅ |
 | 4 | `@MainActor` UI (ElementLocator, GesturePerformer, HierarchyDebouncer, DisplayLinkFPSMonitor, VoiceOver) | `a0646e713` `f715fc90a` `8c634c77a` `957916c1f` `400a3a42e` `d209ad95c` `e1f4c4d86` `2b1373016` | ✅ |
 | 5 | PerfProvider (TaskLocal call-tree + confined pool) | `11d8e192a` | ✅ |
-| 6 | CommandHandler (Sendable POD router, `handle` async) + `CtrlProxy` coordinator | — | ◻️ **NEXT** |
-| 7 | Cutover (point runner/app at rewrite; retire reference; XcodeGen) | — | ◻️ |
+| 6 | CommandHandler (Sendable POD router, `handle` async) + async serial dispatch + `CtrlProxy` coordinator | `5ce6c75bd` `333e236f8` `089e4e0da` `1fb695e35` `d49358121` | ✅ |
+| 7 | Cutover (point runner/app at rewrite; retire reference; XcodeGen) | — | ◻️ **NEXT** |
 | 8 | Post-concurrency fixups (see README index) | — | ◻️ |
 
 **Ported so far** (all one-type-per-file, `Sendable`, differentially verified unless
@@ -147,6 +147,32 @@ load-bearing `@TaskLocal` nesting across a real off-main→`@MainActor` executor
 does not prove production *emits* `perfTiming`; that integration test is a Phase-6
 obligation (see §8). 227 rewrite tests (from 216), all green; full package 533 + 227 green.
 
+**Phase 6 added** (`CommandHandler` router + async serial dispatch + `CtrlProxy`
+coordinator). Landed one green commit each: **6A** the 13 remaining handler-built response
+envelopes (Screenshot/Keyboard/Rotate/CurrentFocus/TraversalOrder/VoiceOver×2/Storage×3/
+Network×3) ported one-per-file `Codable & Sendable` + `WebSocketResponsePayload`
+conformance for every envelope `handle` returns; **6B** additive seams (`PerfTracking.withScope`
+async requirement; `@MainActor HierarchyDebouncing: Sendable`; `: Sendable` refinements on
+`ElementLocating`/`GesturePerforming` so the `Sendable` router can hold the `@MainActor`
+existentials); **6C–E** the `CommandHandler` port (a `Sendable` POD, `handle` **async** →
+`any WebSocketResponsePayload`; `await`s the `@MainActor` UI collaborators + async SDK
+clients, calls the lock-confined ones synchronously; `PerfProvider.track` re-expressed as
+`tracked`(`@MainActor`)/`trackedAsync` over `any PerfTracking`; the cached-SDK read path uses
+`reconcile`), the server's **async serial task-chain** dispatch (`commandTail` lock +
+`await previous?.value` preserves per-command ordering without a blocking hop) bracketing
+decode→handle→flush→encode in `perf.withScope`, and the `@MainActor` `CtrlProxy` coordinator
+filling the production seams (`onSdkEventBatch`/`drainLogEvents`/`onClientPresenceChanged`
+via a late-bound weak box); **6F** two parity layers (46-command routing parity +
+the §8 integration `perfTiming` parity through `WebSocketServer.handleMessage`); **6G** an
+adversarial multi-lens review that caught one real `perfTiming` wire divergence — for
+gestures routed through `performContextCheckedGesture` the reference's *thread-local* perf
+splits the gesture-nested `track` onto the main thread's empty stack (a separate root under a
+synthetic `total`), so the rewrite now runs the gesture inside a **fresh `perf.withScope`** to
+reproduce that split (a plain `MainActor.run` had nested it via the propagated task-local).
+229 rewrite tests (from 227), all green; full package 533 + 229 green. **Coordinator caveat:**
+its iOS (`canImport(XCTest) && os(iOS)`) branch is not host-compiled — full compile lands at
+Phase 7 (Xcode).
+
 ## 6. Archetype map & load-bearing decisions
 
 - **iOS 17 floor rules out `Synchronization.Mutex`** (needs iOS 18). Use actors,
@@ -207,6 +233,36 @@ obligation (see §8). 227 rewrite tests (from 216), all green; full package 533 
   (the reference converted lazily at flush; eager is behaviorally identical since a root and
   its children are fully timed by the time the root completes) so no mutable node is stored
   behind the lock.
+- **Async command dispatch = serial `Task`-chain (Phase 6).** `CommandHandling.handle` became
+  `async` (it `await`s the `@MainActor` UI collaborators + async SDK clients), so the reference's
+  single serial `commandQueue` was replaced by a serial task-chain: `dispatchCommand` holds an
+  `OSAllocatedUnfairLock<Task<Void, Never>?>` (`commandTail`) and each command's `Task` does
+  `await previous?.value` before handling. This preserves the reference's per-command ordering
+  (issue #5374) without a blocking queue hop, and frees the accept `queue` the instant a command
+  is enqueued. `WebSocketServer.handleMessage` is now `async` and brackets
+  decode→handle→flush→encode in `perf.withScope` (the §8 wiring).
+- **`performContextCheckedGesture` = one `MainActor.run` turn + a FRESH `perf.withScope`
+  (Phase 6; the review-caught subtlety).** The reference ran the frame-context validation and the
+  gesture together in one `DispatchQueue.main.sync` (atomic). The rewrite runs them in one
+  `MainActor.run` (same atomicity, no suspension between the generation read and the gesture) —
+  `MainActor.run`, not a blocking `main.sync`, because the perf task-local must reach the gesture.
+  **But** the reference's perf is *thread-local*: `performIfCurrent` hops the gesture onto the
+  main thread, where that stack is empty, so a gesture-nested `track` (`setText.byResourceId`,
+  `pressButton`, …) opens as its OWN root and `flushPerfTiming` wraps the two roots under a
+  synthetic `total`. A plain `MainActor.run` would keep the propagated task-local scope and nest
+  that track under the handler — a different on-wire `perfTiming` tree. So the gesture runs inside
+  a **fresh `perf.withScope`**, reproducing the reference's split exactly (a trackless gesture —
+  tap/swipe/drag — leaves the fresh scope empty, harmless). Locked by a `set_text` integration
+  parity assertion.
+- **`CtrlProxy` coordinator = `@MainActor`, immutable server seams wired via a late-bound weak box
+  (Phase 6).** It owns the single instances and injects the server's immutable `@Sendable` seams
+  at construction (`onSdkEventBatch` → `SdkHierarchyExtractor.extractIfPresent` + a main-actor
+  re-broadcast [the reference `SdkHierarchyRefreshPublisher`, inlined as
+  `publishSdkHierarchyRefresh`]; `drainLogEvents` → `OSLogReaderHolder.shared.drain`;
+  `onClientPresenceChanged` → client-gated samplers, #5477). Because those closures are built
+  before `self` exists and fire off the main actor, they capture a `WeakCoordinator`
+  (`@unchecked Sendable`, written once on the main actor during `init`, read only inside
+  `Task { @MainActor }`) and hop back to the main actor.
 
 ## 7. Race ledger
 
@@ -223,65 +279,62 @@ obligation (see §8). 227 rewrite tests (from 216), all green; full package 533 
 
 ## 8. Seams left open (to fill in later phases)
 
-- `WebSocketConnection` init hooks — the Phase-3 closures now EXIST and are exercised
-  end-to-end in `ConnectionSdkSeamTests` (driver accepts them); only the **production**
-  wiring is deferred to the Phase-6 coordinator:
-  - `onSdkEventBatch: (@Sendable (Data) -> Void)?` → `{ SdkHierarchyExtractor.extractIfPresent(from:$0, into: cache, onHierarchyUpdated:) }`.
-  - `drainLogEvents: (@Sendable () -> [Data])?` → `OSLogReaderHolder.shared.drain`.
-- `WebSocketServer` seams: `CommandHandling` (Phase 6) remains open; `PerfTracking` now has
-  its concrete `PerfProvider` (Phase 5) and `FrameContextRecording` is **implemented**
-  (Phase 4B). All are wired to the concrete collaborators by the `CtrlProxy` coordinator in
-  Phase 6 — including the **`withScope` wiring**: the sync/async `withScope` must bracket the
-  command-handling entry point *and* the background hierarchy-polling entry point, or every
-  perf call is a silent no-op in production (the engine only accumulates inside a bound scope).
-- **Phase-6 integration-parity obligation (from the Phase-5 review):** the Phase-5 parity
-  proves the `PerfProvider` *engine* emits a byte-identical tree, but **not** that production
-  actually emits `perfTiming` on the wire. The reference's global singleton was live on every
-  thread; the rewrite only accumulates inside a `withScope`. Phase 6 must add an integration
-  parity test that drives a real request through `WebSocketServer.handleMessage` (both
-  modules) and diffs the `perfTiming` field on the response envelope — otherwise a missing
-  `withScope` wire-up would leave `perfTiming` empty with the engine tests still green.
-- **Deferred to Phase 6 (CommandHandler):** `WebSocketResponsePayload` conformance for the
-  Phase-3 DB response envelopes (+ the other handler-built envelopes) — the structs are
-  `Codable & Sendable` now; the marker conformances land with the router batch.
-- `broadcastPerformanceUpdate` (deferred from Phase 2, needed `PerformanceSnapshot`) is
-  **done** — it landed with `DisplayLinkFPSMonitor` in Phase 4E. Still deferred from Phase 2:
-  a `127.0.0.1` loopback smoke test; more connection scenarios
-  (frames/ping/close/fragmentation/HTTP) on the existing scripted-`ByteChannel` harness
-  (`ReferenceConnectionDriver` / `RewriteConnectionDriver` / `ConnectionRecorder`).
+**Filled in Phase 6** (all wired by the `CtrlProxy` coordinator, verified by the routing +
+integration parity tests):
+- `WebSocketConnection` production hooks: `onSdkEventBatch` → `SdkHierarchyExtractor.extractIfPresent`
+  (+ main-actor re-broadcast); `drainLogEvents` → `OSLogReaderHolder.shared.drain`. ✅
+- `WebSocketServer.CommandHandling` → the `CommandHandler` router; `PerfTracking` → the Phase-5
+  `PerfProvider`; `FrameContextRecording` → `FrameContext`. ✅
+- The **`withScope` wiring**: `WebSocketServer.handleMessage` brackets the command path in
+  `perf.withScope`, so perf calls accumulate on the wire (proven by the integration test). The
+  background hierarchy-polling path runs inside the `@MainActor` `HierarchyDebouncer` (its own
+  task) and does not open perf blocks in production, so it needs no separate scope. ✅
+- The **integration `perfTiming` parity test** (the Phase-5-review obligation): drives real
+  requests through `WebSocketServer.handleMessage` in both modules and diffs the `perfTiming`
+  tree (`request_hierarchy` and `set_text`). ✅
+- `WebSocketResponsePayload` conformance for the DB + handler-built envelopes. ✅
 
-## 9. Phase 6 plan (NEXT) — CommandHandler + `CtrlProxy` coordinator
+**Still open (Phase 7 / later):**
+- `broadcastPerformanceUpdate` landed in Phase 4E. Still deferred from Phase 2: a `127.0.0.1`
+  loopback smoke test and more connection scenarios (frames/ping/close/fragmentation/HTTP) on
+  the scripted-`ByteChannel` harness (`ReferenceConnectionDriver`/`RewriteConnectionDriver`/
+  `ConnectionRecorder`) — good candidates to fold into the Phase-7 Xcode/UI-test build.
+- Full iOS compile-verification of the `@MainActor` UI domain **and the `CtrlProxy` coordinator's
+  iOS branch** (both host-excluded via `#if canImport(XCTest) && os(iOS)`) lands at Phase 7.
 
-Read the reference first: `Sources/CtrlProxy/CommandHandler.swift` and
-`Sources/CtrlProxy/CtrlProxy.swift` (the coordinator). Every collaborator this phase routes
-to is **already ported**: the wire models, `WebSocketServer`/`WebSocketConnection` (Phase 2),
-the off-main SDK layer + cache (Phase 3), the `@MainActor` UI domain (Phase 4), and the
-`PerfProvider` engine (Phase 5). Phase 6 is the router that ties them together plus the
-coordinator that owns the single instances and fills the open production seams.
+## 9. Phase 7 plan (NEXT) — cutover
 
-Design commitments already recorded (do not re-litigate — see §6/§8):
+Every subsystem is ported and green under the SPM host gate. Phase 7 makes `CtrlProxyRewrite`
+the shipping target and retires the reference oracle. This is the first phase that compiles and
+runs the `@MainActor`/XCUITest bodies **and** the `CtrlProxy` coordinator's iOS branch (all
+host-excluded so far — see §8), so expect the first real iOS-compile fixups here.
 
-1. **`CommandHandler` stays a `Sendable` POD router, NOT `@MainActor`** (#5374): its blocking
-   SDK HTTP/DB calls must not freeze XCUITest or starve `/health`. It `await`s the `@MainActor`
-   UI collaborators (`ElementLocator`, `GesturePerformer`) and the off-main SDK clients.
-2. **`handle` returns `any WebSocketResponsePayload`** (`Sendable & Encodable`), replacing the
-   reference's `-> Any`. `encodeResponse` keeps the `WebSocketResponse`/`HierarchyUpdateResponse`
-   downcasts for `perfTiming` injection; everything else encodes straight through.
-3. **`WebSocketResponsePayload` conformances** for the Phase-3 DB response envelopes (+ the
-   other handler-built envelopes) land here — the structs are already `Codable & Sendable`.
-4. **Fill the open production seams** via the `CtrlProxy` coordinator: `WebSocketServer`'s
-   `CommandHandling` seam → this router; its `PerfTracking` seam → the Phase-5 `PerfProvider`;
-   `WebSocketConnection.onSdkEventBatch` → `SdkHierarchyExtractor.extractIfPresent`;
-   `drainLogEvents` → `OSLogReaderHolder.shared.drain`.
-5. **`withScope` wiring (load-bearing — see §8).** Bracket the command-handling entry point and
-   the background hierarchy-polling entry point in `PerfProvider.withScope`; without it every
-   perf call is a silent production no-op. Use the async overload on the async command path.
-6. **Parity:** two layers. (a) Per-command routing parity through the existing per-module-driver
-   pattern (reference vs rewrite `handle` for each command shape, diffing the response
-   envelope). (b) **The integration `perfTiming` parity test (§8):** drive a real request
-   through `WebSocketServer.handleMessage` in both modules and diff the `perfTiming` field —
-   this is what proves the `withScope` wiring actually emits timings on the wire, which the
-   Phase-5 engine parity cannot.
+Suggested order:
+
+1. **Wire `CtrlProxyRewrite` into `project.yml` / XcodeGen** (currently SPM-only — see §3).
+   Run `scripts/ios/xcodegen-generate.sh` and commit the regenerated `project.pbxproj` (per
+   `ios/CLAUDE.md`). Fakes stay in `CtrlProxyTestSupport`, out of the shipped product.
+2. **Full iOS compile.** Build the rewrite for an iOS simulator (`scripts/ios/xcode-build.sh`)
+   and fix whatever the host gate could not see: the `#if canImport(XCTest) && os(iOS)` bodies
+   in `ElementLocator`/`GesturePerformer`/`DisplayLinkFPSMonitor`/`CtrlProxy`, the coordinator's
+   `setApplication`/`start(bundleId:)`, and any `@MainActor`/`Sendable` errors that only surface
+   with the real XCUITest types.
+3. **Point the runner/app at the rewrite.** Switch the XCUITest runner target to construct
+   `CtrlProxyRewrite.CtrlProxy` instead of the reference; keep the reference target buildable
+   until the UI-test smoke passes, then retire it (drop the per-target `.v5` language mode and
+   the `CtrlProxy`/`CtrlProxyTests` targets, or fold them out of `project.yml`).
+4. **On-device/simulator validation.** Run a real observe→gesture→hierarchy loop against a
+   simulator (and the `manual-test` skill) to confirm the wire behavior end-to-end; fold in the
+   still-deferred Phase-2 loopback smoke test + connection scenarios (§8) as iOS UI tests.
+5. **Then Phase 8 fixups** (README index): the `os_signpost`/direct-interval PerfProvider
+   simplification, the `HierarchyMerger` geometry-key improvement, the keyboard-focus RunLoop
+   de-blocking — all off the critical path, validated against golden-replay corpora.
+
+Design commitments from Phase 6 (do not re-litigate — see §6): `CommandHandler` is a `Sendable`
+POD router (#5374); `handle` is `async -> any WebSocketResponsePayload`; command dispatch is a
+serial `Task`-chain; `performContextCheckedGesture` is one `MainActor.run` turn inside a fresh
+`perf.withScope`; the coordinator is `@MainActor` with a late-bound weak box for its immutable
+`@Sendable` server seams.
 
 ## 10. Conventions
 

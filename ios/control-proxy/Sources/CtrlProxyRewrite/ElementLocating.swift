@@ -14,7 +14,7 @@ import Foundation
 /// debouncer's seam); both declare `getViewHierarchy(disableAllFiltering:)` and a single
 /// implementation satisfies both.
 @MainActor
-public protocol ElementLocating {
+public protocol ElementLocating: Sendable {
     /// The full view hierarchy of the current foreground app plus any system alerts.
     /// - Parameter disableAllFiltering: when `true`, skip optimization and return the raw hierarchy.
     func getViewHierarchy(disableAllFiltering: Bool) throws -> ViewHierarchy

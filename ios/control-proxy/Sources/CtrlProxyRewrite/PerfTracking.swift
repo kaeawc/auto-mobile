@@ -11,4 +11,13 @@ protocol PerfTracking: Sendable {
     func end()
     func flush() -> [PerfTiming]?
     func clear()
+
+    /// Bind a fresh task-scoped call-tree for `body`, so the `serial`/`end`/`track` calls
+    /// made inside it — including across `await`s into `@MainActor` collaborators in the
+    /// same task — accumulate into one tree. The server brackets the command-handling entry
+    /// point in this (see §9.5): without it every perf call outside a scope is a silent
+    /// no-op. Async so the binding survives those awaits; declared `throws` (a protocol
+    /// requirement cannot be `rethrows`, so the concrete `PerfProvider.withScope`'s
+    /// `rethrows` witnesses this `throws` requirement).
+    func withScope<T>(_ body: nonisolated(nonsending) () async throws -> T) async throws -> T
 }

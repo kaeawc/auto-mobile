@@ -19,6 +19,9 @@ struct FakePerfTracking: PerfTracking {
     func end() {}
     func flush() -> [PerfTiming]? { flushResult }
     func clear() {}
+    func withScope<T>(_ body: nonisolated(nonsending) () async throws -> T) async rethrows -> T {
+        try await body()
+    }
 }
 
 struct FakeFrameContextRecording: FrameContextRecording {

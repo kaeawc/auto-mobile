@@ -8,7 +8,7 @@ import Foundation
 /// isolating the whole protocol to the main actor removes the per-call hop and lets a
 /// `Sendable` `CommandHandler` (Phase 6) `await` these from off the main actor.
 @MainActor
-public protocol GesturePerforming {
+public protocol GesturePerforming: Sendable {
     // MARK: - Tap Gestures
 
     /// Tap at coordinates with optional duration for long press

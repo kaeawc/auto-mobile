@@ -30,7 +30,7 @@ import Foundation
 /// `HierarchyDebouncing` protocol and its fake are deferred to Phase 6, where the
 /// production wiring lands.
 @MainActor
-final class HierarchyDebouncer {
+final class HierarchyDebouncer: HierarchyDebouncing {
     // MARK: - Configuration
 
     /// How often to poll for changes (default 1s).

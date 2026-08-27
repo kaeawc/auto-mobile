@@ -279,8 +279,8 @@ export class AppPreferences {
       );
       return parseIosDefaultsType(result.stdout);
     } catch (error) {
-      // `defaults read-type` fails when the key doesn't exist yet, which is a
-      // normal "no preference set" state; undefined lets callers fall back.
+      // This auxiliary type probe must not discard a successfully-read value.
+      // Returning undefined lets callers fall back to the string representation.
       if (looksLikeMissingIosDefault(error)) {
         logger.debug(
           `src/features/preferences/AppPreferences.ts defaults type read found no value: ${error}`,
@@ -288,7 +288,17 @@ export class AppPreferences {
         );
         return undefined;
       }
-      throw new ActionableError(`Failed to read iOS UserDefaults type with defaults: ${error}`);
+      if (deadlineMs !== undefined && this.timer.now() >= deadlineMs) {
+        throw error;
+      }
+      if (!isRetryableIosDefaultsError(error)) {
+        throw new ActionableError(`Failed to read iOS UserDefaults type with defaults: ${error}`);
+      }
+      logger.warn(
+        `src/features/preferences/AppPreferences.ts defaults type read failed; falling back to string: ${error}`,
+        error,
+      );
+      return undefined;
     }
   }
 

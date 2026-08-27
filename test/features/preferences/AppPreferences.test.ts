@@ -970,6 +970,62 @@ describe("AppPreferences", () => {
     ]);
   });
 
+  test("returns a verified write when the iOS UserDefaults type-read times out", async () => {
+    const timer = new FakeTimer();
+    const simctl = new ScriptedSimCtlClient(
+      [
+        {},
+        { stdout: "enabled\n" },
+        { elapsedMs: 10_000, error: new Error("Command timed out after 10000ms") },
+        { elapsedMs: 10_000, error: new Error("Command timed out after 10000ms") },
+      ],
+      timer,
+    );
+    const preferences = new AppPreferences(iosSimulator, { simctl, timer });
+
+    const result = await preferences.setPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "featureFlag",
+      value: "enabled",
+      type: "string",
+    });
+
+    expect(result).toMatchObject({
+      found: true,
+      value: "enabled",
+      verified: true,
+    });
+    expect(timer.now()).toBe(20_000);
+    expect(simctl.calls.map((call) => call.args[3])).toEqual([
+      "write",
+      "read",
+      "read-type",
+      "read-type",
+    ]);
+  });
+
+  test("surfaces a permanent iOS UserDefaults type-read failure", async () => {
+    const simctl = new ScriptedSimCtlClient([
+      {},
+      { stdout: "enabled\n" },
+      { error: new Error("Xcode is not configured") },
+    ]);
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+
+    await expect(
+      preferences.setPreference({
+        scope: "userDefaults",
+        appId: "com.example.app",
+        key: "featureFlag",
+        value: "enabled",
+        type: "string",
+      }),
+    ).rejects.toThrow("Xcode is not configured");
+
+    expect(simctl.calls.map((call) => call.args[3])).toEqual(["write", "read", "read-type"]);
+  });
+
   test("preserves the type-read retry for a direct iOS UserDefaults read", async () => {
     const timer = new FakeTimer();
     const simctl = new ScriptedSimCtlClient(

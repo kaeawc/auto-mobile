@@ -104,6 +104,11 @@ Platform-specific capture sources:
     `adb exec-out screenrecord -` → ffmpeg path. Raw frames carry no geometry, so ffmpeg is spawned
     on the first frame, which pins `-video_size`; frames that later change size (device rotation)
     are dropped rather than skewing the picture.
+  - Device capture is deliberately **not** fps-throttled by the helper, so the backend paces frames
+    against their capture timestamps to hold the requested rate, and repeats a frame across gap
+    slots (bounded at 2s) so a stalled or idle device does not compress the encoded timeline.
+  - A helper that exits nonzero mid-recording (device unplugged, lost capture session) fails the
+    `stop` with its stderr rather than archiving the truncated file as a complete recording.
   - The AutoMobile UDID is mapped onto the AVFoundation `uniqueID` via the helper's
     `--list-devices` JSON (exact match, then a separator-insensitive match, then the only attached
     device) because `--device-id` matches `uniqueID` exactly.

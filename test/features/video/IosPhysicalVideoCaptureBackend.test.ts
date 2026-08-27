@@ -288,9 +288,11 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig());
 
-    harness.helper.emitFrame(4, 2);
-    harness.helper.emitFrame(2, 4); // rotation mid-recording
-    harness.helper.emitFrame(4, 2);
+    // Timestamps stay inside one 15fps slot of each other so the pacing gate
+    // neither drops nor pads anything, isolating the geometry behavior.
+    harness.helper.emitFrame(4, 2, 16, 0xaa, 0);
+    harness.helper.emitFrame(2, 4, 8, 0xaa, 35); // rotation mid-recording
+    harness.helper.emitFrame(4, 2, 16, 0xaa, 70);
 
     expect(harness.ffmpeg.startRequests.length).toBe(1);
     expect(harness.ffmpeg.processes[0].bytesWritten).toBe(2 * 4 * 2 * 4);
@@ -336,7 +338,11 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     await harness.backend.stop(handle);
   });
 
-  test("resyncs pacing after a capture gap instead of admitting a catch-up burst", async function () {
+  // `-framerate` gives every written frame a contiguous fixed-rate timestamp, so
+  // skipping the idle slots would compress real time and end a duration-capped
+  // recording early. The gap is padded with repeats, bounded at 2s so a long
+  // stall cannot write unbounded copies of a multi-megabyte frame.
+  test("pads a capture gap so the encoded timeline keeps wall-clock duration", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig({ fps: 10 }));
 
@@ -347,7 +353,23 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     }
 
     const framePayloadBytes = 4 * 2 * 4;
-    expect(harness.ffmpeg.processes[0].bytesWritten / framePayloadBytes).toBe(2);
+    const written = harness.ffmpeg.processes[0].bytesWritten / framePayloadBytes;
+    // 1 initial + 20 gap-fill repeats (the 2s cap at 10fps) + 1 resumed frame;
+    // the 60fps tail after it is paced out.
+    expect(written).toBe(22);
+    await harness.backend.stop(handle);
+  });
+
+  test("pads a short gap in full without hitting the cap", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
+
+    harness.helper.emitFrame(4, 2, 16, 0xaa, 0);
+    harness.helper.emitFrame(4, 2, 16, 0xaa, 500); // 400ms of missed slots
+
+    const framePayloadBytes = 4 * 2 * 4;
+    // 1 initial + 4 repeats for the missed 100ms slots + the frame itself.
+    expect(harness.ffmpeg.processes[0].bytesWritten / framePayloadBytes).toBe(6);
     await harness.backend.stop(handle);
   });
 
@@ -492,6 +514,29 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
 
     expect(harness.helper.stopped).toBe(1);
     expect(harness.ffmpeg.processes[0].killSignals).toEqual(["SIGKILL"]);
+  });
+
+  test("stop rejects a recording the capture helper aborted mid-stream", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.emitFrame(4, 2);
+    // Device unplugged: the helper exits on its own while ffmpeg finalizes fine.
+    harness.helper.emit("stderr", "error: iOS device capture failed");
+    harness.helper.emit("exit", { code: 3, signal: null });
+
+    await expect(harness.backend.stop(handle)).rejects.toThrow("capture helper exited with code 3");
+    // The partial file is still finalized so it can be inspected.
+    expect(harness.ffmpeg.processes[0].stdin.writableEnded).toBe(true);
+  });
+
+  test("a SIGTERM exit from our own stop is not treated as a helper failure", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.emitFrame(4, 2);
+    harness.helper.emit("exit", { code: null, signal: "SIGTERM" });
+
+    const result = await harness.backend.stop(handle);
+    expect(result.codec).toBe("h264");
   });
 
   test("stop rejects a recording whose encoder exited nonzero", async function () {

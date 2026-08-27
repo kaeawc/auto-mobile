@@ -40,6 +40,13 @@ const BGRA_BYTES_PER_PIXEL = 4;
 /** How long ffmpeg gets to finalize the MP4 (moov atom) after stdin closes. */
 export const IOS_PHYSICAL_ENCODER_FINALIZE_TIMEOUT_MS = 30000;
 
+/**
+ * Ceiling on repeated frames used to hold a capture gap at its real duration.
+ * Beyond this the recording is allowed to compress rather than write unbounded
+ * duplicates of a multi-megabyte frame.
+ */
+const MAX_GAP_FILL_SECONDS = 2;
+
 /** Stderr lines retained from the helper for failure diagnostics. */
 const HELPER_STDERR_TAIL = 20;
 
@@ -124,6 +131,10 @@ interface CaptureState {
   nextFrameDueMs?: number;
   /** Frames discarded purely to hold the declared cadence (not a fault). */
   framesPacedOut: number;
+  /** Repeated frames written to keep a capture gap at its real duration. */
+  framesGapFilled: number;
+  /** Gap slots left unpadded, so the output is shorter than wall clock. */
+  framesGapTruncated: number;
   framesWritten: number;
   framesDropped: number;
   helperStderr: string[];
@@ -193,6 +204,8 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       framesWritten: 0,
       framesDropped: 0,
       framesPacedOut: 0,
+      framesGapFilled: 0,
+      framesGapTruncated: 0,
       helperStderr: [],
     };
     const helper = this.createHelper({
@@ -243,7 +256,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     if (!backendHandle || backendHandle.kind !== "ios-physical") {
       throw new Error("Missing backend handle for physical iOS video recording.");
     }
-    const { helper, state } = backendHandle;
+    const { helper, state, config } = backendHandle;
 
     await helper.stop();
 
@@ -266,22 +279,10 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     }
 
     this.assertEncoderSucceeded(state, handle.outputPath);
+    this.assertHelperSucceeded(state, handle.outputPath);
 
     const sizeBytes = await this.fileSize(handle.outputPath);
-    logger.info(
-      `[IosPhysicalVideo] recording ${handle.recordingId} wrote ${state.framesWritten} frame(s) to ${handle.outputPath}.`,
-    );
-    if (state.framesDropped > 0) {
-      logger.warn(
-        `[IosPhysicalVideo] dropped ${state.framesDropped} frame(s) whose geometry differed from the locked ` +
-          `${state.geometry?.width}x${state.geometry?.height} capture size, or arrived while the encoder was congested.`,
-      );
-    }
-    if (state.framesPacedOut > 0) {
-      logger.debug(
-        `[IosPhysicalVideo] paced out ${state.framesPacedOut} frame(s) to hold the requested cadence.`,
-      );
-    }
+    this.logCaptureAccounting(state, config, handle);
 
     return {
       recordingId: handle.recordingId,
@@ -317,7 +318,8 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       return;
     }
 
-    if (!this.admitForPacing(frame, state, config.fps)) {
+    const copies = this.admitForPacing(frame, state, config.fps);
+    if (copies === 0) {
       return;
     }
 
@@ -334,8 +336,17 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       state.framesDropped += 1;
       return;
     }
-    encoder.stdin.write(packFrame(frame));
-    state.framesWritten += 1;
+    const payload = packFrame(frame);
+    for (let copy = 0; copy < copies; copy++) {
+      // Stop padding the moment the encoder falls behind: gap fill must never be
+      // the thing that congests it.
+      if (copy > 0 && encoder.stdin.writableNeedDrain) {
+        state.framesGapTruncated += copies - copy;
+        break;
+      }
+      encoder.stdin.write(payload);
+      state.framesWritten += 1;
+    }
   }
 
   /**
@@ -346,23 +357,36 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
    * 2-4x slow and `-t` would cut it short. Admit a frame only once its capture
    * timestamp reaches the next scheduled slot.
    */
-  private admitForPacing(frame: DecodedFrame, state: CaptureState, fps: number): boolean {
+  private admitForPacing(frame: DecodedFrame, state: CaptureState, fps: number): number {
     const intervalMs = 1000 / fps;
     const timestampMs = frame.header.timestampMs;
     if (state.nextFrameDueMs === undefined) {
       state.nextFrameDueMs = timestampMs + intervalMs;
-      return true;
+      return 1;
     }
     if (timestampMs < state.nextFrameDueMs) {
       state.framesPacedOut += 1;
-      return false;
+      return 0;
     }
-    // Advance by whole intervals so the cadence does not drift, but resync after
-    // a gap (helper stall, or a device that idles while the screen is static)
-    // rather than admitting a burst to "catch up".
-    const nextSlot = state.nextFrameDueMs + intervalMs;
-    state.nextFrameDueMs = nextSlot > timestampMs ? nextSlot : timestampMs + intervalMs;
-    return true;
+
+    // Slots that elapsed with nothing to encode: a helper stall, or a device
+    // that idles while the screen is static. `-framerate` gives every written
+    // frame a contiguous fixed-rate timestamp, so skipping those slots would
+    // compress real time — a 5s freeze would play back in a fraction of a
+    // second, and a duration-capped recording would end early. Repeat the frame
+    // to keep the encoded timeline on wall clock.
+    const missedSlots = Math.floor((timestampMs - state.nextFrameDueMs) / intervalMs);
+    const maxGapFill = Math.ceil(fps * MAX_GAP_FILL_SECONDS);
+    const gapFill = Math.min(missedSlots, maxGapFill);
+    if (missedSlots > gapFill) {
+      // Padding an arbitrarily long stall would write unbounded duplicate frames,
+      // so very long gaps stay compressed; the recording is shorter than wall
+      // clock by the excess, which the warning names.
+      state.framesGapTruncated += missedSlots - gapFill;
+    }
+    state.framesGapFilled += gapFill;
+    state.nextFrameDueMs = timestampMs + intervalMs;
+    return gapFill + 1;
   }
 
   private startEncoder(
@@ -389,6 +413,39 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     });
   }
 
+  /** One place for the per-recording frame accounting, all of it diagnostic. */
+  private logCaptureAccounting(
+    state: CaptureState,
+    config: VideoCaptureConfig,
+    handle: RecordingHandle,
+  ): void {
+    logger.info(
+      `[IosPhysicalVideo] recording ${handle.recordingId} wrote ${state.framesWritten} frame(s) to ${handle.outputPath}.`,
+    );
+    if (state.framesDropped > 0) {
+      logger.warn(
+        `[IosPhysicalVideo] dropped ${state.framesDropped} frame(s) whose geometry differed from the locked ` +
+          `${state.geometry?.width}x${state.geometry?.height} capture size, or arrived while the encoder was congested.`,
+      );
+    }
+    if (state.framesPacedOut > 0) {
+      logger.debug(
+        `[IosPhysicalVideo] paced out ${state.framesPacedOut} frame(s) to hold the requested cadence.`,
+      );
+    }
+    if (state.framesGapFilled > 0) {
+      logger.debug(
+        `[IosPhysicalVideo] repeated ${state.framesGapFilled} frame(s) to keep capture gaps at their real duration.`,
+      );
+    }
+    if (state.framesGapTruncated > 0) {
+      logger.warn(
+        `[IosPhysicalVideo] ${state.framesGapTruncated} gap slot(s) were left unpadded, so the recording is ` +
+          `about ${(state.framesGapTruncated / config.fps).toFixed(1)}s shorter than the wall-clock capture.`,
+      );
+    }
+  }
+
   /**
    * A nonzero ffmpeg exit (full disk, rejected encoder settings) leaves a
    * truncated file behind. Returning a successful RecordingResult would let the
@@ -413,6 +470,29 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       `FFmpeg failed to finalize the physical iOS recording at ${outputPath} ` +
         `(exitCode: ${exitState.exitCode ?? "null"}, signal: ${exitState.signal ?? "null"}).` +
         (stderr ? `\nffmpeg: ${stderr}` : ""),
+    );
+  }
+
+  /**
+   * A helper that exited nonzero on its own (device unplugged, AVCaptureSession
+   * failure) truncates the capture. ffmpeg still finalizes the frames it did
+   * receive and exits 0, so without this check a partial recording would be
+   * archived as complete. Checked after the encoder is finalized, so the file on
+   * disk is at least playable for diagnosis.
+   *
+   * Our own `stop()` sends SIGTERM, which surfaces as `signal`, not a nonzero
+   * exit code — only a code the helper chose itself counts as a failure.
+   */
+  private assertHelperSucceeded(state: CaptureState, outputPath: string): void {
+    const exit = state.helperExit;
+    if (!exit || exit.code === null || exit.code === 0) {
+      return;
+    }
+    const stderr = state.helperStderr.join("").trim();
+    throw new ActionableError(
+      `The iOS capture helper exited with code ${exit.code} during the recording, so ${outputPath} ` +
+        "is truncated. The device was most likely unplugged or lost its capture session." +
+        (stderr ? `\nscreen-capture-helper: ${stderr}` : ""),
     );
   }
 

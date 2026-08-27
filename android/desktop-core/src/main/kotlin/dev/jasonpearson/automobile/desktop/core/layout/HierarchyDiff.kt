@@ -157,7 +157,14 @@ private fun indexWindows(
 ): LinkedHashMap<String, UIElementInfo> {
   val map = LinkedHashMap<String, UIElementInfo>()
   windows.forEachIndexed { index, window ->
-    addSubtree(map, window, parentKey = "", siblingIndex = slots[index], keyMode = keyMode)
+    addSubtree(
+      map,
+      window,
+      parentKey = "",
+      siblingIndex = slots[index],
+      keyMode = keyMode,
+      parentRole = null,
+    )
   }
   return map
 }
@@ -288,7 +295,14 @@ private fun alignWindowSlots(
  */
 private fun signatureKeys(window: UIElementInfo, keyMode: DiffKeyMode): Set<String> {
   val keys = LinkedHashSet<String>()
-  collectSignatureKeys(keys, window, parentKey = "", siblingIndex = 0, keyMode = keyMode)
+  collectSignatureKeys(
+    keys,
+    window,
+    parentKey = "",
+    siblingIndex = 0,
+    keyMode = keyMode,
+    parentRole = null,
+  )
   return keys
 }
 
@@ -309,11 +323,13 @@ private fun collectSignatureKeys(
   parentKey: String,
   siblingIndex: Int,
   keyMode: DiffKeyMode,
+  parentRole: StructuralRole?,
 ) {
-  val structural = pathKey(parentKey, node, siblingIndex, keyMode)
+  val role = roleFor(node, keyMode, parentRole)
+  val structural = pathKey(parentKey, node, siblingIndex, keyMode, role)
   keys.add("$structural::${semanticDigest(node, keyMode)}")
   node.children.forEachIndexed { index, child ->
-    collectSignatureKeys(keys, child, structural, index, keyMode)
+    collectSignatureKeys(keys, child, structural, index, keyMode, role)
   }
 }
 
@@ -367,38 +383,65 @@ private fun addSubtree(
   parentKey: String,
   siblingIndex: Int,
   keyMode: DiffKeyMode,
+  parentRole: StructuralRole?,
 ) {
-  val key = pathKey(parentKey, node, siblingIndex, keyMode)
+  val role = roleFor(node, keyMode, parentRole)
+  val key = pathKey(parentKey, node, siblingIndex, keyMode, role)
   map[key] = node
-  node.children.forEachIndexed { index, child -> addSubtree(map, child, key, index, keyMode) }
+  node.children.forEachIndexed { index, child ->
+    addSubtree(map, child, key, index, keyMode, role)
+  }
 }
+
+/**
+ * The resolved [StructuralRole] for a node in role mode, threaded to children as their parent role;
+ * null in class-name mode where roles are unused. Computed once per node so [pathKey] and the
+ * recursion share the value (and the [structuralRoleOf] parent-context inference).
+ */
+private fun roleFor(
+  node: UIElementInfo,
+  keyMode: DiffKeyMode,
+  parentRole: StructuralRole?,
+): StructuralRole? =
+  if (keyMode == DiffKeyMode.StructuralRole) structuralRoleOf(node, parentRole) else null
 
 private fun pathKey(
   parentKey: String,
   node: UIElementInfo,
   siblingIndex: Int,
   keyMode: DiffKeyMode,
+  role: StructuralRole?,
 ): String {
   val segment =
     when (keyMode) {
       DiffKeyMode.ClassName -> "${node.className}:${node.resourceId ?: ""}#$siblingIndex"
       // Role mode drops the platform-specific resourceId: it never matches across Android↔iOS, so
-      // keeping it would defeat the whole point of role keying.
-      DiffKeyMode.StructuralRole -> "${structuralRoleOf(node)}#$siblingIndex"
+      // keeping it would defeat the whole point of role keying. [role] is the pre-resolved
+      // [roleFor] value (non-null in this mode).
+      DiffKeyMode.StructuralRole -> "${role}#$siblingIndex"
     }
   return if (parentKey.isEmpty()) segment else "$parentKey$PATH_SEPARATOR$segment"
 }
 
 /**
- * The cross-platform [StructuralRole] of a full node. Starts from the class-name mapping, then
- * applies the semantic signals a class name alone cannot carry:
- * - A checkable node whose class maps only to a generic [StructuralRole.Container] or
- *   [StructuralRole.Other] is promoted to [StructuralRole.Checkbox]. The live iOS runner reports a
- *   checkbox as the bare `UIView` class (`ElementLocator.mapElementType` has no `.checkBox` case)
- *   while still setting `isCheckable`, so without this an iOS checkbox keys as Container and never
- *   pairs with Android's `CheckBox`. The promotion is gated on the generic roles so a `UISwitch`
- *   (also checkable, but already keyed [StructuralRole.Switch] by class) is left alone (issue #4872
- *   review).
+ * The cross-platform [StructuralRole] of a full node, given its [parentRole] (the resolved role of
+ * its parent, or null at a window root). Starts from the class-name mapping, then applies the
+ * semantic and positional signals a class name alone cannot carry:
+ * - A checkable node is promoted to [StructuralRole.Checkbox] unless its class already keyed it to
+ *   the sibling checkable role [StructuralRole.Switch]. The live iOS runner reports a checkbox as
+ *   the bare `UIView` class (`ElementLocator.mapElementType` has no `.checkBox` case) while still
+ *   setting `isCheckable`, so an iOS checkbox arrives as a generic Container; Android's
+ *   `CheckedTextView` instead keys as [StructuralRole.Text] by class (it contains the `TextView`
+ *   substring) yet is a standard checkable control. Promoting on `isCheckable` regardless of the
+ *   class-derived role — not only the generic ones — pairs both against Android's `CheckBox`
+ *   instead of leaving them as OnlyIn. `Switch` is exempt so a `UISwitch`/`SwitchCompat`/
+ *   `ToggleButton` (also checkable) keeps its own distinct role (issue #4872 review).
+ * - A generic node whose [parentRole] is [StructuralRole.List] is promoted to
+ *   [StructuralRole.ListItem]: it is the list's row wrapper. iOS emits a row as a `UITableViewCell
+ *   -> ListItem` by class, but an Android row is an ordinary `LinearLayout`/`ViewGroup ->
+ *   Container` whose collection-item metadata `HierarchyParser` drops, so inferring `ListItem` from
+ *   the `List` parent is what pairs the two rows (and thus their descendants) instead of leaving
+ *   every row as OnlyIn (issue #4872 review).
  * - A non-interactive generic node that carries visible `text` is promoted to
  *   [StructuralRole.Text]. Android's `ViewHierarchyExtractor` blanks `android.widget.TextView` to a
  *   class-less node (it is in `GENERIC_CLASS_NAMES`), which `HierarchyParser` then defaults to
@@ -412,11 +455,15 @@ private fun pathKey(
  *   clears `android.widget.ScrollView`, but retains `isScrollable`; without this recovery it
  *   remains a Container and cannot pair with iOS's `UIScrollView -> ScrollView` role.
  */
-private fun structuralRoleOf(node: UIElementInfo): StructuralRole {
+private fun structuralRoleOf(node: UIElementInfo, parentRole: StructuralRole?): StructuralRole {
   val byClass = structuralRole(node.className)
+  // Checkable controls key as Checkbox even when the class name mapped them elsewhere (e.g.
+  // CheckedTextView -> Text), so a checkable control pairs across platforms. Switch is left alone:
+  // it is a distinct checkable role that must not collapse into Checkbox.
+  if (node.isCheckable && byClass != StructuralRole.Switch) return StructuralRole.Checkbox
   val isGeneric = byClass == StructuralRole.Container || byClass == StructuralRole.Other
   if (!isGeneric) return byClass
-  if (node.isCheckable) return StructuralRole.Checkbox
+  if (parentRole == StructuralRole.List) return StructuralRole.ListItem
   if (node.isScrollable) return StructuralRole.ScrollView
   val hasVisibleText = !node.text.isNullOrEmpty()
   if (hasVisibleText && !node.isClickable && !node.isScrollable) return StructuralRole.Text

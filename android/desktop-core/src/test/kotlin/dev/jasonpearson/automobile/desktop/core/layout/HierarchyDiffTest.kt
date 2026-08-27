@@ -790,6 +790,107 @@ class HierarchyDiffTest {
   }
 
   /**
+   * `android.widget.CheckedTextView` is a standard checkable control, but its class name contains
+   * the `TextView` substring so the class mapping keys it as [StructuralRole.Text] — before any
+   * generic-role checkable promotion could fire. The iOS runner reports the equivalent checkbox as
+   * a checkable bare `UIView -> Container`. Promoting on `isCheckable` regardless of the
+   * class-derived role folds the CheckedTextView into Checkbox too, so the two pair instead of
+   * surfacing as OnlyIn on each side (issue #4872 review).
+   */
+  @Test
+  fun `role mode pairs a checkable android CheckedTextView with an ios checkable view`() {
+    val android =
+      node(
+        "android.view.View",
+        children =
+          listOf(node("android.widget.CheckedTextView", text = "Wifi", isCheckable = true)),
+      )
+    val ios =
+      node("XCUIApplication", children = listOf(node("UIView", text = "Wifi", isCheckable = true)))
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(2, diff.equal)
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Checkbox#"))
+  }
+
+  /**
+   * A production Android list row is an ordinary `LinearLayout`/`ViewGroup -> Container` whose
+   * collection-item metadata `HierarchyParser` drops, while the iOS runner emits the matching row
+   * as a `UITableViewCell -> ListItem` by class. Keying the Android row by its class alone would
+   * make every row (and its whole subtree) OnlyIn against the iOS cells. Inferring [ListItem] for a
+   * generic direct child of a [List] parent pairs the rows so their contents diff (issue #4872
+   * review).
+   */
+  @Test
+  fun `role mode infers ListItem for an android list-row wrapper so it pairs with an ios cell`() {
+    val android =
+      node(
+        "android.widget.FrameLayout",
+        "android:id/content",
+        children =
+          listOf(
+            node(
+              "androidx.recyclerview.widget.RecyclerView",
+              "com.app:id/list",
+              children =
+                listOf(
+                  node(
+                    "android.widget.LinearLayout",
+                    "com.app:id/row",
+                    children = listOf(node("android.widget.TextView", text = "Inbox")),
+                  )
+                ),
+            )
+          ),
+      )
+    val ios =
+      node(
+        "XCUIApplication",
+        children =
+          listOf(
+            node(
+              "UITableView",
+              children =
+                listOf(node("UITableViewCell", children = listOf(node("UILabel", text = "Inbox")))),
+            )
+          ),
+      )
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    // Root(Container) + List + row(ListItem) + label(Text) all pair.
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(0, diff.changed)
+    assertEquals(4, diff.equal)
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "List#"))
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "ListItem#"))
+  }
+
+  /**
+   * The ListItem inference is scoped to a [List] parent: a generic container that is *not* a list
+   * row keeps its Container role, so an ordinary nested wrapper is never mis-keyed as a list item.
+   */
+  @Test
+  fun `role mode does not infer ListItem for a generic container outside a list`() {
+    val android =
+      node(
+        "android.view.View",
+        children = listOf(node("android.widget.LinearLayout", "com.app:id/panel")),
+      )
+    val ios = node("XCUIApplication", children = listOf(node("UIView")))
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(2, diff.equal)
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Container#"))
+    assertNull(statusOf(diff, "ListItem#"))
+  }
+
+  /**
    * An Android icon control can carry an empty `text` alongside a real `content-desc`. The
    * normalized accessible name treats empty text as absent and falls back to `content-desc`, so it
    * reads the same as the iOS `text` label instead of comparing `""` against the label and

@@ -169,6 +169,60 @@ describe("DefaultElementSelector", () => {
     expect(match.totalMatches).toBe(2);
   });
 
+  test("prefers an exact main-hierarchy match over a partial overlay match", () => {
+    const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
+    const viewHierarchy = {
+      hierarchy: {
+        node: {
+          $: {
+            bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+            class: "XCUIElementTypeWindow",
+          },
+          node: [
+            {
+              $: {
+                bounds: { left: 10, top: 10, right: 90, bottom: 40 },
+                class: "XCUIElementTypeButton",
+                text: "Delete",
+                actions: ["click"],
+              },
+            },
+          ],
+        },
+      },
+      windows: [
+        {
+          windowLayer: 1,
+          hierarchy: {
+            node: {
+              $: {
+                bounds: { left: 0, top: 80, right: 100, bottom: 100 },
+                class: "XCUIElementTypeOther",
+              },
+              node: [
+                {
+                  $: {
+                    bounds: { left: 10, top: 82, right: 90, bottom: 98 },
+                    class: "XCUIElementTypeStaticText",
+                    text: "Delete all files",
+                  },
+                },
+              ],
+            },
+          },
+        },
+      ],
+      screenWidth: 100,
+      screenHeight: 100,
+    } as unknown as ViewHierarchyResult;
+
+    const match = selector.selectByText(viewHierarchy, "Delete");
+
+    expect(match.element?.class).toBe("XCUIElementTypeButton");
+    expect(match.element?.text).toBe("Delete");
+    expect(match.totalMatches).toBe(1);
+  });
+
   test("first strategy skips off-screen matches before selecting", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
     const viewHierarchy = createViewHierarchy([

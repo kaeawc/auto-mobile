@@ -336,16 +336,9 @@ export class DefaultElementFinder implements ElementFinder {
     return isClickableElementProperties(props);
   }
 
-  private selectAndRankTextMatches(matches: {
-    exactMatches: Element[];
-    partialMatches: Element[];
-  }): Element[] {
-    const selectedMatches =
-      matches.exactMatches.length > 0 ? matches.exactMatches : matches.partialMatches;
-    selectedMatches.sort(
-      (a, b) => Number(this.isClickableNode(b)) - Number(this.isClickableNode(a)),
-    );
-    return selectedMatches;
+  private rankTextMatches(matches: Element[]): Element[] {
+    matches.sort((a, b) => Number(this.isClickableNode(b)) - Number(this.isClickableNode(a)));
+    return matches;
   }
 
   private isCollectionNode(props: Record<string, unknown>): boolean {
@@ -449,8 +442,10 @@ export class DefaultElementFinder implements ElementFinder {
       return [mainMatches, ...windowMatches].flatMap((matches) => matches.partialMatches);
     }
 
-    return [...windowMatches, mainMatches].flatMap((matches) =>
-      this.selectAndRankTextMatches(matches),
+    const matchesByWindowOrder = [...windowMatches, mainMatches];
+    const hasExactMatches = matchesByWindowOrder.some((matches) => matches.exactMatches.length > 0);
+    return matchesByWindowOrder.flatMap((matches) =>
+      this.rankTextMatches(hasExactMatches ? matches.exactMatches : matches.partialMatches),
     );
   }
 

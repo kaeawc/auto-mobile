@@ -5,8 +5,9 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
-import type { BootedDevice, Platform } from "../../src/models";
+import type { BootedDevice, ExecResult, Platform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+import { DevicectlDeviceLister } from "../../src/utils/ios-cmdline-tools/DevicectlDeviceLister";
 
 /**
  * A physical iPhone can change its display name without the hardware or the
@@ -35,6 +36,25 @@ describe("DevicePool physical iOS rename (#5690)", () => {
     deviceId,
     ...(observedAt !== undefined ? { observedAt } : {}),
   });
+
+  const physicalIosListing = (name: string): string =>
+    JSON.stringify({
+      info: { outcome: "success" },
+      result: {
+        devices: [
+          {
+            identifier: PHYSICAL_IPHONE_UDID,
+            deviceProperties: { name, osVersionNumber: "18.6" },
+            hardwareProperties: {
+              udid: PHYSICAL_IPHONE_UDID,
+              platform: "iOS",
+              productType: "iPhone16,1",
+            },
+            connectionProperties: { tunnelState: "connected" },
+          },
+        ],
+      },
+    });
 
   const initialize = async (device: BootedDevice): Promise<void> => {
     fakeDeviceManager.bootedDevices = [device];
@@ -185,6 +205,36 @@ describe("DevicePool physical iOS rename (#5690)", () => {
       staleSnapshot,
     );
 
+    expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
+  });
+
+  test("refreshes a physical iPhone rename after the lister clock rolls back", async () => {
+    let name = "Old iPhone";
+    let executions = 0;
+    const lister = new DevicectlDeviceLister({
+      platform: () => "darwin",
+      timer: fakeTimer,
+      tmpdir: () => "/tmp",
+      mkdtemp: async (prefix) => `${prefix}listing`,
+      rm: async () => {},
+      execute: async () => {
+        executions++;
+        return { stdout: "", stderr: "", toString: () => "" } as ExecResult;
+      },
+      readFile: async () => physicalIosListing(name),
+      logger: { debug: () => {}, warn: () => {} },
+    } as ConstructorParameters<typeof DevicectlDeviceLister>[0]);
+
+    fakeTimer.setCurrentTime(100);
+    const initial = await lister.listConnectedDevices();
+    await initialize(initial.devices[0]!);
+
+    name = "New iPhone";
+    fakeTimer.setCurrentTime(1);
+    const renamed = await lister.listConnectedDevices();
+    await republishAs(renamed.devices[0]!);
+
+    expect(executions).toBe(2);
     expect(devicePool.getDevice(PHYSICAL_IPHONE_UDID)?.name).toBe("New iPhone");
   });
 

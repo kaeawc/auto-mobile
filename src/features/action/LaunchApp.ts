@@ -1,4 +1,4 @@
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidUserTargetResolver } from "../../utils/android-cmdline-tools/AndroidUserTargetResolver";
 import { BaseVisualChange } from "./BaseVisualChange";
 import {
@@ -91,13 +91,13 @@ export class LaunchApp extends BaseVisualChange {
   /**
    * Create an LaunchApp instance
    * @param device - Optional device
-   * @param adb - Optional AdbClient instance for testing
+   * @param adb - Optional ADB executor for testing
    * @param simctl - Optional SimCtlClient instance for testing
    * @param timer - Optional Timer instance for testing
    */
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     simctl: SimCtlClient | null = null,
     timer: Timer = defaultTimer,
     dependencies: LaunchAppDependencies = {},

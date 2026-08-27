@@ -1,4 +1,4 @@
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, GestureOptions } from "../../models";
 import { Element } from "../../models";
@@ -18,7 +18,7 @@ export class SwipeOnElement extends BaseVisualChange {
 
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     geometry: ElementGeometry = new DefaultElementGeometry(),
   ) {
     super(device, adb);

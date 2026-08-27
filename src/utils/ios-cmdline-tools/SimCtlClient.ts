@@ -12,6 +12,10 @@ import {
 } from "../HostCommandExecutor";
 import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } from "../../models";
 import { defaultTimer, Timer } from "../SystemTimer";
+import {
+  defaultDiscoveryObservationSequence,
+  type DiscoveryObservationSequence,
+} from "../DiscoveryObservationSequence";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../deviceTimeouts";
 import { PlistClient, type PlistReader } from "./PlistClient";
@@ -559,6 +563,7 @@ export class SimCtlClient implements SimCtl {
     fileSystem: SimCtlFileSystem = defaultSimCtlFileSystem,
     bootOptions: SimCtlBootOptions = DEFAULT_SIMCTL_BOOT_OPTIONS,
     private readonly plist: PlistReader = new PlistClient(),
+    private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
   ) {
     this.device = device;
     this.execAsync = execAsyncFn || execAsync;
@@ -1418,7 +1423,7 @@ export class SimCtlClient implements SimCtl {
       name: simulator.name,
       platform: simulator.platform,
       deviceId: simulator.deviceId,
-      observedAt: this.timer.now(),
+      observedAt: this.observationSequence.next(),
     } as BootedDevice;
   }
 
@@ -1510,6 +1515,7 @@ export class SimCtlClient implements SimCtl {
   async getBootedSimulatorsChecked(timeoutMs?: number): Promise<BootedDevice[]> {
     const simulatorList = await this.listSimulators(timeoutMs);
     logger.debug(`Found simulator list: ${simulatorList}`);
+    const observedAt = this.observationSequence.next();
     const bootedDevices: BootedDevice[] = [];
 
     // Extract booted devices from all runtime versions
@@ -1521,7 +1527,7 @@ export class SimCtlClient implements SimCtl {
             name: device.name,
             platform: "ios",
             deviceId: device.udid,
-            observedAt: this.timer.now(),
+            observedAt,
             iosVersion,
             osVersion: iosVersion,
             formFactor: inferIosFormFactor(device.deviceTypeIdentifier),

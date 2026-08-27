@@ -9,6 +9,7 @@ import {
 import type { ExecResult } from "../../../src/models";
 import { isAdbMissingDeviceError } from "../../../src/utils/android-cmdline-tools/AdbDeviceHealth";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeDiscoveryObservationSequence } from "../../fakes/FakeDiscoveryObservationSequence";
 
 function createExecResult(stdout: string, stderr: string = ""): ExecResult {
   return {
@@ -69,7 +70,8 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     };
     const timer = new FakeTimer();
     timer.advanceTime(42);
-    const adb = new AdbClient(null, execAsync, null, undefined, timer);
+    const observations = new FakeDiscoveryObservationSequence();
+    const adb = new AdbClient(null, execAsync, null, undefined, timer, undefined, observations);
 
     const devices = await adb.getBootedAndroidDevices();
 
@@ -78,10 +80,33 @@ describe("AdbClient.getBootedAndroidDevices", () => {
         name: "emulator-5554",
         platform: "android",
         deviceId: "emulator-5554",
-        observedAt: timer.now(),
+        observedAt: 1,
         transportId: "42",
       },
     ]);
+  });
+
+  test("keeps discovery ordering monotonic when the wall clock rolls back", async () => {
+    const timer = new FakeTimer();
+    timer.setCurrentTime(100);
+    const observations = new FakeDiscoveryObservationSequence();
+    const adb = new AdbClient(
+      null,
+      async () =>
+        createExecResult(["List of devices attached", "emulator-5554\tdevice", ""].join("\n")),
+      null,
+      undefined,
+      timer,
+      undefined,
+      observations,
+    );
+
+    const initial = await adb.getBootedAndroidDevices();
+    timer.setCurrentTime(1);
+    const afterRollback = await adb.getBootedAndroidDevices({ bypassCache: true });
+
+    expect(initial[0]?.observedAt).toBe(1);
+    expect(afterRollback[0]?.observedAt).toBe(2);
   });
 
   test("bypasses the device-list cache when checking a connection incarnation", async () => {

@@ -35,6 +35,10 @@ import { TTLCache } from "../cache/Cache";
 import { Timer, defaultTimer } from "../SystemTimer";
 import { isAdbMissingDeviceError, notifyAdbMissingDevice } from "./AdbDeviceHealth";
 import { DefaultSystemDetection, type SystemDetection } from "../system/SystemDetection";
+import {
+  defaultDiscoveryObservationSequence,
+  type DiscoveryObservationSequence,
+} from "../DiscoveryObservationSequence";
 
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
 
@@ -169,6 +173,7 @@ export class AdbClient implements AdbExecutor {
    * @param spawnFn - spawn function (for testing)
    * @param retryExecutor - retry executor for command retries (for testing)
    * @param timer - Timer for delays and time tracking
+   * @param observationSequence - Monotonic discovery ordering source
    */
   constructor(
     device: BootedDevice | null = null,
@@ -181,6 +186,7 @@ export class AdbClient implements AdbExecutor {
     timer: Timer = defaultTimer,
     private readonly systemDetectionFactory: () => SystemDetection = () =>
       new DefaultSystemDetection(),
+    private readonly observationSequence: DiscoveryObservationSequence = defaultDiscoveryObservationSequence,
   ) {
     this.device = device;
     // Test mode if: custom execAsync provided OR global test mode flag is set
@@ -1141,6 +1147,7 @@ export class AdbClient implements AdbExecutor {
     }
     const lines = result.stdout.split("\n").slice(1); // Skip the first line which is the header
 
+    const observedAt = this.observationSequence.next();
     const devices = lines
       .filter((line) => line.trim().length > 0)
       .flatMap((line) => {
@@ -1156,7 +1163,7 @@ export class AdbClient implements AdbExecutor {
             name: deviceId,
             platform: "android",
             deviceId,
-            observedAt: this.timer.now(),
+            observedAt,
             ...(transportId ? { transportId } : {}),
           } satisfies BootedDevice,
         ];

@@ -1,5 +1,5 @@
 import type { BootedDevice, Element, ObserveResult } from "../../models";
-import type { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ProgressCallback } from "../action/BaseVisualChange";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { TapOnElement } from "../action/TapOnElement";
@@ -94,7 +94,7 @@ export function isRatingDialog(elements: Element[]): boolean {
 export async function handlePermissionDialog(
   elements: Element[],
   device: BootedDevice,
-  adb: AdbClient | null,
+  adb: AdbExecutor | null,
   progress?: ProgressCallback,
 ): Promise<boolean> {
   // Look for "Allow" or "While using" buttons
@@ -136,7 +136,7 @@ export async function handlePermissionDialog(
 async function dismissDialog(
   elements: Element[],
   device: BootedDevice,
-  adb: AdbClient | null,
+  adb: AdbExecutor | null,
   progress?: ProgressCallback,
 ): Promise<boolean> {
   const dismissKeywords = ["not now", "later", "no thanks", "dismiss", "close", "skip"];
@@ -182,7 +182,7 @@ type DeadEndHandler = (progress?: ProgressCallback) => Promise<void>;
 export async function detectAndHandleBlockers(
   observation: ObserveResult,
   device: BootedDevice,
-  adb: AdbClient | null,
+  adb: AdbExecutor | null,
   elementParser: ElementParser,
   handleDeadEnd: DeadEndHandler,
   progress?: ProgressCallback,

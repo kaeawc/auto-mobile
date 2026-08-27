@@ -136,8 +136,8 @@ export interface PooledDevice {
    */
   nameRefreshGeneration?: number;
   /**
-   * Discovery timestamp that last wrote the mutable display name. When both
-   * observations carry a stamp, the newer one wins regardless of its path.
+   * Discovery sequence value that last wrote the mutable display name. When
+   * both observations carry a stamp, the newer one wins regardless of its path.
    */
   nameObservedAt?: number;
   /** Authoritative AVD name captured when this pool starts an Android emulator. */

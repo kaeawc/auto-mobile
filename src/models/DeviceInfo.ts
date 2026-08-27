@@ -28,8 +28,9 @@ export interface BootedDevice {
   platform: Platform;
   deviceId: string;
   /**
-   * Monotonic host-clock stamp for the discovery observation that produced this
-   * record. Cached and retained listings preserve their original stamp.
+   * Monotonic process-local sequence for the discovery observation that
+   * produced this record. Cached and retained listings preserve their original
+   * stamp.
    */
   observedAt?: number;
   /** ADB transport identity, which changes when a serial reconnects. */

@@ -313,4 +313,19 @@ final class WebSocketServer: @unchecked Sendable {
             print("[WebSocketServer] Failed to encode hierarchy update: \(error)")
         }
     }
+
+    /// Broadcast a performance update push to all connected clients. Skips the encode
+    /// when no clients are connected, matching the reference.
+    func broadcastPerformanceUpdate(_ snapshot: PerformanceSnapshot) {
+        guard !connections.isEmpty else { return }
+
+        let response = PerformanceUpdateResponse(data: snapshot)
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .sortedKeys
+            broadcast(try encoder.encode(response))
+        } catch {
+            print("[WebSocketServer] Failed to encode performance update: \(error)")
+        }
+    }
 }

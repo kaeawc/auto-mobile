@@ -10,11 +10,13 @@ import Foundation
 /// and screenshot frames. A value is intentionally absent when the platform cannot
 /// identify an interface rotation.
 ///
-/// PHASE 4F: adds the process-lifetime capture epoch (`startMonitoring` / `capture` /
-/// `captureSample`) that `ElementLocator.getViewHierarchy` requires to close the
-/// non-atomic multi-hop capture race. The gesture-orientation members
-/// (`current`, `currentGestureInterfaceOrientation`, `gestureInterfaceOrientation`) land
-/// with the `@MainActor` `GesturePerformer` in Phase 4G.
+/// The process-lifetime capture epoch (`startMonitoring` / `capture` / `captureSample`,
+/// added in Phase 4F) lets `ElementLocator.getViewHierarchy` close the non-atomic
+/// multi-hop capture race. The gesture-orientation members (`current`,
+/// `currentGestureInterfaceOrientation`, `gestureInterfaceOrientation`) landed with the
+/// `@MainActor` `GesturePerformer` in Phase 4G; they are pure reads of `XCUIDevice` /
+/// `UIApplication` scene state and stay `nonisolated` (the reference kept them free
+/// functions on the enum, callable from the main-actor performer without a hop).
 enum DeviceRotation {
     static func fromOrientationName(_ orientation: String) -> Int? {
         switch orientation {
@@ -90,6 +92,59 @@ enum DeviceRotation {
 
         static func captureSample() -> RotationCaptureSample {
             changeMonitor.captureSample(using: rotationSampler)
+        }
+
+        static func current() -> Int? {
+            rotationSampler.currentRotation()
+        }
+
+    #endif
+
+    #if os(iOS)
+        static func currentGestureInterfaceOrientation() -> UIInterfaceOrientation {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            let activeSceneOrientation = scenes.first(where: {
+                $0.activationState == .foregroundActive && isCardinalInterfaceOrientation($0.interfaceOrientation)
+            })?.interfaceOrientation
+            let sceneOrientation = scenes.first(where: {
+                isCardinalInterfaceOrientation($0.interfaceOrientation)
+            })?.interfaceOrientation
+
+            return gestureInterfaceOrientation(
+                activeSceneOrientation: activeSceneOrientation,
+                sceneOrientation: sceneOrientation,
+                deviceOrientation: UIDevice.current.orientation
+            )
+        }
+
+        static func gestureInterfaceOrientation(
+            activeSceneOrientation: UIInterfaceOrientation?,
+            sceneOrientation: UIInterfaceOrientation?,
+            deviceOrientation: UIDeviceOrientation
+        ) -> UIInterfaceOrientation {
+            if let activeSceneOrientation, isCardinalInterfaceOrientation(activeSceneOrientation) {
+                return activeSceneOrientation
+            }
+            if let sceneOrientation, isCardinalInterfaceOrientation(sceneOrientation) {
+                return sceneOrientation
+            }
+
+            switch deviceOrientation {
+            case .portrait: return .portrait
+            case .portraitUpsideDown: return .portraitUpsideDown
+            case .landscapeLeft: return .landscapeLeft
+            case .landscapeRight: return .landscapeRight
+            default: return .portrait
+            }
+        }
+
+        private static func isCardinalInterfaceOrientation(_ orientation: UIInterfaceOrientation) -> Bool {
+            switch orientation {
+            case .portrait, .landscapeLeft, .portraitUpsideDown, .landscapeRight:
+                return true
+            default:
+                return false
+            }
         }
     #endif
 }

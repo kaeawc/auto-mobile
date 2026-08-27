@@ -5,8 +5,8 @@ import XCTest
 // rotation-epoch machinery. The rewrite makes `RotationChangeMonitor`/`RotationChangeGeneration`
 // genuinely `Sendable` (lock-confined, no `@unchecked`) so a single process-lifetime monitor
 // can be held across concurrency domains; the capture/sample math is unchanged, so these are
-// the same four host assertions. The reference's `#if os(iOS)` gesture-orientation test is
-// deferred with the gesture-orientation members to Phase 4G.
+// the same four host assertions. The reference's `#if os(iOS)` gesture-orientation test
+// landed with the gesture-orientation members in Phase 4G (below).
 
 // `@unchecked Sendable`: single-threaded test fake with a mutable stored handler; conforms to
 // the rewrite's `Sendable` `RotationChangeSignaling`.
@@ -92,4 +92,16 @@ final class RotationChangeGenerationTests: XCTestCase {
 
         XCTAssertEqual(monitor.capture(using: sampler) { "capture" }.rotation, 3)
     }
+
+    #if os(iOS)
+        func testGestureOrientationKeepsLandscapeSceneWhenDeviceIsFaceUp() {
+            let orientation = DeviceRotation.gestureInterfaceOrientation(
+                activeSceneOrientation: .landscapeLeft,
+                sceneOrientation: .portrait,
+                deviceOrientation: .faceUp
+            )
+
+            XCTAssertEqual(orientation, .landscapeLeft)
+        }
+    #endif
 }

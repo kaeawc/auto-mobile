@@ -10,7 +10,7 @@ import {
   TapOnSelectedElement,
   ViewHierarchyResult,
 } from "../../models";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { TapOnElementOptions } from "../../models/TapOnElementOptions";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
@@ -195,7 +195,7 @@ export class TapOnElement extends BaseVisualChange {
 
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     options: TapOnElementDependencies = {},
   ) {
     super(device, adb, options.timer);

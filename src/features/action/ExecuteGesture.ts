@@ -1,4 +1,4 @@
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BootedDevice, Point } from "../../models";
 import { FingerPath } from "../../models";
 import { GestureOptions } from "../../models";
@@ -13,7 +13,7 @@ import { logger } from "../../utils/logger";
  * Executes gestures using platform-specific commands
  */
 export class ExecuteGesture extends BaseVisualChange {
-  constructor(device: BootedDevice, adb: AdbClient | null = null) {
+  constructor(device: BootedDevice, adb: AdbExecutor | null = null) {
     super(device, adb);
     this.device = device;
   }

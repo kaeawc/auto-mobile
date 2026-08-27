@@ -1,6 +1,6 @@
 import { BootedDevice } from "../../models";
 import { ObserveResult } from "../../models/ObserveResult";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
 import { ToolRegistry } from "../../server/toolRegistry";
 import { throwIfInternalToolFailed } from "../../server/internalToolCall";
@@ -27,14 +27,14 @@ export interface ObserveScreenLike {
 
 export class DefaultUIStateSetup implements UIStateSetup {
   private device: BootedDevice;
-  private adb: AdbClient;
+  private adb: AdbExecutor;
   private observeScreenProvider: () => ObserveScreenLike;
   private timer: Timer;
   private sessionUuid?: string;
 
   constructor(
     device: BootedDevice,
-    adb: AdbClient,
+    adb: AdbExecutor,
     observeScreenProvider?: () => ObserveScreenLike,
     timer: Timer = defaultTimer,
     sessionUuid?: string,
@@ -43,7 +43,7 @@ export class DefaultUIStateSetup implements UIStateSetup {
     this.adb = adb;
     this.timer = timer;
     this.sessionUuid = sessionUuid;
-    // The setup holds a resolved AdbClient (not a factory), so wrap it in a
+    // The setup holds a resolved ADB executor (not a factory), so wrap it in a
     // trivial factory to satisfy ObserveScreen's factory-only contract (matches
     // the AndroidCtrlProxyClient.getInstance call below).
     this.observeScreenProvider =

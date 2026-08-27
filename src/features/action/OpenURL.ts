@@ -1,4 +1,4 @@
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, OpenURLResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -37,13 +37,13 @@ export class OpenURL extends BaseVisualChange {
 
   /**
    * @param device - The target device
-   * @param adb - Optional AdbClient instance (for testing)
+   * @param adb - Optional ADB executor (for testing)
    * @param simctl - Optional SimCtlClient for the iOS simulator path (for testing)
    * @param devicectl - Optional DeviceUrlLauncher for the iOS physical-device path (for testing)
    */
   constructor(
     device: BootedDevice,
-    adb: AdbClient | null = null,
+    adb: AdbExecutor | null = null,
     simctl: SimCtlClient | null = null,
     devicectl: DeviceUrlLauncher | null = null,
   ) {

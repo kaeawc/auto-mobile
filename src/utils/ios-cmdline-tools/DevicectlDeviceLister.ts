@@ -314,8 +314,13 @@ const defaultDependencies: DevicectlDeviceListerDependencies = {
  */
 export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
   private readonly deps: DevicectlDeviceListerDependencies;
-  private cache: { discovery: PhysicalIosDeviceDiscovery; expiresAt: number } | null = null;
-  private lastGood: { devices: BootedDevice[]; staleAfter: number } | null = null;
+  private cache: {
+    discovery: PhysicalIosDeviceDiscovery;
+    observedAt: number;
+    expiresAt: number;
+  } | null = null;
+  private lastGood: { devices: BootedDevice[]; observedAt: number; staleAfter: number } | null =
+    null;
   private inFlight: Promise<PhysicalIosDeviceDiscovery> | null = null;
 
   constructor(dependencies: Partial<DevicectlDeviceListerDependencies> = {}) {
@@ -326,7 +331,10 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
     if (this.deps.platform() !== "darwin") {
       return { devices: [], complete: true };
     }
-    if (this.cache && this.deps.timer.now() < this.cache.expiresAt) {
+    const now = this.deps.timer.now();
+    // A backward wall-clock adjustment makes cached freshness unknowable.
+    // Re-list immediately rather than retaining a stale physical-device name.
+    if (this.cache && now >= this.cache.observedAt && now < this.cache.expiresAt) {
       return this.cache.discovery;
     }
     // Concurrent sweeps share one devicectl process rather than racing two.
@@ -397,7 +405,11 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
           devices: mergeById(stamped.devices, this.retainedDevices(now)),
           complete: false,
         };
-    this.cache = { discovery: resolved, expiresAt: now + DEVICE_LIST_CACHE_TTL_MS };
+    this.cache = {
+      discovery: resolved,
+      observedAt: now,
+      expiresAt: now + DEVICE_LIST_CACHE_TTL_MS,
+    };
     return resolved;
   }
 
@@ -405,13 +417,17 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
     discovery: PhysicalIosDeviceDiscovery,
     now: number,
   ): PhysicalIosDeviceDiscovery {
-    this.lastGood = { devices: discovery.devices, staleAfter: now + LAST_GOOD_RETENTION_MS };
+    this.lastGood = {
+      devices: discovery.devices,
+      observedAt: now,
+      staleAfter: now + LAST_GOOD_RETENTION_MS,
+    };
     return discovery;
   }
 
   /** Devices the last good sweep found, while still inside the retention window. */
   private retainedDevices(now: number): BootedDevice[] {
-    if (!this.lastGood || now >= this.lastGood.staleAfter) {
+    if (!this.lastGood || now < this.lastGood.observedAt || now >= this.lastGood.staleAfter) {
       this.lastGood = null;
       return [];
     }

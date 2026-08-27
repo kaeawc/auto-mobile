@@ -5,7 +5,7 @@ import { logger, type Logger } from "../../utils/logger";
 import { Image } from "../../utils/image-utils";
 import { TakeScreenshot } from "../observe/TakeScreenshot";
 import { BootedDevice } from "../../models";
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { getTempDir, TEMP_SUBDIRS } from "../../utils/tempDir";
 import {
@@ -177,7 +177,7 @@ export class NavigationScreenshotManager {
    */
   public async captureAndStore(
     device: BootedDevice,
-    adb: AdbClient,
+    adb: AdbExecutor,
     appId: string,
     screenName: string,
     screenshotCapture?: ScreenshotCapture,
@@ -244,7 +244,7 @@ export class NavigationScreenshotManager {
 
   private async doCaptureAndStore(
     device: BootedDevice,
-    adb: AdbClient,
+    adb: AdbExecutor,
     appId: string,
     screenName: string,
     screenshotCapture?: ScreenshotCapture,
@@ -255,7 +255,7 @@ export class NavigationScreenshotManager {
       // Ensure directory exists
       await this.fs.ensureDir(this.screenshotDir);
 
-      // 1. Capture screenshot. This manager holds a resolved AdbClient (not a factory),
+      // 1. Capture screenshot. This manager holds a resolved ADB executor (not a factory),
       // so wrap it in a trivial factory to satisfy TakeScreenshot's factory-only contract.
       const capture = screenshotCapture ?? new TakeScreenshot(device, { create: () => adb });
       const result = await capture.execute();

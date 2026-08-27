@@ -442,6 +442,59 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     await harness.backend.stop(handle);
   });
 
+  // A pipe's default high-water mark is 16KB while one real BGRA frame is
+  // megabytes, so `writableNeedDrain` is true after EVERY write. Treating that
+  // as congestion would drop nearly every frame of a real recording — and the
+  // small payloads used elsewhere in this file would never reveal it.
+  test("keeps recording when a single frame exceeds the stream high-water mark", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
+
+    // 128x128 BGRA = 64KB per frame, four times the default 16KB watermark.
+    harness.helper.emitFrame(128, 128, 128 * 4, 0x11, 0);
+    const encoder = harness.ffmpeg.processes[0];
+    encoder.stdin.pause();
+
+    harness.helper.emitFrame(128, 128, 128 * 4, 0x22, 100);
+    // One buffered frame already trips the stream's own backpressure signal...
+    expect(encoder.stdin.writableNeedDrain).toBe(true);
+
+    // ...but it is not congestion by the frame-based budget, so the next frame
+    // is still encoded rather than dropped.
+    harness.helper.emitFrame(128, 128, 128 * 4, 0x33, 200);
+
+    const frameBytes = 128 * 128 * 4;
+    expect(encoder.stdin.writableLength / frameBytes).toBe(2);
+    encoder.stdin.resume();
+    await harness.backend.stop(handle);
+  });
+
+  test("releases gap padding on drain instead of truncating it synchronously", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
+
+    harness.helper.emitFrame(128, 128, 128 * 4, 0x11, 0);
+    const encoder = harness.ffmpeg.processes[0];
+    encoder.stdin.pause();
+    encoder.stdin.cork();
+
+    // 500ms gap at 10fps owes 4 pads plus the frame; the 2-frame budget cannot
+    // take them all at once, so the remainder must survive as queued work.
+    harness.helper.emitFrame(128, 128, 128 * 4, 0x22, 500);
+    const frameBytes = 128 * 128 * 4;
+    const bufferedNow = encoder.stdin.writableLength / frameBytes;
+    expect(bufferedNow).toBeLessThan(6);
+
+    encoder.stdin.uncork();
+    encoder.stdin.resume();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // Everything owed reaches the encoder once it drains: 1 + 4 pads + 1.
+    const written = encoder.written.reduce((n, c) => n + c.length, 0);
+    expect(written / frameBytes).toBe(6);
+    await harness.backend.stop(handle);
+  });
+
   test("honors resolution and maxDuration like the simulator path", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(

@@ -47,6 +47,16 @@ export const IOS_PHYSICAL_ENCODER_FINALIZE_TIMEOUT_MS = 30000;
  */
 const MAX_GAP_FILL_SECONDS = 2;
 
+/**
+ * How many whole frames of encoder input may sit buffered before frames are
+ * dropped. The bound has to be expressed in FRAMES, not in the stream's own
+ * `writableNeedDrain`: a pipe's default high-water mark is 16KB, while one
+ * physical-device BGRA frame is megabytes (1179x2556x4 is ~12MB), so
+ * `writableNeedDrain` is true after every single write and would read as
+ * permanent congestion — dropping nearly every frame of a real recording.
+ */
+const MAX_BUFFERED_FRAMES = 2;
+
 /** Stderr lines retained from the helper for failure diagnostics. */
 const HELPER_STDERR_TAIL = 20;
 
@@ -135,6 +145,14 @@ interface CaptureState {
   framesGapFilled: number;
   /** Last payload written, repeated across gap slots that precede a new frame. */
   lastPayload?: Buffer;
+  /** Bytes in one packed frame; the unit for the encoder-buffer budget. */
+  frameBytes?: number;
+  /**
+   * Writes still owed to the encoder, in order. Repeats share one payload
+   * reference and carry a count, so a long gap costs a counter rather than N
+   * copies of a multi-megabyte buffer.
+   */
+  pendingWrites: { payload: Buffer; count: number }[];
   /** Gap slots left unpadded, so the output is shorter than wall clock. */
   framesGapTruncated: number;
   framesWritten: number;
@@ -214,6 +232,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       framesPacedOut: 0,
       framesGapFilled: 0,
       framesGapTruncated: 0,
+      pendingWrites: [],
       stopRequested: false,
       helperExitWasRequested: false,
       helperStderr: [],
@@ -291,6 +310,11 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       throw new ActionableError(this.buildNoFramesMessage(state));
     }
 
+    if (encoder.stdin) {
+      this.flushPendingWrites(state, encoder.stdin);
+    }
+    this.discardPendingWrites(state);
+
     // Closing stdin is what makes ffmpeg write the moov atom; a SIGKILL here
     // would leave an unplayable file, so wait for a clean exit instead.
     encoder.stdin?.end();
@@ -336,6 +360,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     const { width, height } = frame.header;
     if (!state.geometry) {
       state.geometry = { width, height };
+      state.frameBytes = width * height * BGRA_BYTES_PER_PIXEL;
       this.startEncoder(state, config, width, height);
     } else if (state.geometry.width !== width || state.geometry.height !== height) {
       // rawvideo has no per-frame geometry: a differently sized frame would be
@@ -354,7 +379,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     // would grow without bound — but consuming the pacing slot for a frame that
     // never reaches stdin would silently shorten the timeline. Dropping before
     // admission leaves the slot owed, so the next frame pads it as a gap.
-    if (encoder.stdin.writableNeedDrain) {
+    if (this.isEncoderCongested(state, encoder.stdin)) {
       state.framesDropped += 1;
       return;
     }
@@ -368,9 +393,13 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
   }
 
   /**
-   * Write the frame into its own slot, preceded by repeats of the previous
-   * picture for any slots the capture gap skipped. Padding with the NEW frame
-   * would move a visual transition earlier than it actually happened.
+   * Queue the frame's own slot, preceded by repeats of the previous picture for
+   * any slots the capture gap skipped. Padding with the NEW frame would move a
+   * visual transition earlier than it actually happened.
+   *
+   * Writes go through a queue so bounded padding survives the encoder consuming
+   * stdin asynchronously: a synchronous truncate would collapse almost every gap
+   * once frames are big enough to fill the pipe buffer in one write.
    */
   private writeFrameCopies(
     frame: DecodedFrame,
@@ -379,22 +408,60 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     copies: number,
   ): void {
     const payload = packFrame(frame);
-    const fillPayload = state.lastPayload ?? payload;
-    for (let copy = 0; copy < copies; copy++) {
-      const isCurrentFrameSlot = copy === copies - 1;
-      // Stop padding the moment the encoder falls behind — gap fill must never
-      // be the thing that congests it — but always emit the real frame.
-      if (copy > 0 && !isCurrentFrameSlot && stdin.writableNeedDrain) {
-        state.framesGapTruncated += copies - copy - 1;
-        stdin.write(payload);
-        state.framesWritten += 1;
-        state.lastPayload = payload;
-        return;
-      }
-      stdin.write(isCurrentFrameSlot ? payload : fillPayload);
-      state.framesWritten += 1;
+    const pads = copies - 1;
+    if (pads > 0) {
+      state.pendingWrites.push({ payload: state.lastPayload ?? payload, count: pads });
     }
+    state.pendingWrites.push({ payload, count: 1 });
     state.lastPayload = payload;
+    this.flushPendingWrites(state, stdin);
+  }
+
+  /** Drain the write queue up to the buffered-frame budget. */
+  private flushPendingWrites(
+    state: CaptureState,
+    stdin: NonNullable<FfmpegProcess["stdin"]>,
+  ): void {
+    if (stdin.writableEnded) {
+      state.pendingWrites = [];
+      return;
+    }
+    while (state.pendingWrites.length > 0 && !this.isEncoderCongested(state, stdin)) {
+      const next = state.pendingWrites[0];
+      stdin.write(next.payload);
+      state.framesWritten += 1;
+      next.count -= 1;
+      if (next.count === 0) {
+        state.pendingWrites.shift();
+      }
+    }
+  }
+
+  /**
+   * Give up on writes still queued when the recording ends: they would land
+   * after the encoder's input closed. Counted so the shortfall is reported.
+   */
+  private discardPendingWrites(state: CaptureState): void {
+    const owed = state.pendingWrites.reduce((total, entry) => total + entry.count, 0);
+    if (owed > 0) {
+      state.framesGapTruncated += owed;
+      state.pendingWrites = [];
+    }
+  }
+
+  /**
+   * True when the encoder already holds {@link MAX_BUFFERED_FRAMES} frames of
+   * input. Deliberately not `writableNeedDrain` — see {@link MAX_BUFFERED_FRAMES}.
+   */
+  private isEncoderCongested(
+    state: CaptureState,
+    stdin: NonNullable<FfmpegProcess["stdin"]>,
+  ): boolean {
+    const frameBytes = state.frameBytes;
+    if (!frameBytes) {
+      return stdin.writableNeedDrain;
+    }
+    return stdin.writableLength >= frameBytes * MAX_BUFFERED_FRAMES;
   }
 
   /**
@@ -454,6 +521,11 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     });
     state.encoder = started.process;
     state.encoderTracker = started.tracker;
+    const stdin = started.process.stdin;
+    stdin?.on("drain", () => {
+      // The encoder consumed a frame: release whatever padding is still owed.
+      this.flushPendingWrites(state, stdin);
+    });
     started.process.stdin?.on("error", (error: Error) => {
       // ffmpeg exiting first closes stdin; the helper keeps writing until it is
       // stopped, so EPIPE here is expected rather than a fault to surface.

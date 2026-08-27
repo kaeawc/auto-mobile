@@ -31,8 +31,8 @@ Critical path (the rewrite's actual goal — concurrency correctness + parity):
    SDK/DB clients async; OSLogReader) ✅ — the cache is a lock, not the actor first
    proposed here; see [STATUS.md](STATUS.md) §6 for the (approved) rationale.
 4. `@MainActor` UI domain (ElementLocator, GesturePerformer, HierarchyDebouncer,
-   DisplayLinkFPSMonitor, VoiceOver) ⟵ **NEXT**
-5. PerfProvider (TaskLocal call-tree + confined pool)
+   DisplayLinkFPSMonitor, VoiceOver) ✅
+5. PerfProvider (TaskLocal call-tree + confined pool) ⟵ **NEXT**
 6. CommandHandler (Sendable POD router) + CtrlProxy coordinator
 7. Cutover (point the runner/app at the rewrite; retire the reference)
 
@@ -47,7 +47,8 @@ cost of parity discipline).
 | Note | Area | Parity risk | Status |
 |---|---|---|---|
 | [hierarchy-merger-geometry](fixup-hierarchy-merger-geometry.md) | `HierarchyMerger` bounds matching | Mixed (containment: none; ±tol: intentional behavior change, approved) | Designed, deferred to Phase 8 |
-| dead API: `ElementLocator.getCachedElement` | ElementLocator | None (drop/internalize) | Noted; resolve when porting ElementLocator (Phase 4) |
+| dead API: `ElementLocator.getCachedElement` | ElementLocator | None (drop/internalize) | ✅ Resolved — dropped when porting `ElementLocator` (Phase 4F); not carried into the rewrite |
 | `Timer` protocol shadows `Foundation.Timer` | PerfProvider/scheduling | None (rename) | Noted; resolve when porting the timer seam (Phase 5) |
+| `GesturePerformer` keyboard-focus / keyboard-visibility polling | GesturePerformer | None (parity-preserving keep) | Noted (uncovered porting `GesturePerformer`, Phase 4G); `tapAndAwaitKeyboardFocus` / `waitForKeyboardVisibility` spin `RunLoop.current.run(until:)` on `Date()`-based deadlines, blocking the main actor for up to their timeout. Ported verbatim; replace with a non-blocking wait in Phase 8 |
 
 Append new entries here as they're uncovered.

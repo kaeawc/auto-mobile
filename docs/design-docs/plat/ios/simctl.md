@@ -99,23 +99,35 @@ The `changeLocalization` MCP tool supports live locale changes on iOS simulators
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> <kbd>📱 Simulator Only</kbd>
 
-The `biometricAuth` MCP tool simulates Touch ID / Face ID on simulators by posting
-BiometricKit Darwin notifications inside the simulator via
+The `biometricAuth` MCP tool and `setDeviceState` control Touch ID / Face ID state
+on simulators through BiometricKit Darwin notifications via
 `xcrun simctl spawn <udid> notifyutil`. This reaches parity with the Android emulator
 `adb emu finger` path (see [Android biometrics](../android/biometrics.md)) for
 `match` / `fail`.
 
+Before provisioning, call `getIosSimulatorCapabilities` with a device type and runtime
+from `automobile:devices/images`. It reports the versioned capability identifiers
+`biometrics.enrollment`, `biometrics.match`, `biometrics.fail`, `biometrics.cancel`,
+and `biometrics.error`. Enrollment is supported; match/fail require an enrolled state;
+cancel/error are explicitly unsupported on iOS Simulator.
+
 ### How it works
 
-1. **Enroll** — a registered `notifyutil` set/read/post on
-   `com.apple.BiometricKit.enrollmentChanged` ensures a biometry is enrolled.
+1. **Set enrollment** — `setDeviceState` accepts
+   `biometrics: { enrollment: "enrolled" | "not_enrolled" }`; `biometricAuth`
+   also accepts `action: "enroll" | "unenroll"` for iOS Simulator. Each uses a
+   registered `notifyutil` set/read/post on
+   `com.apple.BiometricKit.enrollmentChanged`.
    Apple `notifyutil(1)` documents that state values require a current
    registration; the helper self-registers so enrollment does not depend on
    BiometricKit already owning the key. Empirical iOS 18.6 simulator checks
    showed this specific BiometricKit key also persisted without explicit `-1`,
    but the shared helper keeps the registration for keys without an external
    owner.
-2. **Match / non-match** — post the key the app's `LAContext` is waiting on:
+   When enrollment is changed in a daemon session, the original enrollment is
+   restored before that session releases the simulator.
+2. **Match / non-match** — `biometricAuth` first verifies that biometry is
+   enrolled, then posts the key the app's `LAContext` is waiting on:
    - Touch ID: `com.apple.BiometricKit_Sim.fingerTouch.match` / `…nomatch`
    - Face ID: `com.apple.BiometricKit_Sim.pearl.match` / `…nomatch`
 
@@ -126,14 +138,18 @@ BiometricKit Darwin notifications inside the simulator via
 
 | MCP `action`       | iOS result                                    |
 | ------------------ | --------------------------------------------- |
-| `match`            | post `*.match`                                |
-| `fail`             | post `*.nomatch`                              |
+| `enroll`           | set enrollment to `enrolled`                  |
+| `unenroll`         | set enrollment to `not_enrolled`              |
+| `match`            | verify enrolled state, then post `*.match`    |
+| `fail`             | verify enrolled state, then post `*.nomatch`  |
 | `cancel` / `error` | `supported: "partial"` — no simctl equivalent |
 
 ### Limitations
 
 - Simulator only. Physical iOS devices have no public biometric-injection API and return
   `supported: false`.
+- `match` and `fail` never force enrollment. Configure the state first so tests can
+  deterministically cover both enrolled and not-enrolled flows.
 - `cancel` / `error` cannot be injected — the notifications carry only match vs non-match.
   On Android these use the `AutoMobileBiometrics` SDK override, which has no iOS counterpart.
 

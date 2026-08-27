@@ -39,6 +39,7 @@ describe("device state tools", () => {
     expect(getTool).toBeDefined();
     expect(getTool?.requiresDevice).toBe(true);
     expect(() => getTool!.schema.parse({ include: ["doNotDisturb"] })).not.toThrow();
+    expect(() => getTool!.schema.parse({ include: ["biometrics"] })).not.toThrow();
 
     expect(setTool).toBeDefined();
     expect(setTool?.requiresDevice).toBe(true);
@@ -50,6 +51,11 @@ describe("device state tools", () => {
     expect(() =>
       setTool!.schema.parse({
         doNotDisturb: { mode: "priority" },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      setTool!.schema.parse({
+        biometrics: { enrollment: "not_enrolled" },
       }),
     ).not.toThrow();
     expect(() => setTool!.schema.parse({})).toThrow();

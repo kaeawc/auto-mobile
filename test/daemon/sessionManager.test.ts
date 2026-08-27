@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import {
   SessionManager,
+  type BiometricEnrollmentRestorer,
   type KeepScreenAwakeRestorer,
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
@@ -1323,6 +1324,36 @@ describe("SessionManager", () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");
       await sessionManager.releaseSession("session-1");
       expect(sessionManager.getSessionForDevice("emulator-5554")).toBeNull();
+    });
+  });
+
+  describe("biometric enrollment restoration", () => {
+    test("restores the original iOS Simulator enrollment when a session releases", async () => {
+      const restored: string[] = [];
+      const restorer: BiometricEnrollmentRestorer = {
+        restore: async (enrollment) => {
+          restored.push(enrollment);
+        },
+      };
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        () => restorer,
+      );
+      try {
+        await manager.createSession("ios-biometric", "sim-1", "ios");
+        manager.setBiometricEnrollment("ios-biometric", { initialEnrollment: "not_enrolled" });
+        // The initial state is write-once; a later change must not replace it.
+        manager.setBiometricEnrollment("ios-biometric", { initialEnrollment: "enrolled" });
+
+        await manager.releaseSession("ios-biometric");
+
+        expect(restored).toEqual(["not_enrolled"]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
     });
   });
 

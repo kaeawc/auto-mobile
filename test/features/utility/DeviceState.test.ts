@@ -35,6 +35,11 @@ const IOS_SIMULATOR_DND_SET_ON_COMMAND =
 const IOS_SIMULATOR_DND_SET_OFF_COMMAND =
   "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 0 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled";
 const IOS_DND_INDEPENDENT_READBACK_SETTLE_MS = 500;
+const IOS_BIOMETRIC_ENROLLMENT = "com.apple.BiometricKit.enrollmentChanged";
+const IOS_BIOMETRIC_GET_COMMAND =
+  "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -g com.apple.BiometricKit.enrollmentChanged";
+const IOS_BIOMETRIC_UNENROLL_COMMAND =
+  "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.BiometricKit.enrollmentChanged -s com.apple.BiometricKit.enrollmentChanged 0 -g com.apple.BiometricKit.enrollmentChanged -p com.apple.BiometricKit.enrollmentChanged";
 
 function autoAdvanceTimer(): FakeTimer {
   const timer = new FakeTimer();
@@ -75,6 +80,43 @@ describe("DeviceState", () => {
       enabled: true,
       bestEffort: true,
     });
+  });
+
+  test("reads and sets iOS Simulator biometric enrollment", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(IOS_BIOMETRIC_GET_COMMAND, `${IOS_BIOMETRIC_ENROLLMENT} 1\n`);
+    simctl.setCommandResult(
+      IOS_BIOMETRIC_UNENROLL_COMMAND,
+      `${IOS_BIOMETRIC_ENROLLMENT} 0\n${IOS_BIOMETRIC_ENROLLMENT}\n`,
+    );
+    const deviceState = new DeviceState(iosSimulator, { simctl });
+
+    const read = await deviceState.getState(["biometrics"]);
+    const write = await deviceState.setState({
+      biometrics: { enrollment: "not_enrolled" },
+    });
+
+    expect(read).toMatchObject({
+      success: true,
+      biometrics: { enrollment: "enrolled", verified: true },
+    });
+    expect(write).toMatchObject({
+      success: true,
+      biometrics: { enrollment: "not_enrolled", verified: true },
+    });
+    expect(simctl.getMethodCalls("executeCommand")).toEqual([
+      { command: IOS_BIOMETRIC_GET_COMMAND, timeoutMs: undefined },
+      { command: IOS_BIOMETRIC_UNENROLL_COMMAND, timeoutMs: 5000 },
+    ]);
+  });
+
+  test("reports biometric enrollment unsupported outside iOS Simulator", async () => {
+    const deviceState = new DeviceState(androidDevice);
+    const result = await deviceState.setState({ biometrics: { enrollment: "enrolled" } });
+
+    expect(result.success).toBe(false);
+    expect(result.biometrics).toMatchObject({ supported: false, verified: false });
+    expect(result.error).toContain("iOS Simulator");
   });
 
   test("reports iOS 18+ simulator Do Not Disturb read as unsupported (dead legacy key)", async () => {

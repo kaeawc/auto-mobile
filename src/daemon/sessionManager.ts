@@ -10,6 +10,7 @@ import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { toActionableError } from "../models/ActionableError";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
+import { DeviceState, type BiometricEnrollment } from "../features/utility/DeviceState";
 
 /**
  * Device-label → session-UUID map. `buildDeviceLabelMap` assigns each configured
@@ -26,6 +27,16 @@ export type DeviceLabelMap = Record<string, string>;
  */
 export interface KeepScreenAwakeRestorer {
   restore(state: KeepScreenAwakeState): Promise<void>;
+}
+
+/** Original simulator enrollment restored when a session releases its device. */
+export interface BiometricEnrollmentSessionState {
+  initialEnrollment: BiometricEnrollment;
+}
+
+/** Narrow seam for restoring iOS Simulator biometric enrollment on release. */
+export interface BiometricEnrollmentRestorer {
+  restore(enrollment: BiometricEnrollment): Promise<void>;
 }
 
 /**
@@ -50,6 +61,7 @@ export interface SessionCacheData {
   lastObserveTime?: number; // Timestamp of last hierarchy observation
   lastRenderedObservation?: ObserveResult; // Last observation emitted to the agent (sanitized), the #2761 diff baseline
   keepScreenAwake?: KeepScreenAwakeState; // Keep-awake state applied at session setup, restored on release
+  biometricEnrollment?: BiometricEnrollmentSessionState; // Original iOS Simulator biometric enrollment, restored on release
   deviceLabels?: DeviceLabelMap; // Device-label → session map for multi-device (`device:`-labelled) sessions
 }
 
@@ -162,6 +174,7 @@ export interface RebindSessionOptions {
 }
 
 const KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS = 1_000;
+const BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS = 1_000;
 const SESSION_SETUP_DRAIN_TIMEOUT_MS = 1_000;
 const EXPIRY_RELEASE_REASONS = new Set([
   "lazy-expiry",
@@ -249,6 +262,9 @@ export class SessionManager {
   private readonly keepScreenAwakeRestorerFactory: (
     device: BootedDevice,
   ) => KeepScreenAwakeRestorer;
+  private readonly biometricEnrollmentRestorerFactory: (
+    device: BootedDevice,
+  ) => BiometricEnrollmentRestorer;
   private activeSessionExecutionChecker: ActiveSessionExecutionChecker = () => false;
 
   // Session timeout: 30 minutes
@@ -275,11 +291,24 @@ export class SessionManager {
     // tests inject a fake to assert the typed slot's payload reaches `restore`.
     keepScreenAwakeRestorerFactory: (device: BootedDevice) => KeepScreenAwakeRestorer = (device) =>
       new KeepScreenAwakeManager(device),
+    // Simulator enrollment is session-scoped state. Keep this seam parallel to
+    // keep-awake so lifecycle tests never invoke simctl.
+    biometricEnrollmentRestorerFactory: (device: BootedDevice) => BiometricEnrollmentRestorer = (
+      device,
+    ) => ({
+      restore: async (enrollment) => {
+        const result = await new DeviceState(device).setBiometricEnrollmentState(enrollment);
+        if (!result.supported || result.error || result.verified === false) {
+          throw new Error(result.error ?? "Failed to restore iOS Simulator biometric enrollment");
+        }
+      },
+    }),
   ) {
     this.timer = timer;
     this.deviceSessionRepository = deviceSessionRepository;
     this.getBarrier = getBarrier;
     this.keepScreenAwakeRestorerFactory = keepScreenAwakeRestorerFactory;
+    this.biometricEnrollmentRestorerFactory = biometricEnrollmentRestorerFactory;
     // Start periodic cleanup of expired sessions
     this.startCleanupTimer();
   }
@@ -933,9 +962,13 @@ export class SessionManager {
       const pendingSetups =
         setups.length > 0 ? (await this.waitForSessionSetup(sessionId, setups)).pending : null;
       const pendingRestoration = (await this.restoreKeepScreenAwakeBestEffort(session)).pending;
-      const pendingCleanup = [pendingSetups, pendingRestoration].filter(
-        (cleanup): cleanup is Promise<void> => cleanup !== null,
-      );
+      const pendingBiometricRestoration = (await this.restoreBiometricEnrollmentBestEffort(session))
+        .pending;
+      const pendingCleanup = [
+        pendingSetups,
+        pendingRestoration,
+        pendingBiometricRestoration,
+      ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
       const deviceId = session.assignedDevice;
       const releasedAtMs = this.timer.now();
       const releaseSnapshot: SessionReleaseSnapshot = {
@@ -1105,6 +1138,51 @@ export class SessionManager {
     }
   }
 
+  private async restoreBiometricEnrollmentBestEffort(
+    session: Session,
+  ): Promise<{ pending: Promise<void> | null }> {
+    const state = session.cacheData.biometricEnrollment;
+    if (session.platform !== "ios" || !state) {
+      return { pending: null };
+    }
+    const device: BootedDevice = {
+      name: session.assignedDevice,
+      platform: session.platform,
+      deviceId: session.assignedDevice,
+    };
+    const restoration = this.biometricEnrollmentRestorerFactory(device)
+      .restore(state.initialEnrollment)
+      .then(
+        () => ({ outcome: "restored" as const }),
+        (error) => ({ outcome: "failed" as const, error }),
+      );
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timeout = new Promise<{ outcome: "timed-out" }>((resolve) => {
+      timeoutHandle = this.timer.setTimeout(
+        () => resolve({ outcome: "timed-out" }),
+        BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS,
+      );
+    });
+    try {
+      const result = await Promise.race([restoration, timeout]);
+      if (result.outcome === "failed") {
+        logger.warn(
+          `Failed to restore biometric enrollment for session ${session.sessionId}: ${result.error}`,
+        );
+      } else if (result.outcome === "timed-out") {
+        logger.warn(
+          `Timed out after ${BIOMETRIC_ENROLLMENT_RESTORE_TIMEOUT_MS}ms restoring biometric enrollment for session ${session.sessionId}`,
+        );
+        return { pending: restoration.then(() => undefined) };
+      }
+      return { pending: null };
+    } finally {
+      if (timeoutHandle !== undefined) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+    }
+  }
+
   private trackPendingDeviceCleanup(deviceId: string, cleanups: readonly Promise<void>[]): void {
     const previous = this.pendingDeviceCleanups.get(deviceId);
     const cleanup = Promise.allSettled(previous ? [previous, ...cleanups] : cleanups).then(
@@ -1232,6 +1310,23 @@ export class SessionManager {
    */
   getKeepScreenAwake(sessionId: string): KeepScreenAwakeState | undefined {
     return this.getSession(sessionId)?.cacheData.keepScreenAwake;
+  }
+
+  /**
+   * Preserve the pre-session iOS Simulator enrollment state. This setter is
+   * intentionally write-once per session: every later enrollment change must
+   * restore the same state the session first observed.
+   */
+  setBiometricEnrollment(sessionId: string, state: BiometricEnrollmentSessionState): void {
+    if (this.getBiometricEnrollment(sessionId)) {
+      return;
+    }
+    this.updateSessionCache(sessionId, { biometricEnrollment: state });
+  }
+
+  /** Read the original enrollment state without recording session activity. */
+  getBiometricEnrollment(sessionId: string): BiometricEnrollmentSessionState | undefined {
+    return this.getSession(sessionId)?.cacheData.biometricEnrollment;
   }
 
   /**

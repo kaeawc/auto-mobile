@@ -397,9 +397,9 @@
       "type": "object",
       "properties": {
         "action": {
-          "description": "match/fail/cancel/error; cancel/error require Android SDK hook",
+          "description": "match/fail/enroll/unenroll on iOS Simulator; cancel/error require Android SDK hook",
           "type": "string",
-          "enum": ["match", "fail", "cancel", "error"]
+          "enum": ["match", "fail", "cancel", "error", "enroll", "unenroll"]
         },
         "modality": {
           "description": "Modality: any default, fingerprint, or face",
@@ -1574,17 +1574,17 @@
   },
   {
     "name": "getDeviceState",
-    "description": "Read device-level state such as Do Not Disturb",
+    "description": "Read device-level state such as Do Not Disturb and iOS Simulator biometric enrollment",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "include": {
-          "description": "State fields to read; supports doNotDisturb",
+          "description": "State fields to read; supports doNotDisturb and biometrics",
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["doNotDisturb"]
+            "enum": ["doNotDisturb", "biometrics"]
           }
         },
         "platform": {
@@ -1603,6 +1603,28 @@
           "type": "string"
         }
       },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "getIosSimulatorCapabilities",
+    "description": "Discover biometric capabilities for a selected iOS Simulator device type and runtime.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "deviceType": {
+          "description": "CoreSimulator device-type identifier selected from automobile:devices/images.",
+          "type": "string",
+          "minLength": 1
+        },
+        "runtime": {
+          "description": "CoreSimulator runtime identifier selected from automobile:devices/images.",
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": ["deviceType", "runtime"],
       "additionalProperties": false
     }
   },
@@ -7506,7 +7528,7 @@
   },
   {
     "name": "setDeviceState",
-    "description": "Set device state such as Do Not Disturb.",
+    "description": "Set device state such as Do Not Disturb and iOS Simulator biometric enrollment.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -7525,6 +7547,19 @@
               "enum": ["off", "none", "priority", "alarms"]
             }
           },
+          "additionalProperties": false
+        },
+        "biometrics": {
+          "description": "iOS Simulator biometric enrollment state to apply.",
+          "type": "object",
+          "properties": {
+            "enrollment": {
+              "description": "Set iOS Simulator biometric enrollment state.",
+              "type": "string",
+              "enum": ["enrolled", "not_enrolled"]
+            }
+          },
+          "required": ["enrollment"],
           "additionalProperties": false
         },
         "platform": {

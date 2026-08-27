@@ -44,7 +44,14 @@ final class WebSocketServer: @unchecked Sendable {
     private let broadcastSink: (@Sendable (Data) -> Void)?
 
     private let queue = DispatchQueue(label: "com.ctrlproxy.server")
-    private let commandQueue = DispatchQueue(label: "com.ctrlproxy.command")
+
+    /// Serial command execution. Each dispatched command chains after the previous one's
+    /// completion, so per-connection command ordering is preserved even though `handle` is
+    /// now `async` (the reference used a single serial `commandQueue`; this is the
+    /// async-native equivalent). Lock-guarded so `dispatchCommand` is callable from any
+    /// thread, and non-blocking so the accept `queue` is freed the instant a command is
+    /// enqueued rather than hopping onto a second serial queue (issue #5374).
+    private let commandTail = OSAllocatedUnfairLock<Task<Void, Never>?>(initialState: nil)
 
     // Queue-confined (accessed only on `queue`).
     private var listener: NWListener?
@@ -194,31 +201,41 @@ final class WebSocketServer: @unchecked Sendable {
         dispatchCommand(data, responder: connection)
     }
 
-    /// Runs one command off the accept `queue` on the serial `commandQueue`, so a slow
-    /// XCUITest walk / screenshot / SDK call cannot starve `/health` or new accepts
-    /// (issue #5374). `responder` is captured strongly so it outlives the hop.
+    /// Enqueues one command onto the serial task-chain so it runs off the accept `queue` —
+    /// a slow XCUITest walk / screenshot / SDK call cannot starve `/health` or new accepts
+    /// (issue #5374) — while `await previous?.value` keeps commands strictly ordered.
+    /// `responder` is captured strongly so it outlives the hop; enqueuing is non-blocking.
     func dispatchCommand(_ data: Data, responder: any WebSocketResponding) {
-        commandQueue.async { [weak self] in
-            self?.handleMessage(data, responder: responder)
+        commandTail.withLock { tail in
+            let previous = tail
+            tail = Task { [weak self] in
+                await previous?.value
+                await self?.handleMessage(data, responder: responder)
+            }
         }
     }
 
     /// Decode → dispatch → encode → send, recovering the correlation id and emitting a
-    /// structured error envelope on a decode failure. Runs on `commandQueue`.
-    func handleMessage(_ data: Data, responder: any WebSocketResponding) {
-        dispatchPrecondition(condition: .onQueue(commandQueue))
+    /// structured error envelope on a decode failure. The decode→handle→flush→encode core is
+    /// bracketed in `perf.withScope` so the task-local perf call-tree is bound for this
+    /// command and every `serial`/`track` inside `handle` (including across its `await`s into
+    /// `@MainActor` collaborators, same task) accumulates — without it every perf call is a
+    /// silent no-op (§9.5). Runs on the serial command task-chain.
+    func handleMessage(_ data: Data, responder: any WebSocketResponding) async {
         do {
             let request = try JSONDecoder().decode(WebSocketRequest.self, from: data)
             print("[WebSocketServer] Received request type=\(request.typeString) requestId=\(request.requestId ?? "nil")")
 
-            perf.serial("handleRequest:\(request.typeString)")
-            let startTime = Date()
-            let response = commandHandler.handle(request)
-            let totalTimeMs = Int64(Date().timeIntervalSince(startTime) * 1000)
-            perf.end()
+            let responseData = try await perf.withScope {
+                self.perf.serial("handleRequest:\(request.typeString)")
+                let startTime = Date()
+                let response = await self.commandHandler.handle(request)
+                let totalTimeMs = Int64(Date().timeIntervalSince(startTime) * 1000)
+                self.perf.end()
 
-            let perfTiming = flushPerfTiming()
-            let responseData = try encodeResponse(response, totalTimeMs: totalTimeMs, perfTiming: perfTiming)
+                let perfTiming = self.flushPerfTiming()
+                return try self.encodeResponse(response, totalTimeMs: totalTimeMs, perfTiming: perfTiming)
+            }
             responder.send(responseData)
         } catch {
             print("[WebSocketServer] Error handling message: \(error)")

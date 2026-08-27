@@ -429,7 +429,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     // would grow without bound — but consuming the pacing slot for a frame that
     // never reaches stdin would silently shorten the timeline. Dropping before
     // admission leaves the slot owed, so the next frame pads it as a gap.
-    if (this.isEncoderCongested(state, encoder.stdin)) {
+    if (this.isBackloggedForAdmission(state, encoder.stdin)) {
       state.framesDropped += 1;
       return;
     }
@@ -547,6 +547,22 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
    * True when the encoder already holds {@link MAX_BUFFERED_FRAMES} frames of
    * input. Deliberately not `writableNeedDrain` — see {@link MAX_BUFFERED_FRAMES}.
    */
+  /**
+   * Admission-side backlog check. Stricter than {@link isEncoderCongested}: the
+   * buffered-frame budget only measures the stream, so consuming one buffered
+   * write drops it back under the limit while older padding is still queued.
+   * Admitting there would append a new multi-megabyte payload — plus its gap
+   * fill — faster than the encoder drains, so a slow encoder could grow the
+   * queue without bound. A frame rejected here leaves its slot owed, and the
+   * next admitted frame pads it.
+   */
+  private isBackloggedForAdmission(
+    state: CaptureState,
+    stdin: NonNullable<FfmpegProcess["stdin"]>,
+  ): boolean {
+    return state.pendingWrites.length > 0 || this.isEncoderCongested(state, stdin);
+  }
+
   private isEncoderCongested(
     state: CaptureState,
     stdin: NonNullable<FfmpegProcess["stdin"]>,

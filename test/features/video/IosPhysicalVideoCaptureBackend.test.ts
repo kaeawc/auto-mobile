@@ -608,6 +608,39 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     await harness.backend.stop(handle);
   });
 
+  // The buffered-frame budget only measures what the stream itself holds. When
+  // the encoder consumes one buffered write, `writableLength` drops back under
+  // the budget while older padding is STILL queued — admitting the next live
+  // frame there lets a slow encoder grow the queue faster than it drains.
+  test("drops live frames while earlier padding is still queued", async function () {
+    const harness = makeHarness({ now: () => 1_000 });
+    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
+
+    harness.helper.emitFrame(128, 128, 128 * 4, 0x11, 0);
+    const encoder = harness.ffmpeg.processes[0];
+    const frameBytes = 128 * 128 * 4;
+    encoder.stdin.pause();
+
+    // 500ms at 10fps owes 4 pads plus the frame; the 2-frame budget leaves the
+    // remainder queued.
+    harness.helper.emitFrame(128, 128, 128 * 4, 0x22, 500);
+
+    // The encoder consumes one buffered write. `drain` has not fired yet, so the
+    // queue is still non-empty while the buffered-frame budget looks free again.
+    expect(encoder.stdin.read(frameBytes)?.length).toBe(frameBytes);
+    expect(encoder.stdin.writableLength).toBeLessThan(frameBytes * 2);
+
+    // A live frame arriving in that window must be dropped, not appended.
+    harness.helper.emitFrame(128, 128, 128 * 4, 0x33, 600);
+
+    encoder.stdin.resume();
+    await harness.backend.stop(handle);
+
+    // 1 + 4 pads + 1: the dropped frame adds nothing, and its slot stays owed.
+    expect(encoder.bytesWritten / frameBytes).toBe(6);
+    expect(encoder.written.some((chunk) => chunk[0] === 0x33)).toBe(false);
+  });
+
   test("releases gap padding on drain instead of truncating it synchronously", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(makeConfig({ fps: 10 }));

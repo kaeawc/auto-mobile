@@ -68,11 +68,21 @@ export function buildAndroidAvdCapabilityInventory(
  * no simulator implementation and is explicit so clients do not infer support
  * from the device type.
  */
-export function iosSimulatorCapabilityInventory(): VirtualDeviceCapabilityInventory {
+export function iosSimulatorCapabilityInventory(
+  isAvailable: boolean = true,
+  availabilityError?: string,
+): VirtualDeviceCapabilityInventory {
   return {
     schemaVersion: VIRTUAL_DEVICE_CAPABILITY_INVENTORY_SCHEMA_VERSION,
     capabilities: [
-      { id: "ios.simulator.biometric", state: "available", source: "platform" },
+      {
+        id: "ios.simulator.biometric",
+        state: isAvailable ? "available" : "unavailable",
+        source: "platform",
+        ...(isAvailable
+          ? {}
+          : { reason: availabilityError ?? "The iOS Simulator runtime is unavailable." }),
+      },
       {
         id: "ios.simulator.nfc",
         state: "unsupported",

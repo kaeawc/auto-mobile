@@ -8,7 +8,13 @@ import os
 /// the fake is genuinely `Sendable`. As in the reference, scheduled callbacks and
 /// resumed waiters run OUTSIDE the lock so a callback that re-enters the timer cannot
 /// deadlock.
-final class FakeTimer: ProxyTimer {
+///
+/// Named `FakeProxyTimer` (not `FakeTimer`) so the differential-parity drivers can name
+/// the REFERENCE module's public `FakeTimer` unqualified: the reference module also
+/// exports a `public class CtrlProxy` type that shadows the module name, so
+/// `CtrlProxy.FakeTimer` parses as member access on that type and fails — leaving an
+/// unshadowed `FakeTimer` in the test target as the only way to reach the reference fake.
+final class FakeProxyTimer: ProxyTimer {
     enum Mode: Sendable {
         case instant // All waits complete immediately.
         case manual // Waits only complete when manually advanced.

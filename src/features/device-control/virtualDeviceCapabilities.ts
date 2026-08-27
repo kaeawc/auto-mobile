@@ -49,10 +49,7 @@ function avdCapabilityState(
   if (kind === "boolean" && ENABLED_BOOLEAN_AVD_VALUES.has(normalized)) {
     return "available";
   }
-  if (
-    kind === "camera" &&
-    (ENABLED_CAMERA_AVD_VALUES.has(normalized) || /^webcam\d+$/.test(normalized))
-  ) {
+  if (kind === "camera" && ENABLED_CAMERA_AVD_VALUES.has(normalized)) {
     return "available";
   }
   return undefined;

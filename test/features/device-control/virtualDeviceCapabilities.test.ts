@@ -29,6 +29,7 @@ describe("virtual device capability inventories", () => {
   test("returns an empty inventory when an AVD exposes no mapped or recognized hardware features", () => {
     expect(
       buildAndroidAvdCapabilityInventory({
+        "hw.camera.back": "webcam999",
         "hw.fingerprint": "disabled",
         "hw.gps": "corrupted",
         "hw.ramSize": "2048",

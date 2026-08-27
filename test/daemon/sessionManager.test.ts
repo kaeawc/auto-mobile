@@ -1355,6 +1355,66 @@ describe("SessionManager", () => {
         manager.stopCleanupTimer();
       }
     });
+
+    test("restores the old simulator enrollment before a session rebinds", async () => {
+      const restored: Array<{ deviceId: string; enrollment: string }> = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        (device) => ({
+          restore: async (enrollment) => {
+            restored.push({ deviceId: device.deviceId, enrollment });
+          },
+        }),
+      );
+      try {
+        await manager.createSession("ios-rebind", "sim-a", "ios");
+        manager.setBiometricEnrollment("ios-rebind", { initialEnrollment: "enrolled" });
+
+        await manager.rebindSession("ios-rebind", "sim-b", "ios");
+
+        expect(restored).toEqual([{ deviceId: "sim-a", enrollment: "enrolled" }]);
+        expect(manager.getBiometricEnrollment("ios-rebind")).toBeUndefined();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("waits for an active biometric setup before restoring the old simulator", async () => {
+      const restored: string[] = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        () => ({ restore: async (enrollment) => restored.push(enrollment) }),
+      );
+      const started = Promise.withResolvers<void>();
+      const finished = Promise.withResolvers<void>();
+      try {
+        const session = await manager.createSession("ios-rebind-active", "sim-a", "ios");
+        manager.setBiometricEnrollment("ios-rebind-active", { initialEnrollment: "enrolled" });
+        const setup = manager.trackSessionSetup(session, async () => {
+          started.resolve();
+          await finished.promise;
+        });
+        await started.promise;
+
+        const rebind = manager.rebindSession("ios-rebind-active", "sim-b", "ios");
+        await Promise.resolve();
+        expect(restored).toEqual([]);
+
+        finished.resolve();
+        await setup;
+        await rebind;
+
+        expect(restored).toEqual(["enrolled"]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
   });
 
   describe("statistics", () => {

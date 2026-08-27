@@ -21,6 +21,7 @@ import {
 } from "./toolSchemaHelpers";
 import { DaemonState } from "../daemon/daemonState";
 import type { SessionManager } from "../daemon/sessionManager";
+import { runSessionBiometricMutation } from "./sessionBiometricEnrollment";
 
 // Schema definitions
 export const setActiveDeviceSchema = addSessionUuidToSchema(
@@ -386,15 +387,16 @@ export function registerUtilityTools() {
         ...capture.failure,
       });
     }
-    const result = await deviceState.setState({
-      doNotDisturb: args.doNotDisturb,
-      biometrics: args.biometrics,
-    });
-    if (result.success && capture.sessionManager && capture.initialEnrollment) {
-      capture.sessionManager.setBiometricEnrollment(args.sessionUuid!, {
-        initialEnrollment: capture.initialEnrollment,
-      });
-    }
+    const result = await runSessionBiometricMutation(
+      capture.sessionManager,
+      args.sessionUuid,
+      capture.initialEnrollment,
+      () =>
+        deviceState.setState({
+          doNotDisturb: args.doNotDisturb,
+          biometrics: args.biometrics,
+        }),
+    );
 
     return createJSONToolResponse({
       message: result.success

@@ -40,6 +40,8 @@ const IOS_BIOMETRIC_GET_COMMAND =
   "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -g com.apple.BiometricKit.enrollmentChanged";
 const IOS_BIOMETRIC_UNENROLL_COMMAND =
   "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.BiometricKit.enrollmentChanged -s com.apple.BiometricKit.enrollmentChanged 0 -g com.apple.BiometricKit.enrollmentChanged -p com.apple.BiometricKit.enrollmentChanged";
+const IOS18_BIOMETRIC_ENROLL_COMMAND =
+  "spawn 7B3A3792-DB53-4654-BA94-27A1D305C3B7 notifyutil -1 com.apple.BiometricKit.enrollmentChanged -s com.apple.BiometricKit.enrollmentChanged 1 -g com.apple.BiometricKit.enrollmentChanged -p com.apple.BiometricKit.enrollmentChanged";
 
 function autoAdvanceTimer(): FakeTimer {
   const timer = new FakeTimer();
@@ -117,6 +119,27 @@ describe("DeviceState", () => {
     expect(result.success).toBe(false);
     expect(result.biometrics).toMatchObject({ supported: false, verified: false });
     expect(result.error).toContain("iOS Simulator");
+  });
+
+  test("retains a verified biometric result when a sibling state request fails", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      IOS18_BIOMETRIC_ENROLL_COMMAND,
+      `${IOS_BIOMETRIC_ENROLLMENT} 1\n${IOS_BIOMETRIC_ENROLLMENT}\n`,
+    );
+    const deviceState = new DeviceState(ios18Simulator, { simctl });
+
+    const result = await deviceState.setState({
+      doNotDisturb: { enabled: true },
+      biometrics: { enrollment: "enrolled" },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.doNotDisturb?.supported).toBe(false);
+    expect(result.biometrics).toMatchObject({
+      enrollment: "enrolled",
+      verified: true,
+    });
   });
 
   test("reports iOS 18+ simulator Do Not Disturb read as unsupported (dead legacy key)", async () => {

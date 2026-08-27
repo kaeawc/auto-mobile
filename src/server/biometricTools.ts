@@ -8,6 +8,7 @@ import { computeIosSimulatorCapabilities } from "../features/utility/iosSimulato
 import { DeviceState, type BiometricEnrollment } from "../features/utility/DeviceState";
 import { DaemonState } from "../daemon/daemonState";
 import type { SessionManager } from "../daemon/sessionManager";
+import { runSessionBiometricMutation } from "./sessionBiometricEnrollment";
 
 // Type definitions for better TypeScript support
 export interface BiometricAuthArgs extends BiometricAuthOptions {
@@ -91,22 +92,23 @@ export function registerBiometricTools() {
     try {
       const capture = await captureBiometricEnrollment(device, args);
       const biometricAuth = new BiometricAuth(device);
-      const result = await biometricAuth.execute(
-        {
-          action: args.action,
-          modality: args.modality,
-          fingerprintId: args.fingerprintId,
-          errorCode: args.errorCode,
-          ttlMs: args.ttlMs,
-        },
-        progress,
+      const result = await runSessionBiometricMutation(
+        capture.sessionManager,
+        args.sessionUuid,
+        capture.initialEnrollment,
+        () =>
+          biometricAuth.execute(
+            {
+              action: args.action,
+              modality: args.modality,
+              fingerprintId: args.fingerprintId,
+              errorCode: args.errorCode,
+              ttlMs: args.ttlMs,
+            },
+            progress,
+          ),
       );
 
-      if (result.success && capture.sessionManager && capture.initialEnrollment) {
-        capture.sessionManager.setBiometricEnrollment(args.sessionUuid!, {
-          initialEnrollment: capture.initialEnrollment,
-        });
-      }
       if (!result.success) {
         throw new ActionableError(result.error || `Failed to execute biometric ${args.action}`);
       }

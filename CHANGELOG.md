@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.0.66] - 2026-08-27
+
+### Fixed
+
+- Android API 35: CtrlProxy accessibility service is never bound (pm service query omits it) → getAndroid fails at runner-connect ([#5767](https://github.com/kaeawc/auto-mobile/issues/5767)) (android, bot-filed, routine:manual-test)
+
+### Other
+
+- flake(test): Daemon manager transient-process liveness test times out on windows-latest ([#5764](https://github.com/kaeawc/auto-mobile/issues/5764)) (flaky test, ci, testing)
+- DevicePool: carry observation freshness so a newer start-path rename can win ([#5753](https://github.com/kaeawc/auto-mobile/issues/5753))
+- refactor(devices): per-source liveness so a failed simctl sweep does not discard confirmed physical iOS devices ([#5683](https://github.com/kaeawc/auto-mobile/issues/5683))
+
 ## [v0.0.65] - 2026-08-27
 
 ### Fixed

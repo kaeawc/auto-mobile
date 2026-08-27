@@ -25,11 +25,13 @@ Critical path (the rewrite's actual goal — concurrency correctness + parity):
 
 0. Scaffold + wire-decode parity gate ✅
 1. Pure/stateless core (models, StructuralHasher, HierarchyMerger, geometry
-   helpers, **framing statics + wire-error mapping** ⟵ in progress)
-2. Networking core (queue-confinement: WebSocketServer / connection / byte channel)
-3. Off-main SDK actors (SdkHierarchyCache transactional, SDK/DB clients async)
+   helpers, framing statics + wire-error mapping) ✅
+2. Networking core (queue-confinement: WebSocketServer / connection / byte channel) ✅
+3. Off-main SDK layer (SdkHierarchyCache **lock-confined** + transactional `reconcile`;
+   SDK/DB clients async; OSLogReader) ✅ — the cache is a lock, not the actor first
+   proposed here; see [STATUS.md](STATUS.md) §6 for the (approved) rationale.
 4. `@MainActor` UI domain (ElementLocator, GesturePerformer, HierarchyDebouncer,
-   DisplayLinkFPSMonitor, VoiceOver)
+   DisplayLinkFPSMonitor, VoiceOver) ⟵ **NEXT**
 5. PerfProvider (TaskLocal call-tree + confined pool)
 6. CommandHandler (Sendable POD router) + CtrlProxy coordinator
 7. Cutover (point the runner/app at the rewrite; retire the reference)

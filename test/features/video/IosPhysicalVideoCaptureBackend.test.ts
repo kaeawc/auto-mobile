@@ -113,9 +113,23 @@ class FakeCaptureHelper extends EventEmitter implements PhysicalIosCaptureHelper
     return { code: 0, signal: null };
   }
 
-  emitFrame(width: number, height: number, bytesPerRow = width * 4, fill = 0xaa): void {
+  /**
+   * Capture timestamps advance by more than one 15fps interval by default, so a
+   * plain `emitFrame()` is admitted by the pacing gate. Pass `timestampMs`
+   * explicitly to exercise a device pushing frames faster than the request.
+   */
+  private clockMs = 0;
+
+  emitFrame(
+    width: number,
+    height: number,
+    bytesPerRow = width * 4,
+    fill = 0xaa,
+    timestampMs?: number,
+  ): void {
+    this.clockMs += 100;
     this.emit("frame", {
-      header: { width, height, bytesPerRow, timestampMs: 1 },
+      header: { width, height, bytesPerRow, timestampMs: timestampMs ?? this.clockMs },
       pixels: Buffer.alloc(bytesPerRow * height, fill),
     } satisfies DecodedFrame);
   }
@@ -305,6 +319,38 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     await harness.backend.stop(handle);
   });
 
+  // AVFoundation device capture is not fps-throttled by the helper, so a 60fps
+  // device feeding a `-framerate 15` rawvideo stream would play back 4x slow.
+  test("paces an unthrottled device down to the requested fps", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
+
+    // 20 frames at 60fps spans ~317ms of capture; at 10fps (100ms slots) that
+    // admits the frames at t≈0, 100, 200 and 300 — four, not twenty.
+    for (let i = 0; i < 20; i++) {
+      harness.helper.emitFrame(4, 2, 16, 0xaa, i * 16.67);
+    }
+
+    const framePayloadBytes = 4 * 2 * 4;
+    expect(harness.ffmpeg.processes[0].bytesWritten / framePayloadBytes).toBe(4);
+    await harness.backend.stop(handle);
+  });
+
+  test("resyncs pacing after a capture gap instead of admitting a catch-up burst", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
+
+    harness.helper.emitFrame(4, 2, 16, 0xaa, 0);
+    // Device idled for 5s (static screen), then resumed at 60fps.
+    for (let i = 0; i < 5; i++) {
+      harness.helper.emitFrame(4, 2, 16, 0xaa, 5000 + i * 16.67);
+    }
+
+    const framePayloadBytes = 4 * 2 * 4;
+    expect(harness.ffmpeg.processes[0].bytesWritten / framePayloadBytes).toBe(2);
+    await harness.backend.stop(handle);
+  });
+
   test("honors resolution and maxDuration like the simulator path", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(
@@ -446,6 +492,50 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
 
     expect(harness.helper.stopped).toBe(1);
     expect(harness.ffmpeg.processes[0].killSignals).toEqual(["SIGKILL"]);
+  });
+
+  test("stop rejects a recording whose encoder exited nonzero", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.emitFrame(4, 2);
+
+    const encoder = harness.ffmpeg.processes[0];
+    encoder.stderr.write("No space left on device");
+    encoder.exit(1);
+
+    await expect(harness.backend.stop(handle)).rejects.toThrow(
+      "FFmpeg failed to finalize the physical iOS recording",
+    );
+  });
+
+  test("prefers a locally built helper named by the env override", async function () {
+    const ffmpeg = new FakeFfmpegClient();
+    const helper = new FakeCaptureHelper();
+    const helperOptions: { binaryPath: string }[] = [];
+    let providerCalls = 0;
+    const backend = new IosPhysicalVideoCaptureBackend({
+      ffmpegClient: ffmpeg,
+      helperProvider: {
+        ensure: async () => {
+          providerCalls += 1;
+          return "/released/screen-capture-helper";
+        },
+      },
+      deviceLister: new FakeDeviceLister([captureDevice(PHYSICAL_UDID)]),
+      createHelper: (created) => {
+        helperOptions.push({ binaryPath: created.binaryPath });
+        return helper;
+      },
+      platformProvider: () => "darwin",
+      fileSize: async () => 1,
+      env: { AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER: "/local/build/screen-capture-helper" },
+      helperPathExists: (candidate) => candidate === "/local/build/screen-capture-helper",
+    });
+
+    await backend.start(makeConfig());
+
+    expect(helperOptions[0].binaryPath).toBe("/local/build/screen-capture-helper");
+    expect(providerCalls).toBe(0);
   });
 
   test("stop rejects a handle that did not come from this backend", async function () {

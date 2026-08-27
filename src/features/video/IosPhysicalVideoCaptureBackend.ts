@@ -17,6 +17,11 @@ import {
   type IosScreenCaptureHelperOptions,
 } from "../screen-stream/IOSScreenCaptureHelper";
 import { ScreenCaptureHelperProvider } from "../screen-stream/ScreenCaptureHelperProvider";
+import {
+  IOS_SCREEN_CAPTURE_HELPER_ENV,
+  readScreenCaptureHelperEnvOverride,
+  resolveIosScreenCaptureHelperPath,
+} from "../screen-stream/screenCaptureHelperPath";
 import type {
   RecordingHandle,
   RecordingResult,
@@ -94,6 +99,10 @@ export interface IosPhysicalVideoCaptureBackendOptions {
   /** Injectable so file-size reporting stays device- and disk-free in tests. */
   fileSize?: (filePath: string) => Promise<number | undefined>;
   encoderFinalizeTimeoutMs?: number;
+  /** Env seam so the developer override can be exercised without touching process.env. */
+  env?: NodeJS.ProcessEnv;
+  /** Existence seam for the overridden helper path. */
+  helperPathExists?: (candidate: string) => boolean;
 }
 
 interface IosPhysicalBackendHandle {
@@ -111,6 +120,10 @@ interface CaptureState {
   geometry?: { width: number; height: number };
   /** Encoder chosen up front so the first frame can spawn ffmpeg synchronously. */
   encoderName: string;
+  /** Capture timestamp the next admitted frame must reach, for fps pacing. */
+  nextFrameDueMs?: number;
+  /** Frames discarded purely to hold the declared cadence (not a fault). */
+  framesPacedOut: number;
   framesWritten: number;
   framesDropped: number;
   helperStderr: string[];
@@ -137,6 +150,8 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
   private readonly platformProvider: () => NodeJS.Platform;
   private readonly fileSize: (filePath: string) => Promise<number | undefined>;
   private readonly encoderFinalizeTimeoutMs: number;
+  private readonly env: NodeJS.ProcessEnv;
+  private readonly helperPathExists?: (candidate: string) => boolean;
 
   constructor(options: IosPhysicalVideoCaptureBackendOptions = {}) {
     this.ffmpegClient = options.ffmpegClient ?? new DefaultFfmpegClient();
@@ -148,6 +163,8 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     this.fileSize = options.fileSize ?? getFileSize;
     this.encoderFinalizeTimeoutMs =
       options.encoderFinalizeTimeoutMs ?? IOS_PHYSICAL_ENCODER_FINALIZE_TIMEOUT_MS;
+    this.env = options.env ?? process.env;
+    this.helperPathExists = options.helperPathExists;
   }
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
@@ -175,6 +192,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       encoderName,
       framesWritten: 0,
       framesDropped: 0,
+      framesPacedOut: 0,
       helperStderr: [],
     };
     const helper = this.createHelper({
@@ -247,6 +265,8 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       });
     }
 
+    this.assertEncoderSucceeded(state, handle.outputPath);
+
     const sizeBytes = await this.fileSize(handle.outputPath);
     logger.info(
       `[IosPhysicalVideo] recording ${handle.recordingId} wrote ${state.framesWritten} frame(s) to ${handle.outputPath}.`,
@@ -254,7 +274,12 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     if (state.framesDropped > 0) {
       logger.warn(
         `[IosPhysicalVideo] dropped ${state.framesDropped} frame(s) whose geometry differed from the locked ` +
-          `${state.geometry?.width}x${state.geometry?.height} capture size (device rotation is not re-negotiated mid-recording).`,
+          `${state.geometry?.width}x${state.geometry?.height} capture size, or arrived while the encoder was congested.`,
+      );
+    }
+    if (state.framesPacedOut > 0) {
+      logger.debug(
+        `[IosPhysicalVideo] paced out ${state.framesPacedOut} frame(s) to hold the requested cadence.`,
       );
     }
 
@@ -292,6 +317,10 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       return;
     }
 
+    if (!this.admitForPacing(frame, state, config.fps)) {
+      return;
+    }
+
     const encoder = state.encoder;
     if (!encoder?.stdin || encoder.stdin.writableEnded) {
       state.framesDropped += 1;
@@ -307,6 +336,33 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     }
     encoder.stdin.write(packFrame(frame));
     state.framesWritten += 1;
+  }
+
+  /**
+   * Hold the declared cadence. AVFoundation device capture is deliberately not
+   * FPS-throttled by the helper (`DeviceCaptureSession.deviceFPS` documents
+   * this), so a device pushing 30 or 60 fps into a `-framerate 15` rawvideo
+   * stream would timestamp every frame at 15 fps — the recording would play back
+   * 2-4x slow and `-t` would cut it short. Admit a frame only once its capture
+   * timestamp reaches the next scheduled slot.
+   */
+  private admitForPacing(frame: DecodedFrame, state: CaptureState, fps: number): boolean {
+    const intervalMs = 1000 / fps;
+    const timestampMs = frame.header.timestampMs;
+    if (state.nextFrameDueMs === undefined) {
+      state.nextFrameDueMs = timestampMs + intervalMs;
+      return true;
+    }
+    if (timestampMs < state.nextFrameDueMs) {
+      state.framesPacedOut += 1;
+      return false;
+    }
+    // Advance by whole intervals so the cadence does not drift, but resync after
+    // a gap (helper stall, or a device that idles while the screen is static)
+    // rather than admitting a burst to "catch up".
+    const nextSlot = state.nextFrameDueMs + intervalMs;
+    state.nextFrameDueMs = nextSlot > timestampMs ? nextSlot : timestampMs + intervalMs;
+    return true;
   }
 
   private startEncoder(
@@ -331,6 +387,33 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       // stopped, so EPIPE here is expected rather than a fault to surface.
       logger.debug(`[IosPhysicalVideo] encoder stdin error (expected on encoder exit): ${error}`);
     });
+  }
+
+  /**
+   * A nonzero ffmpeg exit (full disk, rejected encoder settings) leaves a
+   * truncated file behind. Returning a successful RecordingResult would let the
+   * service archive it as complete, so surface the encoder's own stderr instead
+   * — the simulator path checks its tracker the same way.
+   */
+  private assertEncoderSucceeded(state: CaptureState, outputPath: string): void {
+    const exitState = state.encoderTracker?.exitState;
+    if (!exitState) {
+      return;
+    }
+    const failed =
+      (exitState.exitCode !== undefined &&
+        exitState.exitCode !== null &&
+        exitState.exitCode !== 0) ||
+      Boolean(exitState.signal);
+    if (!failed) {
+      return;
+    }
+    const stderr = state.encoderTracker?.stderr.join("").trim();
+    throw new ActionableError(
+      `FFmpeg failed to finalize the physical iOS recording at ${outputPath} ` +
+        `(exitCode: ${exitState.exitCode ?? "null"}, signal: ${exitState.signal ?? "null"}).` +
+        (stderr ? `\nffmpeg: ${stderr}` : ""),
+    );
   }
 
   /** Stop a capture that was cancelled between spawn and handle hand-off. */
@@ -400,12 +483,23 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
   }
 
   private async resolveHelperBinary(): Promise<string> {
+    // Daemon startup skips the release prefetch when the developer override is
+    // set, so a local build must win over the pinned release asset — the same
+    // order IosH264Source.resolveHelperPath() uses.
+    const override = readScreenCaptureHelperEnvOverride(this.env);
+    if (override) {
+      return resolveIosScreenCaptureHelperPath(override, {
+        env: this.env,
+        exists: this.helperPathExists,
+      });
+    }
+
     const binaryPath = await this.helperProvider.ensure();
     if (!binaryPath) {
       throw new ActionableError(
         "Physical iOS video recording requires the signed screen-capture-helper from the matching GitHub Release, " +
           "which could not be resolved. For local development, build it with `bash scripts/ios/swift-build.sh` and " +
-          "set AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER to the resulting absolute path.",
+          `set ${IOS_SCREEN_CAPTURE_HELPER_ENV} to the resulting absolute path.`,
       );
     }
     return binaryPath;

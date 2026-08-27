@@ -59,9 +59,10 @@ const IOS_DYNAMIC_ISLAND_IDENTIFIERS = new Set([
   "iphone-16-pro",
   "iphone-16-pro-max",
   "iphone-17",
-  "iphone-17-air",
   "iphone-17-pro",
   "iphone-17-pro-max",
+  "iphone-air",
+  "iphone-17e",
 ]);
 
 const ANDROID_NO_CUTOUT_IDS = new Set([
@@ -97,12 +98,17 @@ const ANDROID_HOLE_PUNCH_IDS = new Set([
   "pixel_9_pro",
   "pixel_9_pro_xl",
   "pixel_9_pro_fold",
-  "pixel_fold",
 ]);
 
 function simulatorDeviceTypeName(deviceType: string): string {
   const prefix = "com.apple.CoreSimulator.SimDeviceType.";
-  return deviceType.startsWith(prefix) ? deviceType.slice(prefix.length).toLowerCase() : "";
+  return deviceType.startsWith(prefix)
+    ? deviceType
+        .slice(prefix.length)
+        .toLowerCase()
+        .replaceAll(/-+/g, "-")
+        .replaceAll(/(^-|-$)/g, "")
+    : "";
 }
 
 /**

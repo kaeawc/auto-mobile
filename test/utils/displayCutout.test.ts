@@ -12,18 +12,28 @@ describe("classifyDisplayCutout", () => {
     expect(
       classifyDisplayCutout(
         "ios",
-        "com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation",
+        "com.apple.CoreSimulator.SimDeviceType.iPhone-SE--2nd-generation-",
+      ),
+    ).toBe("none");
+    expect(
+      classifyDisplayCutout(
+        "ios",
+        "com.apple.CoreSimulator.SimDeviceType.iPod-touch--7th-generation-",
       ),
     ).toBe("none");
     expect(classifyDisplayCutout("ios", "com.apple.CoreSimulator.SimDeviceType.iPhone-14")).toBe(
       "notch",
     );
-    expect(classifyDisplayCutout("ios", "com.apple.CoreSimulator.SimDeviceType.iPhone-17")).toBe(
+    expect(classifyDisplayCutout("ios", "com.apple.CoreSimulator.SimDeviceType.iPhone-Air")).toBe(
+      "dynamic_island",
+    );
+    expect(classifyDisplayCutout("ios", "com.apple.CoreSimulator.SimDeviceType.iPhone-17e")).toBe(
       "dynamic_island",
     );
   });
 
   test("keeps an unknown model unclassified instead of guessing from camera hardware", () => {
     expect(classifyDisplayCutout("android", "future_phone_with_three_cameras")).toBe("unknown");
+    expect(classifyDisplayCutout("android", "pixel_fold")).toBe("unknown");
   });
 });

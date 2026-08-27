@@ -1,5 +1,9 @@
 import { logger } from "../logger";
 import { dirname, join } from "node:path";
+import {
+  buildAndroidAvdCapabilityInventory,
+  type VirtualDeviceCapabilityInventory,
+} from "../../features/device-control/virtualDeviceCapabilities";
 
 /** Minimum guest memory required by modern Play Store system images. */
 export const MIN_AVD_RAM_MB = 2048;
@@ -21,6 +25,8 @@ export interface AvdConfig {
   ramSizeInvalid?: boolean;
   deviceName?: string;
   tag?: string;
+  /** Stable hardware features derived from the AVD's local profile settings. */
+  capabilityInventory?: VirtualDeviceCapabilityInventory;
 }
 
 /**
@@ -163,6 +169,7 @@ export function parseAvdConfig(content: string): AvdConfig {
     ...parseDeviceMetadata(props),
     ...parseApiMetadata(props),
     ...parseArchitecture(props),
+    capabilityInventory: buildAndroidAvdCapabilityInventory(Object.fromEntries(props)),
   };
 }
 

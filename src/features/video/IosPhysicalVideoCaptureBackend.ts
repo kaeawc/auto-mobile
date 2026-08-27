@@ -162,9 +162,14 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       );
     }
 
+    const { abortSignal } = config;
+    throwIfCaptureStartAborted(abortSignal);
     const encoderName = await this.resolveEncoder();
+    throwIfCaptureStartAborted(abortSignal);
     const binaryPath = await this.resolveHelperBinary();
+    throwIfCaptureStartAborted(abortSignal);
     const uniqueId = await this.resolveCaptureUniqueId(binaryPath, device);
+    throwIfCaptureStartAborted(abortSignal);
 
     const state: CaptureState = {
       encoderName,
@@ -194,6 +199,13 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     helper.on("frame", (frame) => this.onFrame(frame, state, config));
 
     await helper.start();
+
+    if (abortSignal?.aborted) {
+      // Shutdown landed while the helper was spawning: tear it down here, or the
+      // capture process outlives the recording that was never handed back.
+      await this.abandonStartedCapture(helper, state);
+      throwIfCaptureStartAborted(abortSignal);
+    }
 
     return {
       recordingId: config.recordingId,
@@ -321,6 +333,26 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     });
   }
 
+  /** Stop a capture that was cancelled between spawn and handle hand-off. */
+  private async abandonStartedCapture(
+    helper: PhysicalIosCaptureHelper,
+    state: CaptureState,
+  ): Promise<void> {
+    try {
+      await helper.stop();
+    } catch (error) {
+      // Already-aborting path: report the leak risk but keep the abort as the
+      // error the caller sees.
+      logger.warn(
+        `[IosPhysicalVideo] failed to stop the capture helper after an aborted start: ${errorMessage(error)}`,
+      );
+    }
+    const encoder = state.encoder;
+    if (encoder && encoder.exitCode === null && !encoder.killed) {
+      encoder.kill("SIGKILL");
+    }
+  }
+
   /**
    * Doubles as the ffmpeg availability check. VideoToolbox is present on every
    * supported macOS host, but a self-built ffmpeg can lack it, so fall back to
@@ -339,6 +371,15 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     }
     if (encoders.includes(VIDEOTOOLBOX_H264_ENCODER)) {
       return VIDEOTOOLBOX_H264_ENCODER;
+    }
+    if (!encoders.includes(SOFTWARE_H264_ENCODER)) {
+      // Blindly naming an absent encoder would only fail once the first frame
+      // spawns ffmpeg, and stop() would then report "no frames captured" — the
+      // wrong cause entirely. Fail here, before the helper is started.
+      throw new ActionableError(
+        `This FFmpeg build exposes neither ${VIDEOTOOLBOX_H264_ENCODER} nor ${SOFTWARE_H264_ENCODER}, ` +
+          "so a physical iOS recording cannot be encoded. Install an FFmpeg with H.264 support (macOS: brew install ffmpeg).",
+      );
     }
     logger.warn(
       `[IosPhysicalVideo] ${VIDEOTOOLBOX_H264_ENCODER} unavailable; falling back to software ${SOFTWARE_H264_ENCODER}.`,
@@ -411,6 +452,16 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       `Could not match device ${device.deviceId} to an AVFoundation capture device. Attached: ${candidates}. ` +
         "Disconnect the other devices, or record the matching UDID.",
     );
+  }
+}
+
+/**
+ * Matches the Android/iOS ffmpeg start paths: a daemon shutdown mid-start must
+ * abort the recording rather than leave a capture process behind.
+ */
+function throwIfCaptureStartAborted(abortSignal: AbortSignal | undefined): void {
+  if (abortSignal?.aborted) {
+    throw new ActionableError("Physical iOS recording start was cancelled during shutdown.");
   }
 }
 

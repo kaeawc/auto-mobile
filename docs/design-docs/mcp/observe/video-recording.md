@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** `videoRecording` MCP tool is fully implemented. Supports Android (via `automobile-video.dex` VirtualDisplay + MediaCodec H.264), iOS simulators (via `simctl io recordVideo`), and physical iOS devices (via the CoreMediaIO `screen-capture-helper` piped into FFmpeg). Highlights, archive management, and Unix socket config are all implemented. See the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Current state:** `videoRecording` MCP tool is fully implemented. Supports Android (via `automobile-video.dex` VirtualDisplay + MediaCodec H.264), iOS simulators (via `simctl io recordVideo`), and physical iOS devices (via the CoreMediaIO `screen-capture-helper` piped into FFmpeg — implemented and unit-tested, pending on-hardware verification). Highlights, archive management, and Unix socket config are all implemented. See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 Optional screen recording for debugging, performance analysis, and CI artifacts. Recording is off by default
 and optimized for low overhead with a low-quality default preset.
@@ -107,6 +107,10 @@ Platform-specific capture sources:
   - The AutoMobile UDID is mapped onto the AVFoundation `uniqueID` via the helper's
     `--list-devices` JSON (exact match, then a separator-insensitive match, then the only attached
     device) because `--device-id` matches `uniqueID` exactly.
+  - **Verification status:** the backend is covered by unit tests against fakes (helper frames,
+    FFmpeg process, `--list-devices` output); end-to-end capture has not yet been confirmed on
+    physical hardware, so treat physical-device support as implemented-but-unverified until a
+    recording succeeds on a real iPhone/iPad (issue #2504).
   - One-time prerequisite: the device must be connected over USB with "Trust This Computer"
     accepted, and macOS may prompt once for capture access. `stop` closes ffmpeg's stdin (rather
     than signalling it) so the MP4 `moov` atom is finalized.

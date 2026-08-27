@@ -105,6 +105,7 @@ class FakeCaptureHelper extends EventEmitter implements PhysicalIosCaptureHelper
 
   start(): void {
     this.started += 1;
+    this.emit("started");
   }
 
   async stop(): Promise<unknown> {
@@ -329,6 +330,40 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     expect(args[args.indexOf("-c:v") + 1]).toBe(SOFTWARE_H264_ENCODER);
     expect(args).toContain("-preset");
     await harness.backend.stop(handle);
+  });
+
+  test("start rejects when ffmpeg exposes no usable H.264 encoder", async function () {
+    const harness = makeHarness();
+    harness.ffmpeg.encoders = ["mpeg4"];
+
+    await expect(harness.backend.start(makeConfig())).rejects.toThrow(
+      "neither h264_videotoolbox nor libx264",
+    );
+    expect(harness.helper.started).toBe(0);
+  });
+
+  test("start rejects an already-aborted recording without spawning the helper", async function () {
+    const harness = makeHarness();
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      harness.backend.start(makeConfig({ abortSignal: controller.signal })),
+    ).rejects.toThrow("cancelled during shutdown");
+    expect(harness.helper.started).toBe(0);
+  });
+
+  test("start stops the helper when shutdown lands while it is spawning", async function () {
+    const controller = new AbortController();
+    const harness = makeHarness();
+    // Abort once the helper has spawned but before the handle is handed back.
+    harness.helper.on("started", () => controller.abort());
+
+    await expect(
+      harness.backend.start(makeConfig({ abortSignal: controller.signal })),
+    ).rejects.toThrow("cancelled during shutdown");
+    expect(harness.helper.started).toBe(1);
+    expect(harness.helper.stopped).toBe(1);
   });
 
   test("start rejects on a non-macOS host before spawning anything", async function () {

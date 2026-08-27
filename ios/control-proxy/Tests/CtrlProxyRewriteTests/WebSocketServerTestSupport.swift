@@ -6,7 +6,7 @@ import os
 
 struct FakeCommandHandling: CommandHandling {
     let handler: @Sendable (WebSocketRequest) -> any WebSocketResponsePayload
-    func handle(_ request: WebSocketRequest) -> any WebSocketResponsePayload {
+    func handle(_ request: WebSocketRequest) async -> any WebSocketResponsePayload {
         handler(request)
     }
 }

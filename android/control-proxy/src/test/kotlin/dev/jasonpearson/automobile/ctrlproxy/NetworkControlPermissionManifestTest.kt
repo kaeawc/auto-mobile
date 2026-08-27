@@ -62,6 +62,25 @@ class NetworkControlPermissionManifestTest {
   }
 
   @Test
+  fun `CtrlProxy accessibility service is exported for system discovery`() {
+    val service =
+      elements(readManifest("control-proxy"), "service").single {
+        it.androidAttribute("name") == ".CtrlProxy"
+      }
+
+    assertEquals(
+      "The Android framework discovers accessibility services through an intent query. The service " +
+        "must be exported so API 35 can bind it.",
+      "true",
+      service.androidAttribute("exported"),
+    )
+    assertEquals(
+      "android.permission.BIND_ACCESSIBILITY_SERVICE",
+      service.androidAttribute("permission"),
+    )
+  }
+
+  @Test
   fun `emulator contract receivers require the platform dump permission`() {
     assertEquals(
       PLATFORM_DUMP_PERMISSION,

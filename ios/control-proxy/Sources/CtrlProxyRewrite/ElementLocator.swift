@@ -81,7 +81,14 @@ public final class ElementLocator: ElementLocating, HierarchyExtracting {
         /// Injected performance tracking (Phase 6 wires the concrete provider).
         private let perf: any PerfTracking
 
-        public init(
+        // `internal`, not `public`: this init injects the internal `PerfTracking` seam, so a
+        // `public` init would expose an internal type (a first-time iOS-compile error the host
+        // `#else` stub hid). `ElementLocator` is only ever constructed inside this module — the
+        // shipped entry point is `CtrlProxy`, and the rewrite's cross-module tests use fakes —
+        // so internal construction is sufficient. (The reference could declare this `public`
+        // only because its `perfProvider` default was the now-dropped public `PerfProvider`
+        // singleton; see STATUS §6.)
+        init(
             application: XCUIApplication? = nil,
             perf: any PerfTracking
         ) {

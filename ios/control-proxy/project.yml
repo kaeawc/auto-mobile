@@ -104,6 +104,38 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
 
+  # Swift-6 concurrency-clean rewrite runner (Phase 7 cutover, additive).
+  # Compiles Sources/CtrlProxyRewrite directly into a UI-test bundle — the first
+  # target in which the `#if canImport(XCTest) && os(iOS)` `@MainActor` bodies build.
+  # The reference `CtrlProxyUITests` target is left intact as the behavioral oracle
+  # until the rewrite's UI-test smoke passes on a simulator (STATUS §9 step 3).
+  CtrlProxyRewriteUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Tests/CtrlProxyRewriteUITests
+      - path: Sources/CtrlProxyRewrite
+    dependencies:
+      - target: CtrlProxyApp
+      # Same @rpath reasoning as CtrlProxyUITests: the xctest bundle loads from a
+      # separate Runner.app, so it must embed its own copy of ObjCExceptionCatcher.
+      - target: ObjCExceptionCatcher
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.rewriteuitests
+        TEST_TARGET_NAME: CtrlProxyApp
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        # Match the SPM CtrlProxyRewrite target's contract exactly: Swift 6 language
+        # mode with complete strict-concurrency (the project base is Swift 5 /
+        # `targeted`), and the iOS 17 platform floor the rewrite is built against
+        # (`OSAllocatedUnfairLock` etc.) so `CLANG_WARN_UNGUARDED_AVAILABILITY`
+        # doesn't flag 16/17-only APIs the project's 15.0 default would reject.
+        SWIFT_VERSION: "6.0"
+        SWIFT_STRICT_CONCURRENCY: complete
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+
 schemes:
   CtrlProxyApp:
     build:
@@ -119,6 +151,7 @@ schemes:
       targets:
         - CtrlProxyTests
         - CtrlProxyUITests
+        - CtrlProxyRewriteUITests
     profile:
       config: Release
     analyze:

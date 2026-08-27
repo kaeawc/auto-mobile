@@ -133,12 +133,16 @@ interface CaptureState {
   framesPacedOut: number;
   /** Repeated frames written to keep a capture gap at its real duration. */
   framesGapFilled: number;
+  /** Last payload written, repeated across gap slots that precede a new frame. */
+  lastPayload?: Buffer;
   /** Gap slots left unpadded, so the output is shorter than wall clock. */
   framesGapTruncated: number;
   framesWritten: number;
   framesDropped: number;
   helperStderr: string[];
   helperExit?: { code: number | null; signal: NodeJS.Signals | null };
+  /** First error emitted by the helper process (spawn ENOENT/EACCES, etc.). */
+  helperError?: Error;
 }
 
 /**
@@ -223,8 +227,12 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       state.helperExit = info;
     });
     helper.on("error", (error) => {
-      // The helper process failing is surfaced from stop() with the stderr tail;
-      // an unhandled 'error' listener would otherwise crash the daemon.
+      // A spawn failure (ENOENT/EACCES on the resolved binary) arrives here
+      // asynchronously, after start() has already returned, and may never be
+      // followed by an 'exit'. Keep the first one so stop() can report the real
+      // cause instead of a misleading "connect and trust the device" message. An
+      // unhandled 'error' listener would also crash the daemon.
+      state.helperError ??= error instanceof Error ? error : new Error(String(error));
       logger.warn(`[IosPhysicalVideo] capture helper error: ${errorMessage(error)}`);
     });
     helper.on("frame", (frame) => this.onFrame(frame, state, config));
@@ -336,17 +344,37 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       state.framesDropped += 1;
       return;
     }
+    this.writeFrameCopies(frame, state, encoder.stdin, copies);
+  }
+
+  /**
+   * Write the frame into its own slot, preceded by repeats of the previous
+   * picture for any slots the capture gap skipped. Padding with the NEW frame
+   * would move a visual transition earlier than it actually happened.
+   */
+  private writeFrameCopies(
+    frame: DecodedFrame,
+    state: CaptureState,
+    stdin: NonNullable<FfmpegProcess["stdin"]>,
+    copies: number,
+  ): void {
     const payload = packFrame(frame);
+    const fillPayload = state.lastPayload ?? payload;
     for (let copy = 0; copy < copies; copy++) {
-      // Stop padding the moment the encoder falls behind: gap fill must never be
-      // the thing that congests it.
-      if (copy > 0 && encoder.stdin.writableNeedDrain) {
-        state.framesGapTruncated += copies - copy;
-        break;
+      const isCurrentFrameSlot = copy === copies - 1;
+      // Stop padding the moment the encoder falls behind — gap fill must never
+      // be the thing that congests it — but always emit the real frame.
+      if (copy > 0 && !isCurrentFrameSlot && stdin.writableNeedDrain) {
+        state.framesGapTruncated += copies - copy - 1;
+        stdin.write(payload);
+        state.framesWritten += 1;
+        state.lastPayload = payload;
+        return;
       }
-      encoder.stdin.write(payload);
+      stdin.write(isCurrentFrameSlot ? payload : fillPayload);
       state.framesWritten += 1;
     }
+    state.lastPayload = payload;
   }
 
   /**
@@ -552,6 +580,12 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
 
   private buildNoFramesMessage(state: CaptureState): string {
     const stderr = state.helperStderr.join("").trim();
+    if (state.helperError) {
+      return (
+        `The iOS capture helper could not be run, so no recording was produced: ${errorMessage(state.helperError)}.` +
+        (stderr ? `\nscreen-capture-helper: ${stderr}` : "")
+      );
+    }
     const exit = state.helperExit
       ? ` (helper exited code=${state.helperExit.code ?? "null"} signal=${state.helperExit.signal ?? "null"})`
       : "";
@@ -639,6 +673,12 @@ function throwIfCaptureStartAborted(abortSignal: AbortSignal | undefined): void 
   }
 }
 
+/** Largest even value <= `value`, floored at 2 so a scale filter stays valid. */
+function evenFloor(value: number): number {
+  const floored = Math.floor(value);
+  return Math.max(2, floored % 2 === 0 ? floored : floored - 1);
+}
+
 /** Lowercased, separator-free UDID for cross-vocabulary comparison. */
 function normalizeUdid(value: string): string {
   return value.replace(/-/g, "").toLowerCase();
@@ -685,8 +725,15 @@ export function buildRawVideoFfmpegArgs(
     "pipe:0",
   ];
 
-  if (config.resolution) {
-    args.push("-vf", `scale=${config.resolution.width}:${config.resolution.height}`);
+  // yuv420p subsamples chroma 2x2, so FFmpeg refuses an odd width or height —
+  // and iPhone panels really are odd (the 1179px-wide fixtures in this repo).
+  // The raw input keeps its true geometry (`-video_size` describes the actual
+  // byte layout and must not be rounded); evenness is imposed on the OUTPUT.
+  const requested = config.resolution;
+  if (requested) {
+    args.push("-vf", `scale=${evenFloor(requested.width)}:${evenFloor(requested.height)}`);
+  } else if (width % 2 !== 0 || height % 2 !== 0) {
+    args.push("-vf", `scale=${evenFloor(width)}:${evenFloor(height)}`);
   }
 
   args.push("-c:v", encoderName);

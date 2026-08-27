@@ -373,6 +373,29 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     await harness.backend.stop(handle);
   });
 
+  // Slots before the new frame arrived showed the OLD picture; filling them with
+  // the new one would move a visual transition earlier than it happened.
+  test("pads gap slots with the previous frame, not the newly arrived one", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig({ fps: 10 }));
+
+    harness.helper.emitFrame(2, 2, 8, 0x11, 0);
+    harness.helper.emitFrame(2, 2, 8, 0x22, 500);
+
+    const encoder = harness.ffmpeg.processes[0];
+    const frames = Buffer.concat(encoder.written);
+    const frameBytes = 2 * 2 * 4;
+    expect(frames.length / frameBytes).toBe(6);
+    // Slots 0..4 carry the old picture; only the final slot is the new frame.
+    for (let slot = 0; slot < 5; slot++) {
+      const start = slot * frameBytes;
+      expect(frames.subarray(start, start + frameBytes).every((b) => b === 0x11)).toBe(true);
+    }
+    const last = frames.subarray(5 * frameBytes);
+    expect(last.every((b) => b === 0x22)).toBe(true);
+    await harness.backend.stop(handle);
+  });
+
   test("honors resolution and maxDuration like the simulator path", async function () {
     const harness = makeHarness();
     const handle = await harness.backend.start(
@@ -384,6 +407,43 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     expect(args).toContain("-vf");
     expect(args[args.indexOf("-vf") + 1]).toBe("scale=640:480");
     expect(args[args.indexOf("-t") + 1]).toBe("12");
+    await harness.backend.stop(handle);
+  });
+
+  // yuv420p subsamples chroma 2x2, so an odd edge makes ffmpeg refuse the encode.
+  // Real iPhone panels are odd (1179x2556), which would fail every recording.
+  test("scales an odd native capture size to even dimensions for yuv420p", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+
+    harness.helper.emitFrame(1179, 2555, 1179 * 4);
+
+    const args = harness.ffmpeg.startRequests[0].args;
+    // The raw input keeps the true byte geometry; only the output is evened.
+    expect(args[args.indexOf("-video_size") + 1]).toBe("1179x2555");
+    expect(args[args.indexOf("-vf") + 1]).toBe("scale=1178:2554");
+    await harness.backend.stop(handle);
+  });
+
+  test("leaves an already-even capture size unscaled", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+
+    harness.helper.emitFrame(4, 2);
+
+    expect(harness.ffmpeg.startRequests[0].args).not.toContain("-vf");
+    await harness.backend.stop(handle);
+  });
+
+  test("rounds an odd requested resolution down to even", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(
+      makeConfig({ resolution: { width: 641, height: 481 } }),
+    );
+    harness.helper.emitFrame(4, 2);
+
+    const args = harness.ffmpeg.startRequests[0].args;
+    expect(args[args.indexOf("-vf") + 1]).toBe("scale=640:480");
     await harness.backend.stop(handle);
   });
 
@@ -492,6 +552,17 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
 
     await expect(harness.backend.start(makeConfig())).rejects.toThrow(
       "Could not match device 00008030-001C2D3E1234567A",
+    );
+  });
+
+  test("stop reports the helper spawn failure rather than a trust hint", async function () {
+    const harness = makeHarness();
+    const handle = await harness.backend.start(makeConfig());
+    // A spawn failure arrives after start() returned and may never emit "exit".
+    harness.helper.emit("error", new Error("spawn /helpers/screen-capture-helper EACCES"));
+
+    await expect(harness.backend.stop(handle)).rejects.toThrow(
+      "could not be run, so no recording was produced: spawn /helpers/screen-capture-helper EACCES",
     );
   });
 

@@ -33,6 +33,8 @@ export interface RecordingHandle {
   recordingId: string;
   outputPath: string;
   startedAt: string;
+  /** Configuration actually used by a backend that adjusted the request. */
+  effectiveConfig?: VideoRecordingConfig;
   backendHandle?: unknown;
 }
 
@@ -186,13 +188,14 @@ export class VideoRecorderService {
 
     const resolvedOutputPath = handle.outputPath || outputPath;
     const resolvedFileName = path.basename(resolvedOutputPath);
+    const effectiveConfig = handle.effectiveConfig ?? config;
 
     const active: ActiveRecordingState = {
       recordingId,
       outputPath: resolvedOutputPath,
       fileName: resolvedFileName,
       startedAt: handle.startedAt || startedAt,
-      config,
+      config: effectiveConfig,
       outputName: options.outputName,
       handle,
       forceStopRequested: false,

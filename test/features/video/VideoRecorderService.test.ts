@@ -221,6 +221,25 @@ describe("VideoRecorderService", () => {
       expect(backend.startCalls[0].fps).toBe(30);
     });
 
+    test("reports and persists a backend's effective configuration", async () => {
+      backend.start = async (config) => {
+        const handle = {
+          recordingId: config.recordingId,
+          outputPath: config.outputPath,
+          startedAt: config.startedAt,
+          effectiveConfig: { ...config, fps: 60 },
+        };
+        backend.startResults.push(handle);
+        return handle;
+      };
+
+      const recording = await service.startRecording({ config: { fps: 120 } });
+      const metadata = await service.stopRecording(recording.recordingId);
+
+      expect(recording.config.fps).toBe(60);
+      expect(metadata.config.fps).toBe(60);
+    });
+
     test("creates output directory", async () => {
       await service.startRecording();
       const dir = path.join(archiveRoot, "rec-1");

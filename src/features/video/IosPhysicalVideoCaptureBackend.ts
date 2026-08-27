@@ -327,6 +327,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       recordingId: captureConfig.recordingId,
       outputPath: captureConfig.outputPath,
       startedAt: captureConfig.startedAt,
+      effectiveConfig: captureConfig,
       backendHandle: {
         kind: "ios-physical",
         helper,

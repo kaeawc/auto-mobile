@@ -42,6 +42,7 @@ data class TestRunQuery(
   val limit: Int? = null,
   val orderDirection: String? = null,
   val latestOnly: Boolean? = null,
+  val deviceId: String? = null,
 )
 
 @Serializable
@@ -62,6 +63,7 @@ fun TestRunQuery.toResourceUri(): String {
       add("limit", limit)
       add("orderDirection", orderDirection)
       add("latestOnly", latestOnly)
+      add("deviceId", deviceId)
     }
     .build()
 }

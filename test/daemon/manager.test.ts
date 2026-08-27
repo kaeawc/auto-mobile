@@ -677,9 +677,6 @@ describe("Daemon manager process detection", () => {
   });
 
   test("excludes transient daemon-mode candidates that are gone by liveness re-check", () => {
-    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-transient-test-"));
-    const pidFilePath = join(dir, "daemon.pid");
-    writeDaemonPidFile(pidFilePath, 201);
     const manager = managerWithProcesses(
       [
         {
@@ -693,20 +690,13 @@ describe("Daemon manager process detection", () => {
           command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
         },
       ],
-      { livePids: new Set([201]), pidFilePath },
+      { livePids: new Set([201]) },
     );
 
-    try {
-      expect(manager.findOtherDaemonProcesses(201)).toEqual([]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(manager.findOtherDaemonProcesses(201)).toEqual([]);
   });
 
   test("ignores daemon-mode candidates that are gone by liveness re-check", () => {
-    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-liveness-test-"));
-    const pidFilePath = join(dir, "daemon.pid");
-    writeDaemonPidFile(pidFilePath, 401);
     const manager = managerWithProcesses(
       [
         {
@@ -720,14 +710,10 @@ describe("Daemon manager process detection", () => {
           command: `bun /worktree-a/dist/src/index.js --daemon-mode`,
         },
       ],
-      { livePids: new Set([201]), pidFilePath },
+      { livePids: new Set([201]) },
     );
 
-    try {
-      expect(manager.findOtherDaemonProcesses(201)).toEqual([]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(manager.findOtherDaemonProcesses(201)).toEqual([]);
   });
 
   test("fails closed when the process table cannot be inspected", () => {

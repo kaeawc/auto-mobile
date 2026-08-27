@@ -20,6 +20,7 @@ import { getAbortSignal } from "../AbortContext";
 import { Mutex } from "async-mutex";
 
 const COMMAND_SETTLEMENT_GRACE_MS = 1_000;
+const SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
 
 export interface AppleDevice {
   udid: string;
@@ -517,7 +518,6 @@ export class SimCtlClient implements SimCtl {
   ) => Promise<ExecResult>;
   private timer: Timer;
   private platform: NodeJS.Platform;
-  private readonly usesInjectedExecAsync: boolean;
   private readonly spawnProcess: (
     command: string,
     args: string[],
@@ -531,7 +531,6 @@ export class SimCtlClient implements SimCtl {
   // Static cache for device list
   private static deviceListCache: { devices: DeviceInfo[]; timestamp: number } | null = null;
   private static readonly DEVICE_LIST_CACHE_TTL = 5000; // 5 seconds
-  private static localSimctlAvailability: Promise<void> | null = null;
   private static readonly simulatorBoots = new Map<string, SimulatorBootState>();
 
   /**
@@ -562,7 +561,6 @@ export class SimCtlClient implements SimCtl {
     private readonly plist: PlistReader = new PlistClient(),
   ) {
     this.device = device;
-    this.usesInjectedExecAsync = execAsyncFn !== null;
     this.execAsync = execAsyncFn || execAsync;
     this.timer = timer;
     this.platform = platform;
@@ -610,23 +608,9 @@ export class SimCtlClient implements SimCtl {
       throw new Error("Command cannot be empty");
     }
 
-    await this.ensureAvailableForCommand();
     const fullArgs = ["simctl", ...args];
     logger.debug(`[iOS] Starting command: xcrun ${fullArgs.join(" ")}`);
     return this.spawnProcess("xcrun", fullArgs, options);
-  }
-
-  private async ensureAvailableForCommand(signal?: AbortSignal): Promise<void> {
-    try {
-      await this.ensureLocalSimctlAvailable(signal);
-    } catch (error) {
-      const detail = errorMessage(error);
-      const message =
-        this.platform === "darwin"
-          ? `simctl is not available. Please install Xcode command line tools to continue. ${detail}`
-          : "iOS simulator tooling is only available on macOS.";
-      throw new ActionableError(message);
-    }
   }
 
   private async executeCommandArgv(
@@ -672,16 +656,7 @@ export class SimCtlClient implements SimCtl {
         }, timeoutMs);
       });
 
-      // Availability is an xcrun invocation too, so it must consume the same
-      // command budget instead of leaving a caller waiting before the actual
-      // simctl child process starts.
-      const availabilityPromise = this.ensureAvailableForCommand(signal);
-      availabilityPromise.catch(() => {
-        /* consumed by the race below, including after a timeout */
-      });
-
       try {
-        await Promise.race([availabilityPromise, timeoutPromise]);
         runPromise = runCommand(signal);
         // Once the timeout wins the race the aborted run promise rejects with an
         // AbortError; keep it handled so it can't surface as an unhandledRejection.
@@ -696,11 +671,12 @@ export class SimCtlClient implements SimCtl {
         if (waitForTimedOutCommandSettlement && runPromise && error === timeoutError) {
           await this.waitForCommandSettlement(runPromise, command);
         }
+        const commandError = this.toActionableSimctlUnavailableError(error);
         const duration = this.timer.now() - startTime;
         logger.warn(
-          `[iOS] Command failed after ${duration}ms: ${command} - ${(error as Error).message}`,
+          `[iOS] Command failed after ${duration}ms: ${command} - ${errorMessage(commandError)}`,
         );
-        throw error;
+        throw commandError;
       } finally {
         this.timer.clearTimeout(timeoutId!);
       }
@@ -708,17 +684,17 @@ export class SimCtlClient implements SimCtl {
 
     // No timeout specified
     try {
-      await this.ensureAvailableForCommand();
       const result = await runCommand(callerSignal);
       const duration = this.timer.now() - startTime;
       logger.debug(`[iOS] Command completed in ${duration}ms: ${command}`);
       return result;
     } catch (error) {
+      const commandError = this.toActionableSimctlUnavailableError(error);
       const duration = this.timer.now() - startTime;
       logger.warn(
-        `[iOS] Command failed after ${duration}ms: ${command} - ${(error as Error).message}`,
+        `[iOS] Command failed after ${duration}ms: ${command} - ${errorMessage(commandError)}`,
       );
-      throw error;
+      throw commandError;
     }
   }
 
@@ -762,40 +738,46 @@ export class SimCtlClient implements SimCtl {
     return this.isLocalSimctlAvailable();
   }
 
-  private async ensureLocalSimctlAvailable(signal?: AbortSignal): Promise<void> {
-    if (this.usesInjectedExecAsync) {
-      await this.execAsync("xcrun", ["simctl", "--version"], undefined, signal);
-      return;
-    }
-
-    if (this.platform !== "darwin") {
-      throw new ActionableError("iOS simulator tooling is only available on macOS.");
-    }
-
-    if (!SimCtlClient.localSimctlAvailability) {
-      try {
-        await this.execAsync("xcrun", ["simctl", "--version"], undefined, signal);
-        // Do not share an in-flight probe: each caller must own its cancellation
-        // signal. Cache only confirmation that simctl is available.
-        SimCtlClient.localSimctlAvailability = Promise.resolve();
-      } catch (error) {
-        logger.debug(`[iOS] simctl unavailable: ${errorMessage(error)}`);
-        throw error;
-      }
-    }
-
-    await SimCtlClient.localSimctlAvailability;
-  }
-
   private async isLocalSimctlAvailable(): Promise<boolean> {
+    const controller = new AbortController();
+    let timeoutId: NodeJS.Timeout | undefined;
+    const probe = this.execAsync("xcrun", ["--find", "simctl"], undefined, controller.signal);
+    probe.catch(() => {
+      // The race below owns the result; this also handles an abort after it wins.
+    });
+    const timeout = new Promise<false>((resolve) => {
+      timeoutId = this.timer.setTimeout(() => {
+        controller.abort();
+        resolve(false);
+      }, SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS);
+    });
+
     try {
-      await this.ensureLocalSimctlAvailable();
-      return true;
+      return await Promise.race([probe.then(() => true, () => false), timeout]);
     } catch (error) {
-      // ensureLocalSimctlAvailable already logged the underlying reason; here we only need the boolean result.
       logger.debug(`src/utils/ios-cmdline-tools/SimCtlClient.ts fallback failed: ${error}`, error);
       return false;
+    } finally {
+      if (timeoutId) {
+        this.timer.clearTimeout(timeoutId);
+      }
     }
+  }
+
+  private toActionableSimctlUnavailableError(error: unknown): unknown {
+    const detail = errorMessage(error);
+    if (
+      !/(?:unable to find utility ["']?simctl|active developer path .* does not exist|xcode-select: error|command not found: xcrun|spawn xcrun ENOENT)/i.test(
+        detail,
+      )
+    ) {
+      return error;
+    }
+    const message =
+      this.platform === "darwin"
+        ? `simctl is not available. Please install Xcode command line tools to continue. ${detail}`
+        : "iOS simulator tooling is only available on macOS.";
+    return new ActionableError(message);
   }
 
   /**

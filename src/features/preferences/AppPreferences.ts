@@ -703,17 +703,21 @@ function looksLikeMissingAndroidPrefsFile(error: unknown): boolean {
 
 function looksLikeMissingIosDefault(error: unknown): boolean {
   const message = errorMessage(error);
-  return /does not exist|Domain .* does not exist|does not contain/i.test(message);
+  return [
+    /The domain\/default pair of \([^)]+\) does not exist\.?$/i,
+    /Domain [^\n]+ does not exist\.?$/i,
+    /Domain [^\n]+ does not contain (?:a value for )?[^\n]+\.?$/i,
+  ].some((pattern) => pattern.test(message));
 }
 
 function isRetryableIosDefaultsError(error: unknown): boolean {
   const message = errorMessage(error);
   return (
     /timed out/i.test(message) ||
-    /(?:core ?simulator|simctl).*(?:connection|service)|(?:connection|service).*(?:core ?simulator|simctl)/i.test(
-      message,
-    ) ||
-    /connection (?:refused|reset|interrupted|invalidated)/i.test(message)
+    /Failed to connect to (?:the )?CoreSimulator service/i.test(message) ||
+    /CoreSimulatorService connection (?:refused|reset|interrupted|invalidated)/i.test(message) ||
+    /connection (?:refused|reset|interrupted|invalidated)/i.test(message) ||
+    /Unable to lookup in current state: Booting/i.test(message)
   );
 }
 

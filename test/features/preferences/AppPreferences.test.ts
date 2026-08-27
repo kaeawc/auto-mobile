@@ -814,6 +814,22 @@ describe("AppPreferences", () => {
     expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
   });
 
+  test("surfaces an invalid simulator instead of reporting a missing iOS default", async () => {
+    const simctl = new ScriptedSimCtlClient([
+      { error: new Error("Invalid device: simulator 12345678 does not exist") },
+    ]);
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+
+    await expect(
+      preferences.getPreference({
+        scope: "userDefaults",
+        appId: "com.example.app",
+        key: "featureFlag",
+      }),
+    ).rejects.toThrow("Invalid device");
+    expect(simctl.calls).toHaveLength(1);
+  });
+
   test("retries a timed-out iOS UserDefaults write once", async () => {
     const simctl = new ScriptedSimCtlClient([
       { error: new Error("Command timed out after 10000ms") },
@@ -863,6 +879,50 @@ describe("AppPreferences", () => {
     const simctl = new ScriptedSimCtlClient([
       {},
       { error: new Error("Failed to connect to the CoreSimulator service") },
+      { stdout: "enabled\n" },
+      { stdout: "Type is string\n" },
+    ]);
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+
+    const result = await preferences.setPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "featureFlag",
+      value: "enabled",
+      type: "string",
+    });
+
+    expect(result.verified).toBeTrue();
+    expect(simctl.calls.map((call) => call.args[3])).toEqual([
+      "write",
+      "read",
+      "read",
+      "read-type",
+    ]);
+  });
+
+  test("does not retry a permanent CoreSimulator configuration error", async () => {
+    const simctl = new ScriptedSimCtlClient([
+      { error: new Error("CoreSimulatorService is unavailable because Xcode is not configured") },
+    ]);
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+
+    await expect(
+      preferences.setPreference({
+        scope: "userDefaults",
+        appId: "com.example.app",
+        key: "featureFlag",
+        value: "enabled",
+        type: "string",
+      }),
+    ).rejects.toThrow("Xcode is not configured");
+    expect(simctl.calls.map((call) => call.args[3])).toEqual(["write"]);
+  });
+
+  test("retries a UserDefaults read while the simulator is booting", async () => {
+    const simctl = new ScriptedSimCtlClient([
+      {},
+      { error: new Error("Unable to lookup in current state: Booting") },
       { stdout: "enabled\n" },
       { stdout: "Type is string\n" },
     ]);

@@ -1,5 +1,4 @@
 import { errorMessage } from "../../utils/describeUnknownError";
-import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { ActionableError, toActionableError, type BootedDevice } from "../../models";
@@ -57,9 +56,20 @@ import type {
 import { H264AnnexBParser, isKeyFrameNal, NAL_TYPE_IDR } from "./h264";
 import { h264MacroblocksPerFrame, WEBRTC_H264_MAX_MACROBLOCKS_PER_FRAME } from "./h264Level";
 import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "./webrtcStreamingConfig";
+import {
+  IOS_SCREEN_CAPTURE_HELPER_ENV,
+  IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS,
+  readScreenCaptureHelperEnvOverride,
+  resolveIosScreenCaptureHelperPath,
+} from "../screen-stream/screenCaptureHelperPath";
 
-export const IOS_SCREEN_CAPTURE_HELPER_ENV = "AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER";
-export const IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS = "AUTO_MOBILE_IOS_SCREEN_CAPTURE_HELPER";
+export {
+  IOS_SCREEN_CAPTURE_HELPER_ENV,
+  IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS,
+  resolveIosScreenCaptureHelperPath,
+};
+export type { IosScreenCaptureHelperPathResolverOptions } from "../screen-stream/screenCaptureHelperPath";
+
 export const IOS_WEBRTC_FFMPEG_ENV = "AUTOMOBILE_IOS_WEBRTC_FFMPEG";
 export const IOS_WEBRTC_FFMPEG_ENV_ALIAS = "AUTO_MOBILE_IOS_WEBRTC_FFMPEG";
 /**
@@ -808,13 +818,7 @@ export class IosH264Source implements H264CaptureSource {
   }
 
   private async resolveHelperPath(): Promise<string> {
-    const configuredPath =
-      this.helperPath ??
-      readEnvWithLegacy(
-        process.env,
-        IOS_SCREEN_CAPTURE_HELPER_ENV,
-        IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS,
-      );
+    const configuredPath = this.helperPath ?? readScreenCaptureHelperEnvOverride(process.env);
     if (configuredPath) {
       return resolveIosScreenCaptureHelperPath(configuredPath, {
         exists: this.helperPathExists,
@@ -1921,41 +1925,6 @@ function tightlyPackBgraFrame(frame: DecodedFrame): Buffer {
     frame.pixels.copy(packed, row * tightBytesPerRow, sourceStart, sourceStart + tightBytesPerRow);
   }
   return packed;
-}
-
-export interface IosScreenCaptureHelperPathResolverOptions {
-  env?: NodeJS.ProcessEnv;
-  exists?: (candidate: string) => boolean;
-}
-
-export function resolveIosScreenCaptureHelperPath(
-  explicitPath?: string,
-  options: IosScreenCaptureHelperPathResolverOptions = {},
-): string {
-  const env = options.env ?? process.env;
-  const exists = options.exists ?? existsSync;
-  const candidates = [
-    explicitPath,
-    readEnvWithLegacy(env, IOS_SCREEN_CAPTURE_HELPER_ENV, IOS_SCREEN_CAPTURE_HELPER_ENV_ALIAS),
-  ].filter((candidate): candidate is string => Boolean(candidate));
-
-  for (const candidate of candidates) {
-    if (exists(candidate)) {
-      return candidate;
-    }
-  }
-
-  throw new ActionableError(
-    `No executable screen-capture-helper was found at the configured path. Set ${IOS_SCREEN_CAPTURE_HELPER_ENV} to the absolute path of a local development build.`,
-  );
-}
-
-function readEnvWithLegacy(
-  env: NodeJS.ProcessEnv,
-  primaryName: string,
-  legacyName: string,
-): string | undefined {
-  return env[primaryName] ?? env[legacyName];
 }
 
 /** True when the force-raw escape hatch is set on either the primary or alias env var. */

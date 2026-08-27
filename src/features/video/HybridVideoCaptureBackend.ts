@@ -8,42 +8,36 @@ import type {
   VideoCaptureConfig,
 } from "./VideoRecorderService";
 import { FfmpegVideoProcessingBackend } from "./FfmpegVideoProcessingBackend";
+import { IosPhysicalVideoCaptureBackend } from "./IosPhysicalVideoCaptureBackend";
 import { PlatformVideoCaptureBackend } from "./PlatformVideoCaptureBackend";
+
+type HybridBackendKind = "ffmpeg" | "platform" | "ios-physical";
 
 interface HybridBackendHandle {
   kind: "hybrid";
-  backend: "ffmpeg" | "platform";
+  backend: HybridBackendKind;
   handle: RecordingHandle;
 }
 
 export class HybridVideoCaptureBackend implements VideoCaptureBackend {
   private ffmpegBackend: VideoCaptureBackend;
   private platformBackend: VideoCaptureBackend;
+  private physicalIosBackend: VideoCaptureBackend;
 
   constructor(
     ffmpegBackend: VideoCaptureBackend = new FfmpegVideoProcessingBackend(),
     platformBackend: VideoCaptureBackend = new PlatformVideoCaptureBackend(),
+    physicalIosBackend: VideoCaptureBackend = new IosPhysicalVideoCaptureBackend(),
   ) {
     this.ffmpegBackend = ffmpegBackend;
     this.platformBackend = platformBackend;
+    this.physicalIosBackend = physicalIosBackend;
   }
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
     const device = config.device;
     if (!device) {
       throw new ActionableError("Device is required to start video recording.");
-    }
-
-    // Physical iOS devices are now discoverable and assignable through DevicePool, but the
-    // iOS video path routes every iOS device to FfmpegVideoProcessingBackend.startIos →
-    // `simctl io <deviceId> recordVideo`, which only drives Simulators. Reject a physical
-    // iPhone here (branching on the UDID type before backend selection) with an actionable
-    // error, rather than surfacing a confusing simctl transport failure.
-    if (device.platform === "ios" && isIosPhysicalUdid(device.deviceId)) {
-      throw new ActionableError(
-        `Video recording is not supported on physical iOS devices (${device.deviceId}); ` +
-          "it currently requires a Simulator (simctl io recordVideo).",
-      );
     }
 
     const backend = this.selectBackend(device);
@@ -53,7 +47,7 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
       ...handle,
       backendHandle: {
         kind: "hybrid",
-        backend: backend === this.ffmpegBackend ? "ffmpeg" : "platform",
+        backend: this.backendKind(backend),
         handle,
       },
     };
@@ -65,11 +59,7 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
       throw new Error("Missing backend handle for hybrid video recording.");
     }
 
-    if (hybridHandle.backend === "ffmpeg") {
-      return this.ffmpegBackend.stop(hybridHandle.handle);
-    }
-
-    return this.platformBackend.stop(hybridHandle.handle);
+    return this.backendFor(hybridHandle.backend).stop(hybridHandle.handle);
   }
 
   async forceStop(handle: RecordingHandle): Promise<void> {
@@ -77,16 +67,33 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
     if (!hybridHandle || hybridHandle.kind !== "hybrid") {
       throw new Error("Missing backend handle for hybrid video recording.");
     }
-    const backend = hybridHandle.backend === "ffmpeg" ? this.ffmpegBackend : this.platformBackend;
+    const backend = this.backendFor(hybridHandle.backend);
     if (!backend.forceStop) {
       throw new Error("Selected video capture backend does not support force stopping recordings.");
     }
     await backend.forceStop(hybridHandle.handle);
   }
 
+  private backendKind(backend: VideoCaptureBackend): HybridBackendKind {
+    if (backend === this.ffmpegBackend) {
+      return "ffmpeg";
+    }
+    return backend === this.physicalIosBackend ? "ios-physical" : "platform";
+  }
+
+  private backendFor(kind: HybridBackendKind): VideoCaptureBackend {
+    if (kind === "ffmpeg") {
+      return this.ffmpegBackend;
+    }
+    return kind === "ios-physical" ? this.physicalIosBackend : this.platformBackend;
+  }
+
   private selectBackend(device: BootedDevice): VideoCaptureBackend {
     if (device.platform === "ios") {
-      return this.ffmpegBackend;
+      // simctl io recordVideo only drives Simulators, and devicectl has no
+      // screen-recording verb, so a physical iPhone/iPad is captured through the
+      // CoreMediaIO screen-capture-helper instead (issue #2504).
+      return isIosPhysicalUdid(device.deviceId) ? this.physicalIosBackend : this.ffmpegBackend;
     }
 
     if (device.platform === "android") {

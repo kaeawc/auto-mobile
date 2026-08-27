@@ -221,6 +221,59 @@ describe("VideoRecorderService", () => {
       expect(backend.startCalls[0].fps).toBe(30);
     });
 
+    test("reports and persists a backend's effective configuration", async () => {
+      backend.start = async (config) => {
+        const handle = {
+          recordingId: config.recordingId,
+          outputPath: config.outputPath,
+          startedAt: config.startedAt,
+          effectiveConfig: { ...config, fps: 60 },
+        };
+        backend.startResults.push(handle);
+        return handle;
+      };
+
+      const recording = await service.startRecording({ config: { fps: 120 } });
+      const metadata = await service.stopRecording(recording.recordingId);
+
+      expect(recording.config.fps).toBe(60);
+      expect(metadata.config.fps).toBe(60);
+    });
+
+    // A backend's `effectiveConfig` is reported to the caller and persisted as
+    // the recording's public configuration, so a backend that spreads its whole
+    // internal capture config must not leak runtime-only fields (abort signals,
+    // absolute paths, the device descriptor) into it.
+    test("narrows a backend's effective configuration to the public fields", async () => {
+      backend.start = async (config) => {
+        const handle = {
+          recordingId: config.recordingId,
+          outputPath: config.outputPath,
+          startedAt: config.startedAt,
+          effectiveConfig: { ...config, fps: 60 },
+        };
+        backend.startResults.push(handle);
+        return handle;
+      };
+
+      const recording = await service.startRecording({ config: { fps: 120 } });
+      const metadata = await service.stopRecording(recording.recordingId);
+
+      const publicKeys = [
+        "qualityPreset",
+        "targetBitrateKbps",
+        "maxThroughputMbps",
+        "fps",
+        "maxArchiveSizeMb",
+        "format",
+        "resolution",
+      ];
+      for (const config of [recording.config, metadata.config]) {
+        expect(Object.keys(config).every((key) => publicKeys.includes(key))).toBe(true);
+        expect(config.fps).toBe(60);
+      }
+    });
+
     test("creates output directory", async () => {
       await service.startRecording();
       const dir = path.join(archiveRoot, "rec-1");

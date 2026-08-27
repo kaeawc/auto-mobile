@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** `videoRecording` MCP tool is fully implemented. Supports Android (via `automobile-video.dex` VirtualDisplay + MediaCodec H.264) and iOS simulator (via `simctl io recordVideo`). Highlights, archive management, and Unix socket config are all implemented. See the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Current state:** `videoRecording` MCP tool is fully implemented. Supports Android (via `automobile-video.dex` VirtualDisplay + MediaCodec H.264), iOS simulators (via `simctl io recordVideo`), and physical iOS devices (via the CoreMediaIO `screen-capture-helper` piped into FFmpeg — implemented and unit-tested, pending on-hardware verification). Highlights, archive management, and Unix socket config are all implemented. See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 Optional screen recording for debugging, performance analysis, and CI artifacts. Recording is off by default
 and optimized for low overhead with a low-quality default preset.
@@ -90,10 +90,41 @@ Platform-specific capture sources:
 - Android:
   - Physical devices: `adb exec-out screenrecord` (pipe to ffmpeg when transcoding or resizing).
   - Emulators: FFmpeg screen/window capture for higher throughput when ADB capture is slow.
-- iOS (simulator only, macOS):
+- iOS simulators (macOS):
   - Prefer `simctl io recordVideo` for simulator-native capture.
   - Unscaled simulator recordings are finalized with an FFmpeg stream-copy remux from `.mov` to `.mp4`; this avoids a lossy re-encode and still applies `maxDuration` when a caller provides one.
   - Fallback to FFmpeg capture when available and needed for cross-platform parity.
+- iOS physical devices (macOS):
+  - `xcrun devicectl` has no screen-recording verb and `simctl io recordVideo` only drives
+    Simulators, so a physical iPhone/iPad is captured through the Swift `screen-capture-helper`:
+    CoreMediaIO's `kCMIOHardwarePropertyAllowScreenCaptureDevices` exposes the USB-connected
+    device as a muxed `AVCaptureDevice`, and the helper streams its BGRA frames to stdout.
+  - `IosPhysicalVideoCaptureBackend` pipes those frames into `ffmpeg -f rawvideo -pixel_format bgra`
+    (`h264_videotoolbox`, falling back to `libx264`), structurally the same handoff as the Android
+    `adb exec-out screenrecord -` → ffmpeg path. Raw frames carry no geometry, so ffmpeg is spawned
+    on the first frame, which pins `-video_size`; frames that later change size (device rotation)
+    are dropped rather than skewing the picture.
+  - Device capture is deliberately **not** fps-throttled by the helper, so the backend paces frames
+    against their capture timestamps to hold the requested rate, advancing the deadline by whole
+    elapsed slots (rebasing it on each arrival loses sub-slot lateness and drifts below the target
+    with integer-millisecond timestamps). Gap slots — mid-recording and between the last frame and
+    `stop` — are padded with the held picture, bounded at 2s, so a stalled or idle device does not
+    compress the encoded timeline.
+  - Encoder backpressure is bounded in whole frames (`writableLength` vs `frameBytes`), not the
+    stream's own `writableNeedDrain`: a pipe's 16KB high-water mark is exceeded by every
+    multi-megabyte BGRA frame, so the stream signal would read as permanent congestion.
+  - A helper that exits nonzero mid-recording (device unplugged, lost capture session) fails the
+    `stop` with its stderr rather than archiving the truncated file as a complete recording.
+  - The AutoMobile UDID is mapped onto the AVFoundation `uniqueID` via the helper's
+    `--list-devices` JSON (exact match, then a separator-insensitive match, then the only attached
+    device) because `--device-id` matches `uniqueID` exactly.
+  - **Verification status:** the backend is covered by unit tests against fakes (helper frames,
+    FFmpeg process, `--list-devices` output); end-to-end capture has not yet been confirmed on
+    physical hardware, so treat physical-device support as implemented-but-unverified until a
+    recording succeeds on a real iPhone/iPad (issue #2504).
+  - One-time prerequisite: the device must be connected over USB with "Trust This Computer"
+    accepted, and macOS may prompt once for capture access. `stop` closes ffmpeg's stdin (rather
+    than signalling it) so the MP4 `moov` atom is finalized.
 
 ## Storage and retention
 

@@ -17,6 +17,28 @@ import {
   type SecurePermissions,
 } from "../../utils/filesystem/securePermissions";
 
+/**
+ * Keep only the declared {@link VideoRecordingConfig} fields. A backend that
+ * derives its `effectiveConfig` from the internal {@link VideoCaptureConfig} it
+ * was handed carries runtime-only members — recording id, absolute paths, the
+ * device descriptor, an `AbortSignal` — and this value is both returned to the
+ * caller and persisted as the recording's public configuration.
+ */
+function toPublicRecordingConfig(config: VideoRecordingConfig): VideoRecordingConfig {
+  const narrowed: VideoRecordingConfig = {
+    qualityPreset: config.qualityPreset,
+    targetBitrateKbps: config.targetBitrateKbps,
+    maxThroughputMbps: config.maxThroughputMbps,
+    fps: config.fps,
+    maxArchiveSizeMb: config.maxArchiveSizeMb,
+    format: config.format,
+  };
+  if (config.resolution) {
+    narrowed.resolution = config.resolution;
+  }
+  return narrowed;
+}
+
 export interface VideoCaptureConfig extends VideoRecordingConfig {
   recordingId: string;
   outputDirectory: string;
@@ -33,6 +55,8 @@ export interface RecordingHandle {
   recordingId: string;
   outputPath: string;
   startedAt: string;
+  /** Configuration actually used by a backend that adjusted the request. */
+  effectiveConfig?: VideoRecordingConfig;
   backendHandle?: unknown;
 }
 
@@ -186,13 +210,14 @@ export class VideoRecorderService {
 
     const resolvedOutputPath = handle.outputPath || outputPath;
     const resolvedFileName = path.basename(resolvedOutputPath);
+    const effectiveConfig = toPublicRecordingConfig(handle.effectiveConfig ?? config);
 
     const active: ActiveRecordingState = {
       recordingId,
       outputPath: resolvedOutputPath,
       fileName: resolvedFileName,
       startedAt: handle.startedAt || startedAt,
-      config,
+      config: effectiveConfig,
       outputName: options.outputName,
       handle,
       forceStopRequested: false,

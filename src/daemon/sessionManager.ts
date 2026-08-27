@@ -1189,7 +1189,12 @@ export class SessionManager {
    */
   private biometricRestoreTarget(session: Session): BiometricRestoreTarget | null {
     const state = session.cacheData.biometricEnrollment;
-    if (session.platform !== "ios" || !state) {
+    // Keyed on the cache alone, not session.platform. The slot is only ever
+    // written by the iOS Simulator biometric path, so its presence is the
+    // authoritative evidence that a simulator needs restoring — whereas
+    // session.platform carries whatever the caller declared to setActiveDevice
+    // and can disagree with the device actually bound.
+    if (!state) {
       return null;
     }
     return {

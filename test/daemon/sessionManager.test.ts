@@ -1513,6 +1513,36 @@ describe("SessionManager", () => {
     });
   });
 
+  describe("biometric enrollment restoration platform independence", () => {
+    test("restores cached enrollment even when the session declares a non-iOS platform", async () => {
+      const restored: Array<{ deviceId: string; enrollment: string }> = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        (device) => ({
+          restore: async (enrollment) => {
+            restored.push({ deviceId: device.deviceId, enrollment });
+          },
+        }),
+      );
+      try {
+        // setActiveDevice stores the caller-declared platform, which can
+        // disagree with the simulator actually bound. The cached enrollment is
+        // iOS-only evidence and must still be restored.
+        await manager.createSession("mislabelled", "sim-1", "android");
+        manager.setBiometricEnrollment("mislabelled", { initialEnrollment: "not_enrolled" });
+
+        await manager.releaseSession("mislabelled");
+
+        expect(restored).toEqual([{ deviceId: "sim-1", enrollment: "not_enrolled" }]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+  });
+
   describe("biometric enrollment restoration on rebind", () => {
     test("quarantines the old simulator and retries when the rebind restore fails", async () => {
       const timer = new FakeTimer();

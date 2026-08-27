@@ -189,7 +189,7 @@
     "js-tiktoken": "^1.0.21",
     "js-yaml": "^5.1.0",
     "knip": "^6.0.0",
-    "oxc-parser": "0.146.0",
+    "oxc-parser": "0.147.0",
     "oxfmt": "0.64.0",
     "oxlint": "1.79.0",
     "oxlint-tsgolint": "7.0.2001",

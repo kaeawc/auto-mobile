@@ -34,7 +34,13 @@ Critical path (the rewrite's actual goal — concurrency correctness + parity):
    DisplayLinkFPSMonitor, VoiceOver) ✅
 5. PerfProvider (TaskLocal call-tree + confined pool) ✅
 6. CommandHandler (Sendable POD router, async) + async serial dispatch + CtrlProxy coordinator ✅
-7. Cutover (point the runner/app at the rewrite; retire the reference; XcodeGen) ⟵ **NEXT**
+7. Cutover — **in progress**:
+   - 7A ✅ wire rewrite into XcodeGen (additive `CtrlProxyRewriteUITests` target) + first green
+     iOS-simulator compile (host-hidden `ElementLocator` init fixed).
+   - 7B ⟵ **NEXT** iOS strict-concurrency warning cleanup (~149 non-fatal warnings in the iOS-only
+     bodies — see [STATUS.md](STATUS.md) §5/§9; approach TBD, can't be runtime-validated here).
+   - 7C point primary runner/app at the rewrite; retire the reference; simulator validation
+     (gated on an iOS runtime).
 
 **8. Post-concurrency fixups (NEW).** Pure, off-critical-path improvements that we
 deliberately defer so the concurrency migration lands *parity-first*. Each is

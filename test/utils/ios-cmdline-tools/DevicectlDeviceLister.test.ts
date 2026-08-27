@@ -365,6 +365,22 @@ describe("DevicectlDeviceLister", () => {
     expect(partial.complete).toBe(false);
   });
 
+  test("a device parsed beside a malformed record is fresh, not retained", async () => {
+    const lister = makeLister({
+      readFile: async () =>
+        JSON.stringify(devicectlPayload([connectedIphone(), { notADevice: true }])),
+    });
+
+    const discovery = await lister.listConnectedDevices();
+
+    // One unreadable record makes the whole sweep non-authoritative, but the
+    // iPhone beside it was still observed just now (#5683). Marking it retained
+    // would make a connected phone unassignable.
+    expect(discovery.complete).toBe(false);
+    expect(discovery.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
+    expect(discovery.retainedDeviceIds ?? new Set()).not.toContain(PHYSICAL_UDID);
+  });
+
   test("retains the last good listing across a failing sweep, then lets it go stale", async () => {
     const timer = new FakeTimer();
     let shouldFail = false;
@@ -389,6 +405,9 @@ describe("DevicectlDeviceLister", () => {
     // sweep is still flagged non-authoritative.
     expect(blipped.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
     expect(blipped.complete).toBe(false);
+    // It is a replay, not an observation: liveness decisions must not read it
+    // as proof the phone is still plugged in (#5683).
+    expect([...(blipped.retainedDeviceIds ?? [])]).toEqual([PHYSICAL_UDID]);
 
     timer.advanceTime(60_000);
     const stale = await lister.listConnectedDevices();

@@ -10,6 +10,7 @@ import {
   type PhysicalIosDeviceDiscovery,
 } from "./ios-cmdline-tools/DevicectlDeviceLister";
 import { isIosPhysicalUdid } from "./ios-cmdline-tools/iosDeviceType";
+import type { DiscoverySource } from "./discoverySource";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
 import { deleteAvd } from "./android-cmdline-tools/avdmanager";
 import { logger } from "./logger";
@@ -44,8 +45,39 @@ export interface DeviceDiscoveryError {
 export interface BootedDeviceDiscovery {
   devices: BootedDevice[];
   succeededPlatforms: Set<Platform>;
+  /**
+   * Per-source completeness, one level finer than `succeededPlatforms` (#5683).
+   *
+   * iOS is discovered by two independent sources, so the platform flag alone
+   * cannot say which half of a mixed outcome is authoritative. Consumers that
+   * decide assignability or pruning for an individual device must ask
+   * `didSourceSucceedForDevice` rather than reading the platform aggregate.
+   */
+  succeededSources?: Set<DiscoverySource>;
+  /**
+   * Devices this sweep **freshly** observed, as opposed to replayed from a
+   * retained listing (#5683).
+   *
+   * Source-level completeness cannot stand in for this. `devicectl` reports
+   * `complete: false` both when every listed device is a stale replay and when
+   * a device was freshly parsed beside one unreadable record — opposite
+   * liveness answers from the same flag. Only membership here proves a device
+   * was seen just now.
+   */
+  freshDeviceIds?: Set<string>;
   /** Platform-specific typed failures for incomplete observations. */
   discoveryErrors?: Partial<Record<Platform, DeviceDiscoveryError>>;
+}
+
+/** The iOS sources that completed, from one sweep's per-source outcome. */
+function iosSucceededSources(outcome: {
+  simulatorsSucceeded: boolean;
+  physicalSucceeded: boolean;
+}): DiscoverySource[] {
+  return [
+    ...(outcome.simulatorsSucceeded ? (["ios-simulator"] as const) : []),
+    ...(outcome.physicalSucceeded ? (["ios-physical"] as const) : []),
+  ];
 }
 
 export interface BootedDeviceDiscoveryOptions {
@@ -446,44 +478,47 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   ): Promise<BootedDeviceDiscovery> {
     const devices: BootedDevice[] = [];
     const succeededPlatforms = new Set<Platform>();
+    const succeededSources = new Set<DiscoverySource>();
+    const freshDeviceIds = new Set<string>();
     const discoveryErrors: Partial<Record<Platform, DeviceDiscoveryError>> = {};
 
     if (platform === "android" || platform === "either") {
-      try {
-        const emulators = await this.emulator.getBootedDevicesChecked(
-          false,
-          {
-            bypassDeviceListCache: options.bypassAndroidDeviceListCache,
-          },
-          getAbortSignal(),
-        );
-        devices.push(...emulators);
+      const android = await this.discoverBootedAndroidDevices(options);
+      devices.push(...android.devices);
+      if (android.error) {
+        discoveryErrors.android = android.error;
+      } else {
         succeededPlatforms.add("android");
-      } catch (error) {
-        logger.warn(
-          `[DeviceManager] Android booted-device discovery failed; retaining tracked Android devices: ${error}`,
-        );
-        discoveryErrors.android = {
-          code: "failed",
-          message: `Android booted-device discovery failed: ${errorMessage(error)}`,
-        };
+        succeededSources.add("android");
+        // adb has no retention replay: a listed device was listed just now.
+        for (const emulator of android.devices) {
+          freshDeviceIds.add(emulator.deviceId);
+        }
       }
     }
 
     if (platform === "ios" || platform === "either") {
       const ios = await this.discoverBootedIosDevices();
       // Physical devices that devicectl confirmed are reported even when
-      // simulator discovery failed; `succeeded` still gates pruning, because a
-      // failed simctl sweep cannot prove a tracked simulator is gone.
+      // simulator discovery failed, and vice versa. `succeededPlatforms.ios`
+      // still means "simctl completed" for the platform-level consumers that
+      // predate #5683; the per-source set is what lets a consumer decide an
+      // individual device without over-reading either failure.
       devices.push(...ios.devices);
-      if (ios.succeeded) {
+      for (const source of iosSucceededSources(ios)) {
+        succeededSources.add(source);
+      }
+      if (ios.simulatorsSucceeded) {
         succeededPlatforms.add("ios");
       } else if (ios.error) {
         discoveryErrors.ios = ios.error;
       }
+      for (const deviceId of ios.freshDeviceIds) {
+        freshDeviceIds.add(deviceId);
+      }
     }
 
-    return { devices, succeededPlatforms, discoveryErrors };
+    return { devices, succeededPlatforms, succeededSources, freshDeviceIds, discoveryErrors };
   }
 
   async getDeviceImagesDetailed(
@@ -534,17 +569,48 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     return { devices, succeededPlatforms, discoveryErrors };
   }
 
+  private async discoverBootedAndroidDevices(
+    options: BootedDeviceDiscoveryOptions,
+  ): Promise<{ devices: BootedDevice[]; error?: DeviceDiscoveryError }> {
+    try {
+      return {
+        devices: await this.emulator.getBootedDevicesChecked(
+          false,
+          { bypassDeviceListCache: options.bypassAndroidDeviceListCache },
+          getAbortSignal(),
+        ),
+      };
+    } catch (error) {
+      logger.warn(
+        `[DeviceManager] Android booted-device discovery failed; retaining tracked Android devices: ${error}`,
+      );
+      return {
+        devices: [],
+        error: {
+          code: "failed",
+          message: `Android booted-device discovery failed: ${errorMessage(error)}`,
+        },
+      };
+    }
+  }
+
   private async discoverBootedIosDevices(): Promise<{
     devices: BootedDevice[];
-    succeeded: boolean;
+    simulatorsSucceeded: boolean;
+    physicalSucceeded: boolean;
+    /** Ids observed by this sweep, excluding devicectl's retained replay. */
+    freshDeviceIds: Set<string>;
     error?: DeviceDiscoveryError;
   }> {
     // iOS tooling that is genuinely unavailable on this host cannot confirm a
-    // device is gone, so report it as un-discovered rather than empty.
+    // device is gone, so report it as un-discovered rather than empty. Neither
+    // source ran, so neither is authoritative.
     if (!(await this.canDiscoverIosLocally())) {
       return {
         devices: [],
-        succeeded: false,
+        simulatorsSucceeded: false,
+        physicalSucceeded: false,
+        freshDeviceIds: new Set(),
         error: {
           code: "unavailable",
           message: "iOS booted-device discovery is unavailable.",
@@ -554,27 +620,40 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     // Physical-device discovery runs regardless of the simulator outcome and
     // cannot fail the sweep: it is best-effort by contract.
     const physical = await this.listPhysicalIosDevices();
+    if (!physical.complete) {
+      logger.warn(
+        "[DeviceManager] iOS physical-device discovery was incomplete; " +
+          "reporting last-known physical devices, which cannot prove one disconnected.",
+      );
+    }
+    // A device devicectl parsed this sweep is fresh even when a sibling record
+    // was unreadable; only the replayed half is stale.
+    const retainedPhysicalIds = physical.retainedDeviceIds ?? new Set<string>();
+    const freshPhysicalIds = physical.devices
+      .map((device) => device.deviceId)
+      .filter((deviceId) => !retainedPhysicalIds.has(deviceId));
     try {
       const simulators = await this.simctl.getBootedSimulatorsChecked();
-      // `succeeded` stays tied to simctl alone. It is a per-platform flag with
-      // no room for "simulators are authoritative but physical devices are
-      // not", and clearing it on a devicectl blip would make every idle
-      // simulator unassignable. The lister keeps a failing sweep from dropping a
-      // connected device by retaining its last-known devices instead.
-      if (!physical.complete) {
-        logger.warn(
-          "[DeviceManager] iOS physical-device discovery was incomplete; " +
-            "reporting last-known physical devices alongside authoritative simulators.",
-        );
-      }
-      return { devices: mergeIosDevices(simulators, physical.devices), succeeded: true };
+      return {
+        devices: mergeIosDevices(simulators, physical.devices),
+        simulatorsSucceeded: true,
+        physicalSucceeded: physical.complete,
+        freshDeviceIds: new Set([
+          ...simulators.map((device) => device.deviceId),
+          ...freshPhysicalIds,
+        ]),
+      };
     } catch (error) {
+      // A failed simctl sweep says nothing about the devicectl half: a physical
+      // device it positively observed stays authoritative (#5683).
       logger.warn(
-        `[DeviceManager] iOS booted-device discovery failed; retaining tracked iOS devices: ${error}`,
+        `[DeviceManager] iOS simulator discovery failed; retaining tracked simulators: ${error}`,
       );
       return {
         devices: physical.devices,
-        succeeded: false,
+        simulatorsSucceeded: false,
+        physicalSucceeded: physical.complete,
+        freshDeviceIds: new Set(freshPhysicalIds),
         error: {
           code: "failed",
           message: `iOS booted-device discovery failed: ${errorMessage(error)}`,

@@ -28,7 +28,8 @@ import {
   DeviceAllocationRequest,
 } from "./DeviceCriteriaMatcher";
 import { resetAdbDeviceListCache } from "../utils/android-cmdline-tools/AdbClient";
-import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { hasMutableDisplayName, isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { didSourceSucceedForDevice, type DiscoverySource } from "../utils/discoverySource";
 import { consolePortFromSerial } from "../utils/android-cmdline-tools/EmulatorConsoleClient";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
@@ -172,8 +173,21 @@ type SessionAssignmentSnapshot = Pick<
   "sessionId" | "status" | "lastUsedAt" | "assignmentCount" | "errorCount" | "autolockSessionId"
 >;
 
+/**
+ * One iOS liveness sweep, carrying completeness per source (#5683).
+ *
+ * `discoverySucceeded` is the simulator (`simctl`) half and keeps its original
+ * meaning; `physicalDiscoverySucceeded` is the devicectl half.
+ *
+ * `bootedDeviceIds` holds only devices a source **freshly** observed this
+ * sweep. That distinction is load-bearing: `DevicectlDeviceLister` replays its
+ * last-good listing for up to 60s behind `complete: false`, so a returned
+ * device is not by itself proof of liveness — only a returned device whose own
+ * source completed is.
+ */
 interface IosLivenessSnapshot {
   discoverySucceeded: boolean;
+  physicalDiscoverySucceeded: boolean;
   bootedDeviceIds: Set<string>;
 }
 
@@ -624,6 +638,7 @@ export class DevicePool {
         bootedDeviceIds,
         bootedPlatforms,
         discovery.succeededPlatforms,
+        discovery.succeededSources,
       );
       if (removed === undefined) {
         logger.info("Discarding an out-of-date device discovery snapshot");
@@ -1297,6 +1312,7 @@ export class DevicePool {
     bootedDeviceIds: Set<string>,
     bootedPlatforms: Set<Platform>,
     succeededPlatforms: Set<Platform>,
+    succeededSources?: Set<DiscoverySource>,
   ): Promise<number> {
     let removedCount = 0;
 
@@ -1311,11 +1327,19 @@ export class DevicePool {
         );
         continue;
       }
-      // Discovery for this platform failed or was unavailable this refresh, so
-      // we cannot confirm the device is gone. Retain it rather than pruning a
-      // device that may still be running (e.g. iOS simctl failed while Android
-      // discovery succeeded, or all tooling was transiently unreachable).
-      if (!succeededPlatforms.has(device.platform)) {
+      // The source that would have listed this device failed or was unavailable
+      // this refresh, so we cannot confirm the device is gone. Retain it rather
+      // than pruning a device that may still be running (e.g. simctl failed
+      // while devicectl and Android discovery succeeded). Asking per source
+      // rather than per platform keeps one failing iOS half from either
+      // freezing the other half's pruning or pruning its own devices (#5683).
+      if (
+        !didSourceSucceedForDevice(
+          { succeededPlatforms, succeededSources },
+          device.platform,
+          device.id,
+        )
+      ) {
         this.refreshMissingDeviceMisses.delete(device.id);
         logger.warn(
           `Device ${device.id} retained: ${device.platform} discovery did not succeed this refresh`,
@@ -1350,6 +1374,7 @@ export class DevicePool {
     bootedDeviceIds: Set<string>,
     bootedPlatforms: Set<Platform>,
     succeededPlatforms: Set<Platform>,
+    succeededSources?: Set<DiscoverySource>,
   ): Promise<number | undefined> {
     const removeMissingDevices = async () => {
       if (refreshGeneration !== this.refreshGeneration) {
@@ -1359,6 +1384,7 @@ export class DevicePool {
         bootedDeviceIds,
         bootedPlatforms,
         succeededPlatforms,
+        succeededSources,
       );
     };
     return assignmentLockHeld
@@ -4003,13 +4029,15 @@ export class DevicePool {
 
       if (status === "stale") {
         logger.warn(
-          `[DevicePool] Removing idle iOS simulator ${device.id}: simctl no longer reports it as booted`,
+          `[DevicePool] Removing idle iOS ${this.iosDeviceNoun(device.id)} ${device.id}: ` +
+            "iOS discovery no longer reports it as booted",
         );
         await this.removeDevice(device.id);
       } else {
         livenessUnknown = true;
         logger.warn(
-          `[DevicePool] Cannot assign idle iOS simulator ${device.id}: iOS liveness discovery failed`,
+          `[DevicePool] Cannot assign idle iOS ${this.iosDeviceNoun(device.id)} ${device.id}: ` +
+            "its iOS liveness discovery source failed",
         );
       }
       candidates = candidates.filter((candidate) => candidate.id !== skippedDeviceId);
@@ -4082,9 +4110,9 @@ export class DevicePool {
     }
 
     const iosLiveness = await this.getIosLivenessSnapshot();
-    if (!iosLiveness.discoverySucceeded) {
+    if (!iosLiveness.discoverySucceeded && !iosLiveness.physicalDiscoverySucceeded) {
       logger.warn(
-        "[DevicePool] Retaining idle iOS simulators: iOS liveness discovery failed before allocation planning",
+        "[DevicePool] Retaining idle iOS devices: no iOS liveness source completed before allocation planning",
       );
       return 0;
     }
@@ -4097,7 +4125,8 @@ export class DevicePool {
       }
       if (this.getIdleDeviceLivenessStatus(device, iosLiveness) === "stale") {
         logger.warn(
-          `[DevicePool] Removing idle iOS simulator ${device.id}: simctl no longer reports it as booted`,
+          `[DevicePool] Removing idle iOS ${this.iosDeviceNoun(device.id)} ${device.id}: ` +
+            "iOS discovery no longer reports it as booted",
         );
         await this.removeDevice(device.id);
         removedCount++;
@@ -4108,17 +4137,34 @@ export class DevicePool {
 
   private async getIosLivenessSnapshot(): Promise<IosLivenessSnapshot> {
     const discovery = await this.deviceManager.getBootedDevicesDetailed("ios");
-    if (!discovery.succeededPlatforms.has("ios")) {
-      return {
-        discoverySucceeded: false,
-        bootedDeviceIds: new Set(),
-      };
-    }
-
+    const sources = discovery.succeededSources;
+    const platformSucceeded = discovery.succeededPlatforms.has("ios");
+    // Presence alone does not prove liveness: a failed devicectl sweep replays
+    // its retained last-good iPhones, and treating those as fresh would hand an
+    // unplugged device to a session instead of raising the intended
+    // unable-to-verify error. Freshness is decided per device rather than per
+    // source, because devicectl also reports source-wide incompleteness for a
+    // sweep in which a device WAS freshly parsed beside one unreadable record —
+    // dropping that device would reject a connected iPhone.
+    const fresh = discovery.freshDeviceIds;
     return {
-      discoverySucceeded: true,
-      bootedDeviceIds: new Set(discovery.devices.map((booted) => booted.deviceId)),
+      discoverySucceeded: sources ? sources.has("ios-simulator") : platformSucceeded,
+      physicalDiscoverySucceeded: sources ? sources.has("ios-physical") : platformSucceeded,
+      bootedDeviceIds: new Set(
+        discovery.devices
+          .map((booted) => booted.deviceId)
+          .filter((deviceId) =>
+            // Producers that do not report freshness fall back to the source
+            // aggregate, which is what they meant before #5683.
+            fresh ? fresh.has(deviceId) : didSourceSucceedForDevice(discovery, "ios", deviceId),
+          ),
+      ),
     };
+  }
+
+  /** "simulator" or "device", so a log about a physical iPhone reads truthfully. */
+  private iosDeviceNoun(deviceId: string): string {
+    return isIosPhysicalUdid(deviceId) ? "device" : "simulator";
   }
 
   private getIdleDeviceLivenessStatus(
@@ -4129,15 +4175,23 @@ export class DevicePool {
       return "assignable";
     }
 
-    if (!iosLiveness?.discoverySucceeded) {
+    if (!iosLiveness) {
       return "unknown";
     }
 
+    // A fresh observation by either source outranks the other's failure: a
+    // devicectl-confirmed iPhone stays assignable through a failed simctl
+    // sweep, and an idle simulator through a failed devicectl sweep (#5683).
+    // The snapshot has already dropped retained-but-unverified ids.
     if (iosLiveness.bootedDeviceIds.has(device.id)) {
       return "assignable";
     }
 
-    return "stale";
+    // Only the source that would have listed this device can call it gone.
+    const observingSourceSucceeded = isIosPhysicalUdid(device.id)
+      ? iosLiveness.physicalDiscoverySucceeded
+      : iosLiveness.discoverySucceeded;
+    return observingSourceSucceeded ? "stale" : "unknown";
   }
 
   private async assertIdleDeviceAssignable(
@@ -4163,15 +4217,17 @@ export class DevicePool {
 
     if (status === "stale") {
       logger.warn(
-        `[DevicePool] Removing idle iOS simulator ${device.id}: simctl no longer reports it as booted`,
+        `[DevicePool] Removing idle iOS ${this.iosDeviceNoun(device.id)} ${device.id}: ` +
+          "iOS discovery no longer reports it as booted",
       );
       await this.removeDevice(device.id);
       throw new ActionableError(unavailableMessage);
     }
 
+    const noun = this.iosDeviceNoun(device.id);
     throw new ActionableError(
-      `Unable to verify iOS simulator '${device.id}' is still booted before assignment.\n` +
-        `iOS simulator discovery failed, so AutoMobile did not assign this pooled UDID.`,
+      `Unable to verify iOS ${noun} '${device.id}' is still booted before assignment.\n` +
+        `iOS ${noun} discovery failed, so AutoMobile did not assign this pooled UDID.`,
     );
   }
 

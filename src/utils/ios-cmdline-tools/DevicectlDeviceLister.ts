@@ -44,6 +44,17 @@ export interface IosPhysicalDeviceLister {
 export interface PhysicalIosDeviceDiscovery {
   devices: BootedDevice[];
   complete: boolean;
+  /**
+   * Devices in `devices` that came from the retention replay rather than this
+   * sweep, so a caller can tell "still plugged in" from "last seen recently".
+   *
+   * `complete` alone cannot make that call in either direction: a sweep with
+   * one malformed record reports `complete: false` while every listed device
+   * was freshly parsed, and a failed sweep reports `complete: false` while
+   * every listed device is a replay. Liveness decisions need this set; pruning
+   * decisions still want `complete` (#5683).
+   */
+  retainedDeviceIds?: ReadonlySet<string>;
 }
 
 /**
@@ -395,16 +406,28 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
         observedAt: device.observedAt ?? observedAt,
       })),
     };
-    const resolved = stamped.complete
-      ? this.recordLastGood(stamped, now)
-      : {
-          // A partial sweep and the retained listing are both incomplete views of
-          // the same hardware, so neither may evict the other's device: union
-          // them. When the sweep failed outright its half is empty and this
-          // degrades to pure retention.
-          devices: mergeById(stamped.devices, this.retainedDevices(now)),
-          complete: false,
-        };
+    let resolved: PhysicalIosDeviceDiscovery;
+    if (stamped.complete) {
+      resolved = this.recordLastGood(stamped, now);
+    } else {
+      // A partial sweep and the retained listing are both incomplete views of
+      // the same hardware, so neither may evict the other's device: union
+      // them. When the sweep failed outright its half is empty and this
+      // degrades to pure retention.
+      const fresh = new Set(stamped.devices.map((device) => device.deviceId));
+      const retained = this.retainedDevices(now);
+      // Only the replayed half is stale. A device this sweep parsed stays fresh
+      // even though a sibling record was unreadable.
+      const retainedDeviceIds = retained
+        .map((device) => device.deviceId)
+        .filter((id) => !fresh.has(id));
+      resolved = {
+        devices: mergeById(stamped.devices, retained),
+        complete: false,
+        // Omitted when empty so a pure-failure sweep keeps its original shape.
+        ...(retainedDeviceIds.length > 0 ? { retainedDeviceIds: new Set(retainedDeviceIds) } : {}),
+      };
+    }
     this.cache = {
       discovery: resolved,
       observedAt: now,

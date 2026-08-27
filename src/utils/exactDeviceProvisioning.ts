@@ -17,6 +17,11 @@ import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { throwIfAborted } from "./toolUtils";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import {
+  classifyDisplayCutout,
+  type DisplayCutoutClassification,
+  type DisplayCutoutPreference,
+} from "./displayCutout";
+import {
   getVirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleCoordinator,
   type VirtualDeviceLifecycleIdentity,
@@ -26,6 +31,7 @@ import {
 export interface AndroidDeviceSpecification {
   runtime: string;
   deviceType: string;
+  displayCutout?: DisplayCutoutPreference;
   configuration?: {
     memoryMb?: number;
   };
@@ -34,9 +40,17 @@ export interface AndroidDeviceSpecification {
 export interface IosDeviceSpecification {
   runtime: string;
   deviceType: string;
+  displayCutout?: DisplayCutoutPreference;
 }
 
 export type ExactDeviceSpecification = AndroidDeviceSpecification | IosDeviceSpecification;
+export type ResolvedExactDeviceSpecification =
+  | (Omit<AndroidDeviceSpecification, "displayCutout"> & {
+      displayCutout: DisplayCutoutClassification;
+    })
+  | (Omit<IosDeviceSpecification, "displayCutout"> & {
+      displayCutout: DisplayCutoutClassification;
+    });
 
 export interface ExactDeviceProvisionRequest {
   platform: "android" | "ios";
@@ -57,13 +71,14 @@ export interface ExactDeviceProvisionRequest {
 export interface ExactProvisionedDevice {
   device: DeviceInfo;
   created: boolean;
-  resolvedSpec: ExactDeviceSpecification;
+  resolvedSpec: ResolvedExactDeviceSpecification;
 }
 
 export type ProvisionDeviceFailureCode =
   | "creation_not_allowed"
   | "identity_conflict"
   | "timeout"
+  | "unsupported"
   | "platform_command_failed";
 
 export class ProvisionDeviceError extends ActionableError {
@@ -236,6 +251,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
   }
 
   async provision(request: ExactDeviceProvisionRequest): Promise<ExactProvisionedDevice> {
+    const displayCutout = this.resolveDisplayCutout(request);
     const ownLease = request.lifecycleLease === undefined;
     const lease =
       request.lifecycleLease ??
@@ -253,7 +269,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
     };
     try {
       throwIfAborted(coordinatedRequest.signal);
-      const result = await this.provisionLocked(coordinatedRequest);
+      const result = await this.provisionLocked(coordinatedRequest, displayCutout);
       const stableId =
         result.device.platform === "android" ? result.device.name : result.device.deviceId;
       if (!stableId) {
@@ -289,6 +305,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
 
   private async provisionLocked(
     request: ExactDeviceProvisionRequest,
+    displayCutout: DisplayCutoutClassification,
   ): Promise<ExactProvisionedDevice> {
     const images = await this.dependencies.listDeviceImages(request.platform);
     const existing = this.findExisting(images, request);
@@ -297,7 +314,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
       return {
         device: existing,
         created: false,
-        resolvedSpec: request.spec,
+        resolvedSpec: this.withResolvedDisplayCutout(request.spec, displayCutout),
       };
     }
 
@@ -310,9 +327,41 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
 
     await request.onBeforeCreate?.();
     if (request.platform === "android") {
-      return await this.createAndroid(request, request.spec as AndroidDeviceSpecification);
+      return await this.createAndroid(
+        request,
+        request.spec as AndroidDeviceSpecification,
+        displayCutout,
+      );
     }
-    return await this.createIos(request, request.spec as IosDeviceSpecification);
+    return await this.createIos(request, request.spec as IosDeviceSpecification, displayCutout);
+  }
+
+  private resolveDisplayCutout(request: ExactDeviceProvisionRequest): DisplayCutoutClassification {
+    const resolved = classifyDisplayCutout(request.platform, request.spec.deviceType);
+    const preference = request.spec.displayCutout;
+    if (preference === undefined || preference === "any") {
+      return resolved;
+    }
+    if (resolved === "unknown") {
+      throw new ProvisionDeviceError(
+        "unsupported",
+        `Display cutout preference '${preference}' is unsupported for ${request.platform} device type '${request.spec.deviceType}' because its cutout class is unknown.`,
+      );
+    }
+    if (resolved !== preference) {
+      throw new ProvisionDeviceError(
+        "identity_conflict",
+        `Exact ${request.platform} device type '${request.spec.deviceType}' has display cutout '${resolved}', not requested '${preference}'.`,
+      );
+    }
+    return resolved;
+  }
+
+  private withResolvedDisplayCutout(
+    spec: ExactDeviceSpecification,
+    displayCutout: DisplayCutoutClassification,
+  ): ResolvedExactDeviceSpecification {
+    return { ...spec, displayCutout } as ResolvedExactDeviceSpecification;
   }
 
   private findExisting(
@@ -423,6 +472,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
   private async createAndroid(
     request: ExactDeviceProvisionRequest,
     spec: AndroidDeviceSpecification,
+    displayCutout: DisplayCutoutClassification,
   ): Promise<ExactProvisionedDevice> {
     const created = await this.dependencies.avdManager.createAvd(
       {
@@ -451,13 +501,14 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
         platform: "android",
         isRunning: false,
       },
-      resolvedSpec: spec,
+      resolvedSpec: this.withResolvedDisplayCutout(spec, displayCutout),
     };
   }
 
   private async createIos(
     request: ExactDeviceProvisionRequest,
     spec: IosDeviceSpecification,
+    displayCutout: DisplayCutoutClassification,
   ): Promise<ExactProvisionedDevice> {
     const deviceId = await this.dependencies.iosSimulator.createSimulator(
       request.name,
@@ -475,7 +526,7 @@ export class DefaultExactDeviceProvisioner implements ExactDeviceProvisioner {
         runtime: spec.runtime,
         deviceType: spec.deviceType,
       },
-      resolvedSpec: spec,
+      resolvedSpec: this.withResolvedDisplayCutout(spec, displayCutout),
     };
   }
 }

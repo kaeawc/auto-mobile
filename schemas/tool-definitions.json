@@ -7004,6 +7004,11 @@
                       "type": "string",
                       "minLength": 1
                     },
+                    "displayCutout": {
+                      "description": "Required display cutout class for the exact device type; 'any' accepts every class",
+                      "type": "string",
+                      "enum": ["none", "notch", "dynamic_island", "hole_punch", "any"]
+                    },
                     "configuration": {
                       "type": "object",
                       "properties": {
@@ -7047,6 +7052,11 @@
                       "description": "CoreSimulator device-type identifier",
                       "type": "string",
                       "minLength": 1
+                    },
+                    "displayCutout": {
+                      "description": "Required display cutout class for the exact device type; 'any' accepts every class",
+                      "type": "string",
+                      "enum": ["none", "notch", "dynamic_island", "hole_punch", "any"]
                     }
                   },
                   "required": ["runtime", "deviceType"],

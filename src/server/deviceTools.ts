@@ -110,6 +110,7 @@ import {
 import { DeviceTeardownService, type DeviceTeardownPhase } from "../utils/deviceTeardownService";
 import { DeviceShutdownService } from "../utils/deviceShutdownService";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { classifyDisplayCutout, DISPLAY_CUTOUT_PREFERENCES } from "../utils/displayCutout";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -242,6 +243,12 @@ const androidProvisionDeviceSpecSchema = z
   .object({
     runtime: z.string().min(1).describe("Installed Android system-image package identifier"),
     deviceType: z.string().min(1).describe("Android avdmanager device profile identifier"),
+    displayCutout: z
+      .enum(DISPLAY_CUTOUT_PREFERENCES)
+      .optional()
+      .describe(
+        "Required display cutout class for the exact device type; 'any' accepts every class",
+      ),
     configuration: z
       .object({
         memoryMb: z.number().int().positive().optional(),
@@ -271,6 +278,12 @@ const iosProvisionDeviceSpecSchema = z
   .object({
     runtime: z.string().min(1).describe("CoreSimulator runtime identifier"),
     deviceType: z.string().min(1).describe("CoreSimulator device-type identifier"),
+    displayCutout: z
+      .enum(DISPLAY_CUTOUT_PREFERENCES)
+      .optional()
+      .describe(
+        "Required display cutout class for the exact device type; 'any' accepts every class",
+      ),
   })
   .strict();
 
@@ -4398,6 +4411,9 @@ export function registerDeviceTools() {
       device: booted?.device ?? provisioned.device,
       requestedSpec: args.device.spec,
       resolvedSpec: provisioned.resolvedSpec,
+      displayCutout:
+        provisioned.resolvedSpec.displayCutout ??
+        classifyDisplayCutout(args.device.platform, provisioned.resolvedSpec.deviceType),
       created: createdByOperation,
       adopted: !createdByOperation,
       lifecycleState: booted ? "ready" : createdByOperation ? "created" : "adopted",

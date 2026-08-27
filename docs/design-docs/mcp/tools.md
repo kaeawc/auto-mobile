@@ -174,7 +174,7 @@ cat "$APP_CONTAINER/Documents/fixtures/hello.txt"
 
 - 📋 Device inventory and pool status are exposed via the `automobile:devices/booted` resource.
 - 🚀 `startDevice` starts a device with the specified device image.
-- 🧱 `provisionDevice` creates or adopts an exact virtual-device identity. It requires the `device-control` capability.
+- 🧱 `provisionDevice` creates or adopts an exact virtual-device identity. Its optional `device.spec.displayCutout` preference (`none`, `notch`, `dynamic_island`, `hole_punch`, or `any`) verifies the supplied exact device type; it never substitutes a different type. Successful responses report the resolved classification. It requires the `device-control` capability.
 - ❌ `killDevice` terminates a running device.
 - 🧹 `deleteDevice` stops and permanently deletes a device identified by its `platform` and stable identity from `automobile:devices/booted`, then verifies its absence from that platform inventory.
 - 🔧 `setActiveDevice` sets the active device for subsequent operations. It is a

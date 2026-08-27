@@ -470,9 +470,19 @@ final class CommandHandler: CommandHandling {
 
     /// Validate the client's `frameContext` and run `operation` as one `@MainActor`
     /// transaction (no suspension between the generation read and the gesture), preserving
-    /// the reference's single-`main.sync` atomicity. Using `MainActor.run` rather than a
-    /// blocking `main.sync` is what lets the task-local perf scope reach the gesture-nested
-    /// `track`s inside `operation`.
+    /// the reference's single-`main.sync` atomicity.
+    ///
+    /// The `operation` runs inside a **fresh** `perf.withScope` for perf-tree parity. The
+    /// reference `FrameContext.performIfCurrent` hops the gesture onto the *main thread* via
+    /// `runOnMainThread`, where the reference's *thread-local* perf stack is empty — so a
+    /// `track` inside `operation` (e.g. `setText.byResourceId`, `pressButton`) opens as its
+    /// own root and is pooled independently of the handler root opened on the command thread
+    /// (`WebSocketServer.flushPerfTiming` then wraps the two roots under a synthetic `total`).
+    /// A plain `MainActor.run` would instead nest that track under the still-open handler
+    /// entry (the task-local scope propagates onto the main actor), producing a different
+    /// on-wire `perfTiming` tree. Binding a fresh scope here reproduces the reference's split
+    /// exactly. (For a gesture with no inner `track` — tap/swipe/drag — the fresh scope stays
+    /// empty and contributes nothing, so it is harmless.)
     ///
     /// No expected context means there is nothing to validate: skip the hierarchy extraction
     /// and blocking SDK fetch entirely on the fast path. When context IS supplied, extract
@@ -486,17 +496,19 @@ final class CommandHandler: CommandHandling {
         async throws -> T
     {
         guard let expected else {
-            return try await MainActor.run { try operation() }
+            return try await perf.withScope { try await MainActor.run { try operation() } }
         }
 
         let hierarchy = (try? await elementLocator.getViewHierarchy(disableAllFiltering: false))
             .map(enrichWithCachedSdkHierarchy)
 
-        return try await MainActor.run {
-            guard let hierarchy, self.frameContext.context(for: hierarchy) == expected else {
-                throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
+        return try await perf.withScope {
+            try await MainActor.run {
+                guard let hierarchy, self.frameContext.context(for: hierarchy) == expected else {
+                    throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
+                }
+                return try operation()
             }
-            return try operation()
         }
     }
 

@@ -118,18 +118,33 @@ final class CommandHandlerParityTests: XCTestCase {
     // MARK: - Integration perfTiming parity (§8 obligation)
 
     func testPerfTimingEmittedOnTheWireMatches() async {
-        let json = #"{"type":"request_hierarchy","requestId":"h1"}"#
-
-        let referenceTree = ReferenceCommandDriver.perfTimingTreeThroughServer(json)
-        let rewriteTree = await RewriteCommandDriver.perfTimingTreeThroughServer(json)
-
-        // Non-empty: a missing `withScope` wire-up would leave this nil while the Phase-5
-        // engine tests still pass.
+        // request_hierarchy: a single command-side root (handleRequestHierarchy → extraction).
+        // Non-empty proves the `withScope` wire-up accumulates (a missing wire-up would leave
+        // this nil while the Phase-5 engine tests still pass).
+        let hierarchyJSON = #"{"type":"request_hierarchy","requestId":"h1"}"#
+        let hierarchyReference = ReferenceCommandDriver.perfTimingTreeThroughServer(hierarchyJSON)
+        let hierarchyRewrite = await RewriteCommandDriver.perfTimingTreeThroughServer(hierarchyJSON)
         XCTAssertEqual(
-            rewriteTree,
+            hierarchyRewrite,
             "handleRequest:request_hierarchy[handleRequestHierarchy[extraction]]",
             "rewrite did not emit the expected perfTiming tree on the wire"
         )
-        XCTAssertEqual(referenceTree, rewriteTree, "perfTiming tree diverged from the reference")
+        XCTAssertEqual(hierarchyReference, hierarchyRewrite, "request_hierarchy perfTiming diverged from the reference")
+
+        // set_text (with resourceId, no frameContext): routes through
+        // performContextCheckedGesture, whose gesture-nested `track` the reference splits onto
+        // the main thread's (empty, thread-local) perf stack — so it is a SEPARATE root, and
+        // flushPerfTiming wraps the two roots under a synthetic `total`. The rewrite reproduces
+        // that split with a fresh `perf.withScope` around the gesture. Guards against the
+        // MainActor.run scope-propagation regression the Phase-6 review caught.
+        let setTextJSON = #"{"type":"request_set_text","requestId":"t1","text":"hi","resourceId":"field"}"#
+        let setTextReference = ReferenceCommandDriver.perfTimingTreeThroughServer(setTextJSON)
+        let setTextRewrite = await RewriteCommandDriver.perfTimingTreeThroughServer(setTextJSON)
+        XCTAssertEqual(
+            setTextRewrite,
+            "total[setText.byResourceId,handleRequest:request_set_text[handleSetText]]",
+            "gesture-nested perf track must be a sibling root under `total`, not nested under the handler"
+        )
+        XCTAssertEqual(setTextReference, setTextRewrite, "set_text perfTiming diverged from the reference")
     }
 }

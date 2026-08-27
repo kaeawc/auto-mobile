@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
+import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.ObservationInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemBarsInsetsInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.SystemChromeInfo
@@ -63,6 +65,65 @@ class CtrlProxyInsetsTest {
         source = "android-window-insets",
       ),
       SystemChromeInfo.fromAndroidBars(statusBarVisible = false, navigationBarVisible = false),
+    )
+  }
+
+  @Test
+  fun `display cutout classifier reports no cutout and unavailable metadata explicitly`() {
+    assertEquals(
+      DisplayCutoutInfo(classification = "none"),
+      DisplayCutoutInfo.none(),
+    )
+    assertEquals(
+      DisplayCutoutInfo(classification = "unknown"),
+      DisplayCutoutInfo.unknown(),
+    )
+  }
+
+  @Test
+  fun `display cutout classifier reports broad edge obstruction as a notch`() {
+    val bounds = listOf(ElementBounds(left = 360, top = 0, right = 720, bottom = 100))
+
+    assertEquals(
+      DisplayCutoutInfo(classification = "notch", bounds = bounds),
+      DisplayCutoutInfo.fromBoundingRects(screenWidth = 1080, screenHeight = 2400, bounds = bounds),
+    )
+  }
+
+  @Test
+  fun `display cutout classifier reports small edge obstruction as a hole punch across rotation`() {
+    val portraitBounds = listOf(ElementBounds(left = 480, top = 0, right = 600, bottom = 100))
+    val landscapeBounds = listOf(ElementBounds(left = 0, top = 480, right = 100, bottom = 600))
+
+    assertEquals(
+      DisplayCutoutInfo(classification = "hole_punch", bounds = portraitBounds),
+      DisplayCutoutInfo.fromBoundingRects(
+        screenWidth = 1080,
+        screenHeight = 2400,
+        bounds = portraitBounds,
+      ),
+    )
+    assertEquals(
+      DisplayCutoutInfo(classification = "hole_punch", bounds = landscapeBounds),
+      DisplayCutoutInfo.fromBoundingRects(
+        screenWidth = 2400,
+        screenHeight = 1080,
+        bounds = landscapeBounds,
+      ),
+    )
+  }
+
+  @Test
+  fun `display cutout classifier preserves ambiguous geometry as unknown`() {
+    val bounds =
+      listOf(
+        ElementBounds(left = 0, top = 100, right = 80, bottom = 300),
+        ElementBounds(left = 1000, top = 100, right = 1080, bottom = 300),
+      )
+
+    assertEquals(
+      DisplayCutoutInfo(classification = "unknown", bounds = bounds),
+      DisplayCutoutInfo.fromBoundingRects(screenWidth = 1080, screenHeight = 2400, bounds = bounds),
     )
   }
 }

@@ -339,8 +339,9 @@ function compactBounds(bounds: {
  * `rawViewHierarchy` is deliberately skipped so `raw: true` still returns the
  * unshaped hierarchy. Only fields literally named `bounds` are flattened, so
  * insets (`systemInsets`, a `{top,bottom,left,right}` object) and other shapes
- * are never mis-compacted. A non-object `bounds` (already a tuple, or a string)
- * is left untouched, so the transform is idempotent.
+ * are never mis-compacted. A `bounds` list is flattened element-by-element; an
+ * already-compact tuple or non-object value is left untouched, so the transform
+ * is idempotent.
  */
 function compactObserveBounds(value: unknown): void {
   if (Array.isArray(value)) {
@@ -359,7 +360,17 @@ function compactObserveBounds(value: unknown): void {
       // Raw stays raw: a `raw: true` consumer wants the unshaped hierarchy.
       continue;
     }
-    if (key === "bounds" && v && typeof v === "object" && !Array.isArray(v)) {
+    if (key === "bounds" && Array.isArray(v)) {
+      obj[key] = v.map((bounds) =>
+        bounds && typeof bounds === "object" && !Array.isArray(bounds)
+          ? compactBounds(
+              bounds as { left?: number; top?: number; right?: number; bottom?: number },
+            )
+          : bounds,
+      );
+      continue;
+    }
+    if (key === "bounds" && v && typeof v === "object") {
       obj[key] = compactBounds(
         v as { left?: number; top?: number; right?: number; bottom?: number },
       );

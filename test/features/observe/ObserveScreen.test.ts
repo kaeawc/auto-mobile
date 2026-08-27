@@ -138,7 +138,14 @@ describe("ObserveScreen", function () {
         screenScale: 3,
         screenWidth: 402,
         screenHeight: 874,
+        rotation: 1,
         systemInsets: { top: 59, right: 0, bottom: 34, left: 0 },
+        insets: {
+          available: false,
+          source: "unavailable",
+          units: "unknown",
+          displayCutoutInfo: { classification: "unknown" },
+        },
         hierarchy: {
           node: {
             $: { class: "XCUIApplication" },
@@ -182,6 +189,8 @@ describe("ObserveScreen", function () {
         expect(result.screenIdentity?.components.navigationTitle).toBe("New Reminder");
         expect(result.screenIdentity?.components.focusedElementId).toBe("Quick Entry Title Field");
         expect(result.systemInsets).toEqual({ top: 59, right: 0, bottom: 34, left: 0 });
+        expect(result.rotation).toBe(1);
+        expect(result.insets?.displayCutoutInfo).toEqual({ classification: "unknown" });
       } finally {
         resetObserveCacheStore();
       }

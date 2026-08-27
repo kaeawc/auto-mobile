@@ -3496,6 +3496,68 @@
                 }
               ]
             },
+            "displayCutoutInfo": {
+              "type": "object",
+              "properties": {
+                "classification": {
+                  "type": "string",
+                  "enum": ["none", "notch", "dynamic_island", "hole_punch", "unknown"]
+                },
+                "bounds": {
+                  "type": "array",
+                  "items": {
+                    "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "left": {
+                            "type": "number"
+                          },
+                          "top": {
+                            "type": "number"
+                          },
+                          "right": {
+                            "type": "number"
+                          },
+                          "bottom": {
+                            "type": "number"
+                          },
+                          "centerX": {
+                            "type": "number"
+                          },
+                          "centerY": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["left", "top", "right", "bottom"],
+                        "additionalProperties": false
+                      },
+                      {
+                        "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                        "type": "array",
+                        "prefixItems": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              "required": ["classification"],
+              "additionalProperties": false
+            },
             "systemGestures": {
               "anyOf": [
                 {
@@ -4103,6 +4165,68 @@
                       "type": "null"
                     }
                   ]
+                },
+                "displayCutoutInfo": {
+                  "type": "object",
+                  "properties": {
+                    "classification": {
+                      "type": "string",
+                      "enum": ["none", "notch", "dynamic_island", "hole_punch", "unknown"]
+                    },
+                    "bounds": {
+                      "type": "array",
+                      "items": {
+                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "left": {
+                                "type": "number"
+                              },
+                              "top": {
+                                "type": "number"
+                              },
+                              "right": {
+                                "type": "number"
+                              },
+                              "bottom": {
+                                "type": "number"
+                              },
+                              "centerX": {
+                                "type": "number"
+                              },
+                              "centerY": {
+                                "type": "number"
+                              }
+                            },
+                            "required": ["left", "top", "right", "bottom"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                            "type": "array",
+                            "prefixItems": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "number"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": ["classification"],
+                  "additionalProperties": false
                 },
                 "systemGestures": {
                   "anyOf": [

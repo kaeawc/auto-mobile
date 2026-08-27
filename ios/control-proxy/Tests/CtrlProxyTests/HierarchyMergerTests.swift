@@ -191,7 +191,35 @@ final class HierarchyMergerTests: XCTestCase {
         XCTAssertEqual(result.insets.source, "unavailable")
         XCTAssertEqual(result.insets.units, "unknown")
         XCTAssertNil(result.insets.safeArea)
+        XCTAssertEqual(result.insets.displayCutoutInfo?.classification, "unknown")
+        XCTAssertNil(result.insets.displayCutoutInfo?.bounds)
         XCTAssertEqual(result.insets.systemChrome?.visibility, "hidden")
+    }
+
+    func testMergePropagatesDisplayCutoutMetadataInScreenCoordinates() {
+        let root = makeElement(text: "Hello")
+        let hierarchy = makeHierarchy(root: root)
+        let sdkHierarchy = SdkViewHierarchy(
+            timestamp: 1000,
+            bundleId: "com.test.app",
+            screenScale: 3.0,
+            screenWidth: 375,
+            screenHeight: 812,
+            safeAreaInsets: SdkEdgeInsets(top: 59, right: 0, bottom: 34, left: 0),
+            displayCutoutInfo: SdkDisplayCutoutInfo(
+                classification: "dynamic_island",
+                bounds: [SdkBounds(left: 128, top: 11, right: 247, bottom: 48)]
+            ),
+            root: nil
+        )
+
+        let result = HierarchyMerger.merge(xcuitest: hierarchy, sdk: sdkHierarchy)
+
+        XCTAssertEqual(result.insets.displayCutoutInfo?.classification, "dynamic_island")
+        XCTAssertEqual(result.insets.displayCutoutInfo?.bounds?.first?.left, 128)
+        XCTAssertEqual(result.insets.displayCutoutInfo?.bounds?.first?.top, 11)
+        XCTAssertEqual(result.screenWidth, 375)
+        XCTAssertEqual(result.screenHeight, 812)
     }
 
     // MARK: - Exact Match

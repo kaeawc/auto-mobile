@@ -1111,11 +1111,21 @@ public struct EdgeInsetsInfo: Codable, Sendable {
     public let left: Double
 }
 
+/// Physical display-cutout metadata, distinct from aggregate safe-area edge insets.
+public struct DisplayCutoutInfo: Codable, Sendable {
+    public let classification: String
+    /// Bounds use the enclosing hierarchy's point coordinate system and rotation.
+    public let bounds: [ElementBounds]?
+
+    public static let unknown = DisplayCutoutInfo(classification: "unknown", bounds: nil)
+}
+
 public struct ObservationInsetsInfo: Codable, Sendable {
     public let available: Bool
     public let source: String
     public let units: String
     public let safeArea: EdgeInsetsInfo?
+    public let displayCutoutInfo: DisplayCutoutInfo?
     public let systemChrome: SystemChromeInfo?
 
     public static let unavailable = ObservationInsetsInfo(
@@ -1123,6 +1133,7 @@ public struct ObservationInsetsInfo: Codable, Sendable {
         source: "unavailable",
         units: "unknown",
         safeArea: nil,
+        displayCutoutInfo: .unknown,
         systemChrome: nil
     )
 }
@@ -1282,7 +1293,7 @@ public struct UIElementInfo: Codable {
 }
 
 /// Element bounds (matching Android's ElementBounds)
-public struct ElementBounds: Codable {
+public struct ElementBounds: Codable, Sendable {
     public let left: Int
     public let top: Int
     public let right: Int

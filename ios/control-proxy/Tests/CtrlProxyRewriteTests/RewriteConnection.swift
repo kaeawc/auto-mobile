@@ -53,9 +53,16 @@ final class RewriteScriptedByteChannel: ByteChannel, @unchecked Sendable {
     }
 }
 
-/// Drives a rewrite `WebSocketConnection` through a scripted scenario.
+/// Drives a rewrite `WebSocketConnection` through a scripted scenario. The SDK seams
+/// (`onSdkEventBatch`, `drainLogEvents`) default to nil but can be supplied to exercise
+/// the `POST`/`GET /sdk-events` wiring (Phase 3).
 enum RewriteConnectionDriver {
-    static func run(inbound: Data, eofWhenDrained: Bool = false) -> ConnectionRecorder {
+    static func run(
+        inbound: Data,
+        eofWhenDrained: Bool = false,
+        onSdkEventBatch: (@Sendable (Data) -> Void)? = nil,
+        drainLogEvents: (@Sendable () -> [Data])? = nil
+    ) -> ConnectionRecorder {
         let queue = DispatchQueue(label: "rewrite.test.connection")
         let recorder = ConnectionRecorder()
         let channel = RewriteScriptedByteChannel(inbound: inbound, recorder: recorder, eofWhenDrained: eofWhenDrained)
@@ -64,8 +71,8 @@ enum RewriteConnectionDriver {
             channel: channel,
             queue: queue,
             boundPort: 8765,
-            onSdkEventBatch: nil,
-            drainLogEvents: nil,
+            onSdkEventBatch: onSdkEventBatch,
+            drainLogEvents: drainLogEvents,
             onUpgrade: { recorder.upgrades += 1 },
             onMessage: { recorder.messages.append($0) },
             onClose: { recorder.closes += 1 }

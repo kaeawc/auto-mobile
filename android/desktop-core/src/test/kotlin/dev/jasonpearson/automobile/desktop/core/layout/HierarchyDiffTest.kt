@@ -914,4 +914,76 @@ class HierarchyDiffTest {
     assertEquals(2, diff.equal)
     assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Button#"))
   }
+
+  @Test
+  fun `role mode aligns later siblings after a platform-specific node`() {
+    val android =
+      node(
+        "android.view.View",
+        children =
+          listOf(
+            node("android.widget.TextView", text = "First"),
+            node("android.widget.ImageView"),
+            node("android.widget.TextView", text = "Second"),
+          ),
+      )
+    val ios =
+      node(
+        "XCUIApplication",
+        children = listOf(node("UILabel", text = "First"), node("UILabel", text = "Second")),
+      )
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(1, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(0, diff.changed)
+    assertEquals(3, diff.equal)
+  }
+
+  @Test
+  fun `role mode promotes a content-description-only generic node to Text`() {
+    val android =
+      node(
+        "android.view.View",
+        children = listOf(node("android.view.View", contentDescription = "Home")),
+      )
+    val ios = node("XCUIApplication", children = listOf(node("UIView", text = "Home")))
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(0, diff.changed)
+    assertEquals(2, diff.equal)
+    assertEquals(NodeDiffStatus.Equal, statusOf(diff, "Text#"))
+  }
+
+  @Test
+  fun `role mode prefers an Android content description over visible text`() {
+    val android =
+      node(
+        "android.view.View",
+        children =
+          listOf(
+            node(
+              "android.widget.Button",
+              text = "AutoMobile Playground",
+              contentDescription = "Predicted app: AutoMobile Playground",
+            )
+          ),
+      )
+    val ios =
+      node(
+        "XCUIApplication",
+        children = listOf(node("UIButton", text = "Predicted app: AutoMobile Playground")),
+      )
+
+    val diff = diffHierarchies(android, ios, DiffKeyMode.StructuralRole)
+
+    assertEquals(0, diff.changed)
+    assertEquals(0, diff.onlyInA)
+    assertEquals(0, diff.onlyInB)
+    assertEquals(2, diff.equal)
+  }
 }

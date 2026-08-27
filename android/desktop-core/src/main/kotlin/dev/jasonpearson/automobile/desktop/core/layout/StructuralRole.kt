@@ -22,6 +22,7 @@ enum class StructuralRole {
   Switch,
   Toolbar,
   ScrollView,
+  Progress,
   WebView,
   Other,
 }
@@ -97,6 +98,11 @@ fun structuralRole(className: String): StructuralRole =
       className.contains("ActionBar") ||
       className.contains("NavigationBar") ||
       className.contains("TabBar") -> StructuralRole.Toolbar
+    // Progress indicators: Android ProgressBar, iOS UIProgressView/UIActivityIndicatorView.
+    className.contains("ProgressBar") ||
+      className.contains("UIProgressView") ||
+      className.contains("UIActivityIndicatorView") ||
+      className.contains("XCUIElementTypeActivityIndicator") -> StructuralRole.Progress
     // Scroll containers: Android ScrollView/NestedScrollView, iOS UIScrollView, XCUITest
     // ScrollView.
     className.contains("ScrollView") || className.contains("XCUIElementTypeScrollView") ->

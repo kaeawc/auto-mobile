@@ -27,6 +27,7 @@ class StructuralRoleTest {
     assertEquals(StructuralRole.Switch, structuralRole("android.widget.ToggleButton"))
     assertEquals(StructuralRole.Toolbar, structuralRole("androidx.appcompat.widget.Toolbar"))
     assertEquals(StructuralRole.ScrollView, structuralRole("android.widget.NestedScrollView"))
+    assertEquals(StructuralRole.Progress, structuralRole("android.widget.ProgressBar"))
     assertEquals(StructuralRole.WebView, structuralRole("android.webkit.WebView"))
   }
 
@@ -78,6 +79,8 @@ class StructuralRoleTest {
     assertEquals(StructuralRole.Toolbar, structuralRole("UINavigationBar"))
     assertEquals(StructuralRole.Toolbar, structuralRole("UITabBar"))
     assertEquals(StructuralRole.ScrollView, structuralRole("UIScrollView"))
+    assertEquals(StructuralRole.Progress, structuralRole("UIProgressView"))
+    assertEquals(StructuralRole.Progress, structuralRole("UIActivityIndicatorView"))
     assertEquals(StructuralRole.WebView, structuralRole("WKWebView"))
   }
 

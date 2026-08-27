@@ -98,8 +98,12 @@ fun diffHierarchies(
   val windowsA = windowsOf(a)
   val windowsB = windowsOf(b)
   val (slotsA, slotsB) = alignWindowSlots(windowsA, windowsB, keyMode)
-  val mapA = indexWindows(windowsA, slotsA, keyMode)
-  val mapB = indexWindows(windowsB, slotsB, keyMode)
+  val (mapA, mapB) =
+    if (keyMode == DiffKeyMode.StructuralRole) {
+      indexAlignedWindows(windowsA, slotsA, windowsB, slotsB, keyMode)
+    } else {
+      indexWindows(windowsA, slotsA, keyMode) to indexWindows(windowsB, slotsB, keyMode)
+    }
   val entries = ArrayList<HierarchyDiffEntry>(mapA.size + mapB.size)
   for ((key, nodeA) in mapA) {
     val nodeB = mapB[key]
@@ -167,6 +171,118 @@ private fun indexWindows(
     )
   }
   return map
+}
+
+/** Index role-mode trees with order-preserving, cross-side child slots. */
+private fun indexAlignedWindows(
+  windowsA: List<UIElementInfo>,
+  slotsA: IntArray,
+  windowsB: List<UIElementInfo>,
+  slotsB: IntArray,
+  keyMode: DiffKeyMode,
+): Pair<LinkedHashMap<String, UIElementInfo>, LinkedHashMap<String, UIElementInfo>> {
+  val mapA = LinkedHashMap<String, UIElementInfo>()
+  val mapB = LinkedHashMap<String, UIElementInfo>()
+  addAlignedChildren(mapA, mapB, windowsA, slotsA, windowsB, slotsB, "", null, null, keyMode)
+  return mapA to mapB
+}
+
+private fun addAlignedChildren(
+  mapA: LinkedHashMap<String, UIElementInfo>,
+  mapB: LinkedHashMap<String, UIElementInfo>,
+  childrenA: List<UIElementInfo>,
+  slotsA: IntArray,
+  childrenB: List<UIElementInfo>,
+  slotsB: IntArray,
+  parentKey: String,
+  parentRoleA: StructuralRole?,
+  parentRoleB: StructuralRole?,
+  keyMode: DiffKeyMode,
+) {
+  val bySlotA = childrenA.indices.associateBy { slotsA[it] }
+  val bySlotB = childrenB.indices.associateBy { slotsB[it] }
+  (bySlotA.keys + bySlotB.keys).sorted().forEach { slot ->
+    val nodeA = bySlotA[slot]?.let(childrenA::get)
+    val nodeB = bySlotB[slot]?.let(childrenB::get)
+    val roleA = nodeA?.let { roleFor(it, keyMode, parentRoleA) }
+    val roleB = nodeB?.let { roleFor(it, keyMode, parentRoleB) }
+    nodeA?.let { mapA[pathKey(parentKey, it, slot, keyMode, roleA)] = it }
+    nodeB?.let { mapB[pathKey(parentKey, it, slot, keyMode, roleB)] = it }
+    val key =
+      nodeA?.let { pathKey(parentKey, it, slot, keyMode, roleA) }
+        ?: nodeB?.let { pathKey(parentKey, it, slot, keyMode, roleB) }
+        ?: return@forEach
+    val (childSlotsA, childSlotsB) =
+      alignChildSlots(nodeA?.children.orEmpty(), nodeB?.children.orEmpty(), roleA, roleB)
+    addAlignedChildren(
+      mapA,
+      mapB,
+      nodeA?.children.orEmpty(),
+      childSlotsA,
+      nodeB?.children.orEmpty(),
+      childSlotsB,
+      key,
+      roleA,
+      roleB,
+      keyMode,
+    )
+  }
+}
+
+/** Needleman-Wunsch alignment that only pairs siblings with the same structural role. */
+private fun alignChildSlots(
+  childrenA: List<UIElementInfo>,
+  childrenB: List<UIElementInfo>,
+  parentRoleA: StructuralRole?,
+  parentRoleB: StructuralRole?,
+): Pair<IntArray, IntArray> {
+  val slotsA = IntArray(childrenA.size)
+  val slotsB = IntArray(childrenB.size)
+  fun similarity(a: UIElementInfo, b: UIElementInfo): Double {
+    if (structuralRoleOf(a, parentRoleA) != structuralRoleOf(b, parentRoleB)) {
+      return Double.NEGATIVE_INFINITY
+    }
+    return if (accessibleName(a) == accessibleName(b)) 2.0 else 1.0
+  }
+  val score = Array(childrenA.size + 1) { DoubleArray(childrenB.size + 1) }
+  for (i in 1..childrenA.size) for (j in 1..childrenB.size) {
+    score[i][j] =
+      maxOf(
+        score[i - 1][j - 1] + similarity(childrenA[i - 1], childrenB[j - 1]),
+        score[i - 1][j],
+        score[i][j - 1],
+      )
+  }
+  val columnsA = ArrayList<Int>()
+  val columnsB = ArrayList<Int>()
+  var i = childrenA.size
+  var j = childrenB.size
+  while (i > 0 || j > 0) {
+    val diagonal =
+      if (i > 0 && j > 0) score[i - 1][j - 1] + similarity(childrenA[i - 1], childrenB[j - 1])
+      else Double.NEGATIVE_INFINITY
+    when {
+      i > 0 && j > 0 && diagonal >= score[i - 1][j] && diagonal >= score[i][j - 1] -> {
+        columnsA.add(--i)
+        columnsB.add(--j)
+      }
+      i > 0 && (j == 0 || score[i - 1][j] >= score[i][j - 1]) -> {
+        columnsA.add(--i)
+        columnsB.add(-1)
+      }
+      else -> {
+        columnsA.add(-1)
+        columnsB.add(--j)
+      }
+    }
+  }
+  var slot = 0
+  for (column in columnsA.indices.reversed()) {
+    columnsA[column].takeIf { it >= 0 }?.let { slotsA[it] = slot }
+    columnsB[column].takeIf { it >= 0 }?.let { slotsB[it] = slot }
+    slot++
+  }
+  return slotsA to slotsB
 }
 
 /**
@@ -442,15 +558,15 @@ private fun pathKey(
  *   Container` whose collection-item metadata `HierarchyParser` drops, so inferring `ListItem` from
  *   the `List` parent is what pairs the two rows (and thus their descendants) instead of leaving
  *   every row as OnlyIn (issue #4872 review).
- * - A non-interactive generic node that carries visible `text` is promoted to
+ * - A non-interactive generic node that carries an accessible name is promoted to
  *   [StructuralRole.Text]. Android's `ViewHierarchyExtractor` blanks `android.widget.TextView` to a
  *   class-less node (it is in `GENERIC_CLASS_NAMES`), which `HierarchyParser` then defaults to
  *   `android.view.View` — so an ordinary Android label reaches here as a generic Container and
  *   would never pair with the iOS runner's `UILabel -> Text`, leaving ubiquitous labels and their
  *   whole subtrees as OnlyIn. The promotion recovers the label the producer erased. It is gated on
- *   non-empty text and on the node being neither clickable nor scrollable, so a genuine interactive
- *   control or scroll container that merely happens to carry text is left in its structural role
- *   (issue #4872 review).
+ *   non-empty accessible name and on the node being neither clickable nor scrollable, so a genuine
+ *   interactive control or scroll container that merely happens to carry a label is left in its
+ *   structural role (issue #4872 review).
  * - A generic scrollable node is promoted to [StructuralRole.ScrollView]. Android's extractor also
  *   clears `android.widget.ScrollView`, but retains `isScrollable`; without this recovery it
  *   remains a Container and cannot pair with iOS's `UIScrollView -> ScrollView` role.
@@ -465,8 +581,8 @@ private fun structuralRoleOf(node: UIElementInfo, parentRole: StructuralRole?): 
   if (!isGeneric) return byClass
   if (parentRole == StructuralRole.List) return StructuralRole.ListItem
   if (node.isScrollable) return StructuralRole.ScrollView
-  val hasVisibleText = !node.text.isNullOrEmpty()
-  if (hasVisibleText && !node.isClickable && !node.isScrollable) return StructuralRole.Text
+  val hasAccessibleName = !accessibleName(node).isNullOrEmpty()
+  if (hasAccessibleName && !node.isClickable && !node.isScrollable) return StructuralRole.Text
   return byClass
 }
 
@@ -505,12 +621,11 @@ private fun nodeAttributesDiffer(
 }
 
 /**
- * The cross-platform accessible name of a node: its visible `text` if non-empty, otherwise its
- * `contentDescription`. Collapses the Android convention (icon controls carry the label in
- * `content-desc`, text controls in `text`) onto the iOS convention (every label in `text`) so the
- * same control reads the same across platforms. An empty `text` is treated as absent so an Android
- * icon control (`text = ""`, `content-desc = "Add"`) still falls back to its content-desc and reads
- * the same as an iOS `text = "Add"` instead of comparing `""` against `"Add"` (issue #4872 review).
+ * The cross-platform accessible name of a node. Android's explicit content description is its
+ * accessibility label even when visible text is also present; iOS serializes that label in `text`
+ * and leaves `contentDescription` empty. Prefer the former when available, then fall back to text,
+ * so a production Android label such as `content-desc="Predicted app: AutoMobile Playground"` pairs
+ * with the equivalent iOS text instead of comparing the Android's separate visible label.
  */
 private fun accessibleName(node: UIElementInfo): String? =
-  node.text?.takeIf { it.isNotEmpty() } ?: node.contentDescription
+  node.contentDescription?.takeIf { it.isNotEmpty() } ?: node.text?.takeIf { it.isNotEmpty() }

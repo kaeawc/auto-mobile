@@ -1,7 +1,12 @@
 import type { AdbExecutor } from "./interfaces/AdbExecutor";
 import { classifyAndroidUser } from "../../models/AndroidUser";
 
-export type UserTargetSource = "explicit" | "foregroundPackage" | "managedProfile" | "primary";
+export type UserTargetSource =
+  | "explicit"
+  | "currentUser"
+  | "foregroundPackage"
+  | "managedProfile"
+  | "primary";
 
 export interface ResolvedUserTarget {
   userId: number;
@@ -11,6 +16,8 @@ export interface ResolvedUserTarget {
 export interface UserTargetRequest {
   packageName?: string;
   explicitUserId?: number;
+  /** Resolve Android's current user before applying package/profile heuristics. */
+  currentUser?: boolean;
   signal?: AbortSignal;
 }
 
@@ -28,6 +35,20 @@ export class AndroidUserTargetResolver {
   async resolve(request: UserTargetRequest = {}): Promise<ResolvedUserTarget> {
     if (request.explicitUserId !== undefined) {
       return { userId: request.explicitUserId, source: "explicit" };
+    }
+
+    if (request.currentUser) {
+      const result = await this.adb.executeCommand(
+        "shell am get-current-user",
+        undefined,
+        undefined,
+        true,
+        request.signal,
+      );
+      const currentUserId = Number.parseInt(result.stdout.trim(), 10);
+      if (Number.isSafeInteger(currentUserId) && currentUserId >= 0) {
+        return { userId: currentUserId, source: "currentUser" };
+      }
     }
 
     if (request.packageName) {

@@ -14,6 +14,11 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { readAndroidDeviceApiLevel } from "../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import {
+  AndroidUserTargetResolver,
+  type ResolvedUserTarget,
+  type UserTargetRequest,
+} from "../utils/android-cmdline-tools/AndroidUserTargetResolver";
+import {
   normalizeSharedStorageNamespace,
   normalizeSharedStorageRelativePath,
   type SharedStorageFileInput,
@@ -22,7 +27,7 @@ import {
   type StagedSharedStorageFile,
 } from "./sharedStorageContract";
 
-const DOWNLOADS_ROOT = "/sdcard/Download";
+const DOWNLOADS_DIRECTORY = "Download";
 
 interface SharedStorageStats {
   size: number;
@@ -47,6 +52,11 @@ export interface SharedStorageServiceDependencies {
   adbFactory?: AdbClientFactory;
   fileSystem?: SharedStorageFileSystem;
   timer?: Timer;
+  createUserResolver?: (adb: AdbExecutor) => SharedStorageUserResolver;
+}
+
+export interface SharedStorageUserResolver {
+  resolve(request?: UserTargetRequest): Promise<ResolvedUserTarget>;
 }
 
 export interface StageSharedStorageRequest extends Omit<StageSharedStorageArgs, "device"> {
@@ -82,6 +92,7 @@ export function createSharedStorageServiceForTesting(
     dependencies.adbFactory ?? defaultAdbClientFactory,
     dependencies.fileSystem ?? defaultFileSystem,
     dependencies.timer ?? defaultTimer,
+    dependencies.createUserResolver ?? ((adb) => new AndroidUserTargetResolver(adb)),
   );
 }
 
@@ -90,6 +101,7 @@ class DefaultSharedStorageService implements SharedStorageService {
     private readonly adbFactory: AdbClientFactory,
     private readonly fileSystem: SharedStorageFileSystem,
     private readonly timer: Timer,
+    private readonly createUserResolver: (adb: AdbExecutor) => SharedStorageUserResolver,
   ) {}
 
   async stage(request: StageSharedStorageRequest): Promise<StageSharedStorageResult> {
@@ -97,9 +109,22 @@ class DefaultSharedStorageService implements SharedStorageService {
       throw new ActionableError("stageSharedStorage is only supported on Android devices.");
     }
     const namespace = normalizeSharedStorageNamespace(request.namespace);
-    const destinationDirectory = posix.join(DOWNLOADS_ROOT, namespace);
-    const adb = this.adbFactory.create(request.device);
     const preparedFiles = await this.prepareFiles(request.files);
+    const adb = this.adbFactory.create(request.device);
+    let user: ResolvedUserTarget;
+    try {
+      user = await this.createUserResolver(adb).resolve({
+        currentUser: true,
+        signal: request.signal,
+      });
+    } catch (error) {
+      throw new ActionableError(
+        `Android shared-storage could not resolve an active profile for device ${request.device.deviceId} ` +
+          `and namespace ${namespace}: ${errorMessage(error)}. ` +
+          "Recovery: boot the intended Android profile and retry.",
+      );
+    }
+    const destinationDirectory = downloadsDirectory(user.userId, namespace);
     try {
       if (request.reset) {
         // namespace has exactly one safe segment, so this can only remove Downloads/<namespace>.
@@ -109,13 +134,17 @@ class DefaultSharedStorageService implements SharedStorageService {
 
       const files: StagedSharedStorageFile[] = [];
       for (const file of preparedFiles) {
-        files.push(await this.stageFile(adb, request, namespace, destinationDirectory, file));
+        files.push(
+          await this.stageFile(adb, request, namespace, destinationDirectory, user.userId, file),
+        );
       }
       return {
         success: true,
         deviceId: request.device.deviceId,
         platform: "android",
         namespace,
+        userId: user.userId,
+        userSource: user.source,
         destinationDirectory,
         reset: request.reset ?? false,
         files,
@@ -162,6 +191,7 @@ class DefaultSharedStorageService implements SharedStorageService {
     request: StageSharedStorageRequest,
     namespace: string,
     destinationDirectory: string,
+    userId: number,
     file: PreparedSharedStorageFile,
   ): Promise<StagedSharedStorageFile> {
     const destinationPath = file.destinationPath;
@@ -173,7 +203,7 @@ class DefaultSharedStorageService implements SharedStorageService {
     await execute(adb, `shell mkdir -p ${shellQuote(posix.dirname(destination))}`, request.signal);
     await executeArgs(adb, ["push", file.source.path, destination], request.signal);
     const mediaIndexing = shouldIndexMedia(destinationPath, request.indexMedia ?? true)
-      ? await indexMediaFile(adb, destination, destinationPath, this.timer, request.signal)
+      ? await indexMediaFile(adb, destination, destinationPath, userId, this.timer, request.signal)
       : {
           status: "notRequested" as const,
           reason: indexingNotRequestedReason(destinationPath, request.indexMedia ?? true),
@@ -228,18 +258,24 @@ async function indexMediaFile(
   adb: AdbExecutor,
   destination: string,
   destinationPath: string,
+  userId: number,
   timer: Timer,
   signal?: AbortSignal,
 ): Promise<{ status: "completed" }> {
   await execute(
     adb,
-    `shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d ${shellQuote(`file://${destination}`)}`,
+    `shell am broadcast --user ${userId} -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d ${shellQuote(`file://${destination}`)}`,
     signal,
   );
   const collection = mediaCollectionFor(destinationPath);
   const apiLevel = await readAndroidDeviceApiLevel(adb);
   const modernQuery = apiLevel === null || apiLevel >= 29;
-  const deviceRelativePath = destination.slice(`${DOWNLOADS_ROOT}/`.length);
+  const downloadsPrefix = `/${DOWNLOADS_DIRECTORY}/`;
+  const downloadsIndex = destination.indexOf(downloadsPrefix);
+  if (downloadsIndex < 0) {
+    throw new ActionableError(`Android media fixture is outside Downloads: ${destination}`);
+  }
+  const deviceRelativePath = destination.slice(downloadsIndex + downloadsPrefix.length);
   const deviceRelativeDirectory = posix.dirname(deviceRelativePath);
   const relativePath =
     deviceRelativeDirectory === "." ? "Download/" : `Download/${deviceRelativeDirectory}/`;
@@ -250,7 +286,7 @@ async function indexMediaFile(
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const result = await executeResult(
       adb,
-      `shell content query --uri content://media/${volume}/${collection}/media --projection _id --where ${shellQuote(selection)}`,
+      `shell content query --user ${userId} --uri content://media/${volume}/${collection}/media --projection _id --where ${shellQuote(selection)}`,
       signal,
     );
     if (/^Row:/m.test(result.stdout)) {
@@ -297,4 +333,8 @@ function indexingNotRequestedReason(path: string, indexMedia: boolean): string {
     return "media indexing was disabled by indexMedia=false";
   }
   return `media indexing was not requested for ${path}; Android document pickers discover files directly from Downloads`;
+}
+
+function downloadsDirectory(userId: number, namespace: string): string {
+  return posix.join(`/storage/emulated/${userId}`, DOWNLOADS_DIRECTORY, namespace);
 }

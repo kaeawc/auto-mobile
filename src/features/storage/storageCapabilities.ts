@@ -277,7 +277,7 @@ function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
     domain: "user_files",
     portable: false,
     platformScope: "android",
-    note: "Android user-visible / shared storage. Staging files into shared storage is supported (stageSharedStorage); a listing/read surface is not yet exposed.",
+    note: "Android user-visible shared storage. putAppFile writes bounded Downloads fixture namespaces; a listing/read surface is not yet exposed.",
     operations: [
       unavailableOperation(
         "list",
@@ -294,9 +294,11 @@ function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
 
 function mediaLibraryDomain(ctx: StorageCapabilityContext): DomainCapability {
   // No AutoMobile tool browses or reads the media library on either platform.
-  // On Android, indexing happens only as a side effect of staging a file into
-  // shared storage (there is no standalone index operation); iOS has no
-  // host-triggered indexer at all.
+  // Android writes are intentionally bounded and report MediaStore verification
+  // as part of putAppFile; iOS has no equivalent provider yet.
+  const androidWrite = deriveOperation("write", undefined, [
+    req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile),
+  ]);
   const indexing =
     ctx.platform === "ios"
       ? deriveOperation(
@@ -304,15 +306,20 @@ function mediaLibraryDomain(ctx: StorageCapabilityContext): DomainCapability {
           "iOS has no MediaScanner-style host-triggered indexing equivalent.",
           [],
         )
-      : unavailableOperation(
+      : deriveOperation(
           "media_indexing",
-          "Media indexing currently occurs only as a side effect of staging a file into shared storage; no standalone indexing operation is exposed.",
+          undefined,
+          [req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile)],
+          "Verified as part of Android putAppFile media_library writes.",
         );
   return {
     domain: "media_library",
     portable: false,
     platformScope: "cross-platform",
-    note: "Media-library browse/read is not yet exposed as an AutoMobile capability.",
+    note:
+      ctx.platform === "android"
+        ? "Android putAppFile writes bounded media fixtures and verifies MediaStore discovery; browse/read is not exposed."
+        : "Media-library browse/read and writes are not exposed on iOS.",
     operations: [
       unavailableOperation(
         "list",
@@ -322,6 +329,13 @@ function mediaLibraryDomain(ctx: StorageCapabilityContext): DomainCapability {
         "read",
         "No AutoMobile media-library read surface is currently exposed.",
       ),
+      ctx.platform === "ios"
+        ? deriveOperation(
+            "write",
+            "iOS has no media-library fixture provider; use the Android media_library target only.",
+            [],
+          )
+        : androidWrite,
       indexing,
     ],
   };

@@ -38,6 +38,8 @@ export interface StageSharedStorageResult {
   deviceId: string;
   platform: "android";
   namespace: string;
+  userId: number;
+  userSource: "explicit" | "currentUser" | "foregroundPackage" | "managedProfile" | "primary";
   destinationDirectory: string;
   reset: boolean;
   files: StagedSharedStorageFile[];

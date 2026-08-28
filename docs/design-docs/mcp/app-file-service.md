@@ -20,6 +20,10 @@ path; generated tool definitions advertise the canonical target-based shape.
   never promises resource operations it cannot implement.
 - Providers receive normalized targets, safe relative paths, and prepared local
   source file paths. They should not accept raw MCP arguments.
+- Android `user_files` delegates to the bounded Downloads staging service and
+  resolves the active Android profile before every write. `media_library` uses
+  the AutoMobile-owned `automobile-media` Downloads namespace and reports
+  success only after MediaStore discovery is verified.
 
 ## Shared Validation
 
@@ -51,4 +55,5 @@ example, Android rejects `library`, and iOS rejects `externalFiles`.
 3. Keep command-line details inside the provider. Return `AppFileListResult`,
    `AppFileReadResult`, and `PutAppFileResult` metadata through the service
    contract rather than leaking raw command output into MCP responses.
-4. Unit-test with fakes; do not require real Android devices or iOS simulators.
+4. Unit-test with fakes. Storage providers also need a focused device smoke test
+   when their contract promises system-picker visibility.

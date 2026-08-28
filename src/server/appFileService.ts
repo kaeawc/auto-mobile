@@ -35,6 +35,7 @@ import { shellQuote } from "../utils/shellQuote";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../utils/logger";
 import { prepareFileSource } from "./fileSourcePreparation";
+import { getSharedStorageService, type SharedStorageService } from "./sharedStorageService";
 
 export type PutAppFileRequest = Omit<PutAppFileArgs, "device"> & {
   device: BootedDevice;
@@ -70,6 +71,13 @@ export interface AppFileWriteProvider {
   putFile(
     request: PutAppFileProviderRequest,
   ): Promise<void | { effects?: PutAppFileWriteResult["effects"] }>;
+  /**
+   * Optional batch path for providers whose device operation must use one
+   * consistent target (for example, a single Android user profile).
+   */
+  putFiles?(
+    requests: PutAppFileProviderRequest[],
+  ): Promise<Array<void | { effects?: PutAppFileWriteResult["effects"] }>>;
 }
 
 export interface AppFileListProvider {
@@ -123,6 +131,7 @@ export interface AppFileServiceDependencies {
   providers?: AppFileProvider[];
   deviceResolver?: (deviceId: string) => Promise<BootedDevice>;
   idGenerator?: IdGenerator;
+  sharedStorageService?: SharedStorageService;
 }
 
 const nodeAppFileFileSystem: AppFileFileSystem = {
@@ -187,7 +196,12 @@ export function createAppFileServiceForTesting(
     deviceResolver: deps.deviceResolver ?? defaultDependencies.deviceResolver,
   };
   return new DefaultAppFileService(
-    deps.providers ?? createDefaultProviders(resolvedDeps, deps.idGenerator ?? defaultIdGenerator),
+    deps.providers ??
+      createDefaultProviders(
+        resolvedDeps,
+        deps.idGenerator ?? defaultIdGenerator,
+        deps.sharedStorageService ?? getSharedStorageService(),
+      ),
     resolvedDeps.deviceResolver,
     resolvedDeps.fileSystem,
   );
@@ -196,9 +210,12 @@ export function createAppFileServiceForTesting(
 function createDefaultProviders(
   deps: Required<Pick<AppFileServiceDependencies, "adbFactory" | "simctlFactory" | "fileSystem">>,
   idGenerator: IdGenerator = defaultIdGenerator,
+  sharedStorageService: SharedStorageService = getSharedStorageService(),
 ): AppFileProvider[] {
   return [
     new AndroidAppFileProvider(deps.adbFactory, idGenerator),
+    new AndroidUserFilesProvider(sharedStorageService),
+    new AndroidMediaLibraryProvider(sharedStorageService),
     new IosSimulatorAppFileProvider(deps.simctlFactory, deps.fileSystem),
   ];
 }
@@ -280,6 +297,39 @@ async function prepareSources(
   }
 }
 
+function buildProviderRequests(
+  request: PutAppFileRequest | LegacyPutAppFileRequest,
+  target: PutAppFileTarget,
+  files: PutAppFileInput[],
+  prepared: Awaited<ReturnType<typeof prepareFileSource>>[],
+): PutAppFileProviderRequest[] {
+  return files.map((file, index) => {
+    const source = prepared[index]!;
+    const providerTarget =
+      target.domain === "user_files" && target.reset === true && index > 0
+        ? { ...target, reset: false }
+        : target;
+    return {
+      device: request.device,
+      target: providerTarget,
+      destinationPath: file.destinationPath,
+      sourcePath: source.path,
+      byteCount: source.byteCount,
+      signal: request.signal,
+    };
+  });
+}
+
+async function writeProviderFiles(
+  provider: AppFileWriteProvider,
+  requests: PutAppFileProviderRequest[],
+) {
+  if (provider.putFiles) {
+    return provider.putFiles(requests);
+  }
+  return Promise.all(requests.map((request) => provider.putFile(request)));
+}
+
 class DefaultAppFileService implements AppFileService {
   private readonly writeProviders = new Map<string, AppFileWriteProvider>();
   private readonly listProviders = new Map<string, AppFileListProvider>();
@@ -320,22 +370,13 @@ class DefaultAppFileService implements AppFileService {
     const prepared = await prepareSources(files, this.fileSystem);
     try {
       const provider = this.getWriteProvider(request.device.platform, target.domain);
+      const providerRequests = buildProviderRequests(request, target, files, prepared);
+      const providerResults = await writeProviderFiles(provider, providerRequests);
       const results: PutAppFileWriteResult[] = [];
       for (let index = 0; index < files.length; index += 1) {
         const file = files[index]!;
         const source = prepared[index]!;
-        const providerTarget =
-          target.domain === "user_files" && target.reset === true && index > 0
-            ? { ...target, reset: false }
-            : target;
-        const providerResult = await provider.putFile({
-          device: request.device,
-          target: providerTarget,
-          destinationPath: file.destinationPath,
-          sourcePath: source.path,
-          byteCount: source.byteCount,
-          signal: request.signal,
-        });
+        const providerResult = providerResults[index];
         results.push({
           destinationPath: file.destinationPath,
           byteCount: source.byteCount,
@@ -691,6 +732,111 @@ class AndroidAppFileProvider
         ? { mimeType: "application/octet-stream", blob }
         : { mimeType: "text/plain; charset=utf-8", text }),
     };
+  }
+}
+
+const ANDROID_MEDIA_LIBRARY_NAMESPACE = "automobile-media";
+
+class AndroidUserFilesProvider implements AppFileWriteProvider {
+  readonly platform = "android" as const;
+  readonly domain = "user_files" as const;
+
+  constructor(private readonly sharedStorageService: SharedStorageService) {}
+
+  async putFile(request: PutAppFileProviderRequest) {
+    return (await this.putFiles([request]))[0];
+  }
+
+  async putFiles(requests: PutAppFileProviderRequest[]) {
+    if (requests.length === 0) {
+      return [];
+    }
+    const request = requests[0]!;
+    if (request.target.domain !== "user_files") {
+      throw new ActionableError(
+        `Android user-files provider received unsupported target domain: ${request.target.domain}`,
+      );
+    }
+    const result = await this.sharedStorageService.stage({
+      device: request.device,
+      namespace: request.target.namespace,
+      reset: request.target.reset,
+      files: requests.map((file) => ({
+        sourcePath: file.sourcePath,
+        destinationPath: file.destinationPath,
+      })),
+      signal: request.signal,
+    });
+    return result.files.map((staged) => ({
+      effects: [
+        {
+          type: "document_picker",
+          status: "completed" as const,
+          reason:
+            `document fixture is available in Downloads for device ${result.deviceId}, ` +
+            `resolved profile ${result.userId}, namespace ${result.namespace}`,
+        },
+        {
+          type: "media_index",
+          status: staged.mediaIndexing.status,
+          ...(staged.mediaIndexing.reason === undefined
+            ? {}
+            : { reason: staged.mediaIndexing.reason }),
+        },
+      ],
+    }));
+  }
+}
+
+class AndroidMediaLibraryProvider implements AppFileWriteProvider {
+  readonly platform = "android" as const;
+  readonly domain = "media_library" as const;
+
+  constructor(private readonly sharedStorageService: SharedStorageService) {}
+
+  async putFile(request: PutAppFileProviderRequest) {
+    return (await this.putFiles([request]))[0];
+  }
+
+  async putFiles(requests: PutAppFileProviderRequest[]) {
+    if (requests.length === 0) {
+      return [];
+    }
+    const request = requests[0]!;
+    if (request.target.domain !== "media_library") {
+      throw new ActionableError(
+        `Android media-library provider received unsupported target domain: ${request.target.domain}`,
+      );
+    }
+    const result = await this.sharedStorageService.stage({
+      device: request.device,
+      namespace: ANDROID_MEDIA_LIBRARY_NAMESPACE,
+      files: requests.map((file) => ({
+        sourcePath: file.sourcePath,
+        destinationPath: file.destinationPath,
+      })),
+      signal: request.signal,
+    });
+    return result.files.map((staged) => {
+      if (staged.mediaIndexing.status !== "completed") {
+        throw new ActionableError(
+          `Android media-library fixture ${staged.destinationPath} on device ${result.deviceId}, ` +
+            `resolved profile ${result.userId}, was not indexed. ` +
+            "Recovery: use an image, video, or audio filename supported by Android MediaStore.",
+        );
+      }
+      return {
+        effects: [
+          {
+            type: "media_index",
+            status: "completed" as const,
+            reason:
+              `MediaStore verified fixture discovery for device ${result.deviceId}, ` +
+              `resolved profile ${result.userId}, namespace ${result.namespace}`,
+          },
+        ],
+      };
+    });
   }
 }
 

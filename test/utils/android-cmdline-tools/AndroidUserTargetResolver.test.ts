@@ -88,6 +88,28 @@ const cases: ResolveCase[] = [
 ];
 
 describe("AndroidUserTargetResolver.resolve", () => {
+  test("uses Android's current user before managed-profile fallback when requested", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setUsers([
+      { userId: 0, name: "Owner", flags: 13, running: true },
+      { userId: 10, name: "Work", flags: 32, running: true },
+    ]);
+    adb.setCommandResponse("am get-current-user", {
+      stdout: "0",
+      stderr: "",
+      toString: () => "0",
+      trim: () => "0",
+      includes: (value) => value === "0",
+    });
+
+    await expect(
+      new AndroidUserTargetResolver(adb).resolve({ currentUser: true }),
+    ).resolves.toEqual({
+      userId: 0,
+      source: "currentUser",
+    });
+  });
+
   test.each(cases)("$name", async ({ request, users, foreground, expected }) => {
     const adb = new FakeAdbExecutor();
     if (users) {

@@ -15,6 +15,7 @@ import { CountingIdGenerator } from "../../src/utils/IdGenerator";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { createSharedStorageServiceForTesting } from "../../src/server/sharedStorageService";
 
 function execResult(stdout: string, stderr = "") {
   return {
@@ -144,6 +145,94 @@ describe("AppFileService", () => {
       { domain: "user_files", namespace: "run-42", reset: true },
       { domain: "user_files", namespace: "run-42", reset: false },
     ]);
+  });
+
+  test("stages user_files in the resolved profile Downloads namespace with document-picker effects", async () => {
+    const executor = new FakeAdbExecutor();
+    let resolveCalls = 0;
+    const sharedStorageService = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      createUserResolver: () => ({
+        resolve: async () => {
+          resolveCalls += 1;
+          return { userId: 10, source: "managedProfile" };
+        },
+      }),
+    });
+    const service = createAppFileServiceForTesting({ sharedStorageService });
+
+    const result = await service.putFile({
+      device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+      target: { domain: "user_files", namespace: "picker-run", reset: true },
+      files: [
+        { contentText: "one", destinationPath: "docs/one.txt" },
+        { contentText: "two", destinationPath: "docs/two.txt" },
+      ],
+    });
+
+    expect(result.files.map((file) => file.effects[0])).toEqual([
+      {
+        type: "document_picker",
+        status: "completed",
+        reason:
+          "document fixture is available in Downloads for device emulator-5554, resolved profile 10, namespace picker-run",
+      },
+      {
+        type: "document_picker",
+        status: "completed",
+        reason:
+          "document fixture is available in Downloads for device emulator-5554, resolved profile 10, namespace picker-run",
+      },
+    ]);
+    expect(
+      executor
+        .getExecutedCommands()
+        .filter((command) => command === "shell rm -rf '/storage/emulated/10/Download/picker-run'"),
+    ).toHaveLength(1);
+    expect(
+      executor
+        .getExecutedArgv()
+        .filter((args) => args[0] === "push")
+        .every((args) => args[2]?.startsWith("/storage/emulated/10/Download/picker-run/")),
+    ).toBe(true);
+    expect(resolveCalls).toBe(1);
+  });
+
+  test("stages media_library fixtures through the bounded AutoMobile namespace after MediaStore verification", async () => {
+    const executor = new FakeAdbExecutor();
+    executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
+    const sharedStorageService = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      createUserResolver: () => ({
+        resolve: async () => ({ userId: 12, source: "managedProfile" }),
+      }),
+    });
+    const service = createAppFileServiceForTesting({ sharedStorageService });
+
+    const result = await service.putFile({
+      device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+      target: { domain: "media_library" },
+      files: [
+        { contentBase64: Buffer.from([1, 2, 3]).toString("base64"), destinationPath: "photo.png" },
+      ],
+    });
+
+    expect(result.files[0]?.effects).toEqual([
+      {
+        type: "media_index",
+        status: "completed",
+        reason:
+          "MediaStore verified fixture discovery for device emulator-5554, resolved profile 12, namespace automobile-media",
+      },
+    ]);
+    expect(executor.getExecutedArgv()).toContainEqual([
+      "push",
+      expect.stringContaining("automobile-app-file-"),
+      "/storage/emulated/12/Download/automobile-media/photo.png",
+    ]);
+    expect(
+      executor.getExecutedCommands().some((command) => command.includes("content query")),
+    ).toBe(true);
   });
 
   test("prepares every file and rejects conflicts before provider mutation", async () => {

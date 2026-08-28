@@ -4,7 +4,7 @@
 
 It gives an MCP-compatible AI client tools to observe screens, interact with
 apps, manage devices, create plans, and collect workflow or performance data.
-See the [workflow guides](index.md#common-workflows).
+See the [workflow guides](using/ux-exploration.md).
 
 ## Which devices are supported?
 

@@ -2011,9 +2011,15 @@ describe("SessionManager", () => {
 
   test("device-killed upgrade after release finalization remains terminal", async () => {
     const reasons: string[] = [];
+    const terminalPersistenceStarted = Promise.withResolvers<void>();
+    const finishTerminalPersistence = Promise.withResolvers<void>();
     const persistence = new FakeDeviceSessionPersistence();
     persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
       reasons.push(reason);
+      if (reason === "device-killed") {
+        terminalPersistenceStarted.resolve();
+        await finishTerminalPersistence.promise;
+      }
     };
     const manager = new SessionManager(fakeTimer, persistence);
     try {
@@ -2023,13 +2029,29 @@ describe("SessionManager", () => {
       manager.onSessionRelease((_sessionId, _deviceId, reason) => {
         callbacks.push(reason);
         if (reason === "explicit-release") {
-          killedRelease = manager.releaseSession("killed-session", "device-killed");
+          // Let the ordinary persistence continuation finalize its snapshot,
+          // then escalate before releaseSession's outer finally removes the
+          // operation. This discriminates the late-finalized branch from the
+          // earlier mutable-reason upgrade path.
+          void Promise.resolve()
+            .then(() => undefined)
+            .then(() => undefined)
+            .then(() => {
+              killedRelease = manager.releaseSession("killed-session", "device-killed");
+            });
         }
       });
 
-      await manager.releaseSession("killed-session", "explicit-release");
+      const ordinaryRelease = manager.releaseSession("killed-session", "explicit-release");
+      await terminalPersistenceStarted.promise;
+      const ordinaryOutcome = await Promise.race([
+        ordinaryRelease.then(() => "released" as const),
+        new Promise<"blocked">((resolve) => setImmediate(() => resolve("blocked"))),
+      ]);
+      finishTerminalPersistence.resolve();
       await killedRelease;
 
+      expect(ordinaryOutcome).toBe("released");
       expect(reasons).toEqual(["explicit-release", "device-killed"]);
       expect(callbacks).toEqual(["explicit-release", "device-killed"]);
       expect(manager.getTerminalReleaseSnapshot("killed-session")).toMatchObject({

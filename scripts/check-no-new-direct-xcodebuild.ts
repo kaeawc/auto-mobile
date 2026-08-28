@@ -27,6 +27,22 @@ function containsXcodebuildCommand(value: string): boolean {
   return /(?:^|[\s;&|])(?:[^\s;&|]*[/\\])?xcodebuild(?:\s|$)/i.test(value);
 }
 
+function shellCommandPayloads(argv: readonly string[]): string[] {
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === OPAQUE_ARGUMENT) {
+      return [OPAQUE_ARGUMENT];
+    }
+    if (argument === "-c" || argument === "--command") {
+      return [argv[index + 1] ?? OPAQUE_ARGUMENT];
+    }
+    if (argument.startsWith("-c") && argument.length > 2) {
+      return [argument.slice(2)];
+    }
+  }
+  return [];
+}
+
 function splitEnvPayload(value: string): string[] {
   const words: string[] = [];
   let word = "";
@@ -114,7 +130,7 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
         return true;
       }
       if (SHELLS.has(command)) {
-        return pending.some(containsXcodebuildCommand);
+        return shellCommandPayloads(pending).some(containsXcodebuildCommand);
       }
       if (ENV_WRAPPERS.has(command)) {
         return envDelegatesToXcodebuild([argument, ...pending]);
@@ -122,6 +138,16 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
       return false;
     }
     if (["-i", "--ignore-environment", "-0", "--null", "-v", "--debug"].includes(argument)) {
+      continue;
+    }
+    if (argument === "--list-signal-handling") {
+      continue;
+    }
+    if (/^--(?:block-signal|default-signal|ignore-signal)$/.test(argument)) {
+      pending.shift();
+      continue;
+    }
+    if (/^--(?:block-signal|default-signal|ignore-signal)=/.test(argument)) {
       continue;
     }
     if (["-u", "--unset", "-C", "--chdir", "-P"].includes(argument)) {
@@ -154,7 +180,7 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
       return true;
     }
     if (SHELLS.has(command)) {
-      return pending.some(containsXcodebuildCommand);
+      return shellCommandPayloads(pending).some(containsXcodebuildCommand);
     }
     if (ENV_WRAPPERS.has(command)) {
       return envDelegatesToXcodebuild([argument, ...pending]);
@@ -176,7 +202,11 @@ function argumentSlotAlternatives(
     if (value === STRING_ANALYSIS_OVERFLOW) {
       return ANALYSIS_OVERFLOW;
     }
-    return value.includes(DYNAMIC_BOUNDARY) ? OPAQUE_ARGUMENT : value;
+    if (!value.includes(DYNAMIC_BOUNDARY)) {
+      return value;
+    }
+    const assignmentPrefix = value.slice(0, value.indexOf(DYNAMIC_BOUNDARY));
+    return /^[A-Za-z_][A-Za-z0-9_]*=$/.test(assignmentPrefix) ? value : OPAQUE_ARGUMENT;
   });
 }
 
@@ -215,20 +245,26 @@ export function findDirectXcodebuildCalls(file: string, source: string): Xcodebu
     const firstArrayAlternatives = ast.arrayAlternatives(first);
     const argumentArrayAlternatives = ast.arrayAlternatives(call.arguments[1]);
     const commandAlternatives = firstArrayAlternatives ? [] : ast.stringAlternatives(first);
+    const unresolvedLauncherCommand =
+      !firstArrayAlternatives && commandAlternatives.length === 0 && ast.isLauncher(call);
     let possibleArgv = firstArrayAlternatives
       ? firstArrayAlternatives.flatMap((items) => argvAlternatives(ast, items))
-      : (commandAlternatives.length > 0 ? commandAlternatives : [OPAQUE_ARGUMENT]).flatMap(
-          (command) =>
-            (argumentArrayAlternatives ?? [[]]).flatMap((items) =>
-              argvAlternatives(ast, items).map((arguments_) => [
-                command === STRING_ANALYSIS_OVERFLOW
-                  ? ANALYSIS_OVERFLOW
-                  : command.includes(DYNAMIC_BOUNDARY)
-                    ? OPAQUE_ARGUMENT
-                    : command,
-                ...arguments_,
-              ]),
-            ),
+      : (commandAlternatives.length > 0
+          ? commandAlternatives
+          : unresolvedLauncherCommand
+            ? [OPAQUE_ARGUMENT]
+            : []
+        ).flatMap((command) =>
+          (argumentArrayAlternatives ?? [[]]).flatMap((items) =>
+            argvAlternatives(ast, items).map((arguments_) => [
+              command === STRING_ANALYSIS_OVERFLOW
+                ? ANALYSIS_OVERFLOW
+                : command.includes(DYNAMIC_BOUNDARY)
+                  ? OPAQUE_ARGUMENT
+                  : command,
+              ...arguments_,
+            ]),
+          ),
         );
     if (possibleArgv.length > MAX_ARGV_ALTERNATIVES) {
       possibleArgv = [[ANALYSIS_OVERFLOW]];

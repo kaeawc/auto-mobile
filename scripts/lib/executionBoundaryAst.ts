@@ -99,6 +99,12 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     position: number;
   }> = [];
   const declarations: Array<{ name: string; scope: ts.Node; position: number }> = [];
+  const functionBindings: Array<{
+    name: string;
+    node: ts.FunctionLikeDeclaration;
+    scope: ts.Node;
+    position: number;
+  }> = [];
   const calls: ts.CallExpression[] = [];
   const launcherAliases = new Set(PROCESS_LAUNCHERS);
   const executionSeamAliases = new Set(["executeCommand", "runExecSeam", "execute"]);
@@ -216,6 +222,14 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     }
     if (ts.isVariableDeclaration(node)) {
       const scope = variableDeclarationScope(node);
+      if (ts.isIdentifier(node.name) && node.initializer && ts.isFunctionLike(node.initializer)) {
+        functionBindings.push({
+          name: node.name.text,
+          node: node.initializer,
+          scope,
+          position: node.getStart(sourceFile),
+        });
+      }
       for (const identifier of bindingIdentifiers(node.name)) {
         declarations.push({ name: identifier.text, scope, position: node.getStart(sourceFile) });
       }
@@ -275,6 +289,14 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
         childProcessNamespaces.add(node.name.text);
       }
     }
+    if (ts.isFunctionDeclaration(node) && node.name) {
+      functionBindings.push({
+        name: node.name.text,
+        node,
+        scope: lexicalScope(node),
+        position: node.getStart(sourceFile),
+      });
+    }
     if (ts.isParameter(node)) {
       const scope = functionScope(node);
       for (const identifier of bindingIdentifiers(node.name)) {
@@ -294,6 +316,32 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     ts.forEachChild(node, collect);
   };
   collect(sourceFile);
+
+  const callResolvesToFunction = (
+    call: ts.CallExpression,
+    target: ts.FunctionLikeDeclaration,
+  ): boolean => {
+    if (unwrapTransparentExpression(call.expression) === target) {
+      return true;
+    }
+    const name = functionName(target);
+    if (!name || !ts.isIdentifier(unwrapTransparentExpression(call.expression))) {
+      return false;
+    }
+    const callScopes = scopeChain(call);
+    const candidates = functionBindings
+      .filter(
+        (binding) =>
+          binding.name === name &&
+          callScopes.includes(binding.scope) &&
+          (ts.isFunctionDeclaration(binding.node) || binding.position < call.getStart(sourceFile)),
+      )
+      .sort((left, right) => {
+        const scopeDelta = callScopes.indexOf(left.scope) - callScopes.indexOf(right.scope);
+        return scopeDelta !== 0 ? scopeDelta : right.position - left.position;
+      });
+    return candidates[0]?.node === target;
+  };
 
   const isPromisifiedLauncher = (node: ts.Expression): boolean =>
     ts.isCallExpression(node) &&
@@ -349,10 +397,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
           const useFunctionName = useFunction ? functionName(useFunction) : undefined;
           const useInvocationPositions = useFunctionName
             ? calls
-                .filter(
-                  (call) =>
-                    ts.isIdentifier(call.expression) && call.expression.text === useFunctionName,
-                )
+                .filter((call) => callResolvesToFunction(call, useFunction!))
                 .map((call) => call.getStart(sourceFile))
             : [];
           const useExecutionPosition =
@@ -374,12 +419,17 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
             ? calls
                 .filter(
                   (call) =>
-                    ts.isIdentifier(call.expression) &&
-                    call.expression.text === candidateFunctionName &&
+                    callResolvesToFunction(call, candidateFunction!) &&
                     call.getStart(sourceFile) < useExecutionPosition,
                 )
                 .map((call) => call.getStart(sourceFile))
-            : [];
+            : calls
+                .filter(
+                  (call) =>
+                    unwrapTransparentExpression(call.expression) === candidateFunction &&
+                    call.getStart(sourceFile) < useExecutionPosition,
+                )
+                .map((call) => call.getStart(sourceFile));
           if (candidateFunction && candidateInvocationPositions.length === 0) {
             return [];
           }

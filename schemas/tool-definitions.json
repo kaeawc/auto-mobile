@@ -3508,7 +3508,6 @@
                     {
                       "type": "array",
                       "items": {
-                        "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
                         "anyOf": [
                           {
                             "type": "object",
@@ -3536,22 +3535,13 @@
                             "additionalProperties": false
                           },
                           {
-                            "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                            "description": "Compact bounds tuple [left, top, right, bottom].",
+                            "minItems": 4,
+                            "maxItems": 4,
                             "type": "array",
-                            "prefixItems": [
-                              {
-                                "type": "number"
-                              },
-                              {
-                                "type": "number"
-                              },
-                              {
-                                "type": "number"
-                              },
-                              {
-                                "type": "number"
-                              }
-                            ]
+                            "items": {
+                              "type": "number"
+                            }
                           }
                         ]
                       }
@@ -4185,7 +4175,6 @@
                         {
                           "type": "array",
                           "items": {
-                            "description": "Element bounds. Default: positional tuple [left, top, right, bottom]; the object {left, top, right, bottom} (+ optional centerX/centerY) is also schema-valid.",
                             "anyOf": [
                               {
                                 "type": "object",
@@ -4213,22 +4202,13 @@
                                 "additionalProperties": false
                               },
                               {
-                                "description": "Compact bounds tuple [left, top, right, bottom], emitted in place of the {left, top, right, bottom} object.",
+                                "description": "Compact bounds tuple [left, top, right, bottom].",
+                                "minItems": 4,
+                                "maxItems": 4,
                                 "type": "array",
-                                "prefixItems": [
-                                  {
-                                    "type": "number"
-                                  },
-                                  {
-                                    "type": "number"
-                                  },
-                                  {
-                                    "type": "number"
-                                  },
-                                  {
-                                    "type": "number"
-                                  }
-                                ]
+                                "items": {
+                                  "type": "number"
+                                }
                               }
                             ]
                           }

@@ -184,6 +184,16 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
         },
       }),
     ).toThrow();
+    expect(() =>
+      observeResultSchema.parse({
+        insets: {
+          available: true,
+          source: "android-window-metrics",
+          units: "physical-pixels",
+          displayCutoutInfo: { classification: "notch", bounds: [[1, 2, 3, 4, 5]] },
+        },
+      }),
+    ).toThrow();
 
     const sanitized = sanitizeObserveResult(
       {

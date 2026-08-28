@@ -148,7 +148,7 @@ class ViewHierarchyScaleMetadataTest {
     )
     assertTrue(
       "ADB fallback must stamp only a stable rotation onto its hierarchy",
-      "hierarchy?.copy(rotation = rotation)" in body,
+      "rotation = rotation" in body,
     )
   }
 

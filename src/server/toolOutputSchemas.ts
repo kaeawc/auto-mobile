@@ -253,11 +253,16 @@ const edgeInsetsSchema = z.object({
   left: z.number(),
 });
 
+const displayCutoutBoundsSchema = z.union([
+  boundsObjectSchema,
+  z.array(z.number()).min(4).max(4).describe("Compact bounds tuple [left, top, right, bottom]."),
+]);
+
 const displayCutoutInfoSchema = z.object({
   classification: z.enum(["none", "notch", "dynamic_island", "hole_punch", "unknown"]),
   // Platform metadata reports a list of bounds objects. The tuple arm preserves
   // forward compatibility should a producer compact those rectangles.
-  bounds: z.array(elementBoundsSchema).nullish(),
+  bounds: z.array(displayCutoutBoundsSchema).nullish(),
 });
 
 const systemChromeSchema = z.object({

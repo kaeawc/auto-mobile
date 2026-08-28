@@ -804,6 +804,8 @@ public final class GesturePerformer: GesturePerforming {
                 throw GestureError.noApplication
             }
 
+            try requireKeyboardFocus(app: app, context: "ensure a text field is focused before performing an IME action")
+
             switch action.lowercased() {
             case "done", "go", "search", "send", "next":
                 try catchingObjCException {
@@ -845,6 +847,58 @@ public final class GesturePerformer: GesturePerforming {
                 return waitForKeyboardVisibility(app: app, expected: false)
             default:
                 throw GestureError.notSupported("Keyboard action: \(action)")
+            }
+        }
+
+        public func pressKey(key: String, modifiers: [String]) throws {
+            guard let app = resolveTextInputApp() else {
+                throw GestureError.noApplication
+            }
+
+            let keyboardKey: XCUIKeyboardKey
+            switch key.lowercased() {
+            case "enter":
+                keyboardKey = .return
+            case "tab":
+                keyboardKey = .tab
+            case "escape":
+                keyboardKey = .escape
+            case "backspace":
+                keyboardKey = .delete
+            case "delete":
+                // XCTest's named constants have varied by SDK. U+F728 is the
+                // stable Cocoa forward-delete function-key value used by typeKey.
+                keyboardKey = XCUIKeyboardKey(rawValue: "\u{F728}")
+            case "arrow_up":
+                keyboardKey = .upArrow
+            case "arrow_down":
+                keyboardKey = .downArrow
+            case "arrow_left":
+                keyboardKey = .leftArrow
+            case "arrow_right":
+                keyboardKey = .rightArrow
+            default:
+                throw GestureError.notSupported("Keyboard key: \(key)")
+            }
+
+            var modifierFlags: XCUIElement.KeyModifierFlags = []
+            for modifier in Set(modifiers.map { $0.lowercased() }) {
+                switch modifier {
+                case "shift":
+                    modifierFlags.formUnion(.shift)
+                case "ctrl":
+                    modifierFlags.formUnion(.control)
+                case "alt":
+                    modifierFlags.formUnion(.option)
+                case "meta":
+                    modifierFlags.formUnion(.command)
+                default:
+                    throw GestureError.notSupported("Keyboard modifier: \(modifier)")
+                }
+            }
+
+            try catchingObjCException {
+                app.typeKey(keyboardKey, modifierFlags: modifierFlags)
             }
         }
 
@@ -1612,6 +1666,10 @@ public final class GesturePerformer: GesturePerforming {
         }
 
         public func performImeAction(_: String) throws {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
+        public func pressKey(key _: String, modifiers _: [String]) throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

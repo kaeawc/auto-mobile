@@ -30,8 +30,8 @@ targets:
         INFOPLIST_FILE: CtrlProxyApp/Info.plist
         CODE_SIGN_STYLE: Automatic
     dependencies:
-      - target: CtrlProxy
-        embed: true
+      # The reference `CtrlProxy` framework was retired in Phase 7E; the app is only the
+      # UI-test host and constructs nothing, so it needs no proxy framework embedded.
       - target: ObjCExceptionCatcher
         embed: true
 
@@ -50,41 +50,11 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
 
-  CtrlProxy:
-    type: framework
-    platform: iOS
-    sources:
-      - path: Sources/CtrlProxy
-    dependencies:
-      - target: ObjCExceptionCatcher
-        embed: false
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.framework
-        DEFINES_MODULE: YES
-        CODE_SIGN_STYLE: Automatic
-        GENERATE_INFOPLIST_FILE: YES
-
-  CtrlProxyTests:
-    type: bundle.unit-test
-    platform: iOS
-    sources:
-      - path: Tests/CtrlProxyTests
-    dependencies:
-      - target: CtrlProxy
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.tests
-        CODE_SIGN_STYLE: Automatic
-        GENERATE_INFOPLIST_FILE: YES
-
-  # The production XCUITest runner. As of Phase 7C it compiles the Swift-6 rewrite
-  # (`Sources/CtrlProxyRewrite`) rather than the reference (`Sources/CtrlProxy`) — the
-  # target name, runner app (`CtrlProxyUITests-Runner.app`), xctest bundle, and
-  # `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService` identifier are kept
-  # so the TS MCP integration + scripts drive it unchanged. The reference impl stays
-  # buildable as the differential-parity oracle via the SwiftPM `CtrlProxy` library +
-  # `CtrlProxyRewriteTests` (it just no longer backs an on-device runner).
+  # The production XCUITest runner. It compiles the Swift-6 rewrite (`Sources/CtrlProxyRewrite`)
+  # directly. The target name, runner app (`CtrlProxyUITests-Runner.app`), xctest bundle, and
+  # `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService` identifier are the stable
+  # contract the TS MCP integration + scripts drive. (The reference `CtrlProxy` framework +
+  # `CtrlProxyTests` targets were retired in Phase 7E; `CtrlProxyRewrite` is the sole impl.)
   CtrlProxyUITests:
     type: bundle.ui-testing
     platform: iOS
@@ -123,15 +93,12 @@ schemes:
     build:
       targets:
         CtrlProxyApp: all
-        CtrlProxy: all
         ObjCExceptionCatcher: all
-        CtrlProxyTests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - CtrlProxyTests
         - CtrlProxyUITests
     profile:
       config: Release

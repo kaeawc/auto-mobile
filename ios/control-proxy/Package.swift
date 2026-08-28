@@ -11,10 +11,6 @@ let package = Package(
     ],
     products: [
         .library(
-            name: "CtrlProxy",
-            targets: ["CtrlProxy"]
-        ),
-        .library(
             name: "CtrlProxyRewrite",
             targets: ["CtrlProxyRewrite"]
         ),
@@ -26,27 +22,13 @@ let package = Package(
             publicHeadersPath: "include"
         ),
 
-        // MARK: Reference implementation (behavioral oracle)
-
-        // The shipped implementation. Pinned to Swift 5 language mode so it keeps
-        // building as the parity oracle while `CtrlProxyRewrite` is brought up under
-        // strict concurrency — a per-target mode avoids forcing the whole reference
-        // (with its runOnMainThread/NSLock/@unchecked-Sendable debt) to migrate in
-        // lockstep. It is retired once the rewrite reaches parity.
-        .target(
-            name: "CtrlProxy",
-            dependencies: ["ObjCExceptionCatcher"],
-            path: "Sources/CtrlProxy",
-            swiftSettings: [.swiftLanguageMode(.v5)]
-        ),
-        .testTarget(
-            name: "CtrlProxyTests",
-            dependencies: ["CtrlProxy"],
-            path: "Tests/CtrlProxyTests",
-            swiftSettings: [.swiftLanguageMode(.v5)]
-        ),
-
-        // MARK: Swift-6 concurrency-clean rewrite (in progress)
+        // MARK: Swift-6 concurrency-clean rewrite (shipping)
+        //
+        // The reference `CtrlProxy` target (a Swift-5-language-mode behavioral oracle) and its
+        // `CtrlProxyTests` were retired in Phase 7E once the rewrite reached parity and passed
+        // on-device; the differential-parity harness (which linked both modules) was re-anchored
+        // to reference-free golden/invariant tests or dropped. `CtrlProxyRewrite` is now the sole
+        // implementation.
 
         .target(
             name: "CtrlProxyRewrite",
@@ -61,12 +43,12 @@ let package = Package(
             path: "Sources/CtrlProxyTestSupport",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
-        // Differential parity + rewrite unit tests. Links BOTH the reference and the
-        // rewrite so it can diff old vs new decode/encode behavior against the shared
-        // wire fixture.
+        // Rewrite unit tests + reference-free wire-contract golden/invariant tests (the
+        // differential-parity harness that once linked the reference module was retired in
+        // Phase 7E — see the shared wire fixture `ios-ctrlproxy-request-snapshots.json`).
         .testTarget(
             name: "CtrlProxyRewriteTests",
-            dependencies: ["CtrlProxy", "CtrlProxyRewrite", "CtrlProxyTestSupport"],
+            dependencies: ["CtrlProxyRewrite", "CtrlProxyTestSupport"],
             path: "Tests/CtrlProxyRewriteTests",
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

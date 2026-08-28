@@ -15,37 +15,9 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "61A21F82A43E4D436CD13CCD"
-               BuildableName = "CtrlProxy.framework"
-               BlueprintName = "CtrlProxy"
-               ReferencedContainer = "container:CtrlProxy.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "YES"
-            buildForProfiling = "YES"
-            buildForArchiving = "YES"
-            buildForAnalyzing = "YES">
-            <BuildableReference
-               BuildableIdentifier = "primary"
                BlueprintIdentifier = "829FFB06AC273BEE7049A7F2"
                BuildableName = "CtrlProxyApp.app"
                BlueprintName = "CtrlProxyApp"
-               ReferencedContainer = "container:CtrlProxy.xcodeproj">
-            </BuildableReference>
-         </BuildActionEntry>
-         <BuildActionEntry
-            buildForTesting = "YES"
-            buildForRunning = "NO"
-            buildForProfiling = "NO"
-            buildForArchiving = "NO"
-            buildForAnalyzing = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "D665478F817F2DF283B43BFB"
-               BuildableName = "CtrlProxyTests.xctest"
-               BlueprintName = "CtrlProxyTests"
                ReferencedContainer = "container:CtrlProxy.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -74,24 +46,13 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "61A21F82A43E4D436CD13CCD"
-            BuildableName = "CtrlProxy.framework"
-            BlueprintName = "CtrlProxy"
+            BlueprintIdentifier = "829FFB06AC273BEE7049A7F2"
+            BuildableName = "CtrlProxyApp.app"
+            BlueprintName = "CtrlProxyApp"
             ReferencedContainer = "container:CtrlProxy.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "D665478F817F2DF283B43BFB"
-               BuildableName = "CtrlProxyTests.xctest"
-               BlueprintName = "CtrlProxyTests"
-               ReferencedContainer = "container:CtrlProxy.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
          <TestableReference
             skipped = "NO"
             parallelizable = "NO">
@@ -117,15 +78,16 @@
       debugDocumentVersioning = "YES"
       debugServiceExtension = "internal"
       allowLocationSimulation = "YES">
-      <MacroExpansion>
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "61A21F82A43E4D436CD13CCD"
-            BuildableName = "CtrlProxy.framework"
-            BlueprintName = "CtrlProxy"
+            BlueprintIdentifier = "829FFB06AC273BEE7049A7F2"
+            BuildableName = "CtrlProxyApp.app"
+            BlueprintName = "CtrlProxyApp"
             ReferencedContainer = "container:CtrlProxy.xcodeproj">
          </BuildableReference>
-      </MacroExpansion>
+      </BuildableProductRunnable>
       <CommandLineArguments>
       </CommandLineArguments>
    </LaunchAction>
@@ -135,17 +97,18 @@
       savedToolIdentifier = ""
       useCustomWorkingDirectory = "NO"
       debugDocumentVersioning = "YES">
-      <CommandLineArguments>
-      </CommandLineArguments>
-      <MacroExpansion>
+      <BuildableProductRunnable
+         runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "61A21F82A43E4D436CD13CCD"
-            BuildableName = "CtrlProxy.framework"
-            BlueprintName = "CtrlProxy"
+            BlueprintIdentifier = "829FFB06AC273BEE7049A7F2"
+            BuildableName = "CtrlProxyApp.app"
+            BlueprintName = "CtrlProxyApp"
             ReferencedContainer = "container:CtrlProxy.xcodeproj">
          </BuildableReference>
-      </MacroExpansion>
+      </BuildableProductRunnable>
+      <CommandLineArguments>
+      </CommandLineArguments>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

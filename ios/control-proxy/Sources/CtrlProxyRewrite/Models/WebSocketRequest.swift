@@ -36,6 +36,7 @@ public enum WebSocketRequest: Decodable, Sendable {
     case clearText(RequestClearText)
     case imeAction(RequestImeAction)
     case selectAll(RequestEnvelope)
+    case pressKey(RequestPressKey)
     case keyboard(RequestKeyboard)
     case pressButton(RequestPressButton)
     case pressHome(RequestEnvelope)
@@ -119,6 +120,8 @@ public enum WebSocketRequest: Decodable, Sendable {
             self = try .imeAction(RequestImeAction(from: decoder))
         case .requestSelectAll:
             self = try .selectAll(RequestEnvelope(from: decoder))
+        case .requestPressKey:
+            self = try .pressKey(RequestPressKey(from: decoder))
         case .requestKeyboard:
             self = try .keyboard(RequestKeyboard(from: decoder))
         case .requestPressButton:
@@ -204,6 +207,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case .clearText: return .requestClearText
         case .imeAction: return .requestImeAction
         case .selectAll: return .requestSelectAll
+        case .pressKey: return .requestPressKey
         case .keyboard: return .requestKeyboard
         case .pressButton: return .requestPressButton
         case .pressHome: return .requestPressHome
@@ -272,6 +276,7 @@ public enum WebSocketRequest: Decodable, Sendable {
         case let .appendText(payload): return payload
         case let .clearText(payload): return payload
         case let .imeAction(payload): return payload
+        case let .pressKey(payload): return payload
         case let .keyboard(payload): return payload
         case let .pressButton(payload): return payload
         case let .action(payload): return payload

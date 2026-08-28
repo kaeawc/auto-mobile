@@ -23,6 +23,7 @@ public enum RequestType: String, CaseIterable, Sendable {
     case requestClearText = "request_clear_text"
     case requestImeAction = "request_ime_action"
     case requestSelectAll = "request_select_all"
+    case requestPressKey = "request_press_key"
     case requestKeyboard = "request_keyboard"
     case requestPressButton = "request_press_button"
     case requestPressHome = "request_press_home"
@@ -94,6 +95,7 @@ extension RequestType {
         case .requestClearText: return .clearTextResult
         case .requestImeAction: return .imeActionResult
         case .requestSelectAll: return .selectAllResult
+        case .requestPressKey: return .pressKeyResult
         case .requestKeyboard: return .keyboardResult
         case .requestPressButton: return .pressButtonResult
         case .requestPressHome: return .pressHomeResult

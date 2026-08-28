@@ -17,6 +17,7 @@ public enum ResponseType: String, Sendable {
     case clearTextResult = "clear_text_result"
     case imeActionResult = "ime_action_result"
     case selectAllResult = "select_all_result"
+    case pressKeyResult = "press_key_result"
     case keyboardResult = "keyboard_result"
     case pressButtonResult = "press_button_result"
     case pressHomeResult = "press_home_result"

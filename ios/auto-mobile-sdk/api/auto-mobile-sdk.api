@@ -792,15 +792,21 @@ public struct SdkViewHierarchy: Codable, Sendable
   public let screenWidth: Int
   public let screenHeight: Int
   public let safeAreaInsets: SdkEdgeInsets?
+  public let displayCutoutInfo: SdkDisplayCutoutInfo?
   public let systemChrome: SdkSystemChrome?
   public let root: SdkViewNode?
-  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), bundleId: String? = nil, screenScale: Float, screenWidth: Int, screenHeight: Int, safeAreaInsets: SdkEdgeInsets? = nil, systemChrome: SdkSystemChrome? = nil, root: SdkViewNode? )
+  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), bundleId: String? = nil, screenScale: Float, screenWidth: Int, screenHeight: Int, safeAreaInsets: SdkEdgeInsets? = nil, displayCutoutInfo: SdkDisplayCutoutInfo? = nil, systemChrome: SdkSystemChrome? = nil, root: SdkViewNode? )
 public struct SdkEdgeInsets: Codable, Sendable
   public let top: Double
   public let right: Double
   public let bottom: Double
   public let left: Double
   public init(top: Double, right: Double, bottom: Double, left: Double)
+public struct SdkDisplayCutoutInfo: Codable, Sendable
+  public let classification: String
+  public let bounds: [SdkBounds]?
+  public static let unknown = SdkDisplayCutoutInfo(classification: "unknown")
+  public init(classification: String, bounds: [SdkBounds]? = nil)
 public struct SdkSystemChrome: Codable, Sendable
   public let visibility: String
   public let statusBar: String
@@ -828,8 +834,9 @@ public struct SdkViewNode: Codable, Sendable
   public let isUserInteractionEnabled: Bool
   public let hasTapTarget: Bool
   public let isOccluded: Bool
+  public let semanticLinks: [SdkSemanticLink]?
   public let children: [SdkViewNode]?
-  public init( className: String, bounds: SdkBounds, accessibilityLabel: String? = nil, accessibilityIdentifier: String? = nil, isAccessibilityElement: Bool = false, isAccessibilityFocused: Bool = false, accessibilityElementsHidden: Bool = false, accessibilityTraits: [String] = [], accessibilityCustomActions: [String] = [], gestureRecognizers: [SdkGestureInfo] = [], alpha: Float = 1.0, backgroundColor: String? = nil, cornerRadius: Float = 0, borderColor: String? = nil, borderWidth: Float = 0, isLayerNode: Bool = false, isHidden: Bool = false, isUserInteractionEnabled: Bool = true, hasTapTarget: Bool = false, isOccluded: Bool = false, children: [SdkViewNode]? = nil )
+  public init( className: String, bounds: SdkBounds, accessibilityLabel: String? = nil, accessibilityIdentifier: String? = nil, isAccessibilityElement: Bool = false, isAccessibilityFocused: Bool = false, accessibilityElementsHidden: Bool = false, accessibilityTraits: [String] = [], accessibilityCustomActions: [String] = [], gestureRecognizers: [SdkGestureInfo] = [], alpha: Float = 1.0, backgroundColor: String? = nil, cornerRadius: Float = 0, borderColor: String? = nil, borderWidth: Float = 0, isLayerNode: Bool = false, isHidden: Bool = false, isUserInteractionEnabled: Bool = true, hasTapTarget: Bool = false, isOccluded: Bool = false, semanticLinks: [SdkSemanticLink]? = nil, children: [SdkViewNode]? = nil )
   public init(from decoder: Decoder) throws
 public struct SdkBounds: Codable, Sendable, Hashable
   public let left: Int
@@ -844,6 +851,19 @@ public struct SdkGestureInfo: Codable, Sendable
   public let isEnabled: Bool
   public init(type: String, isEnabled: Bool)
 
+// ViewHierarchy/SemanticLinkExtractor.swift
+public struct SdkSemanticLink: Codable, Sendable, Equatable
+  public let text: String
+  public let occurrence: Int
+  public let start: Int?
+  public let end: Int?
+  public let centerX: Double?
+  public let centerY: Double?
+  public init( text: String, occurrence: Int, start: Int? = nil, end: Int? = nil, centerX: Double? = nil, centerY: Double? = nil )
+public enum SemanticLinkExtractor
+  public static func links(from attributed: NSAttributedString) -> [SdkSemanticLink]
+  public static func links(fromAccessibilityLinkLabels labels: [String]) -> [SdkSemanticLink]
+
 // ViewHierarchy/ViewHierarchyTracker.swift
 public final class ViewHierarchyTracker: @unchecked Sendable
   public static let shared = ViewHierarchyTracker()
@@ -854,6 +874,11 @@ public final class ViewHierarchyTracker: @unchecked Sendable
 public enum ViewHierarchyWalker
   public static func walk(bundleId: String? = nil) -> SdkViewHierarchy
   public static func computeHash(_ hierarchy: SdkViewHierarchy) -> Int
+
+// ViewHierarchy/WindowClassification.swift
+public enum WindowClassification
+  public static let nonContentWindowClassNames: Set<String> = [
+  public static func isNonContentWindow(className: String) -> Bool
 
 // WebKit/AutoMobileWebViewBridge.swift
 public struct AutoMobileWebElement: Codable, Sendable, Equatable

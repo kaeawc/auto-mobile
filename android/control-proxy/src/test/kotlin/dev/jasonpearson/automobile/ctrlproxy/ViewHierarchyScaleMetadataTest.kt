@@ -148,7 +148,19 @@ class ViewHierarchyScaleMetadataTest {
     )
     assertTrue(
       "ADB fallback must stamp only a stable rotation onto its hierarchy",
-      "hierarchy?.copy(rotation = rotation)" in body,
+      "rotation = rotation" in body,
+    )
+    assertTrue(
+      "ADB fallback must capture typed insets against the same screen dimensions",
+      "val insets = getObservationInsets(screenDimensions)" in body,
+    )
+    assertTrue(
+      "ADB fallback must preserve legacy system insets for compatibility",
+      "systemInsets = legacySystemInsets(insets)" in body,
+    )
+    assertTrue(
+      "ADB fallback must retain typed insets and display-cutout state",
+      "insets = insets" in body,
     )
   }
 

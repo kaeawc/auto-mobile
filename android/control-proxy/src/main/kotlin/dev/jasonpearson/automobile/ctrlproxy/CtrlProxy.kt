@@ -3146,6 +3146,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val allWindows = windows
     val rootNode = rootInActiveWindow
     val screenDimensions = getScreenDimensions()
+    val insets = getObservationInsets(screenDimensions)
 
     if (allWindows.isNullOrEmpty() && rootNode == null) {
       return null
@@ -3182,10 +3183,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         rotationAtCaptureStart,
         getRotationOrNull(),
       )
-    // The ADB EXTRACT_HIERARCHY route must carry the #4548 scale metadata too (this route does not
-    // add the other device metadata, but the daemon retains scale metadata off any route).
-    val hierarchyWithScaleMetadata =
-      withScaleMetadata(hierarchy?.copy(rotation = rotation), screenDimensions)
+    // The ADB EXTRACT_HIERARCHY route carries the same coordinate metadata as the direct path so
+    // fallback observations retain their typed insets and display-cutout state.
+    val enriched =
+      hierarchy?.copy(
+        screenWidth = screenDimensions?.width,
+        screenHeight = screenDimensions?.height,
+        rotation = rotation,
+        systemInsets = legacySystemInsets(insets),
+        insets = insets,
+      )
+    val hierarchyWithScaleMetadata = withScaleMetadata(enriched, screenDimensions)
     if (hierarchyWithScaleMetadata != null && contextAtExtractionStart == currentFrameContext()) {
       extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
     }

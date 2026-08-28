@@ -2824,15 +2824,18 @@ cleanup_macos_desktop_app_replacement() {
     return 0
 }
 
+# Recovery failures are returned explicitly to the caller.
+# shellcheck disable=SC2310
 recover_stale_macos_desktop_app_swap() {
-    local target_parent="$1" target_app="$2" swap_dir previous_app
-    [[ -e "${target_app}" ]] && return 0
+    local target_parent="$1" target_app="$2" swap_dir previous_app target_exists=false
+    [[ -e "${target_app}" ]] && target_exists=true
     while IFS= read -r swap_dir; do
         [[ -n "${swap_dir}" ]] || continue
         previous_app="${swap_dir}/Previous-AutoMobile.app"
-        if run_desktop_app_privileged test -e "${previous_app}"; then
+        if [[ "${target_exists}" != "true" ]] && run_desktop_app_privileged test -e "${previous_app}"; then
             if run_desktop_app_privileged mv -- "${previous_app}" "${target_app}"; then
                 log_warn "Recovered the previous AutoMobile.app after an interrupted installation."
+                target_exists=true
             else
                 log_error "Could not recover the previous AutoMobile.app from ${previous_app}."
                 return 1
@@ -2844,6 +2847,8 @@ recover_stale_macos_desktop_app_swap() {
     done < <(run_desktop_app_privileged find "${target_parent}" -maxdepth 1 -type d -name '.automobile-install.*' ! -name '.automobile-install.lock' -print 2>/dev/null)
 }
 
+# Lock acquisition failures are returned explicitly to the caller.
+# shellcheck disable=SC2310
 acquire_macos_desktop_app_lock() {
     local lock_dir="$1" target_parent="$2" target_app="$3" owner_pid owner_pid_to_write="$$" reclaim_dir reclaim_owner
     if run_desktop_app_privileged mkdir "${lock_dir}" 2>/dev/null; then

@@ -324,6 +324,8 @@ desktop_app_termination_wait() {
     sleep 0.1
 }
 
+# Probe failures are represented by the documented return states.
+# shellcheck disable=SC2310
 desktop_app_pid_command() {
     if run_desktop_app_privileged ps -p "$1" -o command= 2>/dev/null; then
         return 0
@@ -338,6 +340,8 @@ desktop_app_pid_command() {
 
 # Return 0 while the PID is alive, 1 when it has exited, and 2 when its state
 # cannot be verified (for example, because the privileged check was denied).
+# Probe failures are represented by the documented return states.
+# shellcheck disable=SC2310
 desktop_app_pid_alive() {
     local pid="$1" executable recheck_executable process_listing command_status liveness_status recheck_listing recheck_status
     if process_listing=$(desktop_app_pid_command "${pid}"); then
@@ -386,6 +390,8 @@ desktop_app_pid_alive() {
 
 # Return 0 when every PID has stopped, 1 while one is still running, and 2
 # when a PID cannot be verified safely.
+# Probe failures are represented by the documented return states.
+# shellcheck disable=SC2310
 desktop_app_processes_stopped() {
     local pid pid_state
     for pid in "$@"; do
@@ -405,6 +411,8 @@ desktop_app_processes_stopped() {
 
 # Return 0 when all PIDs exit, 1 after the bounded wait, and 2 when a PID can
 # no longer be verified.
+# Probe failures are returned explicitly to the caller.
+# shellcheck disable=SC2310
 wait_for_desktop_app_processes_to_stop() {
     local attempt=0 stopped_status
     while (( attempt < 20 )); do
@@ -420,6 +428,8 @@ wait_for_desktop_app_processes_to_stop() {
     return 1
 }
 
+# Every failed probe and signal is returned explicitly to the caller.
+# shellcheck disable=SC2310
 stop_desktop_app_processes() {
     local pids=()
     local pid pid_state wait_status

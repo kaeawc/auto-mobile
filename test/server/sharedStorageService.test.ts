@@ -157,7 +157,9 @@ describe("SharedStorageService", () => {
     await service.stage({
       device: androidDevice,
       namespace: "work-media",
-      files: [{ contentBase64: Buffer.from([1, 2, 3]).toString("base64"), destinationPath: "photo.png" }],
+      files: [
+        { contentBase64: Buffer.from([1, 2, 3]).toString("base64"), destinationPath: "photo.png" },
+      ],
     });
 
     expect(executor.getExecutedCommands()).toContain(

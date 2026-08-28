@@ -109,10 +109,14 @@ class DefaultSharedStorageService implements SharedStorageService {
       throw new ActionableError("stageSharedStorage is only supported on Android devices.");
     }
     const namespace = normalizeSharedStorageNamespace(request.namespace);
+    const preparedFiles = await this.prepareFiles(request.files);
     const adb = this.adbFactory.create(request.device);
     let user: ResolvedUserTarget;
     try {
-      user = await this.createUserResolver(adb).resolve({ signal: request.signal });
+      user = await this.createUserResolver(adb).resolve({
+        currentUser: true,
+        signal: request.signal,
+      });
     } catch (error) {
       throw new ActionableError(
         `Android shared-storage could not resolve an active profile for device ${request.device.deviceId} ` +
@@ -121,7 +125,6 @@ class DefaultSharedStorageService implements SharedStorageService {
       );
     }
     const destinationDirectory = downloadsDirectory(user.userId, namespace);
-    const preparedFiles = await this.prepareFiles(request.files);
     try {
       if (request.reset) {
         // namespace has exactly one safe segment, so this can only remove Downloads/<namespace>.

@@ -149,10 +149,14 @@ describe("AppFileService", () => {
 
   test("stages user_files in the resolved profile Downloads namespace with document-picker effects", async () => {
     const executor = new FakeAdbExecutor();
+    let resolveCalls = 0;
     const sharedStorageService = createSharedStorageServiceForTesting({
       adbFactory: adbFactoryFor(executor),
       createUserResolver: () => ({
-        resolve: async () => ({ userId: 10, source: "managedProfile" }),
+        resolve: async () => {
+          resolveCalls += 1;
+          return { userId: 10, source: "managedProfile" };
+        },
       }),
     });
     const service = createAppFileServiceForTesting({ sharedStorageService });
@@ -191,6 +195,7 @@ describe("AppFileService", () => {
         .filter((args) => args[0] === "push")
         .every((args) => args[2]?.startsWith("/storage/emulated/10/Download/picker-run/")),
     ).toBe(true);
+    expect(resolveCalls).toBe(1);
   });
 
   test("stages media_library fixtures through the bounded AutoMobile namespace after MediaStore verification", async () => {

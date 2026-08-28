@@ -54,6 +54,14 @@ adb -s "$device_id" shell "content query --uri content://media/external_primary/
 adb -s "$device_id" shell am start -a android.provider.action.PICK_IMAGES >/dev/null
 adb -s "$device_id" shell uiautomator dump "$media_dump" >/dev/null
 adb -s "$device_id" shell cat "$media_dump" | grep -Fq "com.google.android.providers.media.module"
-adb -s "$device_id" shell cat "$media_dump" | grep -Fq 'content-desc="Photo taken on'
+adb -s "$device_id" shell am force-stop com.google.android.documentsui
+adb -s "$device_id" shell am start \
+  -a android.intent.action.OPEN_DOCUMENT \
+  -c android.intent.category.OPENABLE \
+  -t image/png \
+  --eu android.provider.extra.INITIAL_URI \
+  content://com.android.externalstorage.documents/document/primary%3ADownload%2Fautomobile-media >/dev/null
+adb -s "$device_id" shell uiautomator dump "$media_dump" >/dev/null
+adb -s "$device_id" shell cat "$media_dump" | grep -Fq "${media_name}"
 
 echo "putAppFile picker smoke passed for $device_id"

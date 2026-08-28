@@ -124,4 +124,8 @@ public final class ViewHierarchyTracker: @unchecked Sendable {
         return ViewHierarchyWalker.walk(bundleId: bundleId)
     }
 }
+
+#if DEBUG
+extension ViewHierarchyTracker: SdkHierarchyServing {}
+#endif
 #endif

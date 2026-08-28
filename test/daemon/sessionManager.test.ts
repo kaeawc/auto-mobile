@@ -2014,6 +2014,56 @@ describe("SessionManager", () => {
     }
   });
 
+  test("retries a failed device-killed upgrade during release persistence", async () => {
+    const persistence = new DeferredReleaseDeviceSessionPersistence();
+    let failTerminalRelease = true;
+    const markReleased = persistence.markReleased.bind(persistence);
+    persistence.markReleased = async (sessionUuid, status, releasedAtMs, reason) => {
+      await markReleased(sessionUuid, status, releasedAtMs, reason);
+      if (reason === "device-killed" && failTerminalRelease) {
+        failTerminalRelease = false;
+        throw new Error("terminal write failed");
+      }
+    };
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      const session = await manager.createSession("killed-session", "emulator-5554", "android");
+      const callbacks: string[] = [];
+      manager.onSessionRelease((_sessionId, _deviceId, reason) => callbacks.push(reason));
+      const ordinaryRelease = manager.releaseSession("killed-session", "explicit-release");
+      await persistence.releaseStarted.promise;
+      const killedRelease = manager.releaseSessionIfOwned(
+        "killed-session",
+        session,
+        "emulator-5554",
+        "device-killed",
+      );
+      persistence.finishRelease.resolve();
+
+      await expect(Promise.all([ordinaryRelease, killedRelease])).rejects.toThrow(
+        "Failed to persist terminal release",
+      );
+      await expect(manager.releaseSession("killed-session", "device-killed")).resolves.toBe(
+        "emulator-5554",
+      );
+      await expect(manager.releaseSession("killed-session", "device-killed")).resolves.toBe(
+        "emulator-5554",
+      );
+      await expect(
+        manager.releaseSessionIfOwned("killed-session", session, "emulator-5554", "device-killed"),
+      ).resolves.toBe("emulator-5554");
+
+      expect(persistence.reasons).toEqual(["explicit-release", "device-killed", "device-killed"]);
+      expect(callbacks).toEqual(["explicit-release", "device-killed"]);
+      expect(manager.getTerminalReleaseSnapshot("killed-session")).toMatchObject({
+        releaseReason: "device-killed",
+        terminal: true,
+      });
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
   test("device-killed upgrade after release finalization remains terminal", async () => {
     const reasons: string[] = [];
     const terminalPersistenceStarted = Promise.withResolvers<void>();
@@ -2157,6 +2207,180 @@ describe("SessionManager", () => {
         terminal: true,
       });
     } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("stale owned retry cannot replace a newer incarnation terminal release", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const reasons: string[] = [];
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+      reasons.push(reason);
+    };
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      const oldSession = await manager.createSession("reused-session", "old-device", "android");
+      await manager.releaseSession("reused-session", "explicit-release");
+      await manager.createSession("reused-session", "new-device", "android");
+      await manager.releaseSession(
+        "reused-session",
+        "device-disconnected:new-device;incident=new-loss",
+      );
+
+      await expect(
+        manager.releaseSessionIfOwned("reused-session", oldSession, "old-device", "device-killed"),
+      ).resolves.toBeNull();
+
+      expect(reasons).toEqual([
+        "explicit-release",
+        "device-disconnected:new-device;incident=new-loss",
+      ]);
+      expect(manager.getTerminalReleaseSnapshot("reused-session")).toMatchObject({
+        deviceId: "new-device",
+        releaseReason: "device-disconnected:new-device;incident=new-loss",
+      });
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("stale owned retry cannot bypass a newer incarnation release in flight", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const newerReleaseStarted = Promise.withResolvers<void>();
+    const finishNewerRelease = Promise.withResolvers<void>();
+    let releaseCount = 0;
+    persistence.markReleased = async () => {
+      releaseCount += 1;
+      if (releaseCount === 2) {
+        newerReleaseStarted.resolve();
+        await finishNewerRelease.promise;
+      }
+    };
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      const oldSession = await manager.createSession("reused-session", "old-device", "android");
+      await manager.releaseSession("reused-session", "explicit-release");
+      await manager.createSession("reused-session", "new-device", "android");
+      const newerRelease = manager.releaseSession("reused-session", "explicit-release");
+      await newerReleaseStarted.promise;
+
+      await expect(
+        manager.releaseSessionIfOwned("reused-session", oldSession, "old-device", "device-killed"),
+      ).resolves.toBeNull();
+      finishNewerRelease.resolve();
+      await newerRelease;
+
+      expect(releaseCount).toBe(2);
+      expect(manager.getTerminalReleaseSnapshot("reused-session")).toBeUndefined();
+    } finally {
+      finishNewerRelease.resolve();
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("stale owned retry cannot replace a newer finalized ordinary release", async () => {
+    const persistence = new DeferredReleaseDeviceSessionPersistence();
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      const oldSession = await manager.createSession("reused-session", "old-device", "android");
+      const oldRelease = manager.releaseSession("reused-session", "explicit-release");
+      await persistence.releaseStarted.promise;
+      const newerCreation = manager.createSession("reused-session", "new-device", "android");
+      persistence.finishRelease.resolve();
+      await oldRelease;
+      await expect(newerCreation).resolves.toMatchObject({ assignedDevice: "new-device" });
+      await manager.releaseSession("reused-session", "explicit-release");
+
+      await expect(
+        manager.releaseSessionIfOwned("reused-session", oldSession, "old-device", "device-killed"),
+      ).resolves.toBeNull();
+
+      expect(persistence.reasons).toEqual(["explicit-release", "explicit-release"]);
+      expect(manager.getTerminalReleaseSnapshot("reused-session")).toBeUndefined();
+    } finally {
+      persistence.finishRelease.resolve();
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("terminal upgrade blocks replacement publication until its fence is durable", async () => {
+    const persistence = new DeferredReleaseDeviceSessionPersistence();
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      await manager.createSession("reused-session", "old-device", "android");
+      const ordinaryRelease = manager.releaseSession("reused-session", "explicit-release");
+      await persistence.releaseStarted.promise;
+      const terminalRelease = manager.releaseSession("reused-session", "device-killed");
+      const newerCreation = manager.createSession("reused-session", "new-device", "android");
+      persistence.finishRelease.resolve();
+
+      await Promise.all([ordinaryRelease, terminalRelease]);
+      await expect(newerCreation).rejects.toThrow("terminal after device-killed");
+
+      expect(persistence.reasons).toEqual(["explicit-release", "device-killed"]);
+      expect(manager.getSession("reused-session")).toBeNull();
+      expect(manager.getTerminalReleaseSnapshot("reused-session")).toMatchObject({
+        deviceId: "old-device",
+        releaseReason: "device-killed",
+      });
+    } finally {
+      persistence.finishRelease.resolve();
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("stale owned retry cannot fence a newer incarnation pending creation", async () => {
+    const persistence = new DeferredDeviceSessionPersistence();
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      const oldSession = await manager.createSession("reused-session", "old-device", "android");
+      await manager.releaseSession("reused-session", "explicit-release");
+      persistence.deferNextUpsert();
+      const newerCreation = manager.createSession("reused-session", "new-device", "android");
+      await persistence.waitForUpsert();
+
+      await expect(
+        manager.releaseSessionIfOwned("reused-session", oldSession, "old-device", "device-killed"),
+      ).resolves.toBeNull();
+      persistence.finishUpsert();
+      await expect(newerCreation).resolves.toMatchObject({ assignedDevice: "new-device" });
+
+      expect(manager.getSession("reused-session")).toMatchObject({ assignedDevice: "new-device" });
+      expect(manager.getTerminalReleaseSnapshot("reused-session")).toBeUndefined();
+    } finally {
+      persistence.finishUpsert();
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("stale owned retry cannot fence a newer incarnation pending assignment", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const manager = new SessionManager(fakeTimer, persistence);
+    const assignmentStarted = Promise.withResolvers<void>();
+    const finishAssignment = Promise.withResolvers<void>();
+    try {
+      const oldSession = await manager.createSession("reused-session", "old-device", "android");
+      await manager.releaseSession("reused-session", "explicit-release");
+      const assigner: SessionDeviceAssigner = {
+        async assignDeviceToSession(sessionId, platform) {
+          assignmentStarted.resolve();
+          await finishAssignment.promise;
+          await manager.createSession(sessionId, "new-device", platform ?? "android");
+          return "new-device";
+        },
+      };
+      const newerAssignment = manager.getOrCreateSession("reused-session", assigner, "android");
+      await assignmentStarted.promise;
+
+      await expect(
+        manager.releaseSessionIfOwned("reused-session", oldSession, "old-device", "device-killed"),
+      ).resolves.toBeNull();
+      finishAssignment.resolve();
+      await expect(newerAssignment).resolves.toMatchObject({ assignedDevice: "new-device" });
+
+      expect(manager.getTerminalReleaseSnapshot("reused-session")).toBeUndefined();
+    } finally {
+      finishAssignment.resolve();
       manager.stopCleanupTimer();
     }
   });

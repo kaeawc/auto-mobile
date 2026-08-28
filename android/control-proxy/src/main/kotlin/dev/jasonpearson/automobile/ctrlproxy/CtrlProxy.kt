@@ -7271,9 +7271,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         } else if (entry != null) {
           append(""","success":true,"found":true""")
           if (entry.value != null) {
-            val jsonValue =
-              if (entry.type == "STRING") jsonCompact.encodeToString(entry.value) else entry.value
-            append(""","value":$jsonValue""")
+            append(""","value":${jsonCompact.encodeToString(entry.value)}""")
           } else {
             append(""","value":null""")
           }

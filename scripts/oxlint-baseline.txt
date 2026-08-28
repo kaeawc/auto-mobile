@@ -81,7 +81,6 @@
 1	src/features/talkback/FocusNavigationExecutor.ts	eslint(max-depth)
 1	src/features/talkback/TalkBackTapStrategy.ts	eslint(complexity)
 1	src/features/telemetry/TelemetryEventBuffer.ts	eslint(complexity)
-1	src/features/utility/DeviceState.ts	eslint(complexity)
 1	src/features/utility/SystemConfigurationManager.ts	auto-mobile(catch-convention)
 1	src/features/utility/ios/IosNotificationAuthorizationReader.ts	auto-mobile(catch-convention)
 1	src/features/video/FfmpegVideoProcessingBackend.ts	eslint(complexity)

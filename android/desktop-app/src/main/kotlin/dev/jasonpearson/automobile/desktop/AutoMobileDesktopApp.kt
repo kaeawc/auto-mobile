@@ -51,10 +51,10 @@ import dev.jasonpearson.automobile.desktop.core.workspace.NetworkFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.OnboardingScreen
 import dev.jasonpearson.automobile.desktop.core.workspace.PerformanceFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.StorageFacet
+import dev.jasonpearson.automobile.desktop.core.workspace.TestFacet
 import dev.jasonpearson.automobile.desktop.core.workspace.Tool
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceAction
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceEffect
-import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceFacetPlaceholder
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceShell
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceViewModel
@@ -573,9 +573,9 @@ fun AutoMobileDesktopApp(
  * Real docked-facet content for a pane, wired to the per-device facets in desktop-core: Logs
  * (telemetry), Storage (auto-resolved app, Android + iOS), Network (per-device `getNetworkGraph`
  * tool call), Performance (per-device observation stream, filtered by deviceId), Failures
- * (cross-device aggregate), and Navigation (#4837 Phase C — app-scoped graph pulled by the pane
- * device's foreground app). Test (per-device daemon resource, #4715) falls back to the placeholder
- * for now.
+ * (cross-device aggregate), Navigation (#4837 Phase C — app-scoped graph pulled by the pane
+ * device's foreground app), and Test (per-device test-runs daemon resource, #4715 / #5017 — scoped
+ * to the pane device by deviceId).
  */
 @Composable
 private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
@@ -591,9 +591,10 @@ private fun WorkspaceFacet(column: DeviceColumn, tool: Tool) {
     Tool.Failures -> FailuresFacet(column)
     // Navigation is app-scoped (#4837 Phase C): the facet resolves the pane device's foreground app
     // from the stream, then pulls that app's persisted graph by appId — so same-app panes share the
-    // graph and a foreign broadcast can't overwrite a pane (the #4838 contamination). Test
-    // (per-device daemon resource, #4715) still falls back to the placeholder.
+    // graph and a foreign broadcast can't overwrite a pane (the #4838 contamination).
     Tool.Navigation -> NavigationFacet(column)
-    else -> WorkspaceFacetPlaceholder(tool)
+    // Test reads the per-device test-runs daemon resource (automobile:test-runs?deviceId=<id>,
+    // #4715 / #5017), scoped to the pane device so panes don't cross-contaminate (#5019).
+    Tool.Test -> TestFacet(column)
   }
 }

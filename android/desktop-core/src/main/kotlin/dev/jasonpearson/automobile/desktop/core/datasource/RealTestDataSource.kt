@@ -11,15 +11,22 @@ import dev.jasonpearson.automobile.desktop.core.test.TestStep
 /**
  * Real test data source that fetches from MCP resources. Uses the test-runs resource to get actual
  * test data with steps and screens.
+ *
+ * When [deviceId] is non-null the read is scoped to that device via
+ * `automobile:test-runs?deviceId=<id>` (see [TestRunQuery.deviceId]), so a per-device Test facet
+ * shows only its own pane's runs and never bleeds one device's runs into another. A null [deviceId]
+ * reads across all devices (the standalone dashboard's behavior).
  */
-class RealTestDataSource(private val clientProvider: (() -> AutoMobileClient)? = null) :
-  TestDataSource {
+class RealTestDataSource(
+  private val clientProvider: (() -> AutoMobileClient)? = null,
+  private val deviceId: String? = null,
+) : TestDataSource {
   override suspend fun getTestRuns(): Result<List<TestRun>> {
     val provider = clientProvider ?: return Result.Success(emptyList())
 
     return try {
       val client = provider()
-      val summary = client.getTestRuns(TestRunQuery(limit = 100))
+      val summary = client.getTestRuns(TestRunQuery(limit = 100, deviceId = deviceId))
 
       // Map TestRunEntry to TestRun
       val testRuns =

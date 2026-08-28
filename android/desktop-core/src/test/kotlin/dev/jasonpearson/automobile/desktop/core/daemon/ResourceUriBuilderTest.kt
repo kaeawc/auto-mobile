@@ -17,4 +17,12 @@ class ResourceUriBuilderTest {
       TestTimingQuery(testClass = "Example Test", isCi = true).toResourceUri(),
     )
   }
+
+  @Test
+  fun `scopes test runs to a device`() {
+    assertEquals(
+      "automobile:test-runs?limit=100&deviceId=emulator-5554",
+      TestRunQuery(limit = 100, deviceId = "emulator-5554").toResourceUri(),
+    )
+  }
 }

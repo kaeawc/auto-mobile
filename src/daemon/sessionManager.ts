@@ -1385,9 +1385,7 @@ export class SessionManager {
     try {
       return await release;
     } finally {
-      if (reason.lateTerminalRelease === release) {
-        reason.lateTerminalRelease = undefined;
-      }
+      reason.lateTerminalRelease = undefined;
     }
   }
 

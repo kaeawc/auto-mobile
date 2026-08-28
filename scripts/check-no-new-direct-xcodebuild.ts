@@ -98,9 +98,8 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
   while (pending.length > 0) {
     const argument = pending.shift()!;
     if (argument === OPAQUE_ARGUMENT) {
-      // The value may be another environment assignment. Keep scanning known
-      // later slots so an unresolved value cannot hide a prohibited command.
-      continue;
+      // The value may itself be the command, so skipping it would fail open.
+      return true;
     }
     if (!optionsTerminated && argument === "--") {
       optionsTerminated = true;

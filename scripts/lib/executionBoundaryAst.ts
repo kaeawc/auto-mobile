@@ -53,6 +53,15 @@ function propertyNameOf(name: ts.PropertyName): string | undefined {
     : undefined;
 }
 
+function bindingIdentifiers(name: ts.BindingName): ts.Identifier[] {
+  if (ts.isIdentifier(name)) {
+    return [name];
+  }
+  return name.elements.flatMap((element) =>
+    ts.isBindingElement(element) ? bindingIdentifiers(element.name) : [],
+  );
+}
+
 function unwrapTransparentExpression(expression: ts.Expression): ts.Expression {
   let current = expression;
   while (
@@ -206,9 +215,11 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       childProcessNamespaces.add(node.name.text);
     }
     if (ts.isVariableDeclaration(node)) {
+      const scope = variableDeclarationScope(node);
+      for (const identifier of bindingIdentifiers(node.name)) {
+        declarations.push({ name: identifier.text, scope, position: node.getStart(sourceFile) });
+      }
       if (ts.isIdentifier(node.name)) {
-        const scope = variableDeclarationScope(node);
-        declarations.push({ name: node.name.text, scope, position: node.getStart(sourceFile) });
         if (node.initializer) {
           initializers.set(node.name.text, [
             ...(initializers.get(node.name.text) ?? []),
@@ -264,9 +275,11 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
         childProcessNamespaces.add(node.name.text);
       }
     }
-    if (ts.isParameter(node) && ts.isIdentifier(node.name)) {
+    if (ts.isParameter(node)) {
       const scope = functionScope(node);
-      declarations.push({ name: node.name.text, scope, position: node.getStart(sourceFile) });
+      for (const identifier of bindingIdentifiers(node.name)) {
+        declarations.push({ name: identifier.text, scope, position: node.getStart(sourceFile) });
+      }
     }
     if (
       ts.isBinaryExpression(node) &&
@@ -311,7 +324,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       const usePosition = node.getStart(sourceFile);
       let binding: (typeof scopedValues)[number] | undefined;
       for (const scope of scopes) {
-        const candidates = scopedValues.filter((candidate) => {
+        const candidates = scopedValues.flatMap((candidate) => {
           let candidateScope = candidate.scope;
           if (candidate.kind === "assignment") {
             const assignmentScopes = scopeChain(candidate.value);
@@ -324,33 +337,65 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
               .find((item) => item !== undefined);
             candidateScope = declaration?.scope ?? candidateScope;
           }
-          const crossedFunctions: ts.FunctionLikeDeclaration[] = [];
+          const useFunctions: ts.FunctionLikeDeclaration[] = [];
           let current: ts.Node | undefined = node.parent;
           while (current && current !== candidateScope) {
             if (ts.isFunctionLike(current)) {
-              crossedFunctions.push(current);
+              useFunctions.push(current);
             }
             current = current.parent;
           }
-          const outermostFunction = crossedFunctions.at(-1);
-          const closureName = outermostFunction ? functionName(outermostFunction) : undefined;
-          const invocationPositions = closureName
+          const useFunction = useFunctions.at(-1);
+          const useFunctionName = useFunction ? functionName(useFunction) : undefined;
+          const useInvocationPositions = useFunctionName
             ? calls
                 .filter(
                   (call) =>
-                    ts.isIdentifier(call.expression) && call.expression.text === closureName,
+                    ts.isIdentifier(call.expression) && call.expression.text === useFunctionName,
                 )
                 .map((call) => call.getStart(sourceFile))
             : [];
-          const executesBeforeClosure =
-            invocationPositions.length > 0 && candidate.position < Math.min(...invocationPositions);
-          return (
-            candidate.name === node.text &&
+          const useExecutionPosition =
+            useInvocationPositions.length > 0 ? Math.max(...useInvocationPositions) : usePosition;
+
+          const candidateFunctions: ts.FunctionLikeDeclaration[] = [];
+          current = candidate.value.parent;
+          while (current && current !== candidateScope) {
+            if (ts.isFunctionLike(current)) {
+              candidateFunctions.push(current);
+            }
+            current = current.parent;
+          }
+          const candidateFunction = candidateFunctions.at(-1);
+          const candidateFunctionName = candidateFunction
+            ? functionName(candidateFunction)
+            : undefined;
+          const candidateInvocationPositions = candidateFunctionName
+            ? calls
+                .filter(
+                  (call) =>
+                    ts.isIdentifier(call.expression) &&
+                    call.expression.text === candidateFunctionName &&
+                    call.getStart(sourceFile) < useExecutionPosition,
+                )
+                .map((call) => call.getStart(sourceFile))
+            : [];
+          if (candidateFunction && candidateInvocationPositions.length === 0) {
+            return [];
+          }
+          const effectivePosition =
+            candidateInvocationPositions.length > 0
+              ? Math.max(...candidateInvocationPositions)
+              : candidate.position;
+          return candidate.name === node.text &&
             candidateScope === scope &&
-            (candidate.position < usePosition || executesBeforeClosure)
-          );
+            effectivePosition < useExecutionPosition
+            ? [{ candidate, effectivePosition }]
+            : [];
         });
-        binding = candidates.sort((left, right) => right.position - left.position)[0];
+        binding = candidates.sort(
+          (left, right) => right.effectivePosition - left.effectivePosition,
+        )[0]?.candidate;
         if (binding) {
           break;
         }

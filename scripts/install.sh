@@ -82,6 +82,7 @@ IDE_PLUGIN_ZIP_URL=""
 IDE_PLUGIN_DIR=""
 INSTALL_AUTOMOBILE_CLI=false
 INSTALL_DESKTOP_APP=false
+DESKTOP_APP_EXPLICITLY_REQUESTED=false
 INSTALL_CLAUDE_MARKETPLACE=false
 INSTALL_DEV_TOOLS=false
 START_DAEMON=false
@@ -522,6 +523,7 @@ parse_args() {
                 ;;
             --desktop-app)
                 INSTALL_DESKTOP_APP=true
+                DESKTOP_APP_EXPLICITLY_REQUESTED=true
                 shift
                 ;;
             --record-mode)
@@ -2841,9 +2843,9 @@ recover_stale_macos_desktop_app_swap() {
 }
 
 acquire_macos_desktop_app_lock() {
-    local lock_dir="$1" target_parent="$2" target_app="$3" owner_pid
+    local lock_dir="$1" target_parent="$2" target_app="$3" owner_pid owner_pid_to_write="${BASHPID}"
     if run_desktop_app_privileged mkdir "${lock_dir}" 2>/dev/null; then
-        printf '%s\n' "${BASHPID}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null
+        printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null
         return 0
     fi
     if ! owner_pid=$(run_desktop_app_privileged cat "${lock_dir}/owner.pid" 2>/dev/null) \
@@ -2855,7 +2857,7 @@ acquire_macos_desktop_app_lock() {
     run_desktop_app_privileged rm -rf -- "${lock_dir}" || return 1
     recover_stale_macos_desktop_app_swap "${target_parent}" "${target_app}" || return 1
     run_desktop_app_privileged mkdir "${lock_dir}" || return 1
-    printf '%s\n' "${BASHPID}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null
+    printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null
 }
 
 # Copy into a sibling staging directory, then swap the bundle into place. This
@@ -5316,6 +5318,10 @@ main() {
     show_installation_progress 7
     if [[ "${INSTALL_DESKTOP_APP}" == "true" ]]; then
         if ! install_desktop_app; then
+            if [[ "${DESKTOP_APP_EXPLICITLY_REQUESTED}" == "true" ]]; then
+                log_error "Desktop app installation was requested and did not complete."
+                return 1
+            fi
             log_warn "Desktop app installation failed; continuing with the remaining AutoMobile setup."
         fi
     fi

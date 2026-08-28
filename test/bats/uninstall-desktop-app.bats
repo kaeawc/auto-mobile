@@ -35,7 +35,12 @@ setup() {
 
 @test "stops the desktop process before removal with a bounded TERM path" {
   local terminated=false
+  DESKTOP_APP_EXECUTABLES=("/Applications/AutoMobile.app/Contents/MacOS/AutoMobile")
   desktop_app_process_pids() { printf '101\n'; }
+  desktop_app_pid_command() {
+    [[ "${terminated}" != "true" ]] || return 1
+    printf '%s\n' "/Applications/AutoMobile.app/Contents/MacOS/AutoMobile"
+  }
   desktop_app_termination_wait() { :; }
   kill() {
     case "$1" in
@@ -58,7 +63,9 @@ setup() {
 
 @test "force-stops a desktop process that ignores the bounded TERM wait" {
   local terminated=false killed=false waits=0
+  DESKTOP_APP_EXECUTABLES=("/Applications/AutoMobile.app/Contents/MacOS/AutoMobile")
   desktop_app_process_pids() { printf '101\n'; }
+  desktop_app_pid_command() { printf '%s\n' "/Applications/AutoMobile.app/Contents/MacOS/AutoMobile"; }
   desktop_app_termination_wait() { ((waits += 1)); }
   kill() {
     case "$1" in
@@ -79,6 +86,32 @@ setup() {
   [ "${terminated}" = "true" ]
   [ "${killed}" = "true" ]
   [ "${waits}" -eq 20 ]
+}
+
+@test "does not signal a process whose PID was reused after TERM" {
+  local terminated=false killed=false
+  DESKTOP_APP_EXECUTABLES=("/Applications/AutoMobile.app/Contents/MacOS/AutoMobile")
+  desktop_app_process_pids() { printf '101\n'; }
+  desktop_app_termination_wait() { :; }
+  desktop_app_pid_command() {
+    if [[ "${terminated}" == "true" ]]; then
+      printf '%s\n' '/usr/bin/unrelated-process'
+    else
+      printf '%s\n' "/Applications/AutoMobile.app/Contents/MacOS/AutoMobile"
+    fi
+  }
+  kill() {
+    case "$1" in
+      -TERM) terminated=true ;;
+      -KILL) killed=true ;;
+      -0) return 0 ;;
+    esac
+  }
+
+  stop_desktop_app_processes
+
+  [ "${terminated}" = "true" ]
+  [ "${killed}" = "false" ]
 }
 
 @test "runs desktop removal commands directly when already root" {

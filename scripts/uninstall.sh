@@ -318,25 +318,43 @@ desktop_app_termination_wait() {
     sleep 0.1
 }
 
+desktop_app_pid_command() {
+    run_desktop_app_privileged ps -p "$1" -o command= 2>/dev/null
+}
+
 # Return 0 while the PID is alive, 1 when it has exited, and 2 when its state
 # cannot be verified (for example, because the privileged check was denied).
 desktop_app_pid_alive() {
-    local pid="$1" executable
-    if run_desktop_app_privileged kill -0 "${pid}" 2>/dev/null; then
-        return 0
+    local pid="$1" executable process_listing command_status liveness_status
+    if process_listing=$(desktop_app_pid_command "${pid}"); then
+        command_status=0
+    else
+        command_status=$?
     fi
-    local process_listing
-    process_listing=$(run_desktop_app_privileged ps -p "${pid}" -o command= 2>/dev/null) || return 1
-    [[ -n "${process_listing//[[:space:]]/}" ]] || return 1
+    if [[ "${command_status}" -ne 0 ]]; then
+        # A process can exit between the signal probe and ps lookup. Treat that
+        # as stopped; a still-running matching process is reported below.
+        return 1
+    fi
     for executable in ${DESKTOP_APP_EXECUTABLES[@]+"${DESKTOP_APP_EXECUTABLES[@]}"}; do
-        [[ "${process_listing}" == "${executable}" || "${process_listing}" == "${executable} "* ]] && return 2
+        if [[ "${process_listing}" == "${executable}" || "${process_listing}" == "${executable} "* ]]; then
+            if run_desktop_app_privileged kill -0 "${pid}" 2>/dev/null; then
+                liveness_status=0
+            else
+                liveness_status=$?
+            fi
+            if [[ "${liveness_status}" -eq 0 ]]; then
+                return 0
+            fi
+            return 2
+        fi
     done
     return 1
 }
 
 stop_desktop_app_processes() {
     local pids=()
-    local pid attempt running
+    local pid attempt running pid_state
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] && pids+=("${pid}")
     done < <(desktop_app_process_pids)
@@ -350,6 +368,17 @@ stop_desktop_app_processes() {
 
     log_info "Stopping AutoMobile desktop app..."
     for pid in ${pids[@]+"${pids[@]}"}; do
+        if desktop_app_pid_alive "${pid}"; then
+            pid_state=0
+        else
+            pid_state=$?
+        fi
+        if [[ "${pid_state}" -eq 1 ]]; then
+            continue
+        elif [[ "${pid_state}" -eq 2 ]]; then
+            log_error "Could not verify desktop app process ${pid}; refusing to remove the app."
+            return 1
+        fi
         if ! run_desktop_app_privileged kill -TERM "${pid}" 2>/dev/null; then
             log_error "Could not signal desktop app process ${pid}; refusing to remove the app."
             return 1
@@ -361,9 +390,14 @@ stop_desktop_app_processes() {
         running=false
         for pid in ${pids[@]+"${pids[@]}"}; do
             if desktop_app_pid_alive "${pid}"; then
+                pid_state=0
+            else
+                pid_state=$?
+            fi
+            if [[ "${pid_state}" -eq 0 ]]; then
                 running=true
                 break
-            elif [[ "$?" -eq 2 ]]; then
+            elif [[ "${pid_state}" -eq 2 ]]; then
                 log_error "Could not verify desktop app process ${pid}; refusing to remove the app."
                 return 1
             fi
@@ -375,12 +409,20 @@ stop_desktop_app_processes() {
 
     for pid in ${pids[@]+"${pids[@]}"}; do
         if desktop_app_pid_alive "${pid}"; then
-            if ! run_desktop_app_privileged kill -KILL "${pid}" 2>/dev/null; then
-                log_error "Could not terminate desktop app process ${pid}; refusing to remove the app."
-                return 1
-            fi
-        elif [[ "$?" -eq 2 ]]; then
+            pid_state=0
+        else
+            pid_state=$?
+        fi
+        if [[ "${pid_state}" -eq 1 ]]; then
+            continue
+        elif [[ "${pid_state}" -eq 2 ]]; then
             log_error "Could not verify desktop app process ${pid}; refusing to remove the app."
+            return 1
+        fi
+        # The explicit failure branch below intentionally handles this signal.
+        # shellcheck disable=SC2310
+        if ! run_desktop_app_privileged kill -KILL "${pid}" 2>/dev/null; then
+            log_error "Could not terminate desktop app process ${pid}; refusing to remove the app."
             return 1
         fi
     done

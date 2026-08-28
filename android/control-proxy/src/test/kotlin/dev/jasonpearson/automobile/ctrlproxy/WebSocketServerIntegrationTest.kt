@@ -994,7 +994,7 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
-  fun `raw async response clears request owner mapping`() = runBlocking {
+  fun `raw async response drops later orphaned correlated frames`() = runBlocking {
     lateinit var rawSuccessServer: WebSocketServer
     rawSuccessServer =
       WebSocketServer(
@@ -1040,7 +1040,10 @@ class WebSocketServerIntegrationTest {
               ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
               ownerReceivedRaw.complete(Unit)
               sendLateError.await()
-              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              val unexpected = withTimeoutOrNull(250) { incoming.receive() }
+              if (unexpected is Frame.Text) {
+                ownerMessages.add(unexpected.readText())
+              }
             }
           }
 
@@ -1060,9 +1063,10 @@ class WebSocketServerIntegrationTest {
               }
               bystanderReceivedRaw.complete(Unit)
               sendLateError.await()
-              bystanderMessages.add(
-                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
-              )
+              val lateUnexpected = withTimeoutOrNull(250) { incoming.receive() }
+              if (lateUnexpected is Frame.Text) {
+                bystanderMessages.add(lateUnexpected.readText())
+              }
             }
           }
 
@@ -1080,20 +1084,15 @@ class WebSocketServerIntegrationTest {
 
           assertEquals("""{"type":"screenshot","requestId":"req-raw-success"}""", ownerMessages[0])
           assertEquals(
-            "the bystander should receive only the later unowned error, not the raw success",
+            "a terminal raw response removes ownership, so a late same-ID frame reaches nobody",
             1,
+            ownerMessages.size,
+          )
+          assertEquals(
+            "a terminal raw response must not leak a later same-ID frame to another client",
+            0,
             bystanderMessages.size,
           )
-          val ownerError = json.parseToJsonElement(ownerMessages[1]).jsonObject
-          val bystanderError = json.parseToJsonElement(bystanderMessages[0]).jsonObject
-          assertEquals("error", ownerError["type"]?.jsonPrimitive?.content)
-          assertEquals("req-raw-success", ownerError["requestId"]?.jsonPrimitive?.content)
-          assertEquals(
-            "raw success should remove stale request ownership so later same-id errors are not targeted",
-            "error",
-            bystanderError["type"]?.jsonPrimitive?.content,
-          )
-          assertEquals("req-raw-success", bystanderError["requestId"]?.jsonPrimitive?.content)
         }
       }
     } finally {
@@ -1102,7 +1101,7 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
-  fun `typed async response clears request owner mapping`() = runBlocking {
+  fun `typed async response drops later orphaned correlated frames`() = runBlocking {
     lateinit var typedSuccessServer: WebSocketServer
     typedSuccessServer =
       WebSocketServer(
@@ -1159,7 +1158,10 @@ class WebSocketServerIntegrationTest {
               ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
               ownerReceivedTyped.complete(Unit)
               sendLateError.await()
-              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              val unexpected = withTimeoutOrNull(250) { incoming.receive() }
+              if (unexpected is Frame.Text) {
+                ownerMessages.add(unexpected.readText())
+              }
             }
           }
 
@@ -1179,9 +1181,10 @@ class WebSocketServerIntegrationTest {
               }
               bystanderReceivedTyped.complete(Unit)
               sendLateError.await()
-              bystanderMessages.add(
-                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
-              )
+              val lateUnexpected = withTimeoutOrNull(250) { incoming.receive() }
+              if (lateUnexpected is Frame.Text) {
+                bystanderMessages.add(lateUnexpected.readText())
+              }
             }
           }
 
@@ -1200,17 +1203,16 @@ class WebSocketServerIntegrationTest {
           val ownerResult = json.parseToJsonElement(ownerMessages[0]).jsonObject
           assertEquals("settings_get_result", ownerResult["type"]?.jsonPrimitive?.content)
           assertEquals("req-typed-success", ownerResult["requestId"]?.jsonPrimitive?.content)
-          assertEquals("correlated typed success must not leak to another client", 1, bystanderMessages.size)
-          val ownerError = json.parseToJsonElement(ownerMessages[1]).jsonObject
-          val bystanderError = json.parseToJsonElement(bystanderMessages[0]).jsonObject
-          assertEquals("error", ownerError["type"]?.jsonPrimitive?.content)
-          assertEquals("req-typed-success", ownerError["requestId"]?.jsonPrimitive?.content)
           assertEquals(
-            "typed success should remove stale request ownership so later same-id errors are not targeted",
-            "error",
-            bystanderError["type"]?.jsonPrimitive?.content,
+            "a terminal typed response must drop later same-ID frames",
+            1,
+            ownerMessages.size,
           )
-          assertEquals("req-typed-success", bystanderError["requestId"]?.jsonPrimitive?.content)
+          assertEquals(
+            "a terminal typed response must not leak later same-ID frames to another client",
+            0,
+            bystanderMessages.size,
+          )
         }
       }
     } finally {
@@ -1384,13 +1386,13 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
-  fun `uncorrelated hierarchy success does not leave stale request owner`() = runBlocking {
+  fun `uncorrelated hierarchy success drops an unrelated later correlated frame`() = runBlocking {
     // Issue #3190 (follow-up to #3159): a request_hierarchy carrying a requestId completes with an
     // uncorrelated success — the action broadcasts a `hierarchy_update` frame that has NO requestId
     // (production: CtrlProxy.kt broadcasts via HierarchyDebouncer without threading the requestId
     // through). Because that frame cannot clear an owner entry, the server must NOT record one in
-    // the first place. This test proves a later same-id ErrorResponse is broadcast to ALL clients
-    // rather than being misrouted only to the original requester's connection.
+    // the first place. A later correlated frame has no owner and must be dropped rather than
+    // leaked to every connected observer.
     lateinit var hierarchyServer: WebSocketServer
     hierarchyServer =
       WebSocketServer(
@@ -1437,7 +1439,10 @@ class WebSocketServerIntegrationTest {
               ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
               ownerReceivedUpdate.complete(Unit)
               sendLateError.await()
-              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              val unexpected = withTimeoutOrNull(250) { incoming.receive() }
+              if (unexpected is Frame.Text) {
+                ownerMessages.add(unexpected.readText())
+              }
             }
           }
 
@@ -1456,9 +1461,10 @@ class WebSocketServerIntegrationTest {
               )
               bystanderReceivedUpdate.complete(Unit)
               sendLateError.await()
-              bystanderMessages.add(
-                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
-              )
+              val lateUnexpected = withTimeoutOrNull(250) { incoming.receive() }
+              if (lateUnexpected is Frame.Text) {
+                bystanderMessages.add(lateUnexpected.readText())
+              }
             }
           }
 
@@ -1476,17 +1482,16 @@ class WebSocketServerIntegrationTest {
 
           assertEquals("""{"type":"hierarchy_update","hierarchy":{}}""", ownerMessages[0])
           assertEquals("""{"type":"hierarchy_update","hierarchy":{}}""", bystanderMessages[0])
-          val ownerError = json.parseToJsonElement(ownerMessages[1]).jsonObject
-          val bystanderError = json.parseToJsonElement(bystanderMessages[1]).jsonObject
-          assertEquals("error", ownerError["type"]?.jsonPrimitive?.content)
-          assertEquals("req-hierarchy", ownerError["requestId"]?.jsonPrimitive?.content)
           assertEquals(
-            "an uncorrelated hierarchy success must not record owner mapping, so a later same-id " +
-              "error broadcasts to all clients instead of being targeted to the original requester",
-            "error",
-            bystanderError["type"]?.jsonPrimitive?.content,
+            "owner should not receive an unowned correlated error",
+            1,
+            ownerMessages.size,
           )
-          assertEquals("req-hierarchy", bystanderError["requestId"]?.jsonPrimitive?.content)
+          assertEquals(
+            "an uncorrelated hierarchy response leaves no owner, so a later same-ID frame is dropped",
+            1,
+            bystanderMessages.size,
+          )
         }
       }
     } finally {

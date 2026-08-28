@@ -368,12 +368,7 @@ class WebSocketServer(
 
   /** Broadcast a message to all connected clients */
   suspend fun broadcast(message: String) {
-    val target =
-      extractRequestId(message)?.let { requestId ->
-        synchronized(connections) { requestConnections.remove(requestId) }
-      }
-    if (target != null) {
-      sendToClient(target, message)
+    if (routeCorrelatedResponse(extractRequestId(message), message)) {
       return
     }
     _messageFlow.emit(message)
@@ -389,12 +384,7 @@ class WebSocketServer(
   suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String) {
     val perfTiming = perfProvider.flush()
     val message = messageBuilder(perfTiming)
-    val target =
-      extractRequestId(message)?.let { requestId ->
-        synchronized(connections) { requestConnections.remove(requestId) }
-      }
-    if (target != null) {
-      sendToClient(target, message)
+    if (routeCorrelatedResponse(extractRequestId(message), message)) {
       return
     }
     _messageFlow.emit(message)
@@ -410,12 +400,7 @@ class WebSocketServer(
   suspend fun broadcastWithPerfSync(messageBuilder: (perfTiming: JsonElement?) -> String) {
     val perfTiming = perfProvider.flush()
     val message = messageBuilder(perfTiming)
-    val target =
-      extractRequestId(message)?.let { requestId ->
-        synchronized(connections) { requestConnections.remove(requestId) }
-      }
-    if (target != null) {
-      sendToClient(target, message)
+    if (routeCorrelatedResponse(extractRequestId(message), message)) {
       return
     }
     broadcastToClients(message)
@@ -451,15 +436,7 @@ class WebSocketServer(
     waitForClient: Boolean = false,
   ) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
-    val requestId = correlationRequestId(response)
-    val target =
-      if (requestId != null) {
-        synchronized(connections) { requestConnections.remove(requestId) }
-      } else {
-        null
-      }
-    if (target != null) {
-      sendToClient(target, message)
+    if (routeCorrelatedResponse(correlationRequestId(response), message)) {
       return
     }
 
@@ -471,6 +448,29 @@ class WebSocketServer(
         BroadcastMode.Sync -> broadcastToClients(message)
       }
     }
+  }
+
+  /**
+   * Sends a correlated response only to its originating client.
+   *
+   * A request owner is removed when the socket disconnects and when its first terminal response is
+   * delivered. A later response with that request ID is therefore not an event: broadcasting it
+   * could leak one client's screenshot or action result to every other connected client.
+   *
+   * @return `true` when [requestId] was present and the frame was delivered or deliberately
+   *   dropped; `false` for uncorrelated frames that the caller should broadcast normally.
+   */
+  private suspend fun routeCorrelatedResponse(requestId: String?, message: String): Boolean {
+    if (requestId == null) {
+      return false
+    }
+    val target = synchronized(connections) { requestConnections.remove(requestId) }
+    if (target == null) {
+      Log.w(TAG, "Dropping response for disconnected or completed request $requestId")
+    } else {
+      sendToClient(target, message)
+    }
+    return true
   }
 
   /**

@@ -261,6 +261,18 @@ const systemChromeSchema = z.object({
   source: z.enum(["android-window-insets", "ios-status-bar-manager"]),
 });
 
+const displayCutoutBoundsSchema = z.object({
+  left: z.number(),
+  top: z.number(),
+  right: z.number(),
+  bottom: z.number(),
+});
+
+const displayCutoutStateSchema = z.object({
+  classification: z.enum(["none", "notch", "dynamic_island", "hole_punch", "unknown"]),
+  bounds: z.array(displayCutoutBoundsSchema).optional(),
+});
+
 const observationInsetsSchema = z.object({
   available: z.boolean(),
   source: z.enum([
@@ -274,6 +286,7 @@ const observationInsetsSchema = z.object({
   // null (rather than omitting them), particularly on older API levels.
   systemBars: z.object({ visible: edgeInsetsSchema, stable: edgeInsetsSchema }).nullish(),
   displayCutout: edgeInsetsSchema.nullish(),
+  displayCutoutState: displayCutoutStateSchema.optional(),
   systemGestures: edgeInsetsSchema.nullish(),
   mandatorySystemGestures: edgeInsetsSchema.nullish(),
   tappableElement: edgeInsetsSchema.nullish(),

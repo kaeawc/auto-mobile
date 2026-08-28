@@ -31,6 +31,9 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutBoundsInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutClassifier
+import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.FrameMetricsSnapshot
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
@@ -2667,14 +2670,28 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       right = insets.right,
     )
 
+  private fun toDisplayCutoutBoundsInfo(bounds: Rect): DisplayCutoutBoundsInfo =
+    DisplayCutoutBoundsInfo(
+      left = bounds.left,
+      top = bounds.top,
+      right = bounds.right,
+      bottom = bounds.bottom,
+    )
+
   /** Get typed current-window inset metadata for coordinate and layout inspection. */
   @Suppress("DEPRECATION")
-  private fun getObservationInsets(): ObservationInsetsInfo {
+  private fun getObservationInsets(screenDimensions: ScreenDimensions?): ObservationInsetsInfo {
     return try {
       val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
       if (windowManager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         val metrics = windowManager.currentWindowMetrics
         val windowInsets = metrics.windowInsets
+        val displayCutoutInsets =
+          toSystemInsetsInfo(
+            windowInsets.getInsetsIgnoringVisibility(android.view.WindowInsets.Type.displayCutout())
+          )
+        val displayCutoutBounds =
+          windowInsets.displayCutout?.boundingRects?.map(::toDisplayCutoutBoundsInfo).orEmpty()
         ObservationInsetsInfo(
           systemBars =
             SystemBarsInsetsInfo(
@@ -2689,11 +2706,18 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                   )
                 ),
             ),
-          displayCutout =
-            toSystemInsetsInfo(
-              windowInsets.getInsetsIgnoringVisibility(
-                android.view.WindowInsets.Type.displayCutout()
-              )
+          displayCutout = displayCutoutInsets,
+          displayCutoutState =
+            DisplayCutoutInfo(
+              classification =
+                DisplayCutoutClassifier.classify(
+                  bounds = displayCutoutBounds,
+                  screen =
+                    screenDimensions
+                      ?: ScreenDimensions(metrics.bounds.width(), metrics.bounds.height()),
+                  cutoutInsets = displayCutoutInsets,
+                ),
+              bounds = displayCutoutBounds,
             ),
           systemGestures =
             toSystemInsetsInfo(
@@ -2903,7 +2927,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val capturedRootPackage = rootNode?.packageName?.toString()
     val capturedWindowClass = lastWindowClassName
     val screenDimensions = getScreenDimensions()
-    val insets = getObservationInsets()
+    val insets = getObservationInsets(screenDimensions)
 
     if (allWindows.isNullOrEmpty() && rootNode == null) {
       Log.w(TAG, "No windows or root node available for extraction")

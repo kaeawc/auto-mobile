@@ -45,6 +45,16 @@ an app request, not proof that the home indicator is currently hidden. Older And
 and iOS apps built with an older AutoMobile SDK omit `systemChrome`, so clients must treat its
 absence as unknown rather than inferring it from zero insets.
 
+`insets.displayCutoutState` is additive, platform-neutral metadata for the active display treatment.
+Its `classification` is one of `none`, `notch`, `dynamic_island`, `hole_punch`, or `unknown`.
+Android uses `DisplayCutout` regions to report `bounds` in the same physical-pixel coordinate space
+and current orientation as `screenSize` and hierarchy bounds; it returns `unknown` for ambiguous
+or unavailable cutout metadata. iOS has no public cutout-shape API, so it returns explicit `unknown`
+and omits `bounds`, even where safe-area values are present. `dynamic_island` is reserved for a
+future platform source that can determine it reliably. Older runners omit `displayCutoutState`
+entirely, which clients must likewise treat as unknown. The legacy `insets.displayCutout` edge
+insets remain available for safe-area layout auditing and do not classify the cutout shape.
+
 The observation gracefully handles various error conditions:
 
 - Screen off or device locked states

@@ -1111,12 +1111,27 @@ public struct EdgeInsetsInfo: Codable, Sendable {
     public let left: Double
 }
 
+public struct DisplayCutoutBoundsInfo: Codable, Sendable {
+    public let left: Double
+    public let top: Double
+    public let right: Double
+    public let bottom: Double
+}
+
+public struct DisplayCutoutInfo: Codable, Sendable {
+    public let classification: String
+    public let bounds: [DisplayCutoutBoundsInfo]?
+
+    public static let unknown = DisplayCutoutInfo(classification: "unknown", bounds: nil)
+}
+
 public struct ObservationInsetsInfo: Codable, Sendable {
     public let available: Bool
     public let source: String
     public let units: String
     public let safeArea: EdgeInsetsInfo?
     public let systemChrome: SystemChromeInfo?
+    public var displayCutoutState: DisplayCutoutInfo = .unknown
 
     public static let unavailable = ObservationInsetsInfo(
         available: false,

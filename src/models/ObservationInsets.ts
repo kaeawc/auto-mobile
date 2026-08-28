@@ -13,6 +13,28 @@ export interface ObservationSystemBarsInsets {
   stable: ObservationEdgeInsets;
 }
 
+export type DisplayCutoutClassification =
+  | "none"
+  | "notch"
+  | "dynamic_island"
+  | "hole_punch"
+  | "unknown";
+
+/** A non-functional display region in the observation's screen coordinate space. */
+export interface DisplayCutoutBounds {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** Display-cutout classification and, when available, its observed non-functional regions. */
+export interface ObservationDisplayCutout {
+  classification: DisplayCutoutClassification;
+  /** Omitted when the platform cannot provide geometry. */
+  bounds?: DisplayCutoutBounds[];
+}
+
 /**
  * Current system-chrome visibility for the foreground app window. It describes
  * presentation state only; edge-to-edge layout remains an independent choice.
@@ -39,7 +61,10 @@ export interface ObservationInsets {
     | "unavailable";
   units: "physical-pixels" | "points" | "unknown";
   systemBars?: ObservationSystemBarsInsets;
+  /** Legacy edge insets for display cutouts, retained for safe-area auditing. */
   displayCutout?: ObservationEdgeInsets;
+  /** Additive platform-neutral cutout state; absence means an older runner. */
+  displayCutoutState?: ObservationDisplayCutout;
   systemGestures?: ObservationEdgeInsets;
   mandatorySystemGestures?: ObservationEdgeInsets;
   tappableElement?: ObservationEdgeInsets;

@@ -159,6 +159,26 @@ final class HierarchyMergerTests: XCTestCase {
         XCTAssertEqual(result.insets.systemChrome?.statusBar, "hidden")
         XCTAssertEqual(result.insets.systemChrome?.homeIndicatorAutoHideRequested, true)
         XCTAssertEqual(result.insets.systemChrome?.source, "ios-status-bar-manager")
+        XCTAssertEqual(result.insets.displayCutoutState.classification, "unknown")
+        XCTAssertNil(result.insets.displayCutoutState.bounds)
+    }
+
+    func testIosSafeAreaDoesNotInferDynamicIslandCutout() {
+        let hierarchy = makeHierarchy(root: makeElement(text: "Hello"))
+        let sdkHierarchy = SdkViewHierarchy(
+            timestamp: 1000,
+            bundleId: "com.test.app",
+            screenScale: 3.0,
+            screenWidth: 393,
+            screenHeight: 852,
+            safeAreaInsets: SdkEdgeInsets(top: 59, right: 0, bottom: 34, left: 0),
+            root: nil
+        )
+
+        let result = HierarchyMerger.merge(xcuitest: hierarchy, sdk: sdkHierarchy)
+
+        XCTAssertEqual(result.insets.displayCutoutState.classification, "unknown")
+        XCTAssertNil(result.insets.displayCutoutState.bounds)
     }
 
     func testMergeChromeOnlySdkPayloadPreservesUnavailableInsetMetadata() {
@@ -191,6 +211,8 @@ final class HierarchyMergerTests: XCTestCase {
         XCTAssertEqual(result.insets.source, "unavailable")
         XCTAssertEqual(result.insets.units, "unknown")
         XCTAssertNil(result.insets.safeArea)
+        XCTAssertEqual(result.insets.displayCutoutState.classification, "unknown")
+        XCTAssertNil(result.insets.displayCutoutState.bounds)
         XCTAssertEqual(result.insets.systemChrome?.visibility, "hidden")
     }
 

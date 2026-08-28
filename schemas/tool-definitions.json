@@ -3519,6 +3519,39 @@
                 }
               ]
             },
+            "displayCutoutState": {
+              "type": "object",
+              "properties": {
+                "classification": {
+                  "type": "string",
+                  "enum": ["none", "notch", "dynamic_island", "hole_punch", "unknown"]
+                },
+                "bounds": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "left": {
+                        "type": "number"
+                      },
+                      "top": {
+                        "type": "number"
+                      },
+                      "right": {
+                        "type": "number"
+                      },
+                      "bottom": {
+                        "type": "number"
+                      }
+                    },
+                    "required": ["left", "top", "right", "bottom"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["classification"],
+              "additionalProperties": false
+            },
             "systemGestures": {
               "anyOf": [
                 {
@@ -4126,6 +4159,39 @@
                       "type": "null"
                     }
                   ]
+                },
+                "displayCutoutState": {
+                  "type": "object",
+                  "properties": {
+                    "classification": {
+                      "type": "string",
+                      "enum": ["none", "notch", "dynamic_island", "hole_punch", "unknown"]
+                    },
+                    "bounds": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "left": {
+                            "type": "number"
+                          },
+                          "top": {
+                            "type": "number"
+                          },
+                          "right": {
+                            "type": "number"
+                          },
+                          "bottom": {
+                            "type": "number"
+                          }
+                        },
+                        "required": ["left", "top", "right", "bottom"],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["classification"],
+                  "additionalProperties": false
                 },
                 "systemGestures": {
                   "anyOf": [

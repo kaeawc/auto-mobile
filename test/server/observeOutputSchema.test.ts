@@ -78,6 +78,7 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
         source: "ios-sdk-safe-area",
         units: "points",
         safeArea: { top: 59.5, right: 0, bottom: 34, left: 0 },
+        displayCutoutState: { classification: "unknown" },
         systemChrome: {
           visibility: "hidden",
           statusBar: "hidden",
@@ -115,6 +116,7 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
       homeIndicatorAutoHideRequested: true,
       source: "ios-status-bar-manager",
     });
+    expect(parsed.data?.insets?.displayCutoutState).toEqual({ classification: "unknown" });
   });
 
   test("accepts nullable Android inset categories", () => {
@@ -129,6 +131,10 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
             stable: { top: 24, right: 0, bottom: 48, left: 0 },
           },
           displayCutout: null,
+          displayCutoutState: {
+            classification: "hole_punch",
+            bounds: [{ left: 510, top: 0, right: 570, bottom: 60 }],
+          },
           systemGestures: null,
           mandatorySystemGestures: null,
           tappableElement: null,

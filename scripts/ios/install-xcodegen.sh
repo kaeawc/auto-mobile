@@ -35,9 +35,10 @@ fi
 # /usr/local is on PATH everywhere on macOS and writable on GitHub runners.
 # Fall back to ~/.local for a laptop where it is not.
 PREFIX="${XCODEGEN_PREFIX:-/usr/local}"
-if ! mkdir -p "${PREFIX}/bin" 2>/dev/null || [[ ! -w "${PREFIX}/bin" ]]; then
+if ! mkdir -p "${PREFIX}/bin" "${PREFIX}/share" 2>/dev/null \
+   || [[ ! -w "${PREFIX}/bin" || ! -w "${PREFIX}/share" ]]; then
     PREFIX="${HOME}/.local"
-    mkdir -p "${PREFIX}/bin"
+    mkdir -p "${PREFIX}/bin" "${PREFIX}/share"
 fi
 
 echo "Installing XcodeGen ${XCODEGEN_VERSION} (found '${current:-none}') into ${PREFIX}..."

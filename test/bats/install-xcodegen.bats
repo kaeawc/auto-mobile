@@ -17,7 +17,9 @@ setup() {
   VERSION_FILE="$REPO_ROOT/scripts/ios/xcodegen_version.sh"
   STUB_DIR="$BATS_TEST_TMPDIR/stubs"
   PREFIX="$BATS_TEST_TMPDIR/prefix"
-  mkdir -p "$STUB_DIR" "$PREFIX"
+  HOME="$BATS_TEST_TMPDIR/home"
+  export HOME
+  mkdir -p "$STUB_DIR" "$PREFIX" "$HOME"
 }
 
 # Fake xcodegen on PATH reporting $1.
@@ -113,6 +115,33 @@ EOF
   [ "$status" -eq 0 ]
   [ -x "$PREFIX/bin/xcodegen" ]
   [ -d "$PREFIX/share/xcodegen" ]
+}
+
+@test "falls back when the bin directory is writable but share is not" {
+  # CircleCI allows writing /usr/local/bin but not /usr/local/share. The
+  # generator's templates must live under share/, so prefix writability covers
+  # both locations before the installer chooses it.
+  local fallback_home="$BATS_TEST_TMPDIR/home"
+  mkdir -p "$PREFIX/bin" "$fallback_home"
+  cat > "$STUB_DIR/mkdir" <<EOF
+#!/bin/bash
+for arg in "\$@"; do
+  if [[ "\$arg" == "${PREFIX}/share" ]]; then
+    echo "mkdir: ${PREFIX}/share: Permission denied" >&2
+    exit 1
+  fi
+done
+exec /bin/mkdir "\$@"
+EOF
+  chmod +x "$STUB_DIR/mkdir"
+  stub_download "2.46.0"
+
+  run env PATH="$STUB_DIR:/usr/bin:/bin" HOME="$fallback_home" XCODEGEN_PREFIX="$PREFIX" \
+      XCODEGEN_RELEASE_SHA256="$ARCHIVE_SHA" bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [ -x "$fallback_home/.local/bin/xcodegen" ]
+  [ -d "$fallback_home/.local/share/xcodegen" ]
 }
 
 @test "replaces a skewed version — the #3975 shape" {

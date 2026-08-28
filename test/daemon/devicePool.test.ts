@@ -309,6 +309,10 @@ describe("DevicePool", () => {
       this.writeFinished.resolve();
     }
 
+    failUpsert(error: Error): void {
+      this.writeFinished.reject(error);
+    }
+
     async upsertActiveSession(): Promise<void> {
       if (!this.deferWrite) {
         return;
@@ -2792,6 +2796,92 @@ describe("DevicePool", () => {
 
       expect(replacement?.name).toBe("Pixel 8 replacement");
       appsRepository.finishDeferredTrackingWrite();
+    });
+
+    test("captures the live same-UUID replacement while its pool identity update is pending", async () => {
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.initializeWithDevices([device]);
+      await devicePool.bindOrReuseDeviceSession("owner-session", device.deviceId, "android");
+      const originalSession = sessionManager.getSession("owner-session");
+      if (!originalSession) {
+        throw new Error("expected original session");
+      }
+
+      await sessionManager.releaseSession("owner-session");
+      await devicePool.releaseDevice(device.deviceId, "owner-session");
+
+      const replacementPublished = Promise.withResolvers<void>();
+      const finishPoolIdentityUpdate = Promise.withResolvers<void>();
+      sessionManager.waitForSessionRelease = async () => {
+        replacementPublished.resolve();
+        await finishPoolIdentityUpdate.promise;
+      };
+
+      const replacementBinding = devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        device.deviceId,
+        "android",
+      );
+      await replacementPublished.promise;
+      const replacementSession = sessionManager.getSession("owner-session");
+      expect(replacementSession).not.toBeNull();
+      expect(replacementSession).not.toBe(originalSession);
+
+      const shutdownReservationPromise = devicePool.reserveDeviceForShutdown(device.deviceId);
+      finishPoolIdentityUpdate.resolve();
+      await replacementBinding;
+      const shutdownReservation = await shutdownReservationPromise;
+      if (!shutdownReservation) {
+        throw new Error("expected shutdown reservation");
+      }
+      try {
+        expect(shutdownReservation.session).toBe(replacementSession);
+      } finally {
+        await shutdownReservation.release();
+      }
+    });
+
+    test("recaptures the latest finalized owner after a replacement assignment fails", async () => {
+      const persistence = new DeferredDeviceSessionPersistence();
+      persistence.finishUpsert();
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
+      const pool = new DevicePool(
+        sessionManager,
+        "daemon-session",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      const originalDevice = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const replacementDevice = createBootedDevice("emulator-5556", "android", "Pixel 9");
+      fakeDeviceManager.bootedDevices = [originalDevice, replacementDevice];
+      await pool.initializeWithDevices([originalDevice, replacementDevice]);
+      await pool.bindOrReuseDeviceSession("shared", originalDevice.deviceId, "android");
+      const originalSession = sessionManager.getSession("shared");
+      if (!originalSession) {
+        throw new Error("expected original session");
+      }
+      await sessionManager.releaseSession("shared");
+
+      persistence.deferNextUpsert();
+      const replacementAssignment = sessionManager.getOrCreateSession("shared", pool, "android");
+      await persistence.waitForUpsert();
+      const shutdownReservationPromise = pool.reserveDeviceForShutdown(originalDevice.deviceId);
+      persistence.failUpsert(new Error("replacement persistence failed"));
+      await expect(replacementAssignment).rejects.toThrow("replacement persistence failed");
+
+      const shutdownReservation = await shutdownReservationPromise;
+      if (!shutdownReservation) {
+        throw new Error("expected shutdown reservation");
+      }
+      try {
+        expect(shutdownReservation.session).toBe(originalSession);
+      } finally {
+        await shutdownReservation.release();
+      }
     });
 
     test("allows a replacement incarnation to acquire its own shutdown reservation", async () => {

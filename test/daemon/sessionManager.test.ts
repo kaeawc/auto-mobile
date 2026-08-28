@@ -269,6 +269,28 @@ describe("SessionManager", () => {
         manager.stopCleanupTimer();
       }
     });
+
+    test("does not report a finalized identity as latest while its replacement is being created", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+      try {
+        const original = await manager.createSession("reused", "emulator-old", "android");
+        await manager.releaseSession("reused");
+        expect(manager.isLatestSessionIdentity(original)).toBe(true);
+
+        repository.deferNextUpsert();
+        const replacementCreation = manager.createSession("reused", "emulator-new", "android");
+        await repository.waitForUpsert();
+        expect(manager.isLatestSessionIdentity(original)).toBe(false);
+
+        repository.finishUpsert();
+        const replacement = await replacementCreation;
+        expect(manager.isLatestSessionIdentity(original)).toBe(false);
+        expect(manager.isLatestSessionIdentity(replacement)).toBe(true);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
   });
 
   describe("getOrCreateSession", () => {
@@ -367,6 +389,34 @@ describe("SessionManager", () => {
       const [first, second] = await sessionsPromise;
       expect(first.assignedDevice).toBe("device-session-a");
       expect(second.assignedDevice).toBe("device-session-b");
+    });
+
+    test("does not report a finalized identity as latest while replacement assignment is pending", async () => {
+      const original = await sessionManager.createSession("reused", "emulator-old", "android");
+      await sessionManager.releaseSession("reused");
+      const assignmentStarted = Promise.withResolvers<void>();
+      const finishAssignment = Promise.withResolvers<void>();
+      const devicePool: SessionDeviceAssigner = {
+        assignDeviceToSession: async (sessionId: string): Promise<string> => {
+          assignmentStarted.resolve();
+          await finishAssignment.promise;
+          const replacement = await sessionManager.createSession(
+            sessionId,
+            "emulator-new",
+            "android",
+          );
+          return replacement.assignedDevice;
+        },
+      };
+
+      const replacementAssignment = sessionManager.getOrCreateSession("reused", devicePool);
+      await assignmentStarted.promise;
+      expect(sessionManager.isLatestSessionIdentity(original)).toBe(false);
+
+      finishAssignment.resolve();
+      const replacement = await replacementAssignment;
+      expect(sessionManager.isLatestSessionIdentity(original)).toBe(false);
+      expect(sessionManager.isLatestSessionIdentity(replacement)).toBe(true);
     });
 
     test("allows a retry after an unseen-session assignment fails", async () => {

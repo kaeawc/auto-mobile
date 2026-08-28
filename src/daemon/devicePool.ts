@@ -5050,7 +5050,8 @@ export class DevicePool {
     const session =
       candidate !== undefined &&
       candidate.sessionId === device?.sessionId &&
-      candidate.assignedDevice === deviceId
+      candidate.assignedDevice === deviceId &&
+      this.sessionManager.isLatestSessionIdentity(candidate)
         ? candidate
         : undefined;
     return {
@@ -5103,7 +5104,16 @@ export class DevicePool {
       return;
     }
     const session = this.pooledSessionIdentities.get(device);
-    if (session?.sessionId !== device.sessionId || session.assignedDevice !== deviceId) {
+    if (
+      session?.sessionId !== device.sessionId ||
+      session.assignedDevice !== deviceId ||
+      // Every production assignment path holds assignmentMutex. Once this
+      // callback owns it, an outer getOrCreateSession assignment can only be
+      // awaiting its finally cleanup; it can no longer publish device state.
+      !this.sessionManager.isLatestSessionIdentity(session, {
+        ignorePendingAssignment: true,
+      })
+    ) {
       return;
     }
     identity.session = session;

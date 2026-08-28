@@ -903,6 +903,28 @@ export class SessionManager {
     );
   }
 
+  /** Whether this is the newest published, releasing, or finalized incarnation for its UUID. */
+  isLatestSessionIdentity(
+    session: Session,
+    options: { ignorePendingAssignment?: boolean } = {},
+  ): boolean {
+    const current = this.sessions.get(session.sessionId);
+    if (current) {
+      return current === session;
+    }
+    if (
+      this.pendingSessionCreations.has(session.sessionId) ||
+      (!options.ignorePendingAssignment && this.pendingSessionAssignments.has(session.sessionId))
+    ) {
+      return false;
+    }
+    const inFlightRelease = this.releasePromises.get(session.sessionId);
+    if (inFlightRelease) {
+      return inFlightRelease.session === session;
+    }
+    return this.latestFinalizedSessionIdentities.get(session.sessionId)?.deref() === session;
+  }
+
   /**
    * Release a session and free its device
    *

@@ -20,5 +20,7 @@ final class FilesPickerProbeUITests: XCTestCase {
         let selected = app.staticTexts["selected-document"]
         XCTAssertTrue(selected.waitForExistence(timeout: 5))
         XCTAssertEqual(selected.label, "automobile-files-probe.txt")
+        XCTAssertTrue(openPicker.waitForExistence(timeout: 5))
+        XCTAssertTrue(openPicker.isHittable, app.debugDescription)
     }
 }

@@ -82,7 +82,6 @@ schemes:
       config: Debug
       targets:
         - PlaygroundTests
-        - PlaygroundFilesPickerUITests
     profile:
       config: Release
     analyze:

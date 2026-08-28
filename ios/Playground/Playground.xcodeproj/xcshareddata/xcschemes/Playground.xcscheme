@@ -64,17 +64,6 @@
                ReferencedContainer = "container:Playground.xcodeproj">
             </BuildableReference>
          </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "9586904FC044DFE3B2D9C272"
-               BuildableName = "PlaygroundFilesPickerUITests.xctest"
-               BlueprintName = "PlaygroundFilesPickerUITests"
-               ReferencedContainer = "container:Playground.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

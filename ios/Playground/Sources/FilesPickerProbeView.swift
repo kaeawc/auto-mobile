@@ -28,7 +28,10 @@ struct FilesPickerProbeView: View {
         }
         .padding()
         .sheet(isPresented: $showingPicker) {
-            FilesPickerController(selectedFixture: $selectedFixture)
+            FilesPickerController(
+                selectedFixture: $selectedFixture,
+                isPresented: $showingPicker
+            )
         }
         .trackNavigation(destination: "files_picker_probe")
     }
@@ -36,26 +39,35 @@ struct FilesPickerProbeView: View {
 
 private struct FilesPickerController: UIViewControllerRepresentable {
     @Binding var selectedFixture: String
+    @Binding var isPresented: Bool
 
-    func makeUIViewController(context: Context) -> FilesPickerHostViewController {
-        FilesPickerHostViewController { selectedFixture = $0 }
+    func makeUIViewController(context _: Context) -> FilesPickerHostViewController {
+        FilesPickerHostViewController(
+            didSelectFixture: { selectedFixture = $0 },
+            didClose: { isPresented = false }
+        )
     }
 
-    func updateUIViewController(_ uiViewController: FilesPickerHostViewController, context: Context) {}
+    func updateUIViewController(_: FilesPickerHostViewController, context _: Context) {}
 }
 
 private final class FilesPickerHostViewController: UIViewController, UIDocumentPickerDelegate {
     private static let fixtureNamespace = "automobile-issue-5806"
     private let didSelectFixture: (String) -> Void
+    private let didClose: () -> Void
     private var didPresentPicker = false
 
-    init(didSelectFixture: @escaping (String) -> Void) {
+    init(
+        didSelectFixture: @escaping (String) -> Void,
+        didClose: @escaping () -> Void
+    ) {
         self.didSelectFixture = didSelectFixture
+        self.didClose = didClose
         super.init(nibName: nil, bundle: nil)
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -73,14 +85,14 @@ private final class FilesPickerHostViewController: UIViewController, UIDocumentP
     }
 
     func documentPicker(
-        _ controller: UIDocumentPickerViewController,
+        _: UIDocumentPickerViewController,
         didPickDocumentsAt urls: [URL]
     ) {
         didSelectFixture(urls.first?.lastPathComponent ?? "No fixture selected")
-        dismiss(animated: true)
+        didClose()
     }
 
-    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-        dismiss(animated: true)
+    func documentPickerWasCancelled(_: UIDocumentPickerViewController) {
+        didClose()
     }
 }

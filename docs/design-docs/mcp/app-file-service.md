@@ -4,16 +4,22 @@
 
 `putAppFile` and the app-file resources share one internal service so tools and
 resources do not call `adb`, `run-as`, `simctl`, or the host filesystem directly.
+The public write contract is a non-empty `files` batch plus a discriminated
+`target`: `app_containers`, `user_files`, or `media_library`. The legacy
+single-file app-container arguments are accepted only as a compatibility input
+path; generated tool definitions advertise the canonical target-based shape.
 
 ## Service Boundary
 
 - Public MCP handlers call `AppFileService` in `src/server/appFileService.ts`.
-- `DefaultAppFileService` owns shared validation, source preparation, device
-  resolution for resources, provider selection, and typed result metadata.
-- Platform-specific behavior lives behind `AppFileProvider` implementations:
-  `AndroidAppFileProvider` and `IosSimulatorAppFileProvider`.
-- Providers receive normalized app IDs, logical containers, safe relative paths,
-  and prepared source file paths. They should not accept raw MCP arguments.
+- `DefaultAppFileService` owns target/path normalization, whole-batch conflict
+  preflight, source preparation and cleanup, device resolution for resources,
+  provider selection, and typed result metadata.
+- The provider registry keys write providers by platform plus logical storage
+  domain. List and read provider seams are separate, so a write-only target
+  never promises resource operations it cannot implement.
+- Providers receive normalized targets, safe relative paths, and prepared local
+  source file paths. They should not accept raw MCP arguments.
 
 ## Shared Validation
 
@@ -23,22 +29,19 @@ Keep validation that is common to all platforms in the service or contract layer
   parsing.
 - `normalizeAppFileRelativePath` rejects absolute paths, empty paths, repeated
   separators, `.`, and `..` traversal.
-- `AppFileService` validates app IDs before provider selection so unsafe app IDs
-  cannot reach platform path construction.
+- `AppFileService` validates app IDs, user-file namespaces, paths, duplicate
+  destinations, and directory-prefix conflicts before provider mutation begins.
 
 Provider-specific checks should only cover platform capability differences. For
 example, Android rejects `library`, and iOS rejects `externalFiles`.
 
 ## Adding Containers
 
-1. Add the logical name to `APP_FILE_CONTAINERS` in
-   `src/server/appFileContract.ts`.
-2. Map the container in each provider in `src/server/appFileService.ts`.
-3. If a platform cannot support the container, throw an explicit
-   `ActionableError` through the unsupported-operation helper. Include the
-   operation, app ID, container, and platform in the message.
-4. Add tests in `test/server/appFileService.test.ts` for shared validation,
-   provider routing, and the platform-specific capability behavior.
+1. Add the logical domain or app container to `src/server/appFileContract.ts`.
+2. Register a write provider for every supported platform/domain pair.
+3. Add list/read providers only where those operations are actually supported.
+4. Add fake-backed tests in `test/server/appFileService.test.ts` for shared
+   validation, provider routing, cleanup, result mapping, and platform limits.
 
 ## Adding Providers
 

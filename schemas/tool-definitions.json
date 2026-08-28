@@ -7233,36 +7233,104 @@
   },
   {
     "name": "putAppFile",
-    "description": "Write file/text/base64 content into an app container.",
+    "description": "Write files into a bounded logical storage target.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "appId": {
-          "type": "string",
-          "minLength": 1
+        "target": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "domain": {
+                  "type": "string",
+                  "const": "app_containers"
+                },
+                "appId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "container": {
+                  "description": "App container",
+                  "type": "string",
+                  "enum": ["documents", "library", "cache", "tmp", "externalFiles"]
+                }
+              },
+              "required": ["domain", "appId", "container"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "domain": {
+                  "type": "string",
+                  "const": "user_files"
+                },
+                "namespace": {
+                  "description": "One caller-named fixture namespace",
+                  "type": "string"
+                },
+                "reset": {
+                  "description": "Remove only this fixture namespace before writing",
+                  "type": "boolean"
+                }
+              },
+              "required": ["domain", "namespace"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "domain": {
+                  "type": "string",
+                  "const": "media_library"
+                }
+              },
+              "required": ["domain"],
+              "additionalProperties": false
+            }
+          ]
         },
-        "container": {
-          "description": "App container",
-          "type": "string",
-          "enum": ["documents", "library", "cache", "tmp", "externalFiles"]
-        },
-        "sourcePath": {
-          "description": "Host file path",
-          "type": "string",
-          "minLength": 1
-        },
-        "contentText": {
-          "description": "UTF-8 content",
-          "type": "string"
-        },
-        "contentBase64": {
-          "description": "Base64 content",
-          "type": "string"
-        },
-        "destinationPath": {
-          "description": "Container-relative destination path",
-          "type": "string"
+        "files": {
+          "description": "Files to write",
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sourcePath": {
+                "description": "Host file path",
+                "type": "string",
+                "minLength": 1
+              },
+              "contentText": {
+                "description": "UTF-8 content",
+                "type": "string"
+              },
+              "contentBase64": {
+                "description": "Base64 content",
+                "type": "string"
+              },
+              "destinationPath": {
+                "description": "Safe path relative to the declared storage target",
+                "type": "string"
+              }
+            },
+            "required": ["destinationPath"],
+            "additionalProperties": false,
+            "oneOf": [
+              {
+                "required": ["sourcePath"]
+              },
+              {
+                "required": ["contentText"]
+              },
+              {
+                "required": ["contentBase64"]
+              }
+            ]
+          }
         },
         "platform": {
           "type": "string",
@@ -7280,7 +7348,7 @@
           "type": "string"
         }
       },
-      "required": ["appId", "container", "destinationPath"],
+      "required": ["target", "files"],
       "additionalProperties": false
     }
   },

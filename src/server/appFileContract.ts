@@ -1,5 +1,10 @@
 import { z } from "zod/v4";
-import { addDeviceTargetingToSchema, withAppIdAliases } from "./toolSchemaHelpers";
+import {
+  addDeviceTargetingToSchema,
+  appIdFieldAliases,
+  withAppIdAliases,
+  withJsonSchemaOverride,
+} from "./toolSchemaHelpers";
 import type { Platform } from "../models";
 
 export const APP_FILE_CONTAINERS = [
@@ -24,7 +29,47 @@ export interface AppFileResourceParts {
   path?: string;
 }
 
+export type StorageDomain = "app_containers" | "user_files" | "media_library";
+
+export interface AppContainersTarget {
+  domain: "app_containers";
+  appId: string;
+  container: AppFileContainer;
+}
+
+export interface UserFilesTarget {
+  domain: "user_files";
+  namespace: string;
+  reset?: boolean;
+}
+
+export interface MediaLibraryTarget {
+  domain: "media_library";
+}
+
+export type PutAppFileTarget = AppContainersTarget | UserFilesTarget | MediaLibraryTarget;
+
+export interface PutAppFileInput {
+  destinationPath: string;
+  sourcePath?: string;
+  contentText?: string;
+  contentBase64?: string;
+}
+
 export interface PutAppFileArgs {
+  target: PutAppFileTarget;
+  files: PutAppFileInput[];
+  /** Internal compatibility marker populated by the legacy-shape preprocessor. */
+  legacySingleFile?: boolean;
+  platform?: Platform;
+  deviceId?: string;
+  device?: string;
+  sessionUuid?: string;
+  keepScreenAwake?: boolean;
+}
+
+/** The single-file app-container request accepted while callers migrate to {@link PutAppFileArgs}. */
+export interface LegacyPutAppFileArgs {
   appId: string;
   container: AppFileContainer;
   destinationPath: string;
@@ -47,6 +92,27 @@ export interface PutAppFileResult {
   destinationPath: string;
   byteCount: number;
   resourceUri: string;
+}
+
+export interface PutAppFileWriteEffect {
+  type: string;
+  status: "completed" | "notRequested" | "unavailable";
+  reason?: string;
+}
+
+export interface PutAppFileWriteResult {
+  destinationPath: string;
+  byteCount: number;
+  resourceUri?: string;
+  effects: PutAppFileWriteEffect[];
+}
+
+export interface PutAppFileBatchResult {
+  success: true;
+  deviceId: string;
+  platform: Platform;
+  target: PutAppFileTarget;
+  files: PutAppFileWriteResult[];
 }
 
 export interface AppFileListRequest {
@@ -109,18 +175,82 @@ export function normalizeAppFileRelativePath(path: string): string {
   return normalized;
 }
 
-const putAppFileBaseSchema = z.object({
-  appId: z.string().min(1),
-  container: appFileContainerSchema.describe("App container"),
+/** A namespace is exactly one caller-named child directory, keeping reset scope bounded. */
+export function normalizeUserFilesNamespace(namespace: string): string {
+  const normalized = namespace.trim();
+  if (
+    normalized.length === 0 ||
+    normalized === "." ||
+    normalized === ".." ||
+    normalized.includes("/") ||
+    normalized.includes("\\") ||
+    normalized.includes("\0")
+  ) {
+    throw new Error(
+      "namespace must be a non-empty single directory name without path separators or traversal segments",
+    );
+  }
+  return normalized;
+}
+
+export function normalizePutAppFileTarget(target: PutAppFileTarget): PutAppFileTarget {
+  switch (target.domain) {
+    case "app_containers":
+      return {
+        domain: target.domain,
+        appId: target.appId.trim(),
+        container: target.container,
+      };
+    case "user_files":
+      return {
+        domain: target.domain,
+        namespace: normalizeUserFilesNamespace(target.namespace),
+        ...(target.reset === undefined ? {} : { reset: target.reset }),
+      };
+    case "media_library":
+      return { domain: target.domain };
+  }
+}
+
+const appContainersTargetSchema = z
+  .object({
+    domain: z.literal("app_containers"),
+    appId: z.string().min(1),
+    container: appFileContainerSchema.describe("App container"),
+  })
+  .strict();
+
+const userFilesTargetSchema = z
+  .object({
+    domain: z.literal("user_files"),
+    namespace: z.string().describe("One caller-named fixture namespace"),
+    reset: z.boolean().optional().describe("Remove only this fixture namespace before writing"),
+  })
+  .strict()
+  .superRefine((target, ctx) => {
+    try {
+      normalizeUserFilesNamespace(target.namespace);
+    } catch (error) {
+      ctx.addIssue({
+        code: "custom",
+        message: error instanceof Error ? error.message : "namespace must be safe",
+        path: ["namespace"],
+      });
+    }
+  });
+
+const mediaLibraryTargetSchema = z.object({ domain: z.literal("media_library") }).strict();
+
+const putAppFileInputSchema = z
+  .object({
   sourcePath: z.string().min(1).optional().describe("Host file path"),
   contentText: z.string().optional().describe("UTF-8 content"),
   contentBase64: z.string().optional().describe("Base64 content"),
-  destinationPath: z.string().describe("Container-relative destination path"),
-});
-
-export const putAppFileSchema = withAppIdAliases(
-  addDeviceTargetingToSchema(putAppFileBaseSchema).superRefine((args, ctx) => {
-    if (countDefined([args.sourcePath, args.contentText, args.contentBase64]) !== 1) {
+  destinationPath: z.string().describe("Safe path relative to the declared storage target"),
+  })
+  .strict()
+  .superRefine((file, ctx) => {
+    if (countDefined([file.sourcePath, file.contentText, file.contentBase64]) !== 1) {
       ctx.addIssue({
         code: "custom",
         message: "Provide exactly one content source: sourcePath, contentText, or contentBase64.",
@@ -129,7 +259,7 @@ export const putAppFileSchema = withAppIdAliases(
     }
 
     try {
-      normalizeAppFileRelativePath(args.destinationPath);
+      normalizeAppFileRelativePath(file.destinationPath);
     } catch (error) {
       ctx.addIssue({
         code: "custom",
@@ -139,17 +269,14 @@ export const putAppFileSchema = withAppIdAliases(
       });
     }
 
-    if (args.contentBase64 !== undefined) {
+    if (file.contentBase64 !== undefined) {
       try {
-        const decoded = Buffer.from(args.contentBase64, "base64");
+        const decoded = Buffer.from(file.contentBase64, "base64");
         const canonical = decoded.toString("base64");
         const unpadded = canonical.replace(/=+$/, "");
-        if (args.contentBase64 !== canonical && args.contentBase64 !== unpadded) {
+        if (file.contentBase64 !== canonical && file.contentBase64 !== unpadded) {
           throw new Error("round-trip mismatch");
         }
-        // An empty ("") or all-padding ("====") payload round-trips cleanly but
-        // decodes to zero bytes, silently writing an empty file to the device.
-        // Reject it so the caller must send real content (#4183 A4).
         if (decoded.length === 0) {
           throw new Error("empty payload");
         }
@@ -161,7 +288,77 @@ export const putAppFileSchema = withAppIdAliases(
         });
       }
     }
-  }),
+  });
+
+const canonicalPutAppFileSchema = addDeviceTargetingToSchema(
+  z
+    .object({
+      target: z.discriminatedUnion("domain", [
+        appContainersTargetSchema,
+        userFilesTargetSchema,
+        mediaLibraryTargetSchema,
+      ]),
+      files: z.array(putAppFileInputSchema).min(1).describe("Files to write"),
+      // This marker is populated only by the compatibility preprocessor and is
+      // removed from the advertised schema below.
+      legacySingleFile: z.literal(true).optional(),
+    })
+    .strict(),
+);
+
+function preprocessLegacyPutAppFileArgs(input: unknown): unknown {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return input;
+  }
+  const args = input as Record<string, unknown>;
+  if (args.target !== undefined) {
+    // The marker is reserved for a legacy object that this preprocessor itself
+    // converts. A canonical caller cannot select legacy response semantics.
+    return args.legacySingleFile === undefined ? input : { ...args, legacySingleFile: false };
+  }
+  const appId =
+    args.appId ?? appIdFieldAliases.map((alias) => args[alias]).find((value) => value !== undefined);
+  if (appId === undefined || args.container === undefined) {
+    return input;
+  }
+  const { container, destinationPath, sourcePath, contentText, contentBase64, ...deviceArgs } = args;
+  delete deviceArgs.appId;
+  for (const alias of appIdFieldAliases) {
+    delete deviceArgs[alias];
+  }
+  return {
+    ...deviceArgs,
+    target: { domain: "app_containers", appId, container },
+    files: [{ destinationPath, sourcePath, contentText, contentBase64 }],
+    legacySingleFile: true,
+  };
+}
+
+export const putAppFileSchema = withJsonSchemaOverride(
+  withAppIdAliases(z.preprocess(preprocessLegacyPutAppFileArgs, canonicalPutAppFileSchema)),
+  (jsonSchema) => {
+    const properties = jsonSchema.properties as Record<string, unknown> | undefined;
+    if (properties) {
+      delete properties.legacySingleFile;
+      const target = properties.target as Record<string, unknown> | undefined;
+      if (target && Array.isArray(target.anyOf)) {
+        target.oneOf = target.anyOf;
+        delete target.anyOf;
+      }
+      const files = properties.files as Record<string, unknown> | undefined;
+      const file = files?.items as Record<string, unknown> | undefined;
+      if (file) {
+        file.oneOf = [
+          { required: ["sourcePath"] },
+          { required: ["contentText"] },
+          { required: ["contentBase64"] },
+        ];
+      }
+    }
+    if (Array.isArray(jsonSchema.required)) {
+      jsonSchema.required = jsonSchema.required.filter((field) => field !== "legacySingleFile");
+    }
+  },
 );
 
 function encodePathSegments(path: string): string {

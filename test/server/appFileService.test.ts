@@ -5,6 +5,7 @@ import {
   type AppFileStats,
   createAppFileServiceForTesting,
   type AppFileProvider,
+  type AppFileWriteProvider,
   type PutAppFileProviderRequest,
 } from "../../src/server/appFileService";
 import type { BootedDevice } from "../../src/models";
@@ -99,6 +100,83 @@ describe("AppFileService", () => {
       }),
     ).rejects.toThrow("contentBase64 must be valid, non-empty base64.");
     expect(provider.putRequests).toEqual([]);
+  });
+
+  test("routes a normalized canonical batch by platform and logical domain", async () => {
+    const provider = new RecordingStorageWriteProvider("android", "user_files", {
+      effects: [{ type: "media_index", status: "notRequested", reason: "not media" }],
+    });
+    const service = createAppFileServiceForTesting({ providers: [provider] });
+
+    const result = await service.putFile({
+      device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+      target: { domain: "user_files", namespace: " run-42 ", reset: true },
+      files: [
+        { contentText: "one", destinationPath: "./one.txt" },
+        { contentBase64: Buffer.from("two").toString("base64"), destinationPath: "nested/two.txt" },
+      ],
+    });
+
+    expect(result).toEqual({
+      success: true,
+      deviceId: "emulator-5554",
+      platform: "android",
+      target: { domain: "user_files", namespace: "run-42", reset: true },
+      files: [
+        {
+          destinationPath: "one.txt",
+          byteCount: 3,
+          effects: [{ type: "media_index", status: "notRequested", reason: "not media" }],
+        },
+        {
+          destinationPath: "nested/two.txt",
+          byteCount: 3,
+          effects: [{ type: "media_index", status: "notRequested", reason: "not media" }],
+        },
+      ],
+    });
+    expect(provider.requests.map((request) => request.destinationPath)).toEqual([
+      "one.txt",
+      "nested/two.txt",
+    ]);
+    expect(provider.requests.every((request) => request.target.domain === "user_files")).toBe(true);
+    expect(provider.requests.map((request) => request.target)).toEqual([
+      { domain: "user_files", namespace: "run-42", reset: true },
+      { domain: "user_files", namespace: "run-42", reset: false },
+    ]);
+  });
+
+  test("prepares every file and rejects conflicts before provider mutation", async () => {
+    const provider = new RecordingStorageWriteProvider("android", "app_containers");
+    const service = createAppFileServiceForTesting({ providers: [provider] });
+    const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platform: "android" };
+
+    await expect(
+      service.putFile({
+        device,
+        target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+        files: [
+          { contentText: "first", destinationPath: "fixtures" },
+          { contentText: "second", destinationPath: "fixtures/nested.txt" },
+        ],
+      }),
+    ).rejects.toThrow("conflicts with another file");
+    expect(provider.requests).toEqual([]);
+  });
+
+  test("cleans prepared temporary sources when a provider write fails", async () => {
+    const fileSystem = new TestAppFileFileSystem();
+    const provider = new RecordingStorageWriteProvider("android", "app_containers", undefined, new Error("write failed"));
+    const service = createAppFileServiceForTesting({ providers: [provider], fileSystem });
+
+    await expect(
+      service.putFile({
+        device: { deviceId: "emulator-5554", name: "Pixel", platform: "android" },
+        target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+        files: [{ contentText: "hello", destinationPath: "fixture.txt" }],
+      }),
+    ).rejects.toThrow("write failed");
+    expect(fileSystem.removedPaths).toHaveLength(1);
   });
 
   test("rejects unsafe service input before provider selection", async () => {
@@ -964,6 +1042,7 @@ describe("AppFileService", () => {
 
 class RecordingAppFileProvider implements AppFileProvider {
   readonly putRequests: PutAppFileProviderRequest[] = [];
+  readonly domain = "app_containers" as const;
 
   constructor(readonly platform: "android" | "ios") {}
 
@@ -980,7 +1059,27 @@ class RecordingAppFileProvider implements AppFileProvider {
   }
 }
 
+class RecordingStorageWriteProvider implements AppFileWriteProvider {
+  readonly requests: PutAppFileProviderRequest[] = [];
+
+  constructor(
+    readonly platform: "android" | "ios",
+    readonly domain: "app_containers" | "user_files" | "media_library",
+    private readonly result?: { effects?: Array<{ type: string; status: "completed" | "notRequested" | "unavailable"; reason?: string }> },
+    private readonly error?: Error,
+  ) {}
+
+  async putFile(request: PutAppFileProviderRequest) {
+    this.requests.push(request);
+    if (this.error) {
+      throw this.error;
+    }
+    return this.result;
+  }
+}
+
 class TestAppFileFileSystem implements AppFileFileSystem {
+  readonly removedPaths: string[] = [];
   private readonly files = new Map<string, Buffer>();
   private readonly directories = new Set<string>(["/"]);
   private readonly symlinks = new Set<string>();
@@ -1070,6 +1169,7 @@ class TestAppFileFileSystem implements AppFileFileSystem {
   }
 
   async rm(path: string): Promise<void> {
+    this.removedPaths.push(path);
     const normalized = this.normalize(path);
     const prefix = normalized === "/" ? "/" : `${normalized}/`;
 

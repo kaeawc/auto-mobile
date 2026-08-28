@@ -9,10 +9,18 @@ import {
   AppFileListResult,
   AppFileReadRequest,
   AppFileReadResult,
+  AppContainersTarget,
+  LegacyPutAppFileArgs,
   PutAppFileArgs,
+  PutAppFileBatchResult,
+  PutAppFileInput,
   PutAppFileResult,
+  PutAppFileTarget,
+  PutAppFileWriteResult,
+  StorageDomain,
   buildAppFileResourceUri,
   normalizeAppFileRelativePath,
+  normalizePutAppFileTarget,
 } from "./appFileContract";
 import { ActionableError, BootedDevice, Platform, type ExecResult } from "../models";
 import {
@@ -28,15 +36,19 @@ import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceM
 import { logger } from "../utils/logger";
 import { prepareFileSource } from "./fileSourcePreparation";
 
-export interface PutAppFileRequest extends PutAppFileArgs {
+export type PutAppFileRequest = Omit<PutAppFileArgs, "device"> & {
   device: BootedDevice;
   signal?: AbortSignal;
-}
+};
+
+export type LegacyPutAppFileRequest = Omit<LegacyPutAppFileArgs, "device"> & {
+  device: BootedDevice;
+  signal?: AbortSignal;
+};
 
 export interface PutAppFileProviderRequest {
   device: BootedDevice;
-  appId: string;
-  container: AppFileContainer;
+  target: PutAppFileTarget;
   destinationPath: string;
   sourcePath: string;
   byteCount: number;
@@ -52,15 +64,29 @@ export interface AppFileProviderReadRequest extends AppFileReadRequest {
   path: string;
 }
 
-export interface AppFileProvider {
+export interface AppFileWriteProvider {
   readonly platform: Platform;
-  putFile(request: PutAppFileProviderRequest): Promise<void>;
+  readonly domain: StorageDomain;
+  putFile(request: PutAppFileProviderRequest): Promise<void | { effects?: PutAppFileWriteResult["effects"] }>;
+}
+
+export interface AppFileListProvider {
+  readonly platform: Platform;
+  readonly domain: "app_containers";
   listFiles(request: AppFileProviderListRequest): Promise<AppFileListResult>;
+}
+
+export interface AppFileReadProvider {
+  readonly platform: Platform;
+  readonly domain: "app_containers";
   readFile(request: AppFileProviderReadRequest): Promise<AppFileReadResult>;
 }
 
+export type AppFileProvider = AppFileWriteProvider | AppFileListProvider | AppFileReadProvider;
+
 export interface AppFileService {
-  putFile(request: PutAppFileRequest): Promise<PutAppFileResult>;
+  putFile(request: PutAppFileRequest): Promise<PutAppFileBatchResult>;
+  putFile(request: LegacyPutAppFileRequest): Promise<PutAppFileResult>;
   listFiles(request: AppFileListRequest): Promise<AppFileListResult>;
   readFile(request: AppFileReadRequest): Promise<AppFileReadResult>;
 }
@@ -175,8 +201,78 @@ function createDefaultProviders(
   ];
 }
 
+function providerKey(platform: Platform, domain: StorageDomain): string {
+  return `${platform}:${domain}`;
+}
+
+function isCanonicalPutRequest(
+  request: PutAppFileRequest | LegacyPutAppFileRequest,
+): request is PutAppFileRequest {
+  return "target" in request && "files" in request;
+}
+
+function legacyRequestToCanonical(request: LegacyPutAppFileRequest): PutAppFileRequest {
+  const { appId, container, destinationPath, sourcePath, contentText, contentBase64, ...deviceArgs } =
+    request;
+  return {
+    ...deviceArgs,
+    target: { domain: "app_containers", appId, container },
+    files: [{ destinationPath, sourcePath, contentText, contentBase64 }],
+  };
+}
+
+function normalizeTarget(target: PutAppFileTarget): PutAppFileTarget {
+  const normalized = normalizePutAppFileTarget(target);
+  if (normalized.domain === "app_containers") {
+    return { ...normalized, appId: normalizeAppId(normalized.appId) };
+  }
+  return normalized;
+}
+
+function requireAppContainersTarget(target: PutAppFileTarget): AppContainersTarget {
+  if (target.domain !== "app_containers") {
+    throw new ActionableError(`app-container provider received unsupported target domain: ${target.domain}`);
+  }
+  return target;
+}
+
+function validateDestinationConflicts(files: PutAppFileInput[]): void {
+  for (const file of files) {
+    if (
+      files.some(
+        (other) =>
+          other !== file &&
+          (other.destinationPath === file.destinationPath ||
+            other.destinationPath.startsWith(`${file.destinationPath}/`)),
+      )
+    ) {
+      throw new ActionableError(
+        `destinationPath conflicts with another file in this request: ${file.destinationPath}`,
+      );
+    }
+  }
+}
+
+async function prepareSources(
+  files: PutAppFileInput[],
+  fileSystem: AppFileFileSystem,
+): Promise<Awaited<ReturnType<typeof prepareFileSource>>[]> {
+  const prepared: Awaited<ReturnType<typeof prepareFileSource>>[] = [];
+  try {
+    for (const file of files) {
+      prepared.push(await prepareFileSource(file, fileSystem));
+    }
+    return prepared;
+  } catch (error) {
+    await Promise.all(prepared.map((source) => source.cleanup?.()));
+    throw error;
+  }
+}
+
 class DefaultAppFileService implements AppFileService {
-  private readonly providersByPlatform = new Map<Platform, AppFileProvider>();
+  private readonly writeProviders = new Map<string, AppFileWriteProvider>();
+  private readonly listProviders = new Map<string, AppFileListProvider>();
+  private readonly readProviders = new Map<string, AppFileReadProvider>();
 
   constructor(
     providers: AppFileProvider[],
@@ -184,50 +280,98 @@ class DefaultAppFileService implements AppFileService {
     private readonly fileSystem: AppFileFileSystem,
   ) {
     for (const provider of providers) {
-      this.providersByPlatform.set(provider.platform, provider);
+      if ("putFile" in provider) {
+        this.writeProviders.set(providerKey(provider.platform, provider.domain), provider);
+      }
+      if ("listFiles" in provider) {
+        this.listProviders.set(providerKey(provider.platform, provider.domain), provider);
+      }
+      if ("readFile" in provider) {
+        this.readProviders.set(providerKey(provider.platform, provider.domain), provider);
+      }
     }
   }
 
-  async putFile(request: PutAppFileRequest): Promise<PutAppFileResult> {
-    const appId = normalizeAppId(request.appId);
-    const destinationPath = normalizeAppFileRelativePath(request.destinationPath);
-    const provider = this.getProvider(request.device.platform, "putFile", appId, request.container);
-    const source = await prepareFileSource(request, this.fileSystem);
+  async putFile(request: PutAppFileRequest): Promise<PutAppFileBatchResult>;
+  async putFile(request: LegacyPutAppFileRequest): Promise<PutAppFileResult>;
+  async putFile(
+    request: PutAppFileRequest | LegacyPutAppFileRequest,
+  ): Promise<PutAppFileBatchResult | PutAppFileResult> {
+    const canonicalInput = isCanonicalPutRequest(request);
+    const legacy = !canonicalInput || request.legacySingleFile === true;
+    const canonical = canonicalInput ? request : legacyRequestToCanonical(request);
+    const target = normalizeTarget(canonical.target);
+    const files = canonical.files.map((file) => ({
+      ...file,
+      destinationPath: normalizeAppFileRelativePath(file.destinationPath),
+    }));
+    validateDestinationConflicts(files);
+    const prepared = await prepareSources(files, this.fileSystem);
     try {
-      await provider.putFile({
-        device: request.device,
-        appId,
-        container: request.container,
-        destinationPath,
-        sourcePath: source.path,
-        byteCount: source.byteCount,
-        signal: request.signal,
-      });
-
-      return {
+      const provider = this.getWriteProvider(request.device.platform, target.domain);
+      const results: PutAppFileWriteResult[] = [];
+      for (let index = 0; index < files.length; index += 1) {
+        const file = files[index]!;
+        const source = prepared[index]!;
+        const providerTarget =
+          target.domain === "user_files" && target.reset === true && index > 0
+            ? { ...target, reset: false }
+            : target;
+        const providerResult = await provider.putFile({
+          device: request.device,
+          target: providerTarget,
+          destinationPath: file.destinationPath,
+          sourcePath: source.path,
+          byteCount: source.byteCount,
+          signal: request.signal,
+        });
+        results.push({
+          destinationPath: file.destinationPath,
+          byteCount: source.byteCount,
+          ...(target.domain === "app_containers"
+            ? {
+                resourceUri: buildAppFileResourceUri({
+                  deviceId: request.device.deviceId,
+                  appId: target.appId,
+                  container: target.container,
+                  path: file.destinationPath,
+                }),
+              }
+            : {}),
+          effects: providerResult?.effects ?? [],
+        });
+      }
+      const result: PutAppFileBatchResult = {
         success: true,
         deviceId: request.device.deviceId,
         platform: request.device.platform,
-        appId,
-        container: request.container,
-        destinationPath,
-        byteCount: source.byteCount,
-        resourceUri: buildAppFileResourceUri({
-          deviceId: request.device.deviceId,
-          appId,
-          container: request.container,
-          path: destinationPath,
-        }),
+        target,
+        files: results,
+      };
+      if (!legacy) {
+        return result;
+      }
+      const file = results[0]!;
+      const appTarget = target as AppContainersTarget;
+      return {
+        success: true,
+        deviceId: result.deviceId,
+        platform: result.platform,
+        appId: appTarget.appId,
+        container: appTarget.container,
+        destinationPath: file.destinationPath,
+        byteCount: file.byteCount,
+        resourceUri: file.resourceUri!,
       };
     } finally {
-      await source.cleanup?.();
+      await Promise.all(prepared.map((source) => source.cleanup?.()));
     }
   }
 
   async listFiles(request: AppFileListRequest): Promise<AppFileListResult> {
     const appId = normalizeAppId(request.appId);
     const device = await this.deviceResolver(request.deviceId);
-    const provider = this.getProvider(device.platform, "listFiles", appId, request.container);
+    const provider = this.getListProvider(device.platform, "app_containers", "listFiles", appId, request.container);
     return provider.listFiles({
       device,
       deviceId: device.deviceId,
@@ -240,7 +384,7 @@ class DefaultAppFileService implements AppFileService {
     const appId = normalizeAppId(request.appId);
     const path = normalizeAppFileRelativePath(request.path);
     const device = await this.deviceResolver(request.deviceId);
-    const provider = this.getProvider(device.platform, "readFile", appId, request.container);
+    const provider = this.getReadProvider(device.platform, "app_containers", "readFile", appId, request.container);
     return provider.readFile({
       device,
       deviceId: device.deviceId,
@@ -250,13 +394,22 @@ class DefaultAppFileService implements AppFileService {
     });
   }
 
-  private getProvider(
+  private getWriteProvider(platform: Platform, domain: StorageDomain): AppFileWriteProvider {
+    const provider = this.writeProviders.get(providerKey(platform, domain));
+    if (!provider) {
+      throw new ActionableError(`putFile is not supported for ${domain} on ${platform}: no write provider is registered`);
+    }
+    return provider;
+  }
+
+  private getListProvider(
     platform: Platform,
+    domain: "app_containers",
     operation: string,
     appId: string,
     container: AppFileContainer,
-  ): AppFileProvider {
-    const provider = this.providersByPlatform.get(platform);
+  ): AppFileListProvider {
+    const provider = this.listProviders.get(providerKey(platform, domain));
     if (!provider) {
       throw unsupportedAppFileOperation(
         operation,
@@ -268,10 +421,27 @@ class DefaultAppFileService implements AppFileService {
     }
     return provider;
   }
+
+  private getReadProvider(
+    platform: Platform,
+    domain: "app_containers",
+    operation: string,
+    appId: string,
+    container: AppFileContainer,
+  ): AppFileReadProvider {
+    const provider = this.readProviders.get(providerKey(platform, domain));
+    if (!provider) {
+      throw unsupportedAppFileOperation(operation, platform, appId, container, "no app file provider is registered");
+    }
+    return provider;
+  }
 }
 
-class AndroidAppFileProvider implements AppFileProvider {
+class AndroidAppFileProvider
+  implements AppFileWriteProvider, AppFileListProvider, AppFileReadProvider
+{
   readonly platform = "android" as const;
+  readonly domain = "app_containers" as const;
 
   constructor(
     private readonly adbFactory: AdbClientFactory,
@@ -279,14 +449,15 @@ class AndroidAppFileProvider implements AppFileProvider {
   ) {}
 
   async putFile(request: PutAppFileProviderRequest): Promise<void> {
+    const appTarget = requireAppContainersTarget(request.target);
     const adb = this.adbFactory.create(request.device);
-    const target = resolveAndroidTarget(request.appId, request.container, request.destinationPath);
+    const target = resolveAndroidTarget(appTarget.appId, appTarget.container, request.destinationPath);
     if (target.kind === "unsupported") {
       throw unsupportedAppFileOperation(
         "putFile",
         request.device.platform,
-        request.appId,
-        request.container,
+        appTarget.appId,
+        appTarget.container,
         target.message,
       );
     }
@@ -297,8 +468,8 @@ class AndroidAppFileProvider implements AppFileProvider {
         `shell mkdir -p ${shellQuote(posix.dirname(target.absolutePath))}`,
         {
           device: request.device,
-          appId: request.appId,
-          container: request.container,
+          appId: appTarget.appId,
+          container: appTarget.container,
           operation: "write",
           access: "externalFiles",
         },
@@ -309,8 +480,8 @@ class AndroidAppFileProvider implements AppFileProvider {
         `push ${shellQuote(request.sourcePath)} ${shellQuote(target.absolutePath)}`,
         {
           device: request.device,
-          appId: request.appId,
-          container: request.container,
+          appId: appTarget.appId,
+          container: appTarget.container,
           operation: "write",
           access: "externalFiles",
         },
@@ -325,8 +496,8 @@ class AndroidAppFileProvider implements AppFileProvider {
       `push ${shellQuote(request.sourcePath)} ${shellQuote(tempDevicePath)}`,
       {
         device: request.device,
-        appId: request.appId,
-        container: request.container,
+        appId: appTarget.appId,
+        container: appTarget.container,
         operation: "write",
         access: "run-as",
       },
@@ -339,11 +510,11 @@ class AndroidAppFileProvider implements AppFileProvider {
         `chmod 600 ${shellQuote(target.relativePath)}`;
       await executeAndroidAppFileCommand(
         adb,
-        `shell run-as ${shellQuote(request.appId)} sh -c ${shellQuote(command)}`,
+        `shell run-as ${shellQuote(appTarget.appId)} sh -c ${shellQuote(command)}`,
         {
           device: request.device,
-          appId: request.appId,
-          container: request.container,
+          appId: appTarget.appId,
+          container: appTarget.container,
           operation: "write",
           access: "run-as",
         },
@@ -488,8 +659,11 @@ class AndroidAppFileProvider implements AppFileProvider {
   }
 }
 
-class IosSimulatorAppFileProvider implements AppFileProvider {
+class IosSimulatorAppFileProvider
+  implements AppFileWriteProvider, AppFileListProvider, AppFileReadProvider
+{
   readonly platform = "ios" as const;
+  readonly domain = "app_containers" as const;
 
   constructor(
     private readonly simctlFactory: (device: BootedDevice) => SimCtlClient,
@@ -497,10 +671,11 @@ class IosSimulatorAppFileProvider implements AppFileProvider {
   ) {}
 
   async putFile(request: PutAppFileProviderRequest): Promise<void> {
+    const appTarget = requireAppContainersTarget(request.target);
     const target = await this.resolvePath(
       request.device,
-      request.appId,
-      request.container,
+      appTarget.appId,
+      appTarget.container,
       request.destinationPath,
       "putFile",
     );

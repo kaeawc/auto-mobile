@@ -2106,7 +2106,7 @@ describe("AndroidCtrlProxyClient", function () {
       }
     });
 
-    test("carries scale metadata through the rootless (UIAutomator-fallback) early return", function () {
+    test("carries observation metadata through the rootless (UIAutomator-fallback) early return", function () {
       // A ctrlProxyIncomplete payload with no hierarchy node takes the early return; #4549 must
       // still see the metadata off this route.
       const rootless = accessibilityServiceClient.convertToViewHierarchyResult({
@@ -2116,6 +2116,14 @@ describe("AndroidCtrlProxyClient", function () {
         ctrlProxyIncomplete: true,
         screenWidth: 1080,
         screenHeight: 2340,
+        rotation: 1,
+        systemInsets: { top: 24, right: 0, bottom: 48, left: 0 },
+        insets: {
+          available: true,
+          source: "android-window-metrics",
+          units: "physical-pixels",
+          displayCutoutInfo: { classification: "hole_punch", bounds: [[480, 0, 600, 120]] },
+        },
         nativeScale: 1,
         pixelWidth: 1080,
         pixelHeight: 2340,
@@ -2125,6 +2133,14 @@ describe("AndroidCtrlProxyClient", function () {
       expect(rootless.nativeScale).toBe(1);
       expect(rootless.pixelWidth).toBe(1080);
       expect(rootless.pixelHeight).toBe(2340);
+      expect(rootless.screenWidth).toBe(1080);
+      expect(rootless.screenHeight).toBe(2340);
+      expect(rootless.rotation).toBe(1);
+      expect(rootless.systemInsets).toEqual({ top: 24, right: 0, bottom: 48, left: 0 });
+      expect(rootless.insets?.displayCutoutInfo).toEqual({
+        classification: "hole_punch",
+        bounds: [[480, 0, 600, 120]],
+      });
 
       // And a rootless payload WITHOUT the fields still omits them (byte-identical legacy).
       const rootlessLegacy = accessibilityServiceClient.convertToViewHierarchyResult({

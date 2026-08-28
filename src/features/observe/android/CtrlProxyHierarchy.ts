@@ -601,6 +601,11 @@ export class CtrlProxyHierarchy {
           ctrlProxyIncomplete: accessibilityHierarchy.ctrlProxyIncomplete,
           truncationReasons: accessibilityHierarchy.truncationReasons,
           sources: ["control-proxy"],
+          screenWidth: accessibilityHierarchy.screenWidth,
+          screenHeight: accessibilityHierarchy.screenHeight,
+          rotation: accessibilityHierarchy.rotation,
+          systemInsets: accessibilityHierarchy.systemInsets,
+          insets: accessibilityHierarchy.insets,
           // Carry the #4548 scale metadata through the rootless / UIAutomator-fallback branch too,
           // so #4549 can consume it regardless of which route produced the hierarchy. Same
           // all-or-nothing validator as the main return and client retention.

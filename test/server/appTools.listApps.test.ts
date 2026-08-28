@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   registerAppTools,
   resetListAppsToolDependencies,
+  resetTerminateAppToolDependencies,
   setListAppsToolDependencies,
+  setTerminateAppToolDependencies,
 } from "../../src/server/appTools";
 import {
   APP_RESOURCE_TEMPLATES,
@@ -15,6 +17,7 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeToolUtils } from "../fakes/FakeToolUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { getInstalledAppsCacheWriteCoordinator } from "../../src/db/installedAppsCacheWriteCoordinator";
+import type { BootedDevice } from "../../src/models";
 
 const resolveWithFakeTimer = async <T>(
   promise: Promise<T>,
@@ -61,12 +64,14 @@ describe("listApps tool", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     resetListAppsToolDependencies();
+    resetTerminateAppToolDependencies();
     registerAppTools();
   });
 
   afterEach(() => {
     ToolRegistry.clearTools();
     resetListAppsToolDependencies();
+    resetTerminateAppToolDependencies();
   });
 
   test("registers listApps tool with a permissive schema", () => {
@@ -124,6 +129,46 @@ describe("listApps tool", () => {
 
     invalidateInstalledAppsCache(deviceId);
     expect(getInstalledAppsCacheWriteCoordinator().isDirty(deviceId)).toBe(true);
+  });
+});
+
+describe("terminateApp tool", () => {
+  const device: BootedDevice = {
+    deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+    name: "iPhone 15",
+    platform: "ios",
+  };
+
+  beforeEach(() => {
+    ToolRegistry.clearTools();
+    resetListAppsToolDependencies();
+    resetTerminateAppToolDependencies();
+    registerAppTools();
+  });
+
+  afterEach(() => {
+    ToolRegistry.clearTools();
+    resetListAppsToolDependencies();
+    resetTerminateAppToolDependencies();
+  });
+
+  test("surfaces a typed TerminateApp failure instead of reporting success", async () => {
+    setTerminateAppToolDependencies({
+      createTerminateApp: () => ({
+        execute: async () => ({
+          success: false,
+          packageName: "com.example.app",
+          wasForeground: false,
+          error: "The installed-app listing failed",
+        }),
+      }),
+    });
+    const tool = ToolRegistry.getTool("terminateApp");
+
+    expect(tool?.deviceAwareHandler).toBeDefined();
+    await expect(tool!.deviceAwareHandler!(device, { appId: "com.example.app" })).rejects.toThrow(
+      "The installed-app listing failed",
+    );
   });
 });
 

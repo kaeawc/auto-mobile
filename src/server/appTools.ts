@@ -1,6 +1,6 @@
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
-import { ActionableError, BootedDevice } from "../models";
+import { ActionableError, BootedDevice, type TerminateAppResult } from "../models";
 import { LaunchApp } from "../features/action/LaunchApp";
 import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
@@ -51,6 +51,41 @@ export function setListAppsToolDependencies(deps: Partial<ListAppsToolDependenci
 
 export function resetListAppsToolDependencies(): void {
   listAppsToolDependencies = null;
+}
+
+export interface TerminateAppExecutor {
+  execute(
+    appId: string,
+    options?: {
+      skipUiStability?: boolean;
+    },
+  ): Promise<TerminateAppResult>;
+}
+
+export interface TerminateAppToolDependencies {
+  createTerminateApp(device: BootedDevice): TerminateAppExecutor;
+}
+
+let terminateAppToolDependencies: TerminateAppToolDependencies | null = null;
+
+function getTerminateAppToolDependencies(): TerminateAppToolDependencies {
+  if (!terminateAppToolDependencies) {
+    terminateAppToolDependencies = {
+      createTerminateApp: (device) => new TerminateApp(device),
+    };
+  }
+  return terminateAppToolDependencies;
+}
+
+export function setTerminateAppToolDependencies(deps: Partial<TerminateAppToolDependencies>): void {
+  const currentDeps = getTerminateAppToolDependencies();
+  terminateAppToolDependencies = {
+    createTerminateApp: deps.createTerminateApp ?? currentDeps.createTerminateApp,
+  };
+}
+
+export function resetTerminateAppToolDependencies(): void {
+  terminateAppToolDependencies = null;
 }
 
 // Schema definitions
@@ -322,7 +357,7 @@ export function registerAppTools() {
   // Terminate app handler
   const terminateAppHandler = async (device: BootedDevice, args: AppActionArgs) => {
     try {
-      const terminateApp = new TerminateApp(device);
+      const terminateApp = getTerminateAppToolDependencies().createTerminateApp(device);
       const result = await terminateApp.execute(args.appId, {
         skipUiStability: true, // skip the 12+ second stability polling
       });

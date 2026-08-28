@@ -259,6 +259,7 @@ async function startWebRtcDaemon(
   const startError = await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"], {
     env: daemonEnvironment,
     timeout: REAL_IO_TIMEOUT_MS,
+    killSignal: "SIGKILL",
   })
     .then(() => null)
     .catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
@@ -356,7 +357,10 @@ function chromeDiagnostics(chrome: ChildProcessWithoutNullStreams, logFile: stri
  * stale user-data lock cannot wedge the relaunch. Returns the live process so
  * the caller can tear it down.
  */
-async function launchChromeReader(logFile: string): Promise<ChromeReader> {
+async function launchChromeReader(
+  logFile: string,
+  onStarted: (chrome: ChildProcessWithoutNullStreams) => void,
+): Promise<ChromeReader> {
   const maxAttempts = 2;
   let lastError: Error | undefined;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -366,6 +370,7 @@ async function launchChromeReader(logFile: string): Promise<ChromeReader> {
       [...CHROME_LAUNCH_ARGS, `--user-data-dir=${userDataDir}`],
       logFile,
     );
+    onStarted(chrome);
     try {
       const cdp = await connectReader(chrome, logFile);
       return { chrome, cdp };
@@ -469,6 +474,7 @@ async function subscribeReader(cdp: CdpClient): Promise<void> {
 async function subscribeRecoveryReader(
   reader: ChromeReader,
   logFile: string,
+  onChromeStarted: (chrome: ChildProcessWithoutNullStreams) => void,
 ): Promise<ChromeReader> {
   try {
     await subscribeReader(reader.cdp);
@@ -477,7 +483,7 @@ async function subscribeRecoveryReader(
     reader.cdp.close();
     await stop(reader.chrome);
     await Bun.sleep(1_000);
-    const replacement = await launchChromeReader(logFile);
+    const replacement = await launchChromeReader(logFile, onChromeStarted);
     try {
       await subscribeReader(replacement.cdp);
       return replacement;
@@ -686,7 +692,7 @@ async function captureProfile(): Promise<CaptureProfile> {
       const { stdout } = await execFileAsync(
         "adb",
         ["-s", androidDeviceId(), "shell", "wm", "size"],
-        { timeout: REAL_IO_TIMEOUT_MS },
+        { timeout: REAL_IO_TIMEOUT_MS, killSignal: "SIGKILL" },
       );
       const match = /Physical size:\s*(\d+)x(\d+)/.exec(stdout);
       return {
@@ -713,19 +719,22 @@ async function launchFixture(): Promise<void> {
     await execFileAsync(
       "adb",
       ["-s", id, "shell", "am", "start", "-a", "android.settings.SETTINGS"],
-      { timeout: REAL_IO_TIMEOUT_MS },
+      { timeout: REAL_IO_TIMEOUT_MS, killSignal: "SIGKILL" },
     );
     await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "no"], {
       timeout: REAL_IO_TIMEOUT_MS,
+      killSignal: "SIGKILL",
     });
     return;
   }
   if (platform === "ios") {
     await execFileAsync("xcrun", ["simctl", "launch", "booted", "com.apple.Preferences"], {
       timeout: REAL_IO_TIMEOUT_MS,
+      killSignal: "SIGKILL",
     });
     await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"], {
       timeout: REAL_IO_TIMEOUT_MS,
+      killSignal: "SIGKILL",
     });
     return;
   }
@@ -740,12 +749,14 @@ async function changeFixture(): Promise<void> {
     // made the old theme-only fixture indistinguishable from a frozen stream.
     await execFileAsync("adb", ["-s", id, "shell", "input", "keyevent", "HOME"], {
       timeout: REAL_IO_TIMEOUT_MS,
+      killSignal: "SIGKILL",
     });
     return;
   }
   if (platform === "ios") {
     await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "dark"], {
       timeout: REAL_IO_TIMEOUT_MS,
+      killSignal: "SIGKILL",
     });
     return;
   }
@@ -765,11 +776,13 @@ afterEach(async () => {
           const id = androidDeviceId();
           await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "no"], {
             timeout: FIXTURE_RESTORE_TIMEOUT_MS,
+            killSignal: "SIGKILL",
           });
         }
         if (platform === "ios") {
           await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"], {
             timeout: FIXTURE_RESTORE_TIMEOUT_MS,
+            killSignal: "SIGKILL",
           });
         }
       },
@@ -880,12 +893,15 @@ function startStreamLeaseHeartbeat(
 describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => {
   afterAll(async () => {
     const cleanup = pendingPipelineTeardown;
-    pendingPipelineTeardown = undefined;
     let cleanupError: unknown;
     try {
       await cleanup?.();
     } catch (error) {
       cleanupError = error;
+    } finally {
+      if (pendingPipelineTeardown === cleanup) {
+        pendingPipelineTeardown = undefined;
+      }
     }
     const record = timeline.toRecord({
       platform: platform ?? "unknown",
@@ -961,12 +977,16 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         join(artifactDir, "mediamtx.log"),
       );
       let chrome: ChildProcessWithoutNullStreams | undefined;
+      const rememberChrome = (nextChrome: ChildProcessWithoutNullStreams): void => {
+        chrome = nextChrome;
+      };
       let cdp: CdpClient | undefined;
       let started = false;
       let observingStart = true;
       let startObserver: Promise<void> = Promise.resolve();
       let leaseHeartbeat: StreamLeaseHeartbeat | undefined;
-      pendingPipelineTeardown = async () => {
+      let teardownPromise: Promise<void> | undefined;
+      const teardown = async (): Promise<void> => {
         observingStart = false;
         // Measured as its own phase (#4354) so a teardown that stalls stopping the
         // daemon, MediaMTX or Chrome is attributable from the artifact rather than
@@ -1000,6 +1020,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
               await execFileAsync("bun", ["dist/src/index.js", "--daemon", "stop"], {
                 env: daemonEnvironment,
                 timeout: FIXTURE_RESTORE_TIMEOUT_MS,
+                killSignal: "SIGKILL",
               }).catch(() => undefined);
             }
           });
@@ -1015,6 +1036,10 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
             throw new AggregateError(cleanupErrors, "WebRTC device-capture teardown failed");
           }
         });
+      };
+      pendingPipelineTeardown = () => {
+        teardownPromise ??= teardown();
+        return teardownPromise;
       };
       try {
         await waitFor(async () => {
@@ -1038,7 +1063,10 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         profile = await captureProfile();
         // Chrome is launched before the measured window opens so its cold start —
         // seconds on a hosted runner — is not charged to the WHEP-connect stage.
-        ({ chrome, cdp } = await launchChromeReader(join(artifactDir, "chrome.log")));
+        ({ chrome, cdp } = await launchChromeReader(
+          join(artifactDir, "chrome.log"),
+          rememberChrome,
+        ));
         await ensureWebRtcDaemon(webRtcSocketPath, daemonEnvironment);
         timeline.mark("startRequest");
         // A video-only start returns as soon as the WHIP publish is accepted; the
@@ -1186,6 +1214,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
             ({ chrome, cdp } = await subscribeRecoveryReader(
               { chrome: chrome!, cdp: cdp! },
               join(artifactDir, "chrome.log"),
+              rememberChrome,
             ));
             const baseline: KeyframeRecoverySample = { keyFramesDecoded: 0, framesDecoded: 0 };
             // Under a static Simulator screen the restarted encoder's IDR only
@@ -1232,9 +1261,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         expect(listed.streams?.some((stream) => stream.streamId === streamId)).toBe(false);
         outcome = "passed";
       } finally {
-        const cleanup = pendingPipelineTeardown;
-        pendingPipelineTeardown = undefined;
-        await cleanup?.();
+        await pendingPipelineTeardown?.();
       }
     },
     deviceIntegrationTimeoutMs,

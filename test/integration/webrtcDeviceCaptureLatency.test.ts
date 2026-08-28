@@ -167,11 +167,14 @@ describe("#4343 device capture latency instrumentation", () => {
     expect(source).toContain("const REAL_IO_TIMEOUT_MS = 30_000;");
     expect(source).toContain("signal: AbortSignal.timeout(REAL_IO_TIMEOUT_MS)");
     expect(source).toContain("handshakeTimeout: REAL_IO_TIMEOUT_MS");
+    expect(source).toContain('killSignal: "SIGKILL"');
     expect(source).toContain("CDP_COMMAND_TIMEOUT_MS");
     expect(source).toContain("async function withDeadline<T>(");
     expect(source).toContain("await withDeadline(message, deadline - Date.now(), predicate)");
     expect(source).toContain("let pendingPipelineTeardown: (() => Promise<void>) | undefined;");
     expect(source).toContain("const cleanup = pendingPipelineTeardown;");
+    expect(source).toContain("teardownPromise ??= teardown()");
+    expect(source).toContain("onStarted(chrome);");
     expect(source).toContain("const cleanupErrors: unknown[] = [];");
     expect(source).toContain("await cleanupStep(() => stop(chrome));");
     expect(source).toContain(

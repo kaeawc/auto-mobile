@@ -4,6 +4,7 @@ import SwiftUI
 enum Tab: String, Hashable {
     case discover
     case demos
+    case files
     case settings
 }
 
@@ -16,6 +17,7 @@ struct ContentView: View {
     private static var initialTab: Tab {
         switch ProcessInfo.processInfo.environment["PLAYGROUND_INITIAL_TAB"] {
         case "demos": return .demos
+        case "files": return .files
         case "settings": return .settings
         default: return .discover
         }
@@ -37,6 +39,12 @@ struct ContentView: View {
                     Label("Demos", systemImage: "play.fill")
                 }
                 .tag(Tab.demos)
+
+            FilesPickerProbeView()
+                .tabItem {
+                    Label("Files", systemImage: "folder")
+                }
+                .tag(Tab.files)
 
             SettingsTab()
                 .tabItem {

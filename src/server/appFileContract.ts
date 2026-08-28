@@ -59,9 +59,7 @@ const MEDIA_LIBRARY_EXTENSION_PATTERN = `\\.(?:${MEDIA_LIBRARY_EXTENSION_NAMES.m
   extension
     .split("")
     .map((character) =>
-      character >= "a" && character <= "z"
-        ? `[${character}${character.toUpperCase()}]`
-        : character,
+      character >= "a" && character <= "z" ? `[${character}${character.toUpperCase()}]` : character,
     )
     .join(""),
 ).join("|")})$`;

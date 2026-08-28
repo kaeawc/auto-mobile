@@ -3,7 +3,7 @@
 Prepare a repeatable device and app state before running a flow. These tools
 are useful for fixtures, localization, permissions, and system state.
 
-## App files and picker fixtures
+## App files
 
 Use `putAppFile` to write text, base64, or a host file into an app container:
 
@@ -26,10 +26,6 @@ Use `putAppFile` to write text, base64, or a host file into an app container:
   }
 }
 ```
-
-Use `stageSharedStorage` for Android document or media pickers. Files are
-placed under `/sdcard/Download/<namespace>`; `reset: true` removes only that
-namespace.
 
 ## Locale and device state
 

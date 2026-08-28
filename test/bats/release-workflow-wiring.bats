@@ -217,7 +217,6 @@
   managed="$(bash scripts/versioning/bump-versions.sh --print-managed-paths)"
   for path in \
     "docs/index.md" \
-    "docs/using/auto-mobile-desktop-app.md" \
     "docs/using/ui-tests.md"; do
     [[ "$managed" == *"$path"* ]]
   done

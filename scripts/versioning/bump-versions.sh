@@ -13,7 +13,6 @@ managed_path_patterns=(
   "android/gradle.properties"
   "android/*/build.gradle.kts"
   "docs/index.md"
-  "docs/using/auto-mobile-desktop-app.md"
   "docs/using/ui-tests.md"
   "ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift"
   "package.json"
@@ -263,7 +262,6 @@ update_public_docs_version() {
   local path
   local docs=(
     "docs/index.md"
-    "docs/using/auto-mobile-desktop-app.md"
     "docs/using/ui-tests.md"
   )
 

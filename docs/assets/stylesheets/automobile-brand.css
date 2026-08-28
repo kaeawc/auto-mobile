@@ -1,0 +1,86 @@
+:root {
+  --auto-mobile-crayon-red: #d62a22;
+  --auto-mobile-crayon-red-dark: #a91e18;
+  --auto-mobile-crayon-red-light: #ff8a7e;
+}
+
+[data-md-color-scheme="default"] {
+  --md-accent-fg-color: var(--auto-mobile-crayon-red);
+  --md-typeset-a-color: var(--auto-mobile-crayon-red);
+}
+
+[data-md-color-scheme="slate"] {
+  --md-accent-fg-color: var(--auto-mobile-crayon-red-light);
+  --md-typeset-a-color: var(--auto-mobile-crayon-red-light);
+}
+
+[data-md-color-scheme] .md-nav__link--active,
+[data-md-color-scheme] .md-typeset a:not(.md-button):not(.headerlink) {
+  color: var(--md-accent-fg-color);
+}
+
+[data-md-color-primary] .md-header {
+  background-color: var(--auto-mobile-crayon-red);
+  box-shadow: none;
+}
+
+.md-header::after {
+  background:
+    linear-gradient(
+      90deg,
+      transparent 0.5%,
+      var(--auto-mobile-crayon-red-dark) 2%,
+      var(--auto-mobile-crayon-red-dark) 98%,
+      transparent 99.5%
+    ),
+    var(--auto-mobile-crayon-red-dark);
+  bottom: -3px;
+  content: "";
+  height: 4px;
+  left: 0;
+  opacity: 0.9;
+  position: absolute;
+  transform: rotate(-0.08deg) scaleX(1.01);
+  width: 100%;
+}
+
+.md-header__button,
+.md-header__title,
+.md-header__topic,
+.md-header__topic .md-ellipsis {
+  color: #fff;
+}
+
+.md-typeset {
+  font-family: "Comic Sans MS", "Comic Sans", cursive;
+}
+
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-typeset h5,
+.md-typeset h6 {
+  font-family: var(--md-text-font-family);
+}
+
+.md-typeset code,
+.md-typeset kbd,
+.md-typeset pre {
+  font-family: Menlo, Monaco, "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.environment-variable-table {
+  overflow-x: auto;
+}
+
+.environment-variable-table table {
+  table-layout: auto;
+  width: 100%;
+}
+
+.environment-variable-table th:first-child,
+.environment-variable-table td:first-child {
+  min-width: 12rem;
+  white-space: nowrap;
+}

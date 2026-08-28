@@ -3,8 +3,6 @@
 AutoMobile uses an observe → execute → observe loop. The complete loop is
 implemented with UI-stability checks before and after action execution.
 
-![Interaction loop demo - setting an alarm](../../img/clock-app.gif)
-
 Observation captures the current UI state and hierarchy. The client then sends
 an action, and AutoMobile returns the result together with a fresh observation.
 This gives the client enough context to choose the next action without relying

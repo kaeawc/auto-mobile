@@ -37,11 +37,18 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
   font:
-    text: "Inter"
+    text: "Shantell Sans"
     code: "Fira Code"
   features:
     - content.code.copy
     - content.code.select
+
+extra_css:
+  - assets/stylesheets/doc-switcher.css
+  - assets/stylesheets/automobile-brand.css
+
+extra_javascript:
+  - assets/javascripts/doc-switcher.js
 
 markdown_extensions:
   - smarty
@@ -84,11 +91,9 @@ nav:
   - "Using AutoMobile":
       - "Explore an app": using/ux-exploration.md
       - "Reproduce a bug": using/reproducing-bugs.md
-      - "AutoMobile Desktop App": using/auto-mobile-desktop-app.md
       - "UI tests": using/ui-tests.md
       - "Test prep tools": using/test-prep-tools.md
       - "Dynamic Tools": using/dynamic-tools.md
-      - "Feature flags": using/feature-flags.md
       - "Environment variables": using/environment-variables.md
       - "Performance": using/performance.md
       - "CI screen streaming": webrtc-streaming-ci-worker.md
@@ -96,5 +101,7 @@ nav:
       - "System design": design-docs/index.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
       - "Daemon": design-docs/mcp/daemon.md
+      - "Android JUnit runner": design-docs/plat/android/junit-runner/index.md
+      - "Desktop App": design-docs/plat/android/desktop-app.md
   - "Usage Data": metrics/usage-data.md
   - "FAQ": faq.md

@@ -1,0 +1,22 @@
+.doc-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.6rem;
+  margin: 0.75rem 0 1.25rem;
+}
+
+.doc-switcher button {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+  color: var(--md-default-fg-color--light);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0.35rem 0 0.45rem;
+}
+
+.doc-switcher button[aria-pressed="true"] {
+  border-bottom-color: var(--md-accent-fg-color);
+  color: var(--md-accent-fg-color);
+}

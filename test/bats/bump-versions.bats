@@ -58,9 +58,6 @@ EOF
   cat > "${TEST_ROOT}/docs/index.md" <<'EOF'
 https://github.com/kaeawc/auto-mobile/releases/download/0.0.1/AutoMobile-0.0.1-macos.dmg
 EOF
-  cat > "${TEST_ROOT}/docs/using/auto-mobile-desktop-app.md" <<'EOF'
-https://github.com/kaeawc/auto-mobile/releases/download/0.0.1/AutoMobile-0.0.1-linux.deb
-EOF
   cat > "${TEST_ROOT}/docs/using/ui-tests.md" <<'EOF'
 testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.1")
 export AUTOMOBILE_VERSION=0.0.1
@@ -119,8 +116,6 @@ run_bump() {
   grep -q "versionName = \"${VERSION}-SNAPSHOT\"" "${TEST_ROOT}/android/playground/app/build.gradle.kts"
   grep -q "releases/download/${VERSION}/AutoMobile-${VERSION}-macos.dmg" \
     "${TEST_ROOT}/docs/index.md"
-  grep -q "releases/download/${VERSION}/AutoMobile-${VERSION}-linux.deb" \
-    "${TEST_ROOT}/docs/using/auto-mobile-desktop-app.md"
   grep -q "auto-mobile-junit-runner:${VERSION}" "${TEST_ROOT}/docs/using/ui-tests.md"
   grep -q "AUTOMOBILE_VERSION=${VERSION}" "${TEST_ROOT}/docs/using/ui-tests.md"
   # The Swift constant must be *regenerated* (not regex-edited in place): assert

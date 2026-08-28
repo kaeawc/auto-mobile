@@ -60,14 +60,14 @@ step_if_condition() {
 # Every downstream step that must not run on a doomed shared prerequisite.
 # Named explicitly: a global count cannot tell "each of these is guarded" from
 # "the total happens to add up", so one step could lose its guard while an
-# unrelated step gained one and the suite would stay green.
-xcode_265_leg_steps() {
-  cat <<'STEPS'
-Ensure AutoMobile daemon ready (Xcode 26.5)
-Warm up iOS CtrlProxy (Xcode 26.5)
-Run iOS navigation graph Simulator workflow
-STEPS
-}
+# unrelated step gained one and the suite would stay green. Keep this as an
+# array rather than a process substitution: BATS' parallel runner can otherwise
+# terminate the short-lived producer while cleaning up the test process group.
+xcode_265_leg_steps=(
+  "Ensure AutoMobile daemon ready (Xcode 26.5)"
+  "Warm up iOS CtrlProxy (Xcode 26.5)"
+  "Run iOS navigation graph Simulator workflow"
+)
 
 @test "no step name is duplicated in the XCTestRunner job" {
   # The by-name lookup above is only safe while names are unique. A duplicate
@@ -90,15 +90,14 @@ STEPS
 
 @test "every 26.5-leg step individually gates on steps.build-ctrlproxy.outcome == success" {
   local offenders=""
-  while IFS= read -r step; do
-    [ -n "$step" ] || continue
+  for step in "${xcode_265_leg_steps[@]}"; do
     condition="$(step_if_condition "$step")"
     if [ -z "$condition" ]; then
       offenders="${offenders}${step}: no 'if:' condition"$'\n'
     elif [[ "$condition" != *"steps.build-ctrlproxy.outcome == 'success'"* ]]; then
       offenders="${offenders}${step}: ${condition}"$'\n'
     fi
-  done < <(xcode_265_leg_steps)
+  done
 
   if [ -n "$offenders" ]; then
     echo "26.5-leg steps missing the shared-build guard:" >&2
@@ -110,13 +109,12 @@ STEPS
 @test "every 26.5-leg step still respects cancellation" {
   # The other half of the condition: a cancelled workflow must skip these steps.
   local offenders=""
-  while IFS= read -r step; do
-    [ -n "$step" ] || continue
+  for step in "${xcode_265_leg_steps[@]}"; do
     condition="$(step_if_condition "$step")"
     if [[ "$condition" != *"!cancelled()"* ]] || [[ "$condition" == *"||"* ]]; then
       offenders="${offenders}${step}: ${condition:-<none>}"$'\n'
     fi
-  done < <(xcode_265_leg_steps)
+  done
 
   if [ -n "$offenders" ]; then
     echo "26.5-leg steps that do not skip on cancellation:" >&2

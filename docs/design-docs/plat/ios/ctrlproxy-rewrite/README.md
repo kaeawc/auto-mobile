@@ -43,8 +43,12 @@ Critical path (the rewrite's actual goal — concurrency correctness + parity):
    - 7C ✅ (middle route) production runner switched to the rewrite — the `CtrlProxyUITests` target
      now compiles `Sources/CtrlProxyRewrite` (name/app/identifier kept → zero TS/script churn);
      reference kept as the SwiftPM parity oracle.
-   - 7D ⟵ **NEXT** retire the reference target + full observe→gesture→hierarchy validation; port the
-     rich iOS integration tests against the rewrite.
+   - 7D ◑ on-device validation (partial): `testServiceStarts` green + the rewrite's `getViewHierarchy`
+     proven to extract a real on-device tree; rich integration test ported (`HierarchyIntegrationTests`,
+     skip-guarded). Full fixture-driven loop blocked by an iOS-27-**beta** sim launch flake (not the
+     rewrite) — finish on a stable runtime / via `manual-test`.
+   - 7E ⟵ **NEXT** retire the reference target (ends the differential-parity harness) — gated on 7D's
+     trusted full observe→gesture→hierarchy loop.
 
 **8. Post-concurrency fixups (NEW).** Pure, off-critical-path improvements that we
 deliberately defer so the concurrency migration lands *parity-first*. Each is

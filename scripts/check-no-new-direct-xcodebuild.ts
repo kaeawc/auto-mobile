@@ -110,9 +110,19 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
       continue;
     }
     if (optionsTerminated) {
-      return commandName(argument) === "xcodebuild";
+      const command = commandName(argument);
+      if (command === "xcodebuild") {
+        return true;
+      }
+      if (SHELLS.has(command)) {
+        return pending.some(containsXcodebuildCommand);
+      }
+      if (ENV_WRAPPERS.has(command)) {
+        return envDelegatesToXcodebuild([argument, ...pending]);
+      }
+      return false;
     }
-    if (["-i", "--ignore-environment", "-0", "--null"].includes(argument)) {
+    if (["-i", "--ignore-environment", "-0", "--null", "-v", "--debug"].includes(argument)) {
       continue;
     }
     if (["-u", "--unset", "-C", "--chdir", "-P"].includes(argument)) {
@@ -167,7 +177,7 @@ function argumentSlotAlternatives(
     if (value === STRING_ANALYSIS_OVERFLOW) {
       return ANALYSIS_OVERFLOW;
     }
-    return value === DYNAMIC_BOUNDARY ? OPAQUE_ARGUMENT : value;
+    return value.includes(DYNAMIC_BOUNDARY) ? OPAQUE_ARGUMENT : value;
   });
 }
 
@@ -212,7 +222,11 @@ export function findDirectXcodebuildCalls(file: string, source: string): Xcodebu
           (command) =>
             (argumentArrayAlternatives ?? [[]]).flatMap((items) =>
               argvAlternatives(ast, items).map((arguments_) => [
-                command === STRING_ANALYSIS_OVERFLOW ? ANALYSIS_OVERFLOW : command,
+                command === STRING_ANALYSIS_OVERFLOW
+                  ? ANALYSIS_OVERFLOW
+                  : command.includes(DYNAMIC_BOUNDARY)
+                    ? OPAQUE_ARGUMENT
+                    : command,
                 ...arguments_,
               ]),
             ),

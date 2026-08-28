@@ -181,6 +181,16 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "rejects a shell wrapper after a split-string option terminator" {
+  printf '%s\n' "spawn(\"env\", [\"-S\", \"-- sh -c 'xcodebuild test'\"]);" > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
 @test "preserves GNU env escaped split-string separators" {
   printf '%s\n' 'spawn("env", ["-S", "FOO=bar \\_ xcodebuild test"]);' > "$repo_dir/src/bypass.ts"
   git -C "$repo_dir" add src/bypass.ts
@@ -219,6 +229,16 @@ teardown() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "recognizes GNU env debug as a no-operand option" {
+  printf '%s\n' 'spawn("env", ["--debug", "echo", "xcodebuild"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new direct production xcodebuild invocations"* ]]
 }
 
 @test "rejects a path-qualified shell produced by env split-string" {
@@ -283,6 +303,16 @@ teardown() {
 
 @test "preserves a literal command branch beside a dynamic template" {
   printf '%s\n' 'Bun.spawn([condition ? "xcodebuild" : `tool-${name}`, "test"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "fails closed for an embedded dynamic command marker" {
+  printf '%s\n' 'spawn("xcodebuild" + suffix, ["test"]);' > "$repo_dir/src/bypass.ts"
   git -C "$repo_dir" add src/bypass.ts
 
   run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"

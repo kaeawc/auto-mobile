@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Intentional conditional calls propagate failures explicitly at their callers.
+# shellcheck disable=SC2310
 IFS=$'\n\t'
 
 # Handle Ctrl-C (SIGINT) - exit immediately
@@ -38,6 +40,7 @@ UNINSTALL_MARKETPLACE=false
 UNINSTALL_CLI=false
 UNINSTALL_DAEMON=false
 UNINSTALL_DATA=false
+UNINSTALL_DESKTOP_APP=false
 
 # Detected components
 MCP_CONFIGS_FOUND=()
@@ -46,6 +49,11 @@ MARKETPLACE_NAME=""
 CLI_INSTALLED=false
 DAEMON_RUNNING=false
 DATA_DIR_EXISTS=false
+DESKTOP_APP_INSTALLED=false
+DESKTOP_APP_PATHS=()
+DESKTOP_APP_PACKAGE=""
+DESKTOP_APP_EXECUTABLES=()
+DESKTOP_APP_BUNDLE_IDENTIFIER="dev.jasonpearson.automobile.desktop"
 
 # Colors
 RED='\033[0;31m'
@@ -59,6 +67,31 @@ RESET='\033[0m'
 # ============================================================================
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+desktop_app_is_root() {
+    [[ "${EUID}" -eq 0 ]]
+}
+
+desktop_app_bundle_identifier() {
+    plutil -extract CFBundleIdentifier raw "$1/Contents/Info.plist" 2>/dev/null
+}
+
+# Every privileged command status is returned to an explicit caller check.
+# shellcheck disable=SC2310
+run_desktop_app_privileged() {
+    if desktop_app_is_root; then
+        "$@"
+    elif [[ "${1:-}" == "kill" || "${1:-}" == "ps" ]] && "$@" 2>/dev/null; then
+        # Prefer the unprivileged operation for same-user processes; fall back
+        # to sudo below when the process belongs to another user.
+        return 0
+    elif command_exists sudo; then
+        sudo "$@"
+    else
+        log_error "Administrator privileges are required to remove the AutoMobile desktop app."
+        return 1
+    fi
 }
 
 log_info() {
@@ -104,6 +137,7 @@ Components that can be removed:
   - AutoMobile CLI (auto-mobile command)
   - MCP daemon process
   - AutoMobile data directory (~/.automobile)
+  - AutoMobile desktop app
 
 Examples:
   ./scripts/uninstall.sh              # Interactive mode
@@ -220,6 +254,264 @@ detect_mcp_configs() {
             fi
         fi
     done
+}
+
+# Package-tool absence is an expected detection miss.
+# shellcheck disable=SC2310
+detect_desktop_app() {
+    DESKTOP_APP_INSTALLED=false
+    DESKTOP_APP_PATHS=()
+    DESKTOP_APP_PACKAGE=""
+    DESKTOP_APP_EXECUTABLES=()
+
+    local os
+    os=$(detect_os)
+    if [[ "${os}" == "macos" ]]; then
+        local app_path
+        for app_path in "/Applications/AutoMobile.app" "${HOME}/Applications/AutoMobile.app"; do
+            if [[ -d "${app_path}" && -f "${app_path}/Contents/Info.plist" ]] \
+                && [[ "$(desktop_app_bundle_identifier "${app_path}")" == "${DESKTOP_APP_BUNDLE_IDENTIFIER}" ]]; then
+                DESKTOP_APP_PATHS+=("${app_path}")
+                DESKTOP_APP_EXECUTABLES+=("${app_path}/Contents/MacOS/AutoMobile")
+                DESKTOP_APP_INSTALLED=true
+            fi
+        done
+        return 0
+    fi
+
+    # This is a capability predicate; absence means there is no package to inspect.
+    # shellcheck disable=SC2310
+    if [[ "${os}" == "linux" ]] && command_exists dpkg-query; then
+        local package status
+        for package in automobile auto-mobile; do
+            status=$(dpkg-query -W -f='${db:Status-Status}' "${package}" 2>/dev/null || true)
+            if [[ "${status}" == "installed" || "${status}" == "unpacked" || "${status}" == "half-configured" || "${status}" == "half-installed" ]]; then
+                DESKTOP_APP_PACKAGE="${package}"
+                DESKTOP_APP_INSTALLED=true
+                local installed_path
+                while IFS= read -r installed_path; do
+                    if [[ "${installed_path}" == */bin/AutoMobile ]]; then
+                        DESKTOP_APP_EXECUTABLES+=("${installed_path}")
+                    fi
+                done < <(dpkg-query -L "${package}" 2>/dev/null || true)
+                return 0
+            fi
+        done
+    fi
+}
+
+desktop_app_process_table() {
+    ps -axo pid=,command=
+}
+
+# Only match commands whose executable is one of the exact paths discovered
+# from the installed app bundle/package. This avoids broad pkill patterns that
+# could terminate unrelated commands containing the AutoMobile name.
+# The process-table failure is handled explicitly below.
+# shellcheck disable=SC2310
+desktop_app_process_pids() {
+    local pid command_line executable process_table
+    if ! process_table=$(desktop_app_process_table); then
+        return 1
+    fi
+    while IFS=' ' read -r pid command_line; do
+        [[ -n "${pid}" && -n "${command_line}" ]] || continue
+        for executable in ${DESKTOP_APP_EXECUTABLES[@]+"${DESKTOP_APP_EXECUTABLES[@]}"}; do
+            if [[ "${command_line}" == "${executable}" || "${command_line}" == "${executable}"\ * ]]; then
+                printf '%s\n' "${pid}"
+                break
+            fi
+        done
+    done <<< "${process_table}"
+}
+
+desktop_app_termination_wait() {
+    sleep 0.1
+}
+
+# Probe failures are represented by the documented return states.
+# shellcheck disable=SC2310
+desktop_app_pid_command() {
+    if run_desktop_app_privileged ps -p "$1" -o command= 2>/dev/null; then
+        return 0
+    fi
+    # A live PID whose command cannot be inspected is not safe to remove. A
+    # failed liveness probe confirms that the process exited instead.
+    if run_desktop_app_privileged kill -0 "$1" 2>/dev/null; then
+        return 2
+    fi
+    return 1
+}
+
+# Return 0 while the PID is alive, 1 when it has exited, and 2 when its state
+# cannot be verified (for example, because the privileged check was denied).
+# Probe failures are represented by the documented return states.
+# shellcheck disable=SC2310
+desktop_app_pid_alive() {
+    local pid="$1" executable recheck_executable process_listing command_status liveness_status recheck_listing recheck_status
+    if process_listing=$(desktop_app_pid_command "${pid}"); then
+        command_status=0
+    else
+        command_status=$?
+    fi
+    if [[ "${command_status}" -eq 2 ]]; then
+        return 2
+    elif [[ "${command_status}" -ne 0 ]]; then
+        # A process can exit between the signal probe and ps lookup.
+        return 1
+    fi
+    for executable in ${DESKTOP_APP_EXECUTABLES[@]+"${DESKTOP_APP_EXECUTABLES[@]}"}; do
+        if [[ "${process_listing}" == "${executable}" || "${process_listing}" == "${executable} "* ]]; then
+            if run_desktop_app_privileged kill -0 "${pid}" 2>/dev/null; then
+                liveness_status=0
+            else
+                liveness_status=$?
+            fi
+            if [[ "${liveness_status}" -eq 0 ]]; then
+                return 0
+            fi
+            # The PID can exit or be reused after its command was read. Re-read
+            # the identity before treating a failed liveness probe as unsafe.
+            if recheck_listing=$(desktop_app_pid_command "${pid}"); then
+                recheck_status=0
+            else
+                recheck_status=$?
+            fi
+            if [[ "${recheck_status}" -eq 1 ]]; then
+                return 1
+            elif [[ "${recheck_status}" -eq 2 ]]; then
+                return 2
+            fi
+            for recheck_executable in ${DESKTOP_APP_EXECUTABLES[@]+"${DESKTOP_APP_EXECUTABLES[@]}"}; do
+                if [[ "${recheck_listing}" == "${recheck_executable}" || "${recheck_listing}" == "${recheck_executable} "* ]]; then
+                    return 2
+                fi
+            done
+            return 1
+        fi
+    done
+    return 1
+}
+
+# Return 0 when every PID has stopped, 1 while one is still running, and 2
+# when a PID cannot be verified safely.
+# Probe failures are represented by the documented return states.
+# shellcheck disable=SC2310
+desktop_app_processes_stopped() {
+    local pid pid_state
+    for pid in "$@"; do
+        if desktop_app_pid_alive "${pid}"; then
+            pid_state=0
+        else
+            pid_state=$?
+        fi
+        if [[ "${pid_state}" -eq 0 ]]; then
+            return 1
+        elif [[ "${pid_state}" -eq 2 ]]; then
+            return 2
+        fi
+    done
+    return 0
+}
+
+# Return 0 when all PIDs exit, 1 after the bounded wait, and 2 when a PID can
+# no longer be verified.
+# Probe failures are returned explicitly to the caller.
+# shellcheck disable=SC2310
+wait_for_desktop_app_processes_to_stop() {
+    local attempt=0 stopped_status
+    while (( attempt < 20 )); do
+        if desktop_app_processes_stopped "$@"; then
+            return 0
+        else
+            stopped_status=$?
+        fi
+        [[ "${stopped_status}" -eq 2 ]] && return 2
+        desktop_app_termination_wait
+        ((attempt += 1))
+    done
+    return 1
+}
+
+# Every failed probe and signal is returned explicitly to the caller.
+# shellcheck disable=SC2310
+stop_desktop_app_processes() {
+    local pids=()
+    local pid pid_state wait_status process_pids
+    if ! process_pids=$(desktop_app_process_pids); then
+        log_error "Could not enumerate desktop app processes; refusing to remove the app."
+        return 1
+    fi
+    while IFS= read -r pid; do
+        [[ -n "${pid}" ]] && pids+=("${pid}")
+    done <<< "${process_pids}"
+
+    [[ ${#pids[@]} -gt 0 ]] || return 0
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        log_info "[DRY-RUN] Would stop the AutoMobile desktop app"
+        return 0
+    fi
+
+    log_info "Stopping AutoMobile desktop app..."
+    for pid in ${pids[@]+"${pids[@]}"}; do
+        if desktop_app_pid_alive "${pid}"; then
+            pid_state=0
+        else
+            pid_state=$?
+        fi
+        if [[ "${pid_state}" -eq 1 ]]; then
+            continue
+        elif [[ "${pid_state}" -eq 2 ]]; then
+            log_error "Could not verify desktop app process ${pid}; refusing to remove the app."
+            return 1
+        fi
+        if ! run_desktop_app_privileged kill -TERM "${pid}" 2>/dev/null; then
+            log_error "Could not signal desktop app process ${pid}; refusing to remove the app."
+            return 1
+        fi
+    done
+
+    if wait_for_desktop_app_processes_to_stop ${pids[@]+"${pids[@]}"}; then
+        return 0
+    else
+        wait_status=$?
+    fi
+    if [[ "${wait_status}" -eq 2 ]]; then
+        log_error "Could not verify a desktop app process; refusing to remove the app."
+        return 1
+    fi
+
+    for pid in ${pids[@]+"${pids[@]}"}; do
+        if desktop_app_pid_alive "${pid}"; then
+            pid_state=0
+        else
+            pid_state=$?
+        fi
+        if [[ "${pid_state}" -eq 1 ]]; then
+            continue
+        elif [[ "${pid_state}" -eq 2 ]]; then
+            log_error "Could not verify desktop app process ${pid}; refusing to remove the app."
+            return 1
+        fi
+        # The explicit failure branch below intentionally handles this signal.
+        # shellcheck disable=SC2310
+        if ! run_desktop_app_privileged kill -KILL "${pid}" 2>/dev/null; then
+            log_error "Could not terminate desktop app process ${pid}; refusing to remove the app."
+            return 1
+        fi
+    done
+    if wait_for_desktop_app_processes_to_stop ${pids[@]+"${pids[@]}"}; then
+        return 0
+    else
+        wait_status=$?
+    fi
+    if [[ "${wait_status}" -eq 2 ]]; then
+        log_error "Could not verify a desktop app process after SIGKILL; refusing to remove the app."
+    else
+        log_error "Desktop app processes remained after SIGKILL; refusing to remove the app."
+    fi
+    return 1
 }
 
 config_has_automobile() {
@@ -544,6 +836,58 @@ remove_data_dir() {
     CHANGES_MADE=true
 }
 
+# Package-manager availability explicitly selects the removal command.
+# shellcheck disable=SC2310
+remove_desktop_app() {
+    if [[ "${DESKTOP_APP_INSTALLED}" != "true" ]]; then
+        log_info "AutoMobile desktop app not installed"
+        return 0
+    fi
+
+    local os
+    os=$(detect_os)
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        if [[ "${os}" == "macos" ]]; then
+            local app_path
+            for app_path in ${DESKTOP_APP_PATHS[@]+"${DESKTOP_APP_PATHS[@]}"}; do
+                log_info "[DRY-RUN] Would remove ${app_path}"
+            done
+        else
+            log_info "[DRY-RUN] Would remove AutoMobile desktop package: ${DESKTOP_APP_PACKAGE}"
+        fi
+        return 0
+    fi
+
+    if [[ "${os}" == "macos" ]]; then
+        local app_path
+        for app_path in ${DESKTOP_APP_PATHS[@]+"${DESKTOP_APP_PATHS[@]}"}; do
+            log_info "Removing AutoMobile desktop app from ${app_path}..."
+            if [[ "${app_path}" == "/Applications/"* ]]; then
+                if ! run_desktop_app_privileged rm -rf -- "${app_path}"; then
+                    return 1
+                fi
+            else
+                if ! rm -rf -- "${app_path}"; then
+                    return 1
+                fi
+            fi
+        done
+    elif [[ "${os}" == "linux" ]]; then
+        log_info "Removing AutoMobile desktop package: ${DESKTOP_APP_PACKAGE}..."
+        if command_exists apt-get; then
+            run_desktop_app_privileged apt-get remove -y "${DESKTOP_APP_PACKAGE}" || return 1
+        elif command_exists dpkg; then
+            run_desktop_app_privileged dpkg --remove "${DESKTOP_APP_PACKAGE}" || return 1
+        else
+            log_error "apt-get or dpkg is required to remove the AutoMobile desktop app package."
+            return 1
+        fi
+    fi
+
+    log_info "AutoMobile desktop app removed"
+    CHANGES_MADE=true
+}
+
 # ============================================================================
 # Interactive Selection
 # ============================================================================
@@ -580,6 +924,10 @@ select_components() {
 
     if [[ "${DATA_DIR_EXISTS}" == "true" ]]; then
         options+=("AutoMobile Data (~/.automobile)")
+    fi
+
+    if [[ "${DESKTOP_APP_INSTALLED}" == "true" ]]; then
+        options+=("AutoMobile Desktop App")
     fi
 
     # Add "Everything" option at the bottom if there are multiple components
@@ -622,12 +970,16 @@ select_components() {
             "AutoMobile Data"*)
                 UNINSTALL_DATA=true
                 ;;
+            "AutoMobile Desktop App")
+                UNINSTALL_DESKTOP_APP=true
+                ;;
             "Everything")
                 UNINSTALL_MCP_CONFIGS=true
                 UNINSTALL_MARKETPLACE=true
                 UNINSTALL_CLI=true
                 UNINSTALL_DAEMON=true
                 UNINSTALL_DATA=true
+                UNINSTALL_DESKTOP_APP=true
                 ;;
         esac
     done <<< "${selected}"
@@ -672,6 +1024,10 @@ confirm_uninstall() {
 
     if [[ "${UNINSTALL_DATA}" == "true" ]]; then
         echo "  - AutoMobile Data (~/.automobile)"
+    fi
+
+    if [[ "${UNINSTALL_DESKTOP_APP}" == "true" ]]; then
+        echo "  - AutoMobile Desktop App"
     fi
 
     echo ""
@@ -719,6 +1075,7 @@ main() {
     detect_cli
     detect_daemon
     detect_data_dir
+    detect_desktop_app
 
     # Show what was found
     echo ""
@@ -737,6 +1094,13 @@ main() {
     if [[ "${DATA_DIR_EXISTS}" == "true" ]]; then
         log_info "Found AutoMobile data directory"
     fi
+    if [[ "${DESKTOP_APP_INSTALLED}" == "true" ]]; then
+        if [[ -n "${DESKTOP_APP_PACKAGE}" ]]; then
+            log_info "Found AutoMobile desktop app package: ${DESKTOP_APP_PACKAGE}"
+        else
+            log_info "Found AutoMobile desktop app: ${DESKTOP_APP_PATHS[*]}"
+        fi
+    fi
 
     # Check if anything was found
     local found_something=false
@@ -744,7 +1108,8 @@ main() {
        [[ "${MARKETPLACE_INSTALLED}" == "true" ]] || \
        [[ "${CLI_INSTALLED}" == "true" ]] || \
        [[ "${DAEMON_RUNNING}" == "true" ]] || \
-       [[ "${DATA_DIR_EXISTS}" == "true" ]]; then
+       [[ "${DATA_DIR_EXISTS}" == "true" ]] || \
+       [[ "${DESKTOP_APP_INSTALLED}" == "true" ]]; then
         found_something=true
     fi
 
@@ -761,6 +1126,7 @@ main() {
         UNINSTALL_CLI=true
         UNINSTALL_DAEMON=true
         UNINSTALL_DATA=true
+        UNINSTALL_DESKTOP_APP=true
     else
         select_components
     fi
@@ -782,6 +1148,13 @@ main() {
 
     # Perform uninstall
     echo ""
+    if [[ "${UNINSTALL_DESKTOP_APP}" == "true" ]]; then
+        if ! stop_desktop_app_processes; then
+            log_error "Could not stop the AutoMobile desktop app; uninstall aborted."
+            exit 1
+        fi
+    fi
+
     if [[ "${UNINSTALL_DAEMON}" == "true" ]]; then
         stop_daemon
     fi
@@ -802,6 +1175,13 @@ main() {
         remove_data_dir
     fi
 
+    if [[ "${UNINSTALL_DESKTOP_APP}" == "true" ]]; then
+        if ! remove_desktop_app; then
+            log_error "Could not remove the AutoMobile desktop app; uninstall aborted."
+            exit 1
+        fi
+    fi
+
     # Summary
     echo ""
     if [[ "${DRY_RUN}" == "true" ]]; then
@@ -813,4 +1193,6 @@ main() {
     fi
 }
 
-main "$@"
+if [[ "${UNINSTALL_SH_SOURCE_ONLY:-}" != "true" ]]; then
+    main "$@"
+fi

@@ -41,7 +41,7 @@ teardown() {
 }
 
 run_runner() {
-  run env HOME="$FAKE_HOME" PATH="$STUB_BIN:$PATH" bash "$SCRIPT" "${1:-test/bats}"
+  run env AUTOMOBILE_BATS_SERIAL_ONLY=false HOME="$FAKE_HOME" PATH="$STUB_BIN:$PATH" bash "$SCRIPT" "${1:-test/bats}"
 }
 
 # The parallel pass is the invocation carrying --jobs; the serial pass is the
@@ -92,6 +92,18 @@ serial_pass_args() { grep -v -- '--jobs' "$ARGS_FILE"; }
   run env HOME="$FAKE_HOME" PATH="$STUB_BIN:$PATH" bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$(cat "$ARGS_FILE")" == *"test/bats"* ]]
+}
+
+@test "serial-only mode runs one stable pass without GNU parallel" {
+  run env AUTOMOBILE_BATS_SERIAL_ONLY=true HOME="$FAKE_HOME" PATH="$STUB_BIN:$PATH" bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  local expected_count actual_count
+  expected_count="$(find test/bats -type f -name '*.bats' | wc -l | tr -d ' ')"
+  actual_count="$(wc -l < "$ARGS_FILE" | tr -d ' ')"
+  [ "$actual_count" -eq "$expected_count" ]
+  ! grep -vE '^test/bats/.+\.bats$' "$ARGS_FILE"
+  [ ! -e "$FAKE_HOME/.parallel/will-cite" ]
 }
 
 # is_gnu_parallel must accept only GNU parallel, not the unrelated moreutils

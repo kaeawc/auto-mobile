@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Intentional conditional calls preserve optional-install and cleanup failure handling.
+# shellcheck disable=SC2310
 IFS=$'\n\t'
 
 # Handle piped execution (curl | bash) where BASH_SOURCE is empty
@@ -60,6 +62,13 @@ IOS_RUNTIME_PROBE_PROCESS_GROUP=false
 POST_BUN_SETUP_PID=""
 POST_BUN_SETUP_LOG_FILE=""
 POST_BUN_SETUP_STATE_FILE=""
+DESKTOP_APP_TEMP_DIR=""
+DESKTOP_APP_MOUNT_DIR=""
+DESKTOP_APP_REPLACEMENT_LOCK_DIR=""
+DESKTOP_APP_REPLACEMENT_STAGING_DIR=""
+DESKTOP_APP_REPLACEMENT_TARGET=""
+DESKTOP_APP_REPLACEMENT_PREVIOUS=""
+DESKTOP_APP_REPLACEMENT_COMPLETE=false
 
 # ============================================================================
 # Original Global State
@@ -72,6 +81,8 @@ IDE_PLUGIN_METHOD=""
 IDE_PLUGIN_ZIP_URL=""
 IDE_PLUGIN_DIR=""
 INSTALL_AUTOMOBILE_CLI=false
+INSTALL_DESKTOP_APP=false
+DESKTOP_APP_EXPLICITLY_REQUESTED=false
 INSTALL_CLAUDE_MARKETPLACE=false
 INSTALL_DEV_TOOLS=false
 START_DAEMON=false
@@ -142,6 +153,8 @@ cleanup_background_installer_work() {
     [[ -n "${IOS_RUNTIME_PROBE_FILE}" ]] && rm -f "${IOS_RUNTIME_PROBE_FILE}"
     [[ -n "${POST_BUN_SETUP_LOG_FILE}" ]] && rm -f "${POST_BUN_SETUP_LOG_FILE}"
     [[ -n "${POST_BUN_SETUP_STATE_FILE}" ]] && rm -f "${POST_BUN_SETUP_STATE_FILE}"
+    cleanup_macos_desktop_app_replacement
+    cleanup_desktop_app_installer
     return 0
 }
 
@@ -468,6 +481,7 @@ Options:
   --preset NAME       Use an installation preset (minimal; contributor-only: development, local-dev)
   --contributor       Use contributor defaults (automatically selects the development preset)
   --non-interactive   Skip interactive prompts, use defaults
+  --desktop-app       Install the native AutoMobile desktop app from the latest GitHub release
   --env-file PATH     Write environment state (PATH, ANDROID_HOME) to file
   -h, --help          Show this help message
 
@@ -505,6 +519,11 @@ parse_args() {
                 ;;
             --non-interactive|-y)
                 NON_INTERACTIVE=true
+                shift
+                ;;
+            --desktop-app)
+                INSTALL_DESKTOP_APP=true
+                DESKTOP_APP_EXPLICITLY_REQUESTED=true
                 shift
                 ;;
             --record-mode)
@@ -2684,6 +2703,490 @@ resolve_ide_plugin_url() {
     echo "${url}"
 }
 
+# Return the native installer suffix published for a supported host. Desktop release
+# assets deliberately use a stable platform suffix; the installer architecture is
+# checked after download before anything is copied to the system.
+desktop_app_asset_suffix() {
+    local os="$1"
+    local arch="$2"
+
+    case "${os}:${arch}" in
+        macos:arm64)
+            echo "-macos.dmg"
+            ;;
+        linux:x86_64)
+            echo "-linux.deb"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+desktop_app_is_root() {
+    [[ "${EUID}" -eq 0 ]]
+}
+
+# These predicates intentionally translate command status into availability.
+# shellcheck disable=SC2310
+desktop_app_privilege_available() {
+    desktop_app_is_root || command_exists sudo
+}
+
+# Every privileged command status is returned to an explicit caller check.
+# shellcheck disable=SC2310
+run_desktop_app_privileged() {
+    if desktop_app_is_root; then
+        "$@"
+    elif command_exists sudo; then
+        sudo "$@"
+    else
+        log_error "Administrator privileges are required to install the AutoMobile desktop app."
+        return 1
+    fi
+}
+
+# Missing prerequisites are an expected false predicate, not a fatal command.
+# shellcheck disable=SC2310
+desktop_app_prerequisites_available() {
+    local os="$1"
+
+    if ! desktop_app_privilege_available; then
+        return 1
+    fi
+
+    case "${os}" in
+        macos)
+            command_exists hdiutil && command_exists lipo && command_exists ditto
+            ;;
+        linux)
+            # apt resolves a .deb's dependencies atomically; dpkg alone can
+            # leave an unpacked package behind when a dependency is missing.
+            command_exists dpkg-deb && command_exists apt-get
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Detach before removing the temporary directory. A failed detach is retried by
+# the process-wide EXIT cleanup and must not turn a successful app copy into an
+# installation failure.
+cleanup_desktop_app_installer() {
+    if [[ -n "${DESKTOP_APP_MOUNT_DIR}" ]]; then
+        if hdiutil detach "${DESKTOP_APP_MOUNT_DIR}" >/dev/null 2>&1 \
+            || hdiutil detach -force "${DESKTOP_APP_MOUNT_DIR}" >/dev/null 2>&1; then
+            DESKTOP_APP_MOUNT_DIR=""
+        fi
+    fi
+
+    if [[ -n "${DESKTOP_APP_TEMP_DIR}" && -z "${DESKTOP_APP_MOUNT_DIR}" ]]; then
+        rm -rf -- "${DESKTOP_APP_TEMP_DIR}"
+        DESKTOP_APP_TEMP_DIR=""
+    fi
+    return 0
+}
+
+# Recover an interrupted bundle swap before removing its staging directory. All
+# paths are tracked globally because this function also runs from the process-
+# wide EXIT/TERM cleanup hook.
+# shellcheck disable=SC2310
+cleanup_macos_desktop_app_replacement() {
+    local preserve_staging=false
+
+    if [[ "${DESKTOP_APP_REPLACEMENT_COMPLETE}" != "true" ]] \
+        && [[ -n "${DESKTOP_APP_REPLACEMENT_PREVIOUS}" ]] \
+        && run_desktop_app_privileged test ! -e "${DESKTOP_APP_REPLACEMENT_TARGET}" \
+        && run_desktop_app_privileged test -e "${DESKTOP_APP_REPLACEMENT_PREVIOUS}"; then
+        if ! run_desktop_app_privileged mv -- \
+            "${DESKTOP_APP_REPLACEMENT_PREVIOUS}" "${DESKTOP_APP_REPLACEMENT_TARGET}"; then
+            preserve_staging=true
+            log_error "Could not restore the previous AutoMobile.app. It remains at ${DESKTOP_APP_REPLACEMENT_PREVIOUS}."
+        fi
+    fi
+
+    if [[ "${preserve_staging}" != "true" && -n "${DESKTOP_APP_REPLACEMENT_STAGING_DIR}" ]]; then
+        run_desktop_app_privileged rm -rf -- "${DESKTOP_APP_REPLACEMENT_STAGING_DIR}" || true
+    fi
+    if [[ -n "${DESKTOP_APP_REPLACEMENT_LOCK_DIR}" ]]; then
+        run_desktop_app_privileged rm -f -- "${DESKTOP_APP_REPLACEMENT_LOCK_DIR}/owner.pid" || true
+        run_desktop_app_privileged rmdir "${DESKTOP_APP_REPLACEMENT_LOCK_DIR}" || true
+    fi
+
+    DESKTOP_APP_REPLACEMENT_LOCK_DIR=""
+    if [[ "${preserve_staging}" != "true" ]]; then
+        DESKTOP_APP_REPLACEMENT_TARGET=""
+        DESKTOP_APP_REPLACEMENT_PREVIOUS=""
+        DESKTOP_APP_REPLACEMENT_COMPLETE=false
+        DESKTOP_APP_REPLACEMENT_STAGING_DIR=""
+    fi
+    return 0
+}
+
+# Recovery failures are returned explicitly to the caller.
+# shellcheck disable=SC2310
+recover_stale_macos_desktop_app_swap() {
+    local target_parent="$1" target_app="$2" swap_dir previous_app target_exists=false
+    [[ -e "${target_app}" ]] && target_exists=true
+    while IFS= read -r swap_dir; do
+        [[ -n "${swap_dir}" ]] || continue
+        previous_app="${swap_dir}/Previous-AutoMobile.app"
+        if [[ "${target_exists}" != "true" ]] && run_desktop_app_privileged test -e "${previous_app}"; then
+            if run_desktop_app_privileged mv -- "${previous_app}" "${target_app}"; then
+                log_warn "Recovered the previous AutoMobile.app after an interrupted installation."
+                target_exists=true
+            else
+                log_error "Could not recover the previous AutoMobile.app from ${previous_app}."
+                return 1
+            fi
+            run_desktop_app_privileged rm -rf -- "${swap_dir}" || return 1
+            return 0
+        fi
+        run_desktop_app_privileged rm -rf -- "${swap_dir}" || return 1
+    done < <(run_desktop_app_privileged find "${target_parent}" -maxdepth 1 -type d -name '.automobile-install.*' ! -name '.automobile-install.lock' -print 2>/dev/null)
+}
+
+# Lock acquisition failures are returned explicitly to the caller.
+# shellcheck disable=SC2310
+acquire_macos_desktop_app_lock() {
+    local lock_dir="$1" target_parent="$2" target_app="$3" owner_pid owner_pid_to_write="$$" reclaim_dir reclaim_owner stale_reclaim_dir
+    if run_desktop_app_privileged mkdir "${lock_dir}" 2>/dev/null; then
+        if ! printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null; then
+            run_desktop_app_privileged rmdir "${lock_dir}" || true
+            return 1
+        fi
+        return 0
+    fi
+    owner_pid=$(run_desktop_app_privileged cat "${lock_dir}/owner.pid" 2>/dev/null || true)
+    if [[ "${owner_pid}" =~ ^[0-9]+$ ]] \
+        && run_desktop_app_privileged kill -0 "${owner_pid}" 2>/dev/null; then
+        return 1
+    fi
+    log_warn "Reclaiming stale AutoMobile desktop installation lock."
+    reclaim_dir="${lock_dir}/reclaiming"
+    # Claim recovery inside the existing lock so only one installer can repair
+    # the stale swap while the lock continues to exclude a new installation.
+    if ! run_desktop_app_privileged mkdir "${reclaim_dir}" 2>/dev/null; then
+        reclaim_owner=$(run_desktop_app_privileged cat "${reclaim_dir}/owner.pid" 2>/dev/null || true)
+        if [[ "${reclaim_owner}" =~ ^[0-9]+$ ]] \
+            && run_desktop_app_privileged kill -0 "${reclaim_owner}" 2>/dev/null; then
+            return 1
+        fi
+        log_warn "Reclaiming interrupted AutoMobile desktop installation recovery."
+        # Rename the stale marker before claiming a new one. Removing it first
+        # leaves a window where another installer can create its own marker and
+        # be deleted by this recovery attempt.
+        stale_reclaim_dir="${reclaim_dir}.stale.${owner_pid_to_write}.${RANDOM}"
+        run_desktop_app_privileged mv -- "${reclaim_dir}" "${stale_reclaim_dir}" || return 1
+        if ! run_desktop_app_privileged mkdir "${reclaim_dir}"; then
+            run_desktop_app_privileged rm -rf -- "${stale_reclaim_dir}" || true
+            return 1
+        fi
+        run_desktop_app_privileged rm -rf -- "${stale_reclaim_dir}" || return 1
+    fi
+    if ! printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${reclaim_dir}/owner.pid" >/dev/null; then
+        run_desktop_app_privileged rm -rf -- "${reclaim_dir}" || true
+        return 1
+    fi
+    if ! printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null; then
+        run_desktop_app_privileged rm -rf -- "${reclaim_dir}" || true
+        return 1
+    fi
+    if ! recover_stale_macos_desktop_app_swap "${target_parent}" "${target_app}"; then
+        run_desktop_app_privileged rm -rf -- "${reclaim_dir}" || true
+        return 1
+    fi
+    run_desktop_app_privileged rm -rf -- "${reclaim_dir}"
+}
+
+# Copy into a sibling staging directory, then swap the bundle into place. This
+# keeps an existing installation recoverable if the replacement move fails.
+# shellcheck disable=SC2310
+install_macos_desktop_app_bundle() {
+    local source_app="$1"
+    local target_app="${2:-/Applications/AutoMobile.app}"
+    local target_parent lock_dir staging_dir staged_app previous_app
+    target_parent=$(dirname "${target_app}")
+    lock_dir="${target_parent}/.automobile-install.lock"
+    DESKTOP_APP_REPLACEMENT_TARGET="${target_app}"
+    DESKTOP_APP_REPLACEMENT_LOCK_DIR=""
+    DESKTOP_APP_REPLACEMENT_COMPLETE=false
+    if ! acquire_macos_desktop_app_lock "${lock_dir}" "${target_parent}" "${target_app}"; then
+        DESKTOP_APP_REPLACEMENT_TARGET=""
+        log_error "Another AutoMobile desktop app installation is already in progress."
+        return 1
+    fi
+    DESKTOP_APP_REPLACEMENT_LOCK_DIR="${lock_dir}"
+    if ! staging_dir=$(run_desktop_app_privileged mktemp -d "${target_parent}/.automobile-install.XXXXXX"); then
+        cleanup_macos_desktop_app_replacement
+        return 1
+    fi
+    DESKTOP_APP_REPLACEMENT_STAGING_DIR="${staging_dir}"
+    staged_app="${staging_dir}/AutoMobile.app"
+    previous_app="${staging_dir}/Previous-AutoMobile.app"
+    DESKTOP_APP_REPLACEMENT_PREVIOUS="${previous_app}"
+
+    if ! run_desktop_app_privileged ditto "${source_app}" "${staged_app}"; then
+        cleanup_macos_desktop_app_replacement
+        return 1
+    fi
+
+    if [[ -e "${target_app}" ]]; then
+        if ! run_desktop_app_privileged mv -- "${target_app}" "${previous_app}"; then
+            cleanup_macos_desktop_app_replacement
+            return 1
+        fi
+    fi
+
+    if ! run_desktop_app_privileged mv -- "${staged_app}" "${target_app}"; then
+        cleanup_macos_desktop_app_replacement
+        return 1
+    fi
+
+    DESKTOP_APP_REPLACEMENT_COMPLETE=true
+    cleanup_macos_desktop_app_replacement
+}
+
+# `detect_os` intentionally treats Git Bash as Linux for the existing developer
+# environment setup. Keep the desktop installer separate so it never mistakes a
+# Windows host for a Linux .deb target.
+detect_desktop_app_os() {
+    case "$(uname -s)" in
+        Darwin*)
+            echo "macos"
+            ;;
+        Linux*)
+            echo "linux"
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            echo "windows"
+            ;;
+        *)
+            echo "unknown"
+            ;;
+    esac
+}
+
+# Under Rosetta, uname reports the translated x86_64 process architecture even
+# on Apple Silicon. The published desktop app is arm64-only, so select it from
+# the native hardware signal instead.
+# This is an availability probe: unsupported sysctl keys are an expected miss.
+# shellcheck disable=SC2310
+detect_desktop_app_arch() {
+    if [[ "$(detect_desktop_app_os)" == "macos" ]] \
+        && [[ "$(sysctl -in sysctl.proc_translated 2>/dev/null || true)" == "1" ]]; then
+        echo "arm64"
+    else
+        detect_arch
+    fi
+}
+
+# Extract the matching asset URL from the GitHub releases API response without
+# relying on a line-oriented JSON parser. Python is already a required installer
+# dependency for MCP configuration; jq remains a useful fallback for minimal hosts.
+# Each capability branch explicitly returns the selected parser's status.
+# shellcheck disable=SC2310
+resolve_desktop_app_release_asset() {
+    local release_json="$1"
+    local suffix="$2"
+
+    if command_exists python3; then
+        printf '%s' "${release_json}" | python3 -c '
+import json
+import sys
+
+release = json.load(sys.stdin)
+suffix = sys.argv[1]
+for asset in release.get("assets", []):
+    name = asset.get("name", "")
+    url = asset.get("browser_download_url", "")
+    if name.endswith(suffix) and url:
+        print(url)
+        break
+' "${suffix}"
+        return $?
+    fi
+
+    if command_exists jq; then
+        printf '%s' "${release_json}" | jq -r --arg suffix "${suffix}" \
+            '.assets[] | select(.name | endswith($suffix)) | .browser_download_url' | head -n 1
+        return 0
+    fi
+
+    log_error "python3 or jq is required to read GitHub release metadata."
+    return 1
+}
+
+# Each capability branch explicitly returns the selected downloader's status.
+# shellcheck disable=SC2310
+fetch_latest_desktop_app_release() {
+    local api_url="https://api.github.com/repos/kaeawc/auto-mobile/releases/latest"
+
+    if command_exists curl; then
+        curl --fail --show-error --silent --location "${api_url}"
+    elif command_exists wget; then
+        wget --quiet -O- "${api_url}"
+    else
+        log_error "curl or wget is required to fetch the AutoMobile desktop app release."
+        return 1
+    fi
+}
+
+# A missing tool or mismatched architecture is an expected false predicate.
+# shellcheck disable=SC2310
+desktop_app_deb_architecture_matches_host() {
+    local package_path="$1"
+    local host_arch="$2"
+    local package_arch
+
+    command_exists dpkg-deb || return 1
+    package_arch=$(dpkg-deb --field "${package_path}" Architecture 2>/dev/null) || return 1
+
+    case "${host_arch}:${package_arch}" in
+        x86_64:amd64)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Installer failures are translated into targeted diagnostics at each branch.
+# shellcheck disable=SC2310
+install_desktop_app() {
+    local os arch suffix
+    os=$(detect_desktop_app_os)
+    arch=$(detect_desktop_app_arch)
+    if ! suffix=$(desktop_app_asset_suffix "${os}" "${arch}"); then
+        log_error "The AutoMobile desktop app does not support this host (${os}/${arch})."
+        return 1
+    fi
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        DRY_RUN_LOG+=("[DRY-RUN] Download the latest AutoMobile desktop app for ${os}/${arch} from GitHub Releases")
+        log_info "[DRY-RUN] Would install the latest AutoMobile desktop app for ${os}/${arch}"
+        return 0
+    fi
+
+    # An unavailable prerequisite is translated into the installer diagnostic below.
+    # shellcheck disable=SC2310
+    if ! desktop_app_prerequisites_available "${os}"; then
+        log_error "This host is missing the system tools or administrator privileges required to install the AutoMobile desktop app."
+        return 1
+    fi
+
+    local release_json asset_url
+    if ! release_json=$(fetch_latest_desktop_app_release); then
+        log_error "Failed to fetch the latest AutoMobile GitHub release."
+        return 1
+    fi
+    if ! asset_url=$(resolve_desktop_app_release_asset "${release_json}" "${suffix}"); then
+        return 1
+    fi
+    if [[ -z "${asset_url}" ]]; then
+        log_error "The latest AutoMobile release has no desktop installer for ${os}/${arch}."
+        return 1
+    fi
+
+    local temp_dir installer_path
+    if ! temp_dir=$(mktemp -d); then
+        log_error "Could not create a temporary directory for the AutoMobile desktop app installer."
+        return 1
+    fi
+    DESKTOP_APP_TEMP_DIR="${temp_dir}"
+    installer_path="${temp_dir}/AutoMobile${suffix}"
+    if ! download_file "${asset_url}" "${installer_path}"; then
+        log_error "Failed to download the AutoMobile desktop app from ${asset_url}"
+        cleanup_desktop_app_installer
+        return 1
+    fi
+
+    case "${os}" in
+        macos)
+            local mount_dir app_path app_binary app_arches
+            mount_dir="${temp_dir}/mount"
+            mkdir -p "${mount_dir}"
+            if ! hdiutil attach -nobrowse -readonly -mountpoint "${mount_dir}" "${installer_path}" >/dev/null; then
+                log_error "Could not mount the downloaded AutoMobile disk image."
+                cleanup_desktop_app_installer
+                return 1
+            fi
+            DESKTOP_APP_MOUNT_DIR="${mount_dir}"
+            app_path=$(find "${mount_dir}" -maxdepth 1 -name 'AutoMobile.app' -type d -print -quit)
+            app_binary="${app_path}/Contents/MacOS/AutoMobile"
+            if [[ -z "${app_path}" || ! -x "${app_binary}" ]]; then
+                log_error "The disk image does not contain a valid AutoMobile.app bundle."
+                cleanup_desktop_app_installer
+                return 1
+            fi
+            app_arches=$(lipo -archs "${app_binary}" 2>/dev/null || true)
+            if [[ " ${app_arches} " != *" ${arch} "* ]]; then
+                log_error "Downloaded desktop app architecture (${app_arches:-unknown}) does not match this Mac (${arch})."
+                cleanup_desktop_app_installer
+                return 1
+            fi
+            # Bundle replacement failure is translated into the installer diagnostic below.
+            # shellcheck disable=SC2310
+            if ! install_macos_desktop_app_bundle "${app_path}"; then
+                log_error "Failed to install AutoMobile.app in /Applications."
+                cleanup_desktop_app_installer
+                return 1
+            fi
+            cleanup_desktop_app_installer
+            log_info "AutoMobile desktop app installed to /Applications/AutoMobile.app"
+            ;;
+        linux)
+            if ! desktop_app_deb_architecture_matches_host "${installer_path}" "${arch}"; then
+                log_error "Downloaded desktop app package does not match this Linux host (${arch})."
+                cleanup_desktop_app_installer
+                return 1
+            fi
+            if command_exists apt-get; then
+                # Package-manager failure is translated into the installer diagnostic below.
+                # shellcheck disable=SC2310
+                if ! run_desktop_app_privileged apt-get install -y "${installer_path}"; then
+                    log_error "Failed to install the AutoMobile desktop app package."
+                    cleanup_desktop_app_installer
+                    return 1
+                fi
+            else
+                log_error "apt-get is required to install the downloaded .deb package."
+                cleanup_desktop_app_installer
+                return 1
+            fi
+            log_info "AutoMobile desktop app installed."
+            ;;
+    esac
+
+    cleanup_desktop_app_installer
+    CHANGES_MADE=true
+}
+
+# Unsupported hosts intentionally suppress this optional prompt.
+# shellcheck disable=SC2310
+offer_desktop_app_install() {
+    [[ "${INSTALL_DESKTOP_APP}" == "true" ]] && return 0
+
+    local os arch
+    os=$(detect_desktop_app_os)
+    arch=$(detect_desktop_app_arch)
+    if ! desktop_app_asset_suffix "${os}" "${arch}" >/dev/null; then
+        log_info "AutoMobile desktop app is not available for this host (${os}/${arch})."
+        return 0
+    fi
+    # Missing prerequisites intentionally suppress the optional prompt.
+    # shellcheck disable=SC2310
+    if ! desktop_app_prerequisites_available "${os}"; then
+        log_info "AutoMobile desktop app installation prerequisites are not available on this host."
+        return 0
+    fi
+
+    if gum confirm "Install the native AutoMobile desktop app from the latest GitHub release?" --default=false; then
+        INSTALL_DESKTOP_APP=true
+    fi
+}
+
 detect_ide_plugins_dir() {
     if [[ -n "${ANDROID_STUDIO_PLUGINS_DIR:-}" ]]; then
         echo "${ANDROID_STUDIO_PLUGINS_DIR}"
@@ -4379,7 +4882,7 @@ select_preset() {
         "Leave existing AutoMobile configurations unchanged")
             log_info "Keeping current AI agent setup"
             log_info "No changes necessary"
-            exit 0
+            return 0
             ;;
         "Claude Marketplace"*)
             PRESET="marketplace"
@@ -4622,7 +5125,7 @@ main() {
         "Apply the selected AutoMobile configuration" \
         "Offer optional video-recording support" \
         "Configure optional device support" \
-        "Complete the selected integration"
+        "Install optional tools and complete the selected integration"
     show_installation_progress 1
     select_mcp_config_scope
 
@@ -4644,6 +5147,10 @@ main() {
             # present unrelated platform and CLI prompts after this error.
             exit 1
         fi
+    fi
+
+    if [[ "${NON_INTERACTIVE}" != "true" ]]; then
+        offer_desktop_app_install
     fi
 
     # Only do interactive platform/component selection if using Custom preset
@@ -4844,6 +5351,15 @@ main() {
 
     # CLI installation
     show_installation_progress 7
+    if [[ "${INSTALL_DESKTOP_APP}" == "true" ]]; then
+        if ! install_desktop_app; then
+            if [[ "${DESKTOP_APP_EXPLICITLY_REQUESTED}" == "true" ]]; then
+                log_error "Desktop app installation was requested and did not complete."
+                return 1
+            fi
+            log_warn "Desktop app installation failed; continuing with the remaining AutoMobile setup."
+        fi
+    fi
     if [[ -z "${POST_BUN_SETUP_PID}" && "${INSTALL_AUTOMOBILE_CLI}" == "true" ]]; then
         install_auto_mobile_cli
     fi

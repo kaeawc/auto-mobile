@@ -987,7 +987,9 @@ jobs:
           else
             # Ubuntu apt 'bats' is the old sstephenson/bats which doesn't
             # capture stderr in run output. Install bats-core from source.
-            git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            # Pin the runner: newer development snapshots can miscount this
+            # suite after executing every test, which makes a green run fail.
+            git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
             sudo /tmp/bats-core/install.sh /usr/local
           fi
           if command -v shellcheck &>/dev/null; then
@@ -1011,9 +1013,13 @@ jobs:
 
       - wait: install-bats
 
-      # Cross-file parallel (`--jobs`), within-file serial. See scripts/ci/run-bats.sh.
+      # BATS' cross-file parallel runner can exit nonzero after every test passes
+      # on hosted Linux/macOS runners. Keep the fast local default, but use the
+      # stable serial mode here; the 10-minute job budget has ample headroom.
       - name: "Run BATS Tests"
         shell: bash
+        env:
+          AUTOMOBILE_BATS_SERIAL_ONLY: "true"
         run: scripts/ci/run-bats.sh
 
   installer-minimal:

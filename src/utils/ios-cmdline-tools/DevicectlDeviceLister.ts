@@ -454,6 +454,10 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
       this.lastGood = null;
       return [];
     }
+    if (now < this.lastGood.observedAt) {
+      this.lastGood.observedAt = now;
+      this.lastGood.staleAfter = now + LAST_GOOD_RETENTION_MS;
+    }
     return this.lastGood.devices;
   }
 }

@@ -447,6 +447,33 @@ describe("DevicectlDeviceLister", () => {
     expect([...(discovery.retainedDeviceIds ?? [])]).toEqual([PHYSICAL_UDID]);
   });
 
+  test("bounds retained devices to one window after a large clock rollback", async () => {
+    const timer = new FakeTimer();
+    let shouldFail = false;
+    const lister = makeLister({
+      timer,
+      execute: async () => {
+        if (shouldFail) {
+          throw new Error("devicectl blipped");
+        }
+        return okExec;
+      },
+      readFile: async () => JSON.stringify(devicectlPayload([connectedIphone()])),
+    });
+
+    timer.setCurrentTime(1_000_000);
+    await lister.listConnectedDevices();
+
+    timer.setCurrentTime(0);
+    shouldFail = true;
+    expect((await lister.listConnectedDevices()).devices.map((device) => device.deviceId)).toEqual([
+      PHYSICAL_UDID,
+    ]);
+
+    timer.advanceTime(60_001);
+    expect(await lister.listConnectedDevices()).toEqual({ devices: [], complete: false });
+  });
+
   test("removes its temp directory on both success and failure", async () => {
     const removed: string[] = [];
     const succeeding = makeLister({

@@ -1541,14 +1541,16 @@ function preserveLateShutdownRetirement(
   if (
     !isShutdownTimeoutError(error) &&
     !requestAbortSignal?.aborted &&
-    sessionManager.getSessionForDevice(device.deviceId) === sessionId
+    sessionManager.getSessionForDevice(device.deviceId) === sessionId &&
+    !sessionManager.getTerminalReleaseSnapshot(sessionId)
   ) {
     return;
   }
-  // Session release removes its in-memory mapping before its durable write.
-  // It cannot be cancelled safely, so keep the captured shutdown reservation
-  // until the late release finishes its identity-guarded retirement. Otherwise
-  // a stopped device could become an idle ghost.
+  // Session release either removed its in-memory mapping or terminally fenced
+  // the UUID before a durable write failed. It cannot be cancelled safely, so
+  // keep the captured shutdown reservation until the late release finishes its
+  // identity-guarded retirement. Otherwise a stopped device could remain as a
+  // busy ghost in the pool.
   finishLateShutdownRetirement(
     release,
     device,

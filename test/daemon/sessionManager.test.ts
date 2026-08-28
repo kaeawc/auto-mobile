@@ -50,6 +50,25 @@ class DeferredDeviceSessionPersistence implements DeviceSessionPersistence {
   async markReleased(): Promise<void> {}
 }
 
+class DeferredReleaseDeviceSessionPersistence extends FakeDeviceSessionPersistence {
+  readonly reasons: string[] = [];
+  readonly releaseStarted = Promise.withResolvers<void>();
+  readonly finishRelease = Promise.withResolvers<void>();
+
+  override async markReleased(
+    _sessionUuid: string,
+    _status: DeviceSessionStatus,
+    _releasedAtMs: number,
+    reason: string,
+  ): Promise<void> {
+    this.reasons.push(reason);
+    if (this.reasons.length === 1) {
+      this.releaseStarted.resolve();
+      await this.finishRelease.promise;
+    }
+  }
+}
+
 function makeHierarchy(label: string): ViewHierarchyResult {
   return {
     hierarchy: {
@@ -1952,6 +1971,107 @@ describe("SessionManager", () => {
       releaseReason: "device-killed",
       terminal: true,
     });
+  });
+
+  test("device-killed upgrade during release persistence remains terminal", async () => {
+    const persistence = new DeferredReleaseDeviceSessionPersistence();
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      await manager.createSession("killed-session", "emulator-5554", "android");
+      let callbackSnapshot: unknown;
+      manager.onSessionRelease((_sessionId, _deviceId, _reason, snapshot) => {
+        callbackSnapshot = snapshot;
+      });
+      const ordinaryRelease = manager.releaseSession("killed-session", "explicit-release");
+      await persistence.releaseStarted.promise;
+      const killedRelease = manager.releaseSession("killed-session", "device-killed");
+      persistence.finishRelease.resolve();
+      await Promise.all([ordinaryRelease, killedRelease]);
+      let assignmentCount = 0;
+      const assigner: SessionDeviceAssigner = {
+        async assignDeviceToSession() {
+          assignmentCount += 1;
+          return "emulator-5560";
+        },
+      };
+
+      await expect(
+        manager.getOrCreateSession("killed-session", assigner, "android"),
+      ).rejects.toThrow("terminal after device-killed");
+      expect(assignmentCount).toBe(0);
+      expect(persistence.reasons).toEqual(["explicit-release", "device-killed"]);
+      expect(callbackSnapshot).toMatchObject({
+        releaseReason: "device-killed",
+        terminal: true,
+      });
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("device-killed upgrade after release finalization remains terminal", async () => {
+    const reasons: string[] = [];
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+      reasons.push(reason);
+    };
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      await manager.createSession("killed-session", "emulator-5554", "android");
+      let killedRelease: Promise<string | null> | undefined;
+      const callbacks: string[] = [];
+      manager.onSessionRelease((_sessionId, _deviceId, reason) => {
+        callbacks.push(reason);
+        if (reason === "explicit-release") {
+          killedRelease = manager.releaseSession("killed-session", "device-killed");
+        }
+      });
+
+      await manager.releaseSession("killed-session", "explicit-release");
+      await killedRelease;
+
+      expect(reasons).toEqual(["explicit-release", "device-killed"]);
+      expect(callbacks).toEqual(["explicit-release", "device-killed"]);
+      expect(manager.getTerminalReleaseSnapshot("killed-session")).toMatchObject({
+        releaseReason: "device-killed",
+        terminal: true,
+      });
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("owned device-loss upgrade after release finalization remains terminal", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      const session = await manager.createSession(
+        "disconnected-session",
+        "emulator-5554",
+        "android",
+      );
+      let disconnectedRelease: Promise<string | null> | undefined;
+      manager.onSessionRelease((_sessionId, _deviceId, reason) => {
+        if (reason === "explicit-release") {
+          disconnectedRelease = manager.releaseSessionIfOwned(
+            "disconnected-session",
+            session,
+            "emulator-5554",
+            "device-disconnected:emulator-5554",
+          );
+        }
+      });
+
+      await manager.releaseSession("disconnected-session", "explicit-release");
+      await disconnectedRelease;
+
+      expect(manager.getTerminalReleaseSnapshot("disconnected-session")).toMatchObject({
+        releaseReason: "device-disconnected:emulator-5554",
+        terminal: true,
+      });
+    } finally {
+      manager.stopCleanupTimer();
+    }
   });
 
   test("terminal release fails closed when durable fencing cannot be persisted", async () => {

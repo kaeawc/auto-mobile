@@ -72,7 +72,11 @@ describe("App file resource contract", () => {
 
 describe("putAppFileSchema contentBase64 guard (#4183 A4)", () => {
   const base = {
-    target: { domain: "app_containers" as const, appId: "com.example.app", container: "documents" as const },
+    target: {
+      domain: "app_containers" as const,
+      appId: "com.example.app",
+      container: "documents" as const,
+    },
     files: [{ destinationPath: "notes/hello.txt" }],
   };
   const parseWithBase64 = (contentBase64: string) =>
@@ -102,7 +106,10 @@ describe("putAppFile canonical target contract (#5803)", () => {
   const textFile = { destinationPath: "fixtures/welcome.txt", contentText: "hello" };
 
   test.each([
-    { target: { domain: "app_containers", appId: "com.example.app", container: "documents" }, files: [textFile] },
+    {
+      target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+      files: [textFile],
+    },
     { target: { domain: "user_files", namespace: "run-42", reset: true }, files: [textFile] },
     { target: { domain: "media_library" }, files: [textFile] },
   ])("accepts target branch %#", (args) => {
@@ -159,12 +166,32 @@ describe("putAppFile canonical target contract (#5803)", () => {
   });
 
   test.each([
-    { target: { domain: "app_containers", appId: "com.example.app", container: "documents", namespace: "nope" }, files: [textFile] },
-    { target: { domain: "user_files", namespace: "../escape", appId: "com.example.app" }, files: [textFile] },
+    {
+      target: {
+        domain: "app_containers",
+        appId: "com.example.app",
+        container: "documents",
+        namespace: "nope",
+      },
+      files: [textFile],
+    },
+    {
+      target: { domain: "user_files", namespace: "../escape", appId: "com.example.app" },
+      files: [textFile],
+    },
     { target: { domain: "media_library", namespace: "nope" }, files: [textFile] },
-    { target: { domain: "app_containers", appId: "com.example.app", container: "documents" }, files: [] },
-    { target: { domain: "app_containers", appId: "com.example.app", container: "documents" }, files: [{ ...textFile, sourcePath: "/tmp/file" }] },
-    { target: { domain: "app_containers", appId: "com.example.app", container: "documents" }, files: [{ ...textFile, destinationPath: "../escape" }] },
+    {
+      target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+      files: [],
+    },
+    {
+      target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+      files: [{ ...textFile, sourcePath: "/tmp/file" }],
+    },
+    {
+      target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+      files: [{ ...textFile, destinationPath: "../escape" }],
+    },
   ])("rejects invalid target or file input %#", (args) => {
     expect(putAppFileSchema.safeParse(args).success).toBe(false);
   });

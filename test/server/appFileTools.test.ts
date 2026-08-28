@@ -31,10 +31,14 @@ describe("App file tools", () => {
     expect(
       validate({
         target,
-        files: [{ destinationPath: "multiple-sources.txt", contentText: "x", contentBase64: "eA==" }],
+        files: [
+          { destinationPath: "multiple-sources.txt", contentText: "x", contentBase64: "eA==" },
+        ],
       }),
     ).toBe(false);
-    expect(validate({ target, files: [{ destinationPath: "one-source.txt", contentText: "x" }] })).toBe(true);
+    expect(
+      validate({ target, files: [{ destinationPath: "one-source.txt", contentText: "x" }] }),
+    ).toBe(true);
   });
 
   test("accepts a canonical local-source batch with nested destination paths", () => {

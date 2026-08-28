@@ -67,7 +67,9 @@ export interface AppFileProviderReadRequest extends AppFileReadRequest {
 export interface AppFileWriteProvider {
   readonly platform: Platform;
   readonly domain: StorageDomain;
-  putFile(request: PutAppFileProviderRequest): Promise<void | { effects?: PutAppFileWriteResult["effects"] }>;
+  putFile(
+    request: PutAppFileProviderRequest,
+  ): Promise<void | { effects?: PutAppFileWriteResult["effects"] }>;
 }
 
 export interface AppFileListProvider {
@@ -212,8 +214,15 @@ function isCanonicalPutRequest(
 }
 
 function legacyRequestToCanonical(request: LegacyPutAppFileRequest): PutAppFileRequest {
-  const { appId, container, destinationPath, sourcePath, contentText, contentBase64, ...deviceArgs } =
-    request;
+  const {
+    appId,
+    container,
+    destinationPath,
+    sourcePath,
+    contentText,
+    contentBase64,
+    ...deviceArgs
+  } = request;
   return {
     ...deviceArgs,
     target: { domain: "app_containers", appId, container },
@@ -231,7 +240,9 @@ function normalizeTarget(target: PutAppFileTarget): PutAppFileTarget {
 
 function requireAppContainersTarget(target: PutAppFileTarget): AppContainersTarget {
   if (target.domain !== "app_containers") {
-    throw new ActionableError(`app-container provider received unsupported target domain: ${target.domain}`);
+    throw new ActionableError(
+      `app-container provider received unsupported target domain: ${target.domain}`,
+    );
   }
   return target;
 }
@@ -371,7 +382,13 @@ class DefaultAppFileService implements AppFileService {
   async listFiles(request: AppFileListRequest): Promise<AppFileListResult> {
     const appId = normalizeAppId(request.appId);
     const device = await this.deviceResolver(request.deviceId);
-    const provider = this.getListProvider(device.platform, "app_containers", "listFiles", appId, request.container);
+    const provider = this.getListProvider(
+      device.platform,
+      "app_containers",
+      "listFiles",
+      appId,
+      request.container,
+    );
     return provider.listFiles({
       device,
       deviceId: device.deviceId,
@@ -384,7 +401,13 @@ class DefaultAppFileService implements AppFileService {
     const appId = normalizeAppId(request.appId);
     const path = normalizeAppFileRelativePath(request.path);
     const device = await this.deviceResolver(request.deviceId);
-    const provider = this.getReadProvider(device.platform, "app_containers", "readFile", appId, request.container);
+    const provider = this.getReadProvider(
+      device.platform,
+      "app_containers",
+      "readFile",
+      appId,
+      request.container,
+    );
     return provider.readFile({
       device,
       deviceId: device.deviceId,
@@ -397,7 +420,9 @@ class DefaultAppFileService implements AppFileService {
   private getWriteProvider(platform: Platform, domain: StorageDomain): AppFileWriteProvider {
     const provider = this.writeProviders.get(providerKey(platform, domain));
     if (!provider) {
-      throw new ActionableError(`putFile is not supported for ${domain} on ${platform}: no write provider is registered`);
+      throw new ActionableError(
+        `putFile is not supported for ${domain} on ${platform}: no write provider is registered`,
+      );
     }
     return provider;
   }
@@ -431,7 +456,13 @@ class DefaultAppFileService implements AppFileService {
   ): AppFileReadProvider {
     const provider = this.readProviders.get(providerKey(platform, domain));
     if (!provider) {
-      throw unsupportedAppFileOperation(operation, platform, appId, container, "no app file provider is registered");
+      throw unsupportedAppFileOperation(
+        operation,
+        platform,
+        appId,
+        container,
+        "no app file provider is registered",
+      );
     }
     return provider;
   }
@@ -451,7 +482,11 @@ class AndroidAppFileProvider
   async putFile(request: PutAppFileProviderRequest): Promise<void> {
     const appTarget = requireAppContainersTarget(request.target);
     const adb = this.adbFactory.create(request.device);
-    const target = resolveAndroidTarget(appTarget.appId, appTarget.container, request.destinationPath);
+    const target = resolveAndroidTarget(
+      appTarget.appId,
+      appTarget.container,
+      request.destinationPath,
+    );
     if (target.kind === "unsupported") {
       throw unsupportedAppFileOperation(
         "putFile",

@@ -243,10 +243,10 @@ const mediaLibraryTargetSchema = z.object({ domain: z.literal("media_library") }
 
 const putAppFileInputSchema = z
   .object({
-  sourcePath: z.string().min(1).optional().describe("Host file path"),
-  contentText: z.string().optional().describe("UTF-8 content"),
-  contentBase64: z.string().optional().describe("Base64 content"),
-  destinationPath: z.string().describe("Safe path relative to the declared storage target"),
+    sourcePath: z.string().min(1).optional().describe("Host file path"),
+    contentText: z.string().optional().describe("UTF-8 content"),
+    contentBase64: z.string().optional().describe("Base64 content"),
+    destinationPath: z.string().describe("Safe path relative to the declared storage target"),
   })
   .strict()
   .superRefine((file, ctx) => {
@@ -317,11 +317,13 @@ function preprocessLegacyPutAppFileArgs(input: unknown): unknown {
     return args.legacySingleFile === undefined ? input : { ...args, legacySingleFile: false };
   }
   const appId =
-    args.appId ?? appIdFieldAliases.map((alias) => args[alias]).find((value) => value !== undefined);
+    args.appId ??
+    appIdFieldAliases.map((alias) => args[alias]).find((value) => value !== undefined);
   if (appId === undefined || args.container === undefined) {
     return input;
   }
-  const { container, destinationPath, sourcePath, contentText, contentBase64, ...deviceArgs } = args;
+  const { container, destinationPath, sourcePath, contentText, contentBase64, ...deviceArgs } =
+    args;
   delete deviceArgs.appId;
   for (const alias of appIdFieldAliases) {
     delete deviceArgs[alias];

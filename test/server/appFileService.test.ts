@@ -166,7 +166,12 @@ describe("AppFileService", () => {
 
   test("cleans prepared temporary sources when a provider write fails", async () => {
     const fileSystem = new TestAppFileFileSystem();
-    const provider = new RecordingStorageWriteProvider("android", "app_containers", undefined, new Error("write failed"));
+    const provider = new RecordingStorageWriteProvider(
+      "android",
+      "app_containers",
+      undefined,
+      new Error("write failed"),
+    );
     const service = createAppFileServiceForTesting({ providers: [provider], fileSystem });
 
     await expect(
@@ -1065,7 +1070,13 @@ class RecordingStorageWriteProvider implements AppFileWriteProvider {
   constructor(
     readonly platform: "android" | "ios",
     readonly domain: "app_containers" | "user_files" | "media_library",
-    private readonly result?: { effects?: Array<{ type: string; status: "completed" | "notRequested" | "unavailable"; reason?: string }> },
+    private readonly result?: {
+      effects?: Array<{
+        type: string;
+        status: "completed" | "notRequested" | "unavailable";
+        reason?: string;
+      }>;
+    },
     private readonly error?: Error,
   ) {}
 

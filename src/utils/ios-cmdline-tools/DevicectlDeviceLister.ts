@@ -450,7 +450,7 @@ export class DevicectlDeviceLister implements IosPhysicalDeviceLister {
 
   /** Devices the last good sweep found, while still inside the retention window. */
   private retainedDevices(now: number): BootedDevice[] {
-    if (!this.lastGood || now < this.lastGood.observedAt || now >= this.lastGood.staleAfter) {
+    if (!this.lastGood || now >= this.lastGood.staleAfter) {
       this.lastGood = null;
       return [];
     }

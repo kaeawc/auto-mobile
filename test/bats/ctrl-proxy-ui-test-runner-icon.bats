@@ -151,6 +151,18 @@ PY
   run grep -F 'CtrlProxyUITests.EnvironmentVariables.AUTOMOBILE_DEVICE_ID' "${repository_root}/scripts/test-ctrl-proxy-ios.sh"
   [ "$status" -eq 0 ]
 
+  run grep -F 'automobile-runner-${simulator_id}.xctestrun' "${repository_root}/scripts/local-dev/lib/ctrl-proxy-ios.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_PORT' "${repository_root}/scripts/local-dev/lib/ctrl-proxy-ios.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'IOS_RUNNER_PID_FILE' "${repository_root}/scripts/local-dev/lib/ctrl-proxy-ios.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'pgrep -f "xcodebuild.*test.*CtrlProxy"' "${repository_root}/scripts/local-dev/lib/ctrl-proxy-ios.sh" "${repository_root}/scripts/local-dev/hot-reload.sh"
+  [ "$status" -eq 1 ]
+
   run grep -E '^[[:space:]]*nohup xcodebuild test([[:space:]]|$)' "${repository_root}/scripts/test-ctrl-proxy-ios.sh"
   [ "$status" -eq 1 ]
 
@@ -162,4 +174,23 @@ PY
 
   run grep -E 'xcpretty --color.*\|\| true' "${repository_root}/scripts/ios/ctrl-proxy-build-for-testing.sh"
   [ "$status" -eq 1 ]
+}
+
+@test "a recycled watcher PID is cleared without blocking replacement startup" {
+  local repository_root
+  repository_root="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
+  runner_pid_file="${TEST_ROOT}/runner.pid"
+  printf '%s\n' "$$" > "${runner_pid_file}"
+
+  run env PROJECT_ROOT="${TEST_ROOT}" CTRL_PROXY_IOS_DIR="${TEST_ROOT}" \
+    IOS_RUNNER_PID_FILE="${runner_pid_file}" bash -c '
+      source "$1"
+      kill() { return 0; }
+      ps() { printf "%s\n" "unrelated-process"; }
+      log_warn() { :; }
+      stop_ctrl_proxy_ios
+    ' _ "${repository_root}/scripts/local-dev/lib/ctrl-proxy-ios.sh"
+
+  [ "$status" -eq 0 ]
+  [ ! -e "${runner_pid_file}" ]
 }

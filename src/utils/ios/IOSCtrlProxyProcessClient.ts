@@ -193,7 +193,9 @@ export class IOSCtrlProxyProcessClient {
     }
     await this.signalGroup(pid, "KILL", deadline);
     await this.signalPids(targets, "KILL", deadline);
-    await this.waitForExit([pid, ...descendants], deadline);
+    if (!(await this.waitForExit([pid, ...descendants], deadline))) {
+      throw new Error(`CtrlProxy process tree rooted at PID ${pid} remained alive after SIGKILL`);
+    }
   }
 
   async terminateProcess(pid: number): Promise<void> {

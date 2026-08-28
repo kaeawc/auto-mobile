@@ -4,7 +4,10 @@ setup() {
   repo_dir="$(mktemp -d)"
   mkdir -p "$repo_dir/scripts/lib" "$repo_dir/src/utils/ios-cmdline-tools"
   cp "$BATS_TEST_DIRNAME/../../scripts/check-no-new-direct-xcodebuild.sh" "$repo_dir/scripts/"
+  cp "$BATS_TEST_DIRNAME/../../scripts/check-no-new-direct-xcodebuild.ts" "$repo_dir/scripts/"
+  cp "$BATS_TEST_DIRNAME/../../scripts/lib/executionBoundaryAst.ts" "$repo_dir/scripts/lib/"
   cp "$BATS_TEST_DIRNAME/../../scripts/lib/vcs-diff.sh" "$repo_dir/scripts/lib/"
+  ln -s "$BATS_TEST_DIRNAME/../../node_modules" "$repo_dir/node_modules"
   touch "$repo_dir/src/utils/ios-cmdline-tools/XcodebuildClient.ts"
   git -C "$repo_dir" init -q
   git -C "$repo_dir" config user.email test@example.com
@@ -80,6 +83,36 @@ teardown() {
 
 @test "rejects an xcodebuild executable variable" {
   printf '%s\n' 'const executable = "xcodebuild";' 'spawn(executable, ["test"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "rejects an aliased child-process import" {
+  printf '%s\n' 'import { spawn as launch } from "node:child_process";' 'launch("xcodebuild", ["test"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "rejects an injected execution seam" {
+  printf '%s\n' 'const command = "xcodebuild";' 'executor["executeCommand"](command, ["test"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "rejects a computed child-process launcher" {
+  printf '%s\n' 'import * as cp from "node:child_process";' 'cp["spawn"]("xcodebuild", ["test"]);' > "$repo_dir/src/bypass.ts"
   git -C "$repo_dir" add src/bypass.ts
 
   run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"

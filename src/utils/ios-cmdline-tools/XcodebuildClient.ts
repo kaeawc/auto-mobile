@@ -6,6 +6,7 @@ import { createExecResult } from "../execResult";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { getAbortSignal } from "../AbortContext";
 import { DEFAULT_RUNNER_READINESS_TIMEOUT_MS } from "../runnerReadinessConfig";
+import { waitForSpawn } from "../ChildProcessTracker";
 
 export interface XcodebuildCommandOptions {
   timeoutMs?: number;
@@ -182,6 +183,15 @@ export class XcodebuildClient implements Xcodebuild {
       shell: false,
       signal,
     });
+
+    try {
+      // Attach the error listener before inspecting pid. A real failed spawn
+      // reports asynchronously; throwing first would leave that error event
+      // unhandled and crash the daemon after this promise rejects.
+      await waitForSpawn(child);
+    } catch (error) {
+      throw new ActionableError(`xcodebuild failed to start: ${String(error)}`);
+    }
 
     if (!child.pid) {
       child.kill();

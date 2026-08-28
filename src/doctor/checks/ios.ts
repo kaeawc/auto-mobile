@@ -20,6 +20,8 @@ import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import {
   IOSCtrlProxyClient,
   IOS_RUNNER_FEATURE_COMMANDS,
+  IOS_RUNNER_FEATURE_FLAGS,
+  getRequiredIosRunnerFeatureFlags,
 } from "../../features/observe/ios/IOSCtrlProxyClient";
 import { ObserveElementsBuilder } from "../../features/observe/ObserveElementsBuilder";
 import type { CtrlProxyHierarchy } from "../../features/observe/ios/types";
@@ -32,7 +34,7 @@ import {
 
 // Re-exported so doctor consumers (and tests) can reference the feature command
 // set without reaching into the runner client module.
-export { IOS_RUNNER_FEATURE_COMMANDS };
+export { IOS_RUNNER_FEATURE_COMMANDS, IOS_RUNNER_FEATURE_FLAGS };
 
 const MIN_XCODE_VERSION = "15.0";
 
@@ -52,6 +54,8 @@ export interface IosRunnerInspection {
   running: boolean;
   /** Advertised command set, or null when the runner could not be reached. */
   supportedCommands: string[] | null;
+  /** Advertised non-command feature set, or null for an older/unreachable runner. */
+  supportedFeatures: string[] | null;
 }
 
 /** Source of booted-simulator runner identities (injectable for tests). */
@@ -126,6 +130,7 @@ interface IosRunnerManager {
  */
 interface IosRunnerProbeClient {
   getSupportedCommands(): Promise<string[] | null>;
+  getSupportedFeatures(): Promise<string[] | null>;
   close(): Promise<void>;
 }
 
@@ -206,6 +211,7 @@ export function createIosCtrlProxyRunnerInspector(
         const running = installed ? await manager.isRunning() : false;
 
         let supportedCommands: string[] | null = null;
+        let supportedFeatures: string[] | null = null;
         if (running) {
           // Don't disturb a client someone else owns (e.g. the daemon's live
           // session): if one already exists, read through it and leave its
@@ -216,6 +222,7 @@ export function createIosCtrlProxyRunnerInspector(
           const probe = existing ?? hooks.createClient(device);
           try {
             supportedCommands = await probe.getSupportedCommands();
+            supportedFeatures = await probe.getSupportedFeatures();
           } catch (error) {
             // Treated as an unreachable runner (versionStatus=unknown), not a hard
             // failure: doctor still reports installed/running for the simulator.
@@ -236,6 +243,7 @@ export function createIosCtrlProxyRunnerInspector(
           installed,
           running,
           supportedCommands,
+          supportedFeatures,
         });
       }
       return inspections;
@@ -890,6 +898,7 @@ export async function checkBootedSimulators(
 interface IosRunnerClassification {
   status: IosRunnerVersionStatus;
   missingCommands: string[];
+  missingFeatures: string[];
   line: string;
 }
 
@@ -899,6 +908,7 @@ function classifyRunner(
 ): IosRunnerClassification {
   let status: IosRunnerVersionStatus;
   let missingCommands: string[] = [];
+  let missingFeatures: string[] = [];
 
   if (!inspection.installed) {
     status = "unknown";
@@ -909,7 +919,11 @@ function classifyRunner(
   } else {
     const advertised = new Set(inspection.supportedCommands);
     missingCommands = IOS_RUNNER_FEATURE_COMMANDS.filter((command) => !advertised.has(command));
-    status = missingCommands.length === 0 ? "compatible" : "stale";
+    const advertisedFeatures = new Set(inspection.supportedFeatures ?? []);
+    missingFeatures = getRequiredIosRunnerFeatureFlags().filter(
+      (feature) => !advertisedFeatures.has(feature),
+    );
+    status = missingCommands.length === 0 && missingFeatures.length === 0 ? "compatible" : "stale";
   }
 
   const parts = [
@@ -923,8 +937,11 @@ function classifyRunner(
   if (missingCommands.length > 0) {
     parts.push(`missingCommands=${missingCommands.join(",")}`);
   }
+  if (missingFeatures.length > 0) {
+    parts.push(`missingFeatures=${missingFeatures.join(",")}`);
+  }
 
-  return { status, missingCommands, line: parts.join("; ") };
+  return { status, missingCommands, missingFeatures, line: parts.join("; ") };
 }
 
 interface IosObserveRoundTripClassification {

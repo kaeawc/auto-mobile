@@ -30,6 +30,33 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
     ).toEqual([]);
   });
 
+  test("rejects aliases, spread argv, shell wrappers, and computed seams", () => {
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'const tool = "kill"; executor.executeCommand(tool, ["-TERM", "42"]);',
+      ),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource("fixture.ts", 'spawn("/bin/sh", ["-c", "kill -TERM 42"]);'),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'const command = ["lsof", "-iTCP:8765"]; executor.executeCommand(...command);',
+      ),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource("fixture.ts", 'executor["executeCommand"]("ps", ["-p", "42"]);'),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import * as cp from "node:child_process"; cp["spawn"]("kill", ["-TERM", "42"]);',
+      ),
+    ).toHaveLength(1);
+  });
+
   test("has a production check with documented exceptions", () => {
     const source = readFileSync(CHECK, "utf8");
     expect(source).toContain("const EXCEPTIONS = new Map<string, string>([");

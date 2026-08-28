@@ -72,6 +72,8 @@ import {
   metadataForScreenshotFormat,
   type ScreenshotMetadata,
 } from "../ScreenshotMetadata";
+import { resolveAssetVersion, resolvePinnedVersion } from "../../../constants/release";
+import { compareStrictNumericVersions } from "../../../utils/deviceMatcher";
 
 /**
  * Factory function type for creating CtrlProxyIosManager instances.
@@ -471,6 +473,24 @@ export const IOS_RUNNER_FEATURE_COMMANDS = [
   "set_network_mock_rules",
 ] as const;
 
+/** Non-command wire capabilities advertised by runners built from this source revision. */
+export const IOS_RUNNER_FEATURE_FLAGS = ["display_cutout_info"] as const;
+
+// The immutable 0.0.66 IPA predates the feature handshake. Require the flag
+// only once the release pipeline cuts 0.0.67+ from source that advertises it.
+const IOS_RUNNER_FEATURE_FLAGS_MIN_RELEASE = "0.0.67";
+
+export function getRequiredIosRunnerFeatureFlags(
+  env: Record<string, string | undefined> = process.env,
+): readonly (typeof IOS_RUNNER_FEATURE_FLAGS)[number][] {
+  const artifactVersion = resolveAssetVersion(resolvePinnedVersion(env));
+  const comparison = compareStrictNumericVersions(
+    artifactVersion,
+    IOS_RUNNER_FEATURE_FLAGS_MIN_RELEASE,
+  );
+  return Number.isNaN(comparison) || comparison >= 0 ? IOS_RUNNER_FEATURE_FLAGS : [];
+}
+
 /**
  * IOSCtrlProxyClient - WebSocket client for iOS CtrlProxy
  * Provides iOS UI hierarchy and interaction capabilities matching Android IOSCtrlProxyClient
@@ -504,6 +524,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Push update callbacks
   private onPushUpdateCallbacks: Set<(hierarchy: XCTestHierarchy) => void> = new Set();
   private supportedCommands: Set<string> | null = null;
+  private supportedFeatures: Set<string> | null = null;
 
   // Track last foreground bundle for performance monitoring
   private lastForegroundBundleId: string | null = null;
@@ -1241,6 +1262,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.cachedHierarchy = null;
     this.clearSdkScreenIdentity();
     this.supportedCommands = null;
+    this.supportedFeatures = null;
     this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
 
     if (this.hierarchyNavigationDetector) {
@@ -1792,6 +1814,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this.supportedCommands = Array.isArray(message.supportedCommands)
         ? new Set(message.supportedCommands)
         : null;
+      this.supportedFeatures = Array.isArray(message.supportedFeatures)
+        ? new Set(message.supportedFeatures)
+        : null;
       logger.info(`[IOSCtrlProxyClient] Received connected message`);
       return;
     }
@@ -1938,6 +1963,17 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   public getCachedSupportedCommands(): string[] | null {
     return this.supportedCommands === null ? null : Array.from(this.supportedCommands).sort();
+  }
+
+  /** Runner feature flags from the most recent connected handshake. */
+  public async getSupportedFeatures(): Promise<string[] | null> {
+    await this.getSupportedCommands();
+    return this.getCachedSupportedFeatures();
+  }
+
+  /** Connection-free feature view for status resources. */
+  public getCachedSupportedFeatures(): string[] | null {
+    return this.supportedFeatures === null ? null : Array.from(this.supportedFeatures).sort();
   }
 
   private buildUnsupportedCommandError(messageType: string): string {

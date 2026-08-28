@@ -1,5 +1,5 @@
-import Foundation
 import CryptoKit
+import Foundation
 import Network
 
 /// Global buffer for SDK events received via HTTP POST.
@@ -15,7 +15,9 @@ public final class SdkEventBuffer {
     public func append(_ data: Data) {
         lock.lock()
         buffer.append(data)
-        while buffer.count > maxEvents { buffer.removeFirst() }
+        while buffer.count > maxEvents {
+            buffer.removeFirst()
+        }
         lock.unlock()
     }
 
@@ -123,6 +125,9 @@ public class WebSocketServer: WebSocketServing {
 
     private var listener: NWListener?
     private let connections = ConnectionRegistry<WebSocketConnection>()
+    /// Only connections that completed the RFC 6455 upgrade. HTTP probes share
+    /// the accept path but must never receive framed WebSocket broadcasts.
+    private let upgradedConnections = ConnectionRegistry<WebSocketResponding>()
     private var nextConnectionId = 1
 
     /// Ids of connections that have completed the WebSocket upgrade handshake,
@@ -233,6 +238,7 @@ public class WebSocketServer: WebSocketServing {
 
     /// Stops the server
     public func stop() {
+        _ = upgradedConnections.removeAll()
         connections.removeAll().forEach { $0.close() }
         listener?.cancel()
         listener = nil
@@ -272,6 +278,9 @@ public class WebSocketServer: WebSocketServing {
     /// `private`) so `WebSocketServerTests` can drive the presence bookkeeping
     /// without a live socket (issue #5477).
     func clientDidUpgrade(_ id: Int) {
+        if let connection = connections.value(forId: id) {
+            upgradedConnections.set(connection, forId: id)
+        }
         presenceLock.lock()
         let wasEmpty = upgradedClientIds.isEmpty
         upgradedClientIds.insert(id)
@@ -282,10 +291,17 @@ public class WebSocketServer: WebSocketServing {
         }
     }
 
+    /// Test seam for pinning the broadcast routing invariant without opening a
+    /// real socket. Production upgrades are registered by `clientDidUpgrade`.
+    func registerUpgradedResponderForTesting(_ responder: WebSocketResponding, id: Int) {
+        upgradedConnections.set(responder, forId: id)
+    }
+
     /// Records that a connection closed, firing the presence hook only on the
     /// non-zero → zero transition. A never-upgraded (HTTP-only) connection is a
     /// no-op here, so `/health` probes never toggle presence.
     func clientDidDisconnect(_ id: Int) {
+        upgradedConnections.removeValue(forId: id)
         presenceLock.lock()
         let wasPresent = !upgradedClientIds.isEmpty
         upgradedClientIds.remove(id)
@@ -330,7 +346,9 @@ public class WebSocketServer: WebSocketServing {
     func handleMessage(_ data: Data, responder: WebSocketResponding) {
         do {
             let request = try Self.sharedDecoder.decode(WebSocketRequest.self, from: data)
-            print("[WebSocketServer] Received request type=\(request.typeString) requestId=\(request.requestId ?? "nil")")
+            print(
+                "[WebSocketServer] Received request type=\(request.typeString) requestId=\(request.requestId ?? "nil")"
+            )
 
             // Track the entire request handling with PerfProvider
             perfProvider.serial("handleRequest:\(request.typeString)")
@@ -417,7 +435,7 @@ public class WebSocketServer: WebSocketServing {
             broadcastSink(data)
             return
         }
-        for connection in connections.values() {
+        for connection in upgradedConnections.values() {
             connection.send(data)
         }
     }
@@ -502,7 +520,12 @@ public class WebSocketServer: WebSocketServing {
                 return "\"\(escaped)\""
             } ?? "null"
             let fallbackJSON = """
-            {"type":"error","success":false,"requestId":\(requestIdJSON),"error":"[encoding fallback] \(sanitizedError)","timestamp":\(Int64(Date().timeIntervalSince1970 * 1000))}
+            {"type":"error","success":false,"requestId":\(requestIdJSON),"error":"[encoding fallback] \(
+                sanitizedError
+            )","timestamp":\(Int64(
+                Date()
+                    .timeIntervalSince1970 * 1000
+            ))}
             """
             print("[WebSocketServer] Error response encoding failed, using fallback")
             return fallbackJSON.data(using: .utf8) ?? Data()
@@ -697,9 +720,13 @@ final class NWByteChannel: ByteChannel {
         maximumLength: Int,
         completion: @escaping (Data?, Bool, Error?) -> Void
     ) {
-        connection.receive(minimumIncompleteLength: minimumIncompleteLength, maximumLength: maximumLength) { data, _, isComplete, error in
-            completion(data, isComplete, error)
-        }
+        connection
+            .receive(
+                minimumIncompleteLength: minimumIncompleteLength,
+                maximumLength: maximumLength
+            ) { data, _, isComplete, error in
+                completion(data, isComplete, error)
+            }
     }
 
     func send(_ data: Data, completion: @escaping (Error?) -> Void) {
@@ -867,64 +894,68 @@ class WebSocketConnection: WebSocketResponding {
     // MARK: - WebSocket Handshake
 
     private func receiveHTTPUpgrade() {
-        channel.receive(minimumIncompleteLength: 1, maximumLength: Self.maximumHTTPRequestLength) { [weak self] data, isComplete, error in
-            guard let self = self else { return }
+        channel
+            .receive(
+                minimumIncompleteLength: 1,
+                maximumLength: Self.maximumHTTPRequestLength
+            ) { [weak self] data, isComplete, error in
+                guard let self = self else { return }
 
-            if let error = error {
-                print("[WebSocketConnection] Error: \(error)")
-                self.closeConnection()
-                return
-            }
+                if let error = error {
+                    print("[WebSocketConnection] Error: \(error)")
+                    self.closeConnection()
+                    return
+                }
 
-            if isComplete {
-                self.closeConnection()
-                return
-            }
+                if isComplete {
+                    self.closeConnection()
+                    return
+                }
 
-            guard let data = data else {
-                self.receiveHTTPUpgrade()
-                return
-            }
+                guard let data = data else {
+                    self.receiveHTTPUpgrade()
+                    return
+                }
 
-            self.inboundBuffer.append(data)
-            guard self.inboundBuffer.count <= Self.maximumHTTPRequestLength else {
-                print("[WebSocketConnection] HTTP request exceeds maximum length")
-                self.channel.cancel()
-                return
-            }
+                self.inboundBuffer.append(data)
+                guard self.inboundBuffer.count <= Self.maximumHTTPRequestLength else {
+                    print("[WebSocketConnection] HTTP request exceeds maximum length")
+                    self.channel.cancel()
+                    return
+                }
 
-            guard let requestLength = Self.completeHTTPRequestLength(in: self.inboundBuffer) else {
-                self.receiveHTTPUpgrade()
-                return
-            }
+                guard let requestLength = Self.completeHTTPRequestLength(in: self.inboundBuffer) else {
+                    self.receiveHTTPUpgrade()
+                    return
+                }
 
-            let requestData = Data(self.inboundBuffer.prefix(requestLength))
-            self.inboundBuffer.removeFirst(requestLength)
-            guard let request = String(data: requestData, encoding: .utf8) else {
-                self.channel.cancel()
-                return
-            }
+                let requestData = Data(self.inboundBuffer.prefix(requestLength))
+                self.inboundBuffer.removeFirst(requestLength)
+                guard let request = String(data: requestData, encoding: .utf8) else {
+                    self.channel.cancel()
+                    return
+                }
 
-            // Only the WebSocket-upgrade branch consumes bytes left in
-            // `inboundBuffer` after the slice: `receiveWebSocketFrame` drains them
-            // first (issue #5678). The HTTP branches (`GET /health`,
-            // `POST /sdk-events`, `GET /sdk-events`) each send their response and
-            // then `connection.cancel()`, so any residual bytes after their request
-            // are discarded with the connection — residual-carry there is out of
-            // scope by design (AC4).
-            if request.contains("Upgrade: websocket") || request.contains("upgrade: websocket") {
-                self.handleWebSocketUpgrade(request)
-            } else if request.contains("GET /health") {
-                self.handleHealthCheck()
-            } else if request.contains("POST /sdk-events") {
-                self.handleSdkEventsPost(request)
-            } else if request.contains("GET /sdk-events") {
-                self.handleSdkEventsGet()
-            } else {
-                // Not a WebSocket request, try again
-                self.receiveHTTPUpgrade()
+                // Only the WebSocket-upgrade branch consumes bytes left in
+                // `inboundBuffer` after the slice: `receiveWebSocketFrame` drains them
+                // first (issue #5678). The HTTP branches (`GET /health`,
+                // `POST /sdk-events`, `GET /sdk-events`) each send their response and
+                // then `connection.cancel()`, so any residual bytes after their request
+                // are discarded with the connection — residual-carry there is out of
+                // scope by design (AC4).
+                if request.contains("Upgrade: websocket") || request.contains("upgrade: websocket") {
+                    self.handleWebSocketUpgrade(request)
+                } else if request.contains("GET /health") {
+                    self.handleHealthCheck()
+                } else if request.contains("POST /sdk-events") {
+                    self.handleSdkEventsPost(request)
+                } else if request.contains("GET /sdk-events") {
+                    self.handleSdkEventsGet()
+                } else {
+                    // Not a WebSocket request, try again
+                    self.receiveHTTPUpgrade()
+                }
             }
-        }
     }
 
     /// Returns the byte count of one complete HTTP request, including its body,
@@ -1007,7 +1038,8 @@ class WebSocketConnection: WebSocketResponding {
         } else {
             print("[CtrlProxy] POST /sdk-events: no header separator found in \(request.count) chars")
         }
-        let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 13\r\n\r\n{\"ok\":true}\r\n"
+        let response =
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 13\r\n\r\n{\"ok\":true}\r\n"
         channel.send(Data(response.utf8)) { [weak self] _ in
             self?.channel.cancel()
         }
@@ -1043,8 +1075,7 @@ class WebSocketConnection: WebSocketResponding {
 
         // Calculate accept key
         let magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-        // A String always encodes to UTF-8, so .data(using: .utf8) is never nil.
-    let acceptKey = (key + magic).data(using: .utf8)!.sha1().base64EncodedString()  // swiftlint:disable:this force_unwrapping
+        let acceptKey = Data((key + magic).utf8).sha1().base64EncodedString()
 
         // Send upgrade response
         let response = """
@@ -1264,7 +1295,9 @@ class WebSocketConnection: WebSocketResponding {
         payloadLength: UInt64,
         isMasked: Bool,
         maxPayload: UInt64 = maxFramePayloadLength
-    ) -> Int? {
+    )
+        -> Int?
+    {
         guard payloadLength <= maxPayload else { return nil }
         return Int(payloadLength) + (isMasked ? 4 : 0)
     }
@@ -1294,11 +1327,15 @@ class WebSocketConnection: WebSocketResponding {
         inProgressOpcode: UInt8?,
         alreadyBuffered: Int,
         maxTotal: UInt64 = maxFramePayloadLength
-    ) -> FramePreReadDecision {
+    )
+        -> FramePreReadDecision
+    {
         switch opcode {
         case 0x01, 0x02:
             if inProgressOpcode != nil {
-                return .reject("new data frame (opcode 0x\(String(opcode, radix: 16))) while a fragmented message is open")
+                return .reject(
+                    "new data frame (opcode 0x\(String(opcode, radix: 16))) while a fragmented message is open"
+                )
             }
             guard declaredPayloadLength <= maxTotal else {
                 return .reject("frame payload exceeds \(maxTotal) bytes")
@@ -1416,12 +1453,16 @@ class WebSocketConnection: WebSocketResponding {
         payload: Data,
         inProgressOpcode: inout UInt8?,
         maxTotal: UInt64 = maxFramePayloadLength
-    ) -> AccumulateResult {
+    )
+        -> AccumulateResult
+    {
         switch opcode {
         case 0x01, 0x02:
             // A new data frame is illegal while a fragmented message is still open.
             if inProgressOpcode != nil {
-                return .protocolError("new data frame (opcode 0x\(String(opcode, radix: 16))) while a fragmented message is open")
+                return .protocolError(
+                    "new data frame (opcode 0x\(String(opcode, radix: 16))) while a fragmented message is open"
+                )
             }
             guard UInt64(payload.count) <= maxTotal else {
                 return .protocolError("frame payload exceeds \(maxTotal) bytes")
@@ -1477,7 +1518,8 @@ class WebSocketConnection: WebSocketResponding {
                declaredPayloadLength: length,
                inProgressOpcode: fragmentedOpcode,
                alreadyBuffered: fragmentBuffer.count
-           ) {
+           )
+        {
             print("[WebSocketConnection] Fragmentation protocol error (pre-read): \(reason), closing connection")
             fragmentedOpcode = nil
             fragmentBuffer = Data()

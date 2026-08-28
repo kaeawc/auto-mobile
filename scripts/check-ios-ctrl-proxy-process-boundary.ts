@@ -1,18 +1,12 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
+import { executionBoundaryAst } from "./lib/executionBoundaryAst";
 
 const SOURCE_ROOT = "src";
 const OWNER = "src/utils/ios/IOSCtrlProxyProcessClient.ts";
 const PROCESS_TOOLS = new Set(["ps", "pgrep", "kill", "lsof"]);
-const EXECUTION_METHODS = new Set([
-  "exec",
-  "execFile",
-  "execFileSync",
-  "executeCommand",
-  "spawn",
-  "spawnSync",
-]);
+const SHELLS = new Set(["sh", "/bin/sh", "bash", "/bin/bash", "zsh", "/bin/zsh"]);
 const EXCEPTIONS = new Map<string, string>([
   [
     "src/features/performance/PerformanceMonitor.ts",
@@ -38,26 +32,14 @@ function sourceFiles(directory: string): string[] {
   });
 }
 
-function commandFromCall(node: ts.CallExpression): string | null {
-  const firstArgument = node.arguments[0];
-  if (ts.isStringLiteral(firstArgument)) {
-    return firstArgument.text;
-  }
-  if (ts.isArrayLiteralExpression(firstArgument) && ts.isStringLiteral(firstArgument.elements[0])) {
-    return firstArgument.elements[0].text;
-  }
-  return null;
+function commandName(value: string): string {
+  return value.split(/[\\/]/).at(-1)?.toLowerCase() ?? "";
 }
 
-function executesProcessTool(node: ts.CallExpression): boolean {
-  const expression = node.expression;
-  if (ts.isIdentifier(expression)) {
-    return EXECUTION_METHODS.has(expression.text) && PROCESS_TOOLS.has(commandFromCall(node) ?? "");
-  }
-  if (!ts.isPropertyAccessExpression(expression) || !EXECUTION_METHODS.has(expression.name.text)) {
-    return false;
-  }
-  return PROCESS_TOOLS.has(commandFromCall(node) ?? "");
+function shellTextExecutesProcessTool(value: string): boolean {
+  return [...PROCESS_TOOLS].some((tool) =>
+    new RegExp(`(?:^|[\\s;&|])(?:[^\\s;&|]*[/\\\\])?${tool}(?:\\s|$)`, "i").test(value),
+  );
 }
 
 export function findViolationsInSource(file: string, source: string): Violation[] {
@@ -68,22 +50,35 @@ export function findViolationsInSource(file: string, source: string): Violation[
     true,
     ts.ScriptKind.TS,
   );
+  const ast = executionBoundaryAst(source);
   const violations: Violation[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node) && executesProcessTool(node)) {
-      const { line, character } = sourceFile.getLineAndCharacterOfPosition(
-        node.getStart(sourceFile),
-      );
-      violations.push({
-        file,
-        line: line + 1,
-        column: character + 1,
-        text: node.getText(sourceFile),
-      });
+  for (const node of ast.calls) {
+    if (!ast.isLauncher(node) && !ast.isExecutionSeam(node)) {
+      continue;
     }
-    ts.forEachChild(node, visit);
-  };
-  visit(sourceFile);
+    const first = node.arguments[0];
+    const arrayCommands =
+      ast
+        .arrayAlternatives(first)
+        ?.flatMap((items) => (items.length > 0 ? ast.strings(items[0]) : [])) ?? [];
+    const directCommands = [...ast.strings(first), ...arrayCommands];
+    const executesDirectly = directCommands.some((value) => PROCESS_TOOLS.has(commandName(value)));
+    const invokesShell = directCommands.some((value) => SHELLS.has(value.toLowerCase()));
+    const shellPayloads = node.arguments.slice(1).flatMap((argument) => ast.strings(argument));
+    const executesViaShell =
+      (invokesShell || ["exec", "execSync"].includes(ast.calleeName(node) ?? "")) &&
+      [...directCommands, ...shellPayloads].some(shellTextExecutesProcessTool);
+    if (!executesDirectly && !executesViaShell) {
+      continue;
+    }
+    const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+    violations.push({
+      file,
+      line: line + 1,
+      column: character + 1,
+      text: node.getText(sourceFile),
+    });
+  }
   return violations;
 }
 

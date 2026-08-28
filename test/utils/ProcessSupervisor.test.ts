@@ -47,6 +47,47 @@ describe("DefaultProcessSupervisor", function () {
     expect(timer.getPendingIntervals()).toEqual([250]);
   });
 
+  test("ignores a liveness result from the process that preceded an automatic restart", async function () {
+    const timer = new FakeTimer();
+    let finishProbe!: (alive: boolean) => void;
+    let exits = 0;
+    let restarts = 0;
+    const supervisor = new DefaultProcessSupervisor({
+      name: "test-process",
+      timer,
+      monitorIntervalMs: 250,
+      restartBackoff: sequenceBackoff([100]),
+      restart: async () => {
+        restarts++;
+      },
+      isAlive: async () =>
+        await new Promise<boolean>((resolve) => {
+          finishProbe = resolve;
+        }),
+      onExit: () => {
+        exits++;
+      },
+    });
+
+    await supervisor.start();
+    timer.advanceTime(250);
+    await flushMicrotasks();
+
+    supervisor.processExited();
+    await flushMicrotasks();
+    timer.advanceTime(100);
+    await flushMicrotasks();
+    expect(restarts).toBe(1);
+
+    finishProbe(false);
+    await flushMicrotasks();
+
+    expect(exits).toBe(1);
+    expect(restarts).toBe(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingIntervals()).toEqual([250]);
+  });
+
   test("uses the injected Backoff policy for retry progression", async function () {
     const timer = new FakeTimer();
     const attemptedAt: number[] = [];
@@ -282,6 +323,45 @@ describe("DefaultProcessSupervisor", function () {
     await flushMicrotasks();
 
     // A rejected probe must not schedule a restart of a possibly-healthy runner.
+    expect(exits).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingIntervals()).toEqual([250]);
+  });
+
+  test("discards a stale liveness result after stop and replacement start", async function () {
+    const timer = new FakeTimer();
+    let resolveOldProbe!: (alive: boolean) => void;
+    let useDeferredProbe = true;
+    let exits = 0;
+    const supervisor = new DefaultProcessSupervisor({
+      name: "test-process",
+      timer,
+      monitorIntervalMs: 250,
+      restartBackoff: sequenceBackoff([100]),
+      restart: async () => {},
+      isAlive: async () => {
+        if (!useDeferredProbe) {
+          return true;
+        }
+        return await new Promise<boolean>((resolve) => {
+          resolveOldProbe = resolve;
+        });
+      },
+      onExit: () => {
+        exits++;
+      },
+    });
+
+    await supervisor.start();
+    timer.advanceTime(250);
+    await flushMicrotasks();
+
+    supervisor.stop();
+    useDeferredProbe = false;
+    await supervisor.start();
+    resolveOldProbe(false);
+    await flushMicrotasks();
+
     expect(exits).toBe(0);
     expect(timer.getPendingTimeoutCount()).toBe(0);
     expect(timer.getPendingIntervals()).toEqual([250]);

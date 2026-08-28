@@ -23,6 +23,7 @@
 # Runtime state
 XCODEBUILD_PID=""
 XCODEBUILD_LOG=""
+IOS_RUNNER_PID_FILE="${IOS_RUNNER_PID_FILE:-${PROJECT_ROOT}/scratch/ios-ctrl-proxy-runner.pid}"
 
 # Compute SHA256 hash from stdin
 hash_stream() {
@@ -165,7 +166,8 @@ get_xctestrun_path() {
   fi
 
   local xctestrun_file
-  xctestrun_file=$(find "${products_dir}" -maxdepth 1 -name "*.xctestrun" 2>/dev/null | head -1 || true)
+  xctestrun_file=$(find "${products_dir}" -maxdepth 1 -name "*.xctestrun" \
+    ! -name "automobile-runner-*.xctestrun" 2>/dev/null | head -1 || true)
   if [[ -n "${xctestrun_file}" ]]; then
     echo "${xctestrun_file}"
     return
@@ -179,6 +181,7 @@ start_ctrl_proxy_ios() {
   local simulator_id="$1"
   local port="${CTRL_PROXY_IOS_PORT:-8765}"
   local xctestrun_path
+  local runner_xctestrun_path
   xctestrun_path="$(get_xctestrun_path)"
 
   if [[ -z "${simulator_id}" ]]; then
@@ -187,60 +190,52 @@ start_ctrl_proxy_ios() {
   fi
 
   XCODEBUILD_LOG="${PROJECT_ROOT}/scratch/ios-ctrl-proxy.log"
-  local cmd=()
-
-  if [[ -n "${xctestrun_path}" ]]; then
-    log_info "Starting CtrlProxy iOS (test-without-building)..."
-    cmd=(
-      xcodebuild
-      test-without-building
-      -xctestrun "${xctestrun_path}"
-      -destination "id=${simulator_id}"
-      -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService
-      "CTRL_PROXY_IOS_PORT=${port}"
-      "AUTOMOBILE_DEVICE_ID=${simulator_id}"
-    )
-  else
-    log_info "Starting CtrlProxy iOS (xcodebuild test)..."
-    cmd=(
-      xcodebuild
-      test
-      -scheme CtrlProxyApp
-      -destination "id=${simulator_id}"
-      -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService
-      "CTRL_PROXY_IOS_PORT=${port}"
-      "AUTOMOBILE_DEVICE_ID=${simulator_id}"
-    )
+  if [[ -z "${xctestrun_path}" ]]; then
+    log_error "No CtrlProxy .xctestrun file found after build-for-testing."
+    return 1
   fi
 
+  stop_ctrl_proxy_ios
+
+  runner_xctestrun_path="$(dirname "${xctestrun_path}")/automobile-runner-${simulator_id}.xctestrun"
+  cp "${xctestrun_path}" "${runner_xctestrun_path}"
+  plutil -replace "CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_PORT" \
+    -string "${port}" "${runner_xctestrun_path}"
+  plutil -replace "CtrlProxyUITests.EnvironmentVariables.AUTOMOBILE_DEVICE_ID" \
+    -string "${simulator_id}" "${runner_xctestrun_path}"
   if [[ -n "${CTRL_PROXY_IOS_BUNDLE_ID:-}" ]]; then
-    cmd+=("CTRL_PROXY_IOS_BUNDLE_ID=${CTRL_PROXY_IOS_BUNDLE_ID}")
+    plutil -replace "CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_BUNDLE_ID" \
+      -string "${CTRL_PROXY_IOS_BUNDLE_ID}" "${runner_xctestrun_path}"
   fi
   if [[ -n "${CTRL_PROXY_IOS_TIMEOUT:-}" ]]; then
-    cmd+=("CTRL_PROXY_IOS_TIMEOUT=${CTRL_PROXY_IOS_TIMEOUT}")
+    plutil -replace "CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_TIMEOUT" \
+      -string "${CTRL_PROXY_IOS_TIMEOUT}" "${runner_xctestrun_path}"
   fi
 
-  # Kill any orphaned xcodebuild.*test.*CtrlProxy (e.g. from a
-  # previous watcher that was SIGKILL'd before it could clean up its children).
-  local existing_pids
-  existing_pids=$(pgrep -f "xcodebuild.*test.*CtrlProxy" 2>/dev/null || true)
-  if [[ -n "${existing_pids}" ]]; then
-    log_info "Killing orphaned CtrlProxy iOS xcodebuild processes: ${existing_pids}"
-    echo "${existing_pids}" | xargs kill 2>/dev/null || true
-    sleep 2
-    # Force kill if still running
-    existing_pids=$(pgrep -f "xcodebuild.*test.*CtrlProxy" 2>/dev/null || true)
-    if [[ -n "${existing_pids}" ]]; then
-      log_warn "Force killing orphaned xcodebuild processes..."
-      echo "${existing_pids}" | xargs kill -9 2>/dev/null || true
-      sleep 1
-    fi
+  local cmd=(
+    xcodebuild
+    test-without-building
+    -xctestrun "${runner_xctestrun_path}"
+    -destination "id=${simulator_id}"
+    -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService
+  )
+  local runner_env=(
+    "CTRL_PROXY_IOS_PORT=${port}"
+    "AUTOMOBILE_DEVICE_ID=${simulator_id}"
+  )
+  if [[ -n "${CTRL_PROXY_IOS_BUNDLE_ID:-}" ]]; then
+    runner_env+=("CTRL_PROXY_IOS_BUNDLE_ID=${CTRL_PROXY_IOS_BUNDLE_ID}")
+  fi
+  if [[ -n "${CTRL_PROXY_IOS_TIMEOUT:-}" ]]; then
+    runner_env+=("CTRL_PROXY_IOS_TIMEOUT=${CTRL_PROXY_IOS_TIMEOUT}")
   fi
 
   echo "" >> "${XCODEBUILD_LOG}"
   echo "=== CtrlProxy iOS starting at $(date) ===" >> "${XCODEBUILD_LOG}"
-  (cd "${CTRL_PROXY_IOS_DIR}" && "${cmd[@]}") >> "${XCODEBUILD_LOG}" 2>&1 &
+  (cd "${CTRL_PROXY_IOS_DIR}" && exec env "${runner_env[@]}" "${cmd[@]}") \
+    >> "${XCODEBUILD_LOG}" 2>&1 &
   XCODEBUILD_PID=$!
+  printf '%s\n' "${XCODEBUILD_PID}" > "${IOS_RUNNER_PID_FILE}"
   log_info "CtrlProxy iOS started (PID ${XCODEBUILD_PID})"
   log_info "Logs: ${XCODEBUILD_LOG}"
   return 0
@@ -248,6 +243,23 @@ start_ctrl_proxy_ios() {
 
 # Stop CtrlProxy iOS process
 stop_ctrl_proxy_ios() {
+  if [[ -z "${XCODEBUILD_PID}" ]] && [[ -f "${IOS_RUNNER_PID_FILE}" ]]; then
+    XCODEBUILD_PID=$(cat "${IOS_RUNNER_PID_FILE}" 2>/dev/null || true)
+  fi
+  if [[ -n "${XCODEBUILD_PID}" ]] && ! [[ "${XCODEBUILD_PID}" =~ ^[0-9]+$ ]]; then
+    log_warn "Ignoring invalid CtrlProxy iOS runner PID: ${XCODEBUILD_PID}"
+    XCODEBUILD_PID=""
+  fi
+  if [[ -n "${XCODEBUILD_PID}" ]] && kill -0 "${XCODEBUILD_PID}" 2>/dev/null; then
+    local command
+    command=$(ps -p "${XCODEBUILD_PID}" -o args= 2>/dev/null || true)
+    if [[ "${command}" != *"xcodebuild"* ]] || [[ "${command}" != *"CtrlProxy"* ]]; then
+      log_warn "Refusing to stop recycled/non-CtrlProxy PID ${XCODEBUILD_PID}."
+      XCODEBUILD_PID=""
+      rm -f "${IOS_RUNNER_PID_FILE}"
+      return 0
+    fi
+  fi
   if [[ -n "${XCODEBUILD_PID}" ]] && kill -0 "${XCODEBUILD_PID}" 2>/dev/null; then
     log_info "Stopping CtrlProxy iOS (PID ${XCODEBUILD_PID})..."
     kill "${XCODEBUILD_PID}" 2>/dev/null || true
@@ -266,6 +278,7 @@ stop_ctrl_proxy_ios() {
     fi
   fi
   XCODEBUILD_PID=""
+  rm -f "${IOS_RUNNER_PID_FILE}"
 }
 
 # Watch for changes and rebuild/restart

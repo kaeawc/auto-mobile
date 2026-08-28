@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyClient, CtrlProxyHierarchy } from "../../../../src/features/observe/ios";
+import {
+  IOS_RUNNER_FEATURE_FLAGS,
+  getRequiredIosRunnerFeatureFlags,
+} from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 import { BootedDevice, HighlightShape } from "../../../../src/models";
 import { NetworkState } from "../../../../src/server/NetworkState";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
@@ -20,6 +24,18 @@ import {
   stopDeviceDataStreamSocketServer,
 } from "../../../../src/daemon/deviceDataStreamSocketServer";
 import { FakeSocket } from "../../../fakes/FakeNetServer";
+
+describe("iOS runner feature release sequencing", () => {
+  test("does not require an unreleased handshake from the immutable 0.0.66 IPA", () => {
+    expect(getRequiredIosRunnerFeatureFlags({ AUTOMOBILE_VERSION: "0.0.66" })).toEqual([]);
+  });
+
+  test("requires the handshake starting with the release that will contain it", () => {
+    expect(getRequiredIosRunnerFeatureFlags({ AUTOMOBILE_VERSION: "0.0.67" })).toEqual([
+      ...IOS_RUNNER_FEATURE_FLAGS,
+    ]);
+  });
+});
 
 describe("IOSCtrlProxyClient", function () {
   let ctrlProxyClient: IOSCtrlProxyClient;
@@ -2123,6 +2139,7 @@ describe("IOSCtrlProxyClient", function () {
             type: "connected",
             id: 1,
             supportedCommands: ["request_shake", "add_highlight", "request_press_button"],
+            supportedFeatures: ["display_cutout_info"],
           }),
         );
         await flushPromises();
@@ -2136,6 +2153,8 @@ describe("IOSCtrlProxyClient", function () {
           "request_press_button",
           "request_shake",
         ]);
+        expect(await testClient.getSupportedFeatures()).toEqual(["display_cutout_info"]);
+        expect(testClient.getCachedSupportedFeatures()).toEqual(["display_cutout_info"]);
       } finally {
         await testClient.close();
       }

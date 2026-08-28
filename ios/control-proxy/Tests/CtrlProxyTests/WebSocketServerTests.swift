@@ -173,6 +173,16 @@ final class WebSocketServerTests: XCTestCase {
         XCTAssertNotEqual(response.frameContext, frameContext.context(for: screenA))
     }
 
+    func testBroadcastSendsOnlyToUpgradedResponders() {
+        let upgraded = FakeResponder()
+        let server = makeServer()
+        server.registerUpgradedResponderForTesting(upgraded, id: 7)
+
+        server.broadcast(Data("PUSH".utf8))
+
+        XCTAssertEqual(upgraded.sent, [Data("PUSH".utf8)])
+    }
+
     // MARK: - Decode-failure → error envelope (real handleMessage path)
 
     /// An unknown command `type` (no enum case) is rejected at decode; the real
@@ -269,11 +279,11 @@ final class WebSocketServerTests: XCTestCase {
     /// is that it does not crash and ends empty after a balanced add/remove.
     func testConnectionRegistryConcurrentAccessDoesNotCrash() {
         let registry = ConnectionRegistry<Int>()
-        let iterations = 2_000
+        let iterations = 2000
 
         DispatchQueue.concurrentPerform(iterations: iterations) { i in
             registry.set(i, forId: i)
-            _ = registry.values()   // snapshot iteration, concurrent with mutation
+            _ = registry.values() // snapshot iteration, concurrent with mutation
             _ = registry.count
             registry.removeValue(forId: i)
         }
@@ -433,7 +443,11 @@ final class WebSocketServerTests: XCTestCase {
                 continue
             }
         }
-        XCTFail("could not bind a WebSocketServer on any port in [\(base), \(base + UInt16(attempts))]", file: file, line: line)
+        XCTFail(
+            "could not bind a WebSocketServer on any port in [\(base), \(base + UInt16(attempts))]",
+            file: file,
+            line: line
+        )
         fatalError("unreachable")
     }
 
@@ -536,7 +550,9 @@ final class WebSocketServerTests: XCTestCase {
         )
         XCTAssertEqual(statusBox.value, 200, "health check should return 200 while a command is blocked")
         XCTAssertEqual(
-            bodyBox.value.flatMap { (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any] }?["status"] as? String,
+            bodyBox.value
+                .flatMap { (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any]
+                }?["status"] as? String,
             "ok",
             "health body should report status:ok"
         )
@@ -816,7 +832,8 @@ final class WebSocketServerTests: XCTestCase {
             reassembler.feed(opcode: 0x01, isFinal: false, payload: Data("hello".utf8), maxTotal: 8), // 5
             .buffered
         )
-        let result = reassembler.feed(opcode: 0x00, isFinal: true, payload: Data("world".utf8), maxTotal: 8) // +5 → 10 > 8
+        let result = reassembler
+            .feed(opcode: 0x00, isFinal: true, payload: Data("world".utf8), maxTotal: 8) // +5 → 10 > 8
         guard case .protocolError = result else {
             return XCTFail("exceeding the total reassembled size bound must be a protocol error")
         }
@@ -847,30 +864,62 @@ final class WebSocketServerTests: XCTestCase {
 
         // Admissible: a fresh single/opening data frame within the cap.
         XCTAssertEqual(
-            WebSocketConnection.preReadDataFrameDecision(opcode: 0x01, declaredPayloadLength: 100, inProgressOpcode: nil, alreadyBuffered: 0),
+            WebSocketConnection.preReadDataFrameDecision(
+                opcode: 0x01,
+                declaredPayloadLength: 100,
+                inProgressOpcode: nil,
+                alreadyBuffered: 0
+            ),
             Decision.read
         )
         // Admissible: a continuation that fits the remaining budget exactly.
         XCTAssertEqual(
-            WebSocketConnection.preReadDataFrameDecision(opcode: 0x00, declaredPayloadLength: 4, inProgressOpcode: 0x01, alreadyBuffered: 6, maxTotal: 10),
+            WebSocketConnection.preReadDataFrameDecision(
+                opcode: 0x00,
+                declaredPayloadLength: 4,
+                inProgressOpcode: 0x01,
+                alreadyBuffered: 6,
+                maxTotal: 10
+            ),
             Decision.read
         )
 
         // The Codex vector: a new data frame declared while a fragment is open —
         // illegal, and must be rejected before its ~64 MiB payload is read.
-        guard case .reject = WebSocketConnection.preReadDataFrameDecision(opcode: 0x02, declaredPayloadLength: max, inProgressOpcode: 0x01, alreadyBuffered: Int(max)) else {
+        guard case .reject = WebSocketConnection.preReadDataFrameDecision(
+            opcode: 0x02,
+            declaredPayloadLength: max,
+            inProgressOpcode: 0x01,
+            alreadyBuffered: Int(max)
+        ) else {
             return XCTFail("a new data frame while a fragment is open must be rejected pre-read")
         }
         // A continuation that would overflow the total budget — rejected pre-read.
-        guard case .reject = WebSocketConnection.preReadDataFrameDecision(opcode: 0x00, declaredPayloadLength: 5, inProgressOpcode: 0x01, alreadyBuffered: 6, maxTotal: 10) else {
+        guard case .reject = WebSocketConnection.preReadDataFrameDecision(
+            opcode: 0x00,
+            declaredPayloadLength: 5,
+            inProgressOpcode: 0x01,
+            alreadyBuffered: 6,
+            maxTotal: 10
+        ) else {
             return XCTFail("an over-budget continuation must be rejected pre-read")
         }
         // A continuation with no message in progress — rejected pre-read.
-        guard case .reject = WebSocketConnection.preReadDataFrameDecision(opcode: 0x00, declaredPayloadLength: 1, inProgressOpcode: nil, alreadyBuffered: 0) else {
+        guard case .reject = WebSocketConnection.preReadDataFrameDecision(
+            opcode: 0x00,
+            declaredPayloadLength: 1,
+            inProgressOpcode: nil,
+            alreadyBuffered: 0
+        ) else {
             return XCTFail("an orphan continuation must be rejected pre-read")
         }
         // A single data frame larger than the whole cap — rejected pre-read.
-        guard case .reject = WebSocketConnection.preReadDataFrameDecision(opcode: 0x01, declaredPayloadLength: max + 1, inProgressOpcode: nil, alreadyBuffered: 0) else {
+        guard case .reject = WebSocketConnection.preReadDataFrameDecision(
+            opcode: 0x01,
+            declaredPayloadLength: max + 1,
+            inProgressOpcode: nil,
+            alreadyBuffered: 0
+        ) else {
             return XCTFail("an over-cap opening frame must be rejected pre-read")
         }
     }
@@ -1096,7 +1145,10 @@ final class WebSocketServerTests: XCTestCase {
         }
         wait(for: [received], timeout: 15)
 
-        let response = try XCTUnwrap(responseBox.value, "a frame pipelined with the upgrade must be delivered, not dropped (issue #5678)")
+        let response = try XCTUnwrap(
+            responseBox.value,
+            "a frame pipelined with the upgrade must be delivered, not dropped (issue #5678)"
+        )
         XCTAssertEqual(response["requestId"] as? String, "pipelined-1")
         XCTAssertEqual(response["success"] as? Bool, true)
     }
@@ -1183,7 +1235,11 @@ final class WebSocketServerTests: XCTestCase {
         }
         wait(for: [received], timeout: 20)
 
-        XCTAssertEqual(seenBox.value, Set(ids), "every frame pipelined in the same segment must be delivered, not just the first")
+        XCTAssertEqual(
+            seenBox.value,
+            Set(ids),
+            "every frame pipelined in the same segment must be delivered, not just the first"
+        )
     }
 
     // MARK: - Client presence gating (#5477)
@@ -1699,7 +1755,10 @@ private final class RawWebSocketClient: @unchecked Sendable {
 
     /// Sends one client→server frame, masked as §5.3 requires.
     func sendFrame(opcode: UInt8, fin: Bool, payload: Data) {
-        connection.send(content: Self.maskedFrame(opcode: opcode, fin: fin, payload: payload), completion: .contentProcessed { _ in })
+        connection.send(
+            content: Self.maskedFrame(opcode: opcode, fin: fin, payload: payload),
+            completion: .contentProcessed { _ in }
+        )
     }
 
     /// Polls parsed server frames until one decodes to a JSON object satisfying
@@ -1707,7 +1766,9 @@ private final class RawWebSocketClient: @unchecked Sendable {
     func waitForMessage(
         timeout: TimeInterval,
         where predicate: ([String: Any]) -> Bool
-    ) throws -> [String: Any] {
+    )
+        throws -> [String: Any]
+    {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if let object = nextMatchingMessage(predicate) {
@@ -1794,7 +1855,8 @@ private final class RawWebSocketClient: @unchecked Sendable {
 
             if opcode == 0x01 || opcode == 0x02 {
                 if let object = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
-                   predicate(object) {
+                   predicate(object)
+                {
                     return object
                 }
             }

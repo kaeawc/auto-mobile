@@ -91,6 +91,7 @@ nav:
       - "Feature flags": using/feature-flags.md
       - "Environment variables": using/environment-variables.md
       - "Performance": using/performance.md
+      - "CI screen streaming": webrtc-streaming-ci-worker.md
   - "How it Works":
       - "System design": design-docs/index.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md

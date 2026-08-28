@@ -22,14 +22,20 @@ function containsXcodebuildCommand(value: string): boolean {
 
 function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
   let index = 1;
+  let optionsTerminated = false;
   while (index < argv.length) {
     const argument = argv[index];
-    if (argument === "--") {
-      return commandName(argv[index + 1] ?? "") === "xcodebuild";
+    if (!optionsTerminated && argument === "--") {
+      optionsTerminated = true;
+      index++;
+      continue;
     }
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argument)) {
       index++;
       continue;
+    }
+    if (optionsTerminated) {
+      return commandName(argument) === "xcodebuild";
     }
     if (["-i", "--ignore-environment", "-0", "--null"].includes(argument)) {
       index++;
@@ -41,6 +47,9 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
     }
     if (["-S", "--split-string"].includes(argument)) {
       return containsXcodebuildCommand(argv[index + 1] ?? "");
+    }
+    if (argument.startsWith("-S") && argument.length > 2) {
+      return containsXcodebuildCommand(argument.slice(2));
     }
     if (/^--(?:unset|chdir)=/.test(argument)) {
       index++;

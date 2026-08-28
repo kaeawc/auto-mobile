@@ -163,6 +163,7 @@ interface ReleaseReasonState {
   value: string;
   finalizedSnapshot?: SessionReleaseSnapshot;
   lateTerminalRelease?: Promise<string | null>;
+  terminalPersisted?: boolean;
 }
 
 interface PendingSessionRelease {
@@ -179,6 +180,12 @@ interface PendingSessionRebind {
   promise: Promise<Session>;
 }
 
+interface TerminalReleaseReservation {
+  session: Session;
+  deviceId: string;
+  owner: symbol;
+}
+
 export interface SessionDeviceAssigner {
   assignDeviceToSession(sessionId: string, platform?: Platform): Promise<string>;
 }
@@ -189,6 +196,8 @@ export interface RebindSessionOptions {
    * state must be cleared even though the serial is unchanged.
    */
   force?: boolean;
+  /** Internal owner proving that a shutdown reservation authorized this recovery rebind. */
+  terminalReleaseReservationOwner?: symbol;
 }
 
 const KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS = 1_000;
@@ -258,6 +267,10 @@ export class SessionManager {
   private readonly releasePromises: Map<string, SessionReleaseOperation> = new Map();
   /** Every release still running, including an older session that reused a UUID. */
   private readonly activeReleasePromises: Set<SessionReleaseOperation> = new Set();
+  /** Finalized release state retained only while its exact Session identity is referenced. */
+  private readonly finalizedSessionReleases: WeakMap<Session, ReleaseReasonState> = new WeakMap();
+  /** UUID admission fences held while a device shutdown decides its terminal outcome. */
+  private readonly terminalReleaseReservations: Map<string, TerminalReleaseReservation> = new Map();
   /** Setup work that can modify device state after a session has been assigned. */
   private readonly sessionSetupPromises: Set<{ session: Session; promise: Promise<void> }> =
     new Set();
@@ -385,6 +398,7 @@ export class SessionManager {
     timeoutMs?: number,
     heartbeatTimeoutMs?: number,
   ): Promise<Session> {
+    this.assertTerminalReleaseAdmission(sessionId, this.sessions.get(sessionId));
     const terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
     if (terminalRelease) {
       throw new TerminalSessionError(sessionId, terminalRelease);
@@ -435,6 +449,7 @@ export class SessionManager {
       throw new TerminalSessionError(session.sessionId, persistedTerminalRelease);
     }
     await this.persistSession(session);
+    this.assertTerminalReleaseAdmission(session.sessionId, session);
     this.sessions.set(session.sessionId, session);
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
@@ -588,6 +603,8 @@ export class SessionManager {
       return existing;
     }
 
+    this.assertTerminalReleaseAdmission(sessionId);
+
     const terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
     if (terminalRelease) {
       throw new TerminalSessionError(sessionId, terminalRelease);
@@ -665,6 +682,7 @@ export class SessionManager {
     options: RebindSessionOptions = {},
   ): Promise<Session> {
     const existing = this.sessions.get(sessionId);
+    this.assertTerminalRebindAdmission(sessionId, options.terminalReleaseReservationOwner);
     if (!existing) {
       return await this.createSession(sessionId, assignedDevice, platform);
     }
@@ -694,6 +712,22 @@ export class SessionManager {
         this.pendingSessionRebinds.delete(sessionId);
       }
     }
+  }
+
+  /** Rebind the exact reserved session during its owner-controlled recovery handoff. */
+  async rebindSessionForTerminalReleaseRecovery(
+    session: Session,
+    assignedDevice: string,
+    platform: Platform,
+  ): Promise<Session> {
+    const reservation = this.terminalReleaseReservations.get(session.sessionId);
+    if (reservation?.session !== session) {
+      throw new Error(`Session ${session.sessionId} has no matching terminal release reservation.`);
+    }
+    return await this.rebindSession(session.sessionId, assignedDevice, platform, {
+      force: true,
+      terminalReleaseReservationOwner: reservation.owner,
+    });
   }
 
   private async persistAndPublishRebind(
@@ -778,6 +812,54 @@ export class SessionManager {
     return snapshot ? { ...snapshot, heartbeat: { ...snapshot.heartbeat } } : undefined;
   }
 
+  /** Prevent this exact session UUID from being rebound while its device shutdown is in flight. */
+  reserveSessionForTerminalRelease(session: Session, expectedDeviceId: string): () => void {
+    if (session.assignedDevice !== expectedDeviceId) {
+      throw new Error(`Session ${session.sessionId} no longer owns device ${expectedDeviceId}.`);
+    }
+    if (this.pendingSessionRebinds.has(session.sessionId)) {
+      throw new Error(
+        `Session ${session.sessionId} is rebinding devices; retry shutdown after it settles.`,
+      );
+    }
+    const existing = this.terminalReleaseReservations.get(session.sessionId);
+    if (existing) {
+      throw new Error(`Session ${session.sessionId} is already reserved for terminal release.`);
+    }
+    const reservation: TerminalReleaseReservation = {
+      session,
+      deviceId: expectedDeviceId,
+      owner: Symbol(session.sessionId),
+    };
+    this.terminalReleaseReservations.set(session.sessionId, reservation);
+    return () => {
+      if (this.terminalReleaseReservations.get(session.sessionId)?.owner === reservation.owner) {
+        this.terminalReleaseReservations.delete(session.sessionId);
+      }
+    };
+  }
+
+  private assertTerminalReleaseAdmission(sessionId: string, allowedSession?: Session): void {
+    const reservation = this.terminalReleaseReservations.get(sessionId);
+    if (reservation && reservation.session !== allowedSession) {
+      throw new Error(
+        `Session ${sessionId} is being terminally released from device ${reservation.deviceId}; use a new session UUID.`,
+      );
+    }
+  }
+
+  private assertTerminalRebindAdmission(
+    sessionId: string,
+    reservationOwner: symbol | undefined,
+  ): void {
+    const reservation = this.terminalReleaseReservations.get(sessionId);
+    if (reservation && reservation.owner !== reservationOwner) {
+      throw new Error(
+        `Session ${sessionId} is being terminally released from device ${reservation.deviceId}; use a new session UUID.`,
+      );
+    }
+  }
+
   /**
    * Get session assigned to a device (reverse lookup)
    */
@@ -860,6 +942,35 @@ export class SessionManager {
       expectedSession.assignedDevice === expectedDeviceId
     ) {
       return await this.releaseSession(sessionId, releaseReason);
+    }
+    return await this.releaseFinalizedSessionIfOwned(
+      sessionId,
+      expectedSession,
+      expectedDeviceId,
+      releaseReason,
+    );
+  }
+
+  private async releaseFinalizedSessionIfOwned(
+    sessionId: string,
+    expectedSession: Session,
+    expectedDeviceId: string,
+    releaseReason: string,
+  ): Promise<string | null> {
+    const finalizedRelease = this.finalizedSessionReleases.get(expectedSession);
+    if (
+      finalizedRelease?.finalizedSnapshot?.sessionId === sessionId &&
+      finalizedRelease.finalizedSnapshot.deviceId === expectedDeviceId &&
+      isTerminalReleaseReason(releaseReason)
+    ) {
+      if (
+        finalizedRelease.finalizedSnapshot.terminal &&
+        finalizedRelease.terminalPersisted &&
+        !finalizedRelease.lateTerminalRelease
+      ) {
+        return finalizedRelease.finalizedSnapshot.deviceId;
+      }
+      return await this.releaseFinalizedSession(finalizedRelease, releaseReason);
     }
     return null;
   }
@@ -1089,6 +1200,7 @@ export class SessionManager {
         reason,
         session,
       );
+      this.finalizedSessionReleases.set(session, reason);
       if (persistedSnapshot !== releaseSnapshot) {
         this.notifySessionRelease(persistedSnapshot);
       }
@@ -1122,6 +1234,7 @@ export class SessionManager {
   ): Promise<SessionReleaseSnapshot> {
     if (snapshot.terminal) {
       reason.finalizedSnapshot = snapshot;
+      reason.terminalPersisted = true;
       return snapshot;
     }
     await this.persistSessionRelease(snapshot);
@@ -1140,6 +1253,7 @@ export class SessionManager {
     };
     await this.persistTerminalReleaseIfNeeded(upgradedSnapshot);
     reason.finalizedSnapshot = upgradedSnapshot;
+    reason.terminalPersisted = true;
     return upgradedSnapshot;
   }
 
@@ -1162,11 +1276,18 @@ export class SessionManager {
     reason.value = releaseReason;
     reason.finalizedSnapshot = upgradedSnapshot;
     const release = this.persistTerminalReleaseIfNeeded(upgradedSnapshot).then(() => {
+      reason.terminalPersisted = true;
       this.notifySessionRelease(upgradedSnapshot);
       return upgradedSnapshot.deviceId;
     });
     reason.lateTerminalRelease = release;
-    return await release;
+    try {
+      return await release;
+    } finally {
+      if (reason.lateTerminalRelease === release) {
+        reason.lateTerminalRelease = undefined;
+      }
+    }
   }
 
   private notifySessionRelease(snapshot: SessionReleaseSnapshot): void {

@@ -707,6 +707,56 @@ describe("DevicePool", () => {
       expect(() => devicePool.assertSessionReadyForAutomation("owner-session")).not.toThrow();
     });
 
+    test("captures the exact session identity after its idle deadline", async () => {
+      await bindOwnerSession("owner-session", "emulator-5554");
+      const session = sessionManager.getSession("owner-session");
+      if (!session) {
+        throw new Error("expected owner session");
+      }
+      fakeTimer.advanceTime(31 * 60 * 1_000);
+
+      const reservation = await devicePool.reserveDeviceForShutdown("emulator-5554");
+      try {
+        expect(reservation?.session).toBe(session);
+      } finally {
+        await reservation?.release();
+      }
+    });
+
+    test("captures session identity after an in-flight assignment publishes", async () => {
+      const persistence = new DeferredDeviceSessionPersistence();
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      const device = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      fakeDeviceManager.bootedDevices = [device];
+      await devicePool.initializeWithDevices([device]);
+
+      const binding = devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        device.deviceId,
+        "android",
+        sourceImage,
+      );
+      await persistence.waitForUpsert();
+      const reservationPromise = devicePool.reserveDeviceForShutdown(device.deviceId);
+      persistence.finishUpsert();
+      await binding;
+      const reservation = await reservationPromise;
+      try {
+        expect(reservation?.session).toBe(sessionManager.getSession("owner-session"));
+      } finally {
+        await reservation?.release();
+      }
+    });
+
     test("rejects a bound session while its device carries an intentional-shutdown marker", async () => {
       await bindOwnerSession("owner-session", "emulator-5554");
 

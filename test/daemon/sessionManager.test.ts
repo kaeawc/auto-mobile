@@ -11,7 +11,10 @@ import { FakeDbWriteBarrier } from "../fakes/FakeDbWriteBarrier";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
-import type { DeviceSessionPersistence } from "../../src/db/deviceSessionRepository";
+import type {
+  DeviceSessionPersistence,
+  DeviceSessionRecord,
+} from "../../src/db/deviceSessionRepository";
 import type { DeviceSession, DeviceSessionStatus } from "../../src/db/types";
 import type { ViewHierarchyResult } from "../../src/models/ViewHierarchyResult";
 import type { KeepScreenAwakeState } from "../../src/utils/KeepScreenAwakeManager";
@@ -20,6 +23,7 @@ class DeferredDeviceSessionPersistence implements DeviceSessionPersistence {
   private deferredWrite: Promise<void> | null = null;
   private resolveDeferredWrite: (() => void) | null = null;
   private readonly writeStarted = Promise.withResolvers<void>();
+  readonly upsertedDeviceIds: string[] = [];
 
   deferNextUpsert(): void {
     this.deferredWrite = new Promise<void>((resolve) => {
@@ -35,7 +39,8 @@ class DeferredDeviceSessionPersistence implements DeviceSessionPersistence {
     this.resolveDeferredWrite?.();
   }
 
-  async upsertActiveSession(): Promise<void> {
+  async upsertActiveSession(record: DeviceSessionRecord): Promise<void> {
+    this.upsertedDeviceIds.push(record.deviceId);
     const deferredWrite = this.deferredWrite;
     if (!deferredWrite) {
       return;
@@ -2091,6 +2096,112 @@ describe("SessionManager", () => {
         releaseReason: "device-disconnected:emulator-5554",
         terminal: true,
       });
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("owned device-loss upgrade after an ordinary release remains terminal", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      const session = await manager.createSession(
+        "disconnected-session",
+        "emulator-5554",
+        "android",
+      );
+
+      await manager.releaseSession("disconnected-session", "explicit-release");
+      await manager.releaseSessionIfOwned(
+        "disconnected-session",
+        session,
+        "emulator-5554",
+        "device-disconnected:emulator-5554",
+      );
+
+      expect(manager.getTerminalReleaseSnapshot("disconnected-session")).toMatchObject({
+        releaseReason: "device-disconnected:emulator-5554",
+        terminal: true,
+      });
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("retries a failed owned terminal upgrade after an ordinary release", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const reasons: string[] = [];
+    let failTerminalRelease = true;
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+      reasons.push(reason);
+      if (reason === "device-killed" && failTerminalRelease) {
+        failTerminalRelease = false;
+        throw new Error("terminal write failed");
+      }
+    };
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      const session = await manager.createSession("killed-session", "emulator-5554", "android");
+      await manager.releaseSession("killed-session", "explicit-release");
+
+      await expect(
+        manager.releaseSessionIfOwned("killed-session", session, "emulator-5554", "device-killed"),
+      ).rejects.toThrow("Failed to persist terminal release");
+      await expect(
+        manager.releaseSessionIfOwned("killed-session", session, "emulator-5554", "device-killed"),
+      ).resolves.toBe("emulator-5554");
+
+      expect(reasons).toEqual(["explicit-release", "device-killed", "device-killed"]);
+      expect(manager.getTerminalReleaseSnapshot("killed-session")).toMatchObject({
+        releaseReason: "device-killed",
+        terminal: true,
+      });
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("terminal release reservation blocks UUID reuse until shutdown settles", async () => {
+    const persistence = new FakeDeviceSessionPersistence();
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      const session = await manager.createSession("reserved-session", "emulator-5554", "android");
+      const releaseReservation = manager.reserveSessionForTerminalRelease(session, "emulator-5554");
+      await expect(
+        manager.rebindSession("reserved-session", "emulator-5560", "android"),
+      ).rejects.toThrow("being terminally released");
+      await manager.releaseSession("reserved-session", "explicit-release");
+
+      await expect(
+        manager.createSession("reserved-session", "emulator-5560", "android"),
+      ).rejects.toThrow("being terminally released");
+
+      releaseReservation();
+      await expect(
+        manager.createSession("reserved-session", "emulator-5560", "android"),
+      ).resolves.toMatchObject({ assignedDevice: "emulator-5560" });
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("terminal release reservation rejects while an ordinary rebind is in flight", async () => {
+    const persistence = new DeferredDeviceSessionPersistence();
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      const session = await manager.createSession("reserved-session", "emulator-5554", "android");
+
+      persistence.deferNextUpsert();
+      const rebind = manager.rebindSession("reserved-session", "emulator-5560", "android");
+      await persistence.waitForUpsert();
+      expect(() => manager.reserveSessionForTerminalRelease(session, "emulator-5554")).toThrow(
+        "rebinding devices",
+      );
+      persistence.finishUpsert();
+
+      await expect(rebind).resolves.toBe(session);
+      expect(session.assignedDevice).toBe("emulator-5560");
+      expect(persistence.upsertedDeviceIds).toEqual(["emulator-5554", "emulator-5560"]);
     } finally {
       manager.stopCleanupTimer();
     }

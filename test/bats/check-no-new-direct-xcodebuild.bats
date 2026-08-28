@@ -121,6 +121,36 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "rejects xcodebuild behind an env wrapper" {
+  printf '%s\n' 'spawn("env", ["-i", "DEVELOPER_DIR=/Applications/Xcode.app", "xcodebuild", "test"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "rejects xcodebuild behind an absolute env wrapper" {
+  printf '%s\n' 'execFile("/usr/bin/env", ["--unset", "SDKROOT", "xcodebuild", "test"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "rejects a neutral injected exec seam" {
+  printf '%s\n' 'runner.exec("xcodebuild -version");' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
 @test "allows XcodebuildClient to own direct execution" {
   printf '%s\n' 'spawn("xcodebuild", ["test"]);' > "$repo_dir/src/utils/ios-cmdline-tools/XcodebuildClient.ts"
   git -C "$repo_dir" add src/utils/ios-cmdline-tools/XcodebuildClient.ts

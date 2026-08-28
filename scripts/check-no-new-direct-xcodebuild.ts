@@ -10,6 +10,7 @@ export interface XcodebuildViolation {
 }
 
 const SHELLS = new Set(["sh", "/bin/sh", "bash", "/bin/bash", "zsh", "/bin/zsh"]);
+const ENV_WRAPPERS = new Set(["env"]);
 
 function commandName(value: string): string {
   return value.split(/[\\/]/).at(-1)?.toLowerCase() ?? "";
@@ -17,6 +18,46 @@ function commandName(value: string): string {
 
 function containsXcodebuildCommand(value: string): boolean {
   return /(?:^|[\s;&|])(?:[^\s;&|]*[/\\])?xcodebuild(?:\s|$)/i.test(value);
+}
+
+function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
+  let index = 1;
+  while (index < argv.length) {
+    const argument = argv[index];
+    if (argument === "--") {
+      return commandName(argv[index + 1] ?? "") === "xcodebuild";
+    }
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argument)) {
+      index++;
+      continue;
+    }
+    if (["-i", "--ignore-environment", "-0", "--null"].includes(argument)) {
+      index++;
+      continue;
+    }
+    if (["-u", "--unset", "-C", "--chdir", "-P"].includes(argument)) {
+      index += 2;
+      continue;
+    }
+    if (["-S", "--split-string"].includes(argument)) {
+      return containsXcodebuildCommand(argv[index + 1] ?? "");
+    }
+    if (/^--(?:unset|chdir)=/.test(argument)) {
+      index++;
+      continue;
+    }
+    if (argument.startsWith("--split-string=")) {
+      return containsXcodebuildCommand(argument.slice("--split-string=".length));
+    }
+    if (argument.startsWith("-")) {
+      // Unknown env flags are skipped conservatively. If they take an operand,
+      // treating that operand as the command can only make the boundary louder.
+      index++;
+      continue;
+    }
+    return commandName(argument) === "xcodebuild";
+  }
+  return false;
 }
 
 export function findDirectXcodebuildCalls(file: string, source: string): XcodebuildViolation[] {
@@ -36,12 +77,24 @@ export function findDirectXcodebuildCalls(file: string, source: string): Xcodebu
       return [];
     }
     const first = call.arguments[0];
-    const arrayCommands =
-      ast
-        .arrayAlternatives(first)
-        ?.flatMap((items) => (items.length > 0 ? ast.strings(items[0]) : [])) ?? [];
-    const directValues = [...ast.strings(first), ...arrayCommands];
-    const direct = directValues.some((value) => commandName(value) === "xcodebuild");
+    const firstArrayAlternatives = ast.arrayAlternatives(first);
+    const argumentArrayAlternatives = ast.arrayAlternatives(call.arguments[1]);
+    const argvAlternatives = firstArrayAlternatives
+      ? firstArrayAlternatives.map((items) => items.flatMap((item) => ast.strings(item)))
+      : ast
+          .strings(first)
+          .flatMap((command) =>
+            (argumentArrayAlternatives ?? [[]]).map((items) => [
+              command,
+              ...items.flatMap((item) => ast.strings(item)),
+            ]),
+          );
+    const directValues = argvAlternatives.flatMap((argv) => argv.slice(0, 1));
+    const direct = argvAlternatives.some(
+      (argv) =>
+        commandName(argv[0] ?? "") === "xcodebuild" ||
+        (ENV_WRAPPERS.has(commandName(argv[0] ?? "")) && envDelegatesToXcodebuild(argv)),
+    );
     const shell = directValues.some((value) => SHELLS.has(value.toLowerCase()));
     const shellPayloads = call.arguments.slice(1).flatMap((argument) => ast.strings(argument));
     const embedded =

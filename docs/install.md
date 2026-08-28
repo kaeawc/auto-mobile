@@ -23,6 +23,11 @@ It selects the current host's installer from the latest GitHub release and
 verifies its native architecture before installing it. macOS installs the app
 to `/Applications`; Linux installs the released `.deb` package.
 
+If the desktop app is installed first, it installs Bun from Bun's official
+platform installer when `bunx` is not available. It then starts the exact
+AutoMobile MCP version required by that desktop release, replacing a running
+older or newer daemon when necessary.
+
 ## Homebrew (macOS)
 
 AutoMobile is published to the shared `kaeawc/tap` Homebrew tap on every

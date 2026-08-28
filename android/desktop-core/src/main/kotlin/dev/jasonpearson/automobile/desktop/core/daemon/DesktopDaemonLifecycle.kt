@@ -1,8 +1,10 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import java.io.File
+import java.net.URI
 import java.net.UnixDomainSocketAddress
 import java.nio.channels.SocketChannel
+import java.nio.file.Files
 import java.util.concurrent.TimeUnit
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -246,7 +248,7 @@ internal object SystemDaemonRetryTimer : DaemonRetryTimer {
  * otherwise `ProcessBuilder` fails with "Cannot run program" even when Bun is installed.
  */
 internal interface DaemonPackageRunnerResolver {
-  fun resolve(osName: String): String
+  fun resolve(osName: String): String?
 }
 
 internal class SystemDaemonPackageRunnerResolver(
@@ -255,8 +257,8 @@ internal class SystemDaemonPackageRunnerResolver(
   private val executableAt: (String) -> Boolean = { File(it).canExecute() },
   private val onPath: (String, Boolean) -> String? = ::whichRunner,
 ) : DaemonPackageRunnerResolver {
-  override fun resolve(osName: String): String {
-    val isWindows = osName.lowercase().contains("win")
+  override fun resolve(osName: String): String? {
+    val isWindows = osName.lowercase().startsWith("windows")
     // Prefer the `bunx` the user's PATH resolves (their configured install, e.g. via mise/asdf),
     // then the hard-coded absolute install locations as a fallback for GUI-launched apps whose PATH
     // is stripped (there `which/where` returns nothing, so we still land on the known install).
@@ -268,9 +270,7 @@ internal class SystemDaemonPackageRunnerResolver(
       ?.let {
         return it
       }
-    // Nothing resolved: emit the bare name so the failure surfaces actionable guidance to install
-    // Bun.
-    return if (isWindows) "bunx.exe" else "bunx"
+    return null
   }
 
   private fun bunAbsoluteCandidates(isWindows: Boolean): List<String> =
@@ -336,6 +336,95 @@ internal class SystemDaemonPackageRunnerResolver(
   }
 }
 
+internal interface BunInstallerScriptDownloader {
+  fun download(url: String, target: File)
+}
+
+internal object SystemBunInstallerScriptDownloader : BunInstallerScriptDownloader {
+  override fun download(url: String, target: File) {
+    val connection = URI.create(url).toURL().openConnection()
+    connection.connectTimeout = DOWNLOAD_CONNECT_TIMEOUT_MILLIS
+    connection.readTimeout = DOWNLOAD_READ_TIMEOUT_MILLIS
+    connection.getInputStream().use { input ->
+      target.outputStream().use(input::copyTo)
+    }
+  }
+
+  private const val DOWNLOAD_CONNECT_TIMEOUT_MILLIS = 15_000
+  private const val DOWNLOAD_READ_TIMEOUT_MILLIS = 30_000
+}
+
+internal interface DesktopBunInstaller {
+  fun install(osName: String): DaemonCommandResult
+}
+
+/**
+ * Installs Bun from its official platform script when a desktop-first launch cannot resolve bunx.
+ * The script is downloaded to a private temporary directory and passed as an argv element rather
+ * than interpolated into a shell command. This mirrors scripts/install.sh while keeping network,
+ * process, and temporary-file access injectable for fast tests.
+ */
+internal class SystemDesktopBunInstaller(
+  private val downloader: BunInstallerScriptDownloader = SystemBunInstallerScriptDownloader,
+  private val commandExecutor: DaemonCommandExecutor = SystemDaemonCommandExecutor,
+  private val temporaryDirectoryProvider: () -> File = {
+    Files.createTempDirectory("automobile-bun-install").toFile()
+  },
+) : DesktopBunInstaller {
+  override fun install(osName: String): DaemonCommandResult {
+    val isWindows = osName.lowercase().startsWith("windows")
+    val isPosix =
+      osName.lowercase().let { normalized ->
+        normalized.contains("mac") || normalized.contains("darwin") || normalized.contains("linux")
+      }
+    if (!isWindows && !isPosix) {
+      return DaemonCommandResult(
+        exitCode = INSTALL_FAILURE_EXIT_CODE,
+        output = "Automatic Bun installation is not supported on $osName.",
+      )
+    }
+
+    var temporaryDirectory: File? = null
+    return try {
+      temporaryDirectory = temporaryDirectoryProvider()
+      val script = File(temporaryDirectory, if (isWindows) "install.ps1" else "install.sh")
+      downloader.download(
+        if (isWindows) WINDOWS_INSTALLER_URL else POSIX_INSTALLER_URL,
+        script,
+      )
+      val command =
+        if (isWindows) {
+          listOf(
+            "powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            script.absolutePath,
+          )
+        } else {
+          listOf("/bin/bash", script.absolutePath)
+        }
+      commandExecutor.execute(command)
+    } catch (error: Exception) {
+      DaemonCommandResult(
+        exitCode = INSTALL_FAILURE_EXIT_CODE,
+        output = error.message ?: error.javaClass.simpleName,
+      )
+    } finally {
+      temporaryDirectory?.deleteRecursively()
+    }
+  }
+
+  private companion object {
+    const val POSIX_INSTALLER_URL = "https://bun.sh/install"
+    const val WINDOWS_INSTALLER_URL = "https://bun.sh/install.ps1"
+    const val INSTALL_FAILURE_EXIT_CODE = -3
+  }
+}
+
 /**
  * Picks the runner path from a `where`/`which` listing. The daemon launch wraps the runner in
  * `cmd.exe /c` on Windows, which can only execute a PATHEXT entry — so only a result ending in a
@@ -377,6 +466,7 @@ internal class DesktopDaemonLifecycle(
   private val timer: DaemonRetryTimer = SystemDaemonRetryTimer,
   private val packageRunnerResolver: DaemonPackageRunnerResolver =
     SystemDaemonPackageRunnerResolver(),
+  private val bunInstaller: DesktopBunInstaller = SystemDesktopBunInstaller(),
   private val verificationAttempts: Int = DEFAULT_VERIFICATION_ATTEMPTS,
 ) : DaemonLifecycleEnsurer {
   override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult =
@@ -410,10 +500,45 @@ internal class DesktopDaemonLifecycle(
       }
 
       val action = if (daemonAvailable) "restart" else "start"
+      val osName = System.getProperty("os.name", "")
+      var runner = packageRunnerResolver.resolve(osName)
+      if (runner == null) {
+        val installResult = bunInstaller.install(osName)
+        if (installResult.cancelled) {
+          return DaemonLifecycleResult.Failure("Bun installation was cancelled.")
+        }
+        if (installResult.timedOut) {
+          return DaemonLifecycleResult.Failure(
+            "Timed out while installing Bun. Check your network connection and retry."
+          )
+        }
+        if (installResult.exitCode != 0) {
+          val detail = installResult.output.trim().takeIf { it.isNotEmpty() }
+          return DaemonLifecycleResult.Failure(
+            buildString {
+              append("Could not install Bun automatically")
+              detail?.let { append(": $it") }
+              append(". Install Bun manually, then try again.")
+            }
+          )
+        }
+        runner = packageRunnerResolver.resolve(osName)
+        if (runner == null) {
+          return DaemonLifecycleResult.Failure(
+            "Bun installed, but bunx could not be found. Restart AutoMobile and try again."
+          )
+        }
+      }
       val commandResult =
         try {
           val command =
-            packageDaemonCommand(expectedVersion, action, currentDaemon?.launchArguments.orEmpty())
+            packageDaemonCommand(
+              runner,
+              expectedVersion,
+              action,
+              currentDaemon?.launchArguments.orEmpty(),
+              osName,
+            )
           commandExecutor.execute(command)
         } catch (error: Exception) {
           return DaemonLifecycleResult.Failure(
@@ -457,12 +582,12 @@ internal class DesktopDaemonLifecycle(
     }
 
   private fun packageDaemonCommand(
+    runner: String,
     version: String,
     action: String,
     existingOptions: List<String>,
+    osName: String,
   ): List<String> {
-    val osName = System.getProperty("os.name", "")
-    val runner = packageRunnerResolver.resolve(osName)
     // `bunx` auto-installs the pinned package without prompting, and is a self-contained native
     // binary, so it needs no `-y` flag and no PATH manipulation.
     val runnerArguments =

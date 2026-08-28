@@ -264,6 +264,100 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
+  fun `installs Bun before starting the pinned daemon when bunx is absent`() {
+    val commands = FakeDaemonCommandExecutor()
+    val installer = FakeDesktopBunInstaller()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(false, false, false, true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf(null, "0.0.40")),
+        commandExecutor = commands,
+        timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver =
+          FakeDaemonPackageRunnerResolver(listOf(null, "/home/dev/.bun/bin/bunx")),
+        bunInstaller = installer,
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Ready>(result)
+    assertTrue(result.restarted)
+    assertEquals(1, installer.installCalls)
+    assertEquals(
+      listOf(
+        listOf(
+          "/home/dev/.bun/bin/bunx",
+          "@kaeawc/auto-mobile@0.0.40",
+          "--daemon",
+          "start",
+        )
+      ),
+      commands.commands,
+    )
+  }
+
+  @Test
+  fun `does not install Bun when bunx is already available`() {
+    val installer = FakeDesktopBunInstaller()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(false, true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf(null, "0.0.40")),
+        commandExecutor = FakeDaemonCommandExecutor(),
+        timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver("bunx"),
+        bunInstaller = installer,
+      )
+
+    assertIs<DaemonLifecycleResult.Ready>(lifecycle.ensureVersionMatchedDaemon())
+    assertEquals(0, installer.installCalls)
+  }
+
+  @Test
+  fun `does not install Bun when a matching AutoMobile daemon is already ready`() {
+    val installer = FakeDesktopBunInstaller()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40")),
+        commandExecutor = FakeDaemonCommandExecutor(),
+        timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver(null),
+        bunInstaller = installer,
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Ready>(result)
+    assertFalse(result.restarted)
+    assertEquals(0, installer.installCalls)
+  }
+
+  @Test
+  fun `does not launch the daemon when automatic Bun installation fails`() {
+    val commands = FakeDaemonCommandExecutor()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(false)),
+        pidFileReader = FakeDaemonPidFileReader(listOf(null)),
+        commandExecutor = commands,
+        timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver(null),
+        bunInstaller = FakeDesktopBunInstaller(exitCode = 1, output = "download failed"),
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Failure>(result)
+    assertTrue(result.message.contains("download failed"))
+    assertTrue(commands.commands.isEmpty())
+  }
+
+  @Test
   fun `reports an actionable error when the pinned launch command times out`() {
     val lifecycle =
       DesktopDaemonLifecycle(
@@ -349,7 +443,7 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
-  fun `emits the bare bunx name when nothing resolves`() {
+  fun `reports no runner when nothing resolves`() {
     val resolver =
       SystemDaemonPackageRunnerResolver(
         home = "/Users/dev",
@@ -357,8 +451,49 @@ class DesktopDaemonLifecycleTest {
         onPath = { _, _ -> null },
       )
 
-    assertEquals("bunx", resolver.resolve("Mac OS X"))
-    assertEquals("bunx.exe", resolver.resolve("Windows 11"))
+    assertNull(resolver.resolve("Mac OS X"))
+    assertNull(resolver.resolve("Windows 11"))
+  }
+
+  @Test
+  fun `Bun installer downloads and executes the POSIX script without shell interpolation`() {
+    val temporaryDirectory = Files.createTempDirectory("automobile-bun-installer-test").toFile()
+    val downloader = FakeBunInstallerScriptDownloader()
+    val commands = FakeDaemonCommandExecutor()
+    val installer =
+      SystemDesktopBunInstaller(
+        downloader = downloader,
+        commandExecutor = commands,
+        temporaryDirectoryProvider = { temporaryDirectory },
+      )
+
+    val result = installer.install("Mac OS X")
+
+    assertEquals(0, result.exitCode)
+    assertEquals(listOf("https://bun.sh/install"), downloader.urls)
+    assertEquals("/bin/bash", commands.commands.single().first())
+    assertFalse(temporaryDirectory.exists())
+  }
+
+  @Test
+  fun `Bun installer executes the downloaded Windows script as an argv element`() {
+    val temporaryDirectory = Files.createTempDirectory("automobile-bun-installer-test").toFile()
+    val downloader = FakeBunInstallerScriptDownloader()
+    val commands = FakeDaemonCommandExecutor()
+    val installer =
+      SystemDesktopBunInstaller(
+        downloader = downloader,
+        commandExecutor = commands,
+        temporaryDirectoryProvider = { temporaryDirectory },
+      )
+
+    val result = installer.install("Windows 11")
+
+    assertEquals(0, result.exitCode)
+    assertEquals(listOf("https://bun.sh/install.ps1"), downloader.urls)
+    assertEquals("powershell.exe", commands.commands.single().first())
+    assertEquals("-File", commands.commands.single()[6])
+    assertFalse(temporaryDirectory.exists())
   }
 
   @Test
@@ -527,9 +662,38 @@ class DesktopDaemonLifecycleTest {
       throw java.io.IOException(message)
   }
 
-  private class FakeDaemonPackageRunnerResolver(private val runner: String) :
+  private class FakeDaemonPackageRunnerResolver(private val runners: List<String?>) :
     DaemonPackageRunnerResolver {
-    override fun resolve(osName: String): String = runner
+    constructor(runner: String?) : this(listOf(runner))
+
+    private var resolutions = 0
+
+    override fun resolve(osName: String): String? {
+      val runner = runners[resolutions.coerceAtMost(runners.lastIndex)]
+      resolutions++
+      return runner
+    }
+  }
+
+  private class FakeDesktopBunInstaller(
+    private val exitCode: Int = 0,
+    private val output: String = "installed",
+  ) : DesktopBunInstaller {
+    var installCalls = 0
+
+    override fun install(osName: String): DaemonCommandResult {
+      installCalls++
+      return DaemonCommandResult(exitCode = exitCode, output = output)
+    }
+  }
+
+  private class FakeBunInstallerScriptDownloader : BunInstallerScriptDownloader {
+    val urls = mutableListOf<String>()
+
+    override fun download(url: String, target: java.io.File) {
+      urls += url
+      target.writeText("#!/usr/bin/env bash\n")
+    }
   }
 
   private class FakeDaemonRetryTimer : DaemonRetryTimer {

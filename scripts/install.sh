@@ -62,6 +62,11 @@ POST_BUN_SETUP_LOG_FILE=""
 POST_BUN_SETUP_STATE_FILE=""
 DESKTOP_APP_TEMP_DIR=""
 DESKTOP_APP_MOUNT_DIR=""
+DESKTOP_APP_REPLACEMENT_LOCK_DIR=""
+DESKTOP_APP_REPLACEMENT_STAGING_DIR=""
+DESKTOP_APP_REPLACEMENT_TARGET=""
+DESKTOP_APP_REPLACEMENT_PREVIOUS=""
+DESKTOP_APP_REPLACEMENT_COMPLETE=false
 
 # ============================================================================
 # Original Global State
@@ -145,6 +150,7 @@ cleanup_background_installer_work() {
     [[ -n "${IOS_RUNTIME_PROBE_FILE}" ]] && rm -f "${IOS_RUNTIME_PROBE_FILE}"
     [[ -n "${POST_BUN_SETUP_LOG_FILE}" ]] && rm -f "${POST_BUN_SETUP_LOG_FILE}"
     [[ -n "${POST_BUN_SETUP_STATE_FILE}" ]] && rm -f "${POST_BUN_SETUP_STATE_FILE}"
+    cleanup_macos_desktop_app_replacement
     cleanup_desktop_app_installer
     return 0
 }
@@ -2776,52 +2782,87 @@ cleanup_desktop_app_installer() {
     return 0
 }
 
+# Recover an interrupted bundle swap before removing its staging directory. All
+# paths are tracked globally because this function also runs from the process-
+# wide EXIT/TERM cleanup hook.
+# shellcheck disable=SC2310
+cleanup_macos_desktop_app_replacement() {
+    local preserve_staging=false
+
+    if [[ "${DESKTOP_APP_REPLACEMENT_COMPLETE}" != "true" ]] \
+        && [[ -n "${DESKTOP_APP_REPLACEMENT_PREVIOUS}" ]] \
+        && run_desktop_app_privileged test ! -e "${DESKTOP_APP_REPLACEMENT_TARGET}" \
+        && run_desktop_app_privileged test -e "${DESKTOP_APP_REPLACEMENT_PREVIOUS}"; then
+        if ! run_desktop_app_privileged mv -- \
+            "${DESKTOP_APP_REPLACEMENT_PREVIOUS}" "${DESKTOP_APP_REPLACEMENT_TARGET}"; then
+            preserve_staging=true
+            log_error "Could not restore the previous AutoMobile.app. It remains at ${DESKTOP_APP_REPLACEMENT_PREVIOUS}."
+        fi
+    fi
+
+    if [[ "${preserve_staging}" != "true" && -n "${DESKTOP_APP_REPLACEMENT_STAGING_DIR}" ]]; then
+        run_desktop_app_privileged rm -rf -- "${DESKTOP_APP_REPLACEMENT_STAGING_DIR}" || true
+    fi
+    if [[ -n "${DESKTOP_APP_REPLACEMENT_LOCK_DIR}" ]]; then
+        run_desktop_app_privileged rmdir "${DESKTOP_APP_REPLACEMENT_LOCK_DIR}" || true
+    fi
+
+    DESKTOP_APP_REPLACEMENT_LOCK_DIR=""
+    if [[ "${preserve_staging}" != "true" ]]; then
+        DESKTOP_APP_REPLACEMENT_TARGET=""
+        DESKTOP_APP_REPLACEMENT_PREVIOUS=""
+        DESKTOP_APP_REPLACEMENT_COMPLETE=false
+        DESKTOP_APP_REPLACEMENT_STAGING_DIR=""
+    fi
+    return 0
+}
+
 # Copy into a sibling staging directory, then swap the bundle into place. This
 # keeps an existing installation recoverable if the replacement move fails.
 # shellcheck disable=SC2310
 install_macos_desktop_app_bundle() {
     local source_app="$1"
     local target_app="${2:-/Applications/AutoMobile.app}"
-    local target_parent lock_dir staging_dir staged_app previous_app previous_app_moved=false
+    local target_parent lock_dir staging_dir staged_app previous_app
     target_parent=$(dirname "${target_app}")
     lock_dir="${target_parent}/.automobile-install.lock"
+    DESKTOP_APP_REPLACEMENT_TARGET="${target_app}"
+    DESKTOP_APP_REPLACEMENT_LOCK_DIR="${lock_dir}"
+    DESKTOP_APP_REPLACEMENT_COMPLETE=false
     if ! run_desktop_app_privileged mkdir "${lock_dir}"; then
+        DESKTOP_APP_REPLACEMENT_LOCK_DIR=""
+        DESKTOP_APP_REPLACEMENT_TARGET=""
         log_error "Another AutoMobile desktop app installation is already in progress."
         return 1
     fi
     if ! staging_dir=$(run_desktop_app_privileged mktemp -d "${target_parent}/.automobile-install.XXXXXX"); then
-        run_desktop_app_privileged rmdir "${lock_dir}" || true
+        cleanup_macos_desktop_app_replacement
         return 1
     fi
+    DESKTOP_APP_REPLACEMENT_STAGING_DIR="${staging_dir}"
     staged_app="${staging_dir}/AutoMobile.app"
     previous_app="${staging_dir}/Previous-AutoMobile.app"
+    DESKTOP_APP_REPLACEMENT_PREVIOUS="${previous_app}"
 
     if ! run_desktop_app_privileged ditto "${source_app}" "${staged_app}"; then
-        run_desktop_app_privileged rm -rf -- "${staging_dir}" || true
-        run_desktop_app_privileged rmdir "${lock_dir}" || true
+        cleanup_macos_desktop_app_replacement
         return 1
     fi
 
     if [[ -e "${target_app}" ]]; then
         if ! run_desktop_app_privileged mv -- "${target_app}" "${previous_app}"; then
-            run_desktop_app_privileged rm -rf -- "${staging_dir}" || true
-            run_desktop_app_privileged rmdir "${lock_dir}" || true
+            cleanup_macos_desktop_app_replacement
             return 1
         fi
-        previous_app_moved=true
     fi
 
     if ! run_desktop_app_privileged mv -- "${staged_app}" "${target_app}"; then
-        if [[ "${previous_app_moved}" == "true" ]]; then
-            run_desktop_app_privileged mv -- "${previous_app}" "${target_app}" || true
-        fi
-        run_desktop_app_privileged rm -rf -- "${staging_dir}" || true
-        run_desktop_app_privileged rmdir "${lock_dir}" || true
+        cleanup_macos_desktop_app_replacement
         return 1
     fi
 
-    run_desktop_app_privileged rm -rf -- "${staging_dir}" || true
-    run_desktop_app_privileged rmdir "${lock_dir}" || true
+    DESKTOP_APP_REPLACEMENT_COMPLETE=true
+    cleanup_macos_desktop_app_replacement
 }
 
 # `detect_os` intentionally treats Git Bash as Linux for the existing developer

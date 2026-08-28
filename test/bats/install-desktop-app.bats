@@ -137,6 +137,54 @@ release_json='{
   rm -rf "${root}"
 }
 
+@test "preserves the previous macOS app when replacement and rollback both fail" {
+  local root source_app target_app
+  root=$(mktemp -d)
+  source_app="${root}/source/AutoMobile.app"
+  target_app="${root}/Applications/AutoMobile.app"
+  mkdir -p "${source_app}" "${target_app}"
+  printf 'new\n' > "${source_app}/new-marker"
+  printf 'old\n' > "${target_app}/old-marker"
+  ditto() { cp -R "$1" "$2"; }
+  run_desktop_app_privileged() {
+    if [[ "$1" == "mv" && "$2" == "--" && "$4" == "${target_app}" ]]; then
+      return 1
+    fi
+    "$@"
+  }
+
+  run install_macos_desktop_app_bundle "${source_app}" "${target_app}"
+
+  [ "$status" -ne 0 ]
+  [ ! -e "${target_app}" ]
+  [ "$(find "${root}/Applications" -name old-marker -print -quit)" != "" ]
+  [ ! -e "${root}/Applications/.automobile-install.lock" ]
+  rm -rf "${root}"
+}
+
+@test "process cleanup restores a previous app after an interrupted swap" {
+  local root staging target_app previous_app lock_dir
+  root=$(mktemp -d)
+  staging="${root}/Applications/.automobile-install.abc"
+  target_app="${root}/Applications/AutoMobile.app"
+  previous_app="${staging}/Previous-AutoMobile.app"
+  lock_dir="${root}/Applications/.automobile-install.lock"
+  mkdir -p "${previous_app}" "${lock_dir}"
+  printf 'old\n' > "${previous_app}/old-marker"
+  run_desktop_app_privileged() { "$@"; }
+  DESKTOP_APP_REPLACEMENT_LOCK_DIR="${lock_dir}"
+  DESKTOP_APP_REPLACEMENT_STAGING_DIR="${staging}"
+  DESKTOP_APP_REPLACEMENT_TARGET="${target_app}"
+  DESKTOP_APP_REPLACEMENT_PREVIOUS="${previous_app}"
+
+  cleanup_background_installer_work
+
+  [ -f "${target_app}/old-marker" ]
+  [ ! -e "${staging}" ]
+  [ ! -e "${lock_dir}" ]
+  rm -rf "${root}"
+}
+
 @test "preserves desktop installer temporary files while a disk image cannot detach" {
   local root
   root=$(mktemp -d)

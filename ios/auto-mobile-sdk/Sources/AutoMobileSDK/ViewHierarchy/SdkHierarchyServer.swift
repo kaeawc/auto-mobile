@@ -1,6 +1,26 @@
-#if DEBUG && canImport(UIKit) && !os(watchOS)
+#if DEBUG && !os(watchOS)
 import Foundation
 import Network
+
+/// The hierarchy operations served by `SdkHierarchyServer`. Keeping this narrow
+/// lets the server's listener lifecycle compile and be tested on macOS, where
+/// `ViewHierarchyTracker` itself is unavailable because it needs UIKit.
+protocol SdkHierarchyServing: AnyObject {
+    func getLatestHierarchy() -> SdkViewHierarchy?
+    func walkNow() -> SdkViewHierarchy
+    var bundleId: String? { get }
+}
+
+/// The subset of `NWListener` operations `SdkHierarchyServer` drives. This
+/// seam keeps the server lifecycle testable without binding port 8766.
+protocol SdkHierarchyListener: AnyObject {
+    var stateUpdateHandler: (@Sendable (NWListener.State) -> Void)? { get set }
+    var newConnectionHandler: (@Sendable (NWConnection) -> Void)? { get set }
+    func start(queue: DispatchQueue)
+    func cancel()
+}
+
+extension NWListener: SdkHierarchyListener {}
 
 /// Minimal HTTP server running inside the target app on port 8766.
 /// Serves view hierarchy snapshots to control-proxy on demand.
@@ -16,14 +36,21 @@ final class SdkHierarchyServer: @unchecked Sendable {
     private static let httpHeaderDelimiter = Data("\r\n\r\n".utf8)
     private static let maxHttpBodyBytes = 1024 * 1024
 
-    private let lock = NSLock()
-    private var listener: NWListener?
+    private let lock: any NSLocking
+    private var listener: (any SdkHierarchyListener)?
+    private let listenerFactory: () throws -> any SdkHierarchyListener
     private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.hierarchy-server")
-    private weak var tracker: ViewHierarchyTracker?
+    private weak var tracker: (any SdkHierarchyServing)?
     private let databaseRouteHandler = SdkDatabaseRouteHandler()
 
-    init(tracker: ViewHierarchyTracker) {
+    init(
+        tracker: any SdkHierarchyServing,
+        listenerFactory: @escaping () throws -> any SdkHierarchyListener = SdkHierarchyServer.makeListener,
+        lifecycleLock: any NSLocking = NSLock()
+    ) {
         self.tracker = tracker
+        self.listenerFactory = listenerFactory
+        lock = lifecycleLock
     }
 
     // MARK: - Lifecycle
@@ -39,11 +66,9 @@ final class SdkHierarchyServer: @unchecked Sendable {
         defer { lock.unlock() }
         guard listener == nil else { return }
 
-        let parameters = NWParameters.tcp
-        parameters.allowLocalEndpointReuse = true
-
         do {
-            let nwListener = try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: Self.port))
+            let nwListener = try listenerFactory()
+            listener = nwListener
 
             nwListener.stateUpdateHandler = { state in
                 switch state {
@@ -61,7 +86,6 @@ final class SdkHierarchyServer: @unchecked Sendable {
             }
 
             nwListener.start(queue: queue)
-            listener = nwListener
         } catch {
             InternalLogger.debug("[SdkHierarchyServer] Failed to create listener: \(error)")
         }
@@ -73,6 +97,12 @@ final class SdkHierarchyServer: @unchecked Sendable {
         listener = nil
         lock.unlock()
         listenerToCancel?.cancel()
+    }
+
+    private static func makeListener() throws -> any SdkHierarchyListener {
+        let parameters = NWParameters.tcp
+        parameters.allowLocalEndpointReuse = true
+        return try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: port))
     }
 
     // MARK: - Connection Handling
@@ -236,6 +266,7 @@ final class SdkHierarchyServer: @unchecked Sendable {
     }
 
     private func handleHighlight(_ connection: NWConnection, initialData: Data) {
+#if canImport(UIKit)
         readCompleteHttpBody(connection, initialData: initialData) { [weak self] body in
             guard let self = self else {
                 connection.cancel()
@@ -252,6 +283,9 @@ final class SdkHierarchyServer: @unchecked Sendable {
             }
             self.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
         }
+#else
+        sendResponse(connection, statusCode: 503, body: Data("{\"error\":\"highlight_unavailable\"}".utf8))
+#endif
     }
 
     private func handleBodyRoute(

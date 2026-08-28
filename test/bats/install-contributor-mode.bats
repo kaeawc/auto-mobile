@@ -23,6 +23,14 @@
   [ "$status" -eq 0 ]
 }
 
+@test "installer requires Bun but does not check or manage Node.js" {
+  run bash -c '
+    ! rg -q "REQUIRED_NODE_MAJOR|Checking Node\\.js|NVM_DIR|nvm (ls|use|install)" scripts/install.sh
+  '
+
+  [ "$status" -eq 0 ]
+}
+
 @test "the end-user menu does not include a development route" {
   local options_file
   options_file="${BATS_TEST_TMPDIR}/installer-options"

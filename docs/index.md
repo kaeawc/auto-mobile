@@ -1,43 +1,21 @@
 # AutoMobile
 
-AutoMobile is an MCP server that lets AI agents control your Android & iOS devices using natural language. [Install it now](install.md) and [get started](using/ux-exploration.md).
+AutoMobile is an MCP server that lets an AI agent observe and control Android
+and iOS devices.
 
-It uses standard platform tools like `adb` & `simctl` paired with its own additional Kotlin & Swift libraries and apps. All components are open source. The point is to provide mobile engineers with AI workflow tools to perform UX deep dives, reproduce bugs, and run automated tests.
+## Start here
 
-??? example "See demo: Clock app alarm"
-![Setting an alarm in the Clock app](img/clock-app.gif)
-_An AI agent navigating to the Clock app, creating a new alarm_
+1. [Install AutoMobile](install.md). The installer checks host requirements and
+   configures a supported MCP client.
+2. Connect a physical device or make an emulator/simulator available.
+3. Ask your agent to explore an app or perform a task. See [UX
+   exploration](using/ux-exploration.md) for prompts and expected behavior.
 
-??? example "See demo: YouTube search"
-![Searching YouTube for a video](img/youtube-search.gif)
-_An AI agent searching YouTube and browsing results_
+## Common workflows
 
-### Explore and Test
+- [Explore an app](using/ux-exploration.md)
+- [Reproduce a bug](using/reproducing-bugs.md)
+- [Measure performance](using/performance.md)
 
-| Task                                                                          | What it does                                                                         |
-| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| **[Explore app UX](using/ux-exploration.md)**                                 | Navigate your app, discover screens, map user flows, identify confusing interactions |
-| **[Reproduce bugs](using/reproducing-bugs.md)**                               | Paste a bug report and get exact reproduction steps with screenshots                 |
-| **[Create UI tests](using/ui-tests.md)**                                      | Describe test scenarios in plain English, get executable test plans                  |
-| **[Stage Android picker fixtures](using/android-shared-storage-fixtures.md)** | Prepare bounded Downloads files for system document and media pickers                |
-| **[Measure startup time](using/perf-analysis/startup.md)**                    | Profile cold and warm launch performance                                             |
-| **[Check scroll performance](using/perf-analysis/scroll-framerate.md)**       | Detect jank and dropped frames                                                       |
-| **[Audit contrast](using/a11y.md#contrast)**                                  | Find accessibility issues with color contrast                                        |
-| **[Check tap targets](using/a11y.md#tap-targets)**                            | Ensure touch targets meet size guidelines                                            |
-
-## How it works
-
-- 🤖 **Fast UX Inspection** Kotlin [Accessibility Service](design-docs/plat/android/control-proxy.md) and Swift [CtrlProxy iOS](design-docs/plat/ios/ctrl-proxy-ios.md) to enable fast, accurate observations. 10x faster than the next fastest observation toolkit.
-- 🦾 **Full Touch Injection** Tap, Swipe, Pinch, Drag & Drop, Shake with automatic element targeting.
-- ♻️ **Tool Feedback** [Observations](design-docs/mcp/observe/index.md) drive the [interaction loop](design-docs/mcp/interaction-loop.md) for all [tool calls](design-docs/mcp/tools.md).
-- 🧪 **Test Execution** [Kotlin JUnitRunner](design-docs/plat/android/junit-runner/index.md) & [Swift XCTestRunner](design-docs/plat/ios/xctestrunner/index.md) execute tests natively handling device pooling, multi-device tests, and automatically optimizing test timing.
-
-## License
-
-```yaml
-Copyright 2025 Zillow, Inc.
-Copyright 2025-2026 Jason Pearson
-
-Licensed under the Apache License, Version 2.0
-https://www.apache.org/licenses/LICENSE-2.0
-```
+For device selection, environment variables, and other operational details, see
+the [Using AutoMobile](using/ux-exploration.md) guides in the navigation.

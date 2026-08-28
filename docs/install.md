@@ -1,73 +1,51 @@
-# Install
+# Install AutoMobile
 
-You can use our interactive installer to step through all host platform requirements and configuration options. It checks host dependencies, optionally downloads Android or iOS developer tools, and configures the MCP daemon.
+## Recommended: interactive installer
 
-```bash title="One-line install (click to copy)"
+Run the installer in a terminal:
+
+```bash
 curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/install.sh | bash
 ```
 
+It checks the host, offers to install required Android or iOS developer tools,
+and configures detected MCP clients. Run it from your app's Git repository to
+configure that project; run it elsewhere for a global configuration.
+
+When the installer finishes, restart the MCP client if it was already running.
+
 ![Install Demo](img/install.gif)
 
-Once you've finished that, learn [how to use AutoMobile](using/ux-exploration.md)
+## Manual MCP configuration
 
-## Desktop app
+If the installer does not detect your client, add an MCP server whose command
+is `bunx` and whose argument is `@kaeawc/auto-mobile@latest`:
 
-The interactive installer offers the native desktop app as an optional step. To
-include it in a non-interactive install, use `--desktop-app`:
+```json
+{
+  "command": "bunx",
+  "args": ["@kaeawc/auto-mobile@latest"]
+}
+```
+
+Place this server in the client’s MCP configuration using its documented
+configuration format, then restart the client.
+
+## First use
+
+Make an emulator/simulator or physical device available, then ask the agent to
+perform a task such as:
+
+> Explore the main flow in my Android app and report any confusing steps.
+
+For direct checks, use `auto-mobile --cli help` and
+`auto-mobile --cli listDevices`. If you did not install the CLI, use
+`bunx @kaeawc/auto-mobile@latest --cli help` instead.
+
+## Uninstall
+
+The interactive uninstaller removes selected AutoMobile components:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/install.sh | bash -s -- --desktop-app --non-interactive
-```
-
-It selects the current host's installer from the latest GitHub release and
-verifies its native architecture before installing it. macOS installs the app
-to `/Applications`; Linux installs the released `.deb` package.
-
-If the desktop app is installed first, it installs Bun from Bun's official
-platform installer when `bunx` is not available. It then starts the exact
-AutoMobile MCP version required by that desktop release, replacing a running
-older or newer daemon when necessary.
-
-## Homebrew (macOS)
-
-AutoMobile is published to the shared `kaeawc/tap` Homebrew tap on every
-tagged release. The formula installs the `auto-mobile` CLI and pulls in
-Bun as a runtime dependency.
-
-```bash title="Install via Homebrew"
-brew install kaeawc/tap/auto-mobile
-```
-
-Verify the install:
-
-```bash
-auto-mobile --cli help
-```
-
-## Managed-device crash recovery
-
-To let AutoMobile recover an owned virtual device after a mid-session process
-exit or confirmed disconnect, set this on the process that starts the daemon:
-
-```bash
-AUTOMOBILE_DEVICE_RECOVERY_ON_LOSS=1 \
-AUTOMOBILE_DEVICE_RECOVERY_MAX_ATTEMPTS=2 \
-auto-mobile --daemon restart
-```
-
-Only exact `1` enables recovery. The attempt budget is a strict integer from
-`1` to `10` and defaults to two. The legacy
-`AUTOMOBILE_ANDROID_REBOOT_ON_DEATH=1` setting remains a compatibility fallback.
-AutoMobile recovers only virtual devices it started itself; physical devices and
-externally managed devices are never restarted.
-
-## Uninstalling
-
-To remove AutoMobile and its configurations, use the uninstall script:
-
-```bash title="One-line uninstall (click to copy)"
 curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/uninstall.sh | bash
 ```
-
-??? example "See demo: Uninstall"
-![Uninstall Demo](img/uninstall.gif)

@@ -918,12 +918,7 @@ export class SessionManager {
 
     const reason: ReleaseReasonState = { value: releaseReason };
     const release: PendingSessionRelease = {
-      promise: this.releaseAfterPendingSessionWork(
-        sessionId,
-        reason,
-        allowExpired,
-        pendingSession,
-      ),
+      promise: this.releaseAfterPendingSessionWork(sessionId, reason, allowExpired, pendingSession),
       reason,
     };
     this.pendingSessionReleases.set(sessionId, release);

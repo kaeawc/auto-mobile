@@ -444,9 +444,13 @@ class DeferredReleaseDeviceSessionRepository extends FakeDeviceSessionRepository
 class FailFirstReleaseDeviceSessionRepository extends FakeDeviceSessionRepository {
   releaseAttempts = 0;
 
+  constructor(private readonly failedReleaseAttempts: number = 1) {
+    super();
+  }
+
   override async markReleased(): Promise<void> {
     this.releaseAttempts++;
-    if (this.releaseAttempts === 1) {
+    if (this.releaseAttempts <= this.failedReleaseAttempts) {
       throw new Error("transient release persistence failure");
     }
   }
@@ -777,7 +781,7 @@ describe("killDevice handler", () => {
 
   test("finishes device retirement after terminal release persistence retries", async () => {
     const timer = new FakeTimer();
-    const deviceSessionRepository = new FailFirstReleaseDeviceSessionRepository();
+    const deviceSessionRepository = new FailFirstReleaseDeviceSessionRepository(2);
     const successfulManager = new SuccessfulKillDeviceManager();
     manager = successfulManager;
     setDeviceToolsDependencies({
@@ -807,6 +811,22 @@ describe("killDevice handler", () => {
     );
     DaemonState.getInstance().initialize(sessionManager, pool);
     await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    let reservationReleaseCalls = 0;
+    const reserveDeviceForShutdown = pool.reserveDeviceForShutdown.bind(pool);
+    pool.reserveDeviceForShutdown = async (...args) => {
+      const reservation = await reserveDeviceForShutdown(...args);
+      if (!reservation) {
+        return undefined;
+      }
+      const release = reservation.release;
+      return {
+        ...reservation,
+        release: async () => {
+          reservationReleaseCalls++;
+          await release();
+        },
+      };
+    };
     const tool = ToolRegistry.getTool("killDevice");
     if (!tool) {
       throw new Error("killDevice not registered");
@@ -817,10 +837,92 @@ describe("killDevice handler", () => {
         device: { name: image.name, platform: image.platform, deviceId: image.deviceId! },
       }),
     ).rejects.toThrow("Failed to persist terminal release");
+    timer.advanceTime(1_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    timer.advanceTime(1_000);
     await new Promise((resolve) => setImmediate(resolve));
 
-    expect(deviceSessionRepository.releaseAttempts).toBe(2);
+    expect(deviceSessionRepository.releaseAttempts).toBe(3);
+    expect(reservationReleaseCalls).toBe(1);
     expect(pool.getDevice(image.deviceId!)).toBeNull();
+    expect(sessionManager.getTerminalReleaseSnapshot("session-1")).toMatchObject({
+      releaseReason: "device-killed",
+      terminal: true,
+    });
+  });
+
+  test("bounds terminal release persistence retries while retaining shutdown ownership", async () => {
+    const timer = new FakeTimer();
+    const deviceSessionRepository = new FailFirstReleaseDeviceSessionRepository(
+      Number.POSITIVE_INFINITY,
+    );
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    successfulManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    let reservationReleaseCalls = 0;
+    const reserveDeviceForShutdown = pool.reserveDeviceForShutdown.bind(pool);
+    pool.reserveDeviceForShutdown = async (...args) => {
+      const reservation = await reserveDeviceForShutdown(...args);
+      if (!reservation) {
+        return undefined;
+      }
+      const release = reservation.release;
+      return {
+        ...reservation,
+        release: async () => {
+          reservationReleaseCalls++;
+          await release();
+        },
+      };
+    };
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    await expect(
+      tool.handler({
+        device: { name: image.name, platform: image.platform, deviceId: image.deviceId! },
+      }),
+    ).rejects.toThrow("Failed to persist terminal release");
+    timer.advanceTime(1_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    timer.advanceTime(1_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    timer.advanceTime(10_000);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(deviceSessionRepository.releaseAttempts).toBe(3);
+    expect(reservationReleaseCalls).toBe(0);
+    await expect(pool.reserveDeviceForShutdown(image.deviceId!)).rejects.toThrow(
+      "already shutting down",
+    );
     expect(sessionManager.getTerminalReleaseSnapshot("session-1")).toMatchObject({
       releaseReason: "device-killed",
       terminal: true,

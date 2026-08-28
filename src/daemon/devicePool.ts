@@ -5012,13 +5012,11 @@ export class DevicePool {
       throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
     }
     const identity = this.reserveShutdownSessionIdentity(deviceId);
-    let expectedDevice: PooledDevice | undefined;
-    try {
-      expectedDevice = await this.reserveShutdownDeviceUnderLock(deviceId, identity, abortSignal);
-    } catch (error) {
-      identity.releaseSession?.();
-      throw error;
-    }
+    const expectedDevice = await this.reserveShutdownDeviceWithAbort(
+      deviceId,
+      identity,
+      abortSignal,
+    );
     if (!expectedDevice) {
       identity.releaseSession?.();
       return undefined;
@@ -5039,6 +5037,34 @@ export class DevicePool {
       identity.releaseSession?.();
     };
     return { device: capturedDevice, session: identity.session, release };
+  }
+
+  private async reserveShutdownDeviceWithAbort(
+    deviceId: string,
+    identity: ShutdownIdentityReservation,
+    abortSignal: AbortSignal | undefined,
+  ): Promise<PooledDevice | undefined> {
+    const releaseSessionOnAbort = () => identity.releaseSession?.();
+    abortSignal?.addEventListener("abort", releaseSessionOnAbort, { once: true });
+    try {
+      const expectedDevice = await this.reserveShutdownDeviceUnderLock(
+        deviceId,
+        identity,
+        abortSignal,
+      );
+      if (abortSignal?.aborted) {
+        if (expectedDevice && this.shutdownReservations.get(deviceId) === expectedDevice) {
+          this.shutdownReservations.delete(deviceId);
+        }
+        throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
+      }
+      return expectedDevice;
+    } catch (error) {
+      identity.releaseSession?.();
+      throw error;
+    } finally {
+      abortSignal?.removeEventListener("abort", releaseSessionOnAbort);
+    }
   }
 
   private reserveShutdownSessionIdentity(deviceId: string): ShutdownIdentityReservation {

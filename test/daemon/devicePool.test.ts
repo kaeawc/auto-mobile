@@ -761,6 +761,67 @@ describe("DevicePool", () => {
       }
     });
 
+    test("releases session identity when shutdown reservation aborts behind assignment", async () => {
+      const persistence = new DeferredDeviceSessionPersistence();
+      sessionManager.stopCleanupTimer();
+      sessionManager = new SessionManager(fakeTimer, persistence);
+      devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        fakeAppsRepo,
+        fakeDeviceManager,
+        new DefaultRetryExecutor(fakeTimer),
+      );
+      const owner = createBootedDevice("emulator-5554", "android", "Pixel 8");
+      const blocker = createBootedDevice("emulator-5556", "android", "Pixel 8");
+      fakeDeviceManager.bootedDevices = [owner, blocker];
+      await devicePool.initializeWithDevices([owner, blocker]);
+
+      const ownerBinding = devicePool.bindOrReuseDeviceSession(
+        "owner-session",
+        owner.deviceId,
+        "android",
+        sourceImage,
+      );
+      await persistence.waitForUpsert();
+      persistence.finishUpsert();
+      await ownerBinding;
+
+      persistence.deferNextUpsert();
+      const blockingAssignment = devicePool.bindOrReuseDeviceSession(
+        "blocking-session",
+        blocker.deviceId,
+        "android",
+        sourceImage,
+      );
+      await persistence.waitForUpsert();
+
+      const controller = new AbortController();
+      const abortedReservation = devicePool
+        .reserveDeviceForShutdown(owner.deviceId, controller.signal)
+        .then(
+          (reservation) => ({ reservation }),
+          (error: unknown) => ({ error }),
+        );
+      controller.abort(new Error("shutdown reservation cancelled"));
+      const retryReservation = devicePool.reserveDeviceForShutdown(owner.deviceId).then(
+        (reservation) => ({ reservation }),
+        (error: unknown) => ({ error }),
+      );
+
+      persistence.finishUpsert();
+      await blockingAssignment;
+      const abortedOutcome = await abortedReservation;
+      expect(abortedOutcome.error).toBeInstanceOf(Error);
+      expect((abortedOutcome.error as Error).message).toContain("cancelled");
+
+      const retryOutcome = await retryReservation;
+      expect(retryOutcome.error).toBeUndefined();
+      expect(retryOutcome.reservation?.session).toBe(sessionManager.getSession("owner-session"));
+      await retryOutcome.reservation?.release();
+    });
+
     test("rejects a bound session while its device carries an intentional-shutdown marker", async () => {
       await bindOwnerSession("owner-session", "emulator-5554");
 

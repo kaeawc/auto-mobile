@@ -2064,6 +2064,107 @@ describe("SessionManager", () => {
     }
   });
 
+  test("device-killed supersedes a terminal release during persistence", async () => {
+    const persistence = new DeferredReleaseDeviceSessionPersistence();
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      const session = await manager.createSession("killed-session", "emulator-5554", "android");
+      const callbacks: string[] = [];
+      manager.onSessionRelease((_sessionId, _deviceId, reason) => callbacks.push(reason));
+
+      const timeoutRelease = manager.releaseSession("killed-session", "heartbeat-timeout");
+      await persistence.releaseStarted.promise;
+      const killedRelease = manager.releaseSessionIfOwned(
+        "killed-session",
+        session,
+        "emulator-5554",
+        "device-killed",
+      );
+      persistence.finishRelease.resolve();
+      await Promise.all([timeoutRelease, killedRelease]);
+
+      expect(persistence.reasons).toEqual(["heartbeat-timeout", "device-killed"]);
+      expect(callbacks).toEqual(["device-killed"]);
+      expect(manager.getTerminalReleaseSnapshot("killed-session")).toMatchObject({
+        releaseReason: "device-killed",
+        terminal: true,
+      });
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("device-killed supersedes a finalized terminal release", async () => {
+    const reasons: string[] = [];
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+      reasons.push(reason);
+    };
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      const session = await manager.createSession("killed-session", "emulator-5554", "android");
+      const callbacks: string[] = [];
+      manager.onSessionRelease((_sessionId, _deviceId, reason) => callbacks.push(reason));
+
+      await manager.releaseSession("killed-session", "heartbeat-timeout");
+      await manager.releaseSessionIfOwned(
+        "killed-session",
+        session,
+        "emulator-5554",
+        "device-killed",
+      );
+
+      expect(reasons).toEqual(["heartbeat-timeout", "device-killed"]);
+      expect(callbacks).toEqual(["heartbeat-timeout", "device-killed"]);
+      expect(manager.getTerminalReleaseSnapshot("killed-session")).toMatchObject({
+        releaseReason: "device-killed",
+        terminal: true,
+      });
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
+  test("device-killed remains terminal when persistence retries through ordinary release", async () => {
+    const reasons: string[] = [];
+    let failRelease = true;
+    const persistence = new FakeDeviceSessionPersistence();
+    persistence.markReleased = async (_sessionUuid, _status, _releasedAtMs, reason) => {
+      reasons.push(reason);
+      if (failRelease) {
+        failRelease = false;
+        throw new Error("terminal write failed");
+      }
+    };
+    const manager = new SessionManager(fakeTimer, persistence);
+    try {
+      await manager.createSession("killed-session", "emulator-5554", "android");
+      const callbacks: string[] = [];
+      manager.onSessionRelease((_sessionId, _deviceId, reason) => callbacks.push(reason));
+
+      await expect(manager.releaseSession("killed-session", "device-killed")).rejects.toThrow(
+        "Failed to persist terminal release",
+      );
+      await manager.releaseSession("killed-session", "explicit-release");
+
+      expect(reasons).toEqual(["device-killed", "device-killed"]);
+      expect(callbacks).toEqual(["device-killed"]);
+      expect(manager.getTerminalReleaseSnapshot("killed-session")).toMatchObject({
+        releaseReason: "device-killed",
+        terminal: true,
+      });
+      await expect(
+        manager.getOrCreateSession("killed-session", {
+          async assignDeviceToSession() {
+            return "emulator-5560";
+          },
+        }),
+      ).rejects.toThrow("terminal after device-killed");
+    } finally {
+      manager.stopCleanupTimer();
+    }
+  });
+
   test("retries a failed device-killed upgrade during release persistence", async () => {
     const persistence = new DeferredReleaseDeviceSessionPersistence();
     let failTerminalRelease = true;

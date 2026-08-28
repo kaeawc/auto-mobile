@@ -987,7 +987,9 @@ jobs:
           else
             # Ubuntu apt 'bats' is the old sstephenson/bats which doesn't
             # capture stderr in run output. Install bats-core from source.
-            git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            # Pin the runner: newer development snapshots can miscount this
+            # suite after executing every test, which makes a green run fail.
+            git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
             sudo /tmp/bats-core/install.sh /usr/local
           fi
           if command -v shellcheck &>/dev/null; then

@@ -17,10 +17,6 @@ import {
   iosNotifyutilRegisteredSetReadPostCommand,
   parseNotifyutilState,
 } from "../../utils/ios-cmdline-tools/notifyutil";
-import {
-  iosMajorVersionFromSimctlListDevices,
-  parseIosMajorVersion,
-} from "../../utils/ios-cmdline-tools/iosVersion";
 
 export type DoNotDisturbMode = "off" | "none" | "priority" | "alarms";
 
@@ -94,8 +90,6 @@ export interface DeviceStateDependencies {
   timer?: Timer;
 }
 
-const IOS_DND_NOTIFICATION = "com.apple.donotdisturb.enabled";
-const IOS_DND_INDEPENDENT_READBACK_SETTLE_MS = 500;
 const IOS_BIOMETRIC_ENROLLMENT_NOTIFICATION = "com.apple.BiometricKit.enrollmentChanged";
 const IOS_BIOMETRICS_UNSUPPORTED_ERROR =
   "Biometric enrollment state can only be read or set on an iOS Simulator.";
@@ -104,37 +98,41 @@ const IOS_BIOMETRICS_UNSUPPORTED_ERROR =
  * Physical iOS devices expose no public API to enable/disable Focus or Do Not
  * Disturb. The only sanctioned app-side hook is the read-only Focus Filter API
  * (apps react to an active Focus, they cannot set one), and Apple's device
- * tooling (devicectl, XCUITest) ships no DND/Focus setter. DND automation is
- * therefore simulator-only.
+ * tooling (devicectl, XCUITest) ships no DND/Focus setter. Simulators are no
+ * better off (see IOS_SIM_DND_UNSUPPORTED_ERROR) — DND automation is
+ * unavailable on iOS entirely — but the two carry distinct errors so callers
+ * can tell a device limitation from a daemon-owned key.
  */
 const IOS_PHYSICAL_DND_UNSUPPORTED_ERROR =
   "Do Not Disturb cannot be set on a physical iOS device: iOS exposes no public API to " +
-  "enable/disable Focus or Do Not Disturb (only the read-only Focus Filter API). " +
-  "Use an iOS Simulator for DND automation, or trigger DND manually / via a Shortcuts automation on device.";
-
-/** Last iOS major version where the legacy binary-DND notification is expected to work. */
-const IOS_DND_LEGACY_NOTIFICATION_LAST_SUPPORTED_MAJOR = 17;
+  "enable/disable Focus or Do Not Disturb (only the read-only Focus Filter API), and Apple's " +
+  "device tooling (devicectl, XCUITest) ships no DND/Focus setter. Trigger DND manually or via a " +
+  "Shortcuts automation on device.";
 
 /**
- * iOS 18 moved Do Not Disturb / Focus to the `com.apple.donotdisturbd` daemon
- * (private Core Data store + a Focus-assertion model). That daemon now owns the
- * legacy `com.apple.donotdisturb.enabled` Darwin notification and immediately
- * resets it to its authoritative value: empirically, a value posted via
- * `notifyutil -s` is read back as `0` from a fresh process even sub-second later,
- * while an unmanaged notify key (e.g. BiometricKit's) set the same way persists.
- * So the legacy key neither reflects nor controls the real Focus state — a write
- * cannot verify and a read is a confident falsehood (always `0`). Apple ships no
- * public API to read or set Focus/DND. The version check is only a fast-path:
- * legacy writes that are attempted must still prove persistence with an
- * independent fresh-process readback before reporting success.
+ * Do Not Disturb is unsupported on **every** iOS simulator runtime, not just
+ * iOS 18+. DND/Focus is owned by the private `com.apple.donotdisturbd` daemon,
+ * which shipped with Focus in iOS 15 and reclaims the legacy
+ * `com.apple.donotdisturb.enabled` Darwin notification: a value posted with the
+ * `notifyutil -1 -s -g -p` shape reads back as `0` from a fresh process, while
+ * an unmanaged notify key (BiometricKit's) set the very same way persists as
+ * `1`. So the legacy key neither reflects nor controls real Focus state — a
+ * write is an unverifiable no-op and a read is a confident falsehood.
+ *
+ * Empirically verified (issue #2862) on booted simulators, `donotdisturbd`
+ * running in each: **iOS 16.4 (20E247)** and **iOS 17.5 (21F79)** both revert
+ * the key while the control key persists, matching the previously-recorded
+ * iOS 18.x and 26.x behavior. iOS 15 could not be tested because Xcode 26.3
+ * offers no iOS 15 simulator runtime for download — which also means no iOS 15
+ * simulator can be created with current tooling, so the old `<= 17` legacy
+ * fast-path was unreachable in practice as well as wrong.
  */
-const IOS18_SIM_DND_UNSUPPORTED_ERROR =
-  "Do Not Disturb cannot be reliably read or set on an iOS 18+ simulator: iOS 18 moved Do Not " +
-  "Disturb to the donotdisturbd Focus daemon, which owns the state in a private store and resets " +
-  "the legacy com.apple.donotdisturb.enabled notification — so that notification neither reflects " +
+const IOS_SIM_DND_UNSUPPORTED_ERROR =
+  "Do Not Disturb cannot be read or set on an iOS simulator: Do Not Disturb is owned by the " +
+  "private donotdisturbd Focus daemon, which holds the state in its own store and resets the " +
+  "legacy com.apple.donotdisturb.enabled notification — so that notification neither reflects " +
   "nor controls the real Focus state. iOS exposes no public API to read or set Focus / Do Not " +
-  "Disturb. Use an iOS 17 or earlier simulator for binary DND automation, or set it manually / via " +
-  "a Shortcuts automation.";
+  "Disturb. Set it manually in the simulator, or via a Shortcuts automation.";
 
 function parseAndroidZenMode(raw: string): DoNotDisturbState {
   const value = raw.trim();
@@ -184,66 +182,6 @@ function parseAndroidZenMode(raw: string): DoNotDisturbState {
         warning: `Unknown Android zen_mode value: ${value}`,
       };
   }
-}
-
-function iosDndStateFromNotifyutilOutput(raw: string): DoNotDisturbState {
-  const enabled = parseNotifyutilState(raw);
-  if (enabled === null) {
-    return {
-      supported: true,
-      capability: "binary",
-      method: "ios_simulator_notifyutil",
-      bestEffort: true,
-      rawValue: raw,
-      warning: "Could not parse iOS simulator Do Not Disturb notifyutil state",
-    };
-  }
-
-  return {
-    supported: true,
-    capability: "binary",
-    enabled,
-    mode: enabled ? "none" : "off",
-    rawValue: enabled ? "1" : "0",
-    method: "ios_simulator_notifyutil",
-    bestEffort: true,
-  };
-}
-
-function iosDndUnsupportedReadbackResult(
-  state: DoNotDisturbState,
-  requestedMode: DoNotDisturbMode,
-  requestedEnabled: boolean,
-  reason: string,
-): DoNotDisturbState {
-  const observed = state.enabled === undefined ? "unknown" : state.enabled ? "enabled" : "disabled";
-  const requested = requestedEnabled ? "enabled" : "disabled";
-  return {
-    ...state,
-    supported: false,
-    capability: "unsupported",
-    requestedMode,
-    verified: false,
-    bestEffort: true,
-    error: `iOS simulator Do Not Disturb write did not persist: independent notifyutil readback observed ${observed} after requesting ${requested}. ${reason}`,
-  };
-}
-
-/**
- * Builds the honest warning for an iOS simulator DND write when the binary
- * state verified, but the requested priority/alarms tier cannot be represented.
- */
-function iosDndSetWarning(
-  requestedMode: DoNotDisturbMode,
-  downgraded: boolean,
-): string | undefined {
-  if (downgraded) {
-    const tier =
-      `iOS DND is binary on the simulator; requested "${requestedMode}" has no per-mode/priority/alarms ` +
-      "fidelity (no public Focus API)";
-    return `${tier}, so it was applied as plain DND.`;
-  }
-  return undefined;
 }
 
 function modeForInput(input: SetDeviceStateInput["doNotDisturb"]): DoNotDisturbMode {
@@ -532,71 +470,18 @@ export class DeviceState {
   }
 
   private async getIosDoNotDisturb(): Promise<DoNotDisturbState> {
-    if (!isIosSimulatorDevice(this.device)) {
-      return {
-        supported: false,
-        capability: "unsupported",
-        error: IOS_PHYSICAL_DND_UNSUPPORTED_ERROR,
-      };
-    }
-
-    const simctl = this.simctl ?? new SimCtlClient(this.device);
-
-    // iOS 18+ simulators: the legacy key is owned/reset by donotdisturbd, so
-    // `notifyutil -g` always reads `0` regardless of the real Focus state. Report
-    // unsupported rather than a confident falsehood — symmetric with the write
-    // path. iOS <18 (and unknown) keep the legacy best-effort read below.
-    const iosMajor = await this.resolveSimulatorIosMajorVersion(simctl);
-    if (iosMajor !== null && iosMajor > IOS_DND_LEGACY_NOTIFICATION_LAST_SUPPORTED_MAJOR) {
-      return {
-        supported: false,
-        capability: "unsupported",
-        error: IOS18_SIM_DND_UNSUPPORTED_ERROR,
-      };
-    }
-
-    try {
-      const result = await simctl.executeCommand(
-        iosNotifyutilGetCommand(this.device.deviceId, IOS_DND_NOTIFICATION),
-      );
-      return iosDndStateFromNotifyutilOutput(result.stdout ?? "");
-    } catch (error) {
-      return {
-        supported: true,
-        capability: "binary",
-        method: "ios_simulator_notifyutil",
-        bestEffort: true,
-        error: errorMessage(error),
-      };
-    }
-  }
-
-  /**
-   * Resolve the simulator's major iOS version. Prefers the version already on the
-   * `BootedDevice` (populated by the daemon device pool); falls back to a live
-   * `simctl list devices <udid> --json` probe. Returns `null` when the version
-   * cannot be determined, so callers treat it as "unknown". Non-iOS runtimes
-   * (visionOS/tvOS/watchOS simulators) also resolve to `null` and fall through to
-   * the harmless legacy path — they are not real DND targets.
-   */
-  private async resolveSimulatorIosMajorVersion(
-    simctl: IosSimulatorClient,
-  ): Promise<number | null> {
-    const fromDevice = parseIosMajorVersion(this.device.iosVersion ?? this.device.osVersion);
-    if (fromDevice !== null) {
-      return fromDevice;
-    }
-    try {
-      const result = await simctl.executeCommand(`list devices ${this.device.deviceId} --json`);
-      return iosMajorVersionFromSimctlListDevices(result.stdout ?? "", this.device.deviceId);
-    } catch (error) {
-      logger.warn(
-        `[DeviceState] could not resolve iOS version for ${this.device.deviceId}: ` +
-          `${errorMessage(error)}`,
-        error,
-      );
-      return null;
-    }
+    // No iOS target — simulator or physical — can report DND. Simulators are
+    // covered by IOS_SIM_DND_UNSUPPORTED_ERROR (donotdisturbd owns the legacy
+    // key on every obtainable runtime); physical devices have no public API at
+    // all. Neither issues a notifyutil read, because a read would return a
+    // confident falsehood (always `0`) rather than the real Focus state.
+    return {
+      supported: false,
+      capability: "unsupported",
+      error: isIosSimulatorDevice(this.device)
+        ? IOS_SIM_DND_UNSUPPORTED_ERROR
+        : IOS_PHYSICAL_DND_UNSUPPORTED_ERROR,
+    };
   }
 
   private async setIosDoNotDisturb(
@@ -604,122 +489,20 @@ export class DeviceState {
   ): Promise<DoNotDisturbState> {
     const requestedMode = modeForInput(input);
 
-    // Physical iOS devices: precise, structured "not supported and why" — there
-    // is no public API to set Focus/DND, so this is an early return with no write.
-    if (!isIosSimulatorDevice(this.device)) {
-      return {
-        supported: false,
-        capability: "unsupported",
-        requestedMode,
-        error: IOS_PHYSICAL_DND_UNSUPPORTED_ERROR,
-      };
-    }
-
-    const simctl = this.simctl ?? new SimCtlClient(this.device);
-
-    // Known iOS 18+ simulators skip the legacy probe as a fast-path optimization:
-    // the key is owned/reset by donotdisturbd there. Unknown and older runtimes
-    // still attempt the legacy path, then prove behavior with a fresh readback.
-    const iosMajor = await this.resolveSimulatorIosMajorVersion(simctl);
-    const versionKnown = iosMajor !== null;
-    if (iosMajor !== null && iosMajor > IOS_DND_LEGACY_NOTIFICATION_LAST_SUPPORTED_MAJOR) {
-      return {
-        supported: false,
-        capability: "unsupported",
-        requestedMode,
-        verified: false,
-        error: IOS18_SIM_DND_UNSUPPORTED_ERROR,
-      };
-    }
-
-    // Simulator legacy path: the only lever is the binary `com.apple.donotdisturb.enabled`
-    // Darwin notification. The set command self-registers so keys without some
-    // other live owner are still writable in-process, but that same-invocation
-    // set/read/post is not authoritative: donotdisturbd can reclaim the key
-    // immediately, so success depends on the independent fresh-process readback below.
-    // There is no per-mode (priority/alarms) Darwin notification analogous to
-    // Android's `zen_mode` integer, so `priority`/`alarms` requests are applied
-    // as plain DND ("none") and reported honestly rather than silently claiming
-    // the tier was honored.
-    const requestedEnabled = requestedMode !== "off";
-    const appliedMode: DoNotDisturbMode = requestedEnabled ? "none" : "off";
-    const downgraded = requestedMode === "priority" || requestedMode === "alarms";
-
-    try {
-      const value = requestedEnabled ? "1" : "0";
-      const writeResult = await simctl.executeCommand(
-        iosNotifyutilRegisteredSetReadPostCommand(
-          this.device.deviceId,
-          IOS_DND_NOTIFICATION,
-          value,
-        ),
-        IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS,
-      );
-      const writeStderr = writeResult.stderr?.trim();
-      if (writeStderr) {
-        return {
-          supported: true,
-          capability: "binary",
-          requestedMode,
-          method: "ios_simulator_notifyutil",
-          bestEffort: true,
-          error: `notifyutil failed: ${writeStderr}`,
-        };
-      }
-
-      await this.timer.sleep(IOS_DND_INDEPENDENT_READBACK_SETTLE_MS);
-      const readbackResult = await simctl.executeCommand(
-        iosNotifyutilGetCommand(this.device.deviceId, IOS_DND_NOTIFICATION),
-      );
-      const state = iosDndStateFromNotifyutilOutput(readbackResult.stdout ?? "");
-      const stateMatches = state.enabled === requestedEnabled;
-      if (!stateMatches) {
-        return iosDndUnsupportedReadbackResult(
-          state,
-          requestedMode,
-          requestedEnabled,
-          "The runtime may reset the legacy com.apple.donotdisturb.enabled notification via donotdisturbd.",
-        );
-      }
-      if (!requestedEnabled && !versionKnown) {
-        return iosDndUnsupportedReadbackResult(
-          state,
-          requestedMode,
-          requestedEnabled,
-          "The simulator iOS version is unknown, and an off request reading back disabled does not prove the legacy DND notification can enable DND.",
-        );
-      }
-      // For priority/alarms we applied *a* DND state but NOT the requested tier,
-      // so verified is intentionally false: setState() will then report
-      // success:false, surfacing the unfulfillable request instead of hiding it.
-      const verified = stateMatches && !downgraded;
-
-      const warning = iosDndSetWarning(requestedMode, downgraded);
-
-      // Only assert an applied mode when the binary readback confirmed the
-      // requested enabled state. If it did not, we cannot claim plain DND was
-      // applied — leave `appliedMode` unset and let `mode`/`enabled` reflect
-      // what the readback actually observed (via the `...state` spread).
-      const appliedFields = stateMatches ? { appliedMode, mode: appliedMode } : {};
-
-      return {
-        ...state,
-        capability: "binary",
-        requestedMode,
-        ...appliedFields,
-        verified,
-        bestEffort: true,
-        ...(warning ? { warning } : {}),
-      };
-    } catch (error) {
-      return {
-        supported: true,
-        capability: "binary",
-        requestedMode,
-        method: "ios_simulator_notifyutil",
-        bestEffort: true,
-        error: errorMessage(error),
-      };
-    }
+    // Neither iOS simulators nor physical devices can have DND set. The legacy
+    // com.apple.donotdisturb.enabled notification is owned and reset by the
+    // donotdisturbd Focus daemon on every runtime we can obtain, so writing it
+    // would post a notification that changes nothing and cannot be verified.
+    // Return without issuing any notifyutil write rather than reporting a
+    // best-effort success that is really a no-op.
+    return {
+      supported: false,
+      capability: "unsupported",
+      requestedMode,
+      verified: false,
+      error: isIosSimulatorDevice(this.device)
+        ? IOS_SIM_DND_UNSUPPORTED_ERROR
+        : IOS_PHYSICAL_DND_UNSUPPORTED_ERROR,
+    };
   }
 }

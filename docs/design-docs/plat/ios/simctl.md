@@ -313,79 +313,67 @@ per-package resilience of iOS app-data restore.
 
 ## Do Not Disturb (setDeviceState)
 
-<kbd>✅ Implemented</kbd> <kbd>📱 Simulator (iOS ≤17) Only</kbd>
+<kbd>🚫 Unsupported on iOS</kbd>
 
-The `setDeviceState` / `getDeviceState` MCP tools control Do Not Disturb. On iOS,
-DND is **simulator-only and binary** (on/off) when the legacy notification path
-can prove it works — this is a hard platform limitation, not a missing wiring
-detail. Known **iOS 18+ simulators skip the legacy write probe and report
-`capability: "unsupported"`** (see below): DND moved to the private
-`donotdisturbd` Focus daemon. Unknown or older simulator runtimes attempt the
-legacy path, but write success is behavior-based and requires an independent
-fresh-process readback.
+The `setDeviceState` / `getDeviceState` MCP tools control Do Not Disturb. On iOS
+**both reads and writes report `capability: "unsupported"`** — on simulators and
+physical devices alike. This is a hard platform limitation, not missing wiring.
+Android keeps full four-tier `zen_mode` support; iOS has no equivalent, and that
+asymmetry is reported honestly rather than papered over with a best-effort no-op.
 
-### How it works (iOS ≤17 simulators)
+### Why (empirically verified — issue #2862)
 
-1. **Binary toggle** — the only lever the simulator exposes is the
-   `com.apple.donotdisturb.enabled` Darwin notification, driven via
-   `xcrun simctl spawn <udid> notifyutil`. All four flags are passed in a
-   **single combined invocation** — `notifyutil -1 <key> -s <key> <0|1> -g <key> -p <key>`
-   (`iosNotifyutilRegisteredSetReadPostCommand` in `src/utils/ios-cmdline-tools/notifyutil.ts`),
-   not four separate shell calls:
-   - `notifyutil -1 com.apple.donotdisturb.enabled ...` creates a temporary
-     registration so the state variable exists even if no other process already
-     owns the key.
-   - `notifyutil -s com.apple.donotdisturb.enabled <0|1>` sets the value while
-     that registration is alive.
-   - `notifyutil -g com.apple.donotdisturb.enabled` reads the state in the same
-     invocation.
-   - `notifyutil -p com.apple.donotdisturb.enabled` posts it so observers react.
-   - After a short settle, a separate fresh-process
-     `notifyutil -g com.apple.donotdisturb.enabled` verifies that the value
-     persisted. Only this independent readback can make the write
-     `verified: true`.
-2. **Honest capability reporting** — every result carries a machine-readable
-   `capability` field so callers can branch instead of string-matching warnings:
-   - `binary` — simulator legacy path verified: on/off only.
-   - `unsupported` — physical device, known **iOS 18+ simulator**, or a legacy
-     write whose independent readback reverted instead of persisting.
-   - (`full` is reserved for Android, where all four `zen_mode` tiers are
-     distinct, persisted, and verified.)
-3. **No silent downgrade** — a `priority` or `alarms` request applies plain DND
-   and reports it honestly: `requestedMode: "priority"|"alarms"`,
-   `appliedMode: "none"`, a structured `warning`, and `verified: false` (so
-   `success` is `false`). The tool never claims a tier it cannot deliver.
-4. **Best effort with behavior verification** — results are `bestEffort: true`.
-   The same-invocation registered set/read/post proves only that the command
-   could set state while its registration existed; it is not authoritative by
-   itself. The setter only reports success when the independent readback
-   observes the requested binary state.
+Do Not Disturb is owned by the private **`donotdisturbd`** Focus daemon, which
+shipped with Focus in iOS 15. It owns the legacy
+`com.apple.donotdisturb.enabled` Darwin notification and resets it to its own
+authoritative value, so that notification neither reflects nor controls real
+Focus state: a write cannot be verified and a read is a confident falsehood
+(always `0`).
+
+Measured on booted simulators with `donotdisturbd` running in each, using the
+exact production command shape
+(`notifyutil -1 <key> -s <key> 1 -g <key> -p <key>`, then a **fresh-process**
+`notifyutil -g <key>`):
+
+| Runtime           | DND key fresh readback | Unmanaged control key\* |
+| ----------------- | ---------------------- | ----------------------- |
+| iOS 16.4 (20E247) | `0` — reverted         | `1` — persisted         |
+| iOS 17.5 (21F79)  | `0` — reverted         | `1` — persisted         |
+| iOS 18.x / 26.x   | `0` — reverted         | `1` — persisted         |
+
+\* `com.apple.BiometricKit.enrollmentChanged`, set the same way in the same
+session. It persisting proves the `notifyutil` mechanism itself works and that
+the DND key specifically is being reclaimed.
+
+The result is identical at every version, so there is no working boundary to
+draw. An earlier `IOS_DND_LEGACY_NOTIFICATION_LAST_SUPPORTED_MAJOR = 17`
+fast-path assumed iOS ≤17 still worked; it did not. iOS 15 could not be measured
+because **Xcode 26.3 offers no iOS 15 simulator runtime for download** — which
+also means current tooling cannot create an iOS 15 simulator at all, so the
+legacy path was unreachable in practice as well as wrong.
+
+### Behavior
+
+- **No command is issued.** Neither the read nor the write spawns `notifyutil`.
+  A read would return a falsehood and a write would be an unverifiable no-op, so
+  both return early with a structured, actionable error.
+- **`priority`/`alarms` are not silently downgraded.** They report
+  `requestedMode` with `capability: "unsupported"` and no `appliedMode`, rather
+  than claiming plain DND was applied.
+- **Unknown runtime versions report unsupported too.** The answer no longer
+  depends on resolving the simulator's iOS version, so no `simctl list devices`
+  probe is made.
+- Biometric enrollment still uses `notifyutil` and is unaffected — that key has
+  no daemon owner, which is exactly what the control column above demonstrates.
 
 ### Limitations
 
-- **Known iOS 18+ simulators: unsupported fast-path.** iOS 18 moved Do Not Disturb / Focus to the
-  private **`donotdisturbd`** daemon (a Core Data store + Focus-assertion model).
-  That daemon owns the legacy `com.apple.donotdisturb.enabled` notification and
-  immediately resets it to its authoritative value — verified empirically, a
-  `notifyutil -s` write reads back `0` from a fresh process even sub-second later
-  (an unmanaged notify key set the same way persists). So the legacy key neither
-  reflects nor controls the real Focus state: writes cannot verify and reads are a
-  confident falsehood. When the simulator's iOS major version is known from device
-  metadata or `simctl list devices <udid> --json`, iOS 18+ is treated as an
-  unsupported fast-path to avoid a known-dead probe. When the version is unknown
-  or expected to support the legacy path, `setDeviceState` still probes behavior:
-  if the fresh-process readback reverts, the result is `capability:
-"unsupported"` instead of a false success. On unknown runtimes, an off request
-  reading back disabled is not enough to prove capability, because reclaimed
-  runtimes also settle to `0`; positive enable persistence is the useful proof.
-  Apple exposes no public API to read or set Focus/DND. Use an iOS 17 or earlier
-  simulator with verified legacy behavior, or set it manually / via a Shortcuts
-  automation.
-- **Simulator only.** Physical iOS devices return `supported: false`,
-  `capability: "unsupported"`, and a specific error: iOS exposes **no public
-  API** to enable/disable Focus or Do Not Disturb (only the read-only Focus
-  Filter API), and Apple's device tooling (`devicectl`, XCUITest) ships no
-  DND/Focus setter.
+- **Physical devices carry their own error.** They also return
+  `supported: false`, `capability: "unsupported"`, but with a distinct message:
+  iOS exposes **no public API** to enable/disable Focus or Do Not Disturb (only
+  the read-only Focus Filter API), and Apple's device tooling (`devicectl`,
+  XCUITest) ships no DND/Focus setter. Simulators get the `donotdisturbd`
+  explanation above instead.
 - **Binary, not per-mode.** Since iOS 15, DND lives inside the private **Focus**
   framework. There is no per-mode (priority vs. alarms-only) Darwin notification
   analogous to Android's `zen_mode` integer, so iOS cannot be mapped to the

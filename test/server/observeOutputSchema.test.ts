@@ -144,6 +144,75 @@ describe("observeResultSchema: parses real captures (#3025)", () => {
     ).not.toThrow();
   });
 
+  test("models additive display-cutout classification and geometry", () => {
+    const classifications = ["none", "notch", "dynamic_island", "hole_punch", "unknown"] as const;
+
+    for (const classification of classifications) {
+      expect(() =>
+        observeResultSchema.parse({
+          insets: {
+            available: classification !== "unknown",
+            source: classification === "unknown" ? "unavailable" : "android-window-metrics",
+            units: classification === "unknown" ? "unknown" : "physical-pixels",
+            displayCutoutInfo:
+              classification === "none" || classification === "unknown"
+                ? { classification }
+                : { classification, bounds: [[420, 0, 660, 90]] },
+          },
+        }),
+      ).not.toThrow();
+    }
+
+    expect(() =>
+      observeResultSchema.parse({
+        insets: {
+          available: true,
+          source: "android-window-metrics",
+          units: "physical-pixels",
+          displayCutoutInfo: { classification: "none", bounds: null },
+        },
+      }),
+    ).not.toThrow();
+
+    expect(() =>
+      observeResultSchema.parse({
+        insets: {
+          available: true,
+          source: "android-window-metrics",
+          units: "physical-pixels",
+          displayCutoutInfo: { classification: "notch", bounds: [{ left: 0, top: 0, right: 1 }] },
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      observeResultSchema.parse({
+        insets: {
+          available: true,
+          source: "android-window-metrics",
+          units: "physical-pixels",
+          displayCutoutInfo: { classification: "notch", bounds: [[1, 2, 3, 4, 5]] },
+        },
+      }),
+    ).toThrow();
+
+    const sanitized = sanitizeObserveResult(
+      {
+        insets: {
+          available: true,
+          source: "android-window-metrics",
+          units: "physical-pixels",
+          displayCutoutInfo: {
+            classification: "hole_punch",
+            bounds: [{ left: 480, top: 0, right: 600, bottom: 100 }],
+          },
+        },
+      } as never,
+      { dropElements: false, compact: true },
+    );
+    expect(sanitized.insets?.displayCutoutInfo?.bounds).toEqual([[480, 0, 600, 100]]);
+    expect(() => observeResultSchema.parse(sanitized)).not.toThrow();
+  });
+
   test("accepts the Android resource fallback without system-chrome visibility", () => {
     const fallbackInsets: ObservationInsets = {
       available: true,

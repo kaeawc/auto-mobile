@@ -14,6 +14,22 @@ export interface ObservationSystemBarsInsets {
 }
 
 /**
+ * Physical display cutout details. Unlike {@link ObservationInsets.displayCutout},
+ * which is an aggregate of edge insets for layout, this describes the cutout itself.
+ * Bounds use the enclosing observation's screen coordinate space and rotation.
+ */
+export interface ObservationDisplayCutout {
+  classification: "none" | "notch" | "dynamic_island" | "hole_punch" | "unknown";
+  /** Bounding rectangles for every reported cutout, when the platform provides them. */
+  bounds?: Array<{
+    left: number;
+    top: number;
+    right: number;
+    bottom: number;
+  }> | null;
+}
+
+/**
  * Current system-chrome visibility for the foreground app window. It describes
  * presentation state only; edge-to-edge layout remains an independent choice.
  */
@@ -39,7 +55,10 @@ export interface ObservationInsets {
     | "unavailable";
   units: "physical-pixels" | "points" | "unknown";
   systemBars?: ObservationSystemBarsInsets;
+  /** Aggregate display-cutout edge insets for safe-area calculations. */
   displayCutout?: ObservationEdgeInsets;
+  /** Classification and geometry of the physical cutout, distinct from edge insets above. */
+  displayCutoutInfo?: ObservationDisplayCutout;
   systemGestures?: ObservationEdgeInsets;
   mandatorySystemGestures?: ObservationEdgeInsets;
   tappableElement?: ObservationEdgeInsets;

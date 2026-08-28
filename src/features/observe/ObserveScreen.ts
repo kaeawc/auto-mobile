@@ -686,6 +686,9 @@ export class RealObserveScreen implements ObserveScreen {
         if (result.viewHierarchy?.systemInsets) {
           result.systemInsets = result.viewHierarchy.systemInsets;
         }
+        if (result.viewHierarchy?.rotation !== undefined) {
+          result.rotation = result.viewHierarchy.rotation;
+        }
 
         // Filter offscreen nodes to keep payload small. Original hierarchy stays
         // attached for raw element search when enabled.

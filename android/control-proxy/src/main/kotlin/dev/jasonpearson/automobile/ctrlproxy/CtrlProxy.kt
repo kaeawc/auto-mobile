@@ -31,6 +31,7 @@ import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import dev.jasonpearson.automobile.ctrlproxy.models.DisplayCutoutInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.FrameMetricsSnapshot
 import dev.jasonpearson.automobile.ctrlproxy.models.HighlightShape
@@ -2669,12 +2670,23 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
 
   /** Get typed current-window inset metadata for coordinate and layout inspection. */
   @Suppress("DEPRECATION")
-  private fun getObservationInsets(): ObservationInsetsInfo {
+  private fun getObservationInsets(screenDimensions: ScreenDimensions?): ObservationInsetsInfo {
     return try {
       val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
       if (windowManager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         val metrics = windowManager.currentWindowMetrics
         val windowInsets = metrics.windowInsets
+        val displayCutout = windowInsets.displayCutout
+        val displayCutoutInfo =
+          if (displayCutout == null) {
+            DisplayCutoutInfo.none()
+          } else {
+            DisplayCutoutInfo.fromBoundingRects(
+              screenWidth = screenDimensions?.width ?: 0,
+              screenHeight = screenDimensions?.height ?: 0,
+              bounds = displayCutout.boundingRects.filterNot { it.isEmpty }.map(::ElementBounds),
+            )
+          }
         ObservationInsetsInfo(
           systemBars =
             SystemBarsInsetsInfo(
@@ -2695,6 +2707,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
                 android.view.WindowInsets.Type.displayCutout()
               )
             ),
+          displayCutoutInfo = displayCutoutInfo,
           systemGestures =
             toSystemInsetsInfo(
               windowInsets.getInsets(android.view.WindowInsets.Type.systemGestures())
@@ -2727,11 +2740,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         ObservationInsetsInfo(
           source = "android-resource-fallback",
           systemBars = SystemBarsInsetsInfo(visible = bars, stable = bars),
+          displayCutoutInfo = DisplayCutoutInfo.unknown(),
         )
       }
     } catch (e: Exception) {
       Log.w(TAG, "Failed to get system insets", e)
-      ObservationInsetsInfo(available = false, source = "unavailable", units = "unknown")
+      ObservationInsetsInfo(
+        available = false,
+        source = "unavailable",
+        units = "unknown",
+        displayCutoutInfo = DisplayCutoutInfo.unknown(),
+      )
     }
   }
 
@@ -2903,7 +2922,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val capturedRootPackage = rootNode?.packageName?.toString()
     val capturedWindowClass = lastWindowClassName
     val screenDimensions = getScreenDimensions()
-    val insets = getObservationInsets()
+    val insets = getObservationInsets(screenDimensions)
 
     if (allWindows.isNullOrEmpty() && rootNode == null) {
       Log.w(TAG, "No windows or root node available for extraction")
@@ -2943,6 +2962,15 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         rotationAtCaptureStart,
         getRotationOrNull(),
       )
+    // Bounding rectangles are only meaningful relative to the same orientation
+    // as screenDimensions. Keep the established edge insets, but avoid emitting
+    // stale geometry when the capture's orientation could not be proven.
+    val captureInsets =
+      if (rotation == null) {
+        insets.copy(displayCutoutInfo = DisplayCutoutInfo.unknown())
+      } else {
+        insets
+      }
 
     // Add device metadata to the hierarchy (eliminates need for dumpsys calls on client)
     val wakefulness = getWakefulness()
@@ -2953,8 +2981,8 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         screenWidth = screenDimensions?.width,
         screenHeight = screenDimensions?.height,
         rotation = rotation,
-        systemInsets = legacySystemInsets(insets),
-        insets = insets,
+        systemInsets = legacySystemInsets(captureInsets),
+        insets = captureInsets,
         wakefulness = wakefulness,
         foregroundActivity = foreground,
         density = density,
@@ -3122,6 +3150,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     val allWindows = windows
     val rootNode = rootInActiveWindow
     val screenDimensions = getScreenDimensions()
+    val insets = getObservationInsets(screenDimensions)
 
     if (allWindows.isNullOrEmpty() && rootNode == null) {
       return null
@@ -3160,8 +3189,17 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       )
     // The ADB EXTRACT_HIERARCHY route must carry the #4548 scale metadata too (this route does not
     // add the other device metadata, but the daemon retains scale metadata off any route).
+    val captureInsets =
+      if (rotation == null) insets.copy(displayCutoutInfo = DisplayCutoutInfo.unknown()) else insets
     val hierarchyWithScaleMetadata =
-      withScaleMetadata(hierarchy?.copy(rotation = rotation), screenDimensions)
+      withScaleMetadata(
+        hierarchy?.copy(
+          rotation = rotation,
+          systemInsets = legacySystemInsets(captureInsets),
+          insets = captureInsets,
+        ),
+        screenDimensions,
+      )
     if (hierarchyWithScaleMetadata != null && contextAtExtractionStart == currentFrameContext()) {
       extractedHierarchyFrameContexts[hierarchyWithScaleMetadata] = contextAtExtractionStart
     }

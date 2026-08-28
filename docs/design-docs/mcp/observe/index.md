@@ -13,7 +13,7 @@ All collected data is assembled into an object containing (fields may be omitted
 
 - `updatedAt`: device timestamp (or server timestamp fallback)
 - `screenSize`: current screen dimensions (rotation-aware)
-- `insets`: typed safe-area and system-inset snapshot, including availability, source, units, system bars, cutouts, Android gesture regions, and current system-chrome visibility when available
+- `insets`: typed safe-area and system-inset snapshot, including availability, source, units, system bars, cutouts, Android gesture regions, and current system-chrome visibility when available. `displayCutout` remains the aggregate edge insets used for layout; `displayCutoutInfo` separately carries cutout classification and geometry.
 - `systemInsets`: compatibility alias for the stable system-bar edges; prefer `insets` for new consumers
 - `rotation`: current device rotation value
 - `activeWindow`: current app/activity information when resolved
@@ -44,6 +44,23 @@ may include the visible controller's home-indicator auto-hide preference. That p
 an app request, not proof that the home indicator is currently hidden. Older Android runners
 and iOS apps built with an older AutoMobile SDK omit `systemChrome`, so clients must treat its
 absence as unknown rather than inferring it from zero insets.
+
+## Display cutouts
+
+`insets.displayCutoutInfo` is optional additive metadata with a `classification` of
+`none`, `notch`, `dynamic_island`, `hole_punch`, or `unknown`. When the platform
+provides cutout rectangles, `bounds` holds `[left, top, right, bottom]` rectangles in
+the observation's `screenSize` coordinate space and its reported `rotation`. The units
+are the enclosing `insets.units`: physical pixels on Android and points on iOS.
+
+Android reads the platform `DisplayCutout` rectangles and classifies only unambiguous
+single-cutout geometry; it reports `unknown` for unsupported API levels, unstable
+rotation, malformed or multi-cutout shapes. iOS has no public API that distinguishes a
+notch from Dynamic Island or supplies its bounds, so it reports `unknown` rather than
+inferring the result from safe-area values, camera capability, or device model. Existing
+clients can continue using `displayCutout` for aggregate layout insets; clients that
+need physical-obstruction identity should use `displayCutoutInfo` and treat a missing
+field from an older runner as unknown.
 
 The observation gracefully handles various error conditions:
 

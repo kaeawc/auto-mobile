@@ -253,6 +253,18 @@ const edgeInsetsSchema = z.object({
   left: z.number(),
 });
 
+const displayCutoutBoundsSchema = z.union([
+  boundsObjectSchema,
+  z.array(z.number()).min(4).max(4).describe("Compact bounds tuple [left, top, right, bottom]."),
+]);
+
+const displayCutoutInfoSchema = z.object({
+  classification: z.enum(["none", "notch", "dynamic_island", "hole_punch", "unknown"]),
+  // Platform metadata reports a list of bounds objects. The tuple arm preserves
+  // forward compatibility should a producer compact those rectangles.
+  bounds: z.array(displayCutoutBoundsSchema).nullish(),
+});
+
 const systemChromeSchema = z.object({
   visibility: z.enum(["visible", "hidden", "partial", "unknown"]),
   statusBar: z.enum(["visible", "hidden", "unknown"]),
@@ -274,6 +286,7 @@ const observationInsetsSchema = z.object({
   // null (rather than omitting them), particularly on older API levels.
   systemBars: z.object({ visible: edgeInsetsSchema, stable: edgeInsetsSchema }).nullish(),
   displayCutout: edgeInsetsSchema.nullish(),
+  displayCutoutInfo: displayCutoutInfoSchema.optional(),
   systemGestures: edgeInsetsSchema.nullish(),
   mandatorySystemGestures: edgeInsetsSchema.nullish(),
   tappableElement: edgeInsetsSchema.nullish(),

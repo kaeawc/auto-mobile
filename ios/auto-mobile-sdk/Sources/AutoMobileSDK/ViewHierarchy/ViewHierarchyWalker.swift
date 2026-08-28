@@ -62,6 +62,9 @@
                 screenWidth: screenWidth,
                 screenHeight: screenHeight,
                 safeAreaInsets: safeAreaInsets,
+                // UIKit safe-area values include non-cutout system UI and do not
+                // distinguish a notch from Dynamic Island. Do not infer either.
+                displayCutoutInfo: .unknown,
                 systemChrome: systemChrome,
                 root: rootNode
             )
@@ -84,6 +87,13 @@
                 hasher.combine(safeAreaInsets.right)
                 hasher.combine(safeAreaInsets.bottom)
                 hasher.combine(safeAreaInsets.left)
+            } else {
+                hasher.combine(false)
+            }
+            if let displayCutoutInfo = hierarchy.displayCutoutInfo {
+                hasher.combine(true)
+                hasher.combine(displayCutoutInfo.classification)
+                hasher.combine(displayCutoutInfo.bounds)
             } else {
                 hasher.combine(false)
             }

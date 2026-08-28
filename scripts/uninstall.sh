@@ -38,6 +38,7 @@ UNINSTALL_MARKETPLACE=false
 UNINSTALL_CLI=false
 UNINSTALL_DAEMON=false
 UNINSTALL_DATA=false
+UNINSTALL_DESKTOP_APP=false
 
 # Detected components
 MCP_CONFIGS_FOUND=()
@@ -46,6 +47,9 @@ MARKETPLACE_NAME=""
 CLI_INSTALLED=false
 DAEMON_RUNNING=false
 DATA_DIR_EXISTS=false
+DESKTOP_APP_INSTALLED=false
+DESKTOP_APP_PATHS=()
+DESKTOP_APP_PACKAGE=""
 
 # Colors
 RED='\033[0;31m'
@@ -104,6 +108,7 @@ Components that can be removed:
   - AutoMobile CLI (auto-mobile command)
   - MCP daemon process
   - AutoMobile data directory (~/.automobile)
+  - AutoMobile desktop app
 
 Examples:
   ./scripts/uninstall.sh              # Interactive mode
@@ -220,6 +225,37 @@ detect_mcp_configs() {
             fi
         fi
     done
+}
+
+detect_desktop_app() {
+    DESKTOP_APP_INSTALLED=false
+    DESKTOP_APP_PATHS=()
+    DESKTOP_APP_PACKAGE=""
+
+    local os
+    os=$(detect_os)
+    if [[ "${os}" == "macos" ]]; then
+        local app_path
+        for app_path in "/Applications/AutoMobile.app" "${HOME}/Applications/AutoMobile.app"; do
+            if [[ -d "${app_path}" && -f "${app_path}/Contents/Info.plist" ]]; then
+                DESKTOP_APP_PATHS+=("${app_path}")
+                DESKTOP_APP_INSTALLED=true
+            fi
+        done
+        return 0
+    fi
+
+    if [[ "${os}" == "linux" ]] && command_exists dpkg-query; then
+        local package status
+        for package in automobile auto-mobile; do
+            status=$(dpkg-query -W -f='${db:Status-Status}' "${package}" 2>/dev/null || true)
+            if [[ "${status}" == "installed" ]]; then
+                DESKTOP_APP_PACKAGE="${package}"
+                DESKTOP_APP_INSTALLED=true
+                return 0
+            fi
+        done
+    fi
 }
 
 config_has_automobile() {
@@ -544,6 +580,52 @@ remove_data_dir() {
     CHANGES_MADE=true
 }
 
+remove_desktop_app() {
+    if [[ "${DESKTOP_APP_INSTALLED}" != "true" ]]; then
+        log_info "AutoMobile desktop app not installed"
+        return 0
+    fi
+
+    local os
+    os=$(detect_os)
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        if [[ "${os}" == "macos" ]]; then
+            local app_path
+            for app_path in ${DESKTOP_APP_PATHS[@]+"${DESKTOP_APP_PATHS[@]}"}; do
+                log_info "[DRY-RUN] Would remove ${app_path}"
+            done
+        else
+            log_info "[DRY-RUN] Would remove AutoMobile desktop package: ${DESKTOP_APP_PACKAGE}"
+        fi
+        return 0
+    fi
+
+    if [[ "${os}" == "macos" ]]; then
+        local app_path
+        for app_path in ${DESKTOP_APP_PATHS[@]+"${DESKTOP_APP_PATHS[@]}"}; do
+            log_info "Removing AutoMobile desktop app from ${app_path}..."
+            if [[ "${app_path}" == "/Applications/"* ]] && [[ ! -w "/Applications" ]]; then
+                sudo rm -rf -- "${app_path}"
+            else
+                rm -rf -- "${app_path}"
+            fi
+        done
+    elif [[ "${os}" == "linux" ]]; then
+        log_info "Removing AutoMobile desktop package: ${DESKTOP_APP_PACKAGE}..."
+        if command_exists apt-get; then
+            sudo apt-get remove -y "${DESKTOP_APP_PACKAGE}"
+        elif command_exists dpkg; then
+            sudo dpkg --remove "${DESKTOP_APP_PACKAGE}"
+        else
+            log_error "apt-get or dpkg is required to remove the AutoMobile desktop app package."
+            return 1
+        fi
+    fi
+
+    log_info "AutoMobile desktop app removed"
+    CHANGES_MADE=true
+}
+
 # ============================================================================
 # Interactive Selection
 # ============================================================================
@@ -580,6 +662,10 @@ select_components() {
 
     if [[ "${DATA_DIR_EXISTS}" == "true" ]]; then
         options+=("AutoMobile Data (~/.automobile)")
+    fi
+
+    if [[ "${DESKTOP_APP_INSTALLED}" == "true" ]]; then
+        options+=("AutoMobile Desktop App")
     fi
 
     # Add "Everything" option at the bottom if there are multiple components
@@ -622,12 +708,16 @@ select_components() {
             "AutoMobile Data"*)
                 UNINSTALL_DATA=true
                 ;;
+            "AutoMobile Desktop App")
+                UNINSTALL_DESKTOP_APP=true
+                ;;
             "Everything")
                 UNINSTALL_MCP_CONFIGS=true
                 UNINSTALL_MARKETPLACE=true
                 UNINSTALL_CLI=true
                 UNINSTALL_DAEMON=true
                 UNINSTALL_DATA=true
+                UNINSTALL_DESKTOP_APP=true
                 ;;
         esac
     done <<< "${selected}"
@@ -672,6 +762,10 @@ confirm_uninstall() {
 
     if [[ "${UNINSTALL_DATA}" == "true" ]]; then
         echo "  - AutoMobile Data (~/.automobile)"
+    fi
+
+    if [[ "${UNINSTALL_DESKTOP_APP}" == "true" ]]; then
+        echo "  - AutoMobile Desktop App"
     fi
 
     echo ""
@@ -719,6 +813,7 @@ main() {
     detect_cli
     detect_daemon
     detect_data_dir
+    detect_desktop_app
 
     # Show what was found
     echo ""
@@ -737,6 +832,13 @@ main() {
     if [[ "${DATA_DIR_EXISTS}" == "true" ]]; then
         log_info "Found AutoMobile data directory"
     fi
+    if [[ "${DESKTOP_APP_INSTALLED}" == "true" ]]; then
+        if [[ -n "${DESKTOP_APP_PACKAGE}" ]]; then
+            log_info "Found AutoMobile desktop app package: ${DESKTOP_APP_PACKAGE}"
+        else
+            log_info "Found AutoMobile desktop app: ${DESKTOP_APP_PATHS[*]}"
+        fi
+    fi
 
     # Check if anything was found
     local found_something=false
@@ -744,7 +846,8 @@ main() {
        [[ "${MARKETPLACE_INSTALLED}" == "true" ]] || \
        [[ "${CLI_INSTALLED}" == "true" ]] || \
        [[ "${DAEMON_RUNNING}" == "true" ]] || \
-       [[ "${DATA_DIR_EXISTS}" == "true" ]]; then
+       [[ "${DATA_DIR_EXISTS}" == "true" ]] || \
+       [[ "${DESKTOP_APP_INSTALLED}" == "true" ]]; then
         found_something=true
     fi
 
@@ -761,6 +864,7 @@ main() {
         UNINSTALL_CLI=true
         UNINSTALL_DAEMON=true
         UNINSTALL_DATA=true
+        UNINSTALL_DESKTOP_APP=true
     else
         select_components
     fi
@@ -800,6 +904,10 @@ main() {
 
     if [[ "${UNINSTALL_DATA}" == "true" ]]; then
         remove_data_dir
+    fi
+
+    if [[ "${UNINSTALL_DESKTOP_APP}" == "true" ]]; then
+        remove_desktop_app
     fi
 
     # Summary

@@ -791,11 +791,13 @@ describe("AppPreferences", () => {
     });
   });
 
-  test("returns a not-found result when iOS defaults reports a missing key", async () => {
+  test("returns a not-found result for multiline defaults missing-key stderr", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandError(
       "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app missingKey",
-      new Error("The domain/default pair of (com.example.app, missingKey) does not exist"),
+      new Error(
+        "Command failed:\nxcrun simctl spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app missingKey\n2026-08-26 20:58:25.401 defaults[57675:53795649]\nThe domain/default pair of (com.example.app, missingKey) does not exist\n",
+      ),
     );
 
     const preferences = new AppPreferences(iosSimulator, { simctl });
@@ -812,6 +814,35 @@ describe("AppPreferences", () => {
       key: "missingKey",
     });
     expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(1);
+  });
+
+  test("falls back to a string when multiline defaults read-type stderr reports a missing key", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      "spawn 12345678-1234-1234-1234-123456789ABC defaults read com.example.app missingType",
+      "fallback value\n",
+    );
+    simctl.setCommandError(
+      "spawn 12345678-1234-1234-1234-123456789ABC defaults read-type com.example.app missingType",
+      new Error(
+        "Command failed:\nxcrun simctl spawn 12345678-1234-1234-1234-123456789ABC defaults read-type com.example.app missingType\n2026-08-26 20:58:25.401 defaults[57675:53795649]\nThe domain/default pair of (com.example.app, missingType) does not exist\n",
+      ),
+    );
+
+    const preferences = new AppPreferences(iosSimulator, { simctl });
+    const result = await preferences.getPreference({
+      scope: "userDefaults",
+      appId: "com.example.app",
+      key: "missingType",
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      found: true,
+      value: "fallback value",
+      type: "string",
+    });
+    expect(simctl.getMethodCalls("executeCommandArgs")).toHaveLength(2);
   });
 
   test("surfaces an invalid simulator instead of reporting a missing iOS default", async () => {

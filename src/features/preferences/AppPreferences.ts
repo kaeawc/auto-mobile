@@ -712,7 +712,7 @@ function looksLikeMissingAndroidPrefsFile(error: unknown): boolean {
 }
 
 function looksLikeMissingIosDefault(error: unknown): boolean {
-  const message = errorMessage(error);
+  const message = errorMessage(error).trim();
   return [
     /The domain\/default pair of \([^)]+\) does not exist\.?$/i,
     /Domain [^\n]+ does not exist\.?$/i,

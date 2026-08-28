@@ -101,6 +101,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       if (
         ts.isSourceFile(current) ||
         ts.isBlock(current) ||
+        ts.isModuleBlock(current) ||
         ts.isCaseBlock(current) ||
         ts.isForStatement(current) ||
         ts.isForInStatement(current) ||
@@ -115,8 +116,11 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   const functionScope = (node: ts.Node): ts.Node => {
     let current: ts.Node | undefined = node.parent;
     while (current) {
-      if (ts.isFunctionLike(current) && current.body && ts.isBlock(current.body)) {
-        return current.body;
+      if (ts.isFunctionLike(current)) {
+        return current;
+      }
+      if (ts.isModuleBlock(current)) {
+        return current;
       }
       if (ts.isSourceFile(current)) {
         return current;
@@ -137,7 +141,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       if (
         ts.isSourceFile(current) ||
         ts.isBlock(current) ||
+        ts.isModuleBlock(current) ||
         ts.isCaseBlock(current) ||
+        ts.isFunctionLike(current) ||
         ts.isForStatement(current) ||
         ts.isForInStatement(current) ||
         ts.isForOfStatement(current)
@@ -253,19 +259,6 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     if (ts.isParameter(node) && ts.isIdentifier(node.name)) {
       const scope = functionScope(node);
       declarations.push({ name: node.name.text, scope, position: node.getStart(sourceFile) });
-      if (node.initializer) {
-        initializers.set(node.name.text, [
-          ...(initializers.get(node.name.text) ?? []),
-          node.initializer,
-        ]);
-        scopedValues.push({
-          name: node.name.text,
-          value: node.initializer,
-          kind: "declaration",
-          scope,
-          position: node.getStart(sourceFile),
-        });
-      }
     }
     if (
       ts.isBinaryExpression(node) &&

@@ -31,7 +31,16 @@ function splitEnvPayload(value: string): string[] {
   let escaped = false;
   for (const character of value) {
     if (escaped) {
-      word += character;
+      if (character === "_") {
+        if (quote === '"') {
+          word += " ";
+        } else if (word) {
+          words.push(word);
+          word = "";
+        }
+      } else {
+        word += character;
+      }
       escaped = false;
     } else if (character === "\\" && quote !== "'") {
       escaped = true;

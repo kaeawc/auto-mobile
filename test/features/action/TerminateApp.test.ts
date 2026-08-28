@@ -289,10 +289,7 @@ describe("TerminateApp (Android)", () => {
       "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
       "1",
     );
-    fakeAdb.setCommandResult(
-      'shell dumpsys activity processes | grep -E "com.example.app/u0a"',
-      "3220:com.example.app/u0a123",
-    );
+    fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
     fakeAdb.setCommandResult("shell am force-stop --user 0 com.example.app", "");
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
@@ -325,6 +322,35 @@ describe("TerminateApp (Android)", () => {
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(false);
   });
 
+  test("returns already stopped when the process filter has no match", async () => {
+    fakeAdb.setForegroundApp(null);
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
+    fakeAdb.setCommandResult(
+      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
+      "1",
+    );
+    // grep exits 1 when there are no matching processes. This is the expected
+    // signal that the installed app is already stopped, not an ADB failure.
+    fakeAdb.setCommandError(
+      'shell dumpsys activity processes | grep -E "com.example.app/u0a"',
+      new Error("Command failed with exit code 1"),
+    );
+    fakeAdb.setCommandResult("shell dumpsys activity processes", "3271:com.example.other/u0a123");
+
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
+    const result = await terminateApp.execute("com.example.app", { skipObservation: true });
+
+    expect(result).toEqual({
+      success: true,
+      packageName: "com.example.app",
+      wasInstalled: true,
+      wasRunning: false,
+      wasForeground: false,
+      userId: 0,
+    });
+    expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(false);
+  });
+
   test("fails instead of reporting a stopped app when the user-scoped process check fails", async () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
@@ -332,10 +358,7 @@ describe("TerminateApp (Android)", () => {
       "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
       "1",
     );
-    fakeAdb.setCommandError(
-      'shell dumpsys activity processes | grep -E "com.example.app/u0a"',
-      new Error("dumpsys unavailable"),
-    );
+    fakeAdb.setCommandError("shell dumpsys activity processes", new Error("dumpsys unavailable"));
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
 
@@ -559,10 +582,7 @@ describe("TerminateApp (observed interaction, perf-tree ownership)", () => {
       "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
       "1",
     );
-    fakeAdb.setCommandResult(
-      'shell dumpsys activity processes | grep -E "com.example.app/u0a"',
-      "3220:com.example.app/u0a123",
-    );
+    fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
     fakeAdb.setCommandResult("shell am force-stop --user 0 com.example.app", "");
 
     const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);

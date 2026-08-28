@@ -76,13 +76,30 @@ schemes:
       targets:
         Playground: all
         PlaygroundTests: [test]
-        PlaygroundFilesPickerUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
         - PlaygroundTests
+        - PlaygroundFilesPickerUITests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  PlaygroundFilesPickerSmoke:
+    build:
+      targets:
+        Playground: all
+        PlaygroundFilesPickerUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
         - PlaygroundFilesPickerUITests
     profile:
       config: Release

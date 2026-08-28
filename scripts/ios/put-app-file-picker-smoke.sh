@@ -33,7 +33,7 @@ xcrun simctl bootstatus "${device_id}" -b
 
 xcodebuild \
     -project "${repo_root}/ios/Playground/Playground.xcodeproj" \
-    -scheme Playground \
+    -scheme PlaygroundFilesPickerSmoke \
     -destination "platform=iOS Simulator,id=${device_id}" \
     -derivedDataPath "${derived_data}" \
     build-for-testing
@@ -65,7 +65,7 @@ xcrun simctl terminate "${device_id}" "${app_id}"
 
 xcodebuild \
     -project "${repo_root}/ios/Playground/Playground.xcodeproj" \
-    -scheme Playground \
+    -scheme PlaygroundFilesPickerSmoke \
     -destination "platform=iOS Simulator,id=${device_id}" \
     -derivedDataPath "${derived_data}" \
     -only-testing:PlaygroundFilesPickerUITests \

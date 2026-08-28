@@ -226,6 +226,7 @@ nav:
       - "iOS Simulator Continuity Contract": release/ios-simulator-continuity.md
       - "Dependency Decisions":
           - "fast-check": decisions/fast-check.md
+          - "iOS Files picker fixture provider": decisions/ios-user-files-provider.md
           - "TypeScript 7 (tsgo)": decisions/typescript-native-preview.md
           - "oxlint": decisions/oxlint.md
           - "oxc-parser": decisions/oxc-parser.md

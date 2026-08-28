@@ -32,12 +32,12 @@ instead of treating Playground as the runtime provider.
 
 ## What is and is not supported
 
-| Target | Status | Behavior |
-| --- | --- | --- |
-| iOS Simulator | supported after #5807 | Stage in the managed provider's bounded Documents namespace. |
-| iOS physical device | unsupported | `simctl` cannot resolve or mutate an on-device app container; do not infer support from the simulator. |
-| Direct Files local-provider storage | unsupported | No public `simctl` staging command exists, and internal provider paths are not an AutoMobile API. |
-| A custom File Provider extension | not selected | Apple positions one for apps that provide and sync remote documents; it is unnecessary for local fixture sharing. |
+| Target                              | Status                | Behavior                                                                                                          |
+| ----------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| iOS Simulator                       | supported after #5807 | Stage in the managed provider's bounded Documents namespace.                                                      |
+| iOS physical device                 | unsupported           | `simctl` cannot resolve or mutate an on-device app container; do not infer support from the simulator.            |
+| Direct Files local-provider storage | unsupported           | No public `simctl` staging command exists, and internal provider paths are not an AutoMobile API.                 |
+| A custom File Provider extension    | not selected          | Apple positions one for apps that provide and sync remote documents; it is unnecessary for local fixture sharing. |
 
 A future physical-device implementation requires explicit app integration: an
 `IosFilesFixtureClient` seam owned by the installed fixture app, with an opt-in

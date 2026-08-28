@@ -34,6 +34,13 @@ function propertyName(expression: ts.Expression): string | undefined {
   if (ts.isPropertyAccessExpression(expression)) {
     return expression.name.text;
   }
+  if (
+    ts.isElementAccessExpression(expression) &&
+    expression.argumentExpression &&
+    ts.isStringLiteralLike(expression.argumentExpression)
+  ) {
+    return expression.argumentExpression.text;
+  }
   return undefined;
 }
 
@@ -180,15 +187,16 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     isPromisifiedLauncher(node);
   const isExecutionSeamReference = (node: ts.Expression): boolean =>
     (ts.isIdentifier(node) && executionSeamAliases.has(node.text)) ||
-    (ts.isPropertyAccessExpression(node) &&
-      (node.name.text === "executeCommand" ||
-        node.name.text === "runExecSeam" ||
-        (node.name.text === "execute" &&
+    ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+      (propertyName(node) === "executeCommand" ||
+        propertyName(node) === "runExecSeam" ||
+        (propertyName(node) === "execute" &&
           (node.expression.kind === ts.SyntaxKind.ThisKeyword ||
             /(?:executor|host|process|deps)/i.test(node.expression.getText(sourceFile))))));
   const isRunExecSeamReference = (node: ts.Expression): boolean =>
     (ts.isIdentifier(node) && runExecSeamAliases.has(node.text)) ||
-    (ts.isPropertyAccessExpression(node) && node.name.text === "runExecSeam");
+    ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+      propertyName(node) === "runExecSeam");
   let changed = true;
   while (changed) {
     changed = false;

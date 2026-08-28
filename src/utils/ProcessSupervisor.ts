@@ -31,16 +31,19 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
   private restartAttempts = 0;
   private isStopping = false;
   private autoRestartEnabled = true;
+  private lifecycleGeneration = 0;
 
   public constructor(private readonly options: ProcessSupervisorOptions) {}
 
   public async start(): Promise<void> {
     this.isStopping = false;
+    this.lifecycleGeneration++;
     this.startMonitoring();
   }
 
   public stop(): void {
     this.isStopping = true;
+    this.lifecycleGeneration++;
     this.stopMonitoring();
     this.clearRestartTimeout();
     this.restartAttempts = 0;
@@ -76,8 +79,9 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
 
   private startMonitoring(): void {
     this.stopMonitoring();
+    const generation = this.lifecycleGeneration;
     this.monitorInterval = this.options.timer.setInterval(() => {
-      void this.checkLiveness();
+      void this.checkLiveness(generation);
     }, this.options.monitorIntervalMs);
   }
 
@@ -88,9 +92,13 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
     }
   }
 
-  private async checkLiveness(): Promise<void> {
+  private async checkLiveness(generation: number): Promise<void> {
     try {
-      if (!(await this.options.isAlive())) {
+      const isAlive = await this.options.isAlive();
+      if (generation !== this.lifecycleGeneration || this.isStopping) {
+        return;
+      }
+      if (!isAlive) {
         logger.warn(`[ProcessSupervisor] ${this.options.name} is no longer alive`);
         this.processExited();
       }

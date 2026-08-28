@@ -1761,15 +1761,21 @@ public struct PerformanceUpdateResponse: Codable {
 
 // MARK: - Connected Event
 
+public enum RunnerFeature: String, CaseIterable, Codable {
+    case displayCutoutInfo = "display_cutout_info"
+}
+
 public struct ConnectedEvent: Codable {
     public let type: String
     public let id: Int
     public let supportedCommands: [String]
+    public let supportedFeatures: [String]
 
     public init(id: Int) {
         type = "connected"
         self.id = id
         supportedCommands = RequestType.allCases.map(\.rawValue).sorted()
+        supportedFeatures = RunnerFeature.allCases.map(\.rawValue).sorted()
     }
 }
 

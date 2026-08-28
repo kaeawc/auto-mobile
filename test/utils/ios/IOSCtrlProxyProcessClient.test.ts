@@ -77,7 +77,9 @@ describe("IOSCtrlProxyProcessClient", () => {
       releaseGraceMs: 1,
     });
 
-    await client.terminateProcessTree(42);
+    await expect(client.terminateProcessTree(42)).rejects.toThrow(
+      "CtrlProxy process tree rooted at PID 42 remained alive after SIGKILL",
+    );
 
     expect(host.getExecutedCommands()).toEqual(
       expect.arrayContaining([
@@ -89,6 +91,33 @@ describe("IOSCtrlProxyProcessClient", () => {
         "kill -KILL 42",
       ]),
     );
+  });
+
+  test("resolves process-tree termination once SIGKILL removes every target", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    let killed = false;
+    const host: HostCommandExecutor = {
+      async executeCommand(file, args) {
+        if (file === "ps") {
+          return result("42 1\n43 42\n");
+        }
+        if (file === "kill" && args[0] === "-KILL") {
+          killed = true;
+          return result();
+        }
+        if (file === "kill" && args[0] === "-0" && killed) {
+          throw new Error("not running");
+        }
+        return result();
+      },
+    };
+    const client = new IOSCtrlProxyProcessClient(host, timer, {
+      releaseAttempts: 1,
+      releaseGraceMs: 1,
+    });
+
+    await expect(client.terminateProcessTree(42)).resolves.toBeUndefined();
   });
 
   test("propagates deadline expiry while waiting for a process tree to exit", async () => {

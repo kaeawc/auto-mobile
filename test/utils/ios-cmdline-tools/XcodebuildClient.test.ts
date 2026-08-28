@@ -143,6 +143,7 @@ describe("XcodebuildClient streaming runner", () => {
       new FakeTimer(),
       (command, args, options) => {
         calls.push({ command, args, options });
+        child.simulateSpawn();
         return child as never;
       },
     );
@@ -190,6 +191,7 @@ describe("XcodebuildClient streaming runner", () => {
       timer,
       () => {
         spawned = true;
+        child.simulateSpawn();
         return child as never;
       },
     );
@@ -222,5 +224,22 @@ describe("XcodebuildClient streaming runner", () => {
     ).rejects.toThrow("xcodebuild is not available");
 
     expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("handles an asynchronous spawn error before returning the child", async () => {
+    const child = new FakeChildProcess();
+    child.setSpawnError("posix_spawn: executable missing");
+    const client = new XcodebuildClient(
+      async () => createExecResult("Xcode 26.5", ""),
+      new FakeTimer(),
+      () => {
+        child.simulateSpawn();
+        return child as never;
+      },
+    );
+
+    await expect(client.startStreaming(["test-without-building"])).rejects.toThrow(
+      "xcodebuild failed to start: Error: posix_spawn: executable missing",
+    );
   });
 });

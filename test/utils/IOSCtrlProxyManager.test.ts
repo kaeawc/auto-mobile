@@ -2773,6 +2773,87 @@ describe("IOSCtrlProxyManager", function () {
       }
     });
 
+    test("startOnDevice() ignores late exit and error events from a replaced child", async function () {
+      const physicalDevice: BootedDevice = {
+        deviceId: "00008030001E28C11E",
+        platform: "ios",
+        name: "iPhone",
+      };
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        physicalDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor,
+        {
+          resolveSigningForDevice: async () => ({
+            buildSettings: [],
+            allowProvisioningUpdates: false,
+            warnings: [],
+          }),
+        } as unknown as XcodeSigningManager,
+      );
+      const internal = manager as unknown as {
+        verifyInstalledAppBundle: () => Promise<void>;
+        startIproxyTunnel: () => Promise<void>;
+        startOnDevice: () => Promise<void>;
+        xcTestProcessId: number | null;
+        xcTestProcess: FakeChildProcess | null;
+      };
+      internal.verifyInstalledAppBundle = async () => {};
+      internal.startIproxyTunnel = async () => {};
+
+      await internal.startOnDevice();
+      const staleChild = fakeExecutor.getSpawnedProcesses()[0].process as FakeChildProcess;
+      const replacement = new FakeChildProcess();
+      replacement.pid = 41002;
+      internal.xcTestProcessId = replacement.pid;
+      internal.xcTestProcess = replacement;
+
+      staleChild.emit("error", new Error("late stale failure"));
+      staleChild.emit("exit", 1, null);
+      await Promise.resolve();
+
+      expect(internal.xcTestProcessId).toBe(41002);
+      expect(internal.xcTestProcess).toBe(replacement);
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    });
+
+    test("stop() retains runner ownership and fails when SIGKILL cannot terminate it", async function () {
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        createFakeBuilder(),
+        fakeExecutor,
+      );
+      const process: FakeListeningProcess = {
+        pid: 42001,
+        port: 8765,
+        command: `xcodebuild test-without-building -xctestrun /tmp/CtrlProxy.xctestrun -destination platform=iOS Simulator,id=${testDevice.deviceId} -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService`,
+        alive: true,
+        ignoreTerm: true,
+        ignoreKill: true,
+      };
+      installListeningProcessFakes(fakeExecutor, [process]);
+      fakeTimer.enableAutoAdvance();
+      const child = new FakeChildProcess();
+      child.pid = process.pid;
+      const internal = manager as unknown as {
+        xcTestProcessId: number | null;
+        xcTestProcess: FakeChildProcess | null;
+      };
+      internal.xcTestProcessId = process.pid;
+      internal.xcTestProcess = child;
+
+      await expect(manager.stop()).rejects.toThrow(
+        "CtrlProxy process tree rooted at PID 42001 remained alive after SIGKILL",
+      );
+
+      expect(internal.xcTestProcessId).toBe(42001);
+      expect(internal.xcTestProcess).toBe(child);
+      expect(process.alive).toBe(true);
+      expect(PortManager.getPort(testDevice.deviceId)).toBe(manager.getServicePort());
+    });
+
     test("start() terminates a stale owned runner on the intended port before spawning", async function () {
       const staleProcess: FakeListeningProcess = {
         pid: 2222,

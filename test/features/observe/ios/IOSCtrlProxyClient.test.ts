@@ -2123,6 +2123,7 @@ describe("IOSCtrlProxyClient", function () {
             type: "connected",
             id: 1,
             supportedCommands: ["request_shake", "add_highlight", "request_press_button"],
+            supportedFeatures: ["display_cutout_info"],
           }),
         );
         await flushPromises();
@@ -2136,6 +2137,8 @@ describe("IOSCtrlProxyClient", function () {
           "request_press_button",
           "request_shake",
         ]);
+        expect(await testClient.getSupportedFeatures()).toEqual(["display_cutout_info"]);
+        expect(testClient.getCachedSupportedFeatures()).toEqual(["display_cutout_info"]);
       } finally {
         await testClient.close();
       }

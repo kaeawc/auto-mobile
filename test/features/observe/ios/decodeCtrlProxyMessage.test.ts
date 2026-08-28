@@ -606,14 +606,35 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
   }
 
   // Every type that reads `message.success` (all decoded types except the
-  // no-success hierarchy_update and the hardcoded-true screenshot) must pass an
-  // explicit success flag straight through, both true and false.
+  // no-success hierarchy_update) must pass an explicit success flag straight
+  // through, both true and false.
   const READS_MESSAGE_SUCCESS = DEFAULT_WHEN_ABSENT.filter(
-    (row) => row.type !== "hierarchy_update" && row.type !== "screenshot",
+    (row) => row.type !== "hierarchy_update",
   ).map((row) => row.type);
 
-  test("the passthrough set is the 37 success-reading types", () => {
-    expect(READS_MESSAGE_SUCCESS.length).toBe(37);
+  test("preserves a screenshot failure envelope instead of fabricating success", () => {
+    const decoded = decodeCtrlProxyMessage(
+      msg({
+        type: "screenshot",
+        success: false,
+        error: "Command execution failed: boom",
+        totalTimeMs: 17,
+      }),
+    );
+
+    expect(decoded?.result).toEqual({
+      success: false,
+      data: undefined,
+      format: "png",
+      timestamp: undefined,
+      frameContext: undefined,
+      rotation: undefined,
+      error: "Command execution failed: boom",
+    });
+  });
+
+  test("the passthrough set is the 38 success-reading types", () => {
+    expect(READS_MESSAGE_SUCCESS.length).toBe(38);
   });
 
   for (const type of READS_MESSAGE_SUCCESS) {
@@ -627,9 +648,9 @@ describe("decodeCtrlProxyMessage success defaulting (PARAM-5 / item 11)", () => 
     });
   }
 
-  test("screenshot hardcodes success=true even when the wire says false", () => {
+  test("screenshot preserves success=false from a failure envelope", () => {
     const decoded = decodeCtrlProxyMessage(msg({ type: "screenshot", success: false }));
-    expect((decoded?.result as { success?: boolean }).success).toBe(true);
+    expect((decoded?.result as { success?: boolean }).success).toBe(false);
   });
 
   // The five `success ?? ok ?? false` types read the `ok` alias when `success`

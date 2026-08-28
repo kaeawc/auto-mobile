@@ -96,6 +96,9 @@ export class FakeProcessExecutor implements HostProcessExecutor {
     const process = this.nextSpawnProcess ?? new FakeChildProcess();
     this.nextSpawnProcess = null;
     this.spawnResponses.push({ command, args, options, process });
+    if (process instanceof FakeChildProcess) {
+      process.simulateSpawn();
+    }
     return process;
   }
 

@@ -151,6 +151,18 @@ PY
   run grep -F 'CtrlProxyUITests.EnvironmentVariables.AUTOMOBILE_DEVICE_ID' "${repository_root}/scripts/test-ctrl-proxy-ios.sh"
   [ "$status" -eq 0 ]
 
+  run grep -F 'automobile-runner-${simulator_id}.xctestrun' "${repository_root}/scripts/local-dev/lib/ctrl-proxy-ios.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'CtrlProxyUITests.EnvironmentVariables.CTRL_PROXY_IOS_PORT' "${repository_root}/scripts/local-dev/lib/ctrl-proxy-ios.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'IOS_RUNNER_PID_FILE' "${repository_root}/scripts/local-dev/lib/ctrl-proxy-ios.sh"
+  [ "$status" -eq 0 ]
+
+  run grep -F 'pgrep -f "xcodebuild.*test.*CtrlProxy"' "${repository_root}/scripts/local-dev/lib/ctrl-proxy-ios.sh" "${repository_root}/scripts/local-dev/hot-reload.sh"
+  [ "$status" -eq 1 ]
+
   run grep -E '^[[:space:]]*nohup xcodebuild test([[:space:]]|$)' "${repository_root}/scripts/test-ctrl-proxy-ios.sh"
   [ "$status" -eq 1 ]
 

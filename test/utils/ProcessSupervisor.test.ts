@@ -287,6 +287,45 @@ describe("DefaultProcessSupervisor", function () {
     expect(timer.getPendingIntervals()).toEqual([250]);
   });
 
+  test("discards a stale liveness result after stop and replacement start", async function () {
+    const timer = new FakeTimer();
+    let resolveOldProbe!: (alive: boolean) => void;
+    let useDeferredProbe = true;
+    let exits = 0;
+    const supervisor = new DefaultProcessSupervisor({
+      name: "test-process",
+      timer,
+      monitorIntervalMs: 250,
+      restartBackoff: sequenceBackoff([100]),
+      restart: async () => {},
+      isAlive: async () => {
+        if (!useDeferredProbe) {
+          return true;
+        }
+        return await new Promise<boolean>((resolve) => {
+          resolveOldProbe = resolve;
+        });
+      },
+      onExit: () => {
+        exits++;
+      },
+    });
+
+    await supervisor.start();
+    timer.advanceTime(250);
+    await flushMicrotasks();
+
+    supervisor.stop();
+    useDeferredProbe = false;
+    await supervisor.start();
+    resolveOldProbe(false);
+    await flushMicrotasks();
+
+    expect(exits).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(timer.getPendingIntervals()).toEqual([250]);
+  });
+
   test("reports liveness through the injected liveness check", async function () {
     const timer = new FakeTimer();
     let alive = true;

@@ -16,6 +16,7 @@ import {
   createIosObserveRoundTripInspector,
   createIosCtrlProxyRunnerInspector,
   IOS_RUNNER_FEATURE_COMMANDS,
+  IOS_RUNNER_FEATURE_FLAGS,
   runIosChecks,
 } from "../../src/doctor/checks/ios";
 import type {
@@ -688,6 +689,7 @@ describe("checkIosCtrlProxyRunner", () => {
     installed: true,
     running: true,
     supportedCommands: [...FRESH_COMMANDS],
+    supportedFeatures: [...IOS_RUNNER_FEATURE_FLAGS],
     ...over,
   });
 
@@ -752,6 +754,16 @@ describe("checkIosCtrlProxyRunner", () => {
     // derived-data output; DERIVED_DATA is the followable override (#4221).
     expect(result.recommendation).toContain("AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA");
     expect(result.recommendation).not.toContain("AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH");
+  });
+
+  test("warns when a released runner lacks a current non-command feature", async () => {
+    const result = await checkIosCtrlProxyRunner(
+      withRunners([inspection({ supportedFeatures: null })]),
+    );
+
+    expect(result.status).toBe("warn");
+    expect(result.message).toContain("versionStatus=stale");
+    expect(result.message).toContain("missingFeatures=display_cutout_info");
   });
 
   test("reports unknown when the runner is installed but not running", async () => {
@@ -1012,6 +1024,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     let closes = 0;
     const probe = {
       getSupportedCommands: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
+      getSupportedFeatures: async () => [...IOS_RUNNER_FEATURE_FLAGS],
       close: async () => {
         closes += 1;
       },
@@ -1030,6 +1043,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     const inspections = await inspector.inspectBootedRunners();
 
     expect(inspections[0].supportedCommands).toEqual([...IOS_RUNNER_FEATURE_COMMANDS]);
+    expect(inspections[0].supportedFeatures).toEqual([...IOS_RUNNER_FEATURE_FLAGS]);
     expect(closes).toBe(1);
   });
 
@@ -1037,6 +1051,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     let closes = 0;
     const existing = {
       getSupportedCommands: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
+      getSupportedFeatures: async () => [...IOS_RUNNER_FEATURE_FLAGS],
       close: async () => {
         closes += 1;
       },
@@ -1068,6 +1083,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
       getSupportedCommands: async () => {
         throw new Error("unreachable");
       },
+      getSupportedFeatures: async () => null,
       close: async () => {
         closes += 1;
       },
@@ -1086,6 +1102,7 @@ describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
     const inspections = await inspector.inspectBootedRunners();
 
     expect(inspections[0].supportedCommands).toBeNull();
+    expect(inspections[0].supportedFeatures).toBeNull();
     expect(closes).toBe(1);
   });
 });

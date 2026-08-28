@@ -138,61 +138,10 @@ Environment variables:
 EOF
 }
 
-list_ctrl_proxy_ios_xcodebuild_pids() {
-  pgrep -f "xcodebuild.*test.*CtrlProxy" 2>/dev/null || true
-}
-
-process_parent_pid() {
-  local pid="$1"
-  ps -o ppid= -p "${pid}" 2>/dev/null | tr -d ' ' || true
-}
-
 kill_ctrl_proxy_ios_xcodebuild_processes() {
-  local mode="${1:-all}"
-  local pid
-  local pids=()
-
-  while IFS= read -r pid; do
-    if [[ -z "${pid}" ]]; then
-      continue
-    fi
-
-    if [[ "${mode}" == "orphaned" ]] && [[ "$(process_parent_pid "${pid}")" != "1" ]]; then
-      continue
-    fi
-
-    pids+=("${pid}")
-  done < <(list_ctrl_proxy_ios_xcodebuild_pids)
-
-  if [[ ${#pids[@]} -eq 0 ]]; then
-    return 0
-  fi
-
-  if [[ "${mode}" == "orphaned" ]]; then
-    log_info "Killing orphaned watcher-owned CtrlProxy iOS xcodebuild processes: ${pids[*]}"
-  else
-    log_info "Killing CtrlProxy iOS xcodebuild processes: ${pids[*]}"
-  fi
-
-  for pid in ${pids[@]+"${pids[@]}"}; do
-    kill "${pid}" 2>/dev/null || true
-  done
-
-  sleep 2
-
-  local still_running=()
-  for pid in ${pids[@]+"${pids[@]}"}; do
-    if kill -0 "${pid}" 2>/dev/null; then
-      still_running+=("${pid}")
-    fi
-  done
-
-  if [[ ${#still_running[@]} -gt 0 ]]; then
-    log_warn "Force killing CtrlProxy iOS xcodebuild processes: ${still_running[*]}"
-    for pid in "${still_running[@]}"; do
-      kill -9 "${pid}" 2>/dev/null || true
-    done
-  fi
+  # The sourced runner helper persists the exact watcher-owned PID. Never scan
+  # or signal other worktrees' or simulators' xcodebuild processes.
+  stop_ctrl_proxy_ios || true
 }
 
 # Kill any previous hot-reload processes
@@ -231,13 +180,10 @@ kill_previous() {
     fi
   fi
 
-  # Kill watcher-owned xcodebuild.*test.*CtrlProxy processes left behind when a
-  # watcher was SIGKILL'd. In daemon-owned mode, only clean orphaned processes
-  # so a live daemon-owned runner is not interrupted.
+  # Clean only the runner PID persisted by this watcher. In daemon-owned mode,
+  # do not touch any xcodebuild process.
   if [[ "${MANAGE_IOS_RUNNER}" == "true" ]]; then
-    kill_ctrl_proxy_ios_xcodebuild_processes all
-  else
-    kill_ctrl_proxy_ios_xcodebuild_processes orphaned
+    kill_ctrl_proxy_ios_xcodebuild_processes
   fi
 }
 

@@ -71,6 +71,8 @@ const DEFAULT_CONNECTION_CONFIG: ConnectionConfig = {
 export abstract class DeviceServiceClient {
   // Connection state
   protected ws: WebSocket | null = null;
+  /** Socket owning the current handshake/open lifecycle, used to reject delayed stale events. */
+  private lifecycleSocket: WebSocket | null = null;
   protected isConnecting: boolean = false;
   protected connectionAttempts: number = 0;
   protected lastConnectionAttempt: number = 0;
@@ -276,10 +278,11 @@ export abstract class DeviceServiceClient {
       // Cancel all pending requests
       this.requestManager.cancelAll(new Error("WebSocket connection closed"));
 
-      if (this.ws) {
+      const socket = this.ws ?? this.lifecycleSocket;
+      this.ws = null;
+      this.lifecycleSocket = null;
+      if (socket) {
         logger.info(`[${this.logTag}] Closing WebSocket connection`);
-        const socket = this.ws;
-        this.ws = null;
         // Detach the lifecycle listeners installed in connectWebSocket() BEFORE
         // closing, so the socket's async `close` event cannot drive a SECOND
         // onConnectionClosed() after the synchronous call below (issue #5657).
@@ -322,6 +325,12 @@ export abstract class DeviceServiceClient {
     }
   }
 
+  private clearLifecycleSocket(socket: WebSocket): void {
+    if (this.lifecycleSocket === socket) {
+      this.lifecycleSocket = null;
+    }
+  }
+
   // ===========================================================================
   // WebSocket connection (shared implementation)
   // ===========================================================================
@@ -344,12 +353,21 @@ export abstract class DeviceServiceClient {
     // Clean up stale WebSocket
     if (this.ws && this.ws.readyState !== WebSocket.OPEN) {
       logger.info(`[${this.logTag}] Cleaning up stale WebSocket (state: ${this.ws.readyState})`);
-      try {
-        this.ws.close();
-      } catch {
-        // Ignore close errors on stale socket
-      }
+      const staleSocket = this.ws;
       this.ws = null;
+      this.clearLifecycleSocket(staleSocket);
+      try {
+        // This socket may emit close/error after a replacement is installed.
+        // Detach its stateful lifecycle handlers before closing so those late
+        // events cannot tear down the replacement connection.
+        staleSocket.removeAllListeners();
+        staleSocket.on("error", (error) => {
+          logger.debug(`[${this.logTag}] Ignoring error on stale WebSocket: ${error}`);
+        });
+        staleSocket.close();
+      } catch (error) {
+        logger.debug(`[${this.logTag}] Error closing stale WebSocket: ${error}`);
+      }
     }
 
     // Connection already in progress - wait for it
@@ -411,6 +429,7 @@ export abstract class DeviceServiceClient {
         () =>
           new Promise<boolean>((resolve, reject) => {
             const ws = this.webSocketFactory(wsUrl);
+            this.lifecycleSocket = ws;
             const connectionTimeout = this.timer.setTimeout(() => {
               this.pendingConnectAbort = null;
               ws.close();
@@ -428,6 +447,7 @@ export abstract class DeviceServiceClient {
               // replacement connect; keep a lone swallowing error listener so a
               // mid-handshake error cannot throw and crash the daemon.
               try {
+                this.clearLifecycleSocket(ws);
                 ws.removeAllListeners();
                 ws.on("error", (error) => {
                   logger.debug(`[${this.logTag}] Ignoring error on aborted WebSocket: ${error}`);
@@ -454,6 +474,7 @@ export abstract class DeviceServiceClient {
                 // a spurious reconnect. Removing the listeners makes that a no-op.
                 logger.info(`[${this.logTag}] Discarding WebSocket opened after close`);
                 try {
+                  this.clearLifecycleSocket(ws);
                   ws.removeAllListeners();
                   // Keep a lone error listener: a discarded socket (e.g. dialing a
                   // dead old port) can still emit "error" during its close
@@ -502,12 +523,22 @@ export abstract class DeviceServiceClient {
 
             ws.on("close", () => {
               this.pendingConnectAbort = null;
+              if (this.lifecycleSocket !== ws) {
+                logger.debug(`[${this.logTag}] Ignoring close from stale WebSocket`);
+                return;
+              }
+              this.lifecycleSocket = null;
               logger.info(`[${this.logTag}] WebSocket connection closed`);
               this.ws = null;
               this.isConnecting = false;
 
               // Stop health check
               this.stopHealthCheck();
+
+              // The transport is known dead, so commands cannot receive a
+              // response. Settle them immediately rather than retaining their
+              // request state and timers until the command timeout expires.
+              this.requestManager.cancelAll(new Error("WebSocket connection closed"));
 
               // Platform-specific cleanup
               this.onConnectionClosed();

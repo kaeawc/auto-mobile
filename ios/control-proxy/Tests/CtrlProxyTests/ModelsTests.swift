@@ -432,6 +432,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(event.type, "connected")
         XCTAssertEqual(event.id, 7)
         XCTAssertEqual(event.supportedCommands, RequestType.allCases.map(\.rawValue).sorted())
+        XCTAssertEqual(event.supportedFeatures, ["display_cutout_info"])
         XCTAssertTrue(event.supportedCommands.contains("request_press_back"))
         XCTAssertTrue(event.supportedCommands.contains("request_keyboard"))
     }

@@ -56,12 +56,16 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
 
     case "screenshot":
       result = {
-        success: true,
+        // Successful ScreenshotResponse envelopes predate the shared success
+        // field and omit it, while CommandHandler failures use the same
+        // discriminator with success:false plus error. Preserve both shapes.
+        success: message.success ?? true,
         data: message.data,
         format: message.format ?? "png",
         timestamp: message.timestamp,
         frameContext: message.frameContext,
         rotation: message.rotation,
+        ...(message.error === undefined ? {} : { error: message.error }),
       };
       break;
 

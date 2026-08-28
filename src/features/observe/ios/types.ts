@@ -130,6 +130,7 @@ export interface WebSocketMessage {
   requestId?: string;
   id?: number;
   supportedCommands?: string[];
+  supportedFeatures?: string[];
   data?: XCTestHierarchy;
   performanceData?: CtrlProxyPerformanceSnapshot;
   format?: string;

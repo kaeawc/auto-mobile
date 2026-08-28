@@ -1265,6 +1265,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // Stop iproxy tunnel if running
     await this.stopIproxyTunnel({ clearDevicePort: true });
 
+    let runnerTerminationError: unknown;
     if (this.xcTestProcessId) {
       try {
         if (await this.isOwnRunnerProcessAlive()) {
@@ -1276,18 +1277,27 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
           );
         }
       } catch (error) {
+        runnerTerminationError = error;
         logger.warn(
           `[IOSCtrlProxy] Failed to terminate tracked CtrlProxy runner ${this.xcTestProcessId}: ` +
             `${errorMessage(error)}`,
         );
       }
-      this.xcTestProcessId = null;
-      this.xcTestProcess = null;
+      if (runnerTerminationError === undefined) {
+        this.xcTestProcessId = null;
+        this.xcTestProcess = null;
+      }
     }
 
     this.clearCaches();
-    PortManager.release(this.device.deviceId);
     this.isStopping = false;
+    if (runnerTerminationError !== undefined) {
+      throw new ActionableError(
+        `Failed to stop iOS CtrlProxy runner ${this.xcTestProcessId}: ` +
+          `${errorMessage(runnerTerminationError)}`,
+      );
+    }
+    PortManager.release(this.device.deviceId);
     logger.info("[IOSCtrlProxy] Service stopped");
   }
 
@@ -2382,7 +2392,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             `[IOSCtrlProxy] Terminating stale CtrlProxy process tree rooted at ${rootPid} ` +
               `for listener ${process.pid} on port ${this.servicePort}`,
           );
-          await this.processClient.terminateProcessTree(rootPid);
+          await this.processClient.terminateProcessTree(rootPid).catch((error) => {
+            logger.warn(
+              `[IOSCtrlProxy] Stale runner tree ${rootPid} survived termination: ${errorMessage(error)}`,
+            );
+          });
         }
 
         const remainingProcesses = await this.findListeningProcessesOnPort(this.servicePort);
@@ -2398,7 +2412,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
               `[IOSCtrlProxy] CtrlProxy listener ${process.pid} still holds port ${this.servicePort}; ` +
                 `force-terminating remaining owned process tree`,
             );
-            await this.processClient.terminateProcessTree(process.pid);
+            await this.processClient.terminateProcessTree(process.pid).catch((error) => {
+              logger.warn(
+                `[IOSCtrlProxy] Listener ${process.pid} survived forced termination: ${errorMessage(error)}`,
+              );
+            });
           }
         }
 
@@ -2833,11 +2851,23 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     });
 
     child.on("error", (error) => {
+      if (this.xcTestProcess !== child) {
+        logger.debug(
+          `[IOSCtrlProxy] Ignoring error from stale xcodebuild PID ${child.pid ?? "unknown"}`,
+        );
+        return;
+      }
       logger.warn(`[IOSCtrlProxy] xcodebuild test error: ${error.message}`);
       this.handleProcessExit();
     });
 
     child.on("exit", (code, signal) => {
+      if (this.xcTestProcess !== child) {
+        logger.debug(
+          `[IOSCtrlProxy] Ignoring exit from stale xcodebuild PID ${child.pid ?? "unknown"}`,
+        );
+        return;
+      }
       if (code !== 0 || signal) {
         logger.warn(`[IOSCtrlProxy] xcodebuild test exited: code=${code}, signal=${signal}`);
       }

@@ -18,6 +18,7 @@ import { IOSCtrlProxyBuilder } from "../utils/IOSCtrlProxyBuilder";
 import {
   IOSCtrlProxyClient,
   IOS_RUNNER_FEATURE_COMMANDS,
+  IOS_RUNNER_FEATURE_FLAGS,
 } from "../features/observe/ios/IOSCtrlProxyClient";
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
 import { defaultTimer } from "../utils/SystemTimer";
@@ -61,6 +62,8 @@ export interface DeviceServiceStatus {
    * always-true. null when the runner has not handshaked (identity unknown).
    */
   supportedCommandsComplete?: boolean | null;
+  /** iOS only: whether all required non-command runner features are advertised. */
+  supportedFeaturesComplete?: boolean | null;
 }
 
 interface DeviceIdentity {
@@ -76,7 +79,12 @@ interface DeviceReadiness {
 interface DeviceCapabilities {
   automation: Pick<
     DeviceServiceStatus,
-    "installed" | "enabled" | "running" | "isCompatible" | "supportedCommandsComplete"
+    | "installed"
+    | "enabled"
+    | "running"
+    | "isCompatible"
+    | "supportedCommandsComplete"
+    | "supportedFeaturesComplete"
   > | null;
 }
 
@@ -606,6 +614,7 @@ function withServiceStatus(
         running: serviceStatus.running,
         isCompatible: serviceStatus.isCompatible,
         supportedCommandsComplete: serviceStatus.supportedCommandsComplete,
+        supportedFeaturesComplete: serviceStatus.supportedFeaturesComplete,
       },
     },
   };
@@ -742,6 +751,7 @@ async function queryDeviceServiceStatus(
       // `supportedCommands` handshake. Read it connection-free (this hot path must
       // not open a WebSocket); null means identity is unknown this fetch.
       let supportedCommandsComplete: boolean | null = null;
+      let supportedFeaturesComplete: boolean | null = null;
       if (running) {
         const client = IOSCtrlProxyClient.getExistingInstance(bootedDevice.deviceId);
         const cached = client?.getCachedSupportedCommands() ?? null;
@@ -749,6 +759,13 @@ async function queryDeviceServiceStatus(
           const advertised = new Set(cached);
           supportedCommandsComplete = IOS_RUNNER_FEATURE_COMMANDS.every((command) =>
             advertised.has(command),
+          );
+        }
+        const cachedFeatures = client?.getCachedSupportedFeatures() ?? null;
+        if (cachedFeatures !== null) {
+          const advertisedFeatures = new Set(cachedFeatures);
+          supportedFeaturesComplete = IOS_RUNNER_FEATURE_FLAGS.every((feature) =>
+            advertisedFeatures.has(feature),
           );
         }
       }
@@ -759,7 +776,9 @@ async function queryDeviceServiceStatus(
       // not-compatible rather than the previous always-true reassurance. An
       // unverifiable explicit pin is never compatible (#2746).
       const isCompatible =
-        supportedCommandsComplete === true && !IOSCtrlProxyBuilder.isPinnedVersionUnverifiable();
+        supportedCommandsComplete === true &&
+        supportedFeaturesComplete === true &&
+        !IOSCtrlProxyBuilder.isPinnedVersionUnverifiable();
 
       return {
         installed,
@@ -769,6 +788,7 @@ async function queryDeviceServiceStatus(
         expectedSha256,
         isCompatible,
         supportedCommandsComplete,
+        supportedFeaturesComplete,
       };
     }
   } catch (error) {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { BootedDevice } from "../../../../src/models";
-import { FakeWebSocket } from "../../../fakes/FakeWebSocket";
+import { FakeWebSocket, WebSocketState } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
 
@@ -123,5 +123,67 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
     await flushSetImmediate();
 
     expect(notifier.count).toBe(1);
+  });
+
+  test("a stale socket close cannot tear down its live replacement", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const sockets: FakeWebSocket[] = [];
+
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => {
+        const socket = new FakeWebSocket(url, "none", 0, fakeTimer);
+        sockets.push(socket);
+        return socket;
+      },
+      fakeTimer,
+    );
+
+    expect(await client.ensureConnected()).toBe(true);
+    const oldSocket = sockets[0];
+    oldSocket.readyState = WebSocketState.CLOSING;
+
+    expect(await client.ensureConnected()).toBe(true);
+    expect(sockets).toHaveLength(2);
+    expect(client.isConnected()).toBe(true);
+
+    oldSocket.emit("close");
+    await flushSetImmediate();
+
+    expect(sockets[1].readyState).toBe(WebSocketState.OPEN);
+    expect(client.isConnected()).toBe(true);
+  });
+
+  test("unsolicited socket drop immediately rejects in-flight requests", async () => {
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    let socket: FakeWebSocket | null = null;
+
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => {
+        socket = new FakeWebSocket(url, "none", 0, fakeTimer);
+        return socket;
+      },
+      fakeTimer,
+    );
+
+    expect(await client.ensureConnected()).toBe(true);
+    const request = client.requestSwipe(0, 0, 10, 10, 300, 60_000);
+    await flushSetImmediate();
+    const requestManager = (
+      client as unknown as {
+        requestManager: { getPendingCount(): number };
+      }
+    ).requestManager;
+    expect(requestManager.getPendingCount()).toBe(1);
+
+    socket!.emit("close");
+
+    expect(requestManager.getPendingCount()).toBe(0);
+    await expect(request).rejects.toThrow("WebSocket connection closed");
   });
 });

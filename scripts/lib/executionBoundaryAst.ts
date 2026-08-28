@@ -79,13 +79,36 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     ts.ScriptKind.TS,
   );
   const initializers = new Map<string, ts.Expression[]>();
+  const scopedValues: Array<{
+    name: string;
+    value: ts.Expression;
+    scope: ts.Node;
+    position: number;
+  }> = [];
   const calls: ts.CallExpression[] = [];
   const launcherAliases = new Set(PROCESS_LAUNCHERS);
   const executionSeamAliases = new Set(["executeCommand", "runExecSeam", "execute"]);
   const runExecSeamAliases = new Set(["runExecSeam"]);
   const childProcessNamespaces = new Set<string>();
-  const bind = (name: string, value: ts.Expression): void =>
+  const lexicalScope = (node: ts.Node): ts.Node => {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (ts.isSourceFile(current) || ts.isBlock(current) || ts.isCaseBlock(current)) {
+        return current;
+      }
+      current = current.parent;
+    }
+    return sourceFile;
+  };
+  const bind = (name: string, value: ts.Expression, owner: ts.Node): void => {
     initializers.set(name, [...(initializers.get(name) ?? []), value]);
+    scopedValues.push({
+      name,
+      value,
+      scope: lexicalScope(owner),
+      position: owner.getStart(sourceFile),
+    });
+  };
   const collect = (node: ts.Node): void => {
     if (
       ts.isImportDeclaration(node) &&
@@ -116,7 +139,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     }
     if (ts.isVariableDeclaration(node)) {
       if (ts.isIdentifier(node.name) && node.initializer) {
-        bind(node.name.text, node.initializer);
+        bind(node.name.text, node.initializer, node);
       }
       if (ts.isObjectBindingPattern(node.name)) {
         const initializer = node.initializer;
@@ -164,7 +187,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
       ts.isIdentifier(node.left)
     ) {
-      bind(node.left.text, node.right);
+      bind(node.left.text, node.right, node);
     }
     if (ts.isCallExpression(node)) {
       calls.push(node);
@@ -198,9 +221,23 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       return true;
     }
     if (ts.isIdentifier(node) && !seen.has(node.text)) {
-      return (initializers.get(node.text) ?? []).some((value) =>
-        isRegExpReference(value, new Set([...seen, node.text])),
-      );
+      const scopes = new Set<ts.Node>();
+      let current: ts.Node | undefined = node.parent;
+      while (current) {
+        if (ts.isSourceFile(current) || ts.isBlock(current) || ts.isCaseBlock(current)) {
+          scopes.add(current);
+        }
+        current = current.parent;
+      }
+      const binding = scopedValues
+        .filter(
+          (candidate) =>
+            candidate.name === node.text &&
+            candidate.position < node.getStart(sourceFile) &&
+            scopes.has(candidate.scope),
+        )
+        .sort((left, right) => right.position - left.position)[0];
+      return binding ? isRegExpReference(binding.value, new Set([...seen, node.text])) : false;
     }
     return false;
   };

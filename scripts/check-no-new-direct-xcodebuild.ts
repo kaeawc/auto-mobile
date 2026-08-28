@@ -20,53 +20,110 @@ function containsXcodebuildCommand(value: string): boolean {
   return /(?:^|[\s;&|])(?:[^\s;&|]*[/\\])?xcodebuild(?:\s|$)/i.test(value);
 }
 
+function splitEnvPayload(value: string): string[] {
+  const words: string[] = [];
+  let word = "";
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  for (const character of value) {
+    if (escaped) {
+      word += character;
+      escaped = false;
+    } else if (character === "\\" && quote !== "'") {
+      escaped = true;
+    } else if (quote) {
+      if (character === quote) {
+        quote = null;
+      } else {
+        word += character;
+      }
+    } else if (character === "'" || character === '"') {
+      quote = character;
+    } else if (/\s/.test(character)) {
+      if (word) {
+        words.push(word);
+        word = "";
+      }
+    } else {
+      word += character;
+    }
+  }
+  if (escaped) {
+    word += "\\";
+  }
+  if (word) {
+    words.push(word);
+  }
+  return words;
+}
+
 function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
-  let index = 1;
+  const pending = argv.slice(1);
   let optionsTerminated = false;
-  while (index < argv.length) {
-    const argument = argv[index];
+  let steps = 0;
+  while (pending.length > 0 && steps++ < 1_000) {
+    const argument = pending.shift()!;
     if (!optionsTerminated && argument === "--") {
       optionsTerminated = true;
-      index++;
       continue;
     }
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argument)) {
-      index++;
       continue;
     }
     if (optionsTerminated) {
       return commandName(argument) === "xcodebuild";
     }
     if (["-i", "--ignore-environment", "-0", "--null"].includes(argument)) {
-      index++;
       continue;
     }
     if (["-u", "--unset", "-C", "--chdir", "-P"].includes(argument)) {
-      index += 2;
+      pending.shift();
       continue;
     }
     if (["-S", "--split-string"].includes(argument)) {
-      return containsXcodebuildCommand(argv[index + 1] ?? "");
+      pending.unshift(...splitEnvPayload(pending.shift() ?? ""));
+      continue;
     }
     if (argument.startsWith("-S") && argument.length > 2) {
-      return containsXcodebuildCommand(argument.slice(2));
+      pending.unshift(...splitEnvPayload(argument.slice(2)));
+      continue;
     }
     if (/^--(?:unset|chdir)=/.test(argument)) {
-      index++;
       continue;
     }
     if (argument.startsWith("--split-string=")) {
-      return containsXcodebuildCommand(argument.slice("--split-string=".length));
+      pending.unshift(...splitEnvPayload(argument.slice("--split-string=".length)));
+      continue;
     }
     if (argument.startsWith("-")) {
       // Unknown env flags are skipped conservatively. If they take an operand,
       // treating that operand as the command can only make the boundary louder.
-      index++;
       continue;
     }
     return commandName(argument) === "xcodebuild";
   }
   return false;
+}
+
+function argumentSlotAlternatives(
+  ast: ReturnType<typeof executionBoundaryAst>,
+  node: ts.Expression,
+) {
+  const values = ast.strings(node);
+  return values.includes("\u0000") ? [values.join("")] : values;
+}
+
+function argvAlternatives(
+  ast: ReturnType<typeof executionBoundaryAst>,
+  items: readonly ts.Expression[],
+): string[][] {
+  return items.reduce<string[][]>(
+    (alternatives, item) =>
+      alternatives.flatMap((prefix) =>
+        argumentSlotAlternatives(ast, item).map((value) => [...prefix, value]),
+      ),
+    [[]],
+  );
 }
 
 export function findDirectXcodebuildCalls(file: string, source: string): XcodebuildViolation[] {
@@ -88,18 +145,17 @@ export function findDirectXcodebuildCalls(file: string, source: string): Xcodebu
     const first = call.arguments[0];
     const firstArrayAlternatives = ast.arrayAlternatives(first);
     const argumentArrayAlternatives = ast.arrayAlternatives(call.arguments[1]);
-    const argvAlternatives = firstArrayAlternatives
-      ? firstArrayAlternatives.map((items) => items.flatMap((item) => ast.strings(item)))
+    const possibleArgv = firstArrayAlternatives
+      ? firstArrayAlternatives.flatMap((items) => argvAlternatives(ast, items))
       : ast
           .strings(first)
           .flatMap((command) =>
-            (argumentArrayAlternatives ?? [[]]).map((items) => [
-              command,
-              ...items.flatMap((item) => ast.strings(item)),
-            ]),
+            (argumentArrayAlternatives ?? [[]]).flatMap((items) =>
+              argvAlternatives(ast, items).map((arguments_) => [command, ...arguments_]),
+            ),
           );
-    const directValues = argvAlternatives.flatMap((argv) => argv.slice(0, 1));
-    const direct = argvAlternatives.some(
+    const directValues = possibleArgv.flatMap((argv) => argv.slice(0, 1));
+    const direct = possibleArgv.some(
       (argv) =>
         commandName(argv[0] ?? "") === "xcodebuild" ||
         (ENV_WRAPPERS.has(commandName(argv[0] ?? "")) && envDelegatesToXcodebuild(argv)),

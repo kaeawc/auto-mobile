@@ -417,6 +417,36 @@ describe("DevicectlDeviceLister", () => {
     expect(stale).toEqual({ devices: [], complete: false });
   });
 
+  test("retains a physical device through a failed sweep after a clock rollback", async () => {
+    const timer = new FakeTimer();
+    let shouldFail = false;
+    const lister = makeLister({
+      timer,
+      execute: async () => {
+        if (shouldFail) {
+          throw new Error("devicectl blipped");
+        }
+        return okExec;
+      },
+      readFile: async () => JSON.stringify(devicectlPayload([connectedIphone()])),
+    });
+
+    timer.setCurrentTime(1_000);
+    expect((await lister.listConnectedDevices()).devices.map((device) => device.deviceId)).toEqual([
+      PHYSICAL_UDID,
+    ]);
+
+    // A clock rollback invalidates cache freshness, but not the last known
+    // presence of hardware when the next devicectl sweep cannot complete.
+    timer.setCurrentTime(999);
+    shouldFail = true;
+    const discovery = await lister.listConnectedDevices();
+
+    expect(discovery.devices.map((device) => device.deviceId)).toEqual([PHYSICAL_UDID]);
+    expect(discovery.complete).toBe(false);
+    expect([...(discovery.retainedDeviceIds ?? [])]).toEqual([PHYSICAL_UDID]);
+  });
+
   test("removes its temp directory on both success and failure", async () => {
     const removed: string[] = [];
     const succeeding = makeLister({

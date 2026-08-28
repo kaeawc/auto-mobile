@@ -72,6 +72,7 @@ IDE_PLUGIN_METHOD=""
 IDE_PLUGIN_ZIP_URL=""
 IDE_PLUGIN_DIR=""
 INSTALL_AUTOMOBILE_CLI=false
+INSTALL_DESKTOP_APP=false
 INSTALL_CLAUDE_MARKETPLACE=false
 INSTALL_DEV_TOOLS=false
 START_DAEMON=false
@@ -468,6 +469,7 @@ Options:
   --preset NAME       Use an installation preset (minimal; contributor-only: development, local-dev)
   --contributor       Use contributor defaults (automatically selects the development preset)
   --non-interactive   Skip interactive prompts, use defaults
+  --desktop-app       Install the native AutoMobile desktop app from the latest GitHub release
   --env-file PATH     Write environment state (PATH, ANDROID_HOME) to file
   -h, --help          Show this help message
 
@@ -505,6 +507,10 @@ parse_args() {
                 ;;
             --non-interactive|-y)
                 NON_INTERACTIVE=true
+                shift
+                ;;
+            --desktop-app)
+                INSTALL_DESKTOP_APP=true
                 shift
                 ;;
             --record-mode)
@@ -2684,6 +2690,235 @@ resolve_ide_plugin_url() {
     echo "${url}"
 }
 
+# Return the native installer suffix published for a supported host. Desktop release
+# assets deliberately use a stable platform suffix; the installer architecture is
+# checked after download before anything is copied to the system.
+desktop_app_asset_suffix() {
+    local os="$1"
+    local arch="$2"
+
+    case "${os}:${arch}" in
+        macos:x86_64|macos:arm64)
+            echo "-macos.dmg"
+            ;;
+        linux:x86_64|linux:arm64)
+            echo "-linux.deb"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# `detect_os` intentionally treats Git Bash as Linux for the existing developer
+# environment setup. Keep the desktop installer separate so it never mistakes a
+# Windows host for a Linux .deb target.
+detect_desktop_app_os() {
+    case "$(uname -s)" in
+        Darwin*)
+            echo "macos"
+            ;;
+        Linux*)
+            echo "linux"
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            echo "windows"
+            ;;
+        *)
+            echo "unknown"
+            ;;
+    esac
+}
+
+# Extract the matching asset URL from the GitHub releases API response without
+# relying on a line-oriented JSON parser. Python is already a required installer
+# dependency for MCP configuration; jq remains a useful fallback for minimal hosts.
+resolve_desktop_app_release_asset() {
+    local release_json="$1"
+    local suffix="$2"
+
+    if command_exists python3; then
+        printf '%s' "${release_json}" | python3 -c '
+import json
+import sys
+
+release = json.load(sys.stdin)
+suffix = sys.argv[1]
+for asset in release.get("assets", []):
+    name = asset.get("name", "")
+    url = asset.get("browser_download_url", "")
+    if name.endswith(suffix) and url:
+        print(url)
+        break
+' "${suffix}"
+        return $?
+    fi
+
+    if command_exists jq; then
+        printf '%s' "${release_json}" | jq -r --arg suffix "${suffix}" \
+            '.assets[] | select(.name | endswith($suffix)) | .browser_download_url' | head -n 1
+        return 0
+    fi
+
+    log_error "python3 or jq is required to read GitHub release metadata."
+    return 1
+}
+
+fetch_latest_desktop_app_release() {
+    local api_url="https://api.github.com/repos/kaeawc/auto-mobile/releases/latest"
+
+    if command_exists curl; then
+        curl --fail --show-error --silent --location "${api_url}"
+    elif command_exists wget; then
+        wget --quiet -O- "${api_url}"
+    else
+        log_error "curl or wget is required to fetch the AutoMobile desktop app release."
+        return 1
+    fi
+}
+
+desktop_app_deb_architecture_matches_host() {
+    local package_path="$1"
+    local host_arch="$2"
+    local package_arch
+
+    command_exists dpkg-deb || return 1
+    package_arch=$(dpkg-deb --field "${package_path}" Architecture 2>/dev/null) || return 1
+
+    case "${host_arch}:${package_arch}" in
+        x86_64:amd64|arm64:arm64)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+install_desktop_app() {
+    local os arch suffix
+    os=$(detect_desktop_app_os)
+    arch=$(detect_arch)
+    if ! suffix=$(desktop_app_asset_suffix "${os}" "${arch}"); then
+        log_error "The AutoMobile desktop app does not support this host (${os}/${arch})."
+        return 1
+    fi
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        DRY_RUN_LOG+=("[DRY-RUN] Download the latest AutoMobile desktop app for ${os}/${arch} from GitHub Releases")
+        log_info "[DRY-RUN] Would install the latest AutoMobile desktop app for ${os}/${arch}"
+        return 0
+    fi
+
+    local release_json asset_url
+    if ! release_json=$(fetch_latest_desktop_app_release); then
+        log_error "Failed to fetch the latest AutoMobile GitHub release."
+        return 1
+    fi
+    if ! asset_url=$(resolve_desktop_app_release_asset "${release_json}" "${suffix}"); then
+        return 1
+    fi
+    if [[ -z "${asset_url}" ]]; then
+        log_error "The latest AutoMobile release has no desktop installer for ${os}/${arch}."
+        return 1
+    fi
+
+    local temp_dir installer_path
+    temp_dir=$(mktemp -d)
+    installer_path="${temp_dir}/AutoMobile${suffix}"
+    if ! download_file "${asset_url}" "${installer_path}"; then
+        log_error "Failed to download the AutoMobile desktop app from ${asset_url}"
+        rm -rf "${temp_dir}"
+        return 1
+    fi
+
+    case "${os}" in
+        macos)
+            local mount_dir app_path app_binary app_arches
+            mount_dir="${temp_dir}/mount"
+            mkdir -p "${mount_dir}"
+            if ! hdiutil attach -nobrowse -readonly -mountpoint "${mount_dir}" "${installer_path}" >/dev/null; then
+                log_error "Could not mount the downloaded AutoMobile disk image."
+                rm -rf "${temp_dir}"
+                return 1
+            fi
+            app_path=$(find "${mount_dir}" -maxdepth 1 -name 'AutoMobile.app' -type d -print -quit)
+            app_binary="${app_path}/Contents/MacOS/AutoMobile"
+            if [[ -z "${app_path}" || ! -x "${app_binary}" ]]; then
+                log_error "The disk image does not contain a valid AutoMobile.app bundle."
+                hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true
+                rm -rf "${temp_dir}"
+                return 1
+            fi
+            app_arches=$(lipo -archs "${app_binary}" 2>/dev/null || true)
+            if [[ " ${app_arches} " != *" ${arch} "* ]]; then
+                log_error "Downloaded desktop app architecture (${app_arches:-unknown}) does not match this Mac (${arch})."
+                hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true
+                rm -rf "${temp_dir}"
+                return 1
+            fi
+            if [[ -e "/Applications/AutoMobile.app" ]]; then
+                log_info "AutoMobile.app is already installed in /Applications; use its in-app updater to update it."
+                hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true
+                rm -rf "${temp_dir}"
+                return 0
+            fi
+            if ! sudo ditto "${app_path}" "/Applications/AutoMobile.app"; then
+                log_error "Failed to copy AutoMobile.app to /Applications."
+                hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true
+                rm -rf "${temp_dir}"
+                return 1
+            fi
+            hdiutil detach "${mount_dir}" >/dev/null
+            log_info "AutoMobile desktop app installed to /Applications/AutoMobile.app"
+            ;;
+        linux)
+            if ! desktop_app_deb_architecture_matches_host "${installer_path}" "${arch}"; then
+                log_error "Downloaded desktop app package does not match this Linux host (${arch})."
+                rm -rf "${temp_dir}"
+                return 1
+            fi
+            if command_exists apt-get; then
+                if ! sudo apt-get install -y "${installer_path}"; then
+                    log_error "Failed to install the AutoMobile desktop app package."
+                    rm -rf "${temp_dir}"
+                    return 1
+                fi
+            elif command_exists dpkg; then
+                if ! sudo dpkg --install "${installer_path}"; then
+                    log_error "Failed to install the AutoMobile desktop app package."
+                    rm -rf "${temp_dir}"
+                    return 1
+                fi
+            else
+                log_error "apt-get or dpkg is required to install the downloaded .deb package."
+                rm -rf "${temp_dir}"
+                return 1
+            fi
+            log_info "AutoMobile desktop app installed."
+            ;;
+    esac
+
+    rm -rf "${temp_dir}"
+    CHANGES_MADE=true
+}
+
+offer_desktop_app_install() {
+    [[ "${INSTALL_DESKTOP_APP}" == "true" ]] && return 0
+
+    local os arch
+    os=$(detect_desktop_app_os)
+    arch=$(detect_arch)
+    if ! desktop_app_asset_suffix "${os}" "${arch}" >/dev/null; then
+        log_info "AutoMobile desktop app is not available for this host (${os}/${arch})."
+        return 0
+    fi
+
+    if gum confirm "Install the native AutoMobile desktop app from the latest GitHub release?" --default=false; then
+        INSTALL_DESKTOP_APP=true
+    fi
+}
+
 detect_ide_plugins_dir() {
     if [[ -n "${ANDROID_STUDIO_PLUGINS_DIR:-}" ]]; then
         echo "${ANDROID_STUDIO_PLUGINS_DIR}"
@@ -4622,7 +4857,7 @@ main() {
         "Apply the selected AutoMobile configuration" \
         "Offer optional video-recording support" \
         "Configure optional device support" \
-        "Complete the selected integration"
+        "Install optional tools and complete the selected integration"
     show_installation_progress 1
     select_mcp_config_scope
 
@@ -4644,6 +4879,10 @@ main() {
             # present unrelated platform and CLI prompts after this error.
             exit 1
         fi
+    fi
+
+    if [[ "${NON_INTERACTIVE}" != "true" ]]; then
+        offer_desktop_app_install
     fi
 
     # Only do interactive platform/component selection if using Custom preset
@@ -4844,6 +5083,9 @@ main() {
 
     # CLI installation
     show_installation_progress 7
+    if [[ "${INSTALL_DESKTOP_APP}" == "true" ]]; then
+        install_desktop_app
+    fi
     if [[ -z "${POST_BUN_SETUP_PID}" && "${INSTALL_AUTOMOBILE_CLI}" == "true" ]]; then
         install_auto_mobile_cli
     fi

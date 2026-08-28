@@ -10,6 +10,19 @@ curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/ins
 
 Once you've finished that, learn [how to use AutoMobile](using/ux-exploration.md)
 
+## Desktop app
+
+The interactive installer offers the native desktop app as an optional step. To
+include it in a non-interactive install, use `--desktop-app`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/install.sh | bash -s -- --desktop-app --non-interactive
+```
+
+It selects the current host's installer from the latest GitHub release and
+verifies its native architecture before installing it. macOS installs the app
+to `/Applications`; Linux installs the released `.deb` package.
+
 ## Homebrew (macOS)
 
 AutoMobile is published to the shared `kaeawc/tap` Homebrew tap on every

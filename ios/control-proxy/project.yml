@@ -78,19 +78,25 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
 
+  # The production XCUITest runner. As of Phase 7C it compiles the Swift-6 rewrite
+  # (`Sources/CtrlProxyRewrite`) rather than the reference (`Sources/CtrlProxy`) — the
+  # target name, runner app (`CtrlProxyUITests-Runner.app`), xctest bundle, and
+  # `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService` identifier are kept
+  # so the TS MCP integration + scripts drive it unchanged. The reference impl stays
+  # buildable as the differential-parity oracle via the SwiftPM `CtrlProxy` library +
+  # `CtrlProxyRewriteTests` (it just no longer backs an on-device runner).
   CtrlProxyUITests:
     type: bundle.ui-testing
     platform: iOS
     sources:
       - path: Tests/CtrlProxyUITests
-      # Include CtrlProxy sources directly so XCTest is available during compilation
-      - path: Sources/CtrlProxy
-        excludes:
-          - "Fakes.swift"  # Exclude test-only fakes
+      # Compile the rewrite sources directly so XCTest/XCUIApplication are available to
+      # the `@MainActor` UI domain (the `#if canImport(XCTest) && os(iOS)` bodies).
+      - path: Sources/CtrlProxyRewrite
     dependencies:
       - target: CtrlProxyApp
-        # Note: We don't depend on CtrlProxy framework - sources are compiled directly into UI tests
-        # to give XCTest access for XCUIApplication
+        # Note: We don't depend on a CtrlProxy framework - sources are compiled directly
+        # into the UI tests to give XCTest access for XCUIApplication.
       # Must embed: the xctest bundle is loaded from CtrlProxyUITests-Runner.app, a
       # different bundle from CtrlProxyApp.app, so @rpath cannot reach the copy the
       # app embeds. Without this the runner dies at dlopen with
@@ -100,30 +106,6 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.uitests
-        TEST_TARGET_NAME: CtrlProxyApp
-        CODE_SIGN_STYLE: Automatic
-        GENERATE_INFOPLIST_FILE: YES
-
-  # Swift-6 concurrency-clean rewrite runner (Phase 7 cutover, additive).
-  # Compiles Sources/CtrlProxyRewrite directly into a UI-test bundle — the first
-  # target in which the `#if canImport(XCTest) && os(iOS)` `@MainActor` bodies build.
-  # The reference `CtrlProxyUITests` target is left intact as the behavioral oracle
-  # until the rewrite's UI-test smoke passes on a simulator (STATUS §9 step 3).
-  CtrlProxyRewriteUITests:
-    type: bundle.ui-testing
-    platform: iOS
-    sources:
-      - path: Tests/CtrlProxyRewriteUITests
-      - path: Sources/CtrlProxyRewrite
-    dependencies:
-      - target: CtrlProxyApp
-      # Same @rpath reasoning as CtrlProxyUITests: the xctest bundle loads from a
-      # separate Runner.app, so it must embed its own copy of ObjCExceptionCatcher.
-      - target: ObjCExceptionCatcher
-        embed: true
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.rewriteuitests
         TEST_TARGET_NAME: CtrlProxyApp
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
@@ -151,7 +133,6 @@ schemes:
       targets:
         - CtrlProxyTests
         - CtrlProxyUITests
-        - CtrlProxyRewriteUITests
     profile:
       config: Release
     analyze:

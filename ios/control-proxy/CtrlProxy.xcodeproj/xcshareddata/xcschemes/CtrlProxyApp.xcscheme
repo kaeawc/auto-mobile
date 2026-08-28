@@ -103,17 +103,6 @@
                ReferencedContainer = "container:CtrlProxy.xcodeproj">
             </BuildableReference>
          </TestableReference>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "CDF193681C3A3FAA021DD992"
-               BuildableName = "CtrlProxyRewriteUITests.xctest"
-               BlueprintName = "CtrlProxyRewriteUITests"
-               ReferencedContainer = "container:CtrlProxy.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

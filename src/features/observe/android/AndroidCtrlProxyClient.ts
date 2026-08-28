@@ -474,6 +474,7 @@ interface WsGetPreferenceResultMessage extends WsMessageBase {
   found?: boolean;
   key?: string;
   value?: string;
+  valueType?: KeyValueType;
   totalTimeMs?: number;
 }
 
@@ -1610,6 +1611,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   public override async ensureConnected(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
+    if (this.closed) {
+      return false;
+    }
     const connected = await super.ensureConnected(perf);
     if (connected) {
       this.syncAccessibilityFlagsToDevice();
@@ -1620,6 +1624,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   protected override async connectWebSocket(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
   ): Promise<boolean> {
+    if (this.closed) {
+      return false;
+    }
     const connection = super.connectWebSocket(perf);
     this.inFlightConnection = connection;
     try {
@@ -1749,8 +1756,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     );
   }
 
-  protected async setupBeforeConnect(perf: PerformanceTracker): Promise<void> {
-    await this.setupPortForwarding(perf);
+  protected async setupBeforeConnect(perf: PerformanceTracker, signal: AbortSignal): Promise<void> {
+    await this.setupPortForwarding(perf, signal);
   }
 
   // ===========================================================================
@@ -3071,6 +3078,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private async setupPortForwarding(
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    signal?: AbortSignal,
   ): Promise<void> {
     if (this.closed) {
       return;
@@ -3078,7 +3086,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // Verify port forwarding is still active even if we think it's set up
     // Port forwarding can be lost if ADB server restarts or emulator restarts
     if (this.portForwardingSetup) {
-      const isActive = await this.isPortForwardingActive();
+      const isActive = await this.isPortForwardingActive(signal);
       if (isActive) {
         logger.debug(`[CTRL_PROXY] Port forwarding already active (localhost:${this.localPort})`);
         return;
@@ -3090,7 +3098,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     try {
       const previousLocalPort = this.localPort;
       await perf.track("clearPortForward", () =>
-        this.adb.executeCommand(`forward --remove tcp:${this.localPort}`).catch(() => {}),
+        this.adb
+          .execute(["forward", "--remove", `tcp:${this.localPort}`], { signal })
+          .catch(() => {}),
       );
       if (this.closed) {
         return;
@@ -3103,16 +3113,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       if (this.localPort !== previousLocalPort) {
         await perf.track("clearReallocatedPortForward", () =>
-          this.adb.executeCommand(`forward --remove tcp:${this.localPort}`).catch(() => {}),
+          this.adb
+            .execute(["forward", "--remove", `tcp:${this.localPort}`], { signal })
+            .catch(() => {}),
         );
       }
 
       await perf.track("setupPortForward", () =>
-        this.adb.executeCommand(`forward tcp:${this.localPort} tcp:${PortManager.DEVICE_PORT}`),
+        this.adb.execute(["forward", `tcp:${this.localPort}`, `tcp:${PortManager.DEVICE_PORT}`], {
+          signal,
+        }),
       );
 
       if (this.closed) {
-        await this.adb.executeCommand(`forward --remove tcp:${this.localPort}`).catch(() => {});
+        await this.adb.execute(["forward", "--remove", `tcp:${this.localPort}`]).catch(() => {});
         return;
       }
 
@@ -3137,16 +3151,24 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   /**
    * Check if port forwarding is still active by querying adb forward --list
    */
-  private async isPortForwardingActive(): Promise<boolean> {
+  private async isPortForwardingActive(signal?: AbortSignal): Promise<boolean> {
     try {
-      const result = await this.adb.executeCommand("forward --list");
-      const expectedForward = `tcp:${this.localPort} tcp:${PortManager.DEVICE_PORT}`;
-      // Check if our port forward entry exists in the list
-      // Format is: "serial tcp:localPort tcp:remotePort" per line
-      const isActive = result.stdout.includes(expectedForward);
+      const result = await this.adb.execute(["forward", "--list"], { signal });
+      // Format is exactly: "serial tcp:localPort tcp:remotePort". Requiring
+      // the serial prevents another device's same-number forward from being
+      // mistaken for this client's forward.
+      const isActive = result.stdout.split(/\r?\n/).some((line) => {
+        const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
+        return (
+          extra.length === 0 &&
+          serial === this.device.deviceId &&
+          local === `tcp:${this.localPort}` &&
+          remote === `tcp:${PortManager.DEVICE_PORT}`
+        );
+      });
       if (!isActive) {
         logger.debug(
-          `[CTRL_PROXY] Port forwarding not found in active forwards. Expected: ${expectedForward}`,
+          `[CTRL_PROXY] Port forwarding not found for ${this.device.deviceId} on tcp:${this.localPort}`,
         );
       }
       return isActive;
@@ -3627,7 +3649,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
             ? {
                 key: message.key,
                 value: message.value,
-                type: message.type,
+                type: message.valueType ?? "UNKNOWN",
               }
             : undefined;
         this.requestManager.resolve(message.requestId, {

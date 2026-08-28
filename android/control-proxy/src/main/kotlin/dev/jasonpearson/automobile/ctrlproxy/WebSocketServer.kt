@@ -228,7 +228,10 @@ class WebSocketServer(
 
     try {
       server =
-        embeddedServer(CIO, port = port) {
+        // CtrlProxy is reached exclusively through adb forward. Binding loopback
+        // prevents the accessibility-control endpoint from being exposed to the
+        // device LAN when the runner is installed on a physical device.
+        embeddedServer(CIO, host = "127.0.0.1", port = port) {
             install(WebSockets) {
               pingPeriod = 15.seconds
               timeout = 60.seconds
@@ -365,7 +368,9 @@ class WebSocketServer(
 
   /** Broadcast a message to all connected clients */
   suspend fun broadcast(message: String) {
-    forgetRequestConnectionForRawMessage(message)
+    if (routeCorrelatedResponse(extractRequestId(message), message)) {
+      return
+    }
     _messageFlow.emit(message)
   }
 
@@ -379,7 +384,9 @@ class WebSocketServer(
   suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String) {
     val perfTiming = perfProvider.flush()
     val message = messageBuilder(perfTiming)
-    forgetRequestConnectionForRawMessage(message)
+    if (routeCorrelatedResponse(extractRequestId(message), message)) {
+      return
+    }
     _messageFlow.emit(message)
   }
 
@@ -393,7 +400,9 @@ class WebSocketServer(
   suspend fun broadcastWithPerfSync(messageBuilder: (perfTiming: JsonElement?) -> String) {
     val perfTiming = perfProvider.flush()
     val message = messageBuilder(perfTiming)
-    forgetRequestConnectionForRawMessage(message)
+    if (routeCorrelatedResponse(extractRequestId(message), message)) {
+      return
+    }
     broadcastToClients(message)
   }
 
@@ -427,22 +436,34 @@ class WebSocketServer(
     waitForClient: Boolean = false,
   ) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
-    val requestId = correlationRequestId(response)
-    if (response is ErrorResponse) {
-      val target =
-        if (requestId != null) {
-          synchronized(connections) { requestConnections.remove(requestId) }
-        } else {
-          null
-        }
-      if (target != null) {
-        sendToClient(target, message)
-        return
-      }
-    } else {
-      forgetRequestConnection(requestId)
+    if (routeCorrelatedResponse(correlationRequestId(response), message)) {
+      return
     }
 
+    broadcastSerialized(message, mode, waitForClient)
+  }
+
+  /**
+   * Broadcasts a response whose correlation ID was created outside this WebSocket server.
+   *
+   * Android broadcast commands do not originate from a socket, so their IDs have no entry in
+   * [requestConnections]. Their responses must still reach the daemon that is awaiting the ID,
+   * while ordinary orphaned WebSocket responses remain protected by [routeCorrelatedResponse].
+   */
+  suspend fun broadcastExternallyCorrelatedResponse(
+    response: WebSocketResponse,
+    mode: BroadcastMode = BroadcastMode.Async,
+    waitForClient: Boolean = false,
+  ) {
+    val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
+    broadcastSerialized(message, mode, waitForClient)
+  }
+
+  private suspend fun broadcastSerialized(
+    message: String,
+    mode: BroadcastMode,
+    waitForClient: Boolean,
+  ) {
     if (waitForClient) {
       broadcastToClientsWhenClientConnected(message)
     } else {
@@ -451,6 +472,29 @@ class WebSocketServer(
         BroadcastMode.Sync -> broadcastToClients(message)
       }
     }
+  }
+
+  /**
+   * Sends a correlated response only to its originating client.
+   *
+   * A request owner is removed when the socket disconnects and when its first terminal response is
+   * delivered. A later response with that request ID is therefore not an event: broadcasting it
+   * could leak one client's screenshot or action result to every other connected client.
+   *
+   * @return `true` when [requestId] was present and the frame was delivered or deliberately
+   *   dropped; `false` for uncorrelated frames that the caller should broadcast normally.
+   */
+  private suspend fun routeCorrelatedResponse(requestId: String?, message: String): Boolean {
+    if (requestId == null) {
+      return false
+    }
+    val target = synchronized(connections) { requestConnections.remove(requestId) }
+    if (target == null) {
+      Log.w(TAG, "Dropping response for disconnected or completed request $requestId")
+    } else {
+      sendToClient(target, message)
+    }
+    return true
   }
 
   /**
@@ -465,14 +509,7 @@ class WebSocketServer(
     waitForClient: Boolean = false,
   ) {
     val message = responseJson.encodeToString(SdkEvent.serializer(), event)
-    if (waitForClient) {
-      broadcastToClientsWhenClientConnected(message)
-    } else {
-      when (mode) {
-        BroadcastMode.Async -> _messageFlow.emit(message)
-        BroadcastMode.Sync -> broadcastToClients(message)
-      }
-    }
+    broadcastSerialized(message, mode, waitForClient)
   }
 
   /**
@@ -566,16 +603,6 @@ class WebSocketServer(
       else -> true
     }
 
-  private fun forgetRequestConnectionForRawMessage(message: String) {
-    forgetRequestConnection(extractRequestId(message))
-  }
-
-  private fun forgetRequestConnection(requestId: String?) {
-    requestId?.let {
-      synchronized(connections) { requestConnections.remove(requestId) }
-    }
-  }
-
   /** Get the number of active connections */
   fun getConnectionCount(): Int {
     return synchronized(connections) { connections.size }
@@ -661,8 +688,8 @@ class WebSocketServer(
 
     Log.d(TAG, "Received ${request::class.simpleName} (requestId: ${request.requestId})")
     // Only record owner mappings for request types whose normal completion carries the same
-    // requestId back over the wire (raw or typed responses that clear the entry via
-    // `forgetRequestConnection`). Hierarchy requests are the exception: the action layer never
+    // requestId back over the wire (raw or typed responses route to and clear the entry).
+    // Hierarchy requests are the exception: the action layer never
     // receives their requestId, the success `hierarchy_update` frame has no requestId, and the
     // stale-skip path emits no frame at all — so a recorded owner would never be cleared until the
     // WebSocket disconnects, recreating the long-lived-session leak and leaving a stale id

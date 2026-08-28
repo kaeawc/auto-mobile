@@ -89,6 +89,7 @@ export function createIosDelegateHarness(
   let cache: CtrlProxyCachedHierarchy | null = options.initialCache ?? null;
 
   const fakeSocket = {
+    readyState: 1,
     send(data: unknown): void {
       const text = typeof data === "string" ? data : String(data);
       try {

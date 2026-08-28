@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { RequestManager } from "../../src/utils/RequestManager";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("RequestManager", () => {
@@ -8,7 +9,7 @@ describe("RequestManager", () => {
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
-    manager = new RequestManager(fakeTimer);
+    manager = new RequestManager(fakeTimer, new FakeIdGenerator(["first", "second", "third"]));
   });
 
   afterEach(() => {
@@ -20,10 +21,13 @@ describe("RequestManager", () => {
     const id2 = manager.generateId("screenshot");
     const id3 = manager.generateId("swipe");
 
-    expect(id1).not.toBe(id2);
-    expect(id2).not.toBe(id3);
-    expect(id1).toContain("screenshot");
-    expect(id3).toContain("swipe");
+    expect([id1, id2, id3]).toEqual(["screenshot_first", "screenshot_second", "swipe_third"]);
+  });
+
+  test("does not collide across managers created in the same tick", () => {
+    const otherManager = new RequestManager(fakeTimer, new FakeIdGenerator(["other"]));
+    expect(manager.generateId("screenshot")).toBe("screenshot_first");
+    expect(otherManager.generateId("screenshot")).toBe("screenshot_other");
   });
 
   test("should register and resolve requests", async () => {
@@ -241,16 +245,14 @@ describe("RequestManager", () => {
     expect(manager.resolveError("does-not-exist", "boom", 0)).toBe(false);
   });
 
-  test("resets the counter on reset so the next id restarts from 1", () => {
+  test("keeps IDs unique after reset", () => {
     manager.generateId("test");
     manager.generateId("test");
     manager.generateId("test");
 
     manager.reset();
 
-    // FakeTimer stays at now()=0, so the next id is fully determined: the counter
-    // must restart at 1 rather than continue from 4.
     const newId = manager.generateId("test");
-    expect(newId).toBe("test_0_1");
+    expect(newId).toBe("test_fake-1");
   });
 });

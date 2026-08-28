@@ -579,16 +579,22 @@ export class AdbClient implements AdbExecutor {
   }
 
   async spawn(args: string[], options: AdbSpawnOptions = {}): Promise<AdbProcess> {
+    const startTime = this.timer.now();
     const signal = options.signal ?? getAbortSignal();
     if (signal?.aborted) {
       throw this.getAbortError(signal);
     }
 
-    const { adbPath, baseArgs } = await this.getBaseCommandParts();
+    const { adbPath, baseArgs } = await this.getBaseCommandParts(options.timeoutMs, signal);
     if (signal?.aborted) {
       throw this.getAbortError(signal);
     }
     const fullArgs = [...baseArgs, ...args];
+    const remainingTimeoutMs = this.getRemainingTimeoutMs(
+      options.timeoutMs,
+      startTime,
+      args.join(" "),
+    );
     const child = this.spawnFn(adbPath, fullArgs, { stdio: ["ignore", "pipe", "pipe"] });
     this.activeProcesses.add(child);
 
@@ -624,8 +630,8 @@ export class AdbClient implements AdbExecutor {
     child.once("exit", onExit);
     child.once("error", onError);
     signal?.addEventListener("abort", onAbort, { once: true });
-    if (options.timeoutMs) {
-      timeoutId = this.timer.setTimeout(onAbort, options.timeoutMs);
+    if (remainingTimeoutMs !== undefined) {
+      timeoutId = this.timer.setTimeout(onAbort, remainingTimeoutMs);
     }
 
     await new Promise<void>((resolve, reject) => {

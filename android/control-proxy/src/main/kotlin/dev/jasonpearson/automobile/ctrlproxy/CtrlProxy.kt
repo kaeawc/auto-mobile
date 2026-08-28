@@ -3239,7 +3239,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     if (frame == null) return
     resultBroadcaster.guard(frame.requestId, "hierarchy_extract_error") {
       if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-        webSocketServer.broadcast(frame)
+        webSocketServer.broadcastExternallyCorrelatedResponse(frame)
       }
     }
   }
@@ -7271,13 +7271,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         } else if (entry != null) {
           append(""","success":true,"found":true""")
           if (entry.value != null) {
-            val jsonValue =
-              if (entry.type == "STRING") jsonCompact.encodeToString(entry.value) else entry.value
-            append(""","value":$jsonValue""")
+            append(""","value":${jsonCompact.encodeToString(entry.value)}""")
           } else {
             append(""","value":null""")
           }
-          append(""","type":${jsonCompact.encodeToString(entry.type)}""")
+          append(""","valueType":${jsonCompact.encodeToString(entry.type)}""")
         } else {
           append(""","success":true,"found":false""")
         }

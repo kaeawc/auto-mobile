@@ -202,6 +202,7 @@ function isTerminalReleaseReason(releaseReason: string): boolean {
   return (
     releaseReason === "missing-first-heartbeat" ||
     releaseReason === "heartbeat-timeout" ||
+    releaseReason === "device-killed" ||
     releaseReason.startsWith("device-disconnected:")
   );
 }

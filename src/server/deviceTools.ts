@@ -1587,7 +1587,7 @@ async function releaseShutdownSessionOwnership(
     `device-disconnected:${device.deviceId}`,
     { excludeExecutionId: getShutdownInitiatingExecutionId() },
   );
-  const release = sessionManager.releaseSession(sessionId, `device-stopped:${device.deviceId}`);
+  const release = sessionManager.releaseSession(sessionId, "device-killed");
   try {
     await runWithinShutdownDeadline(
       device,

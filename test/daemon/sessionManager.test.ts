@@ -1922,6 +1922,29 @@ describe("SessionManager", () => {
     });
   });
 
+  test("device-killed UUID cannot silently allocate another device", async () => {
+    await sessionManager.createSession("killed-session", "emulator-5554", "android");
+    await sessionManager.releaseSession("killed-session", "device-killed");
+    let assignmentCount = 0;
+    const assigner: SessionDeviceAssigner = {
+      async assignDeviceToSession() {
+        assignmentCount += 1;
+        return "emulator-5560";
+      },
+    };
+
+    await expect(
+      sessionManager.getOrCreateSession("killed-session", assigner, "android"),
+    ).rejects.toThrow("terminal after device-killed");
+    expect(assignmentCount).toBe(0);
+    expect(sessionManager.getTerminalReleaseSnapshot("killed-session")).toMatchObject({
+      sessionId: "killed-session",
+      deviceId: "emulator-5554",
+      releaseReason: "device-killed",
+      terminal: true,
+    });
+  });
+
   test("terminal release fails closed when durable fencing cannot be persisted", async () => {
     const persistence = new FakeDeviceSessionPersistence();
     const manager = new SessionManager(fakeTimer, persistence);

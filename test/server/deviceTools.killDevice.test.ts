@@ -557,6 +557,12 @@ describe("killDevice handler", () => {
 
     expect(successfulManager.getCallCount("startDevice")).toBe(1);
     expect(pool.getDevice("emulator-5554")).toBeNull();
+    expect(sessionManager.getTerminalReleaseSnapshot("session-1")).toMatchObject({
+      sessionId: "session-1",
+      deviceId: "emulator-5554",
+      releaseReason: "device-killed",
+      terminal: true,
+    });
   });
 
   test("keeps the initiating parallel plan alive while cancelling other execution tracks", async () => {

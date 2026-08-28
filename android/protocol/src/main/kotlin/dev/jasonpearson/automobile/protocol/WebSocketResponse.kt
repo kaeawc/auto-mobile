@@ -695,7 +695,7 @@ data class GetPreferenceResult(
   val fileName: String,
   val key: String,
   val value: String? = null,
-  val type: String? = null,
+  val valueType: String? = null,
   val found: Boolean = false,
   val error: String? = null,
 ) : WebSocketResponse()

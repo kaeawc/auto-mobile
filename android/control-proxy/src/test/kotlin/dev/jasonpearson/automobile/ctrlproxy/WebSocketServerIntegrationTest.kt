@@ -1054,9 +1054,10 @@ class WebSocketServerIntegrationTest {
               incoming.receive() // Connection message
               bystanderReady.complete(Unit)
               sendOwnerMessage.await()
-              bystanderMessages.add(
-                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
-              )
+              val unexpected = withTimeoutOrNull(250) { incoming.receive() }
+              if (unexpected is Frame.Text) {
+                bystanderMessages.add(unexpected.readText())
+              }
               bystanderReceivedRaw.complete(Unit)
               sendLateError.await()
               bystanderMessages.add(
@@ -1079,11 +1080,12 @@ class WebSocketServerIntegrationTest {
 
           assertEquals("""{"type":"screenshot","requestId":"req-raw-success"}""", ownerMessages[0])
           assertEquals(
-            """{"type":"screenshot","requestId":"req-raw-success"}""",
-            bystanderMessages[0],
+            "the bystander should receive only the later unowned error, not the raw success",
+            1,
+            bystanderMessages.size,
           )
           val ownerError = json.parseToJsonElement(ownerMessages[1]).jsonObject
-          val bystanderError = json.parseToJsonElement(bystanderMessages[1]).jsonObject
+          val bystanderError = json.parseToJsonElement(bystanderMessages[0]).jsonObject
           assertEquals("error", ownerError["type"]?.jsonPrimitive?.content)
           assertEquals("req-raw-success", ownerError["requestId"]?.jsonPrimitive?.content)
           assertEquals(
@@ -1171,9 +1173,10 @@ class WebSocketServerIntegrationTest {
               incoming.receive() // Connection message
               bystanderReady.complete(Unit)
               sendOwnerMessage.await()
-              bystanderMessages.add(
-                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
-              )
+              val unexpected = withTimeoutOrNull(250) { incoming.receive() }
+              if (unexpected is Frame.Text) {
+                bystanderMessages.add(unexpected.readText())
+              }
               bystanderReceivedTyped.complete(Unit)
               sendLateError.await()
               bystanderMessages.add(
@@ -1195,13 +1198,11 @@ class WebSocketServerIntegrationTest {
           bystanderJob.join()
 
           val ownerResult = json.parseToJsonElement(ownerMessages[0]).jsonObject
-          val bystanderResult = json.parseToJsonElement(bystanderMessages[0]).jsonObject
           assertEquals("settings_get_result", ownerResult["type"]?.jsonPrimitive?.content)
           assertEquals("req-typed-success", ownerResult["requestId"]?.jsonPrimitive?.content)
-          assertEquals("settings_get_result", bystanderResult["type"]?.jsonPrimitive?.content)
-          assertEquals("req-typed-success", bystanderResult["requestId"]?.jsonPrimitive?.content)
+          assertEquals("correlated typed success must not leak to another client", 1, bystanderMessages.size)
           val ownerError = json.parseToJsonElement(ownerMessages[1]).jsonObject
-          val bystanderError = json.parseToJsonElement(bystanderMessages[1]).jsonObject
+          val bystanderError = json.parseToJsonElement(bystanderMessages[0]).jsonObject
           assertEquals("error", ownerError["type"]?.jsonPrimitive?.content)
           assertEquals("req-typed-success", ownerError["requestId"]?.jsonPrimitive?.content)
           assertEquals(

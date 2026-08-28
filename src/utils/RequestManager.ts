@@ -1,5 +1,6 @@
 import { logger } from "./logger";
 import { Timer, defaultTimer } from "./SystemTimer";
+import { randomUUID } from "node:crypto";
 
 /**
  * Represents a pending request with timeout handling.
@@ -38,7 +39,6 @@ type ResponseErrorFactory<T> = (error: string, totalTimeMs: number) => T;
 export class RequestManager {
   private pending: Map<string, PendingRequest<unknown>> = new Map();
   private timer: Timer;
-  private requestCounter: number = 0;
 
   constructor(timer: Timer = defaultTimer) {
     this.timer = timer;
@@ -50,8 +50,11 @@ export class RequestManager {
    * @returns Unique request ID
    */
   generateId(type: string): string {
-    this.requestCounter++;
-    return `${type}_${this.timer.now()}_${this.requestCounter}`;
+    // Request managers are deliberately per client. A time + per-instance counter
+    // collides when two daemon clients issue the same request in the same tick, and
+    // CtrlProxy uses the ID to select the response owner. A UUID keeps that routing
+    // boundary safe across clients as well as across reconnects.
+    return `${type}_${randomUUID()}`;
   }
 
   /**
@@ -69,7 +72,7 @@ export class RequestManager {
     timeoutErrorFactory: TimeoutErrorFactory<T>,
     responseErrorFactory?: ResponseErrorFactory<T>,
   ): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
+    const promise = new Promise<T>((resolve, reject) => {
       // Set up timeout
       const timeoutId = this.timer.setTimeout(() => {
         const request = this.pending.get(id);
@@ -97,6 +100,12 @@ export class RequestManager {
         `[RequestManager] Registered request: ${type} (id: ${id}, timeout: ${timeoutMs}ms)`,
       );
     });
+    // A caller can fail synchronously while writing the just-registered request
+    // to a WebSocket. Keep that abandoned promise observed until the caller's
+    // error path cancels it or its timeout resolves; otherwise close() turns a
+    // send failure into an unhandled rejection.
+    void promise.catch(() => {});
+    return promise;
   }
 
   /**

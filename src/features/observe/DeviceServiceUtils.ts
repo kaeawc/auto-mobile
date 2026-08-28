@@ -9,6 +9,7 @@ import { errorMessage } from "../../utils/describeUnknownError";
 import type { Timer } from "../../utils/SystemTimer";
 import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger, type Logger } from "../../utils/logger";
+import WebSocket from "ws";
 import type { GestureResult, TextResult, ScreenshotResult } from "./DeviceService";
 import type {
   BaseResult,
@@ -312,7 +313,18 @@ export async function sendCommand<T>(
   );
 
   const msg = createMessage(options.messageType, requestId, options.params);
-  context.getWebSocket()?.send(msg);
+  try {
+    const ws = context.getWebSocket();
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      throw new Error("WebSocket not connected");
+    }
+    ws.send(msg);
+  } catch (error) {
+    context.requestManager.reject(
+      requestId,
+      error instanceof Error ? error : new Error(String(error)),
+    );
+  }
 
   return options.perf
     ? options.perf.track(`${options.idPrefix}.awaitResponse`, () => promise)

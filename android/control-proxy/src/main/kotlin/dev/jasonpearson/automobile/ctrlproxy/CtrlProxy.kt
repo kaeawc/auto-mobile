@@ -7277,7 +7277,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           } else {
             append(""","value":null""")
           }
-          append(""","type":${jsonCompact.encodeToString(entry.type)}""")
+          append(""","valueType":${jsonCompact.encodeToString(entry.type)}""")
         } else {
           append(""","success":true,"found":false""")
         }

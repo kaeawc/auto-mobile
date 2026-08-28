@@ -240,6 +240,49 @@ describe("CtrlProxyStorage (Android)", function () {
     });
   });
 
+  describe("getPreference", function () {
+    test("resolves a found entry from the valueType wire field", async function () {
+      const { factory, getSocket } = createCapturingFactory(fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        fakeTimer,
+      );
+      try {
+        await client.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+
+        const baseCount = socket!.sentMessages.length;
+        const resultPromise = client.getPreference("com.example", "settings.xml", "launchCount");
+        await waitForSentMessages(socket, baseCount + 1);
+        const sent = findSentMessage(socket!, "get_preference");
+
+        socket!.simulateMessage(
+          JSON.stringify({
+            type: "get_preference_result",
+            requestId: sent.requestId,
+            success: true,
+            found: true,
+            key: "launchCount",
+            value: "3",
+            valueType: "INT",
+            totalTimeMs: 2,
+          }),
+        );
+
+        await expect(resultPromise).resolves.toEqual({
+          key: "launchCount",
+          value: "3",
+          type: "INT",
+        });
+      } finally {
+        await client.close();
+      }
+    });
+  });
+
   describe("listDataStores", function () {
     test("sends adapterName and resolves with the device's file list", async function () {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);

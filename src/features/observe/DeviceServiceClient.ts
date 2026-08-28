@@ -86,6 +86,9 @@ export abstract class DeviceServiceClient {
   // isConnecting true until connectionTimeoutMs, stalling a fresh-port connect
   // by up to ~5s. Cleared to null the moment the handshake terminates. (#5656)
   private pendingConnectAbort: { socket: WebSocket; abort: () => void } | null = null;
+  // Platform setup (notably adb port forwarding) is also part of a connection
+  // attempt. Keep its controller separately because no WebSocket exists yet.
+  private pendingPlatformSetupAbort: AbortController | null = null;
 
   // Auto-reconnection state
   protected autoReconnectEnabled: boolean = true;
@@ -154,7 +157,10 @@ export abstract class DeviceServiceClient {
    * For Android, this sets up port forwarding.
    * For iOS, this may resolve the host address.
    */
-  protected abstract setupBeforeConnect(perf: PerformanceTracker): Promise<void>;
+  protected abstract setupBeforeConnect(
+    perf: PerformanceTracker,
+    signal: AbortSignal,
+  ): Promise<void>;
 
   /**
    * Cancel any pending screenshot backoff captures.
@@ -318,6 +324,8 @@ export abstract class DeviceServiceClient {
    * is in flight. (#5656)
    */
   protected abortPendingConnect(): void {
+    this.pendingPlatformSetupAbort?.abort();
+    this.pendingPlatformSetupAbort = null;
     const pending = this.pendingConnectAbort;
     if (pending) {
       this.pendingConnectAbort = null;
@@ -414,8 +422,7 @@ export abstract class DeviceServiceClient {
     const generation = this.connectionGeneration;
 
     try {
-      // Platform-specific setup (e.g., port forwarding)
-      await perf.track("platformSetup", () => this.setupBeforeConnect(perf));
+      await this.runPlatformSetup(perf);
 
       if (generation !== this.connectionGeneration) {
         // close() ran during platform setup; do not open a socket to a
@@ -506,6 +513,7 @@ export abstract class DeviceServiceClient {
               }
               logger.info(`[${this.logTag}] WebSocket connected successfully`);
               this.ws = ws;
+              this.protectRegisteredRequestSends(ws);
               this.isConnecting = false;
               this.connectionAttempts = 0; // Reset on successful connection
 
@@ -562,6 +570,61 @@ export abstract class DeviceServiceClient {
       this.lastConnectionAttempt = this.timer.now();
       logger.warn(`[${this.logTag}] Failed to connect to WebSocket: ${error}`);
       return false;
+    }
+  }
+
+  private async runPlatformSetup(perf: PerformanceTracker): Promise<void> {
+    // Platform-specific setup (e.g., port forwarding) must be cancellable: a
+    // close while adb is hung otherwise leaves the client in-flight forever.
+    const setupAbort = new AbortController();
+    this.pendingPlatformSetupAbort = setupAbort;
+    const setupTimeout = this.timer.setTimeout(
+      () => setupAbort.abort(),
+      this.config.connectionTimeoutMs,
+    );
+    try {
+      await perf.track("platformSetup", () => this.setupBeforeConnect(perf, setupAbort.signal));
+    } finally {
+      this.timer.clearTimeout(setupTimeout);
+      if (this.pendingPlatformSetupAbort === setupAbort) {
+        this.pendingPlatformSetupAbort = null;
+      }
+    }
+  }
+
+  /**
+   * Every CtrlProxy request carries its correlation ID in the JSON payload. A
+   * synchronous ws.send failure otherwise bypasses the request awaiter's error
+   * path and leaves that registration pending until a later timeout or close.
+   */
+  private protectRegisteredRequestSends(ws: WebSocket): void {
+    const send = ws.send.bind(ws) as (data: WebSocket.Data, ...args: unknown[]) => void;
+    ws.send = ((data: WebSocket.Data, ...args: unknown[]) => {
+      try {
+        return send(data, ...args);
+      } catch (error) {
+        const requestId = this.requestIdFromWireData(data);
+        if (requestId) {
+          this.requestManager.reject(
+            requestId,
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        }
+        logger.debug(
+          `[${this.logTag}] WebSocket send failed${requestId ? ` for request ${requestId}` : ""}: ${error}`,
+        );
+        throw error;
+      }
+    }) as WebSocket["send"];
+  }
+
+  private requestIdFromWireData(data: WebSocket.Data): string | undefined {
+    try {
+      const parsed = JSON.parse(data.toString()) as { requestId?: unknown };
+      return typeof parsed.requestId === "string" ? parsed.requestId : undefined;
+    } catch (error) {
+      logger.debug(`[${this.logTag}] Could not read request ID from failed WebSocket send: ${error}`);
+      return undefined;
     }
   }
 

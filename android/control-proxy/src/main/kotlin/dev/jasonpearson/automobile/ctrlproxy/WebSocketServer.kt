@@ -228,7 +228,10 @@ class WebSocketServer(
 
     try {
       server =
-        embeddedServer(CIO, port = port) {
+        // CtrlProxy is reached exclusively through adb forward. Binding loopback
+        // prevents the accessibility-control endpoint from being exposed to the
+        // device LAN when the runner is installed on a physical device.
+        embeddedServer(CIO, host = "127.0.0.1", port = port) {
             install(WebSockets) {
               pingPeriod = 15.seconds
               timeout = 60.seconds
@@ -365,7 +368,14 @@ class WebSocketServer(
 
   /** Broadcast a message to all connected clients */
   suspend fun broadcast(message: String) {
-    forgetRequestConnectionForRawMessage(message)
+    val target =
+      extractRequestId(message)?.let { requestId ->
+        synchronized(connections) { requestConnections.remove(requestId) }
+      }
+    if (target != null) {
+      sendToClient(target, message)
+      return
+    }
     _messageFlow.emit(message)
   }
 
@@ -379,7 +389,14 @@ class WebSocketServer(
   suspend fun broadcastWithPerf(messageBuilder: (perfTiming: JsonElement?) -> String) {
     val perfTiming = perfProvider.flush()
     val message = messageBuilder(perfTiming)
-    forgetRequestConnectionForRawMessage(message)
+    val target =
+      extractRequestId(message)?.let { requestId ->
+        synchronized(connections) { requestConnections.remove(requestId) }
+      }
+    if (target != null) {
+      sendToClient(target, message)
+      return
+    }
     _messageFlow.emit(message)
   }
 
@@ -393,7 +410,14 @@ class WebSocketServer(
   suspend fun broadcastWithPerfSync(messageBuilder: (perfTiming: JsonElement?) -> String) {
     val perfTiming = perfProvider.flush()
     val message = messageBuilder(perfTiming)
-    forgetRequestConnectionForRawMessage(message)
+    val target =
+      extractRequestId(message)?.let { requestId ->
+        synchronized(connections) { requestConnections.remove(requestId) }
+      }
+    if (target != null) {
+      sendToClient(target, message)
+      return
+    }
     broadcastToClients(message)
   }
 
@@ -428,19 +452,15 @@ class WebSocketServer(
   ) {
     val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
     val requestId = correlationRequestId(response)
-    if (response is ErrorResponse) {
-      val target =
-        if (requestId != null) {
-          synchronized(connections) { requestConnections.remove(requestId) }
-        } else {
-          null
-        }
-      if (target != null) {
-        sendToClient(target, message)
-        return
+    val target =
+      if (requestId != null) {
+        synchronized(connections) { requestConnections.remove(requestId) }
+      } else {
+        null
       }
-    } else {
-      forgetRequestConnection(requestId)
+    if (target != null) {
+      sendToClient(target, message)
+      return
     }
 
     if (waitForClient) {
@@ -566,16 +586,6 @@ class WebSocketServer(
       else -> true
     }
 
-  private fun forgetRequestConnectionForRawMessage(message: String) {
-    forgetRequestConnection(extractRequestId(message))
-  }
-
-  private fun forgetRequestConnection(requestId: String?) {
-    requestId?.let {
-      synchronized(connections) { requestConnections.remove(requestId) }
-    }
-  }
-
   /** Get the number of active connections */
   fun getConnectionCount(): Int {
     return synchronized(connections) { connections.size }
@@ -661,8 +671,8 @@ class WebSocketServer(
 
     Log.d(TAG, "Received ${request::class.simpleName} (requestId: ${request.requestId})")
     // Only record owner mappings for request types whose normal completion carries the same
-    // requestId back over the wire (raw or typed responses that clear the entry via
-    // `forgetRequestConnection`). Hierarchy requests are the exception: the action layer never
+    // requestId back over the wire (raw or typed responses route to and clear the entry).
+    // Hierarchy requests are the exception: the action layer never
     // receives their requestId, the success `hierarchy_update` frame has no requestId, and the
     // stale-skip path emits no frame at all — so a recorded owner would never be cleared until the
     // WebSocket disconnects, recreating the long-lived-session leak and leaving a stale id

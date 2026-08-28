@@ -45,7 +45,10 @@ class TestDeviceServiceClient extends DeviceServiceClient {
     this.connectionClosedCount++;
   }
 
-  protected async setupBeforeConnect(_perf: PerformanceTracker): Promise<void> {}
+  protected async setupBeforeConnect(
+    _perf: PerformanceTracker,
+    _signal: AbortSignal,
+  ): Promise<void> {}
 
   getConnectionAttempts(): number {
     return this.connectionAttempts;

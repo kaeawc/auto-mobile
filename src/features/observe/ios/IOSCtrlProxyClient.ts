@@ -1793,7 +1793,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       });
   }
 
-  protected async setupBeforeConnect(_perf: PerformanceTracker): Promise<void> {
+  protected async setupBeforeConnect(
+    _perf: PerformanceTracker,
+    _signal: AbortSignal,
+  ): Promise<void> {
     // No port forwarding needed for iOS simulator
     // For real devices, iproxy may be needed in the future
   }

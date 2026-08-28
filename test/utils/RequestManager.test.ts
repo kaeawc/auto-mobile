@@ -26,6 +26,11 @@ describe("RequestManager", () => {
     expect(id3).toContain("swipe");
   });
 
+  test("does not collide across managers created in the same tick", () => {
+    const otherManager = new RequestManager(fakeTimer);
+    expect(manager.generateId("screenshot")).not.toBe(otherManager.generateId("screenshot"));
+  });
+
   test("should register and resolve requests", async () => {
     const id = manager.generateId("test");
     const promise = manager.register<{ success: boolean }>(id, "test", 5000, () => ({
@@ -241,16 +246,14 @@ describe("RequestManager", () => {
     expect(manager.resolveError("does-not-exist", "boom", 0)).toBe(false);
   });
 
-  test("resets the counter on reset so the next id restarts from 1", () => {
+  test("keeps IDs unique after reset", () => {
     manager.generateId("test");
     manager.generateId("test");
     manager.generateId("test");
 
     manager.reset();
 
-    // FakeTimer stays at now()=0, so the next id is fully determined: the counter
-    // must restart at 1 rather than continue from 4.
     const newId = manager.generateId("test");
-    expect(newId).toBe("test_0_1");
+    expect(newId).toMatch(/^test_[0-9a-f-]{36}$/);
   });
 });

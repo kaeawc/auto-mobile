@@ -11,4 +11,3 @@ person needs to inspect the same state.
 >
 > Report the exact steps, expected and actual results, device and OS version,
 > app version, and whether the issue reproduced consistently.
-

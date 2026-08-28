@@ -35,4 +35,3 @@ or `--mcp-recording`. Plan-only tools are never shown in public discovery.
 
 If a tool is missing, check its exact name and required process options, then
 refresh discovery after the `notifications/tools/list_changed` notification.
-

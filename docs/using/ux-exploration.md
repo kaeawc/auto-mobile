@@ -17,4 +17,3 @@ iterates on tool calls as it navigates.
 
 Be specific about the outcome you want. Mention a required route—such as a
 deep link, search, or scrolling—when the route itself matters.
-

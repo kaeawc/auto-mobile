@@ -128,4 +128,3 @@ final class LaunchTests: AutoMobileTestCase {
 Run the test target from Xcode or with `xcodebuild test` against a booted iOS
 Simulator. Keep selectors semantic and add `observe.waitFor` steps at important
 checkpoints so failures explain which state was missing.
-

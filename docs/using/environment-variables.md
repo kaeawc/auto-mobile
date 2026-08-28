@@ -83,4 +83,3 @@ clean shutdown then stops it after active device sessions are released.
 The preferred `AUTOMOBILE_*` spelling is documented here. Older
 `AUTO_MOBILE_*` aliases are accepted for the state, log, database, recovery,
 and ADB settings when the preferred name is unset.
-

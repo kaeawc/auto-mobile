@@ -99,4 +99,3 @@ Some common workflows:
 ~~~bash
 curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/uninstall.sh | bash
 ~~~
-

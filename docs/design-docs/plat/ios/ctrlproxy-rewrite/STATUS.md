@@ -6,13 +6,17 @@ can be given minimal guidance — e.g. *"we just finished Phase 2; read
 and orient entirely from here. See [README.md](README.md) for the fixup-note index
 and the amended phase plan.
 
-Last updated after Phase 7D (on-device validation — **complete**). The production runner runs the
-rewrite, and the full observe→gesture→hierarchy loop (`HierarchyIntegrationTests`) passes green on
-the **iOS 26.5** (release) simulator — hierarchy extraction, tap, `typeText`, and secure-field
-masking all asserted, 0 failures. (The earlier failure was an iOS-27-**beta** runtime app-launch
-flake, not the rewrite; the test is `XCTSkipUnless`-guarded so it skips there and hard-asserts on
-26.5.) Retiring the reference (7E) — the one-way step that ends the differential-parity harness — is
-now **unblocked but deferred** per the middle-route preference (keep the reference for now).
+**Phase 7 cutover is COMPLETE (7E done): the Swift-6 rewrite is the sole `CtrlProxy` implementation
+and the reference oracle is retired.** The production XCUITest runner compiles + runs `CtrlProxyRewrite`;
+the full observe→gesture→hierarchy loop passes on the iOS 26.5 sim; the reference impl, its unit tests,
+and the differential-parity harness are removed (the KEEP wire-contract tests were re-anchored
+reference-free; the behavioral-domain parity tests were dropped). Remaining: **Phase 8** post-concurrency
+fixups (README index) + the still-deferred Phase-2 loopback/connection scenarios as iOS UI tests.
+
+Validation gate is now SPM `-warnings-as-errors` (196 rewrite tests, 0 failures; single module) +
+the iOS-sim `build-for-testing` + the on-device runner smoke. **Runtime caveat (durable):** validate
+on the iOS **26.5** sim, not the 27.0 **beta** (host-app launch flake — see the Phase-7D note); pin
+the 26.5 device UDID (`name=iPhone 17` is ambiguous across both runtimes).
 
 ---
 
@@ -53,19 +57,18 @@ resolves a *different* package (e.g. `ios/auto-mobile-sdk`, which has its own un
 pre-existing Swift-6 `URLProtocol: Sendable` error) and the failure looks like a rewrite
 regression when it is not.
 
-## 3. Package layout & per-target language modes
+## 3. Package layout (post-cutover)
 
-`Package.swift` (tools 6.3, platforms iOS 17 / macOS 15) uses **per-target language
-modes** so the oracle keeps building while the rewrite is strict:
+`Package.swift` (tools 6.3, platforms iOS 17 / macOS 15). As of Phase 7E the per-target-language-mode
+scheme is gone with the reference — `CtrlProxyRewrite` is the sole implementation:
 
-- `CtrlProxy` (reference oracle) + `CtrlProxyTests` → `.swiftLanguageMode(.v5)`.
-  **Left pristine at `main`** — do not modify. (Paul's earlier incremental-fixup edits
-  were reverted; saved at `scratch/reference-incremental-fixup-wip.patch`.)
-- `CtrlProxyRewrite` + `CtrlProxyTestSupport` + `CtrlProxyRewriteTests` → `.v6`.
-- `CtrlProxyRewrite` is at `Sources/CtrlProxyRewrite/` (155 `.swift` files); tests at
-  `Tests/CtrlProxyRewriteTests/` (65 files).
-- NOT yet in `project.yml` / XcodeGen (SPM-only) — wire into the Xcode/UI-test build at
-  cutover (Phase 7). Fakes live in `CtrlProxyTestSupport` (not the shipped product).
+- `CtrlProxyRewrite` (`Sources/CtrlProxyRewrite/`) + `CtrlProxyTestSupport` + `CtrlProxyRewriteTests`
+  → all `.swiftLanguageMode(.v6)`. `CtrlProxyRewriteTests` is now a single-module suite (196 tests).
+- **Historical:** the reference `CtrlProxy` + `CtrlProxyTests` targets were pinned `.v5` as a
+  behavioral oracle during the migration and were retired in Phase 7E (§5).
+- Xcode/XcodeGen: the `CtrlProxyUITests` target compiles `Sources/CtrlProxyRewrite` directly
+  (Swift-6 / complete / iOS-17 per-target settings) — see §9/Phase 7C. Fakes live in
+  `CtrlProxyTestSupport` (not the shipped product).
 
 ## 4. Parity-harness technique (important, reused everywhere)
 
@@ -94,7 +97,7 @@ wire fixture is `test/fixtures/ios-ctrlproxy-request-snapshots.json`.
 | 7B | iOS strict-concurrency warning cleanup (`DeviceRotation`/`DefaultVoiceOverToggle`/runner) — 0 warnings + runtime-validated on sim | — | ✅ |
 | 7C | Point the production runner at the rewrite (repurpose `CtrlProxyUITests` target → compiles `Sources/CtrlProxyRewrite`; zero TS/script churn) | — | ✅ (middle route) |
 | 7D | On-device validation — full observe→gesture→hierarchy loop (`HierarchyIntegrationTests`) green on the **iOS 26.5** sim; `testServiceStarts` green | — | ✅ (use 26.5, not the 27.0-beta runtime) |
-| 7E | Retire the reference target (drops the differential-parity harness) — gate cleared by 7D; **deferred per the middle-route preference** | — | ◻️ available on request |
+| 7E | Retire the reference (KEEP wire tests re-anchored reference-free; behavioral parity dropped; reference impl + targets + harness removed) | `739dfb0d6` `bbddf06c7` `af5841806` | ✅ |
 | 8 | Post-concurrency fixups (see README index) | — | ◻️ |
 
 **Ported so far** (all one-type-per-file, `Sendable`, differentially verified unless
@@ -269,10 +272,23 @@ in ~13 s). Not a rewrite bug (the rewrite's `getViewHierarchy` faithfully extrac
 a diagnostic run returned a real 15-node tree even on the beta). The ported test is `XCTSkipUnless`-
 guarded on the fixture appearing, so it hard-asserts on 26.5 and skips (not red-fails) on 27.0-beta.
 
-**Consequence:** the 7E gate (a trusted full observe→gesture→hierarchy loop) is **cleared**. Retiring
-the reference — which also dismantles the differential-parity harness (`CtrlProxyRewriteTests` links
-both modules) — is now available but **deferred per the middle-route preference** (keep the oracle for
-now); do it on explicit request.
+**Consequence:** the 7E gate (a trusted full observe→gesture→hierarchy loop) was cleared here.
+
+**Phase 7E added — reference retired (cutover complete).** Landed as three commits: **1/3**
+(`739dfb0d6`) re-anchored the Codable wire-model parity tests (WireDecode, ResponseModel,
+SdkDatabaseModel, HierarchyModel, PerformanceWire) reference-free via a new `JSONGolden` helper
+(decode→sorted-encode must be idempotent + preserve every wire field the input carried — containment
+tolerates a model materializing a defaulted field; an explicit-null optional == omission); **2/3**
+(`bbddf06c7`) rewrote Framing + Geometry as reference-free invariant / known-value tests (byte-blob
+outputs can't be literal goldens); **3/3** (`af5841806`) deleted `Sources/CtrlProxy`, `Tests/CtrlProxyTests`,
+all 17 `Reference*` helpers, the 10 behavioral-domain `*ParityTests` + their orphaned `Rewrite*`
+helpers/fixtures, and dropped the reference from Package.swift (product/target/`CtrlProxyTests` +
+`CtrlProxyRewriteTests`' dep + the `.v5` modes), project.yml (framework + unit-test targets + the app's
+embed + scheme), and the `CtrlProxyTests.xctest` checks in the `ctrl-proxy-*` scripts. `CtrlProxyRewrite`
+is now the sole implementation; `CtrlProxyRewriteTests` is a single-module suite (196 tests). Kept
+`RewriteConnection`/`ConnectionTestRecorder` (`ConnectionSdkSeamTests`) and `HTTPTransportStub`
+(SDK-client tests). Validated: SPM build 0 warnings + 196 tests green; iOS-sim `build-for-testing`
+green (0/0); production runner smoke green on the 26.5 sim.
 
 ## 6. Archetype map & load-bearing decisions
 

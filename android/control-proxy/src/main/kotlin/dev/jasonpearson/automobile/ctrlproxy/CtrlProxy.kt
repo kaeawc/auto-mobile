@@ -3239,7 +3239,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     if (frame == null) return
     resultBroadcaster.guard(frame.requestId, "hierarchy_extract_error") {
       if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
-        webSocketServer.broadcast(frame)
+        webSocketServer.broadcastExternallyCorrelatedResponse(frame)
       }
     }
   }

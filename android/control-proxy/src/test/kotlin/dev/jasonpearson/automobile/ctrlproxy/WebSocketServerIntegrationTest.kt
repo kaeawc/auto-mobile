@@ -1289,6 +1289,36 @@ class WebSocketServerIntegrationTest {
   }
 
   @Test
+  fun `externally correlated response broadcasts without a socket owner`() = runBlocking {
+    server.start()
+
+    val client = HttpClient(CIO) { install(WebSockets) }
+    client.use { c ->
+      c.webSocket(
+        method = HttpMethod.Get,
+        host = "localhost",
+        port = getServerPort(),
+        path = "/ws",
+      ) {
+        incoming.receive() // Connection message
+
+        server.broadcastExternallyCorrelatedResponse(
+          ErrorResponse(
+            timestamp = 1234,
+            requestId = "sync_1234_external",
+            error = "Hierarchy extraction failed",
+          )
+        )
+
+        val responseFrame = withTimeout(1000) { incoming.receive() } as Frame.Text
+        val responseJson = json.parseToJsonElement(responseFrame.readText()).jsonObject
+        assertEquals("error", responseJson["type"]?.jsonPrimitive?.content)
+        assertEquals("sync_1234_external", responseJson["requestId"]?.jsonPrimitive?.content)
+      }
+    }
+  }
+
+  @Test
   fun `async action failure error response is sent only to originating connection`() = runBlocking {
     lateinit var asyncServer: WebSocketServer
     val runnerHolder = arrayOfNulls<AsyncActionRunner>(1)

@@ -440,6 +440,30 @@ class WebSocketServer(
       return
     }
 
+    broadcastSerialized(message, mode, waitForClient)
+  }
+
+  /**
+   * Broadcasts a response whose correlation ID was created outside this WebSocket server.
+   *
+   * Android broadcast commands do not originate from a socket, so their IDs have no entry in
+   * [requestConnections]. Their responses must still reach the daemon that is awaiting the ID,
+   * while ordinary orphaned WebSocket responses remain protected by [routeCorrelatedResponse].
+   */
+  suspend fun broadcastExternallyCorrelatedResponse(
+    response: WebSocketResponse,
+    mode: BroadcastMode = BroadcastMode.Async,
+    waitForClient: Boolean = false,
+  ) {
+    val message = responseJson.encodeToString(WebSocketResponse.serializer(), response)
+    broadcastSerialized(message, mode, waitForClient)
+  }
+
+  private suspend fun broadcastSerialized(
+    message: String,
+    mode: BroadcastMode,
+    waitForClient: Boolean,
+  ) {
     if (waitForClient) {
       broadcastToClientsWhenClientConnected(message)
     } else {
@@ -485,14 +509,7 @@ class WebSocketServer(
     waitForClient: Boolean = false,
   ) {
     val message = responseJson.encodeToString(SdkEvent.serializer(), event)
-    if (waitForClient) {
-      broadcastToClientsWhenClientConnected(message)
-    } else {
-      when (mode) {
-        BroadcastMode.Async -> _messageFlow.emit(message)
-        BroadcastMode.Sync -> broadcastToClients(message)
-      }
-    }
+    broadcastSerialized(message, mode, waitForClient)
   }
 
   /**

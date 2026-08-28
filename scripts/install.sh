@@ -60,6 +60,8 @@ IOS_RUNTIME_PROBE_PROCESS_GROUP=false
 POST_BUN_SETUP_PID=""
 POST_BUN_SETUP_LOG_FILE=""
 POST_BUN_SETUP_STATE_FILE=""
+DESKTOP_APP_TEMP_DIR=""
+DESKTOP_APP_MOUNT_DIR=""
 
 # ============================================================================
 # Original Global State
@@ -143,6 +145,7 @@ cleanup_background_installer_work() {
     [[ -n "${IOS_RUNTIME_PROBE_FILE}" ]] && rm -f "${IOS_RUNTIME_PROBE_FILE}"
     [[ -n "${POST_BUN_SETUP_LOG_FILE}" ]] && rm -f "${POST_BUN_SETUP_LOG_FILE}"
     [[ -n "${POST_BUN_SETUP_STATE_FILE}" ]] && rm -f "${POST_BUN_SETUP_STATE_FILE}"
+    cleanup_desktop_app_installer
     return 0
 }
 
@@ -2698,16 +2701,113 @@ desktop_app_asset_suffix() {
     local arch="$2"
 
     case "${os}:${arch}" in
-        macos:x86_64|macos:arm64)
+        macos:arm64)
             echo "-macos.dmg"
             ;;
-        linux:x86_64|linux:arm64)
+        linux:x86_64)
             echo "-linux.deb"
             ;;
         *)
             return 1
             ;;
     esac
+}
+
+desktop_app_is_root() {
+    [[ "${EUID}" -eq 0 ]]
+}
+
+# These predicates intentionally translate command status into availability.
+# shellcheck disable=SC2310
+desktop_app_privilege_available() {
+    desktop_app_is_root || command_exists sudo
+}
+
+# Every privileged command status is returned to an explicit caller check.
+# shellcheck disable=SC2310
+run_desktop_app_privileged() {
+    if desktop_app_is_root; then
+        "$@"
+    elif command_exists sudo; then
+        sudo "$@"
+    else
+        log_error "Administrator privileges are required to install the AutoMobile desktop app."
+        return 1
+    fi
+}
+
+# Missing prerequisites are an expected false predicate, not a fatal command.
+# shellcheck disable=SC2310
+desktop_app_prerequisites_available() {
+    local os="$1"
+
+    if ! desktop_app_privilege_available; then
+        return 1
+    fi
+
+    case "${os}" in
+        macos)
+            command_exists hdiutil && command_exists lipo && command_exists ditto
+            ;;
+        linux)
+            command_exists dpkg-deb && (command_exists apt-get || command_exists dpkg)
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Detach before removing the temporary directory. A failed detach is retried by
+# the process-wide EXIT cleanup and must not turn a successful app copy into an
+# installation failure.
+cleanup_desktop_app_installer() {
+    if [[ -n "${DESKTOP_APP_MOUNT_DIR}" ]]; then
+        if hdiutil detach "${DESKTOP_APP_MOUNT_DIR}" >/dev/null 2>&1 \
+            || hdiutil detach -force "${DESKTOP_APP_MOUNT_DIR}" >/dev/null 2>&1; then
+            DESKTOP_APP_MOUNT_DIR=""
+        fi
+    fi
+
+    if [[ -n "${DESKTOP_APP_TEMP_DIR}" && -z "${DESKTOP_APP_MOUNT_DIR}" ]]; then
+        rm -rf -- "${DESKTOP_APP_TEMP_DIR}"
+        DESKTOP_APP_TEMP_DIR=""
+    fi
+    return 0
+}
+
+# Copy into a sibling staging directory, then swap the bundle into place. This
+# keeps an existing installation recoverable if the replacement move fails.
+# shellcheck disable=SC2310
+install_macos_desktop_app_bundle() {
+    local source_app="$1"
+    local target_app="${2:-/Applications/AutoMobile.app}"
+    local target_parent staging_dir staged_app previous_app
+    target_parent=$(dirname "${target_app}")
+    staging_dir=$(run_desktop_app_privileged mktemp -d "${target_parent}/.automobile-install.XXXXXX") || return 1
+    staged_app="${staging_dir}/AutoMobile.app"
+    previous_app="${staging_dir}/Previous-AutoMobile.app"
+
+    if ! run_desktop_app_privileged ditto "${source_app}" "${staged_app}"; then
+        run_desktop_app_privileged rm -rf -- "${staging_dir}" || true
+        return 1
+    fi
+
+    if [[ -e "${target_app}" ]] \
+        && ! run_desktop_app_privileged mv -- "${target_app}" "${previous_app}"; then
+        run_desktop_app_privileged rm -rf -- "${staging_dir}" || true
+        return 1
+    fi
+
+    if ! run_desktop_app_privileged mv -- "${staged_app}" "${target_app}"; then
+        if [[ -e "${previous_app}" ]]; then
+            run_desktop_app_privileged mv -- "${previous_app}" "${target_app}" || true
+        fi
+        run_desktop_app_privileged rm -rf -- "${staging_dir}" || true
+        return 1
+    fi
+
+    run_desktop_app_privileged rm -rf -- "${staging_dir}" || true
 }
 
 # `detect_os` intentionally treats Git Bash as Linux for the existing developer
@@ -2733,6 +2833,8 @@ detect_desktop_app_os() {
 # Extract the matching asset URL from the GitHub releases API response without
 # relying on a line-oriented JSON parser. Python is already a required installer
 # dependency for MCP configuration; jq remains a useful fallback for minimal hosts.
+# Each capability branch explicitly returns the selected parser's status.
+# shellcheck disable=SC2310
 resolve_desktop_app_release_asset() {
     local release_json="$1"
     local suffix="$2"
@@ -2764,6 +2866,8 @@ for asset in release.get("assets", []):
     return 1
 }
 
+# Each capability branch explicitly returns the selected downloader's status.
+# shellcheck disable=SC2310
 fetch_latest_desktop_app_release() {
     local api_url="https://api.github.com/repos/kaeawc/auto-mobile/releases/latest"
 
@@ -2777,6 +2881,8 @@ fetch_latest_desktop_app_release() {
     fi
 }
 
+# A missing tool or mismatched architecture is an expected false predicate.
+# shellcheck disable=SC2310
 desktop_app_deb_architecture_matches_host() {
     local package_path="$1"
     local host_arch="$2"
@@ -2786,7 +2892,7 @@ desktop_app_deb_architecture_matches_host() {
     package_arch=$(dpkg-deb --field "${package_path}" Architecture 2>/dev/null) || return 1
 
     case "${host_arch}:${package_arch}" in
-        x86_64:amd64|arm64:arm64)
+        x86_64:amd64)
             return 0
             ;;
         *)
@@ -2795,12 +2901,20 @@ desktop_app_deb_architecture_matches_host() {
     esac
 }
 
+# Installer failures are translated into targeted diagnostics at each branch.
+# shellcheck disable=SC2310
 install_desktop_app() {
     local os arch suffix
     os=$(detect_desktop_app_os)
     arch=$(detect_arch)
     if ! suffix=$(desktop_app_asset_suffix "${os}" "${arch}"); then
         log_error "The AutoMobile desktop app does not support this host (${os}/${arch})."
+        return 1
+    fi
+    # An unavailable prerequisite is translated into the installer diagnostic below.
+    # shellcheck disable=SC2310
+    if ! desktop_app_prerequisites_available "${os}"; then
+        log_error "This host is missing the system tools or administrator privileges required to install the AutoMobile desktop app."
         return 1
     fi
 
@@ -2825,10 +2939,11 @@ install_desktop_app() {
 
     local temp_dir installer_path
     temp_dir=$(mktemp -d)
+    DESKTOP_APP_TEMP_DIR="${temp_dir}"
     installer_path="${temp_dir}/AutoMobile${suffix}"
     if ! download_file "${asset_url}" "${installer_path}"; then
         log_error "Failed to download the AutoMobile desktop app from ${asset_url}"
-        rm -rf "${temp_dir}"
+        cleanup_desktop_app_installer
         return 1
     fi
 
@@ -2839,70 +2954,70 @@ install_desktop_app() {
             mkdir -p "${mount_dir}"
             if ! hdiutil attach -nobrowse -readonly -mountpoint "${mount_dir}" "${installer_path}" >/dev/null; then
                 log_error "Could not mount the downloaded AutoMobile disk image."
-                rm -rf "${temp_dir}"
+                cleanup_desktop_app_installer
                 return 1
             fi
+            DESKTOP_APP_MOUNT_DIR="${mount_dir}"
             app_path=$(find "${mount_dir}" -maxdepth 1 -name 'AutoMobile.app' -type d -print -quit)
             app_binary="${app_path}/Contents/MacOS/AutoMobile"
             if [[ -z "${app_path}" || ! -x "${app_binary}" ]]; then
                 log_error "The disk image does not contain a valid AutoMobile.app bundle."
-                hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true
-                rm -rf "${temp_dir}"
+                cleanup_desktop_app_installer
                 return 1
             fi
             app_arches=$(lipo -archs "${app_binary}" 2>/dev/null || true)
             if [[ " ${app_arches} " != *" ${arch} "* ]]; then
                 log_error "Downloaded desktop app architecture (${app_arches:-unknown}) does not match this Mac (${arch})."
-                hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true
-                rm -rf "${temp_dir}"
+                cleanup_desktop_app_installer
                 return 1
             fi
-            if [[ -e "/Applications/AutoMobile.app" ]]; then
-                log_info "AutoMobile.app is already installed in /Applications; use its in-app updater to update it."
-                hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true
-                rm -rf "${temp_dir}"
-                return 0
-            fi
-            if ! sudo ditto "${app_path}" "/Applications/AutoMobile.app"; then
-                log_error "Failed to copy AutoMobile.app to /Applications."
-                hdiutil detach "${mount_dir}" >/dev/null 2>&1 || true
-                rm -rf "${temp_dir}"
+            # Bundle replacement failure is translated into the installer diagnostic below.
+            # shellcheck disable=SC2310
+            if ! install_macos_desktop_app_bundle "${app_path}"; then
+                log_error "Failed to install AutoMobile.app in /Applications."
+                cleanup_desktop_app_installer
                 return 1
             fi
-            hdiutil detach "${mount_dir}" >/dev/null
+            cleanup_desktop_app_installer
             log_info "AutoMobile desktop app installed to /Applications/AutoMobile.app"
             ;;
         linux)
             if ! desktop_app_deb_architecture_matches_host "${installer_path}" "${arch}"; then
                 log_error "Downloaded desktop app package does not match this Linux host (${arch})."
-                rm -rf "${temp_dir}"
+                cleanup_desktop_app_installer
                 return 1
             fi
             if command_exists apt-get; then
-                if ! sudo apt-get install -y "${installer_path}"; then
+                # Package-manager failure is translated into the installer diagnostic below.
+                # shellcheck disable=SC2310
+                if ! run_desktop_app_privileged apt-get install -y "${installer_path}"; then
                     log_error "Failed to install the AutoMobile desktop app package."
-                    rm -rf "${temp_dir}"
+                    cleanup_desktop_app_installer
                     return 1
                 fi
             elif command_exists dpkg; then
-                if ! sudo dpkg --install "${installer_path}"; then
+                # Package-manager failure is translated into the installer diagnostic below.
+                # shellcheck disable=SC2310
+                if ! run_desktop_app_privileged dpkg --install "${installer_path}"; then
                     log_error "Failed to install the AutoMobile desktop app package."
-                    rm -rf "${temp_dir}"
+                    cleanup_desktop_app_installer
                     return 1
                 fi
             else
                 log_error "apt-get or dpkg is required to install the downloaded .deb package."
-                rm -rf "${temp_dir}"
+                cleanup_desktop_app_installer
                 return 1
             fi
             log_info "AutoMobile desktop app installed."
             ;;
     esac
 
-    rm -rf "${temp_dir}"
+    cleanup_desktop_app_installer
     CHANGES_MADE=true
 }
 
+# Unsupported hosts intentionally suppress this optional prompt.
+# shellcheck disable=SC2310
 offer_desktop_app_install() {
     [[ "${INSTALL_DESKTOP_APP}" == "true" ]] && return 0
 
@@ -2911,6 +3026,12 @@ offer_desktop_app_install() {
     arch=$(detect_arch)
     if ! desktop_app_asset_suffix "${os}" "${arch}" >/dev/null; then
         log_info "AutoMobile desktop app is not available for this host (${os}/${arch})."
+        return 0
+    fi
+    # Missing prerequisites intentionally suppress the optional prompt.
+    # shellcheck disable=SC2310
+    if ! desktop_app_prerequisites_available "${os}"; then
+        log_info "AutoMobile desktop app installation prerequisites are not available on this host."
         return 0
     fi
 

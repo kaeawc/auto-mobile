@@ -26,7 +26,10 @@ release_json='{
   [ "$status" -eq 0 ]
   [ "$output" = "-linux.deb" ]
 
-  run desktop_app_asset_suffix linux riscv64
+  run desktop_app_asset_suffix macos x86_64
+  [ "$status" -ne 0 ]
+
+  run desktop_app_asset_suffix linux arm64
   [ "$status" -ne 0 ]
 }
 
@@ -57,17 +60,78 @@ release_json='{
 
 @test "accepts a deb whose package architecture matches the host" {
   command_exists() { [[ "$1" == "dpkg-deb" ]]; }
-  dpkg-deb() { printf 'arm64\n'; }
+  dpkg-deb() { printf 'amd64\n'; }
 
-  run desktop_app_deb_architecture_matches_host /tmp/AutoMobile.deb arm64
+  run desktop_app_deb_architecture_matches_host /tmp/AutoMobile.deb x86_64
 
   [ "$status" -eq 0 ]
+}
+
+@test "does not offer a Linux desktop install without deb package tools" {
+  detect_desktop_app_os() { printf 'linux\n'; }
+  detect_arch() { printf 'x86_64\n'; }
+  desktop_app_is_root() { return 0; }
+  command_exists() { [[ "$1" == "dpkg-deb" ]]; }
+  gum() { printf 'gum should not be called\n'; return 1; }
+
+  run offer_desktop_app_install
+
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"gum should not be called"* ]]
+  [ "$INSTALL_DESKTOP_APP" = "false" ]
+}
+
+@test "runs privileged desktop commands directly when already root" {
+  desktop_app_is_root() { return 0; }
+  sudo() { printf 'sudo should not be called\n'; return 1; }
+  root_command() { printf 'ran directly\n'; }
+
+  run run_desktop_app_privileged root_command
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "ran directly" ]
+}
+
+@test "replaces an existing macOS app bundle through a staged copy" {
+  local root source_app target_app
+  root=$(mktemp -d)
+  source_app="${root}/source/AutoMobile.app"
+  target_app="${root}/Applications/AutoMobile.app"
+  mkdir -p "${source_app}" "${target_app}"
+  printf 'new\n' > "${source_app}/new-marker"
+  printf 'old\n' > "${target_app}/old-marker"
+  run_desktop_app_privileged() { "$@"; }
+  ditto() { cp -R "$1" "$2"; }
+
+  install_macos_desktop_app_bundle "${source_app}" "${target_app}"
+
+  [ -f "${target_app}/new-marker" ]
+  [ ! -e "${target_app}/old-marker" ]
+  rm -rf "${root}"
+}
+
+@test "preserves desktop installer temporary files while a disk image cannot detach" {
+  local root
+  root=$(mktemp -d)
+  DESKTOP_APP_TEMP_DIR="${root}"
+  DESKTOP_APP_MOUNT_DIR="${root}/mount"
+  mkdir -p "${DESKTOP_APP_MOUNT_DIR}"
+  hdiutil() { return 1; }
+
+  cleanup_desktop_app_installer
+
+  [ -d "${root}" ]
+  [ "${DESKTOP_APP_MOUNT_DIR}" = "${root}/mount" ]
+  DESKTOP_APP_MOUNT_DIR=""
+  cleanup_desktop_app_installer
+  [ ! -e "${root}" ]
 }
 
 @test "dry-run records a desktop installation without fetching a release" {
   DRY_RUN=true
   detect_desktop_app_os() { printf 'linux\n'; }
   detect_arch() { printf 'x86_64\n'; }
+  desktop_app_prerequisites_available() { return 0; }
   fetch_latest_desktop_app_release() { return 1; }
 
   install_desktop_app

@@ -50,6 +50,7 @@ DATA_DIR_EXISTS=false
 DESKTOP_APP_INSTALLED=false
 DESKTOP_APP_PATHS=()
 DESKTOP_APP_PACKAGE=""
+DESKTOP_APP_EXECUTABLES=()
 
 # Colors
 RED='\033[0;31m'
@@ -63,6 +64,23 @@ RESET='\033[0m'
 # ============================================================================
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+desktop_app_is_root() {
+    [[ "${EUID}" -eq 0 ]]
+}
+
+# Every privileged command status is returned to an explicit caller check.
+# shellcheck disable=SC2310
+run_desktop_app_privileged() {
+    if desktop_app_is_root; then
+        "$@"
+    elif command_exists sudo; then
+        sudo "$@"
+    else
+        log_error "Administrator privileges are required to remove the AutoMobile desktop app."
+        return 1
+    fi
 }
 
 log_info() {
@@ -227,10 +245,13 @@ detect_mcp_configs() {
     done
 }
 
+# Package-tool absence is an expected detection miss.
+# shellcheck disable=SC2310
 detect_desktop_app() {
     DESKTOP_APP_INSTALLED=false
     DESKTOP_APP_PATHS=()
     DESKTOP_APP_PACKAGE=""
+    DESKTOP_APP_EXECUTABLES=()
 
     local os
     os=$(detect_os)
@@ -239,12 +260,15 @@ detect_desktop_app() {
         for app_path in "/Applications/AutoMobile.app" "${HOME}/Applications/AutoMobile.app"; do
             if [[ -d "${app_path}" && -f "${app_path}/Contents/Info.plist" ]]; then
                 DESKTOP_APP_PATHS+=("${app_path}")
+                DESKTOP_APP_EXECUTABLES+=("${app_path}/Contents/MacOS/AutoMobile")
                 DESKTOP_APP_INSTALLED=true
             fi
         done
         return 0
     fi
 
+    # This is a capability predicate; absence means there is no package to inspect.
+    # shellcheck disable=SC2310
     if [[ "${os}" == "linux" ]] && command_exists dpkg-query; then
         local package status
         for package in automobile auto-mobile; do
@@ -252,10 +276,80 @@ detect_desktop_app() {
             if [[ "${status}" == "installed" ]]; then
                 DESKTOP_APP_PACKAGE="${package}"
                 DESKTOP_APP_INSTALLED=true
+                local installed_path
+                while IFS= read -r installed_path; do
+                    if [[ "${installed_path}" == */bin/AutoMobile ]]; then
+                        DESKTOP_APP_EXECUTABLES+=("${installed_path}")
+                    fi
+                done < <(dpkg-query -L "${package}" 2>/dev/null || true)
                 return 0
             fi
         done
     fi
+}
+
+desktop_app_process_table() {
+    ps -axo pid=,command=
+}
+
+# Only match commands whose executable is one of the exact paths discovered
+# from the installed app bundle/package. This avoids broad pkill patterns that
+# could terminate unrelated commands containing the AutoMobile name.
+desktop_app_process_pids() {
+    local pid command_line executable
+    while IFS=' ' read -r pid command_line; do
+        [[ -n "${pid}" && -n "${command_line}" ]] || continue
+        for executable in ${DESKTOP_APP_EXECUTABLES[@]+"${DESKTOP_APP_EXECUTABLES[@]}"}; do
+            if [[ "${command_line}" == "${executable}" || "${command_line}" == "${executable}"\ * ]]; then
+                printf '%s\n' "${pid}"
+                break
+            fi
+        done
+    done < <(desktop_app_process_table)
+}
+
+desktop_app_termination_wait() {
+    sleep 0.1
+}
+
+stop_desktop_app_processes() {
+    local pids=()
+    local pid attempt running
+    while IFS= read -r pid; do
+        [[ -n "${pid}" ]] && pids+=("${pid}")
+    done < <(desktop_app_process_pids)
+
+    [[ ${#pids[@]} -gt 0 ]] || return 0
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        log_info "[DRY-RUN] Would stop the AutoMobile desktop app"
+        return 0
+    fi
+
+    log_info "Stopping AutoMobile desktop app..."
+    for pid in ${pids[@]+"${pids[@]}"}; do
+        kill -TERM "${pid}" 2>/dev/null || true
+    done
+
+    attempt=0
+    while (( attempt < 20 )); do
+        running=false
+        for pid in ${pids[@]+"${pids[@]}"}; do
+            if kill -0 "${pid}" 2>/dev/null; then
+                running=true
+                break
+            fi
+        done
+        [[ "${running}" == "false" ]] && return 0
+        desktop_app_termination_wait
+        ((attempt += 1))
+    done
+
+    for pid in ${pids[@]+"${pids[@]}"}; do
+        if kill -0 "${pid}" 2>/dev/null; then
+            kill -KILL "${pid}" 2>/dev/null || true
+        fi
+    done
 }
 
 config_has_automobile() {
@@ -580,6 +674,8 @@ remove_data_dir() {
     CHANGES_MADE=true
 }
 
+# Package-manager availability explicitly selects the removal command.
+# shellcheck disable=SC2310
 remove_desktop_app() {
     if [[ "${DESKTOP_APP_INSTALLED}" != "true" ]]; then
         log_info "AutoMobile desktop app not installed"
@@ -605,7 +701,7 @@ remove_desktop_app() {
         for app_path in ${DESKTOP_APP_PATHS[@]+"${DESKTOP_APP_PATHS[@]}"}; do
             log_info "Removing AutoMobile desktop app from ${app_path}..."
             if [[ "${app_path}" == "/Applications/"* ]] && [[ ! -w "/Applications" ]]; then
-                sudo rm -rf -- "${app_path}"
+                run_desktop_app_privileged rm -rf -- "${app_path}"
             else
                 rm -rf -- "${app_path}"
             fi
@@ -613,9 +709,9 @@ remove_desktop_app() {
     elif [[ "${os}" == "linux" ]]; then
         log_info "Removing AutoMobile desktop package: ${DESKTOP_APP_PACKAGE}..."
         if command_exists apt-get; then
-            sudo apt-get remove -y "${DESKTOP_APP_PACKAGE}"
+            run_desktop_app_privileged apt-get remove -y "${DESKTOP_APP_PACKAGE}"
         elif command_exists dpkg; then
-            sudo dpkg --remove "${DESKTOP_APP_PACKAGE}"
+            run_desktop_app_privileged dpkg --remove "${DESKTOP_APP_PACKAGE}"
         else
             log_error "apt-get or dpkg is required to remove the AutoMobile desktop app package."
             return 1
@@ -886,6 +982,10 @@ main() {
 
     # Perform uninstall
     echo ""
+    if [[ "${UNINSTALL_DESKTOP_APP}" == "true" ]]; then
+        stop_desktop_app_processes
+    fi
+
     if [[ "${UNINSTALL_DAEMON}" == "true" ]]; then
         stop_daemon
     fi
@@ -921,4 +1021,6 @@ main() {
     fi
 }
 
-main "$@"
+if [[ "${UNINSTALL_SH_SOURCE_ONLY:-}" != "true" ]]; then
+    main "$@"
+fi

@@ -173,6 +173,13 @@ type SessionAssignmentSnapshot = Pick<
   "sessionId" | "status" | "lastUsedAt" | "assignmentCount" | "errorCount" | "autolockSessionId"
 >;
 
+interface ShutdownIdentityReservation {
+  device: PooledDevice | undefined;
+  assignmentCount: number | undefined;
+  session: Session | undefined;
+  releaseSession: (() => void) | undefined;
+}
+
 /**
  * One iOS liveness sweep, carrying completeness per source (#5683).
  *
@@ -414,6 +421,8 @@ export class DevicePool {
    * as well as ordinary pool allocation.
    */
   private readonly shutdownReservations: Map<string, PooledDevice> = new Map();
+  /** Exact session incarnation last assigned to each pooled-device incarnation. */
+  private readonly pooledSessionIdentities: WeakMap<PooledDevice, Session> = new WeakMap();
   /**
    * Serials the user intentionally stopped, mapped to the pooled-device
    * incarnation that was present at mark time (or {@link INCARNATION_ANY} when
@@ -4344,6 +4353,7 @@ export class DevicePool {
           `Device '${device.id}' disconnected while its session was being created.`,
         );
       }
+      this.pooledSessionIdentities.set(device, session);
       return session;
     } catch (error) {
       if (this.devices.get(device.id) === device && device.sessionId === attemptedSessionId) {
@@ -4807,11 +4817,10 @@ export class DevicePool {
         `Session '${session.sessionId}' was released while System UI recovery was in progress.`,
       );
     }
-    const reboundSession = await this.sessionManager.rebindSession(
-      session.sessionId,
+    const reboundSession = await this.sessionManager.rebindSessionForTerminalReleaseRecovery(
+      session,
       replacementDevice.id,
       replacementDevice.platform,
-      { force: true },
     );
     if (
       this.devices.get(replacementDevice.id) !== replacementDevice ||
@@ -4824,6 +4833,7 @@ export class DevicePool {
     }
     replacementDevice.sessionId = session.sessionId;
     replacementDevice.status = "busy";
+    this.pooledSessionIdentities.set(replacementDevice, session);
     // addDevice leaves autolockSessionId undefined, which assertAutolockAccess
     // reads as "unlocked" and would let any session drive the recovered device
     // while the mcpSessionAutolockMap still points at the original. Carry the
@@ -4993,25 +5003,22 @@ export class DevicePool {
   ): Promise<
     | {
         device: PooledDevice;
+        session?: Session;
         release: () => Promise<void>;
       }
     | undefined
   > {
-    let expectedDevice: PooledDevice | undefined;
-    await this.assignmentMutex.runExclusive(() => {
-      if (abortSignal?.aborted) {
-        throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
-      }
-      expectedDevice = this.devices.get(deviceId);
-      if (!expectedDevice) {
-        return;
-      }
-      if (this.shutdownReservations.get(deviceId) === expectedDevice) {
-        throw new ActionableError(`Device '${deviceId}' is already shutting down.`);
-      }
-      this.shutdownReservations.set(deviceId, expectedDevice);
-    });
+    if (abortSignal?.aborted) {
+      throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
+    }
+    const identity = this.reserveShutdownSessionIdentity(deviceId);
+    const expectedDevice = await this.reserveShutdownDeviceWithAbort(
+      deviceId,
+      identity,
+      abortSignal,
+    );
     if (!expectedDevice) {
+      identity.releaseSession?.();
       return undefined;
     }
     const capturedDevice = expectedDevice;
@@ -5027,8 +5034,119 @@ export class DevicePool {
       if (this.shutdownReservations.get(capturedDevice.id) === capturedDevice) {
         this.shutdownReservations.delete(capturedDevice.id);
       }
+      identity.releaseSession?.();
     };
-    return { device: capturedDevice, release };
+    return { device: capturedDevice, session: identity.session, release };
+  }
+
+  private async reserveShutdownDeviceWithAbort(
+    deviceId: string,
+    identity: ShutdownIdentityReservation,
+    abortSignal: AbortSignal | undefined,
+  ): Promise<PooledDevice | undefined> {
+    const releaseSessionOnAbort = () => identity.releaseSession?.();
+    abortSignal?.addEventListener("abort", releaseSessionOnAbort, { once: true });
+    try {
+      const expectedDevice = await this.reserveShutdownDeviceUnderLock(
+        deviceId,
+        identity,
+        abortSignal,
+      );
+      if (abortSignal?.aborted) {
+        if (expectedDevice && this.shutdownReservations.get(deviceId) === expectedDevice) {
+          this.shutdownReservations.delete(deviceId);
+        }
+        throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
+      }
+      return expectedDevice;
+    } catch (error) {
+      identity.releaseSession?.();
+      throw error;
+    } finally {
+      abortSignal?.removeEventListener("abort", releaseSessionOnAbort);
+    }
+  }
+
+  private reserveShutdownSessionIdentity(deviceId: string): ShutdownIdentityReservation {
+    const device = this.devices.get(deviceId);
+    if (device && this.shutdownReservations.get(deviceId) === device) {
+      throw new ActionableError(`Device '${deviceId}' is already shutting down.`);
+    }
+    const candidate = device ? this.pooledSessionIdentities.get(device) : undefined;
+    const session =
+      candidate !== undefined &&
+      candidate.sessionId === device?.sessionId &&
+      candidate.assignedDevice === deviceId &&
+      this.sessionManager.isLatestSessionIdentity(candidate)
+        ? candidate
+        : undefined;
+    return {
+      device,
+      assignmentCount: device?.assignmentCount,
+      session,
+      releaseSession: session
+        ? this.sessionManager.reserveSessionForTerminalRelease(session, deviceId)
+        : undefined,
+    };
+  }
+
+  private async reserveShutdownDeviceUnderLock(
+    deviceId: string,
+    identity: ShutdownIdentityReservation,
+    abortSignal: AbortSignal | undefined,
+  ): Promise<PooledDevice | undefined> {
+    return await this.assignmentMutex.runExclusive(() => {
+      if (abortSignal?.aborted) {
+        throw abortSignal.reason ?? new Error("Shutdown reservation cancelled");
+      }
+      const currentDevice = this.devices.get(deviceId);
+      if (
+        identity.device &&
+        (currentDevice !== identity.device ||
+          currentDevice.assignmentCount !== identity.assignmentCount)
+      ) {
+        throw new ActionableError(
+          `Device '${deviceId}' changed while its shutdown was being reserved.`,
+        );
+      }
+      if (!currentDevice) {
+        return undefined;
+      }
+      if (this.shutdownReservations.get(deviceId) === currentDevice) {
+        throw new ActionableError(`Device '${deviceId}' is already shutting down.`);
+      }
+      this.completeShutdownSessionIdentity(deviceId, currentDevice, identity);
+      this.shutdownReservations.set(deviceId, currentDevice);
+      return currentDevice;
+    });
+  }
+
+  private completeShutdownSessionIdentity(
+    deviceId: string,
+    device: PooledDevice,
+    identity: ShutdownIdentityReservation,
+  ): void {
+    if (identity.session) {
+      return;
+    }
+    const session = this.pooledSessionIdentities.get(device);
+    if (
+      session?.sessionId !== device.sessionId ||
+      session.assignedDevice !== deviceId ||
+      // Every production assignment path holds assignmentMutex. Once this
+      // callback owns it, an outer getOrCreateSession assignment can only be
+      // awaiting its finally cleanup; it can no longer publish device state.
+      !this.sessionManager.isLatestSessionIdentity(session, {
+        ignorePendingAssignment: true,
+      })
+    ) {
+      return;
+    }
+    identity.session = session;
+    identity.releaseSession = this.sessionManager.reserveSessionForTerminalRelease(
+      session,
+      deviceId,
+    );
   }
 
   private isReservedForShutdown(device: PooledDevice): boolean {

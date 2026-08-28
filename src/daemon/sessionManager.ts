@@ -159,13 +159,31 @@ interface PendingSessionCreation {
   promise: Promise<Session>;
 }
 
+interface ReleaseReasonState {
+  value: string;
+  finalizedSnapshot?: SessionReleaseSnapshot;
+  lateTerminalRelease?: Promise<string | null>;
+  terminalPersisted?: boolean;
+}
+
 interface PendingSessionRelease {
   promise: Promise<string | null>;
+  reason: ReleaseReasonState;
+}
+
+interface SessionReleaseOperation extends PendingSessionRelease {
+  session: Session;
 }
 
 interface PendingSessionRebind {
   session: Session;
   promise: Promise<Session>;
+}
+
+interface TerminalReleaseReservation {
+  session: Session;
+  deviceId: string;
+  owner: symbol;
 }
 
 export interface SessionDeviceAssigner {
@@ -178,6 +196,8 @@ export interface RebindSessionOptions {
    * state must be cleared even though the serial is unchanged.
    */
   force?: boolean;
+  /** Internal owner proving that a shutdown reservation authorized this recovery rebind. */
+  terminalReleaseReservationOwner?: symbol;
 }
 
 const KEEP_SCREEN_AWAKE_RESTORE_TIMEOUT_MS = 1_000;
@@ -202,6 +222,7 @@ function isTerminalReleaseReason(releaseReason: string): boolean {
   return (
     releaseReason === "missing-first-heartbeat" ||
     releaseReason === "heartbeat-timeout" ||
+    releaseReason === "device-killed" ||
     releaseReason.startsWith("device-disconnected:")
   );
 }
@@ -243,15 +264,25 @@ export class SessionManager {
   private releaseCallbacks: SessionReleaseCallback[] = [];
   private createdCallbacks: SessionCreatedCallback[] = [];
   private deviceUnboundCallbacks: SessionDeviceUnboundCallback[] = [];
-  private readonly releasePromises: Map<
-    string,
-    { session: Session; promise: Promise<string | null> }
-  > = new Map();
+  private readonly releasePromises: Map<string, SessionReleaseOperation> = new Map();
   /** Every release still running, including an older session that reused a UUID. */
-  private readonly activeReleasePromises: Set<{
-    session: Session;
-    promise: Promise<string | null>;
-  }> = new Set();
+  private readonly activeReleasePromises: Set<SessionReleaseOperation> = new Set();
+  /** Finalized release state retained only while its exact Session identity is referenced. */
+  private readonly finalizedSessionReleases: WeakMap<Session, ReleaseReasonState> = new WeakMap();
+  /** Latest finalized incarnation, weakly retained until a same-UUID replacement publishes. */
+  private readonly latestFinalizedSessionIdentities: Map<string, WeakRef<Session>> = new Map();
+  private readonly finalizedSessionIdentityRegistry = new FinalizationRegistry<{
+    sessionId: string;
+    identity: WeakRef<Session>;
+  }>(({ sessionId, identity }) => {
+    if (this.latestFinalizedSessionIdentities.get(sessionId) === identity) {
+      this.latestFinalizedSessionIdentities.delete(sessionId);
+    }
+  });
+  /** Finalized terminal state used to coalesce UUID-only recovery retries. */
+  private readonly terminalReleaseReasonStates: Map<string, ReleaseReasonState> = new Map();
+  /** UUID admission fences held while a device shutdown decides its terminal outcome. */
+  private readonly terminalReleaseReservations: Map<string, TerminalReleaseReservation> = new Map();
   /** Setup work that can modify device state after a session has been assigned. */
   private readonly sessionSetupPromises: Set<{ session: Session; promise: Promise<void> }> =
     new Set();
@@ -379,13 +410,25 @@ export class SessionManager {
     timeoutMs?: number,
     heartbeatTimeoutMs?: number,
   ): Promise<Session> {
-    const terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
+    this.assertTerminalReleaseAdmission(sessionId, this.sessions.get(sessionId));
+    let terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
     if (terminalRelease) {
       throw new TerminalSessionError(sessionId, terminalRelease);
     }
     if (this.sessions.has(sessionId)) {
       logger.warn(`Session ${sessionId} already exists, returning existing session`);
       return this.sessions.get(sessionId)!;
+    }
+    const activeReleases = Array.from(this.activeReleasePromises)
+      .filter((release) => release.session.sessionId === sessionId)
+      .map((release) => release.promise);
+    if (activeReleases.length > 0) {
+      await Promise.all(activeReleases);
+      this.assertTerminalReleaseAdmission(sessionId, this.sessions.get(sessionId));
+      terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
+      if (terminalRelease) {
+        throw new TerminalSessionError(sessionId, terminalRelease);
+      }
     }
 
     const pendingCreation = this.pendingSessionCreations.get(sessionId);
@@ -429,6 +472,13 @@ export class SessionManager {
       throw new TerminalSessionError(session.sessionId, persistedTerminalRelease);
     }
     await this.persistSession(session);
+    this.assertTerminalReleaseAdmission(session.sessionId, session);
+    const terminalRelease = this.terminalReleaseSnapshots.get(session.sessionId);
+    if (terminalRelease) {
+      await this.persistSessionRelease(terminalRelease);
+      throw new TerminalSessionError(session.sessionId, terminalRelease);
+    }
+    this.invalidateFinalizedSessionIdentity(session.sessionId);
     this.sessions.set(session.sessionId, session);
     this.sessionDeviceMap.set(session.sessionId, session.assignedDevice);
     this.deviceSessionMap.set(session.assignedDevice, session.sessionId);
@@ -582,6 +632,8 @@ export class SessionManager {
       return existing;
     }
 
+    this.assertTerminalReleaseAdmission(sessionId);
+
     const terminalRelease = this.terminalReleaseSnapshots.get(sessionId);
     if (terminalRelease) {
       throw new TerminalSessionError(sessionId, terminalRelease);
@@ -659,6 +711,7 @@ export class SessionManager {
     options: RebindSessionOptions = {},
   ): Promise<Session> {
     const existing = this.sessions.get(sessionId);
+    this.assertTerminalRebindAdmission(sessionId, options.terminalReleaseReservationOwner);
     if (!existing) {
       return await this.createSession(sessionId, assignedDevice, platform);
     }
@@ -688,6 +741,22 @@ export class SessionManager {
         this.pendingSessionRebinds.delete(sessionId);
       }
     }
+  }
+
+  /** Rebind the exact reserved session during its owner-controlled recovery handoff. */
+  async rebindSessionForTerminalReleaseRecovery(
+    session: Session,
+    assignedDevice: string,
+    platform: Platform,
+  ): Promise<Session> {
+    const reservation = this.terminalReleaseReservations.get(session.sessionId);
+    if (reservation?.session !== session) {
+      throw new Error(`Session ${session.sessionId} has no matching terminal release reservation.`);
+    }
+    return await this.rebindSession(session.sessionId, assignedDevice, platform, {
+      force: true,
+      terminalReleaseReservationOwner: reservation.owner,
+    });
   }
 
   private async persistAndPublishRebind(
@@ -772,6 +841,54 @@ export class SessionManager {
     return snapshot ? { ...snapshot, heartbeat: { ...snapshot.heartbeat } } : undefined;
   }
 
+  /** Prevent this exact session UUID from being rebound while its device shutdown is in flight. */
+  reserveSessionForTerminalRelease(session: Session, expectedDeviceId: string): () => void {
+    if (session.assignedDevice !== expectedDeviceId) {
+      throw new Error(`Session ${session.sessionId} no longer owns device ${expectedDeviceId}.`);
+    }
+    if (this.pendingSessionRebinds.has(session.sessionId)) {
+      throw new Error(
+        `Session ${session.sessionId} is rebinding devices; retry shutdown after it settles.`,
+      );
+    }
+    const existing = this.terminalReleaseReservations.get(session.sessionId);
+    if (existing) {
+      throw new Error(`Session ${session.sessionId} is already reserved for terminal release.`);
+    }
+    const reservation: TerminalReleaseReservation = {
+      session,
+      deviceId: expectedDeviceId,
+      owner: Symbol(session.sessionId),
+    };
+    this.terminalReleaseReservations.set(session.sessionId, reservation);
+    return () => {
+      if (this.terminalReleaseReservations.get(session.sessionId)?.owner === reservation.owner) {
+        this.terminalReleaseReservations.delete(session.sessionId);
+      }
+    };
+  }
+
+  private assertTerminalReleaseAdmission(sessionId: string, allowedSession?: Session): void {
+    const reservation = this.terminalReleaseReservations.get(sessionId);
+    if (reservation && reservation.session !== allowedSession) {
+      throw new Error(
+        `Session ${sessionId} is being terminally released from device ${reservation.deviceId}; use a new session UUID.`,
+      );
+    }
+  }
+
+  private assertTerminalRebindAdmission(
+    sessionId: string,
+    reservationOwner: symbol | undefined,
+  ): void {
+    const reservation = this.terminalReleaseReservations.get(sessionId);
+    if (reservation && reservation.owner !== reservationOwner) {
+      throw new Error(
+        `Session ${sessionId} is being terminally released from device ${reservation.deviceId}; use a new session UUID.`,
+      );
+    }
+  }
+
   /**
    * Get session assigned to a device (reverse lookup)
    */
@@ -784,6 +901,28 @@ export class SessionManager {
       this.sessions.get(session.sessionId) === session &&
       !this.terminalReleaseSnapshots.has(session.sessionId)
     );
+  }
+
+  /** Whether this is the newest published, releasing, or finalized incarnation for its UUID. */
+  isLatestSessionIdentity(
+    session: Session,
+    options: { ignorePendingAssignment?: boolean } = {},
+  ): boolean {
+    const current = this.sessions.get(session.sessionId);
+    if (current) {
+      return current === session;
+    }
+    if (
+      this.pendingSessionCreations.has(session.sessionId) ||
+      (!options.ignorePendingAssignment && this.pendingSessionAssignments.has(session.sessionId))
+    ) {
+      return false;
+    }
+    const inFlightRelease = this.releasePromises.get(session.sessionId);
+    if (inFlightRelease) {
+      return inFlightRelease.session === session;
+    }
+    return this.latestFinalizedSessionIdentities.get(session.sessionId)?.deref() === session;
   }
 
   /**
@@ -807,19 +946,21 @@ export class SessionManager {
 
     const inFlightRelease = this.releasePromises.get(sessionId);
     if (inFlightRelease?.session === session) {
+      this.upgradeReleaseReason(inFlightRelease.reason, releaseReason);
       return await inFlightRelease.promise;
     }
 
     this.releasingSessions.add(session);
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
+    const reason = this.createReleaseReasonState(sessionId, releaseReason);
     const promise =
       pendingRebind?.session === session
         ? pendingRebind.promise.then(
-            () => this.releaseSessionInternal(sessionId, session, releaseReason),
-            () => this.releaseSessionInternal(sessionId, session, releaseReason),
+            () => this.releaseSessionInternal(sessionId, session, reason),
+            () => this.releaseSessionInternal(sessionId, session, reason),
           )
-        : this.releaseSessionInternal(sessionId, session, releaseReason);
-    const release = { session, promise };
+        : this.releaseSessionInternal(sessionId, session, reason);
+    const release = { session, promise, reason };
     this.releasePromises.set(sessionId, release);
     this.activeReleasePromises.add(release);
     try {
@@ -840,10 +981,51 @@ export class SessionManager {
     releaseReason: string = "explicit-release",
   ): Promise<string | null> {
     const session = this.sessions.get(sessionId);
-    if (session !== expectedSession || session.assignedDevice !== expectedDeviceId) {
+    if (session === expectedSession && session.assignedDevice === expectedDeviceId) {
+      return await this.releaseSession(sessionId, releaseReason);
+    }
+    if (session) {
       return null;
     }
-    return await this.releaseSession(sessionId, releaseReason);
+    if (
+      this.pendingSessionAssignments.has(sessionId) ||
+      this.pendingSessionCreations.has(sessionId)
+    ) {
+      return null;
+    }
+    const inFlightRelease = this.releasePromises.get(sessionId);
+    if (inFlightRelease) {
+      if (
+        inFlightRelease.session === expectedSession &&
+        expectedSession.assignedDevice === expectedDeviceId
+      ) {
+        return await this.releaseSession(sessionId, releaseReason);
+      }
+      return null;
+    }
+    return await this.releaseFinalizedSessionIfOwned(
+      sessionId,
+      expectedSession,
+      expectedDeviceId,
+      releaseReason,
+    );
+  }
+
+  private async releaseFinalizedSessionIfOwned(
+    sessionId: string,
+    expectedSession: Session,
+    expectedDeviceId: string,
+    releaseReason: string,
+  ): Promise<string | null> {
+    const finalizedRelease = this.finalizedSessionReleases.get(expectedSession);
+    if (
+      finalizedRelease?.finalizedSnapshot?.sessionId === sessionId &&
+      finalizedRelease.finalizedSnapshot.deviceId === expectedDeviceId &&
+      isTerminalReleaseReason(releaseReason)
+    ) {
+      return await this.releaseFinalizedSession(finalizedRelease, releaseReason);
+    }
+    return null;
   }
 
   private async releaseUnpublishedSession(
@@ -853,7 +1035,20 @@ export class SessionManager {
   ): Promise<string | null> {
     const inFlightRelease = this.releasePromises.get(sessionId);
     if (inFlightRelease) {
+      if (inFlightRelease.reason.finalizedSnapshot && isTerminalReleaseReason(releaseReason)) {
+        return await this.releaseFinalizedSession(inFlightRelease.reason, releaseReason);
+      }
+      this.upgradeReleaseReason(inFlightRelease.reason, releaseReason);
       return await inFlightRelease.promise;
+    }
+    const terminalSnapshot = this.terminalReleaseSnapshots.get(sessionId);
+    if (terminalSnapshot && isTerminalReleaseReason(releaseReason)) {
+      const terminalReason = this.terminalReleaseReasonStates.get(sessionId);
+      if (terminalReason) {
+        return await this.releaseFinalizedSession(terminalReason, releaseReason);
+      }
+      await this.persistSessionRelease(terminalSnapshot);
+      return terminalSnapshot.deviceId;
     }
     const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
     const pendingCreation = this.pendingSessionCreations.get(sessionId);
@@ -878,16 +1073,14 @@ export class SessionManager {
   ): Promise<string | null> {
     const existingRelease = this.pendingSessionReleases.get(sessionId);
     if (existingRelease) {
+      this.upgradeReleaseReason(existingRelease.reason, releaseReason);
       return await existingRelease.promise;
     }
 
+    const reason: ReleaseReasonState = { value: releaseReason };
     const release: PendingSessionRelease = {
-      promise: this.releaseAfterPendingSessionWork(
-        sessionId,
-        releaseReason,
-        allowExpired,
-        pendingSession,
-      ),
+      promise: this.releaseAfterPendingSessionWork(sessionId, reason, allowExpired, pendingSession),
+      reason,
     };
     this.pendingSessionReleases.set(sessionId, release);
     try {
@@ -901,13 +1094,13 @@ export class SessionManager {
 
   private async releaseAfterPendingSessionWork(
     sessionId: string,
-    releaseReason: string,
+    reason: ReleaseReasonState,
     allowExpired: boolean,
     pendingSession: Promise<Session>,
   ): Promise<string | null> {
     try {
       await pendingSession;
-      return await this.releaseSession(sessionId, releaseReason, allowExpired);
+      return await this.releaseSession(sessionId, reason.value, allowExpired);
     } catch (error) {
       logger.warn(`Session ${sessionId} assignment failed before release: ${error}`);
       return null;
@@ -990,7 +1183,7 @@ export class SessionManager {
   private async releaseSessionInternal(
     sessionId: string,
     session: Session,
-    releaseReason: string,
+    reason: ReleaseReasonState,
   ): Promise<string | null> {
     try {
       const setups = Array.from(this.sessionSetupPromises, (setup) =>
@@ -1009,7 +1202,8 @@ export class SessionManager {
       ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
       const deviceId = session.assignedDevice;
       const releasedAtMs = this.timer.now();
-      const releaseSnapshot: SessionReleaseSnapshot = {
+      const releaseReason = reason.value;
+      let releaseSnapshot: SessionReleaseSnapshot = {
         sessionId,
         deviceId,
         releaseReason,
@@ -1025,15 +1219,21 @@ export class SessionManager {
           // monitor, which is constructed with default config. (A monitor given an
           // explicit `preFirstHeartbeatGraceMs`, as in tests, would diverge; drive
           // the grace via env to keep the snapshot consistent.)
-          timeoutMs:
-            releaseReason === "missing-first-heartbeat"
-              ? getDefaultPreFirstHeartbeatGraceMs()
-              : session.heartbeatTimeoutMs,
+          timeoutMs: this.releaseHeartbeatTimeoutMs(releaseReason, session),
           ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
         },
       };
 
-      await this.persistTerminalReleaseIfNeeded(releaseSnapshot);
+      // A non-terminal release must not yield after freezing its reason: a
+      // concurrent terminal release can only upgrade the shared reason while
+      // this operation is awaiting teardown above.
+      if (releaseSnapshot.terminal) {
+        await this.persistTerminalReleaseIfNeeded(releaseSnapshot);
+        if (reason.value !== releaseSnapshot.releaseReason) {
+          releaseSnapshot = this.withReleaseReason(releaseSnapshot, reason.value, session);
+          await this.persistTerminalReleaseIfNeeded(releaseSnapshot);
+        }
+      }
       if (!this.removeSession(sessionId, session)) {
         if (pendingCleanup.length > 0) {
           this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
@@ -1046,20 +1246,18 @@ export class SessionManager {
       }
       if (!releaseSnapshot.terminal) {
         this.terminalReleaseSnapshots.delete(sessionId);
+        this.terminalReleaseReasonStates.delete(sessionId);
       }
 
-      // In-memory ownership is already terminal, so notify bound transports
-      // before awaiting best-effort persistence. This closes the window where a
-      // released UUID could be forwarded again while the DB write is pending.
-      for (const callback of this.releaseCallbacks) {
-        try {
-          callback(sessionId, deviceId, releaseReason, releaseSnapshot);
-        } catch (error) {
-          logger.warn(`Session release callback failed for ${sessionId}: ${error}`);
-        }
-      }
-      if (!releaseSnapshot.terminal) {
-        await this.persistSessionRelease(releaseSnapshot);
+      this.notifySessionRelease(releaseSnapshot);
+      const persistedSnapshot = await this.completeReleasePersistence(
+        releaseSnapshot,
+        reason,
+        session,
+      );
+      this.recordFinalizedSessionRelease(session, reason);
+      if (persistedSnapshot !== releaseSnapshot) {
+        this.notifySessionRelease(persistedSnapshot);
       }
       logger.info(
         pendingCleanup.length > 0
@@ -1069,6 +1267,163 @@ export class SessionManager {
       return deviceId;
     } finally {
       this.releasingSessions.delete(session);
+    }
+  }
+
+  private upgradeReleaseReason(reason: ReleaseReasonState, candidate: string): void {
+    if (candidate === "device-killed" && reason.value !== candidate) {
+      reason.value = candidate;
+      return;
+    }
+    if (reason.value === "device-killed") {
+      return;
+    }
+    if (!isTerminalReleaseReason(reason.value) && isTerminalReleaseReason(candidate)) {
+      reason.value = candidate;
+    }
+  }
+
+  private createReleaseReasonState(sessionId: string, releaseReason: string): ReleaseReasonState {
+    const reason: ReleaseReasonState = { value: releaseReason };
+    const terminalReleaseReason = this.terminalReleaseSnapshots.get(sessionId)?.releaseReason;
+    if (terminalReleaseReason) {
+      this.upgradeReleaseReason(reason, terminalReleaseReason);
+    }
+    return reason;
+  }
+
+  private releaseHeartbeatTimeoutMs(releaseReason: string, session: Session): number {
+    return releaseReason === "missing-first-heartbeat"
+      ? getDefaultPreFirstHeartbeatGraceMs()
+      : session.heartbeatTimeoutMs;
+  }
+
+  private withReleaseReason(
+    snapshot: SessionReleaseSnapshot,
+    releaseReason: string,
+    session: Session,
+  ): SessionReleaseSnapshot {
+    return {
+      ...snapshot,
+      releaseReason,
+      terminal: isTerminalReleaseReason(releaseReason),
+      heartbeat: {
+        ...snapshot.heartbeat,
+        timeoutMs: this.releaseHeartbeatTimeoutMs(releaseReason, session),
+      },
+    };
+  }
+
+  private async completeReleasePersistence(
+    snapshot: SessionReleaseSnapshot,
+    reason: ReleaseReasonState,
+    session: Session,
+  ): Promise<SessionReleaseSnapshot> {
+    if (snapshot.terminal) {
+      reason.finalizedSnapshot = snapshot;
+      reason.terminalPersisted = true;
+      this.terminalReleaseReasonStates.set(snapshot.sessionId, reason);
+      return snapshot;
+    }
+    await this.persistSessionRelease(snapshot);
+    if (!isTerminalReleaseReason(reason.value)) {
+      reason.finalizedSnapshot = snapshot;
+      return snapshot;
+    }
+    const upgradedSnapshot = this.withReleaseReason(snapshot, reason.value, session);
+    reason.finalizedSnapshot = upgradedSnapshot;
+    this.recordFinalizedSessionRelease(session, reason);
+    this.terminalReleaseReasonStates.set(upgradedSnapshot.sessionId, reason);
+    await this.persistTerminalReleaseIfNeeded(upgradedSnapshot);
+    reason.terminalPersisted = true;
+    return upgradedSnapshot;
+  }
+
+  private async releaseFinalizedSession(
+    reason: ReleaseReasonState,
+    releaseReason: string,
+  ): Promise<string | null> {
+    this.upgradeReleaseReason(reason, releaseReason);
+    if (reason.lateTerminalRelease) {
+      return await reason.lateTerminalRelease;
+    }
+    const snapshot = reason.finalizedSnapshot;
+    if (!snapshot) {
+      return null;
+    }
+    const indexedTerminalReason = this.terminalReleaseReasonStates.get(snapshot.sessionId);
+    if (indexedTerminalReason && indexedTerminalReason !== reason) {
+      return null;
+    }
+    if (snapshot.terminal && reason.terminalPersisted && snapshot.releaseReason === reason.value) {
+      return snapshot.deviceId;
+    }
+    let upgradedSnapshot: SessionReleaseSnapshot = {
+      ...snapshot,
+      releaseReason: reason.value,
+      terminal: true,
+    };
+    reason.finalizedSnapshot = upgradedSnapshot;
+    reason.terminalPersisted = false;
+    this.terminalReleaseReasonStates.set(upgradedSnapshot.sessionId, reason);
+    const release = (async () => {
+      await this.persistTerminalReleaseIfNeeded(upgradedSnapshot);
+      if (reason.value !== upgradedSnapshot.releaseReason) {
+        upgradedSnapshot = {
+          ...upgradedSnapshot,
+          releaseReason: reason.value,
+        };
+        reason.finalizedSnapshot = upgradedSnapshot;
+        this.terminalReleaseReasonStates.set(upgradedSnapshot.sessionId, reason);
+        await this.persistTerminalReleaseIfNeeded(upgradedSnapshot);
+      }
+      reason.terminalPersisted = true;
+      this.notifySessionRelease(upgradedSnapshot);
+      return upgradedSnapshot.deviceId;
+    })();
+    reason.lateTerminalRelease = release;
+    try {
+      return await release;
+    } finally {
+      if (reason.lateTerminalRelease === release) {
+        reason.lateTerminalRelease = undefined;
+      }
+    }
+  }
+
+  private recordFinalizedSessionRelease(session: Session, reason: ReleaseReasonState): void {
+    this.finalizedSessionReleases.set(session, reason);
+    const existingIdentity = this.latestFinalizedSessionIdentities.get(session.sessionId);
+    if (existingIdentity?.deref() === session) {
+      return;
+    }
+    const identity = new WeakRef(session);
+    this.latestFinalizedSessionIdentities.set(session.sessionId, identity);
+    this.finalizedSessionIdentityRegistry.register(session, {
+      sessionId: session.sessionId,
+      identity,
+    });
+  }
+
+  private invalidateFinalizedSessionIdentity(sessionId: string): void {
+    const identity = this.latestFinalizedSessionIdentities.get(sessionId);
+    if (!identity) {
+      return;
+    }
+    const session = identity.deref();
+    if (session) {
+      this.finalizedSessionReleases.delete(session);
+    }
+    this.latestFinalizedSessionIdentities.delete(sessionId);
+  }
+
+  private notifySessionRelease(snapshot: SessionReleaseSnapshot): void {
+    for (const callback of this.releaseCallbacks) {
+      try {
+        callback(snapshot.sessionId, snapshot.deviceId, snapshot.releaseReason, snapshot);
+      } catch (error) {
+        logger.warn(`Session release callback failed for ${snapshot.sessionId}: ${error}`);
+      }
     }
   }
 

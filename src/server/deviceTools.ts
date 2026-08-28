@@ -51,7 +51,7 @@ import {
 } from "../utils/deviceProvisioning";
 import { DaemonState } from "../daemon/daemonState";
 import type { DevicePool, DeviceReadinessReservation, PooledDevice } from "../daemon/devicePool";
-import type { SessionManager } from "../daemon/sessionManager";
+import type { Session, SessionManager } from "../daemon/sessionManager";
 import { DeviceBootService, type DeviceBootResult } from "../utils/deviceBootService";
 import { getInstalledAppsCacheWriteCoordinator } from "../db/installedAppsCacheWriteCoordinator";
 import { getDbWriteBarrier } from "../db/dbWriteBarrier";
@@ -390,6 +390,7 @@ export const DEVICE_ALREADY_STOPPED_ERROR_CODE = "device_already_stopped";
 const DEVICE_SHUTDOWN_TIMEOUT_MS = 30_000;
 const DEVICE_SHUTDOWN_POLL_INTERVAL_MS = 1_000;
 const DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS = 1_000;
+const DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES = 2;
 const TEARDOWN_OPERATION_RESULT_TTL_MS = 5 * 60 * 1_000;
 
 function getShutdownInitiatingExecutionId(): string | undefined {
@@ -1413,28 +1414,53 @@ function finishLateShutdownRetirement(
   release: Promise<string | null>,
   device: BootedDevice,
   expectedPooledDevice: PooledDevice,
+  expectedSession: Session | undefined,
   observedReplacement: BootedDevice | undefined,
   deviceManager: PlatformDeviceManager,
   timer: Timer,
   deadlineMs: number,
   stopPerformanceMonitoring: (deviceId: string) => void,
   retainReservationUntil: (retirement: Promise<void>) => void,
+  terminalReleaseRetriesRemaining: number,
 ): void {
   const continueRetirement = async () => {
     await retireShutdownOwnership(
       device,
       expectedPooledDevice,
+      expectedSession,
       observedReplacement,
       deviceManager,
       timer,
       deadlineMs,
       undefined,
       stopPerformanceMonitoring,
-      () => undefined,
+      retainReservationUntil,
       false,
     );
   };
-  const lateRetirement = release.then(continueRetirement, continueRetirement);
+  const retryRetirement = async (error: unknown) => {
+    if (terminalReleaseRetriesRemaining <= 0) {
+      throw error;
+    }
+    await timer.sleep(DEVICE_SHUTDOWN_POST_RELEASE_RECHECK_TIMEOUT_MS);
+    await retireShutdownOwnership(
+      device,
+      expectedPooledDevice,
+      expectedSession,
+      observedReplacement,
+      deviceManager,
+      timer,
+      deadlineMs,
+      undefined,
+      stopPerformanceMonitoring,
+      retainReservationUntil,
+      false,
+      false,
+      DEVICE_SHUTDOWN_TIMEOUT_MS,
+      terminalReleaseRetriesRemaining - 1,
+    );
+  };
+  const lateRetirement = release.then(continueRetirement, retryRetirement);
   lateRetirement.catch((lateError) => {
     logger.warn(
       `[DeviceTools] Failed to finish late shutdown retirement for ${device.deviceId}: ${lateError}`,
@@ -1447,6 +1473,7 @@ function retainFailedShutdownRetirement(
   error: unknown,
   device: BootedDevice,
   expectedPooledDevice: PooledDevice,
+  expectedSession: Session | undefined,
   observedReplacement: BootedDevice | undefined,
   deviceManager: PlatformDeviceManager,
   timer: Timer,
@@ -1460,6 +1487,7 @@ function retainFailedShutdownRetirement(
         await retireShutdownOwnership(
           device,
           expectedPooledDevice,
+          expectedSession,
           observedReplacement,
           deviceManager,
           timer,
@@ -1482,6 +1510,7 @@ function retainFailedShutdownRetirement(
 async function findReplacementOrRetainShutdownReservation(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice,
+  expectedSession: Session | undefined,
   observedReplacement: BootedDevice | undefined,
   deviceManager: PlatformDeviceManager,
   timer: Timer,
@@ -1511,6 +1540,7 @@ async function findReplacementOrRetainShutdownReservation(
       error,
       device,
       expectedPooledDevice,
+      expectedSession,
       observedReplacement,
       deviceManager,
       timer,
@@ -1531,40 +1561,47 @@ function preserveLateShutdownRetirement(
   release: Promise<string | null>,
   device: BootedDevice,
   expectedPooledDevice: PooledDevice,
+  expectedSession: Session | undefined,
   observedReplacement: BootedDevice | undefined,
   deviceManager: PlatformDeviceManager,
   timer: Timer,
   deadlineMs: number,
   stopPerformanceMonitoring: (deviceId: string) => void,
   retainReservationUntil: (retirement: Promise<void>) => void,
+  terminalReleaseRetriesRemaining: number,
 ): void {
   if (
     !isShutdownTimeoutError(error) &&
     !requestAbortSignal?.aborted &&
-    sessionManager.getSessionForDevice(device.deviceId) === sessionId
+    sessionManager.getSessionForDevice(device.deviceId) === sessionId &&
+    !sessionManager.getTerminalReleaseSnapshot(sessionId)
   ) {
     return;
   }
-  // Session release removes its in-memory mapping before its durable write.
-  // It cannot be cancelled safely, so keep the captured shutdown reservation
-  // until the late release finishes its identity-guarded retirement. Otherwise
-  // a stopped device could become an idle ghost.
+  // Session release either removed its in-memory mapping or terminally fenced
+  // the UUID before a durable write failed. It cannot be cancelled safely, so
+  // keep the captured shutdown reservation until the late release finishes its
+  // identity-guarded retirement. Otherwise a stopped device could remain as a
+  // busy ghost in the pool.
   finishLateShutdownRetirement(
     release,
     device,
     expectedPooledDevice,
+    expectedSession,
     observedReplacement,
     deviceManager,
     timer,
     deadlineMs,
     stopPerformanceMonitoring,
     retainReservationUntil,
+    terminalReleaseRetriesRemaining,
   );
 }
 
 async function releaseShutdownSessionOwnership(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice,
+  expectedSession: Session | undefined,
   daemonState: DaemonState,
   observedReplacement: BootedDevice | undefined,
   deviceManager: PlatformDeviceManager,
@@ -1575,10 +1612,11 @@ async function releaseShutdownSessionOwnership(
   retainReservationUntil: (retirement: Promise<void>) => void,
   strictDeadline: boolean,
   timeoutMs: number,
+  terminalReleaseRetriesRemaining: number,
 ): Promise<void> {
   const sessionManager = daemonState.getSessionManager();
-  const sessionId = expectedPooledDevice.sessionId;
-  if (!sessionId || sessionManager.getSessionForDevice(device.deviceId) !== sessionId) {
+  const sessionId = expectedSession?.sessionId;
+  if (!sessionId || expectedSession.assignedDevice !== device.deviceId) {
     return;
   }
 
@@ -1587,7 +1625,12 @@ async function releaseShutdownSessionOwnership(
     `device-disconnected:${device.deviceId}`,
     { excludeExecutionId: getShutdownInitiatingExecutionId() },
   );
-  const release = sessionManager.releaseSession(sessionId, `device-stopped:${device.deviceId}`);
+  const release = sessionManager.releaseSessionIfOwned(
+    sessionId,
+    expectedSession,
+    device.deviceId,
+    "device-killed",
+  );
   try {
     await runWithinShutdownDeadline(
       device,
@@ -1607,12 +1650,14 @@ async function releaseShutdownSessionOwnership(
       release,
       device,
       expectedPooledDevice,
+      expectedSession,
       observedReplacement,
       deviceManager,
       timer,
       deadlineMs,
       stopPerformanceMonitoring,
       retainReservationUntil,
+      terminalReleaseRetriesRemaining,
     );
     throw error;
   }
@@ -1621,6 +1666,7 @@ async function releaseShutdownSessionOwnership(
 async function retireShutdownOwnership(
   device: BootedDevice,
   expectedPooledDevice: PooledDevice | null,
+  expectedSession: Session | undefined,
   observedReplacement: BootedDevice | undefined,
   deviceManager: PlatformDeviceManager,
   timer: Timer,
@@ -1631,6 +1677,7 @@ async function retireShutdownOwnership(
   retryAfterDiscoveryFailure: boolean = true,
   strictDeadline = false,
   timeoutMs = DEVICE_SHUTDOWN_TIMEOUT_MS,
+  terminalReleaseRetriesRemaining = DEVICE_SHUTDOWN_TERMINAL_RELEASE_RETRIES,
 ): Promise<void> {
   if (!expectedPooledDevice) {
     return;
@@ -1649,6 +1696,7 @@ async function retireShutdownOwnership(
   await releaseShutdownSessionOwnership(
     device,
     expectedPooledDevice,
+    expectedSession,
     daemonState,
     observedReplacement,
     deviceManager,
@@ -1659,6 +1707,7 @@ async function retireShutdownOwnership(
     retainReservationUntil,
     strictDeadline,
     timeoutMs,
+    terminalReleaseRetriesRemaining,
   );
   if (devicePool.getDevice(device.deviceId) !== expectedPooledDevice) {
     return;
@@ -1672,6 +1721,7 @@ async function retireShutdownOwnership(
   const replacement = await findReplacementOrRetainShutdownReservation(
     device,
     expectedPooledDevice,
+    expectedSession,
     observedReplacement,
     deviceManager,
     timer,
@@ -1709,6 +1759,7 @@ async function killProcessAndRetireOwnership(
   requestAbortSignal: AbortSignal | undefined,
   devicePool: DevicePool | undefined,
   expectedPooledDevice: PooledDevice | null,
+  expectedSession: Session | undefined,
   androidObserverState: AndroidObserverShutdownState,
   shutdownDeadlineMs: number,
   retainReservationUntil: (
@@ -1791,6 +1842,7 @@ async function killProcessAndRetireOwnership(
     await retireShutdownOwnership(
       shutdownDevice,
       expectedPooledDevice,
+      expectedSession,
       observedReplacement,
       deviceManager,
       dependencies.timer,
@@ -1856,9 +1908,10 @@ async function shutdownDevice(
   perf.serial(operationName);
   const daemonState = DaemonState.getInstance();
   const devicePool = daemonState.isInitialized() ? daemonState.getDevicePool() : undefined;
+  let expectedSession: Session | undefined;
   return await deviceShutdownService.shutdown({
-    prepare: async () =>
-      await runWithinShutdownDeadline(
+    prepare: async () => {
+      const reservation = await runWithinShutdownDeadline(
         device,
         dependencies.timer,
         shutdownDeadlineMs,
@@ -1866,7 +1919,10 @@ async function shutdownDevice(
         requestAbortSignal,
         async (signal) => await devicePool?.reserveDeviceForShutdown(device.deviceId, signal),
         timeoutMs,
-      ),
+      );
+      expectedSession = reservation?.session;
+      return reservation;
+    },
     execute: async (shutdownReservation, retainReservationUntil) => {
       const expectedPooledDevice = shutdownReservation?.device ?? null;
       const retainShutdownUntil = (
@@ -1899,6 +1955,7 @@ async function shutdownDevice(
         requestAbortSignal,
         devicePool,
         expectedPooledDevice,
+        expectedSession,
         androidObserverState,
         shutdownDeadlineMs,
         (retirement, releaseReservationAfterFailure) => {
@@ -1915,6 +1972,7 @@ async function shutdownDevice(
         await retireShutdownOwnership(
           device,
           expectedPooledDevice,
+          expectedSession,
           undefined,
           dependencies.deviceManagerFactory(),
           dependencies.timer,
@@ -2506,6 +2564,7 @@ async function retireTeardownPooledOwnership(
     await retireShutdownOwnership(
       retirementDevice,
       expectedPooledDevice,
+      reservation.session,
       undefined,
       context.deviceManager,
       context.dependencies.timer,

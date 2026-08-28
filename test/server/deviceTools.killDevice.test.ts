@@ -134,6 +134,27 @@ class DelayedSuccessfulKillDeviceManager extends FailingKillDeviceManager {
   override async killDevice(): Promise<void> {}
 }
 
+class ReleaseDuringShutdownWaitDeviceManager extends DelayedSuccessfulKillDeviceManager {
+  private shutdownStarted = false;
+  private releasedSession = false;
+  onShutdownWait: (() => Promise<void>) | undefined;
+
+  override async killDevice(): Promise<void> {
+    this.shutdownStarted = true;
+  }
+
+  override async getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery> {
+    if (this.shutdownStarted) {
+      if (!this.releasedSession) {
+        this.releasedSession = true;
+        await this.onShutdownWait?.();
+      }
+      return { devices: [], succeededPlatforms: new Set(["android"]) };
+    }
+    return await super.getBootedDevicesDetailed(platform);
+  }
+}
+
 class FailedDiscoveryThenReplacementDeviceManager extends DelayedSuccessfulKillDeviceManager {
   private replacementSequenceStarted = false;
   private failedDiscoveryReported = false;
@@ -395,11 +416,16 @@ class ReplacingDeviceSessionRepository extends FakeDeviceSessionRepository {
 class DeferredReleaseDeviceSessionRepository extends FakeDeviceSessionRepository {
   private releaseMarkReleased: (() => void) | undefined;
   private resolveMarkReleasedStarted: (() => void) | undefined;
+  private releaseAttempts = 0;
   private readonly markReleasedStarted = new Promise<void>((resolve) => {
     this.resolveMarkReleasedStarted = resolve;
   });
 
   override async markReleased(): Promise<void> {
+    this.releaseAttempts++;
+    if (this.releaseAttempts > 1) {
+      return;
+    }
     this.resolveMarkReleasedStarted?.();
     await new Promise<void>((resolve) => {
       this.releaseMarkReleased = resolve;
@@ -412,6 +438,21 @@ class DeferredReleaseDeviceSessionRepository extends FakeDeviceSessionRepository
 
   finishMarkReleased(): void {
     this.releaseMarkReleased?.();
+  }
+}
+
+class FailFirstReleaseDeviceSessionRepository extends FakeDeviceSessionRepository {
+  releaseAttempts = 0;
+
+  constructor(private readonly failedReleaseAttempts: number = 1) {
+    super();
+  }
+
+  override async markReleased(): Promise<void> {
+    this.releaseAttempts++;
+    if (this.releaseAttempts <= this.failedReleaseAttempts) {
+      throw new Error("transient release persistence failure");
+    }
   }
 }
 
@@ -557,6 +598,335 @@ describe("killDevice handler", () => {
 
     expect(successfulManager.getCallCount("startDevice")).toBe(1);
     expect(pool.getDevice("emulator-5554")).toBeNull();
+    expect(sessionManager.getTerminalReleaseSnapshot("session-1")).toMatchObject({
+      sessionId: "session-1",
+      deviceId: "emulator-5554",
+      releaseReason: "device-killed",
+      terminal: true,
+    });
+  });
+
+  test("terminally fences a session released while shutdown is being confirmed", async () => {
+    const timer = new FakeTimer();
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const releaseDuringWaitManager = new ReleaseDuringShutdownWaitDeviceManager();
+    manager = releaseDuringWaitManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => releaseDuringWaitManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    releaseDuringWaitManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      releaseDuringWaitManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    await pool.addDevice({
+      name: "Pixel 9",
+      platform: "android",
+      deviceId: "emulator-5560",
+    });
+    releaseDuringWaitManager.onShutdownWait = async () => {
+      await sessionManager.releaseSession("session-1", "explicit-release");
+      await pool.releaseDevice(image.deviceId!, "session-1");
+      expect(pool.getDevice(image.deviceId!)?.sessionId).toBeNull();
+      await expect(sessionManager.getOrCreateSession("session-1", pool, "android")).rejects.toThrow(
+        "being terminally released",
+      );
+    };
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    await tool.handler({
+      device: { name: image.name, platform: image.platform, deviceId: image.deviceId! },
+    });
+
+    expect(sessionManager.getTerminalReleaseSnapshot("session-1")).toMatchObject({
+      deviceId: image.deviceId,
+      releaseReason: "device-killed",
+      terminal: true,
+    });
+    expect(pool.getDevice(image.deviceId!)).toBeNull();
+  });
+
+  test("captures a session released immediately before shutdown reservation", async () => {
+    const timer = new FakeTimer();
+    const deviceSessionRepository = new FakeDeviceSessionRepository();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    successfulManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    await sessionManager.releaseSession("session-1", "explicit-release");
+    expect(pool.getDevice(image.deviceId!)?.sessionId).toBe("session-1");
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    await tool.handler({
+      device: { name: image.name, platform: image.platform, deviceId: image.deviceId! },
+    });
+
+    expect(sessionManager.getTerminalReleaseSnapshot("session-1")).toMatchObject({
+      releaseReason: "device-killed",
+      terminal: true,
+    });
+    expect(pool.getDevice(image.deviceId!)).toBeNull();
+  });
+
+  test("captures a session whose ordinary release persistence is still in flight", async () => {
+    const timer = new FakeTimer();
+    const deviceSessionRepository = new DeferredReleaseDeviceSessionRepository();
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    successfulManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+
+    const ordinaryRelease = sessionManager.releaseSession("session-1", "explicit-release");
+    await deviceSessionRepository.waitForMarkReleased();
+    const reservationStarted = Promise.withResolvers<void>();
+    const reserveDeviceForShutdown = pool.reserveDeviceForShutdown.bind(pool);
+    pool.reserveDeviceForShutdown = async (...args) => {
+      const reservation = await reserveDeviceForShutdown(...args);
+      reservationStarted.resolve();
+      return reservation;
+    };
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    const result = tool.handler({
+      device: { name: image.name, platform: image.platform, deviceId: image.deviceId! },
+    });
+    await reservationStarted.promise;
+    deviceSessionRepository.finishMarkReleased();
+    await Promise.all([ordinaryRelease, result]);
+
+    expect(sessionManager.getTerminalReleaseSnapshot("session-1")).toMatchObject({
+      releaseReason: "device-killed",
+      terminal: true,
+    });
+    expect(pool.getDevice(image.deviceId!)).toBeNull();
+  });
+
+  test("finishes device retirement after terminal release persistence retries", async () => {
+    const timer = new FakeTimer();
+    const deviceSessionRepository = new FailFirstReleaseDeviceSessionRepository(2);
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    successfulManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    let reservationReleaseCalls = 0;
+    const reserveDeviceForShutdown = pool.reserveDeviceForShutdown.bind(pool);
+    pool.reserveDeviceForShutdown = async (...args) => {
+      const reservation = await reserveDeviceForShutdown(...args);
+      if (!reservation) {
+        return undefined;
+      }
+      const release = reservation.release;
+      return {
+        ...reservation,
+        release: async () => {
+          reservationReleaseCalls++;
+          await release();
+        },
+      };
+    };
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    await expect(
+      tool.handler({
+        device: { name: image.name, platform: image.platform, deviceId: image.deviceId! },
+      }),
+    ).rejects.toThrow("Failed to persist terminal release");
+    timer.advanceTime(1_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    timer.advanceTime(1_000);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(deviceSessionRepository.releaseAttempts).toBe(3);
+    expect(reservationReleaseCalls).toBe(1);
+    expect(pool.getDevice(image.deviceId!)).toBeNull();
+    expect(sessionManager.getTerminalReleaseSnapshot("session-1")).toMatchObject({
+      releaseReason: "device-killed",
+      terminal: true,
+    });
+  });
+
+  test("bounds terminal release persistence retries while retaining shutdown ownership", async () => {
+    const timer = new FakeTimer();
+    const deviceSessionRepository = new FailFirstReleaseDeviceSessionRepository(
+      Number.POSITIVE_INFINITY,
+    );
+    const successfulManager = new SuccessfulKillDeviceManager();
+    manager = successfulManager;
+    setDeviceToolsDependencies({
+      deviceManagerFactory: () => successfulManager,
+      notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
+      clearInstalledAppsForDevice: async () => {},
+      timer,
+    });
+    sessionManager = new SessionManager(timer, deviceSessionRepository);
+    const image: DeviceInfo = {
+      name: "Pixel 8",
+      platform: "android",
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local",
+    };
+    successfulManager.setDeviceImages("android", [image]);
+    const pool = new DevicePool(
+      sessionManager,
+      "daemon-session",
+      timer,
+      new FakeInstalledAppsRepository(),
+      successfulManager,
+      new DefaultRetryExecutor(timer),
+      deviceSessionRepository,
+    );
+    DaemonState.getInstance().initialize(sessionManager, pool);
+    await pool.assignMultipleDevices(["session-1"], 1_000, "android");
+    let reservationReleaseCalls = 0;
+    const reserveDeviceForShutdown = pool.reserveDeviceForShutdown.bind(pool);
+    pool.reserveDeviceForShutdown = async (...args) => {
+      const reservation = await reserveDeviceForShutdown(...args);
+      if (!reservation) {
+        return undefined;
+      }
+      const release = reservation.release;
+      return {
+        ...reservation,
+        release: async () => {
+          reservationReleaseCalls++;
+          await release();
+        },
+      };
+    };
+    const tool = ToolRegistry.getTool("killDevice");
+    if (!tool) {
+      throw new Error("killDevice not registered");
+    }
+
+    await expect(
+      tool.handler({
+        device: { name: image.name, platform: image.platform, deviceId: image.deviceId! },
+      }),
+    ).rejects.toThrow("Failed to persist terminal release");
+    timer.advanceTime(1_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    timer.advanceTime(1_000);
+    await new Promise((resolve) => setImmediate(resolve));
+    timer.advanceTime(10_000);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(deviceSessionRepository.releaseAttempts).toBe(3);
+    expect(reservationReleaseCalls).toBe(0);
+    await expect(pool.reserveDeviceForShutdown(image.deviceId!)).rejects.toThrow(
+      "already shutting down",
+    );
+    expect(sessionManager.getTerminalReleaseSnapshot("session-1")).toMatchObject({
+      releaseReason: "device-killed",
+      terminal: true,
+    });
   });
 
   test("keeps the initiating parallel plan alive while cancelling other execution tracks", async () => {

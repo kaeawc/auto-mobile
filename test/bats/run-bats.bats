@@ -98,7 +98,11 @@ serial_pass_args() { grep -v -- '--jobs' "$ARGS_FILE"; }
   run env AUTOMOBILE_BATS_SERIAL_ONLY=true HOME="$FAKE_HOME" PATH="$STUB_BIN:$PATH" bash "$SCRIPT"
 
   [ "$status" -eq 0 ]
-  [ "$(cat "$ARGS_FILE")" = "test/bats" ]
+  local expected_count actual_count
+  expected_count="$(find test/bats -type f -name '*.bats' | wc -l | tr -d ' ')"
+  actual_count="$(wc -l < "$ARGS_FILE" | tr -d ' ')"
+  [ "$actual_count" -eq "$expected_count" ]
+  ! grep -vE '^test/bats/.+\.bats$' "$ARGS_FILE"
   [ ! -e "$FAKE_HOME/.parallel/will-cite" ]
 }
 

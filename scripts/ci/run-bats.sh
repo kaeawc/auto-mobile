@@ -85,6 +85,17 @@ job_count() {
   printf '%s\n' "$jobs"
 }
 
+# Run each file independently so a BATS suite-level discovery/counting defect
+# cannot discard later files after earlier tests have passed. `read -d ''` and
+# find's `-print0` preserve paths without relying on GNU-only sort options.
+run_bats_serially() {
+  local bats_dir="$1" bats_file rc=0
+  while IFS= read -r -d '' bats_file; do
+    bats "$bats_file" || rc=1
+  done < <(find "$bats_dir" -type f -name '*.bats' -print0)
+  return "$rc"
+}
+
 main() {
   # errexit is deliberately NOT set: this script branches on the exit status of
   # helper functions (ensure_gnu_parallel, is_gnu_parallel) and of each bats
@@ -95,8 +106,8 @@ main() {
   local bats_dir="${1:-test/bats}"
 
   if [[ "${AUTOMOBILE_BATS_SERIAL_ONLY:-false}" == "true" ]]; then
-    log "Serial-only pass: bats over $bats_dir"
-    bats "$bats_dir"
+    log "Serial-only pass: bats each file over $bats_dir"
+    run_bats_serially "$bats_dir"
     return $?
   fi
 

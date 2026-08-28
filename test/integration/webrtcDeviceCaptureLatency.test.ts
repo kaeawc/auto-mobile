@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { CAPTURE_STAGES } from "../helpers/captureStageTimeline";
 
 const repoRoot = join(import.meta.dir, "../..");
+const execFileAsync = promisify(execFile);
 
 function read(relativePath: string): string {
   return readFileSync(join(repoRoot, relativePath), "utf8");
@@ -154,6 +157,61 @@ describe("#4343 device capture latency instrumentation", () => {
 
     expect(source).toContain('runPhase("pipelineTeardown"');
   });
+
+  test("bounds real-I/O operations and leaves a teardown fallback for a timed-out body (#5715)", () => {
+    const source = withoutComments(read(INTEGRATION_TEST_PATH));
+
+    // The outer test deadline only reports a whole-suite hang. Every operation
+    // that can block on the hosted runner needs its own failure path, while the
+    // retained cleanup callback lets afterAll reap processes if Bun skips finally.
+    expect(source).toContain("const REAL_IO_TIMEOUT_MS = 30_000;");
+    expect(source).toContain("signal: AbortSignal.timeout(REAL_IO_TIMEOUT_MS)");
+    expect(source).toContain("handshakeTimeout: REAL_IO_TIMEOUT_MS");
+    expect(source).toContain("CDP_COMMAND_TIMEOUT_MS");
+    expect(source).toContain("async function withDeadline<T>(");
+    expect(source).toContain("await withDeadline(message, deadline - Date.now(), predicate)");
+    expect(source).toContain("let pendingPipelineTeardown: (() => Promise<void>) | undefined;");
+    expect(source).toContain("const cleanup = pendingPipelineTeardown;");
+    expect(source).toContain("const cleanupErrors: unknown[] = [];");
+    expect(source).toContain("await cleanupStep(() => stop(chrome));");
+    expect(source).toContain(
+      'new AggregateError(cleanupErrors, "WebRTC device-capture teardown failed")',
+    );
+    expect(source).toContain("const TEARDOWN_HOOK_TIMEOUT_MS = 45_000;");
+
+    const afterAllIndex = indexOfRequired(source, "afterAll(");
+    const cleanupIndex = indexOfRequired(source.slice(afterAllIndex), "await cleanup?.()");
+    const recordIndex = indexOfRequired(source.slice(afterAllIndex), "timeline.toRecord(");
+    expect(cleanupIndex).toBeLessThan(recordIndex);
+  });
+
+  test("keeps the default skipped-suite load path free of WebRTC and simulator runtime graphs (#5715)", () => {
+    const source = withoutComments(read(INTEGRATION_TEST_PATH));
+
+    // The macOS default test job does not enable device integration. Loading
+    // these runtime graphs before registering describe.skip can wedge the
+    // isolate before Bun prints the skipped test result.
+    expect(source).not.toContain('from "../../src/features/webrtc/IosH264Source"');
+    expect(source).not.toContain('from "../../src/server/webrtcStreamManager"');
+    expect(source).not.toContain('from "../../src/utils/ios-cmdline-tools/SimCtlClient"');
+    expect(source).not.toContain('from "../../src/features/webrtc/webrtcStreamingConfig"');
+    expect(source).toContain('await import("../../src/features/webrtc/IosH264Source")');
+    expect(source).toContain('await import("../../src/server/webrtcStreamManager")');
+    expect(source).toContain('await import("../../src/utils/ios-cmdline-tools/SimCtlClient")');
+    expect(source).toContain('await import("../../src/features/webrtc/webrtcStreamingConfig")');
+  });
+
+  test("loads the default skipped suite without initializing device capture", async () => {
+    const env = { ...process.env };
+    delete env.AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION;
+    const { stderr, stdout } = await execFileAsync("bun", ["test", INTEGRATION_TEST_PATH], {
+      cwd: repoRoot,
+      env,
+      timeout: 10_000,
+    });
+
+    expect(`${stdout}\n${stderr}`).toContain("(skip) device capture -> WHIP -> MediaMTX -> WHEP");
+  }, 15_000);
 
   test("collects phases on the shared timeline and keeps afterAll the sole record writer (#4354)", () => {
     const source = withoutComments(read(INTEGRATION_TEST_PATH));

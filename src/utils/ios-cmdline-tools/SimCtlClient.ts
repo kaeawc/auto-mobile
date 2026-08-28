@@ -271,9 +271,10 @@ export interface SimCtl {
   /**
    * Get the screen size of the simulator
    * @param deviceId - Optional device ID (defaults to current device or "booted")
+   * @param timeoutMs - Optional command timeout in milliseconds
    * @returns Promise with screen dimensions
    */
-  getScreenSize(deviceId?: string): Promise<ScreenSize>;
+  getScreenSize(deviceId?: string, timeoutMs?: number): Promise<ScreenSize>;
 
   /**
    * Set the simulator appearance
@@ -1891,13 +1892,13 @@ export class SimCtlClient implements SimCtl {
    * @param deviceId - Optional device ID (defaults to current device or "booted")
    * @returns Promise with screen dimensions
    */
-  async getScreenSize(deviceId?: string): Promise<ScreenSize> {
+  async getScreenSize(deviceId?: string, timeoutMs?: number): Promise<ScreenSize> {
     const targetDevice = deviceId || this.device?.deviceId || "booted";
 
     logger.info(`[iOS] Getting screen size for simulator ${targetDevice}`);
 
     // Use simctl io enumerate to get display information
-    const result = await this.executeCommandArgs(["io", targetDevice, "enumerate"]);
+    const result = await this.executeCommandArgs(["io", targetDevice, "enumerate"], timeoutMs);
 
     // Parse the text output to find LCD screen information
     const lines = result.stdout.split("\n");

@@ -8,10 +8,6 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import WebSocket from "ws";
 import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
-import { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
-import { WEBRTC_IOS_SIMULATOR_FPS_DEFAULT } from "../../src/features/webrtc/webrtcStreamingConfig";
-import { IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS } from "../../src/features/webrtc/IosH264Source";
-import { WEBRTC_STREAM_LEASE_TTL_MS } from "../../src/server/webrtcStreamManager";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 import {
   CaptureStageTimeline,
@@ -51,8 +47,15 @@ const ANDROID_VIDEO_SERVER_MEDIUM_FPS = 30;
 const FIXTURE_RESTORE_TIMEOUT_MS = 15_000;
 // bun caps a hook with no explicit deadline at 5000ms, which is what turned a
 // slow appearance restore into a failed run whose pipeline recorded `passed`.
-// Give the hook its own generous timeout, comfortably past the restore budget.
-const TEARDOWN_HOOK_TIMEOUT_MS = 30_000;
+// A worst-case cleanup takes 33s (heartbeat, Chrome and MediaMTX escalation,
+// and bounded daemon stop), so leave room for directory cleanup and artifact
+// writing instead of cancelling afterAll before it can reap every resource.
+const TEARDOWN_HOOK_TIMEOUT_MS = 45_000;
+// The outer test deadline is a last resort. Bound individual real-I/O calls so
+// a hung subprocess or socket names the failed operation rather than consuming
+// the entire device lane (#5715).
+const REAL_IO_TIMEOUT_MS = 30_000;
+const CDP_COMMAND_TIMEOUT_MS = REAL_IO_TIMEOUT_MS;
 
 interface ChromeTarget {
   type: string;
@@ -74,11 +77,38 @@ interface ChromeReader {
   cdp: CdpClient;
 }
 
+/** Bound an operation that can otherwise hold a CI isolate indefinitely. */
+async function withDeadline<T>(step: string, timeoutMs: number, run: () => Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = defaultTimer.setTimeout(
+      () =>
+        reject(
+          new Error(
+            `${step} did not complete within ${timeoutMs}ms — bounded real-I/O deadline hit`,
+          ),
+        ),
+      timeoutMs,
+    );
+  });
+  try {
+    return await Promise.race([run(), deadline]);
+  } finally {
+    if (timer !== undefined) {
+      defaultTimer.clearTimeout(timer);
+    }
+  }
+}
+
 class CdpClient {
   private nextId = 1;
   private readonly pending = new Map<
     number,
-    { resolve: (response: CdpResponse) => void; reject: (error: Error) => void }
+    {
+      resolve: (response: CdpResponse) => void;
+      reject: (error: Error) => void;
+      timeout: NodeJS.Timeout;
+    }
   >();
 
   private constructor(private readonly socket: WebSocket) {
@@ -92,29 +122,69 @@ class CdpClient {
         return;
       }
       this.pending.delete(response.id);
+      defaultTimer.clearTimeout(pending.timeout);
       response.error
         ? pending.reject(new Error(response.error.message))
         : pending.resolve(response);
     });
+    socket.on("error", (error) => this.rejectPending(error));
+    socket.on("close", () => this.rejectPending(new Error("Chrome DevTools connection closed")));
   }
 
   static async connect(url: string): Promise<CdpClient> {
-    const socket = new WebSocket(url);
-    await once(socket, "open");
-    return new CdpClient(socket);
+    const socket = new WebSocket(url, { handshakeTimeout: REAL_IO_TIMEOUT_MS });
+    try {
+      await withDeadline("Chrome DevTools connection", REAL_IO_TIMEOUT_MS, () =>
+        once(socket, "open"),
+      );
+      return new CdpClient(socket);
+    } catch (error) {
+      socket.terminate();
+      throw error;
+    }
   }
 
   command(method: string, params: Record<string, unknown> = {}): Promise<CdpResponse> {
     const id = this.nextId++;
-    const response = new Promise<CdpResponse>((resolve, reject) =>
-      this.pending.set(id, { resolve, reject }),
-    );
-    this.socket.send(JSON.stringify({ id, method, params }));
-    return response;
+    return new Promise<CdpResponse>((resolve, reject) => {
+      const timeout = defaultTimer.setTimeout(() => {
+        if (this.pending.delete(id)) {
+          reject(
+            new Error(
+              `Chrome DevTools ${method} command timed out after ${CDP_COMMAND_TIMEOUT_MS}ms`,
+            ),
+          );
+        }
+      }, CDP_COMMAND_TIMEOUT_MS);
+      this.pending.set(id, { resolve, reject, timeout });
+      try {
+        this.socket.send(JSON.stringify({ id, method, params }));
+      } catch (error) {
+        this.rejectPendingRequest(id, error);
+      }
+    });
   }
 
   close(): void {
     this.socket.close();
+  }
+
+  private rejectPending(error: Error): void {
+    for (const pending of this.pending.values()) {
+      defaultTimer.clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+    this.pending.clear();
+  }
+
+  private rejectPendingRequest(id: number, error: unknown): void {
+    const pending = this.pending.get(id);
+    if (!pending) {
+      return;
+    }
+    this.pending.delete(id);
+    defaultTimer.clearTimeout(pending.timeout);
+    pending.reject(error instanceof Error ? error : new Error(String(error)));
   }
 }
 
@@ -134,7 +204,7 @@ async function waitFor(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await predicate()) {
+    if (await withDeadline(message, deadline - Date.now(), predicate)) {
       return;
     }
     await Bun.sleep(100);
@@ -188,6 +258,7 @@ async function startWebRtcDaemon(
   // than surfacing only as a generic "socket did not become ready".
   const startError = await execFileAsync("bun", ["dist/src/index.js", "--daemon", "start"], {
     env: daemonEnvironment,
+    timeout: REAL_IO_TIMEOUT_MS,
   })
     .then(() => null)
     .catch((error: unknown) => (error instanceof Error ? error : new Error(String(error))));
@@ -232,10 +303,12 @@ async function stop(child: ChildProcessWithoutNullStreams | undefined): Promise<
   if (!child || child.exitCode !== null || child.signalCode !== null) {
     return;
   }
+  const exit = once(child, "exit");
   child.kill("SIGTERM");
-  await Promise.race([once(child, "exit"), Bun.sleep(3_000)]);
+  await Promise.race([exit, Bun.sleep(3_000)]);
   if (child.exitCode === null && child.signalCode === null) {
     child.kill("SIGKILL");
+    await withDeadline("process exit after SIGKILL", 3_000, () => exit);
   }
 }
 
@@ -328,7 +401,9 @@ async function connectReader(
       }
       try {
         const targets = (await (
-          await fetch(`http://127.0.0.1:${CHROME_DEBUG_PORT}/json/list`)
+          await fetch(`http://127.0.0.1:${CHROME_DEBUG_PORT}/json/list`, {
+            signal: AbortSignal.timeout(REAL_IO_TIMEOUT_MS),
+          })
         ).json()) as ChromeTarget[];
         target = targets.find(
           (candidate) => candidate.type === "page" && candidate.webSocketDebuggerUrl,
@@ -604,16 +679,15 @@ async function captureProfile(): Promise<CaptureProfile> {
       ? usesVideoServer
         ? ANDROID_VIDEO_SERVER_MEDIUM_FPS
         : null
-      : WEBRTC_IOS_SIMULATOR_FPS_DEFAULT;
+      : (await import("../../src/features/webrtc/webrtcStreamingConfig"))
+          .WEBRTC_IOS_SIMULATOR_FPS_DEFAULT;
   try {
     if (platform === "android") {
-      const { stdout } = await execFileAsync("adb", [
-        "-s",
-        androidDeviceId(),
-        "shell",
-        "wm",
-        "size",
-      ]);
+      const { stdout } = await execFileAsync(
+        "adb",
+        ["-s", androidDeviceId(), "shell", "wm", "size"],
+        { timeout: REAL_IO_TIMEOUT_MS },
+      );
       const match = /Physical size:\s*(\d+)x(\d+)/.exec(stdout);
       return {
         sourceSize: match ? { width: Number(match[1]), height: Number(match[2]) } : null,
@@ -623,7 +697,8 @@ async function captureProfile(): Promise<CaptureProfile> {
     // Not a hand-rolled `simctl io enumerate` regex: the first "Pixel Size:" in
     // that output belongs to the CarPlay screen, so a naive match reports
     // 720x480 for every simulator. SimCtlClient gates on the integrated display.
-    const screen = await new SimCtlClient().getScreenSize("booted");
+    const { SimCtlClient } = await import("../../src/utils/ios-cmdline-tools/SimCtlClient");
+    const screen = await new SimCtlClient().getScreenSize("booted", REAL_IO_TIMEOUT_MS);
     return { sourceSize: { width: screen.width, height: screen.height }, configuredFps };
   } catch (error) {
     // Diagnostic metadata only — a failed size query must not fail the lane.
@@ -635,21 +710,23 @@ async function captureProfile(): Promise<CaptureProfile> {
 async function launchFixture(): Promise<void> {
   if (platform === "android") {
     const id = androidDeviceId();
-    await execFileAsync("adb", [
-      "-s",
-      id,
-      "shell",
-      "am",
-      "start",
-      "-a",
-      "android.settings.SETTINGS",
-    ]);
-    await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "no"]);
+    await execFileAsync(
+      "adb",
+      ["-s", id, "shell", "am", "start", "-a", "android.settings.SETTINGS"],
+      { timeout: REAL_IO_TIMEOUT_MS },
+    );
+    await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "no"], {
+      timeout: REAL_IO_TIMEOUT_MS,
+    });
     return;
   }
   if (platform === "ios") {
-    await execFileAsync("xcrun", ["simctl", "launch", "booted", "com.apple.Preferences"]);
-    await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"]);
+    await execFileAsync("xcrun", ["simctl", "launch", "booted", "com.apple.Preferences"], {
+      timeout: REAL_IO_TIMEOUT_MS,
+    });
+    await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"], {
+      timeout: REAL_IO_TIMEOUT_MS,
+    });
     return;
   }
   throw new Error("AUTOMOBILE_WEBRTC_DEVICE_PLATFORM must be android or ios");
@@ -661,11 +738,15 @@ async function changeFixture(): Promise<void> {
     // A Home transition guarantees a visible surface change. The emulator may
     // accept a ui-mode setting without repainting the Settings window, which
     // made the old theme-only fixture indistinguishable from a frozen stream.
-    await execFileAsync("adb", ["-s", id, "shell", "input", "keyevent", "HOME"]);
+    await execFileAsync("adb", ["-s", id, "shell", "input", "keyevent", "HOME"], {
+      timeout: REAL_IO_TIMEOUT_MS,
+    });
     return;
   }
   if (platform === "ios") {
-    await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "dark"]);
+    await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "dark"], {
+      timeout: REAL_IO_TIMEOUT_MS,
+    });
     return;
   }
   throw new Error("AUTOMOBILE_WEBRTC_DEVICE_PLATFORM must be android or ios");
@@ -718,11 +799,14 @@ let decodedSize: CaptureDimensions | null = null;
 let egressKbps: number | null = null;
 let decodedFps: number | null = null;
 let outcome: "passed" | "failed" = "failed";
+// Bun still executes afterAll after a test deadline, unlike the test body's
+// finally. Retain this callback until it runs so a stalled operation cannot
+// orphan Chrome or MediaMTX on the macOS worker (#5715).
+let pendingPipelineTeardown: (() => Promise<void>) | undefined;
 // Window over which egress bitrate and decoded fps are averaged, and the
 // interval between the fixture toggles that keep the screen changing across it.
 const EGRESS_WINDOW_MS = 2_000;
 const EGRESS_TOGGLE_INTERVAL_MS = 400;
-const STREAM_LEASE_HEARTBEAT_INTERVAL_MS = WEBRTC_STREAM_LEASE_TTL_MS / 3;
 
 interface StreamLeaseHeartbeat {
   stop(): Promise<Error | null>;
@@ -737,6 +821,7 @@ function startStreamLeaseHeartbeat(
   streamId: string,
   leaseId: string,
   socketPath: string,
+  intervalMs: number,
   timer: Timer = defaultTimer,
 ): StreamLeaseHeartbeat {
   let stopped = false;
@@ -780,7 +865,7 @@ function startStreamLeaseHeartbeat(
       });
   };
 
-  const interval = timer.setInterval(renew, STREAM_LEASE_HEARTBEAT_INTERVAL_MS);
+  const interval = timer.setInterval(renew, intervalMs);
   (interval as { unref?: () => void }).unref?.();
   return {
     async stop(): Promise<Error | null> {
@@ -794,6 +879,14 @@ function startStreamLeaseHeartbeat(
 
 describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => {
   afterAll(async () => {
+    const cleanup = pendingPipelineTeardown;
+    pendingPipelineTeardown = undefined;
+    let cleanupError: unknown;
+    try {
+      await cleanup?.();
+    } catch (error) {
+      cleanupError = error;
+    }
     const record = timeline.toRecord({
       platform: platform ?? "unknown",
       streamId,
@@ -816,7 +909,10 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       `${JSON.stringify(record, null, 2)}\n`,
     );
     await writeFile(join(artifactDir, "result.txt"), `${summary}\n`);
-  });
+    if (cleanupError) {
+      throw cleanupError;
+    }
+  }, TEARDOWN_HOOK_TIMEOUT_MS);
 
   test(
     "the real device capture path renders changing video and stops cleanly",
@@ -870,6 +966,56 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       let observingStart = true;
       let startObserver: Promise<void> = Promise.resolve();
       let leaseHeartbeat: StreamLeaseHeartbeat | undefined;
+      pendingPipelineTeardown = async () => {
+        observingStart = false;
+        // Measured as its own phase (#4354) so a teardown that stalls stopping the
+        // daemon, MediaMTX or Chrome is attributable from the artifact rather than
+        // only from job logs. Attempt every cleanup step before surfacing failures
+        // so one stalled resource cannot orphan all of the later ones.
+        await timeline.runPhase("pipelineTeardown", async () => {
+          const cleanupErrors: unknown[] = [];
+          const cleanupStep = async (run: () => Promise<void> | void): Promise<void> => {
+            try {
+              await run();
+            } catch (error) {
+              cleanupErrors.push(error);
+            }
+          };
+
+          await cleanupStep(async () => {
+            const leaseHeartbeatError = await leaseHeartbeat?.stop();
+            if (leaseHeartbeatError) {
+              console.warn(
+                `WebRTC stream lease heartbeat failed during teardown: ${leaseHeartbeatError.message}`,
+              );
+            }
+          });
+          // Nothing in the observer rejects today; swallow anyway so a future edit
+          // cannot skip the teardown below and replace the real test failure.
+          await cleanupStep(() => startObserver.catch(() => undefined));
+          await cleanupStep(() => cdp?.close());
+          await cleanupStep(() => stop(chrome));
+          await cleanupStep(async () => {
+            if (started) {
+              await execFileAsync("bun", ["dist/src/index.js", "--daemon", "stop"], {
+                env: daemonEnvironment,
+                timeout: FIXTURE_RESTORE_TIMEOUT_MS,
+              }).catch(() => undefined);
+            }
+          });
+          await cleanupStep(() => stop(mediamtx));
+          await cleanupStep(() => rm(webRtcSocketDir, { recursive: true, force: true }));
+          // The daemon dir lives under the artifact dir and holds its logs and DB.
+          // Now that artifacts upload on success too, keep it only for a failure to
+          // triage; a green run should ship the latency record, not a sqlite file.
+          if (outcome === "passed") {
+            await cleanupStep(() => rm(daemonDir, { recursive: true, force: true }));
+          }
+          if (cleanupErrors.length > 0) {
+            throw new AggregateError(cleanupErrors, "WebRTC device-capture teardown failed");
+          }
+        });
+      };
       try {
         await waitFor(async () => {
           if (mediamtx.exitCode !== null || mediamtx.signalCode !== null) {
@@ -877,7 +1023,9 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
               "MediaMTX exited before it became ready; inspect scratch/webrtc-device-integration/mediamtx.log",
             );
           }
-          const response = await fetch(`http://127.0.0.1:${webRtcPort}/`).catch(() => undefined);
+          const response = await fetch(`http://127.0.0.1:${webRtcPort}/`, {
+            signal: AbortSignal.timeout(REAL_IO_TIMEOUT_MS),
+          }).catch(() => undefined);
           if (!response) {
             return false;
           }
@@ -929,7 +1077,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
             // default so host-candidate negotiation cannot depend on runner DNS.
             iceServers: [],
           },
-          { socketPath: webRtcSocketPath },
+          { socketPath: webRtcSocketPath, timeoutMs: REAL_IO_TIMEOUT_MS },
         );
         if (!response.success) {
           throw new Error(
@@ -940,7 +1088,13 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         if (!leaseId) {
           throw new Error("started device WebRTC stream did not return an ownership lease");
         }
-        leaseHeartbeat = startStreamLeaseHeartbeat(streamId, leaseId, webRtcSocketPath);
+        const { WEBRTC_STREAM_LEASE_TTL_MS } = await import("../../src/server/webrtcStreamManager");
+        leaseHeartbeat = startStreamLeaseHeartbeat(
+          streamId,
+          leaseId,
+          webRtcSocketPath,
+          WEBRTC_STREAM_LEASE_TTL_MS / 3,
+        );
         await waitFor(async () => {
           const status = await sendWebRtcStreamRequest(
             { action: "status", id: `${streamId}-capture-status`, streamId, leaseId },
@@ -1023,6 +1177,8 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         // scope here. Fresh viewer subscribing relays a PLI upstream through
         // MediaMTX to the WHIP publisher, which calls source.requestKeyFrame().
         if (platform === "ios") {
+          const { IOS_FORCED_KEYFRAME_MIN_INTERVAL_MS } =
+            await import("../../src/features/webrtc/IosH264Source");
           await timeline.runPhase("keyframeRecovery", async () => {
             // A brand-new WHEP subscription is the relayed PLI: it renegotiates
             // with MediaMTX, which requests a keyframe upstream. The recovery
@@ -1066,47 +1222,19 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         }
         const stopped = await sendWebRtcStreamRequest(
           { action: "stop", id: `${streamId}-stop`, streamId },
-          { socketPath: webRtcSocketPath },
+          { socketPath: webRtcSocketPath, timeoutMs: REAL_IO_TIMEOUT_MS },
         );
         expect(stopped.success).toBe(true);
         const listed = await sendWebRtcStreamRequest(
           { action: "list", id: `${streamId}-list` },
-          { socketPath: webRtcSocketPath },
+          { socketPath: webRtcSocketPath, timeoutMs: REAL_IO_TIMEOUT_MS },
         );
         expect(listed.streams?.some((stream) => stream.streamId === streamId)).toBe(false);
         outcome = "passed";
       } finally {
-        observingStart = false;
-        // Measured as its own phase (#4354) so a teardown that stalls stopping the
-        // daemon, MediaMTX or Chrome is attributable from the artifact rather than
-        // only from job logs. runPhase re-throws, preserving the prior semantics
-        // where a failed cleanup surfaces as a test failure.
-        await timeline.runPhase("pipelineTeardown", async () => {
-          const leaseHeartbeatError = await leaseHeartbeat?.stop();
-          if (leaseHeartbeatError) {
-            console.warn(
-              `WebRTC stream lease heartbeat failed during teardown: ${leaseHeartbeatError.message}`,
-            );
-          }
-          // Nothing in the observer rejects today; swallow anyway so a future edit
-          // cannot skip the teardown below and replace the real test failure.
-          await startObserver.catch(() => undefined);
-          cdp?.close();
-          await stop(chrome);
-          if (started) {
-            await execFileAsync("bun", ["dist/src/index.js", "--daemon", "stop"], {
-              env: daemonEnvironment,
-            }).catch(() => undefined);
-          }
-          await stop(mediamtx);
-          await rm(webRtcSocketDir, { recursive: true, force: true });
-          // The daemon dir lives under the artifact dir and holds its logs and DB.
-          // Now that artifacts upload on success too, keep it only for a failure to
-          // triage; a green run should ship the latency record, not a sqlite file.
-          if (outcome === "passed") {
-            await rm(daemonDir, { recursive: true, force: true });
-          }
-        });
+        const cleanup = pendingPipelineTeardown;
+        pendingPipelineTeardown = undefined;
+        await cleanup?.();
       }
     },
     deviceIntegrationTimeoutMs,

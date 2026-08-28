@@ -1,27 +1,7 @@
-# Release Downloads
+# Usage Data
 
-Daily download counts for every AutoMobile release — GitHub release assets (APK, IPA, video jar,
-desktop `deb`/`dmg`/`msi`, screen-capture helper) **and** the npm package.
-
-The data is snapshotted daily by the
-[`release-downloads-metrics`](https://github.com/kaeawc/auto-mobile/blob/main/.github/workflows/release-downloads-metrics.yml)
-workflow into
-[`docs/metrics/data/downloads.jsonl`](https://github.com/kaeawc/auto-mobile/blob/main/docs/metrics/data/downloads.jsonl)
-on `main`, and this page fetches that file live at view time — so it is always current regardless of
-when the docs site was last rebuilt. The three charts below are all re-derived from that one raw
-snapshot file at view time, so adding, changing, or re-slicing a chart never requires migrating data.
-
-!!! note "How the daily numbers are derived"
-GitHub's API reports only the **cumulative** `download_count` per asset — there is no per-day
-history. Daily figures are recovered by snapshotting the cumulative count each day and diffing
-consecutive snapshots. **History before the first snapshot is unrecoverable**: the first run
-seeds day-0 with each release's current cumulative total, and true daily deltas begin the day
-_after_ the first snapshot. A day whose delta is unknowable — the day-0 seed, a missing
-intermediate snapshot, or a counter reset (asset re-published) — is never invented as a zero;
-it is excluded from the daily total and the affected stacked segment is drawn faded, so the bar
-reads as an honest lower bound. npm is different — its API returns true daily counts directly, so
-its chart is exact from the start. npm daily totals include _all_ package downloads (CI, mirrors)
-and dwarf the asset counts, so npm is charted in its own section on its own axis.
+AutoMobile does not include any tracking mechanisms of any kind. These numbers
+come from the GitHub Releases API and npm download counts.
 
 <div id="dl-metrics" markdown="0">
   <p id="dl-status">Loading download metrics…</p>
@@ -29,8 +9,7 @@ and dwarf the asset counts, so npm is charted in its own section on its own axis
 
 <style>
   #dl-metrics .dl-section { margin: 1.2rem 0 2rem; }
-  #dl-metrics h3 { margin-bottom: 0.2rem; }
-  #dl-metrics .dl-sub { font-size: 0.85rem; opacity: 0.75; margin-top: 0; }
+  #dl-metrics #dl-status { opacity: 0.7; }
   #dl-metrics svg { width: 100%; height: auto; max-width: 100%; overflow: visible; }
   #dl-metrics .dl-legend { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; font-size: 0.8rem; margin: 0.3rem 0 0.6rem; }
   #dl-metrics .dl-legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
@@ -410,15 +389,6 @@ and dwarf the asset counts, so npm is charted in its own section on its own axis
   function section(root, title, subtitle) {
     var wrap = document.createElement("div");
     wrap.className = "dl-section";
-    var h = document.createElement("h3");
-    h.textContent = title;
-    wrap.appendChild(h);
-    if (subtitle) {
-      var p = document.createElement("p");
-      p.className = "dl-sub";
-      p.textContent = subtitle;
-      wrap.appendChild(p);
-    }
     root.appendChild(wrap);
     return wrap;
   }
@@ -429,12 +399,6 @@ and dwarf the asset counts, so npm is charted in its own section on its own axis
       root.innerHTML = '<p class="dl-error">No snapshot data available yet.</p>';
       return;
     }
-    var latest = snapshots[snapshots.length - 1].date;
-    var intro = document.createElement("p");
-    intro.className = "dl-sub";
-    intro.textContent = "Latest snapshot: " + latest + " · " + snapshots.length + " day(s) of history.";
-    root.appendChild(intro);
-
     var built = buildAssetSeries(snapshots);
 
     // Chart 1 — the headline: total artifact downloads over time, by asset type,
@@ -508,4 +472,3 @@ and dwarf the asset counts, so npm is charted in its own section on its own axis
   }
 })();
 </script>
-

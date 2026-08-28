@@ -23,5 +23,6 @@ The main user-facing capabilities are:
 - select and manage devices;
 - execute repeatable plans and collect diagnostics.
 
-Start with [installation](../install.md) or the [tool list](mcp/tools.md).
-
+Start with [installation](../index.md#install), then see the
+[interaction loop](mcp/interaction-loop.md) for how AutoMobile observes,
+acts, and returns updated state.

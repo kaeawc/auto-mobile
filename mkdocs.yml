@@ -80,159 +80,20 @@ markdown_extensions:
 
 nav:
   - "Overview": index.md
-  - "Install": install.md
+  - "MCP Tools": design-docs/mcp/tools.md
   - "Using AutoMobile":
-      - "UX Exploration": using/ux-exploration.md
-      - "Reproducing Bugs": using/reproducing-bugs.md
-      - "UI Tests": using/ui-tests.md
-      - "Hermetic CI Pinning": using/hermetic-ci-pinning.md
-      - "Per-tool Selection & Registration Gates": using/tool-capabilities.md
-      - "Stage Android picker fixtures": using/android-shared-storage-fixtures.md
-      - "WebRTC Screen Streaming": webrtc-streaming-ci-worker.md
-      - "Environment Variables": using/environment-variables.md
-      - "Performance Analysis":
-          - "Overview": using/perf-analysis/index.md
-          - "Startup": using/perf-analysis/startup.md
-          - "Screen Transition": using/perf-analysis/screen-transition.md
-          - "Scroll Framerate": using/perf-analysis/scroll-framerate.md
-      - "Device Screen Control": using/screen-control.md
-      - "Accessibility": using/a11y.md
-      - "TalkBack Testing": using/talkback.md
-      - "VoiceOver Testing": using/voiceover.md
-  - "Metrics":
-      - "Release Downloads": metrics/downloads.md
-  - "Design Docs":
-      - "Overview": design-docs/index.md
-      - "Status Glossary": design-docs/status-glossary.md
-      - "DB Concurrency RMW Audit": design-docs/db-concurrency-rmw-audit.md
-      - "Image Backend": design-docs/image-backend.md
-      - "Runtime Dependency Pinning": design-docs/release/runtime-dependency-pinning.md
-      - "Playground Design System": design-docs/playground-design-system.md
-      - "Sharp Bun 0.35 Repro": reproductions/sharp-bun-035/README.md
-      - "API Surface":
-          - "Autocomplete Audit": design-docs/api-surface/autocomplete-audit.md
-          - "Cross-Platform Parity": design-docs/api-surface/cross-platform-parity.md
-          - "Doc Generation": design-docs/api-surface/doc-generation.md
-          - "Navigation Alignment": design-docs/api-surface/navigation-alignment.md
-      - "MCP":
-          - "Overview": design-docs/mcp/index.md
-          - "Tools": design-docs/mcp/tools.md
-          - "App File Service": design-docs/mcp/app-file-service.md
-          - "SDK v2 / Stateless Migration": design-docs/mcp/sdk-v2-stateless-migration.md
-          - "Observe":
-              - "Overview": design-docs/mcp/observe/index.md
-              - "Appearance Sync": design-docs/mcp/observe/appearance.md
-              - "Screen Streaming": design-docs/mcp/observe/screen-streaming.md
-              - "WebRTC Streaming (WHIP)": design-docs/mcp/observe/webrtc-streaming.md
-              - "WebRTC Standards Map": design-docs/mcp/observe/webrtc-standards-map.md
-              - "werift H.264 Packetization Spike": design-docs/mcp/observe/werift-h264-packetization-spike.md
-              - "iOS WebRTC Streaming": design-docs/mcp/observe/ios-webrtc-streaming.md
-              - "Video Recording": design-docs/mcp/observe/video-recording.md
-              - "Vision Fallback": design-docs/mcp/observe/vision-fallback.md
-              - "Visual Highlighting": design-docs/mcp/observe/visual-highlighting.md
-          - "Interaction Loop": design-docs/mcp/interaction-loop.md
-          - "Loading-State Awareness": design-docs/mcp/loading-awareness.md
-          - "Daemon":
-              - "Overview": design-docs/mcp/daemon/index.md
-              - "Critical Section": design-docs/mcp/daemon/critical-section.md
-              - "Multi-Agent Filesystem Contract": design-docs/mcp/daemon/multi-agent-filesystem-contract.md
-              - "Unix Socket API": design-docs/mcp/daemon/unix-socket-api.md
-              - "Client Screen Control (3rd-party guide)": design-docs/mcp/daemon/client-screen-control.md
-              - "Screen Control Mapping": design-docs/mcp/daemon/screen-control-mapping.md
-              - "Client Frame Snapshot": design-docs/mcp/daemon/client-frame-snapshot.md
-          - "Multi-device": design-docs/mcp/multi-device.md
-          - "Navigation Graph":
-              - "Overview": design-docs/mcp/nav/index.md
-              - "Graph Structure": design-docs/mcp/nav/graph-structure.md
-              - "Fingerprinting": design-docs/mcp/nav/fingerprinting.md
-              - "Performance": design-docs/mcp/nav/performance.md
-              - "Explore": design-docs/mcp/nav/explore.md
-          - "Feature Flags": design-docs/mcp/feature-flags.md
-          - "Storage":
-              - "Overview": design-docs/mcp/storage/index.md
-              - "Migrations": design-docs/mcp/storage/migrations.md
-              - "Device State Snapshots": design-docs/mcp/storage/snapshots.md
-          - "Accessibility":
-              - "Overview": design-docs/mcp/a11y/index.md
-              - "TalkBack/VoiceOver": design-docs/mcp/a11y/talkback-voiceover.md
-              - "VoiceOver/TalkBack Parity": design-docs/mcp/a11y/voiceover-talkback-parity.md
-          - "Resources": design-docs/mcp/resources.md
-          - "Context Thresholds": design-docs/mcp/context-thresholds.md
-          - "SDK Event Pipeline": design-docs/mcp/sdk-event-pipeline.md
-          - "Test Plan Validation": design-docs/mcp/test-plan-validation.md
-      - "Platform Specific":
-          - "Android":
-              - "Overview": design-docs/plat/android/index.md
-              - "Observe": design-docs/plat/android/observe.md
-              - "Screen Streaming": design-docs/plat/android/screen-streaming.md
-              - "Video-Stream Rotation Attestation": design-docs/plat/android/video-stream-rotation-attestation.md
-              - "Emulator Startup": design-docs/plat/android/emulator-startup.md
-              - "CtrlProxy": design-docs/plat/android/control-proxy.md
-              - "AutoMobile SDK": design-docs/plat/android/auto-mobile-sdk.md
-              - "actions-diff-observe sign-off": design-docs/plat/android/actions-diff-observe-signoff.md
-              - "JUnitRunner":
-                  - "Overview": design-docs/plat/android/junit-runner/index.md
-                  - "Project Setup": design-docs/plat/android/junit-runner/project-setup.md
-                  - "Writing Tests": design-docs/plat/android/junit-runner/writing-tests.md
-                  - "CI Integration": design-docs/plat/android/junit-runner/ci-integration.md
-                  - "CI daemon logs": design-docs/plat/android/junit-runner/ci-daemon-logs.md
-                  - "Plan failure observation": design-docs/plat/android/junit-runner/ci-plan-failure-observation.md
-                  - "Diagnosing daemon connectivity": design-docs/plat/android/junit-runner/diagnosing-daemon-mcp-connectivity.md
-                  - "CI app launch troubleshooting": design-docs/plat/android/junit-runner/ci-troubleshooting-app-launch.md
-                  - "Agent brief (app not foreground)": design-docs/plat/android/junit-runner/agent-brief-app-not-foreground.md
-              - "IDE Plugin":
-                  - "Overview": design-docs/plat/android/ide-plugin/overview.md
-                  - "Test Recording": design-docs/plat/android/ide-plugin/test-recording.md
-                  - "Navigation Graph Render": design-docs/plat/android/ide-plugin/navigation-graph.md
-                  - "Control Feature Flags": design-docs/plat/android/ide-plugin/feature-flags.md
-              - "Desktop App": design-docs/plat/android/desktop-app.md
-              - "Work Profiles": design-docs/plat/android/work-profiles.md
-              - "Device Tools":
-                  - "accessibilityFocus": design-docs/plat/android/accessibility-focus.md
-                  - "takeScreenshot fallback": design-docs/plat/android/take-screenshot.md
-                  - "Biometrics stubbing": design-docs/plat/android/biometrics.md
-                  - "Keyguard handling": design-docs/plat/android/keyguard.md
-                  - "Notification triggering": design-docs/plat/android/notifications.md
-                  - "System tray lookFor": design-docs/plat/android/system-tray-lookfor.md
-                  - "tapOn pre-tap stability": design-docs/plat/android/tapOn-pre-tap-stability-and-search-flakes.md
-                  - "Clipboard tool": design-docs/plat/android/clipboard.md
-              - "Feature Ideas":
-                  - "Overview": design-docs/plat/android/feature-ideas.md
-                  - "Network state control": design-docs/plat/android/network-state.md
-                  - "Accessibility testing": design-docs/plat/android/accessibility-testing.md
-                  - "executePlan assertions": design-docs/plat/android/executeplan-assertions.md
-                  - "TalkBack simulation": design-docs/plat/android/talkback.md
-          - "iOS":
-              - "Overview": design-docs/plat/ios/index.md
-              - "Screen Streaming": design-docs/plat/ios/screen-streaming.md
-              - "CtrlProxy iOS": design-docs/plat/ios/ctrl-proxy-ios.md
-              - "simctl Integration": design-docs/plat/ios/simctl.md
-              - "Managed App Configuration": design-docs/plat/ios/managed-app-config.md
-              - "Managed Apple IDs": design-docs/plat/ios/managed-apple-ids.md
-              - "XCTest Runner":
-                  - "Overview": design-docs/plat/ios/xctestrunner/index.md
-                  - "Project Setup": design-docs/plat/ios/xctestrunner/project-setup.md
-                  - "Writing Tests": design-docs/plat/ios/xctestrunner/writing-tests.md
-                  - "CI Integration": design-docs/plat/ios/xctestrunner/ci-integration.md
-              - "AutoMobile SDK": design-docs/plat/ios/auto-mobile-sdk.md
-              - "Real App Performance (spike)": design-docs/plat/ios/real-app-performance.md
-              - "testmanagerd": design-docs/plat/ios/testmanagerd.md
-  - "Contributing":
-      - "Overview": contributing.md
-      - "Standard Library First": contributing/stdlib-first.md
-      - "Apple Signing & Notarization": release/apple-signing-setup.md
-      - "Windows & Linux Signing (research)": release/windows-linux-signing-research.md
-      - "Maven Publication Manifest": release/maven-publication-manifest.md
-      - "iOS Simulator Continuity Contract": release/ios-simulator-continuity.md
-      - "Dependency Decisions":
-          - "fast-check": decisions/fast-check.md
-          - "iOS Files picker fixture provider": decisions/ios-user-files-provider.md
-          - "TypeScript 7 (tsgo)": decisions/typescript-native-preview.md
-          - "oxlint": decisions/oxlint.md
-          - "oxc-parser": decisions/oxc-parser.md
-          - "oxlint-tsgolint": decisions/oxlint-tsgolint.md
-          - "oxfmt": decisions/oxfmt.md
-      - "Codex Automation Thread Report": codex-automation-thread-spam-report.md
-  - "GitHub Discussions": https://github.com/kaeawc/auto-mobile/discussions
+      - "Explore an app": using/ux-exploration.md
+      - "Reproduce a bug": using/reproducing-bugs.md
+      - "AutoMobile Desktop App": using/auto-mobile-desktop-app.md
+      - "UI tests": using/ui-tests.md
+      - "Test prep tools": using/test-prep-tools.md
+      - "Dynamic Tools": using/dynamic-tools.md
+      - "Feature flags": using/feature-flags.md
+      - "Environment variables": using/environment-variables.md
+      - "Performance": using/performance.md
+  - "How it Works":
+      - "System design": design-docs/index.md
+      - "Interaction loop": design-docs/mcp/interaction-loop.md
+      - "Daemon": design-docs/mcp/daemon.md
+  - "Usage Data": metrics/usage-data.md
   - "FAQ": faq.md
-  - "Change Log": changelog.md

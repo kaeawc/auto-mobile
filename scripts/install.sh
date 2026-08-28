@@ -2845,7 +2845,7 @@ recover_stale_macos_desktop_app_swap() {
 }
 
 acquire_macos_desktop_app_lock() {
-    local lock_dir="$1" target_parent="$2" target_app="$3" owner_pid owner_pid_to_write="${BASHPID}" reclaim_dir reclaim_owner
+    local lock_dir="$1" target_parent="$2" target_app="$3" owner_pid owner_pid_to_write="$$" reclaim_dir reclaim_owner
     if run_desktop_app_privileged mkdir "${lock_dir}" 2>/dev/null; then
         if ! printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null; then
             run_desktop_app_privileged rmdir "${lock_dir}" || true
@@ -2853,9 +2853,9 @@ acquire_macos_desktop_app_lock() {
         fi
         return 0
     fi
-    if ! owner_pid=$(run_desktop_app_privileged cat "${lock_dir}/owner.pid" 2>/dev/null) \
-        || [[ ! "${owner_pid}" =~ ^[0-9]+$ ]] \
-        || run_desktop_app_privileged kill -0 "${owner_pid}" 2>/dev/null; then
+    owner_pid=$(run_desktop_app_privileged cat "${lock_dir}/owner.pid" 2>/dev/null || true)
+    if [[ "${owner_pid}" =~ ^[0-9]+$ ]] \
+        && run_desktop_app_privileged kill -0 "${owner_pid}" 2>/dev/null; then
         return 1
     fi
     log_warn "Reclaiming stale AutoMobile desktop installation lock."
@@ -2863,9 +2863,9 @@ acquire_macos_desktop_app_lock() {
     # Claim recovery inside the existing lock so only one installer can repair
     # the stale swap while the lock continues to exclude a new installation.
     if ! run_desktop_app_privileged mkdir "${reclaim_dir}" 2>/dev/null; then
-        if ! reclaim_owner=$(run_desktop_app_privileged cat "${reclaim_dir}/owner.pid" 2>/dev/null) \
-            || [[ ! "${reclaim_owner}" =~ ^[0-9]+$ ]] \
-            || run_desktop_app_privileged kill -0 "${reclaim_owner}" 2>/dev/null; then
+        reclaim_owner=$(run_desktop_app_privileged cat "${reclaim_dir}/owner.pid" 2>/dev/null || true)
+        if [[ "${reclaim_owner}" =~ ^[0-9]+$ ]] \
+            && run_desktop_app_privileged kill -0 "${reclaim_owner}" 2>/dev/null; then
             return 1
         fi
         log_warn "Reclaiming interrupted AutoMobile desktop installation recovery."
@@ -2897,14 +2897,14 @@ install_macos_desktop_app_bundle() {
     target_parent=$(dirname "${target_app}")
     lock_dir="${target_parent}/.automobile-install.lock"
     DESKTOP_APP_REPLACEMENT_TARGET="${target_app}"
-    DESKTOP_APP_REPLACEMENT_LOCK_DIR="${lock_dir}"
+    DESKTOP_APP_REPLACEMENT_LOCK_DIR=""
     DESKTOP_APP_REPLACEMENT_COMPLETE=false
     if ! acquire_macos_desktop_app_lock "${lock_dir}" "${target_parent}" "${target_app}"; then
-        DESKTOP_APP_REPLACEMENT_LOCK_DIR=""
         DESKTOP_APP_REPLACEMENT_TARGET=""
         log_error "Another AutoMobile desktop app installation is already in progress."
         return 1
     fi
+    DESKTOP_APP_REPLACEMENT_LOCK_DIR="${lock_dir}"
     if ! staging_dir=$(run_desktop_app_privileged mktemp -d "${target_parent}/.automobile-install.XXXXXX"); then
         cleanup_macos_desktop_app_replacement
         return 1

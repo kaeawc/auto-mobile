@@ -1,0 +1,4 @@
+AutoMobile #5806 document-picker fixture.
+
+This text file is copied only into the Playground app's
+Documents/automobile-issue-5806 namespace by the iOS smoke script.

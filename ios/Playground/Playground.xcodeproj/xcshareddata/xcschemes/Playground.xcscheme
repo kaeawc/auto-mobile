@@ -29,6 +29,20 @@
             buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
+               BlueprintIdentifier = "9586904FC044DFE3B2D9C272"
+               BuildableName = "PlaygroundFilesPickerUITests.xctest"
+               BlueprintName = "PlaygroundFilesPickerUITests"
+               ReferencedContainer = "container:Playground.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
                BlueprintIdentifier = "21356511771170ED7D28D6F3"
                BuildableName = "PlaygroundTests.xctest"
                BlueprintName = "PlaygroundTests"
@@ -61,6 +75,17 @@
                BlueprintIdentifier = "21356511771170ED7D28D6F3"
                BuildableName = "PlaygroundTests.xctest"
                BlueprintName = "PlaygroundTests"
+               ReferencedContainer = "container:Playground.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "9586904FC044DFE3B2D9C272"
+               BuildableName = "PlaygroundFilesPickerUITests.xctest"
+               BlueprintName = "PlaygroundFilesPickerUITests"
                ReferencedContainer = "container:Playground.xcodeproj">
             </BuildableReference>
          </TestableReference>

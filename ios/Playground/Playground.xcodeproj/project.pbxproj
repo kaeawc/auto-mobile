@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		007B2120C2735B42A20C510B /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2F4747AC5700DF138836D5F /* Theme.swift */; };
 		15B37A3EDBAFD6BD0FC98BFC /* DemosTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25213AE8A9FD9A5B1EEFD97F /* DemosTab.swift */; };
+		1EE5E98648A8DFD56C1EE62C /* FilesPickerProbeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06C02BE035F32E984F52B8D0 /* FilesPickerProbeUITests.swift */; };
+		2F8BA3EDD179892E3C489DCB /* FilesPickerProbeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C80CB4E7FD9E92FD2A08F2F /* FilesPickerProbeView.swift */; };
 		327A28D4620038BBA8D02656 /* Shapes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5122FF517804CD75B0F75CBA /* Shapes.swift */; };
 		4546703D0511A96D6060F587 /* CrayonSketch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0972F015B9B7D85BD6F3270 /* CrayonSketch.swift */; };
 		4E220C88A805ED0A7AFDEE38 /* PlaygroundDatabaseFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A14ADB69D8A746CDB99D61DE /* PlaygroundDatabaseFixtureTests.swift */; };
@@ -32,6 +34,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		5F0B8E59CC46A228D3DBC98D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DF84942AD828BBDD499F04C0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 739B1FD817D42F0264714A50;
+			remoteInfo = Playground;
+		};
 		BFE3470C534A49ECA416CB8A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = DF84942AD828BBDD499F04C0 /* Project object */;
@@ -42,6 +51,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		06C02BE035F32E984F52B8D0 /* FilesPickerProbeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesPickerProbeUITests.swift; sourceTree = "<group>"; };
 		0C5B41C44C18F0045A6B61C2 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		11B156E0FBE749405E1F2D0D /* CrayonSketchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CrayonSketchTests.swift; sourceTree = "<group>"; };
 		25213AE8A9FD9A5B1EEFD97F /* DemosTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemosTab.swift; sourceTree = "<group>"; };
@@ -52,6 +62,7 @@
 		51580F5FC5ADCD5576885563 /* Typography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Typography.swift; sourceTree = "<group>"; };
 		64FD18EC8D1B9A665615C374 /* SettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTab.swift; sourceTree = "<group>"; };
 		8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHighlightOverlayE2ETests.swift; sourceTree = "<group>"; };
+		8C80CB4E7FD9E92FD2A08F2F /* FilesPickerProbeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FilesPickerProbeView.swift; sourceTree = "<group>"; };
 		A14ADB69D8A746CDB99D61DE /* PlaygroundDatabaseFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaygroundDatabaseFixtureTests.swift; sourceTree = "<group>"; };
 		AA0EB8290A6E5436B2C8CE6F /* auto-mobile-sdk */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "auto-mobile-sdk"; path = "../auto-mobile-sdk"; sourceTree = SOURCE_ROOT; };
 		BDA9169E926B14087F3B1BA2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -66,6 +77,7 @@
 		D61225B3155981050B6A59A6 /* AccessibilityRotorDemo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityRotorDemo.swift; sourceTree = "<group>"; };
 		E1B25FBAC5217DE05EA701CF /* ShantellSans.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = ShantellSans.ttf; sourceTree = "<group>"; };
 		E40DD68F934F5F0D2981ACA1 /* Playground.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Playground.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FAD793841AB97726998E94B5 /* PlaygroundFilesPickerUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlaygroundFilesPickerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		FBFA8ECD2DC59DBF8A6FBBF3 /* PlaygroundThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaygroundThemeTests.swift; sourceTree = "<group>"; };
 		FF86B8E1368C9B39424F13C0 /* DiscoverTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverTab.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -90,10 +102,20 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		0A0CCC846A066708EBAEA795 /* FilesPickerProbeUITests */ = {
+			isa = PBXGroup;
+			children = (
+				06C02BE035F32E984F52B8D0 /* FilesPickerProbeUITests.swift */,
+			);
+			name = FilesPickerProbeUITests;
+			path = Tests/FilesPickerProbeUITests;
+			sourceTree = "<group>";
+		};
 		3F6B916872C30820F6241E84 /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				E40DD68F934F5F0D2981ACA1 /* Playground.app */,
+				FAD793841AB97726998E94B5 /* PlaygroundFilesPickerUITests.xctest */,
 				CBBA4475C2A7A68AE3987086 /* PlaygroundTests.xctest */,
 			);
 			name = Products;
@@ -131,6 +153,7 @@
 			isa = PBXGroup;
 			children = (
 				D01BCE22E951887741F32904 /* ContentView.swift */,
+				8C80CB4E7FD9E92FD2A08F2F /* FilesPickerProbeView.swift */,
 				BDA9169E926B14087F3B1BA2 /* Info.plist */,
 				C6EA6F80147865B6F32DD526 /* PlaygroundApp.swift */,
 				3CF899DC96DC92471BB6FC81 /* PlaygroundDatabaseFixture.swift */,
@@ -175,6 +198,7 @@
 			children = (
 				CAC67DC1CDDC454A7BB7870A /* Assets.xcassets */,
 				C8708B4984B178C033908015 /* Configurations */,
+				0A0CCC846A066708EBAEA795 /* FilesPickerProbeUITests */,
 				75054112A41CDCE58ADACF92 /* Packages */,
 				AABC9BE64A1302199D5D2AF8 /* Sources */,
 				B500CE1A6941BEA33903C091 /* Tests */,
@@ -237,6 +261,24 @@
 			productReference = E40DD68F934F5F0D2981ACA1 /* Playground.app */;
 			productType = "com.apple.product-type.application";
 		};
+		9586904FC044DFE3B2D9C272 /* PlaygroundFilesPickerUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C80713D8EF4DF8591125FE94 /* Build configuration list for PBXNativeTarget "PlaygroundFilesPickerUITests" */;
+			buildPhases = (
+				0F694132B18E1FF619AF35E3 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C55EEF7404A088DD02C8AD02 /* PBXTargetDependency */,
+			);
+			name = PlaygroundFilesPickerUITests;
+			packageProductDependencies = (
+			);
+			productName = PlaygroundFilesPickerUITests;
+			productReference = FAD793841AB97726998E94B5 /* PlaygroundFilesPickerUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -251,6 +293,10 @@
 					};
 					739B1FD817D42F0264714A50 = {
 						ProvisioningStyle = Automatic;
+					};
+					9586904FC044DFE3B2D9C272 = {
+						ProvisioningStyle = Automatic;
+						TestTargetID = 739B1FD817D42F0264714A50;
 					};
 				};
 			};
@@ -273,6 +319,7 @@
 			targets = (
 				739B1FD817D42F0264714A50 /* Playground */,
 				21356511771170ED7D28D6F3 /* PlaygroundTests */,
+				9586904FC044DFE3B2D9C272 /* PlaygroundFilesPickerUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -290,6 +337,14 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		0F694132B18E1FF619AF35E3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1EE5E98648A8DFD56C1EE62C /* FilesPickerProbeUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E40BECB45945A673BB0CC3F9 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -300,6 +355,7 @@
 				4546703D0511A96D6060F587 /* CrayonSketch.swift in Sources */,
 				15B37A3EDBAFD6BD0FC98BFC /* DemosTab.swift in Sources */,
 				EA349DF37933D70B410F7135 /* DiscoverTab.swift in Sources */,
+				2F8BA3EDD179892E3C489DCB /* FilesPickerProbeView.swift in Sources */,
 				553F94B4D033BCA44B07AC4E /* PlaygroundApp.swift in Sources */,
 				C9A1977492B71CC9FE85DA16 /* PlaygroundDatabaseFixture.swift in Sources */,
 				7FDB62C4B6F0092619122928 /* SemanticLinksDemo.swift in Sources */,
@@ -325,6 +381,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		C55EEF7404A088DD02C8AD02 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 739B1FD817D42F0264714A50 /* Playground */;
+			targetProxy = 5F0B8E59CC46A228D3DBC98D /* PBXContainerItemProxy */;
+		};
 		EDB85CA665C60FA530302190 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 739B1FD817D42F0264714A50 /* Playground */;
@@ -425,6 +486,24 @@
 			};
 			name = Release;
 		};
+		41FB747DB84A62CE02DE4155 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.PlaygroundFilesPickerUITests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Playground;
+			};
+			name = Debug;
+		};
 		4F8F737A22C49C70A327F32E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -442,6 +521,24 @@
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
+		};
+		8DC9C2FFC0FAB4DB86539DDE /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.PlaygroundFilesPickerUITests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Playground;
+			};
+			name = Release;
 		};
 		DF83FEB514DF89BC00722881 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -532,6 +629,15 @@
 			buildConfigurations = (
 				18883859C44E4AE8042B204F /* Debug */,
 				FE96C092F5D790A83D093866 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C80713D8EF4DF8591125FE94 /* Build configuration list for PBXNativeTarget "PlaygroundFilesPickerUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				41FB747DB84A62CE02DE4155 /* Debug */,
+				8DC9C2FFC0FAB4DB86539DDE /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

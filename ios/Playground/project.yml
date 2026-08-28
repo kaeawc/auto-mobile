@@ -43,6 +43,8 @@ targets:
     platform: iOS
     sources:
       - path: Tests
+        excludes:
+          - FilesPickerProbeUITests
     dependencies:
       - target: Playground
       - package: AutoMobileSDK
@@ -54,18 +56,34 @@ targets:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Playground.app/Playground"
         BUNDLE_LOADER: "$(TEST_HOST)"
 
+  PlaygroundFilesPickerUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Tests/FilesPickerProbeUITests
+    dependencies:
+      - target: Playground
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.PlaygroundFilesPickerUITests
+        TEST_TARGET_NAME: Playground
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   Playground:
     build:
       targets:
         Playground: all
         PlaygroundTests: [test]
+        PlaygroundFilesPickerUITests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
         - PlaygroundTests
+        - PlaygroundFilesPickerUITests
     profile:
       config: Release
     analyze:

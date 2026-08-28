@@ -20,6 +20,9 @@
     <string>1</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <!-- The #5806 smoke uses this app as a simulator-only fixture provider. -->
+    <key>LSSupportsOpeningDocumentsInPlace</key>
+    <true/>
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>
@@ -34,6 +37,8 @@
     <array>
         <string>ShantellSans.ttf</string>
     </array>
+    <key>UIFileSharingEnabled</key>
+    <true/>
     <key>UILaunchScreen</key>
     <dict/>
     <key>UIRequiredDeviceCapabilities</key>

@@ -235,6 +235,65 @@ describe("AppFileService", () => {
     ).toBe(true);
   });
 
+  test("imports iOS Simulator media through an injected argv-safe client and preserves filenames", async () => {
+    const fileSystem = new TestAppFileFileSystem();
+    const imports: Array<{ deviceId: string; paths: string[] }> = [];
+    const service = createAppFileServiceForTesting({
+      fileSystem,
+      iosSimulatorMediaClient: {
+        importMedia: async (device, paths) => {
+          imports.push({ deviceId: device.deviceId, paths: [...paths] });
+        },
+      },
+    });
+
+    const result = await service.putFile({
+      device: iosSimulatorDevice,
+      target: { domain: "media_library" },
+      files: [
+        { destinationPath: "fixtures/photo.png", contentBase64: "AQID" },
+        { destinationPath: "clips/demo.mov", contentBase64: "BAUG" },
+      ],
+    });
+
+    expect(imports).toEqual([
+      {
+        deviceId: iosSimulatorDevice.deviceId,
+        paths: [expect.stringMatching(/photo\.png$/), expect.stringMatching(/demo\.mov$/)],
+      },
+    ]);
+    expect(result.files.map((file) => file.effects)).toEqual([
+      [
+        expect.objectContaining({ type: "media_import", status: "completed" }),
+        expect.objectContaining({ type: "picker_visibility", status: "unavailable" }),
+      ],
+      [
+        expect.objectContaining({ type: "media_import", status: "completed" }),
+        expect.objectContaining({ type: "picker_visibility", status: "unavailable" }),
+      ],
+    ]);
+  });
+
+  test("rejects iOS physical-device media-library mutation before importing", async () => {
+    let importCalls = 0;
+    const service = createAppFileServiceForTesting({
+      iosSimulatorMediaClient: {
+        importMedia: async () => {
+          importCalls += 1;
+        },
+      },
+    });
+
+    await expect(
+      service.putFile({
+        device: { deviceId: "00008110-001234567890801E", name: "iPhone", platform: "ios" },
+        target: { domain: "media_library" },
+        files: [{ destinationPath: "photo.png", contentBase64: "AQID" }],
+      }),
+    ).rejects.toThrow("only supported on iOS simulators");
+    expect(importCalls).toBe(0);
+  });
+
   test("prepares every file and rejects conflicts before provider mutation", async () => {
     const provider = new RecordingStorageWriteProvider("android", "app_containers");
     const service = createAppFileServiceForTesting({ providers: [provider] });

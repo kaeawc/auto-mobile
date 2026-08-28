@@ -312,6 +312,14 @@ function mediaLibraryDomain(ctx: StorageCapabilityContext): DomainCapability {
           [req(PREREQ_ACTIVE_PROFILE, ctx.activeUserProfile)],
           "Verified as part of Android putAppFile media_library writes.",
         );
+  const iosWrite = deriveOperation(
+    "write",
+    ctx.deviceType === "simulator"
+      ? undefined
+      : "iOS media-library fixture staging is only supported on iOS Simulators.",
+    [],
+    "Imports image and video fixtures through xcrun simctl addmedia; picker visibility is unverified.",
+  );
   return {
     domain: "media_library",
     portable: false,
@@ -319,7 +327,9 @@ function mediaLibraryDomain(ctx: StorageCapabilityContext): DomainCapability {
     note:
       ctx.platform === "android"
         ? "Android putAppFile writes bounded media fixtures and verifies MediaStore discovery; browse/read is not exposed."
-        : "Media-library browse/read and writes are not exposed on iOS.",
+        : ctx.deviceType === "simulator"
+          ? "iOS Simulator putAppFile imports image and video fixtures through simctl addmedia; browse/read is not exposed."
+          : "iOS physical media-library mutation is not exposed.",
     operations: [
       unavailableOperation(
         "list",
@@ -329,13 +339,7 @@ function mediaLibraryDomain(ctx: StorageCapabilityContext): DomainCapability {
         "read",
         "No AutoMobile media-library read surface is currently exposed.",
       ),
-      ctx.platform === "ios"
-        ? deriveOperation(
-            "write",
-            "iOS has no media-library fixture provider; use the Android media_library target only.",
-            [],
-          )
-        : androidWrite,
+      ctx.platform === "ios" ? iosWrite : androidWrite,
       indexing,
     ],
   };

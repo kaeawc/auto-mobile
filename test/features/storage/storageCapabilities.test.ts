@@ -108,7 +108,7 @@ describe("AC2: platform-qualified domains", () => {
     const report = computeStorageCapabilities(
       ctx({ platform: "android", activeUserProfile: true }),
     );
-    // Staging into shared storage is backed by stageSharedStorage.
+    // Staging into shared storage is backed by putAppFile user_files providers.
     expect(isStorageOperationAvailable(report, "user_files", "write")).toBe(true);
     // No AutoMobile listing/read surface exists for shared storage yet.
     expect(findOperationCapability(report, "user_files", "list")?.state).toBe("unavailable");
@@ -220,6 +220,17 @@ describe("AC4: partial / disabled / unsupported / conflicting inputs", () => {
     expect(findOperationCapability(report, "media_library", "list")?.state).toBe("unavailable");
     expect(findOperationCapability(report, "media_library", "read")?.state).toBe("unavailable");
     expect(isStorageOperationAvailable(report, "media_library", "list")).toBe(false);
+  });
+
+  it("advertises Android media_library writes only when an active profile is available", () => {
+    const available = computeStorageCapabilities(ctx({ activeUserProfile: true }));
+    expect(isStorageOperationAvailable(available, "media_library", "write")).toBe(true);
+    expect(findOperationCapability(available, "media_library", "media_indexing")?.state).toBe(
+      "supported",
+    );
+
+    const ios = computeStorageCapabilities(ctx({ platform: "ios", deviceType: "simulator" }));
+    expect(findOperationCapability(ios, "media_library", "write")?.state).toBe("unsupported");
   });
 
   it("secure_state read is unavailable pending the #5161 host policy, not unsupported", () => {

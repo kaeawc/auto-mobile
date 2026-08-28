@@ -35,6 +35,7 @@ import { shellQuote } from "../utils/shellQuote";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { logger } from "../utils/logger";
 import { prepareFileSource } from "./fileSourcePreparation";
+import { getSharedStorageService, type SharedStorageService } from "./sharedStorageService";
 
 export type PutAppFileRequest = Omit<PutAppFileArgs, "device"> & {
   device: BootedDevice;
@@ -123,6 +124,7 @@ export interface AppFileServiceDependencies {
   providers?: AppFileProvider[];
   deviceResolver?: (deviceId: string) => Promise<BootedDevice>;
   idGenerator?: IdGenerator;
+  sharedStorageService?: SharedStorageService;
 }
 
 const nodeAppFileFileSystem: AppFileFileSystem = {
@@ -187,7 +189,12 @@ export function createAppFileServiceForTesting(
     deviceResolver: deps.deviceResolver ?? defaultDependencies.deviceResolver,
   };
   return new DefaultAppFileService(
-    deps.providers ?? createDefaultProviders(resolvedDeps, deps.idGenerator ?? defaultIdGenerator),
+    deps.providers ??
+      createDefaultProviders(
+        resolvedDeps,
+        deps.idGenerator ?? defaultIdGenerator,
+        deps.sharedStorageService ?? getSharedStorageService(),
+      ),
     resolvedDeps.deviceResolver,
     resolvedDeps.fileSystem,
   );
@@ -196,9 +203,12 @@ export function createAppFileServiceForTesting(
 function createDefaultProviders(
   deps: Required<Pick<AppFileServiceDependencies, "adbFactory" | "simctlFactory" | "fileSystem">>,
   idGenerator: IdGenerator = defaultIdGenerator,
+  sharedStorageService: SharedStorageService = getSharedStorageService(),
 ): AppFileProvider[] {
   return [
     new AndroidAppFileProvider(deps.adbFactory, idGenerator),
+    new AndroidUserFilesProvider(sharedStorageService),
+    new AndroidMediaLibraryProvider(sharedStorageService),
     new IosSimulatorAppFileProvider(deps.simctlFactory, deps.fileSystem),
   ];
 }
@@ -690,6 +700,89 @@ class AndroidAppFileProvider
       ...(text === undefined
         ? { mimeType: "application/octet-stream", blob }
         : { mimeType: "text/plain; charset=utf-8", text }),
+    };
+  }
+}
+
+const ANDROID_MEDIA_LIBRARY_NAMESPACE = "automobile-media";
+
+class AndroidUserFilesProvider implements AppFileWriteProvider {
+  readonly platform = "android" as const;
+  readonly domain = "user_files" as const;
+
+  constructor(private readonly sharedStorageService: SharedStorageService) {}
+
+  async putFile(request: PutAppFileProviderRequest) {
+    if (request.target.domain !== "user_files") {
+      throw new ActionableError(
+        `Android user-files provider received unsupported target domain: ${request.target.domain}`,
+      );
+    }
+    const result = await this.sharedStorageService.stage({
+      device: request.device,
+      namespace: request.target.namespace,
+      reset: request.target.reset,
+      files: [{ sourcePath: request.sourcePath, destinationPath: request.destinationPath }],
+      signal: request.signal,
+    });
+    const staged = result.files[0]!;
+    return {
+      effects: [
+        {
+          type: "document_picker",
+          status: "completed" as const,
+          reason:
+            `document fixture is available in Downloads for device ${result.deviceId}, ` +
+            `resolved profile ${result.userId}, namespace ${result.namespace}`,
+        },
+        {
+          type: "media_index",
+          status: staged.mediaIndexing.status,
+          ...(staged.mediaIndexing.reason === undefined
+            ? {}
+            : { reason: staged.mediaIndexing.reason }),
+        },
+      ],
+    };
+  }
+}
+
+class AndroidMediaLibraryProvider implements AppFileWriteProvider {
+  readonly platform = "android" as const;
+  readonly domain = "media_library" as const;
+
+  constructor(private readonly sharedStorageService: SharedStorageService) {}
+
+  async putFile(request: PutAppFileProviderRequest) {
+    if (request.target.domain !== "media_library") {
+      throw new ActionableError(
+        `Android media-library provider received unsupported target domain: ${request.target.domain}`,
+      );
+    }
+    const result = await this.sharedStorageService.stage({
+      device: request.device,
+      namespace: ANDROID_MEDIA_LIBRARY_NAMESPACE,
+      files: [{ sourcePath: request.sourcePath, destinationPath: request.destinationPath }],
+      signal: request.signal,
+    });
+    const staged = result.files[0]!;
+    if (staged.mediaIndexing.status !== "completed") {
+      throw new ActionableError(
+        `Android media-library fixture ${request.destinationPath} on device ${result.deviceId}, ` +
+          `resolved profile ${result.userId}, was not indexed. ` +
+          "Recovery: use an image, video, or audio filename supported by Android MediaStore.",
+      );
+    }
+    return {
+      effects: [
+        {
+          type: "media_index",
+          status: "completed" as const,
+          reason:
+            `MediaStore verified fixture discovery for device ${result.deviceId}, ` +
+            `resolved profile ${result.userId}, namespace ${result.namespace}`,
+        },
+      ],
     };
   }
 }

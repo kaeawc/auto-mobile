@@ -24,7 +24,7 @@ All Interactions tools — including `pinchOn`, which routes coordinate-based pi
 - 🚀 `launchApp` starts apps by package name (with optional clear-app-data support).
 - ❌ `terminateApp` force-stops an app by package name.
 - 📦 `installApp` installs an APK.
-- 📄 `putAppFile` writes a local file, UTF-8 text, or base64 binary content into logical app containers such as `documents`, `cache`, `tmp`, and `externalFiles`.
+- 📄 `putAppFile` writes a local file, UTF-8 text, or base64 binary content into logical `app_containers`, Android `user_files`, or Android `media_library` targets.
 - 📂 `stageSharedStorageFixtures` writes a batch of local, UTF-8, or base64 fixtures beneath an isolated Android `Download/<namespace>` directory for document and media picker workflows.
 - 🔗 `getDeepLinks` reads registered deep links/intent filters for an Android package.
 
@@ -84,11 +84,12 @@ Stage shared-storage fixtures for a system picker:
 ```
 
 The namespace is limited to one safe child directory; file paths must be
-relative, and reset deletes only that namespace. The supported shared location
-is `/sdcard/Download/<namespace>`. Media extensions receive a media-scan request
-and report `verified` when MediaStore reports the file, or `dispatched` with a
-timeout reason when the asynchronous scan does not complete in time. Non-media
-files are intended for the Downloads document picker.
+relative, and reset deletes only that namespace. `putAppFile` should be used
+for new picker fixtures: `target.domain: "user_files"` uses the resolved
+profile's `Download/<namespace>` location, while `media_library` uses the
+bounded AutoMobile media namespace and reports success only once MediaStore
+discovers the file. `stageSharedStorageFixtures` remains a compatibility alias
+for existing callers.
 
 Android app files support `externalFiles` through `/sdcard/Android/data/{appId}/files`. Use this for app-readable fixture files that do not require private app storage:
 

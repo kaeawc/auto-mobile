@@ -50,7 +50,9 @@ describe("SharedStorageService", () => {
       deviceId: "emulator-5554",
       platform: "android",
       namespace: "run-42",
-      destinationDirectory: "/sdcard/Download/run-42",
+      userId: 0,
+      userSource: "primary",
+      destinationDirectory: "/storage/emulated/0/Download/run-42",
       reset: true,
       files: [
         {
@@ -71,26 +73,27 @@ describe("SharedStorageService", () => {
     });
 
     const commands = executor.getExecutedCommands();
-    expect(commands[0]).toBe("shell rm -rf '/sdcard/Download/run-42'");
-    expect(commands).toContain("shell mkdir -p '/sdcard/Download/run-42'");
-    expect(commands).toContain("shell mkdir -p '/sdcard/Download/run-42/docs'");
-    expect(commands).toContain("shell mkdir -p '/sdcard/Download/run-42/media'");
+    expect(commands[0]).toBe("shell rm -rf '/storage/emulated/0/Download/run-42'");
+    expect(commands).toContain("shell mkdir -p '/storage/emulated/0/Download/run-42'");
+    expect(commands).toContain("shell mkdir -p '/storage/emulated/0/Download/run-42/docs'");
+    expect(commands).toContain("shell mkdir -p '/storage/emulated/0/Download/run-42/media'");
     expect(
       commands.some(
         (command) =>
-          command.includes("push ") && command.includes("/sdcard/Download/run-42/docs/read me.txt"),
+          command.includes("push ") &&
+          command.includes("/storage/emulated/0/Download/run-42/docs/read me.txt"),
       ),
     ).toBe(true);
     expect(executor.getExecutedArgv()).toContainEqual([
       "push",
       expect.stringContaining("automobile-shared-storage-"),
-      "/sdcard/Download/run-42/docs/read me.txt",
+      "/storage/emulated/0/Download/run-42/docs/read me.txt",
     ]);
     expect(
       commands.some(
         (command) =>
           command.includes("MEDIA_SCANNER_SCAN_FILE") &&
-          command.includes("file:///sdcard/Download/run-42/media/photo.png"),
+          command.includes("file:///storage/emulated/0/Download/run-42/media/photo.png"),
       ),
     ).toBe(true);
     expect(
@@ -99,7 +102,72 @@ describe("SharedStorageService", () => {
           command.includes("content query") && command.includes("external_primary/images/media"),
       ),
     ).toBe(true);
+    expect(
+      commands.some(
+        (command) =>
+          command.includes("relative_path=") &&
+          command.includes("Download") &&
+          !command.includes("Download/Download/"),
+      ),
+    ).toBe(true);
     expect(commands.every((command) => !command.includes(".."))).toBe(true);
+  });
+
+  test("uses the resolved active profile rather than assuming Android user zero", async () => {
+    const executor = new FakeAdbExecutor();
+    const service = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      createUserResolver: () => ({
+        resolve: async () => ({ userId: 12, source: "managedProfile" }),
+      }),
+    });
+
+    const result = await service.stage({
+      device: androidDevice,
+      namespace: "work-fixtures",
+      reset: true,
+      files: [{ contentText: "picker", destinationPath: "document.txt" }],
+    });
+
+    expect(result).toMatchObject({
+      userId: 12,
+      userSource: "managedProfile",
+      destinationDirectory: "/storage/emulated/12/Download/work-fixtures",
+    });
+    expect(executor.getExecutedCommands()).toContain(
+      "shell rm -rf '/storage/emulated/12/Download/work-fixtures'",
+    );
+    expect(executor.getExecutedArgv()).toContainEqual([
+      "push",
+      expect.stringContaining("automobile-shared-storage-"),
+      "/storage/emulated/12/Download/work-fixtures/document.txt",
+    ]);
+  });
+
+  test("scopes MediaStore scanning and verification to the resolved profile", async () => {
+    const executor = new FakeAdbExecutor();
+    executor.setCommandResponse("content query", execResult("Row: 0 _id=42"));
+    const service = createSharedStorageServiceForTesting({
+      adbFactory: adbFactoryFor(executor),
+      createUserResolver: () => ({
+        resolve: async () => ({ userId: 12, source: "managedProfile" }),
+      }),
+    });
+
+    await service.stage({
+      device: androidDevice,
+      namespace: "work-media",
+      files: [{ contentBase64: Buffer.from([1, 2, 3]).toString("base64"), destinationPath: "photo.png" }],
+    });
+
+    expect(executor.getExecutedCommands()).toContain(
+      "shell am broadcast --user 12 -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d 'file:///storage/emulated/12/Download/work-media/photo.png'",
+    );
+    expect(
+      executor
+        .getExecutedCommands()
+        .some((command) => command.startsWith("shell content query --user 12 --uri ")),
+    ).toBe(true);
   });
 
   test("reports why indexing was not requested when the caller opts out", async () => {

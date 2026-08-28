@@ -185,10 +185,31 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       ts.isIdentifier(node.expression) &&
       childProcessNamespaces.has(node.expression.text)) ||
     isPromisifiedLauncher(node);
+  const isRegExpReference = (node: ts.Expression, seen = new Set<string>()): boolean => {
+    node = unwrapTransparentExpression(node);
+    if (node.kind === ts.SyntaxKind.RegularExpressionLiteral) {
+      return true;
+    }
+    if (
+      ts.isNewExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "RegExp"
+    ) {
+      return true;
+    }
+    if (ts.isIdentifier(node) && !seen.has(node.text)) {
+      return (initializers.get(node.text) ?? []).some((value) =>
+        isRegExpReference(value, new Set([...seen, node.text])),
+      );
+    }
+    return false;
+  };
   const isExecutionSeamReference = (node: ts.Expression): boolean =>
     (ts.isIdentifier(node) && executionSeamAliases.has(node.text)) ||
     ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
-      (propertyName(node) === "executeCommand" ||
+      ((propertyName(node) === "exec" && !isRegExpReference(node.expression)) ||
+        propertyName(node) === "execSync" ||
+        propertyName(node) === "executeCommand" ||
         propertyName(node) === "runExecSeam" ||
         (propertyName(node) === "execute" &&
           (node.expression.kind === ts.SyntaxKind.ThisKeyword ||

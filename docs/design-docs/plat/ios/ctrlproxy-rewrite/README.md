@@ -63,3 +63,46 @@ cost of parity discipline).
 | PerfProvider is an over-elaborate interval accumulator | PerfProvider | None (external timing data stays equivalent) | Noted (porting `PerfProvider`, Phase 5). The whole `MutablePerfEntry` tree + `@TaskLocal` scope + pooled flush is an elaborate way to compute the handful of intervals actually reported. Ported faithfully to keep the emitted `perfTiming` byte-identical; replace with `os_signpost` / direct interval math in Phase 8 (external API/data equivalent, per Paul: "direct rewrite then refactor"). The reference singleton was already dropped in the port (injected `any PerfTracking`; see [STATUS.md](STATUS.md) §6) — do not restore it for parity |
 
 Append new entries here as they're uncovered.
+
+## Beyond ctrl-proxy — native-Swift landscape & follow-ups
+
+Captured while answering "where does ctrl-proxy fit, and what else needs a Swift-6 pass?"
+(evidence: a subsystem survey of `ios/*` + the TS integration). Not full roadmaps — pointers.
+
+**ctrl-proxy structure — two simplifications evaluated and rejected (don't re-litigate):**
+- The server runs *inside the XCUITest runner* (`CtrlProxyUITests-Runner.app` → `testRunService`),
+  not in `CtrlProxyApp` (that app is only the required UI-test *host*; blank VC). Cross-app
+  hierarchy reads + gesture injection come from `XCUIApplication`/`XCUIElement`, a privilege
+  `testmanagerd` grants **only** to a UI-test process — no entitlement grants it, so it can never
+  be a packaged/App-Store app. `control-proxy.ipa` is just a zip of `Build/Products/`.
+- **macOS CLI target** (in the SPM package): not useful — on macOS the whole `ElementLocator`/
+  `GesturePerformer` capability compiles out (`#if os(iOS)`); a CLI server would drive nothing, and
+  XCUITest isn't available to a plain executable anyway. The `#else` "non-iOS mode" path is only a
+  fast host compile/parity gate.
+- **Drop `CtrlProxy.xcodeproj` for pure SPM**: not feasible — SPM can't emit the `bundle.ui-testing`
+  product / `XCTRunner.app`, an iOS app host, the `.xctestrun`, or the signing/install orchestration.
+  The SPM (fast host logic + parity + the `.v6` `CtrlProxyRewrite`) ⇄ xcodegen (the only thing that
+  builds the shipped runner) split **is** the minimal form; `project.yml` is already the declarative
+  source of truth.
+
+**Other native-Swift components needing their own Swift-6 pass (ranked, separate from this rewrite):**
+- **`ios/auto-mobile-sdk`** (in-app instrumentation SDK; ctrl-proxy links it for wire models) — **largest
+  need.** It is architecturally the *pre-rewrite ctrl-proxy state*: ~44 `@unchecked Sendable` + NSLock,
+  ~20 mutable singletons, real flagged races (signal-handler globals; the `AutoMobileURLProtocol`
+  Sendable error already in STATUS §5). **CI builds it macOS-only**, so its iOS UIKit `@MainActor`
+  surface is unchecked → true error count exceeds what a host build shows. Hard blocker: **iOS 15 floor
+  rules out both `Mutex` and `OSAllocatedUnfairLock`** — decide raise-floor vs. `os_unfair_lock`/actor
+  first. Likely warrants the same parallel-target + parity-oracle playbook. First step: an *iOS-platform*
+  strict build to measure the real surface.
+- **`ios/XCTestRunner`** (standalone MCP-client XCTest wrapper — the iOS analog of the Android JUnit
+  runner; NOT an XCUITest harness, no `XCUIApplication`; no code coupling to ctrl-proxy) — **moderate,
+  in-place.** Already tools-6.0/`.v5`. Work concentrates in 2 MCP-client classes (fields mutated from
+  `@Sendable` closures → queue-confine or async-seam POD) + ~4 singleton annotations. Surfaces a real
+  bug: `TestTimingCache.clear()` mutates state without `loadLock`. No parity machinery needed.
+- **`ios/screen-capture`** (independent macOS CLI video helper; frozen stdout wire protocol) —
+  **moderate, annotate-and-isolate** (future-proofing; no current race). Already coded toward Swift 6
+  (`withLock`, 3 `@unchecked Sendable`). Per-target `.v6` + `@Sendable` on ~17 closures + make 5
+  capture/writer classes Sendable; expect ScreenCaptureKit/AVFoundation `@MainActor`-drift churn.
+  Verification is easy (macOS target → every body compiles on the host). Keep `runBlocking` as-is.
+- **`ios/Playground`** (internal SwiftUI SDK demo/test-host app, not shipped) — **defer**; no
+  concurrency surface of its own. Should follow `auto-mobile-sdk`, not lead.

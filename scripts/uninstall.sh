@@ -307,8 +307,13 @@ desktop_app_process_table() {
 # Only match commands whose executable is one of the exact paths discovered
 # from the installed app bundle/package. This avoids broad pkill patterns that
 # could terminate unrelated commands containing the AutoMobile name.
+# The process-table failure is handled explicitly below.
+# shellcheck disable=SC2310
 desktop_app_process_pids() {
-    local pid command_line executable
+    local pid command_line executable process_table
+    if ! process_table=$(desktop_app_process_table); then
+        return 1
+    fi
     while IFS=' ' read -r pid command_line; do
         [[ -n "${pid}" && -n "${command_line}" ]] || continue
         for executable in ${DESKTOP_APP_EXECUTABLES[@]+"${DESKTOP_APP_EXECUTABLES[@]}"}; do
@@ -317,7 +322,7 @@ desktop_app_process_pids() {
                 break
             fi
         done
-    done < <(desktop_app_process_table)
+    done <<< "${process_table}"
 }
 
 desktop_app_termination_wait() {
@@ -432,10 +437,14 @@ wait_for_desktop_app_processes_to_stop() {
 # shellcheck disable=SC2310
 stop_desktop_app_processes() {
     local pids=()
-    local pid pid_state wait_status
+    local pid pid_state wait_status process_pids
+    if ! process_pids=$(desktop_app_process_pids); then
+        log_error "Could not enumerate desktop app processes; refusing to remove the app."
+        return 1
+    fi
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] && pids+=("${pid}")
-    done < <(desktop_app_process_pids)
+    done <<< "${process_pids}"
 
     [[ ${#pids[@]} -gt 0 ]] || return 0
 

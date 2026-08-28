@@ -2850,7 +2850,7 @@ recover_stale_macos_desktop_app_swap() {
 # Lock acquisition failures are returned explicitly to the caller.
 # shellcheck disable=SC2310
 acquire_macos_desktop_app_lock() {
-    local lock_dir="$1" target_parent="$2" target_app="$3" owner_pid owner_pid_to_write="$$" reclaim_dir reclaim_owner
+    local lock_dir="$1" target_parent="$2" target_app="$3" owner_pid owner_pid_to_write="$$" reclaim_dir reclaim_owner stale_reclaim_dir
     if run_desktop_app_privileged mkdir "${lock_dir}" 2>/dev/null; then
         if ! printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null; then
             run_desktop_app_privileged rmdir "${lock_dir}" || true
@@ -2874,8 +2874,16 @@ acquire_macos_desktop_app_lock() {
             return 1
         fi
         log_warn "Reclaiming interrupted AutoMobile desktop installation recovery."
-        run_desktop_app_privileged rm -rf -- "${reclaim_dir}" || return 1
-        run_desktop_app_privileged mkdir "${reclaim_dir}" || return 1
+        # Rename the stale marker before claiming a new one. Removing it first
+        # leaves a window where another installer can create its own marker and
+        # be deleted by this recovery attempt.
+        stale_reclaim_dir="${reclaim_dir}.stale.${owner_pid_to_write}.${RANDOM}"
+        run_desktop_app_privileged mv -- "${reclaim_dir}" "${stale_reclaim_dir}" || return 1
+        if ! run_desktop_app_privileged mkdir "${reclaim_dir}"; then
+            run_desktop_app_privileged rm -rf -- "${stale_reclaim_dir}" || true
+            return 1
+        fi
+        run_desktop_app_privileged rm -rf -- "${stale_reclaim_dir}" || return 1
     fi
     if ! printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${reclaim_dir}/owner.pid" >/dev/null; then
         run_desktop_app_privileged rm -rf -- "${reclaim_dir}" || true
@@ -4874,7 +4882,7 @@ select_preset() {
         "Leave existing AutoMobile configurations unchanged")
             log_info "Keeping current AI agent setup"
             log_info "No changes necessary"
-            exit 0
+            return 0
             ;;
         "Claude Marketplace"*)
             PRESET="marketplace"

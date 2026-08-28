@@ -39,6 +39,19 @@ SCRIPT
   [ "$output" = $'101\n102' ]
 }
 
+@test "refuses removal when desktop process enumeration fails" {
+  desktop_app_process_table() { return 1; }
+  local stop_status
+
+  if stop_desktop_app_processes; then
+    stop_status=0
+  else
+    stop_status=$?
+  fi
+
+  [ "${stop_status}" -eq 1 ]
+}
+
 @test "stops the desktop process before removal with a bounded TERM path" {
   local terminated=false
   DESKTOP_APP_EXECUTABLES=("/Applications/AutoMobile.app/Contents/MacOS/AutoMobile")

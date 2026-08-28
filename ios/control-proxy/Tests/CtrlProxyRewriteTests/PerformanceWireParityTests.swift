@@ -1,46 +1,43 @@
 import Foundation
 import XCTest
 
-// Differential parity for the performance wire models. Imports NEITHER module: the
-// per-module drivers (`ReferencePerformanceWire` / `RewritePerformanceWire`) produce
-// encoded bytes and this suite diffs them, so a divergence in either module's
-// `PerformanceSnapshot` / `PerformanceUpdateResponse` encoding fails here.
+/// Wire-contract tests for the performance wire models (`PerformanceSnapshot` /
+/// `PerformanceUpdateResponse`), driven module-agnostically via `RewritePerformanceWire`.
+///
+/// Phase-7E re-anchor: was differential (byte/object-diff of reference vs rewrite encodings).
+/// With the reference retired it is reference-free — it pins the Codable **key-omission
+/// contract** (nil optionals are omitted, non-nil are emitted) via key counts, plus the update
+/// envelope shape. The specs still cover every-field / all-nil / mixed / escaping / ProMotion.
 final class PerformanceWireParityTests: XCTestCase {
-    /// `PerformanceSnapshot` carries no live clock, so its bytes must match exactly.
-    func testSnapshotEncodesIdenticallyAcrossModules() throws {
+    /// Every non-nil field is emitted and every nil field is omitted (the Codable contract).
+    func testSnapshotOmitsNilFieldsOnly() throws {
+        // `full`: all 10 fields populated → all 10 keys present.
+        let full = JSONGolden.object(try RewritePerformanceWire.encodeSnapshot(PerfSnapshotSpecs.full))
+        XCTAssertEqual(full?.count, 10, "fully-populated snapshot must emit all 10 fields")
+        XCTAssertEqual((full?["timestamp"] as? NSNumber)?.int64Value, PerfSnapshotSpecs.full.timestamp)
+
+        // `allNil`: only the required `timestamp` → exactly 1 key.
+        let allNil = JSONGolden.object(try RewritePerformanceWire.encodeSnapshot(PerfSnapshotSpecs.allNil))
+        XCTAssertEqual(allNil?.count, 1, "all-optionals-nil snapshot must emit only `timestamp`")
+        XCTAssertEqual((allNil?["timestamp"] as? NSNumber)?.int64Value, PerfSnapshotSpecs.allNil.timestamp)
+
+        // Every spec encodes to a valid object carrying its timestamp.
         for spec in PerfSnapshotSpecs.all {
-            XCTAssertEqual(
-                try ReferencePerformanceWire.encodeSnapshot(spec),
-                try RewritePerformanceWire.encodeSnapshot(spec),
-                "PerformanceSnapshot bytes diverge for spec timestamp=\(spec.timestamp)"
-            )
+            let object = JSONGolden.object(try RewritePerformanceWire.encodeSnapshot(spec))
+            XCTAssertEqual((object?["timestamp"] as? NSNumber)?.int64Value, spec.timestamp,
+                           "snapshot timestamp for spec timestamp=\(spec.timestamp)")
         }
     }
 
-    /// `PerformanceUpdateResponse` stamps its top-level `timestamp` from a live `Date()`
-    /// at init, so compare the JSON objects with that key stripped (the nested
-    /// `performanceData.timestamp` comes from the spec and must still match).
-    func testPerformanceUpdateEncodesIdenticallyAcrossModules() throws {
+    /// The update envelope wraps the snapshot under `performanceData` with a
+    /// `performance_update` discriminator (top-level `timestamp` is a live `Date()`).
+    func testPerformanceUpdateEnvelopeShape() throws {
         for spec in PerfSnapshotSpecs.all {
-            let reference = normalized(try ReferencePerformanceWire.encodeUpdate(spec))
-            let rewrite = normalized(try RewritePerformanceWire.encodeUpdate(spec))
-            XCTAssertEqual(
-                reference, rewrite,
-                "PerformanceUpdateResponse (timestamp-stripped) diverges for spec timestamp=\(spec.timestamp)"
-            )
-            XCTAssertEqual(rewrite?["type"] as? String, "performance_update")
-            XCTAssertNotNil(rewrite?["performanceData"], "performanceData must survive normalization")
+            let object = JSONGolden.object(try RewritePerformanceWire.encodeUpdate(spec), strippingTimestamp: true)
+            XCTAssertEqual(object?["type"] as? String, "performance_update",
+                           "type for spec timestamp=\(spec.timestamp)")
+            XCTAssertNotNil(object?["performanceData"] as? [String: Any],
+                            "performanceData must be an object for spec timestamp=\(spec.timestamp)")
         }
-    }
-
-    /// Parse JSON to a dictionary with the live-`Date()`-stamped top-level `timestamp`
-    /// removed (mirrors the strip in `ResponseModelParityTests`).
-    private func normalized(_ data: Data, file: StaticString = #filePath, line: UInt = #line) -> NSDictionary? {
-        guard var dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
-            XCTFail("performance update was not a JSON object", file: file, line: line)
-            return nil
-        }
-        dict.removeValue(forKey: "timestamp")
-        return dict as NSDictionary
     }
 }

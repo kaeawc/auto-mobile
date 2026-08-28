@@ -1,75 +1,67 @@
 import Foundation
 import XCTest
 
-/// Differential parity for the SDK database result models (`SdkExecuteSqlResult`,
+/// Wire-contract tests for the SDK database result models (`SdkExecuteSqlResult`,
 /// `SdkTableDataResult`, `SdkTableStructureResult`, `SdkStorageCapabilities`,
 /// `SdkColumnInfo`, `SdkStorageDiagnostic`, `SdkDatabaseInfo`), `SdkHierarchyServerInfo`,
-/// and the six DB response envelopes (Phase 3). Each golden is decoded then re-encoded
-/// with sorted keys through BOTH modules; byte-identical output proves the ported field
-/// set + custom decoders (notably `SdkExecuteSqlResult`'s tolerant `truncated`) match the
-/// reference exactly. The envelopes carry a fixed `timestamp` in the golden so the
-/// decode→encode round-trip is deterministic (their live-`Date()` init is not exercised).
+/// and the six DB response envelopes (Phase 3).
+///
+/// Phase-7E re-anchor: these were differential-parity tests (decode→sorted-encode through
+/// BOTH the reference and rewrite, diffed byte-for-byte). With the reference retired they are
+/// re-anchored reference-free via `JSONGolden.assertReencodePreservesWire` — the round-trip
+/// must be idempotent and preserve every wire field the input carried (containment tolerates
+/// a model materializing a defaulted field, e.g. `SdkExecuteSqlResult`'s tolerant `truncated`).
+/// Envelopes carry a fixed `timestamp` in the input and strip the top-level one on compare.
 final class SdkDatabaseModelParityTests: XCTestCase {
-    private func assertReencodeEqual(
-        _ reference: (Data) throws -> Data,
-        _ rewrite: (Data) throws -> Data,
-        _ golden: String,
+    private func assertReencode(
+        _ reencode: (Data) throws -> Data,
+        _ input: String,
+        stripTimestamp: Bool = false,
         _ label: String,
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let data = Data(golden.utf8)
-        do {
-            let ref = try reference(data)
-            let rw = try rewrite(data)
-            if ref != rw {
-                XCTFail(
-                    "\(label) re-encode diverged:\nreference: \(String(decoding: ref, as: UTF8.self))\nrewrite:   \(String(decoding: rw, as: UTF8.self))",
-                    file: file,
-                    line: line
-                )
-            }
-        } catch {
-            XCTFail("\(label) threw: \(error)", file: file, line: line)
-        }
+        JSONGolden.assertReencodePreservesWire(
+            reencode, input: input, stripTimestamp: stripTimestamp, label, file: file, line: line
+        )
     }
 
     // MARK: - SDK result models
 
     func testStorageDiagnosticParity() {
-        assertReencodeEqual(
-            ReferenceSdkDatabase.diagnostic, RewriteSdkDatabase.diagnostic,
+        assertReencode(
+            RewriteSdkDatabase.diagnostic,
             #"{"code":"READ_ONLY","message":"database opened read-only"}"#, "SdkStorageDiagnostic"
         )
     }
 
     func testDatabaseInfoParity() {
-        assertReencodeEqual(
-            ReferenceSdkDatabase.databaseInfo, RewriteSdkDatabase.databaseInfo,
+        assertReencode(
+            RewriteSdkDatabase.databaseInfo,
             #"{"name":"app.db","path":"/tmp/app.db","sizeBytes":40960}"#, "SdkDatabaseInfo(size)"
         )
-        assertReencodeEqual(
-            ReferenceSdkDatabase.databaseInfo, RewriteSdkDatabase.databaseInfo,
+        assertReencode(
+            RewriteSdkDatabase.databaseInfo,
             #"{"name":"app.db","path":"/tmp/app.db"}"#, "SdkDatabaseInfo(no size)"
         )
     }
 
     func testColumnInfoParity() {
-        assertReencodeEqual(
-            ReferenceSdkDatabase.columnInfo, RewriteSdkDatabase.columnInfo,
+        assertReencode(
+            RewriteSdkDatabase.columnInfo,
             #"{"name":"id","type":"INTEGER","nullable":false,"primaryKey":true,"defaultValue":null}"#,
             "SdkColumnInfo(null default)"
         )
-        assertReencodeEqual(
-            ReferenceSdkDatabase.columnInfo, RewriteSdkDatabase.columnInfo,
+        assertReencode(
+            RewriteSdkDatabase.columnInfo,
             #"{"name":"status","type":"TEXT","nullable":true,"primaryKey":false,"defaultValue":"active"}"#,
             "SdkColumnInfo(default)"
         )
     }
 
     func testStorageCapabilitiesParity() {
-        assertReencodeEqual(
-            ReferenceSdkDatabase.storageCapabilities, RewriteSdkDatabase.storageCapabilities,
+        assertReencode(
+            RewriteSdkDatabase.storageCapabilities,
             """
             {"readOnly":false,"mutationAuthorized":true,
              "registeredAppGroupSuites":["group.a","group.b"],
@@ -82,8 +74,8 @@ final class SdkDatabaseModelParityTests: XCTestCase {
 
     func testExecuteSqlResultParity() {
         // SELECT result: columns/rows/diagnostic/truncated all present, rows carry nulls.
-        assertReencodeEqual(
-            ReferenceSdkDatabase.executeSqlResult, RewriteSdkDatabase.executeSqlResult,
+        assertReencode(
+            RewriteSdkDatabase.executeSqlResult,
             """
             {"queryType":"SELECT","columns":["id","name","email"],
              "rows":[["1","alice",null],["2","bob","bob@example.com"]],
@@ -92,21 +84,21 @@ final class SdkDatabaseModelParityTests: XCTestCase {
             "SdkExecuteSqlResult(select)"
         )
         // Write result omitting `truncated` (tolerant decode → false) and columns/rows.
-        assertReencodeEqual(
-            ReferenceSdkDatabase.executeSqlResult, RewriteSdkDatabase.executeSqlResult,
+        assertReencode(
+            RewriteSdkDatabase.executeSqlResult,
             #"{"queryType":"UPDATE","rowsAffected":3}"#, "SdkExecuteSqlResult(write, no truncated)"
         )
         // Error result.
-        assertReencodeEqual(
-            ReferenceSdkDatabase.executeSqlResult, RewriteSdkDatabase.executeSqlResult,
+        assertReencode(
+            RewriteSdkDatabase.executeSqlResult,
             #"{"queryType":"UNKNOWN","rowsAffected":0,"error":"no such table: ghost"}"#,
             "SdkExecuteSqlResult(error)"
         )
     }
 
     func testTableDataResultParity() {
-        assertReencodeEqual(
-            ReferenceSdkDatabase.tableDataResult, RewriteSdkDatabase.tableDataResult,
+        assertReencode(
+            RewriteSdkDatabase.tableDataResult,
             """
             {"columns":["id","name"],"rows":[["1","alice"],["2",null]],"total":2,
              "diagnostic":{"code":"OK","message":"ok"}}
@@ -116,8 +108,8 @@ final class SdkDatabaseModelParityTests: XCTestCase {
     }
 
     func testTableStructureResultParity() {
-        assertReencodeEqual(
-            ReferenceSdkDatabase.tableStructureResult, RewriteSdkDatabase.tableStructureResult,
+        assertReencode(
+            RewriteSdkDatabase.tableStructureResult,
             """
             {"columns":[{"name":"id","type":"INTEGER","nullable":false,"primaryKey":true,"defaultValue":null}],
              "diagnostic":null}
@@ -128,81 +120,80 @@ final class SdkDatabaseModelParityTests: XCTestCase {
 
     func testServerInfoParity() throws {
         let golden = Data(#"{"status":"ok","bundleId":"com.example.app","capabilities":["hierarchy","network","db"]}"#.utf8)
-        let ref = try ReferenceSdkDatabase.serverInfo(golden)
-        let rw = try RewriteSdkDatabase.serverInfo(golden)
-        XCTAssertEqual(ref.0, rw.0, "status")
-        XCTAssertEqual(ref.1, rw.1, "bundleId")
-        XCTAssertEqual(ref.2, rw.2, "capabilities (sorted)")
+        let info = try RewriteSdkDatabase.serverInfo(golden)
+        XCTAssertEqual(info.0, "ok", "status")
+        XCTAssertEqual(info.1, "com.example.app", "bundleId")
+        XCTAssertEqual(info.2, ["db", "hierarchy", "network"], "capabilities (sorted)")
     }
 
     // MARK: - DB response envelopes (fixed timestamp for a deterministic round-trip)
 
     func testExecuteSqlResponseParity() {
-        assertReencodeEqual(
-            ReferenceSdkDatabase.executeSqlResponse, RewriteSdkDatabase.executeSqlResponse,
+        assertReencode(
+            RewriteSdkDatabase.executeSqlResponse,
             """
             {"type":"execute_sql_result","timestamp":1730000000000,"requestId":"r1","success":true,
              "queryType":"SELECT","columns":["id"],"rows":[["1"]],"rowsAffected":0,
              "diagnostic":{"code":"OK","message":"1 row"},"truncated":false,"totalTimeMs":12}
             """,
-            "ExecuteSqlResponse"
+            stripTimestamp: true, "ExecuteSqlResponse"
         )
     }
 
     func testListDatabasesResponseParity() {
-        assertReencodeEqual(
-            ReferenceSdkDatabase.listDatabasesResponse, RewriteSdkDatabase.listDatabasesResponse,
+        assertReencode(
+            RewriteSdkDatabase.listDatabasesResponse,
             """
             {"type":"list_databases_result","timestamp":1730000000000,"requestId":"r2","success":true,
              "databases":[{"name":"app.db","path":"/tmp/app.db","sizeBytes":100}],"totalTimeMs":5}
             """,
-            "ListDatabasesResponse"
+            stripTimestamp: true, "ListDatabasesResponse"
         )
     }
 
     func testStorageCapabilitiesResponseParity() {
-        assertReencodeEqual(
-            ReferenceSdkDatabase.storageCapabilitiesResponse, RewriteSdkDatabase.storageCapabilitiesResponse,
+        assertReencode(
+            RewriteSdkDatabase.storageCapabilitiesResponse,
             """
             {"type":"storage_capabilities_result","timestamp":1730000000000,"requestId":"r3","success":true,
              "capabilities":{"readOnly":true,"mutationAuthorized":false,"registeredAppGroupSuites":[],
              "coreDataStores":[],"unavailableStores":[]},"totalTimeMs":7}
             """,
-            "StorageCapabilitiesResponse"
+            stripTimestamp: true, "StorageCapabilitiesResponse"
         )
     }
 
     func testListTablesResponseParity() {
-        assertReencodeEqual(
-            ReferenceSdkDatabase.listTablesResponse, RewriteSdkDatabase.listTablesResponse,
+        assertReencode(
+            RewriteSdkDatabase.listTablesResponse,
             """
             {"type":"list_tables_result","timestamp":1730000000000,"requestId":"r4","success":true,
              "tables":["users","posts"],"totalTimeMs":3}
             """,
-            "ListTablesResponse"
+            stripTimestamp: true, "ListTablesResponse"
         )
     }
 
     func testTableDataResponseParity() {
-        assertReencodeEqual(
-            ReferenceSdkDatabase.tableDataResponse, RewriteSdkDatabase.tableDataResponse,
+        assertReencode(
+            RewriteSdkDatabase.tableDataResponse,
             """
             {"type":"table_data_result","timestamp":1730000000000,"requestId":"r5","success":true,
              "columns":["id","name"],"rows":[["1","alice"],["2",null]],"total":2,
              "diagnostic":{"code":"OK","message":"ok"},"totalTimeMs":9}
             """,
-            "TableDataResponse"
+            stripTimestamp: true, "TableDataResponse"
         )
     }
 
     func testTableStructureResponseParity() {
-        assertReencodeEqual(
-            ReferenceSdkDatabase.tableStructureResponse, RewriteSdkDatabase.tableStructureResponse,
+        assertReencode(
+            RewriteSdkDatabase.tableStructureResponse,
             """
             {"type":"table_structure_result","timestamp":1730000000000,"requestId":"r6","success":false,
              "error":"no such table","totalTimeMs":2}
             """,
-            "TableStructureResponse"
+            stripTimestamp: true, "TableStructureResponse"
         )
     }
 }

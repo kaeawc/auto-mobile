@@ -6,11 +6,13 @@ import XCTest
 /// `UIElementInfo` `CodingKeys`, nested elements, windows, insets, and system chrome
 /// is decoded through BOTH modules; then:
 ///
-///   1. re-encoding with sorted keys yields byte-identical output (proves the ported
-///      model's field set + custom `CodingKeys` match the reference exactly), and
-///   2. `StructuralHasher.computeHash` agrees in-process (proves the change-detection
-///      combine sequence was ported faithfully — the hash is process-internal, never
-///      on the wire, so only in-process agreement is meaningful).
+///   1. re-encoding with sorted keys is idempotent and preserves every wire field the
+///      golden carried (proves the model's field set + kebab-case `CodingKeys`), and
+///   2. `StructuralHasher.computeHash` is deterministic + non-trivial.
+///
+/// Phase-7E re-anchor: was differential (decode→re-encode through BOTH modules, byte-diff +
+/// cross-module hash equality). With the reference retired it is reference-free
+/// (idempotence + `JSONGolden` containment + the kebab-key survival check that was already here).
 final class HierarchyModelParityTests: XCTestCase {
     /// Rich enough to cover every kebab-case key and one level of nesting.
     private let goldenJSON = """
@@ -76,32 +78,30 @@ final class HierarchyModelParityTests: XCTestCase {
     }
     """
 
-    func testViewHierarchyReencodesIdenticallyInBothModules() throws {
+    func testViewHierarchyReencodesFaithfully() throws {
         let data = Data(goldenJSON.utf8)
-        let reference = try ReferenceHierarchyDecoder.decodeReencodeAndHash(data)
-        let rewrite = try RewriteHierarchyDecoder.decodeReencodeAndHash(data)
+        let first = try RewriteHierarchyDecoder.decodeReencodeAndHash(data)
+        // Idempotent: decoding + re-encoding the sorted-key output yields identical bytes.
+        let second = try RewriteHierarchyDecoder.decodeReencodeAndHash(first.encoded)
+        XCTAssertEqual(first.encoded, second.encoded, "ViewHierarchy re-encode is not idempotent")
 
-        if reference.encoded != rewrite.encoded {
-            let refString = String(decoding: reference.encoded, as: UTF8.self)
-            let rwString = String(decoding: rewrite.encoded, as: UTF8.self)
-            XCTFail("re-encoded ViewHierarchy diverged:\nreference: \(refString)\nrewrite:   \(rwString)")
+        // Every wire field the golden carried survives the round trip (no drop/rename/change).
+        if let inputObject = JSONGolden.object(data), let outputObject = JSONGolden.object(first.encoded) {
+            JSONGolden.assertContains(outputObject, contains: inputObject, context: "ViewHierarchy")
         }
 
         // Sanity: the kebab-case wire keys actually survived the round trip.
-        let encodedString = String(decoding: rewrite.encoded, as: UTF8.self)
+        let encodedString = String(decoding: first.encoded, as: UTF8.self)
         for key in ["content-desc", "resource-id", "semantic-links", "accessibility-focused", "long-clickable", "view-id", "state-description", "hint-text"] {
             XCTAssertTrue(encodedString.contains("\"\(key)\""), "rewrite dropped wire key `\(key)`")
         }
     }
 
-    func testStructuralHashMatchesInBothModules() throws {
+    func testStructuralHashIsDeterministic() throws {
         let data = Data(goldenJSON.utf8)
-        let reference = try ReferenceHierarchyDecoder.decodeReencodeAndHash(data)
-        let rewrite = try RewriteHierarchyDecoder.decodeReencodeAndHash(data)
-        XCTAssertEqual(
-            reference.structuralHash,
-            rewrite.structuralHash,
-            "StructuralHasher must agree in-process (same combine sequence)"
-        )
+        let a = try RewriteHierarchyDecoder.decodeReencodeAndHash(data).structuralHash
+        let b = try RewriteHierarchyDecoder.decodeReencodeAndHash(data).structuralHash
+        XCTAssertEqual(a, b, "StructuralHasher must be deterministic (stable combine sequence)")
+        XCTAssertNotEqual(a, 0, "hash should be non-trivial for a populated hierarchy")
     }
 }

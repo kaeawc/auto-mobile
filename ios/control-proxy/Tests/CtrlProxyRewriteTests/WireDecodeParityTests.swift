@@ -42,19 +42,11 @@ final class WireDecodeParityTests: XCTestCase {
         )
     }
 
-    // MARK: - Differential decode parity
+    // MARK: - Frozen-fixture decode contract
 
-    func testEverySnapshotDecodesIdenticallyInBothModules() throws {
+    func testEverySnapshotHonorsTheFrozenFixture() throws {
         for snapshot in try Self.loadSnapshots() {
             let data = try wireJSON(snapshot.wire)
-
-            let reference: (type: String, normalizedPayload: Any)
-            do {
-                reference = try ReferenceWireDecoder.decode(data)
-            } catch {
-                XCTFail("\(snapshot.name): reference CtrlProxy failed to decode: \(error)")
-                continue
-            }
 
             let rewrite: (type: String, normalizedPayload: Any)
             do {
@@ -68,17 +60,11 @@ final class WireDecodeParityTests: XCTestCase {
                 XCTFail("\(snapshot.name): snapshot has no `type` discriminator")
                 continue
             }
-            XCTAssertEqual(reference.type, type, "\(snapshot.name): reference discriminator")
             XCTAssertEqual(rewrite.type, type, "\(snapshot.name): rewrite discriminator")
 
-            // (2) rewrite payload == reference payload, field for field.
-            assertNormalizedEqual(
-                reference.normalizedPayload,
-                rewrite.normalizedPayload,
-                context: "\(snapshot.name) [reference vs rewrite]"
-            )
-
-            // (3) rewrite payload still honors the frozen fixture.
+            // The rewrite payload still honors the frozen fixture: every wire field lands on a
+            // same-named property with an equal value (the fixture is the golden — Phase-7E
+            // dropped the now-removed reference-vs-rewrite comparison this test also did).
             guard let rewritePayload = rewrite.normalizedPayload as? [String: Any] else {
                 XCTFail("\(snapshot.name): rewrite payload did not normalize to an object")
                 continue
@@ -89,64 +75,17 @@ final class WireDecodeParityTests: XCTestCase {
         }
     }
 
-    /// Unknown discriminators surface the exact wire error string on both sides
+    /// Unknown discriminators surface the exact wire error string
     /// (`"Unknown command type: <type>"`, matched by the TS `rewriteUnknownCommandError`).
     func testUnknownCommandErrorTextMatches() {
         let data = Data(#"{"type":"totally_made_up_command","requestId":"x"}"#.utf8)
-        let referenceMessage = ReferenceWireDecoder.decodeErrorMessage(data)
-        let rewriteMessage = RewriteWireDecoder.decodeErrorMessage(data)
-
-        XCTAssertEqual(referenceMessage, "Unknown command type: totally_made_up_command")
-        XCTAssertEqual(rewriteMessage, referenceMessage, "rewrite unknown-command wire text must match reference")
+        XCTAssertEqual(
+            RewriteWireDecoder.decodeErrorMessage(data),
+            "Unknown command type: totally_made_up_command"
+        )
     }
 
     // MARK: - Normalized-value comparison helpers
-
-    /// Deep structural equality of two `jsonNormalized` values (dictionaries,
-    /// arrays, and `NSNumber`/`NSString`/`NSNull` scalars).
-    private func assertNormalizedEqual(
-        _ lhs: Any,
-        _ rhs: Any,
-        context: String,
-        file: StaticString = #filePath,
-        line: UInt = #line
-    ) {
-        if let lhsDict = lhs as? [String: Any] {
-            guard let rhsDict = rhs as? [String: Any] else {
-                XCTFail("\(context): reference is an object, rewrite decoded \(rhs)", file: file, line: line)
-                return
-            }
-            XCTAssertEqual(
-                Set(lhsDict.keys),
-                Set(rhsDict.keys),
-                "\(context): payload property sets differ",
-                file: file,
-                line: line
-            )
-            for (key, lhsValue) in lhsDict {
-                guard let rhsValue = rhsDict[key] else { continue }
-                assertNormalizedEqual(lhsValue, rhsValue, context: "\(context).\(key)", file: file, line: line)
-            }
-            return
-        }
-        if let lhsArray = lhs as? [Any] {
-            guard let rhsArray = rhs as? [Any] else {
-                XCTFail("\(context): reference is an array, rewrite decoded \(rhs)", file: file, line: line)
-                return
-            }
-            XCTAssertEqual(lhsArray.count, rhsArray.count, "\(context): array length", file: file, line: line)
-            for (index, pair) in zip(lhsArray, rhsArray).enumerated() {
-                assertNormalizedEqual(pair.0, pair.1, context: "\(context)[\(index)]", file: file, line: line)
-            }
-            return
-        }
-        XCTAssertTrue(
-            (lhs as AnyObject).isEqual(rhs),
-            "\(context): reference \(lhs) != rewrite \(rhs)",
-            file: file,
-            line: line
-        )
-    }
 
     /// Every wire field lands on a same-named payload property with an equal value;
     /// payload-only keys must be NSNull (an optional the wire did not carry). Ported

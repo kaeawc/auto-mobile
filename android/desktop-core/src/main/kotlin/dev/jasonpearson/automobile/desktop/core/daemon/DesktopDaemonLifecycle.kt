@@ -254,6 +254,7 @@ internal interface DaemonPackageRunnerResolver {
 internal class SystemDaemonPackageRunnerResolver(
   private val home: String? =
     System.getProperty("user.home")?.takeIf { it.isNotEmpty() } ?: System.getenv("HOME"),
+  private val bunInstall: String? = System.getenv("BUN_INSTALL")?.takeIf { it.isNotEmpty() },
   private val executableAt: (String) -> Boolean = { File(it).canExecute() },
   private val onPath: (String, Boolean) -> String? = ::whichRunner,
 ) : DaemonPackageRunnerResolver {
@@ -275,9 +276,13 @@ internal class SystemDaemonPackageRunnerResolver(
 
   private fun bunAbsoluteCandidates(isWindows: Boolean): List<String> =
     if (isWindows) {
-      buildList { home?.let { add("$it\\.bun\\bin\\bunx.exe") } }
+      buildList {
+        bunInstall?.let { add("$it\\bin\\bunx.exe") }
+        home?.let { add("$it\\.bun\\bin\\bunx.exe") }
+      }
     } else {
       buildList {
+        bunInstall?.let { add("$it/bin/bunx") }
         home?.let { add("$it/.bun/bin/bunx") }
         add("/opt/homebrew/bin/bunx")
         add("/usr/local/bin/bunx")

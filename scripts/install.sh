@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Intentional conditional calls preserve optional-install and cleanup failure handling.
+# shellcheck disable=SC2310
 IFS=$'\n\t'
 
 # Handle piped execution (curl | bash) where BASH_SOURCE is empty
@@ -2804,6 +2806,7 @@ cleanup_macos_desktop_app_replacement() {
         run_desktop_app_privileged rm -rf -- "${DESKTOP_APP_REPLACEMENT_STAGING_DIR}" || true
     fi
     if [[ -n "${DESKTOP_APP_REPLACEMENT_LOCK_DIR}" ]]; then
+        run_desktop_app_privileged rm -f -- "${DESKTOP_APP_REPLACEMENT_LOCK_DIR}/owner.pid" || true
         run_desktop_app_privileged rmdir "${DESKTOP_APP_REPLACEMENT_LOCK_DIR}" || true
     fi
 
@@ -2815,6 +2818,44 @@ cleanup_macos_desktop_app_replacement() {
         DESKTOP_APP_REPLACEMENT_STAGING_DIR=""
     fi
     return 0
+}
+
+recover_stale_macos_desktop_app_swap() {
+    local target_parent="$1" target_app="$2" swap_dir previous_app
+    [[ -e "${target_app}" ]] && return 0
+    while IFS= read -r swap_dir; do
+        [[ -n "${swap_dir}" ]] || continue
+        previous_app="${swap_dir}/Previous-AutoMobile.app"
+        if run_desktop_app_privileged test -e "${previous_app}"; then
+            if run_desktop_app_privileged mv -- "${previous_app}" "${target_app}"; then
+                log_warn "Recovered the previous AutoMobile.app after an interrupted installation."
+            else
+                log_error "Could not recover the previous AutoMobile.app from ${previous_app}."
+                return 1
+            fi
+            run_desktop_app_privileged rm -rf -- "${swap_dir}" || return 1
+            return 0
+        fi
+        run_desktop_app_privileged rm -rf -- "${swap_dir}" || return 1
+    done < <(run_desktop_app_privileged find "${target_parent}" -maxdepth 1 -type d -name '.automobile-install.*' -print 2>/dev/null)
+}
+
+acquire_macos_desktop_app_lock() {
+    local lock_dir="$1" target_parent="$2" target_app="$3" owner_pid
+    if run_desktop_app_privileged mkdir "${lock_dir}" 2>/dev/null; then
+        printf '%s\n' "${BASHPID}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null
+        return 0
+    fi
+    if ! owner_pid=$(run_desktop_app_privileged cat "${lock_dir}/owner.pid" 2>/dev/null) \
+        || [[ ! "${owner_pid}" =~ ^[0-9]+$ ]] \
+        || run_desktop_app_privileged kill -0 "${owner_pid}" 2>/dev/null; then
+        return 1
+    fi
+    log_warn "Reclaiming stale AutoMobile desktop installation lock."
+    run_desktop_app_privileged rm -rf -- "${lock_dir}" || return 1
+    recover_stale_macos_desktop_app_swap "${target_parent}" "${target_app}" || return 1
+    run_desktop_app_privileged mkdir "${lock_dir}" || return 1
+    printf '%s\n' "${BASHPID}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null
 }
 
 # Copy into a sibling staging directory, then swap the bundle into place. This
@@ -2829,7 +2870,7 @@ install_macos_desktop_app_bundle() {
     DESKTOP_APP_REPLACEMENT_TARGET="${target_app}"
     DESKTOP_APP_REPLACEMENT_LOCK_DIR="${lock_dir}"
     DESKTOP_APP_REPLACEMENT_COMPLETE=false
-    if ! run_desktop_app_privileged mkdir "${lock_dir}"; then
+    if ! acquire_macos_desktop_app_lock "${lock_dir}" "${target_parent}" "${target_app}"; then
         DESKTOP_APP_REPLACEMENT_LOCK_DIR=""
         DESKTOP_APP_REPLACEMENT_TARGET=""
         log_error "Another AutoMobile desktop app installation is already in progress."
@@ -5274,7 +5315,9 @@ main() {
     # CLI installation
     show_installation_progress 7
     if [[ "${INSTALL_DESKTOP_APP}" == "true" ]]; then
-        install_desktop_app
+        if ! install_desktop_app; then
+            log_warn "Desktop app installation failed; continuing with the remaining AutoMobile setup."
+        fi
     fi
     if [[ -z "${POST_BUN_SETUP_PID}" && "${INSTALL_AUTOMOBILE_CLI}" == "true" ]]; then
         install_auto_mobile_cli

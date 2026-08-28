@@ -415,6 +415,20 @@ class DesktopDaemonLifecycleTest {
   }
 
   @Test
+  fun `discovers bunx under the BUN_INSTALL root`() {
+    val customBunx = "/opt/custom-bun/bin/bunx"
+    val resolver =
+      SystemDaemonPackageRunnerResolver(
+        home = "/Users/dev",
+        bunInstall = "/opt/custom-bun",
+        executableAt = { it == customBunx },
+        onPath = { _, _ -> null },
+      )
+
+    assertEquals(customBunx, resolver.resolve("Mac OS X"))
+  }
+
+  @Test
   fun `discovers a linuxbrew bun install when PATH omits it`() {
     val linuxbrewBunx = "/home/linuxbrew/.linuxbrew/bin/bunx"
     val resolver =

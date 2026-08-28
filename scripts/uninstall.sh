@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Intentional conditional calls propagate failures explicitly at their callers.
+# shellcheck disable=SC2310
 IFS=$'\n\t'
 
 # Handle Ctrl-C (SIGINT) - exit immediately
@@ -75,6 +77,10 @@ desktop_app_is_root() {
 run_desktop_app_privileged() {
     if desktop_app_is_root; then
         "$@"
+    elif [[ "${1:-}" == "kill" || "${1:-}" == "ps" ]] && "$@" 2>/dev/null; then
+        # Prefer the unprivileged operation for same-user processes; fall back
+        # to sudo below when the process belongs to another user.
+        return 0
     elif command_exists sudo; then
         sudo "$@"
     else
@@ -312,6 +318,22 @@ desktop_app_termination_wait() {
     sleep 0.1
 }
 
+# Return 0 while the PID is alive, 1 when it has exited, and 2 when its state
+# cannot be verified (for example, because the privileged check was denied).
+desktop_app_pid_alive() {
+    local pid="$1" executable
+    if run_desktop_app_privileged kill -0 "${pid}" 2>/dev/null; then
+        return 0
+    fi
+    local process_listing
+    process_listing=$(run_desktop_app_privileged ps -p "${pid}" -o command= 2>/dev/null) || return 1
+    [[ -n "${process_listing//[[:space:]]/}" ]] || return 1
+    for executable in ${DESKTOP_APP_EXECUTABLES[@]+"${DESKTOP_APP_EXECUTABLES[@]}"}; do
+        [[ "${process_listing}" == "${executable}" || "${process_listing}" == "${executable} "* ]] && return 2
+    done
+    return 1
+}
+
 stop_desktop_app_processes() {
     local pids=()
     local pid attempt running
@@ -328,16 +350,22 @@ stop_desktop_app_processes() {
 
     log_info "Stopping AutoMobile desktop app..."
     for pid in ${pids[@]+"${pids[@]}"}; do
-        kill -TERM "${pid}" 2>/dev/null || true
+        if ! run_desktop_app_privileged kill -TERM "${pid}" 2>/dev/null; then
+            log_error "Could not signal desktop app process ${pid}; refusing to remove the app."
+            return 1
+        fi
     done
 
     attempt=0
     while (( attempt < 20 )); do
         running=false
         for pid in ${pids[@]+"${pids[@]}"}; do
-            if kill -0 "${pid}" 2>/dev/null; then
+            if desktop_app_pid_alive "${pid}"; then
                 running=true
                 break
+            elif [[ "$?" -eq 2 ]]; then
+                log_error "Could not verify desktop app process ${pid}; refusing to remove the app."
+                return 1
             fi
         done
         [[ "${running}" == "false" ]] && return 0
@@ -346,10 +374,17 @@ stop_desktop_app_processes() {
     done
 
     for pid in ${pids[@]+"${pids[@]}"}; do
-        if kill -0 "${pid}" 2>/dev/null; then
-            kill -KILL "${pid}" 2>/dev/null || true
+        if desktop_app_pid_alive "${pid}"; then
+            if ! run_desktop_app_privileged kill -KILL "${pid}" 2>/dev/null; then
+                log_error "Could not terminate desktop app process ${pid}; refusing to remove the app."
+                return 1
+            fi
+        elif [[ "$?" -eq 2 ]]; then
+            log_error "Could not verify desktop app process ${pid}; refusing to remove the app."
+            return 1
         fi
     done
+
 }
 
 config_has_automobile() {
@@ -701,17 +736,21 @@ remove_desktop_app() {
         for app_path in ${DESKTOP_APP_PATHS[@]+"${DESKTOP_APP_PATHS[@]}"}; do
             log_info "Removing AutoMobile desktop app from ${app_path}..."
             if [[ "${app_path}" == "/Applications/"* ]]; then
-                run_desktop_app_privileged rm -rf -- "${app_path}"
+                if ! run_desktop_app_privileged rm -rf -- "${app_path}"; then
+                    return 1
+                fi
             else
-                rm -rf -- "${app_path}"
+                if ! rm -rf -- "${app_path}"; then
+                    return 1
+                fi
             fi
         done
     elif [[ "${os}" == "linux" ]]; then
         log_info "Removing AutoMobile desktop package: ${DESKTOP_APP_PACKAGE}..."
         if command_exists apt-get; then
-            run_desktop_app_privileged apt-get remove -y "${DESKTOP_APP_PACKAGE}"
+            run_desktop_app_privileged apt-get remove -y "${DESKTOP_APP_PACKAGE}" || return 1
         elif command_exists dpkg; then
-            run_desktop_app_privileged dpkg --remove "${DESKTOP_APP_PACKAGE}"
+            run_desktop_app_privileged dpkg --remove "${DESKTOP_APP_PACKAGE}" || return 1
         else
             log_error "apt-get or dpkg is required to remove the AutoMobile desktop app package."
             return 1
@@ -983,7 +1022,10 @@ main() {
     # Perform uninstall
     echo ""
     if [[ "${UNINSTALL_DESKTOP_APP}" == "true" ]]; then
-        stop_desktop_app_processes
+        if ! stop_desktop_app_processes; then
+            log_error "Could not stop the AutoMobile desktop app; uninstall aborted."
+            exit 1
+        fi
     fi
 
     if [[ "${UNINSTALL_DAEMON}" == "true" ]]; then
@@ -1007,7 +1049,10 @@ main() {
     fi
 
     if [[ "${UNINSTALL_DESKTOP_APP}" == "true" ]]; then
-        remove_desktop_app
+        if ! remove_desktop_app; then
+            log_error "Could not remove the AutoMobile desktop app; uninstall aborted."
+            exit 1
+        fi
     fi
 
     # Summary

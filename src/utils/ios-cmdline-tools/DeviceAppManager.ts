@@ -878,7 +878,8 @@ export class DeviceAppManager implements DeviceUrlLauncher {
    * instead of returning an empty list (issue #2883).
    *
    * Unlike {@link queryInstalledAppEntry} this omits `--bundle-id`, which is
-   * what turns the lookup into a full listing. devicectl exec / JSON-read
+   * what turns the lookup into a full listing, and passes `--include-all-apps`
+   * to match simctl's unfiltered listing scope. devicectl exec / JSON-read
    * failures are wrapped and PROPAGATE: an empty list must mean "no apps", not
    * "devicectl is broken", because callers report that distinction as their
    * `successful` flag. macOS-only.
@@ -898,6 +899,7 @@ export class DeviceAppManager implements DeviceUrlLauncher {
         "device",
         "info",
         "apps",
+        "--include-all-apps",
         "--device",
         deviceUdid,
         "--json-output",

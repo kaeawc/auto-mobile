@@ -1594,7 +1594,7 @@ describe("DeviceAppManager.listInstalledApps", () => {
     };
   }
 
-  test("queries devicectl for the whole listing, without --bundle-id", async () => {
+  test("queries devicectl for the whole listing, including all app scopes and without --bundle-id", async () => {
     const commands: string[] = [];
     const manager = createManager({}, commands);
 
@@ -1604,6 +1604,7 @@ describe("DeviceAppManager.listInstalledApps", () => {
     expect(commands).toHaveLength(1);
     expect(commands[0]).toContain("devicectl device info apps");
     expect(commands[0]).toContain("--device 00008130-001C2D3E1234567A");
+    expect(commands[0]).toContain("--include-all-apps");
     expect(commands[0]).not.toContain("--bundle-id");
   });
 

@@ -23,6 +23,9 @@ final class SdkHierarchyServerTests: XCTestCase {
         private let stateLock = NSLock()
         private var _isLocked = false
 
+        /// Signals when another caller tries to acquire the lock while it is held.
+        let didAttemptLockWhileHeld = DispatchSemaphore(value: 0)
+
         var isLocked: Bool {
             stateLock.lock()
             defer { stateLock.unlock() }
@@ -30,6 +33,13 @@ final class SdkHierarchyServerTests: XCTestCase {
         }
 
         func lock() {
+            stateLock.lock()
+            let wasLocked = _isLocked
+            stateLock.unlock()
+            if wasLocked {
+                didAttemptLockWhileHeld.signal()
+            }
+
             underlyingLock.lock()
             stateLock.lock()
             _isLocked = true
@@ -118,6 +128,11 @@ final class SdkHierarchyServerTests: XCTestCase {
             stopReturned.fulfill()
         }
 
+        XCTAssertEqual(
+            lifecycleLock.didAttemptLockWhileHeld.wait(timeout: .now() + 1),
+            .success,
+            "stop must attempt to acquire the lifecycle lock before listener startup can finish"
+        )
         listener.mayFinishStart.signal()
         wait(for: [startReturned, stopReturned], timeout: 1)
 

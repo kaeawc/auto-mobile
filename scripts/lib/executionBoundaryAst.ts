@@ -332,6 +332,14 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       ts.isIdentifier(node.left)
     ) {
       bind(node.left.text, node.right, node, "assignment");
+      if (ts.isFunctionLike(node.right)) {
+        functionBindings.push({
+          name: node.left.text,
+          node: node.right,
+          scope: lexicalScope(node),
+          position: node.getStart(sourceFile),
+        });
+      }
     }
     if (ts.isCallExpression(node)) {
       calls.push(node);

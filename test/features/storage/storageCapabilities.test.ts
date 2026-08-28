@@ -230,7 +230,14 @@ describe("AC4: partial / disabled / unsupported / conflicting inputs", () => {
     );
 
     const ios = computeStorageCapabilities(ctx({ platform: "ios", deviceType: "simulator" }));
-    expect(findOperationCapability(ios, "media_library", "write")?.state).toBe("unsupported");
+    expect(findOperationCapability(ios, "media_library", "write")?.state).toBe("supported");
+    expect(
+      findOperationCapability(
+        computeStorageCapabilities(ctx({ platform: "ios", deviceType: "physical" })),
+        "media_library",
+        "write",
+      )?.state,
+    ).toBe("unsupported");
   });
 
   it("secure_state read is unavailable pending the #5161 host policy, not unsupported", () => {

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   APP_FILE_RESOURCE_TEMPLATES,
   buildAppFileResourceUri,
@@ -111,9 +112,73 @@ describe("putAppFile canonical target contract (#5803)", () => {
       files: [textFile],
     },
     { target: { domain: "user_files", namespace: "run-42", reset: true }, files: [textFile] },
-    { target: { domain: "media_library" }, files: [textFile] },
+    {
+      target: { domain: "media_library" },
+      files: [{ destinationPath: "fixtures/welcome.png", contentBase64: "iVBORw0KGgo=" }],
+    },
   ])("accepts target branch %#", (args) => {
     expect(putAppFileSchema.safeParse(args).success).toBe(true);
+  });
+
+  test("rejects media-library fixture names without a supported media extension", () => {
+    expect(
+      putAppFileSchema.safeParse({
+        target: { domain: "media_library" },
+        files: [{ destinationPath: "fixtures/payload", contentText: "not a media filename" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  test.each(["clip.mkv", "clip.webm"])(
+    "keeps Android media-library fixture format %s available",
+    (destinationPath) => {
+      expect(
+        putAppFileSchema.safeParse({
+          target: { domain: "media_library" },
+          files: [{ destinationPath, contentBase64: "AQID" }],
+        }).success,
+      ).toBe(true);
+    },
+  );
+
+  test("rejects extensionless media-library fixture names that look like an extension", () => {
+    expect(
+      putAppFileSchema.safeParse({
+        target: { domain: "media_library" },
+        files: [{ destinationPath: "fixtures/png", contentText: "not a media filename" }],
+      }).success,
+    ).toBe(false);
+  });
+
+  test("advertises the media-library filename requirement in generated tool definitions", () => {
+    const definitions = JSON.parse(readFileSync("schemas/tool-definitions.json", "utf8")) as Array<{
+      name: string;
+      inputSchema?: { if?: unknown; then?: unknown };
+    }>;
+    const putAppFile = definitions.find((definition) => definition.name === "putAppFile");
+
+    expect(putAppFile?.inputSchema?.if).toEqual({
+      properties: {
+        target: {
+          properties: { domain: { const: "media_library" } },
+          required: ["domain"],
+        },
+      },
+      required: ["target"],
+    });
+    expect(putAppFile?.inputSchema?.then).toEqual({
+      properties: {
+        files: {
+          items: {
+            properties: {
+              destinationPath: {
+                pattern: expect.stringContaining("[pP][nN][gG]"),
+              },
+            },
+          },
+        },
+      },
+    });
   });
 
   test("normalizes the legacy single-file app-container shape into the canonical batch", () => {

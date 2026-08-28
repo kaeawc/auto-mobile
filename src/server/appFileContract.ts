@@ -1,3 +1,4 @@
+import { extname } from "node:path";
 import { z } from "zod/v4";
 import {
   addDeviceTargetingToSchema,
@@ -30,6 +31,72 @@ export interface AppFileResourceParts {
 }
 
 export type StorageDomain = "app_containers" | "user_files" | "media_library";
+
+const MEDIA_LIBRARY_EXTENSION_NAMES = [
+  "aac",
+  "aiff",
+  "avif",
+  "bmp",
+  "flac",
+  "gif",
+  "heic",
+  "jpeg",
+  "jpg",
+  "m4a",
+  "mkv",
+  "mov",
+  "mp4",
+  "m4v",
+  "mp3",
+  "ogg",
+  "png",
+  "tif",
+  "tiff",
+  "wav",
+  "webm",
+  "webp",
+] as const;
+
+const MEDIA_LIBRARY_EXTENSIONS = new Set<string>(MEDIA_LIBRARY_EXTENSION_NAMES);
+const MEDIA_LIBRARY_EXTENSION_PATTERN = `\\.(?:${MEDIA_LIBRARY_EXTENSION_NAMES.map((extension) =>
+  extension
+    .split("")
+    .map((character) =>
+      character >= "a" && character <= "z" ? `[${character}${character.toUpperCase()}]` : character,
+    )
+    .join(""),
+).join("|")})$`;
+
+const SIMULATOR_MEDIA_EXTENSIONS = new Set([
+  "avif",
+  "bmp",
+  "gif",
+  "heic",
+  "jpeg",
+  "jpg",
+  "mov",
+  "mp4",
+  "m4v",
+  "png",
+  "tif",
+  "tiff",
+  "webp",
+]);
+
+function extensionFor(path: string): string | undefined {
+  const extension = extname(path);
+  return extension.length > 1 ? extension.slice(1).toLowerCase() : undefined;
+}
+
+export function hasSupportedMediaLibraryExtension(path: string): boolean {
+  const extension = extensionFor(path);
+  return extension !== undefined && MEDIA_LIBRARY_EXTENSIONS.has(extension);
+}
+
+export function hasSupportedSimulatorMediaExtension(path: string): boolean {
+  const extension = extensionFor(path);
+  return extension !== undefined && SIMULATOR_MEDIA_EXTENSIONS.has(extension);
+}
 
 export interface AppContainersTarget {
   domain: "app_containers";
@@ -304,7 +371,20 @@ const canonicalPutAppFileSchema = addDeviceTargetingToSchema(
       legacySingleFile: z.literal(true).optional(),
     })
     .strict(),
-);
+).superRefine((args, ctx) => {
+  if (args.target.domain !== "media_library") {
+    return;
+  }
+  for (const [index, file] of args.files.entries()) {
+    if (!hasSupportedMediaLibraryExtension(file.destinationPath)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "media_library destinationPath must end in a supported image or video extension.",
+        path: ["files", index, "destinationPath"],
+      });
+    }
+  }
+});
 
 function preprocessLegacyPutAppFileArgs(input: unknown): unknown {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
@@ -356,6 +436,27 @@ export const putAppFileSchema = withJsonSchemaOverride(
           { required: ["contentBase64"] },
         ];
       }
+
+      jsonSchema.if = {
+        properties: {
+          target: {
+            properties: { domain: { const: "media_library" } },
+            required: ["domain"],
+          },
+        },
+        required: ["target"],
+      };
+      jsonSchema.then = {
+        properties: {
+          files: {
+            items: {
+              properties: {
+                destinationPath: { pattern: MEDIA_LIBRARY_EXTENSION_PATTERN },
+              },
+            },
+          },
+        },
+      };
     }
     if (Array.isArray(jsonSchema.required)) {
       jsonSchema.required = jsonSchema.required.filter((field) => field !== "legacySingleFile");

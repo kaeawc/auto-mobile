@@ -7349,7 +7349,33 @@
         }
       },
       "required": ["target", "files"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "target": {
+            "properties": {
+              "domain": {
+                "const": "media_library"
+              }
+            },
+            "required": ["domain"]
+          }
+        },
+        "required": ["target"]
+      },
+      "then": {
+        "properties": {
+          "files": {
+            "items": {
+              "properties": {
+                "destinationPath": {
+                  "pattern": "\\.(?:[aA][aA][cC]|[aA][iI][fF][fF]|[aA][vV][iI][fF]|[bB][mM][pP]|[fF][lL][aA][cC]|[gG][iI][fF]|[hH][eE][iI][cC]|[jJ][pP][eE][gG]|[jJ][pP][gG]|[mM]4[aA]|[mM][kK][vV]|[mM][oO][vV]|[mM][pP]4|[mM]4[vV]|[mM][pP]3|[oO][gG][gG]|[pP][nN][gG]|[tT][iI][fF]|[tT][iI][fF][fF]|[wW][aA][vV]|[wW][eE][bB][mM]|[wW][eE][bB][pP])$"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   {

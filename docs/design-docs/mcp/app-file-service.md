@@ -24,6 +24,9 @@ path; generated tool definitions advertise the canonical target-based shape.
   resolves the active Android profile before every write. `media_library` uses
   the AutoMobile-owned `automobile-media` Downloads namespace and reports
   success only after MediaStore discovery is verified.
+- iOS Simulator `media_library` imports supported image and video filenames
+  through `simctl addmedia`. Its result confirms import, not picker visibility;
+  iOS physical devices and media list/read operations remain unsupported.
 
 ## Shared Validation
 

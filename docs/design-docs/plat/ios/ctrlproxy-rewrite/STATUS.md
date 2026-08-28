@@ -6,11 +6,12 @@ can be given minimal guidance — e.g. *"we just finished Phase 2; read
 and orient entirely from here. See [README.md](README.md) for the fixup-note index
 and the amended phase plan.
 
-Last updated after Phase 7C (the production XCUITest runner now compiles + runs the Swift-6
-rewrite — the `CtrlProxyUITests` target was repurposed to compile `Sources/CtrlProxyRewrite`,
-so the TS MCP integration + scripts drive it unchanged; `testServiceStarts` green on an iOS 27
-sim). Reference impl kept as the SwiftPM parity oracle. 7D (retire the reference target + full
-observe→gesture→hierarchy validation) is next.
+Last updated after Phase 7D (on-device validation, partial). The production runner runs the
+rewrite on an iOS 27 sim; the rewrite's on-device hierarchy extraction is proven (a ported
+integration test's `getViewHierarchy` returned a real 15-node tree). The full fixture-driven
+gesture/typing loop is blocked by an iOS-27-**beta** simulator app-launch flake (the host app
+doesn't reach its fixture VC; "Unable to monitor event loop" + a ~10-min xcodebuild teardown
+hang), not by the rewrite. Retiring the reference (7E) stays gated on a trusted full loop.
 
 ---
 
@@ -91,7 +92,8 @@ wire fixture is `test/fixtures/ios-ctrlproxy-request-snapshots.json`.
 | 7A | Wire rewrite into XcodeGen + first green iOS-sim compile (host-hidden `ElementLocator` init fixed) | `12e7c80a1` | ✅ |
 | 7B | iOS strict-concurrency warning cleanup (`DeviceRotation`/`DefaultVoiceOverToggle`/runner) — 0 warnings + runtime-validated on sim | — | ✅ |
 | 7C | Point the production runner at the rewrite (repurpose `CtrlProxyUITests` target → compiles `Sources/CtrlProxyRewrite`; zero TS/script churn) | — | ✅ (middle route) |
-| 7D | Retire the reference target + full observe→gesture→hierarchy validation (port the rich iOS integration tests) | — | ◻️ **NEXT** |
+| 7D | On-device validation (server lifecycle + real hierarchy extraction proven on sim; rich integration test ported, skip-guarded) | — | ◑ partial — full fixture loop blocked by iOS-27-beta sim launch flake |
+| 7E | Retire the reference target (drops the differential-parity harness) — **gated on a trusted full observe→gesture→hierarchy loop** (manual-test / stable runtime) | — | ◻️ **NEXT** |
 | 8 | Post-concurrency fixups (see README index) | — | ◻️ |
 
 **Ported so far** (all one-type-per-file, `Sendable`, differentially verified unless
@@ -247,6 +249,23 @@ framework target is untouched) — it just no longer backs an on-device runner. 
 green (0 errors, 0 source warnings) and the **production** identifier
 `CtrlProxyUITests/CtrlProxyUITests/testServiceStarts` runs green on iPhone 17. SPM gate: 229 green.
 
+**Phase 7D added** (on-device validation — partial; reference NOT yet retired). On-device evidence
+the rewrite is trustworthy: (1) `testServiceStarts` runs green on iPhone 17 — the `@MainActor`
+coordinator init path (incl. `DeviceRotation` signal-init `assumeIsolated`) + server start→stop work;
+(2) the reference's rich integration test (`testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree`)
+was ported into `Tests/CtrlProxyUITests/HierarchyIntegrationTests.swift` (against the rewrite; `@MainActor`,
+explicit `perf:`), and a diagnostic run **proved the rewrite's `getViewHierarchy` extracts a real
+on-device tree** (15 nodes reflecting exactly what rendered). **Blocker (environment, not the rewrite):**
+on the iOS-27-**beta** runtime the host app doesn't reach its `SnapshotGapViewController` fixture
+(XCUITest "Unable to monitor event loop"; the app stays on a launch-screen-like tree; xcodebuild
+*teardown* then hangs ~10 min though the test body runs in ~13 s) — so the fixture-driven
+gesture/typing/secure-field assertions can't complete here. The ported test is therefore
+**`XCTSkipUnless`-guarded** on the fixture appearing: it hard-asserts on a healthy runtime and skips
+(not red-fails) on the beta-sim launch flake. **Consequence:** retiring the reference (7E) — which
+also dismantles the differential-parity harness (`CtrlProxyRewriteTests` links both modules) — stays
+gated on a trusted full observe→gesture→hierarchy loop (the `manual-test` skill / a stable, non-beta
+runtime driving a live client), per the §10 discipline.
+
 ## 6. Archetype map & load-bearing decisions
 
 - **iOS 17 floor rules out `Synchronization.Mutex`** (needs iOS 18). Use actors,
@@ -389,8 +408,9 @@ so the rewrite now both **compiles and runs** on a simulator. All `swift`/`xcode
 invocations here need `dangerouslyDisableSandbox` (temp/DerivedData/CoreSimulator/SPM-manifest
 `sandbox-exec` writes are outside the sandbox allowlist). Run one test via
 `xcodebuild test-without-building -xctestrun <…>.xctestrun -destination 'platform=iOS
-Simulator,name=iPhone 17' -only-testing:CtrlProxyRewriteUITests/…` (never run `testRunService` —
-it waits forever).
+Simulator,name=iPhone 17' -only-testing:CtrlProxyUITests/HierarchyIntegrationTests` (never run
+`testRunService` — it waits forever). Note: on the iOS-27-beta runtime xcodebuild *teardown* can hang
+~10 min after the test body finishes (a sim/beta flake) — bound it with an outer timeout.
 
 Suggested order:
 
@@ -402,14 +422,18 @@ Suggested order:
 3. ✅ **Point the runner at the rewrite (7C, middle route).** Repurposed the `CtrlProxyUITests`
    XcodeGen target to compile `Sources/CtrlProxyRewrite` (name/app/xctest/`-only-testing` identifier
    kept → zero TS/script churn). Reference impl kept as the SwiftPM parity oracle.
-4. **(7D) Retire the reference + full validation.** Once a full observe→gesture→hierarchy loop passes
-   on a simulator (the `manual-test` skill; a live client, not just `testServiceStarts`), retire the
-   reference: drop the per-target `.v5` mode + the `CtrlProxy`/`CtrlProxyTests` (and Xcode `CtrlProxy`
-   framework) targets — which also ends the differential-parity harness (`CtrlProxyRewriteTests` links
-   both modules), so do it only after the on-device loop is trusted. Port the reference's rich iOS
-   integration tests (`testHierarchyIncludes…`) against the rewrite's injected seams; fold in the
-   still-deferred Phase-2 loopback smoke test + connection scenarios (§8) as iOS UI tests.
-5. **Then Phase 8 fixups** (README index): the `os_signpost`/direct-interval PerfProvider
+4. ◑ **(7D) On-device validation — partial.** `testServiceStarts` green on iPhone 17; the reference's
+   rich integration test ported (`HierarchyIntegrationTests`, skip-guarded) and the rewrite's
+   `getViewHierarchy` proven to extract a real on-device tree. The full fixture-driven loop is blocked
+   by an iOS-27-beta sim launch flake (see the Phase-7D note). **To finish:** run the loop on a stable
+   (non-beta) runtime or via the `manual-test` skill (a live client), and fold in the deferred Phase-2
+   loopback smoke test + connection scenarios (§8) as iOS UI tests.
+5. **(7E) Retire the reference — the one-way step, gated on 7D's full loop.** Only once the
+   observe→gesture→hierarchy loop is trusted: drop the per-target `.v5` mode + the
+   `CtrlProxy`/`CtrlProxyTests` (and Xcode `CtrlProxy` framework) targets. This **ends the
+   differential-parity harness** (`CtrlProxyRewriteTests` links both modules), so it is deliberately
+   last and irreversible-ish.
+6. **Then Phase 8 fixups** (README index): the `os_signpost`/direct-interval PerfProvider
    simplification, the `HierarchyMerger` geometry-key improvement, the keyboard-focus RunLoop
    de-blocking — all off the critical path, validated against golden-replay corpora.
 

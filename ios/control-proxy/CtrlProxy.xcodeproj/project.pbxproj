@@ -69,6 +69,7 @@
 		4917F959900833F074F22C34 /* FrameContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD4BE559FB2C03A096815C9F /* FrameContext.swift */; };
 		4A99C099F2E5C6589CC24FB8 /* RequestClearText.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83F1048EB07A1C40FEE1C6E8 /* RequestClearText.swift */; };
 		51172531044918A0248559AE /* ObjCExceptionCatcher.h in Headers */ = {isa = PBXBuildFile; fileRef = D219492B8663B05AFF608428 /* ObjCExceptionCatcher.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		51FEF589F67C8A78E299A91A /* HierarchyIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 401502F4542F2B4B460018E9 /* HierarchyIntegrationTests.swift */; };
 		5278294A4F04317461A1FBE4 /* ObjCExceptionCatcher.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; };
 		543CE5608AD59EF3C64CE382 /* RequestGetPreference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B5F8F7BAAAAC5FEA95C9792 /* RequestGetPreference.swift */; };
 		5651AAF00833750D1DFD55CE /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF23F10C24C9F40E5CEC303 /* Logging.swift */; };
@@ -386,6 +387,7 @@
 		3BF23F10C24C9F40E5CEC303 /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
 		3CB3829011D3086CDB1E76EB /* SdkHierarchyFetching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyFetching.swift; sourceTree = "<group>"; };
 		3E5AAA4E2861D92C17F39B14 /* HierarchyDebouncerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyDebouncerTests.swift; sourceTree = "<group>"; };
+		401502F4542F2B4B460018E9 /* HierarchyIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyIntegrationTests.swift; sourceTree = "<group>"; };
 		4077C07753B2627ACB9A9B2E /* RotationChangeGeneration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RotationChangeGeneration.swift; sourceTree = "<group>"; };
 		41C220C155D0C4EB562356EB /* RequestSetNetworkMockRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestSetNetworkMockRules.swift; sourceTree = "<group>"; };
 		42C53A4D56EE97B5BD11EC63 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
@@ -734,6 +736,7 @@
 			isa = PBXGroup;
 			children = (
 				802717F6B1F37809C4806C23 /* CtrlProxyUITests.swift */,
+				401502F4542F2B4B460018E9 /* HierarchyIntegrationTests.swift */,
 			);
 			name = CtrlProxyUITests;
 			path = Tests/CtrlProxyUITests;
@@ -940,7 +943,7 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		"TEMP_B88F6EFF-C7EA-4EBC-A2DF-3BE9A6540AAE" /* .claude */ = {
+		"TEMP_F32EC9C6-454D-4105-AB3E-1AB88B47974F" /* .claude */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -1234,6 +1237,7 @@
 				307FF58A5B28BF820089790F /* HierarchyDebouncer.swift in Sources */,
 				D5A531020329DB24EF380253 /* HierarchyDebouncing.swift in Sources */,
 				AEDF42DBD9FBE3231F1071AD /* HierarchyExtracting.swift in Sources */,
+				51FEF589F67C8A78E299A91A /* HierarchyIntegrationTests.swift in Sources */,
 				0DF936A0A44D72C5082C0B22 /* HierarchyMerger.swift in Sources */,
 				5ED1131AD64B510B6A1896F7 /* HierarchyResult.swift in Sources */,
 				5AB632C7B0EADA658817B7F7 /* HierarchyUpdateResponse.swift in Sources */,

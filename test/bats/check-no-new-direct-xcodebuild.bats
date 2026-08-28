@@ -191,6 +191,36 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "preserves GNU env escaped whitespace separators" {
+  printf '%s\n' 'spawn("env", ["-S", String.raw`FOO=bar\txcodebuild test`]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "honors GNU env split-string termination" {
+  printf '%s\n' 'spawn("env", ["-S", String.raw`tool \c xcodebuild test`]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new direct production xcodebuild invocations"* ]]
+}
+
+@test "fails closed for bundled env short options" {
+  printf '%s\n' 'spawn("env", ["-iS", "xcodebuild test"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
 @test "rejects a path-qualified shell produced by env split-string" {
   printf '%s\n' "spawn(\"env\", [\"-S\", \"/usr/bin/bash -c 'xcodebuild test'\"]);" > "$repo_dir/src/bypass.ts"
   git -C "$repo_dir" add src/bypass.ts
@@ -233,6 +263,16 @@ teardown() {
 
 @test "fails closed for an unresolved array-form command" {
   printf '%s\n' 'Bun.spawn([wrapper, "xcodebuild", "test"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "fails closed for an unresolved string-form command" {
+  printf '%s\n' 'spawn(commandVariable, ["-S", "xcodebuild test"]);' > "$repo_dir/src/bypass.ts"
   git -C "$repo_dir" add src/bypass.ts
 
   run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"

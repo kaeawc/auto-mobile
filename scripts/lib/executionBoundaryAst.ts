@@ -12,8 +12,8 @@ export const PROCESS_LAUNCHERS = new Set([
 ]);
 const CHILD_PROCESS_MODULES = new Set(["child_process", "node:child_process"]);
 const INJECTED_LAUNCHERS = new Set(["spawn", "spawnSync"]);
-const DYNAMIC_BOUNDARY = "\u0000";
-const STRING_ANALYSIS_OVERFLOW = "\u0003";
+export const DYNAMIC_BOUNDARY = "\u0000";
+export const STRING_ANALYSIS_OVERFLOW = "\u0003";
 const MAX_STRING_ALTERNATIVES = 256;
 
 export interface ExecutionBoundaryAst {

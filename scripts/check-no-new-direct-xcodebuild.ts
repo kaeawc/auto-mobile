@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs";
 import ts from "typescript";
-import { executionBoundaryAst } from "./lib/executionBoundaryAst";
+import {
+  DYNAMIC_BOUNDARY,
+  executionBoundaryAst,
+  STRING_ANALYSIS_OVERFLOW,
+} from "./lib/executionBoundaryAst";
 
 export interface XcodebuildViolation {
   readonly file: string;
@@ -13,7 +17,6 @@ const SHELLS = new Set(["sh", "/bin/sh", "bash", "/bin/bash", "zsh", "/bin/zsh"]
 const ENV_WRAPPERS = new Set(["env"]);
 const OPAQUE_ARGUMENT = "\u0001";
 const ANALYSIS_OVERFLOW = "\u0002";
-const STRING_ANALYSIS_OVERFLOW = "\u0003";
 const MAX_ARGV_ALTERNATIVES = 256;
 
 function commandName(value: string): string {
@@ -31,9 +34,27 @@ function splitEnvPayload(value: string): string[] {
   let escaped = false;
   for (const character of value) {
     if (escaped) {
-      if (character === "_") {
+      if (character === "c") {
+        if (word) {
+          words.push(word);
+        }
+        return words;
+      }
+      if (["_", "t", "n", "v", "f", "r"].includes(character)) {
         if (quote === '"') {
-          word += " ";
+          const whitespace =
+            character === "t"
+              ? "\t"
+              : character === "n"
+                ? "\n"
+                : character === "v"
+                  ? "\v"
+                  : character === "f"
+                    ? "\f"
+                    : character === "r"
+                      ? "\r"
+                      : " ";
+          word += whitespace;
         } else if (word) {
           words.push(word);
           word = "";
@@ -73,6 +94,7 @@ function splitEnvPayload(value: string): string[] {
 function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
   const pending = argv.slice(1);
   let optionsTerminated = false;
+  let unknownFlagSeen = false;
   while (pending.length > 0) {
     const argument = pending.shift()!;
     if (argument === OPAQUE_ARGUMENT) {
@@ -113,8 +135,9 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
       continue;
     }
     if (argument.startsWith("-")) {
-      // Unknown env flags are skipped conservatively. If they take an operand,
-      // treating that operand as the command can only make the boundary louder.
+      // Unknown flags may bundle -S or consume an operand. Remember them so a
+      // later unrecognized word cannot make the boundary silently fail open.
+      unknownFlagSeen = true;
       continue;
     }
     const command = commandName(argument);
@@ -127,7 +150,7 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
     if (ENV_WRAPPERS.has(command)) {
       return envDelegatesToXcodebuild([argument, ...pending]);
     }
-    return false;
+    return unknownFlagSeen && [argument, ...pending].some(containsXcodebuildCommand);
   }
   return false;
 }
@@ -144,7 +167,7 @@ function argumentSlotAlternatives(
     if (value === STRING_ANALYSIS_OVERFLOW) {
       return ANALYSIS_OVERFLOW;
     }
-    return value === "\u0000" ? OPAQUE_ARGUMENT : value;
+    return value === DYNAMIC_BOUNDARY ? OPAQUE_ARGUMENT : value;
   });
 }
 
@@ -182,10 +205,10 @@ export function findDirectXcodebuildCalls(file: string, source: string): Xcodebu
     const first = call.arguments[0];
     const firstArrayAlternatives = ast.arrayAlternatives(first);
     const argumentArrayAlternatives = ast.arrayAlternatives(call.arguments[1]);
+    const commandAlternatives = firstArrayAlternatives ? [] : ast.stringAlternatives(first);
     let possibleArgv = firstArrayAlternatives
       ? firstArrayAlternatives.flatMap((items) => argvAlternatives(ast, items))
-      : ast
-          .stringAlternatives(first)
+      : (commandAlternatives.length > 0 ? commandAlternatives : [OPAQUE_ARGUMENT])
           .flatMap((command) =>
             (argumentArrayAlternatives ?? [[]]).flatMap((items) =>
               argvAlternatives(ast, items).map((arguments_) => [

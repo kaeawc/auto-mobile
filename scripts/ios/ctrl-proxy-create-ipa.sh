@@ -129,7 +129,6 @@ fi
 REQUIRED_ARTIFACTS=(
     "${SIM_DIR}/CtrlProxyApp.app"
     "${SIM_DIR}/CtrlProxyUITests-Runner.app"
-    "${SIM_DIR}/CtrlProxyTests.xctest"
 )
 
 ALL_FOUND=true

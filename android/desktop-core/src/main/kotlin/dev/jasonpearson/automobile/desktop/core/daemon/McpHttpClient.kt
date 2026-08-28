@@ -120,8 +120,9 @@ class McpHttpClient(
     endTime: String?,
     limit: Int?,
     offset: Int?,
+    deviceId: String?,
   ): PerformanceAuditHistoryResult {
-    val uri = buildPerformanceResultsUri(startTime, endTime, limit, offset)
+    val uri = buildPerformanceResultsUri(startTime, endTime, limit, offset, deviceId)
     val contents = readResource(uri)
     return decodePerformanceAuditResource(json, contents)
   }

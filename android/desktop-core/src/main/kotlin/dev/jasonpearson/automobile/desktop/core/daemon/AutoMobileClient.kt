@@ -43,6 +43,7 @@ interface AutoMobileClient {
     endTime: String? = null,
     limit: Int? = null,
     offset: Int? = null,
+    deviceId: String? = null,
   ): PerformanceAuditHistoryResult
 
   fun getTestTimings(query: TestTimingQuery = TestTimingQuery()): TestTimingSummary

@@ -283,14 +283,25 @@ class FakeAutoMobileClient : AutoMobileClient {
     return setFeatureFlagResult
   }
 
+  /** deviceId passed to the most recent [listPerformanceAuditResults] call (null if unscoped). */
+  var lastListPerformanceAuditResultsDeviceId: String? = null
+
   override fun listPerformanceAuditResults(
     startTime: String?,
     endTime: String?,
     limit: Int?,
     offset: Int?,
+    deviceId: String?,
   ): PerformanceAuditHistoryResult {
     calls.add("listPerformanceAuditResults")
-    return listPerformanceAuditResultsResult
+    lastListPerformanceAuditResultsDeviceId = deviceId
+    // Mirror the performance-results resource's server-side deviceId filter so device-scoped
+    // reads only surface their own device's entries.
+    if (deviceId == null) {
+      return listPerformanceAuditResultsResult
+    }
+    val scoped = listPerformanceAuditResultsResult.results.filter { it.deviceId == deviceId }
+    return listPerformanceAuditResultsResult.copy(results = scoped)
   }
 
   override fun getTestTimings(query: TestTimingQuery): TestTimingSummary {

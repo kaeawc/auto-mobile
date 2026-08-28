@@ -57,7 +57,8 @@ fun PerformanceDashboard(
   clientProvider: (() -> AutoMobileClient)? = null, // MCP client for real data
   observationStreamClient: ObservationStream? = null, // Per-device stream for real-time updates
   // Device this dashboard is scoped to; when set, cross-device stream updates are dropped so panes
-  // in a multi-device workspace can't contaminate each other's live metrics. Null = no filtering.
+  // in a multi-device workspace can't contaminate each other's live metrics, and the audit-history
+  // fetch is scoped to this device. Null = no filtering.
   deviceId: String? = null,
   // Initial metrics from parent to avoid empty state flicker when opening
   initialFps: Float? = null,
@@ -555,7 +556,7 @@ fun PerformanceDashboard(
   }
 
   // Initial fetch as fallback (only if we don't already have data from initial metrics)
-  LaunchedEffect(dataSourceMode, clientProvider) {
+  LaunchedEffect(dataSourceMode, clientProvider, deviceId) {
     // Skip fetch if we already have data from initial metrics
     if (currentRun != null) {
       isLoading = false
@@ -566,7 +567,11 @@ fun PerformanceDashboard(
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
       try {
         val dataSource =
-          graph.dataSourceFactory.createPerformanceDataSource(dataSourceMode, clientProvider)
+          graph.dataSourceFactory.createPerformanceDataSource(
+            dataSourceMode,
+            clientProvider,
+            deviceId,
+          )
         when (val result = dataSource.getPerformanceRun()) {
           is dev.jasonpearson.automobile.desktop.core.datasource.Result.Success -> {
             // Only update if we still don't have data (stream might have pushed by now)

@@ -56,6 +56,7 @@ internal fun buildPerformanceResultsUri(
   endTime: String?,
   limit: Int?,
   offset: Int?,
+  deviceId: String?,
 ): String {
   return ResourceUriBuilder(PERFORMANCE_RESULTS_RESOURCE_URI)
     .apply {
@@ -63,6 +64,7 @@ internal fun buildPerformanceResultsUri(
       add("endTime", endTime)
       add("limit", limit)
       add("offset", offset)
+      add("deviceId", deviceId)
     }
     .build()
 }

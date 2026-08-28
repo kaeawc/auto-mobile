@@ -337,7 +337,8 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
           const invocationPositions = closureName
             ? calls
                 .filter(
-                  (call) => ts.isIdentifier(call.expression) && call.expression.text === closureName,
+                  (call) =>
+                    ts.isIdentifier(call.expression) && call.expression.text === closureName,
                 )
                 .map((call) => call.getStart(sourceFile))
             : [];

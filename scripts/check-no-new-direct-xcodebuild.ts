@@ -13,6 +13,7 @@ const SHELLS = new Set(["sh", "/bin/sh", "bash", "/bin/bash", "zsh", "/bin/zsh"]
 const ENV_WRAPPERS = new Set(["env"]);
 const OPAQUE_ARGUMENT = "\u0001";
 const ANALYSIS_OVERFLOW = "\u0002";
+const STRING_ANALYSIS_OVERFLOW = "\u0003";
 const MAX_ARGV_ALTERNATIVES = 256;
 
 function commandName(value: string): string {
@@ -111,7 +112,7 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
     if (command === "xcodebuild") {
       return true;
     }
-    if (SHELLS.has(argument.toLowerCase())) {
+    if (SHELLS.has(command)) {
       return pending.some(containsXcodebuildCommand);
     }
     if (ENV_WRAPPERS.has(command)) {
@@ -130,7 +131,12 @@ function argumentSlotAlternatives(
   if (values.length === 0) {
     return [OPAQUE_ARGUMENT];
   }
-  return values;
+  return values.map((value) => {
+    if (value === STRING_ANALYSIS_OVERFLOW) {
+      return ANALYSIS_OVERFLOW;
+    }
+    return value === "\u0000" ? OPAQUE_ARGUMENT : value;
+  });
 }
 
 function argvAlternatives(

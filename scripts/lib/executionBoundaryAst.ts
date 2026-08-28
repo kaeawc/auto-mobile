@@ -13,6 +13,8 @@ export const PROCESS_LAUNCHERS = new Set([
 const CHILD_PROCESS_MODULES = new Set(["child_process", "node:child_process"]);
 const INJECTED_LAUNCHERS = new Set(["spawn", "spawnSync"]);
 const DYNAMIC_BOUNDARY = "\u0000";
+const STRING_ANALYSIS_OVERFLOW = "\u0003";
+const MAX_STRING_ALTERNATIVES = 256;
 
 export interface ExecutionBoundaryAst {
   readonly calls: readonly ts.CallExpression[];
@@ -246,6 +248,23 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
         CHILD_PROCESS_MODULES.has(node.initializer.arguments[0].text)
       ) {
         childProcessNamespaces.add(node.name.text);
+      }
+    }
+    if (ts.isParameter(node) && ts.isIdentifier(node.name)) {
+      const scope = functionScope(node);
+      declarations.push({ name: node.name.text, scope, position: node.getStart(sourceFile) });
+      if (node.initializer) {
+        initializers.set(node.name.text, [
+          ...(initializers.get(node.name.text) ?? []),
+          node.initializer,
+        ]);
+        scopedValues.push({
+          name: node.name.text,
+          value: node.initializer,
+          kind: "declaration",
+          scope,
+          position: node.getStart(sourceFile),
+        });
       }
     }
     if (
@@ -491,6 +510,15 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       const right = stringAlternatives(node.right, seen);
       const leftValues = left.length > 0 ? left : [DYNAMIC_BOUNDARY];
       const rightValues = right.length > 0 ? right : [DYNAMIC_BOUNDARY];
+      if (
+        leftValues.includes(STRING_ANALYSIS_OVERFLOW) ||
+        rightValues.includes(STRING_ANALYSIS_OVERFLOW)
+      ) {
+        return [STRING_ANALYSIS_OVERFLOW];
+      }
+      if (leftValues.length * rightValues.length > MAX_STRING_ALTERNATIVES) {
+        return [STRING_ANALYSIS_OVERFLOW];
+      }
       return leftValues.flatMap((prefix) => rightValues.map((suffix) => prefix + suffix));
     }
     if (ts.isTemplateExpression(node)) {
@@ -498,6 +526,12 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       for (const span of node.templateSpans) {
         const interpolation = stringAlternatives(span.expression, seen);
         const values = interpolation.length > 0 ? interpolation : [DYNAMIC_BOUNDARY];
+        if (values.includes(STRING_ANALYSIS_OVERFLOW)) {
+          return [STRING_ANALYSIS_OVERFLOW];
+        }
+        if (alternatives.length * values.length > MAX_STRING_ALTERNATIVES) {
+          return [STRING_ANALYSIS_OVERFLOW];
+        }
         alternatives = alternatives.flatMap((prefix) =>
           values.map((value) => prefix + value + span.literal.text),
         );

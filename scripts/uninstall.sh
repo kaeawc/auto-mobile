@@ -339,7 +339,7 @@ desktop_app_pid_command() {
 # Return 0 while the PID is alive, 1 when it has exited, and 2 when its state
 # cannot be verified (for example, because the privileged check was denied).
 desktop_app_pid_alive() {
-    local pid="$1" executable process_listing command_status liveness_status
+    local pid="$1" executable recheck_executable process_listing command_status liveness_status recheck_listing recheck_status
     if process_listing=$(desktop_app_pid_command "${pid}"); then
         command_status=0
     else
@@ -361,7 +361,24 @@ desktop_app_pid_alive() {
             if [[ "${liveness_status}" -eq 0 ]]; then
                 return 0
             fi
-            return 2
+            # The PID can exit or be reused after its command was read. Re-read
+            # the identity before treating a failed liveness probe as unsafe.
+            if recheck_listing=$(desktop_app_pid_command "${pid}"); then
+                recheck_status=0
+            else
+                recheck_status=$?
+            fi
+            if [[ "${recheck_status}" -eq 1 ]]; then
+                return 1
+            elif [[ "${recheck_status}" -eq 2 ]]; then
+                return 2
+            fi
+            for recheck_executable in ${DESKTOP_APP_EXECUTABLES[@]+"${DESKTOP_APP_EXECUTABLES[@]}"}; do
+                if [[ "${recheck_listing}" == "${recheck_executable}" || "${recheck_listing}" == "${recheck_executable} "* ]]; then
+                    return 2
+                fi
+            done
+            return 1
         fi
     done
     return 1

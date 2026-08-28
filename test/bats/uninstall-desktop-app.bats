@@ -149,6 +149,32 @@ SCRIPT
   [ "${killed}" = "false" ]
 }
 
+@test "treats a PID that exits after TERM as stopped" {
+  local terminated=false stop_status
+  DESKTOP_APP_EXECUTABLES=("/Applications/AutoMobile.app/Contents/MacOS/AutoMobile")
+  desktop_app_process_pids() { printf '101\n'; }
+  desktop_app_pid_command() {
+    [[ "${terminated}" != "true" ]] || return 1
+    printf '%s\n' "/Applications/AutoMobile.app/Contents/MacOS/AutoMobile"
+  }
+  desktop_app_termination_wait() { :; }
+  kill() {
+    case "$1" in
+      -TERM) terminated=true ;;
+      -0) [[ "${terminated}" != "true" ]] ;;
+    esac
+  }
+
+  if stop_desktop_app_processes; then
+    stop_status=0
+  else
+    stop_status=$?
+  fi
+
+  [ "${stop_status}" -eq 0 ]
+  [ "${terminated}" = "true" ]
+}
+
 @test "runs desktop removal commands directly when already root" {
   desktop_app_is_root() { return 0; }
   sudo() { printf 'sudo should not be called\n'; return 1; }

@@ -2845,7 +2845,7 @@ recover_stale_macos_desktop_app_swap() {
 }
 
 acquire_macos_desktop_app_lock() {
-    local lock_dir="$1" target_parent="$2" target_app="$3" owner_pid owner_pid_to_write="${BASHPID}" reclaim_dir
+    local lock_dir="$1" target_parent="$2" target_app="$3" owner_pid owner_pid_to_write="${BASHPID}" reclaim_dir reclaim_owner
     if run_desktop_app_privileged mkdir "${lock_dir}" 2>/dev/null; then
         if ! printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null; then
             run_desktop_app_privileged rmdir "${lock_dir}" || true
@@ -2862,16 +2862,29 @@ acquire_macos_desktop_app_lock() {
     reclaim_dir="${lock_dir}/reclaiming"
     # Claim recovery inside the existing lock so only one installer can repair
     # the stale swap while the lock continues to exclude a new installation.
-    run_desktop_app_privileged mkdir "${reclaim_dir}" 2>/dev/null || return 1
+    if ! run_desktop_app_privileged mkdir "${reclaim_dir}" 2>/dev/null; then
+        if ! reclaim_owner=$(run_desktop_app_privileged cat "${reclaim_dir}/owner.pid" 2>/dev/null) \
+            || [[ ! "${reclaim_owner}" =~ ^[0-9]+$ ]] \
+            || run_desktop_app_privileged kill -0 "${reclaim_owner}" 2>/dev/null; then
+            return 1
+        fi
+        log_warn "Reclaiming interrupted AutoMobile desktop installation recovery."
+        run_desktop_app_privileged rm -rf -- "${reclaim_dir}" || return 1
+        run_desktop_app_privileged mkdir "${reclaim_dir}" || return 1
+    fi
+    if ! printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${reclaim_dir}/owner.pid" >/dev/null; then
+        run_desktop_app_privileged rm -rf -- "${reclaim_dir}" || true
+        return 1
+    fi
     if ! printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null; then
-        run_desktop_app_privileged rmdir "${reclaim_dir}" || true
+        run_desktop_app_privileged rm -rf -- "${reclaim_dir}" || true
         return 1
     fi
     if ! recover_stale_macos_desktop_app_swap "${target_parent}" "${target_app}"; then
-        run_desktop_app_privileged rmdir "${reclaim_dir}" || true
+        run_desktop_app_privileged rm -rf -- "${reclaim_dir}" || true
         return 1
     fi
-    run_desktop_app_privileged rmdir "${reclaim_dir}"
+    run_desktop_app_privileged rm -rf -- "${reclaim_dir}"
 }
 
 # Copy into a sibling staging directory, then swap the bundle into place. This

@@ -129,6 +129,27 @@ describe("putAppFile canonical target contract (#5803)", () => {
     ).toBe(false);
   });
 
+  test.each(["clip.mkv", "clip.webm"])(
+    "keeps Android media-library fixture format %s available",
+    (destinationPath) => {
+      expect(
+        putAppFileSchema.safeParse({
+          target: { domain: "media_library" },
+          files: [{ destinationPath, contentBase64: "AQID" }],
+        }).success,
+      ).toBe(true);
+    },
+  );
+
+  test("rejects extensionless media-library fixture names that look like an extension", () => {
+    expect(
+      putAppFileSchema.safeParse({
+        target: { domain: "media_library" },
+        files: [{ destinationPath: "fixtures/png", contentText: "not a media filename" }],
+      }).success,
+    ).toBe(false);
+  });
+
   test("advertises the media-library filename requirement in generated tool definitions", () => {
     const definitions = JSON.parse(readFileSync("schemas/tool-definitions.json", "utf8")) as Array<{
       name: string;

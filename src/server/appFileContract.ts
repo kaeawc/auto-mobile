@@ -1,3 +1,4 @@
+import { extname } from "node:path";
 import { z } from "zod/v4";
 import {
   addDeviceTargetingToSchema,
@@ -42,6 +43,7 @@ const MEDIA_LIBRARY_EXTENSION_NAMES = [
   "jpeg",
   "jpg",
   "m4a",
+  "mkv",
   "mov",
   "mp4",
   "m4v",
@@ -51,6 +53,7 @@ const MEDIA_LIBRARY_EXTENSION_NAMES = [
   "tif",
   "tiff",
   "wav",
+  "webm",
   "webp",
 ] as const;
 
@@ -81,7 +84,8 @@ const SIMULATOR_MEDIA_EXTENSIONS = new Set([
 ]);
 
 function extensionFor(path: string): string | undefined {
-  return path.split("/").at(-1)?.split(".").at(-1)?.toLowerCase();
+  const extension = extname(path);
+  return extension.length > 1 ? extension.slice(1).toLowerCase() : undefined;
 }
 
 export function hasSupportedMediaLibraryExtension(path: string): boolean {

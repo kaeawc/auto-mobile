@@ -436,11 +436,32 @@ Suggested order:
    observe→gesture→hierarchy loop (`HierarchyIntegrationTests`) green on the **iOS 26.5** sim (not the
    27.0-beta — see the Phase-7D note). Still to fold in (nice-to-have): the deferred Phase-2 loopback
    smoke test + connection scenarios (§8) as iOS UI tests; a full `manual-test` live-client pass.
-5. **(7E) Retire the reference — the one-way step; gate cleared, deferred by preference.** When ready:
-   drop the per-target `.v5` mode + the `CtrlProxy`/`CtrlProxyTests` (and Xcode `CtrlProxy` framework)
-   targets, and rework `CtrlProxyRewriteTests` (it currently links both modules for differential
-   parity — retiring the reference **ends that harness**, so those `Reference*`/parity tests either go
-   or are re-anchored to golden fixtures). Deliberately last and irreversible-ish.
+5. **(7E) Retire the reference — the one-way step; gate cleared, HYBRID disposition chosen.** A single
+   cohesive change (the ordering constraint — the reference can't be dropped until every KEEP domain is
+   decoupled from `Reference*` — makes partial steps low-value). **Inventory:** `CtrlProxyRewriteTests`
+   = 17 `Reference*.swift` (`import CtrlProxy`) + 17 `Rewrite*.swift` + `*ParityTests` diffing them
+   (~80 differential tests) + ~155 rewrite-only tests (survive untouched). Hybrid plan (Paul):
+   - **Golden-re-anchor (KEEP), wire-contract / Codable domains** → assert `Rewrite*` output against a
+     golden captured from the *current* rewrite (valid: parity is green, so rewrite output == reference
+     output == frozen-contract output): **WireDecode** (already fixture-anchored — just drop the
+     reference-comparison half; the `assertWireSubset` vs `ios-ctrlproxy-request-snapshots.json` IS the
+     golden), **ResponseModel**, **SdkDatabaseModel**, **HierarchyModel**, **PerformanceWire**. Small
+     Codable outputs → literal/expected-JSON goldens (capture via a one-shot print-harvest). **Framing**
+     (11, byte-loop) + **Geometry** (5): literal byte goldens are impractical → use a generated
+     `#filePath`-relative golden fixture file (the same load technique `WireSnapshotFixture` already
+     uses — no SPM resource decl needed), or reduce to representative cases + invariants.
+   - **Delete (behavioral/driver)**: CommandHandler, Connection, HierarchyDebouncer, PerfProvider,
+     VoiceOver, OSLog, FrameContext, SdkHierarchyExtractor, StorageInspecting, HierarchyMerge (the last
+     also conflicts with the planned Phase-8 merger behavior change). Delete their `Reference*` +
+     `Rewrite*` helpers + fixtures/recorders too (the compiler flags orphans).
+   - **Then remove the reference**: drop `Sources/CtrlProxy` + `Tests/CtrlProxyTests`; the SwiftPM
+     `CtrlProxy` target/product + `CtrlProxyTests`; `CtrlProxyRewriteTests`' `CtrlProxy` dependency +
+     the per-target `.v5` modes; the Xcode `CtrlProxy` framework + `CtrlProxyTests` targets +
+     `CtrlProxyApp`'s `CtrlProxy` embed + the scheme's `CtrlProxyTests`; and the `CtrlProxyTests.xctest`
+     artifact checks in `scripts/ios/ctrl-proxy-{build-for-testing,verify-artifacts,create-ipa}.sh`.
+   - **Validate**: SPM `-warnings-as-errors` (surviving rewrite-only + golden tests green) + a
+     `build-for-testing` on the sim. Then fold in the deferred Phase-2 loopback/connection scenarios.
+   Deliberately last and irreversible-ish (git keeps the deleted differential tests in history).
 6. **Then Phase 8 fixups** (README index): the `os_signpost`/direct-interval PerfProvider
    simplification, the `HierarchyMerger` geometry-key improvement, the keyboard-focus RunLoop
    de-blocking — all off the critical path, validated against golden-replay corpora.

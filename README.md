@@ -35,8 +35,6 @@ _An AI agent searching YouTube and browsing results_
 | **[Create UI tests](docs/using/ui-tests.md)**                                | Describe test scenarios in plain English, get executable test plans                  |
 | **[Measure startup time](docs/using/perf-analysis/startup.md)**              | Profile cold and warm launch performance                                             |
 | **[Check scroll performance](docs/using/perf-analysis/scroll-framerate.md)** | Detect jank and dropped frames                                                       |
-| **[Audit contrast](docs/using/a11y.md#contrast)**                            | Find accessibility issues with color contrast                                        |
-| **[Check tap targets](docs/using/a11y.md#tap-targets)**                      | Ensure touch targets meet size guidelines                                            |
 
 ## How it works
 
@@ -53,7 +51,7 @@ You can use our interactive installer to step through all host platform requirem
 curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/refs/heads/main/scripts/install.sh | bash
 ```
 
-or you can read and follow the [step-by-step manual guide](docs/install.md).
+or follow the [installation guide](docs/index.md#install).
 
 ## Documentation
 

@@ -11,7 +11,8 @@ when starting the MCP server. Flags are independent and cumulative.
 
 ## Performance Flags
 
-- `--ui-perf-mode` — enable UI performance monitoring.
+- UI performance monitoring is enabled by default. Use `--no-ui-perf-mode` to
+  disable it.
 - `--mem-perf-audit` — enable memory-performance auditing.
 
 ## Behavior Flags

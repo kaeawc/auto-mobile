@@ -53,8 +53,6 @@ global configuration. Restart your MCP client when it finishes.
 
 ![Install Demo](img/install.gif)
 
-The last step of the install script offers to install the AutoMobile desktop app. You can also download it and have the AutoMobile MCP daemon installed from that end.
-
 <div class="desktop-install-options">
   <a href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.66/AutoMobile-0.0.66-macos.dmg" aria-label="Download AutoMobile Desktop App for macOS x86-64">
     <strong>macOS</strong>
@@ -70,15 +68,14 @@ The last step of the install script offers to install the AutoMobile desktop app
   </a>
 </div>
 
-
 ### Manual MCP configuration
 
-~~~json
+```json
 {
   "command": "bunx",
   "args": ["@kaeawc/auto-mobile@latest"]
 }
-~~~
+```
 
 Place this server in the client’s documented MCP configuration, then restart
 the client. Going this route means you're going to handle dependencies like having
@@ -96,6 +93,6 @@ Some common workflows:
 
 ### Uninstall
 
-~~~bash
+```bash
 curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/uninstall.sh | bash
-~~~
+```

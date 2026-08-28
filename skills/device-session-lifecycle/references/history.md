@@ -107,8 +107,7 @@ daemon and desktop ship together):
   navigation cross-contamination). Skew hazard: old deviceId-only subscribe
   against new daemon silently becomes all-devices. Discovery contract:
   enumerate `daemon/listDeviceSessions` first; boot-time devices emit no
-  started frame. Wire doc: `docs/design-docs/mcp/daemon/client-screen-control.md`
-  (doc-coupling tests exist).
+  started frame.
 - Open: #5260 (push-socket auth + registration-only sessions + ownership
   re-auth revoking foreign subscribers), #5262 (desktop DaemonStreamHub),
   #5263 (workspace state keyed on deviceSessionUuid).

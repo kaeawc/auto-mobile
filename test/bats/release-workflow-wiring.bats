@@ -212,13 +212,13 @@
   [[ "$commit_step" == *'allowed_patterns+=("CHANGELOG.md")'* ]]
 }
 
-@test "bump script managed paths cover the version-synchronized CtrlProxy docs" {
+@test "bump script managed paths cover version-synchronized public docs" {
   local managed
   managed="$(bash scripts/versioning/bump-versions.sh --print-managed-paths)"
   for path in \
-    "docs/design-docs/mcp/daemon/client-frame-snapshot.md" \
-    "docs/design-docs/mcp/daemon/client-screen-control.md" \
-    "docs/design-docs/mcp/daemon/unix-socket-api.md"; do
+    "docs/index.md" \
+    "docs/using/auto-mobile-desktop-app.md" \
+    "docs/using/ui-tests.md"; do
     [[ "$managed" == *"$path"* ]]
   done
 }

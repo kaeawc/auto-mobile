@@ -5,12 +5,12 @@ state directory, logs, tool set, or device behavior.
 
 ## State and logs
 
-| Variable | Use | Default |
-| --- | --- | --- |
-| `AUTOMOBILE_DATA_DIR` | Base directory for the database, caches, screenshots, and other state | `~/.auto-mobile` |
-| `AUTOMOBILE_LOG_DIR` | Directory for daemon and client logs | `~/.auto-mobile/logs` |
-| `AUTOMOBILE_LOG_FORMAT` | `text` or newline-delimited `json` | `text` |
-| `AUTOMOBILE_LOG_SINK` | `file`, `stderr`, or `both` | `file` |
+| Variable                | Use                                                                   | Default               |
+| ----------------------- | --------------------------------------------------------------------- | --------------------- |
+| `AUTOMOBILE_DATA_DIR`   | Base directory for the database, caches, screenshots, and other state | `~/.auto-mobile`      |
+| `AUTOMOBILE_LOG_DIR`    | Directory for daemon and client logs                                  | `~/.auto-mobile/logs` |
+| `AUTOMOBILE_LOG_FORMAT` | `text` or newline-delimited `json`                                    | `text`                |
+| `AUTOMOBILE_LOG_SINK`   | `file`, `stderr`, or `both`                                           | `file`                |
 
 For container log collection:
 
@@ -22,10 +22,10 @@ export AUTOMOBILE_LOG_SINK=stderr
 
 ## Database
 
-| Variable | Use | Default |
-| --- | --- | --- |
-| `AUTOMOBILE_DB_PATH` | Exact SQLite database path | `~/.auto-mobile/auto-mobile.db` |
-| `AUTOMOBILE_DB_DIR` | Directory containing `auto-mobile.db` | unset |
+| Variable             | Use                                   | Default                         |
+| -------------------- | ------------------------------------- | ------------------------------- |
+| `AUTOMOBILE_DB_PATH` | Exact SQLite database path            | `~/.auto-mobile/auto-mobile.db` |
+| `AUTOMOBILE_DB_DIR`  | Directory containing `auto-mobile.db` | unset                           |
 
 `AUTOMOBILE_DB_PATH` takes precedence over `AUTOMOBILE_DB_DIR`. Relative paths
 are resolved from the daemon's launch directory. Use a path unique to each

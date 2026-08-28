@@ -12,10 +12,17 @@ Use `putAppFile` to write text, base64, or a host file into an app container:
   "name": "putAppFile",
   "arguments": {
     "platform": "android",
-    "appId": "com.example.app",
-    "container": "documents",
-    "destinationPath": "fixtures/settings.json",
-    "contentText": "{\"enabled\":true}"
+    "target": {
+      "domain": "app_containers",
+      "appId": "com.example.app",
+      "container": "documents"
+    },
+    "files": [
+      {
+        "destinationPath": "fixtures/settings.json",
+        "contentText": "{\"enabled\":true}"
+      }
+    ]
   }
 }
 ```
@@ -42,8 +49,15 @@ state before continuing.
 
 ## Device snapshots
 
-Use `deviceSnapshot` to capture a known-good state before a destructive flow,
-then restore it for the next run:
+Enable `deviceSnapshot` for the current connection, then capture a known-good
+state before a destructive flow:
+
+```json
+{
+  "name": "setToolEnabled",
+  "arguments": { "toolName": "deviceSnapshot", "enabled": true }
+}
+```
 
 ```json
 {

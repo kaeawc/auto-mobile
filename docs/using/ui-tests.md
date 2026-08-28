@@ -75,7 +75,7 @@ Place this test under `app/src/test/`:
 
 ```kotlin
 import dev.jasonpearson.automobile.junit.AutoMobileRunner
-import dev.jasonpearson.automobile.junit.AutoMobileTest
+import dev.jasonpearson.automobile.junit.AutoMobilePlan
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlin.test.assertTrue
@@ -83,14 +83,9 @@ import kotlin.test.assertTrue
 @RunWith(AutoMobileRunner::class)
 class LaunchTest {
     @Test
-    @AutoMobileTest(
-        plan = "test-plans/launch-app.yaml",
-        appId = "com.example.app",
-        aiAssistance = false,
-        timeoutMs = 60_000L,
-    )
     fun appLaunches() {
-        // The runner executes the YAML plan.
+        val result = AutoMobilePlan("test-plans/launch-app.yaml").execute()
+        assertTrue(result.success, result.output)
     }
 }
 ```

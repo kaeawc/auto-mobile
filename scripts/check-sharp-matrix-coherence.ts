@@ -14,7 +14,7 @@ import { join } from "node:path";
  * `.github/dependabot.yml` groups these so they *tend* to bump together, but a
  * `groups` rule does not enforce completeness. This check is the actual gate:
  * it rejects any partial bump so the invariant holds regardless of how the
- * update arrived. See docs/design-docs/image-backend.md.
+ * update arrived.
  */
 
 interface PackageJson {
@@ -75,9 +75,7 @@ if (errors.length > 0) {
   for (const message of errors) {
     console.error(`  - ${message}`);
   }
-  console.error(
-    "Bump `sharp` + every `@img/sharp-*` (and `@img/sharp-libvips-*`) together. See docs/design-docs/image-backend.md.",
-  );
+  console.error("Bump `sharp` + every `@img/sharp-*` (and `@img/sharp-libvips-*`) together.");
   process.exit(1);
 }
 

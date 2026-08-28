@@ -41,7 +41,7 @@ teardown() {
 }
 
 run_runner() {
-  run env HOME="$FAKE_HOME" PATH="$STUB_BIN:$PATH" bash "$SCRIPT" "${1:-test/bats}"
+  run env AUTOMOBILE_BATS_SERIAL_ONLY=false HOME="$FAKE_HOME" PATH="$STUB_BIN:$PATH" bash "$SCRIPT" "${1:-test/bats}"
 }
 
 # The parallel pass is the invocation carrying --jobs; the serial pass is the

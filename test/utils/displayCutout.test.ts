@@ -4,6 +4,9 @@ import { classifyDisplayCutout } from "../../src/utils/displayCutout";
 describe("classifyDisplayCutout", () => {
   test("classifies known Android profile identifiers without inspecting camera metadata", () => {
     expect(classifyDisplayCutout("android", "pixel_2")).toBe("none");
+    expect(classifyDisplayCutout("android", "Nexus 5X")).toBe("none");
+    expect(classifyDisplayCutout("android", "Medium Phone")).toBe("none");
+    expect(classifyDisplayCutout("android", "Small Phone")).toBe("none");
     expect(classifyDisplayCutout("android", "pixel_3_xl")).toBe("notch");
     expect(classifyDisplayCutout("android", "pixel_9")).toBe("hole_punch");
   });

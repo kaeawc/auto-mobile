@@ -76,6 +76,9 @@ const ANDROID_NO_CUTOUT_IDS = new Set([
   "pixel_4_xl",
   "pixel_c",
   "pixel_tablet",
+  "nexus 5x",
+  "medium phone",
+  "small phone",
 ]);
 
 const ANDROID_NOTCH_IDS = new Set(["pixel_3_xl"]);

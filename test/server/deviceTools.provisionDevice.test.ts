@@ -94,6 +94,18 @@ class FakeProvisionDeviceOperationStore implements ProvisionDeviceOperationStore
     operation.result = result;
   }
 
+  setStoredResult(operationId: string, result: Record<string, unknown>): void {
+    const operation = this.results.get(operationId);
+    if (!operation) {
+      throw new Error(`missing operation ${operationId}`);
+    }
+    operation.result = result;
+  }
+
+  getStoredResult(operationId: string): Record<string, unknown> | undefined {
+    return this.results.get(operationId)?.result;
+  }
+
   async fail(): Promise<void> {
     this.failCalls++;
   }
@@ -259,6 +271,41 @@ describe("provisionDevice handler", () => {
       displayCutout: "hole_punch",
     });
     expect(second).toEqual(first);
+  });
+
+  test("backfills cutout fields when replaying a legacy persisted result", async () => {
+    const tool = ToolRegistry.getTool("provisionDevice");
+    if (!tool) {
+      throw new Error("provisionDevice not registered");
+    }
+    const args = {
+      operationId: "operation-legacy-cutout-replay",
+      device: {
+        platform: "android" as const,
+        name: "phone-api-36-a",
+        spec: {
+          runtime: "system-images;android-36;google_apis;x86_64",
+          deviceType: "pixel_9",
+        },
+      },
+      boot: false,
+      readiness: "none" as const,
+    };
+
+    const first = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+    const legacyResult = { ...first };
+    delete legacyResult.displayCutout;
+    legacyResult.resolvedSpec = { ...legacyResult.resolvedSpec };
+    delete legacyResult.resolvedSpec.displayCutout;
+    operationStore.setStoredResult(args.operationId, legacyResult);
+
+    const replay = JSON.parse(((await tool.handler(args)) as any).content[0].text);
+
+    expect(replay).toMatchObject({
+      displayCutout: "hole_punch",
+      resolvedSpec: { displayCutout: "hole_punch" },
+    });
+    expect(replay).toEqual(operationStore.getStoredResult(args.operationId));
   });
 
   test("coordinates completed provisioning replays with teardown", async () => {

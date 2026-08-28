@@ -39,3 +39,25 @@ namespace.
 For a clean app start, use `launchApp` with `clearAppData: true` where the
 platform supports it. Use `observe` after preparation to confirm the expected
 state before continuing.
+
+## Device snapshots
+
+Use `deviceSnapshot` to capture a known-good state before a destructive flow,
+then restore it for the next run:
+
+```json
+{
+  "name": "deviceSnapshot",
+  "arguments": {
+    "action": "capture",
+    "snapshotName": "signed-in",
+    "platform": "android",
+    "includeAppData": true,
+    "includeSettings": true
+  }
+}
+```
+
+Android emulators can restore full VM snapshots. iOS simulators back up the
+specified app containers; physical Android devices restore settings only.
+Restore with `action: "restore"` and the same `snapshotName`.

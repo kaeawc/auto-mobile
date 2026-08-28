@@ -128,3 +128,38 @@ final class LaunchTests: AutoMobileTestCase {
 Run the test target from Xcode or with `xcodebuild test` against a booted iOS
 Simulator. Keep selectors semantic and add `observe.waitFor` steps at important
 checkpoints so failures explain which state was missing.
+
+## 5. Run a multi-device plan
+
+Add device labels when a flow spans two users or devices. Steps for different
+labels run concurrently:
+
+```yaml
+devices: [sender, recipient]
+steps:
+  - tool: launchApp
+    device: sender
+    appId: com.example.chat
+  - tool: launchApp
+    device: recipient
+    appId: com.example.chat
+  - tool: inputText
+    device: sender
+    text: Hello
+```
+
+Use `barrier` to make device tracks meet at a point, or `criticalSection` only
+when they must serialize access to a shared resource.
+
+## 6. Pin CI releases
+
+Use one release version for the runner, daemon, and device helpers. Restart a
+shared daemon so it receives the pin, then check the environment before tests:
+
+```bash
+export AUTOMOBILE_VERSION=0.0.66
+bunx @kaeawc/auto-mobile@0.0.66 --daemon restart
+bunx @kaeawc/auto-mobile@0.0.66 --cli doctor
+```
+
+Replace `0.0.66` with the version used by your test runner dependency.

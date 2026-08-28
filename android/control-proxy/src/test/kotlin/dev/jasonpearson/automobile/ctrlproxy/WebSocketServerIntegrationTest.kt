@@ -1019,8 +1019,9 @@ class WebSocketServerIntegrationTest {
       val bystanderReady = kotlinx.coroutines.CompletableDeferred<Unit>()
       val sendOwnerMessage = kotlinx.coroutines.CompletableDeferred<Unit>()
       val ownerReceivedRaw = kotlinx.coroutines.CompletableDeferred<Unit>()
-      val bystanderReceivedRaw = kotlinx.coroutines.CompletableDeferred<Unit>()
-      val sendLateError = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val ownerReceivedProbe = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val bystanderReceivedProbe = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val readLateSequence = kotlinx.coroutines.CompletableDeferred<Unit>()
 
       val ownerClient = HttpClient(CIO) { install(WebSockets) }
       val bystanderClient = HttpClient(CIO) { install(WebSockets) }
@@ -1039,11 +1040,10 @@ class WebSocketServerIntegrationTest {
               send(Frame.Text("""{"type":"request_screenshot","requestId":"req-raw-success"}"""))
               ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
               ownerReceivedRaw.complete(Unit)
-              sendLateError.await()
-              val unexpected = withTimeoutOrNull(250) { incoming.receive() }
-              if (unexpected is Frame.Text) {
-                ownerMessages.add(unexpected.readText())
-              }
+              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              ownerReceivedProbe.complete(Unit)
+              readLateSequence.await()
+              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
             }
           }
 
@@ -1057,16 +1057,14 @@ class WebSocketServerIntegrationTest {
               incoming.receive() // Connection message
               bystanderReady.complete(Unit)
               sendOwnerMessage.await()
-              val unexpected = withTimeoutOrNull(250) { incoming.receive() }
-              if (unexpected is Frame.Text) {
-                bystanderMessages.add(unexpected.readText())
-              }
-              bystanderReceivedRaw.complete(Unit)
-              sendLateError.await()
-              val lateUnexpected = withTimeoutOrNull(250) { incoming.receive() }
-              if (lateUnexpected is Frame.Text) {
-                bystanderMessages.add(lateUnexpected.readText())
-              }
+              bystanderMessages.add(
+                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+              )
+              bystanderReceivedProbe.complete(Unit)
+              readLateSequence.await()
+              bystanderMessages.add(
+                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+              )
             }
           }
 
@@ -1074,24 +1072,34 @@ class WebSocketServerIntegrationTest {
           bystanderReady.await()
           sendOwnerMessage.complete(Unit)
           ownerReceivedRaw.await()
-          bystanderReceivedRaw.await()
+          rawSuccessServer.broadcast("""{"type":"probe","sequence":1}""")
+          ownerReceivedProbe.await()
+          bystanderReceivedProbe.await()
           rawSuccessServer.broadcast(
             ErrorResponse(requestId = "req-raw-success", error = "late correlated failure")
           )
-          sendLateError.complete(Unit)
+          rawSuccessServer.broadcast("""{"type":"probe","sequence":2}""")
+          readLateSequence.complete(Unit)
           ownerJob.join()
           bystanderJob.join()
 
           assertEquals("""{"type":"screenshot","requestId":"req-raw-success"}""", ownerMessages[0])
           assertEquals(
             "a terminal raw response removes ownership, so a late same-ID frame reaches nobody",
-            1,
-            ownerMessages.size,
+            listOf(
+              """{"type":"screenshot","requestId":"req-raw-success"}""",
+              """{"type":"probe","sequence":1}""",
+              """{"type":"probe","sequence":2}""",
+            ),
+            ownerMessages.toList(),
           )
           assertEquals(
             "a terminal raw response must not leak a later same-ID frame to another client",
-            0,
-            bystanderMessages.size,
+            listOf(
+              """{"type":"probe","sequence":1}""",
+              """{"type":"probe","sequence":2}""",
+            ),
+            bystanderMessages.toList(),
           )
         }
       }
@@ -1137,8 +1145,9 @@ class WebSocketServerIntegrationTest {
       val bystanderReady = kotlinx.coroutines.CompletableDeferred<Unit>()
       val sendOwnerMessage = kotlinx.coroutines.CompletableDeferred<Unit>()
       val ownerReceivedTyped = kotlinx.coroutines.CompletableDeferred<Unit>()
-      val bystanderReceivedTyped = kotlinx.coroutines.CompletableDeferred<Unit>()
-      val sendLateError = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val ownerReceivedProbe = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val bystanderReceivedProbe = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val readLateSequence = kotlinx.coroutines.CompletableDeferred<Unit>()
 
       val ownerClient = HttpClient(CIO) { install(WebSockets) }
       val bystanderClient = HttpClient(CIO) { install(WebSockets) }
@@ -1157,11 +1166,10 @@ class WebSocketServerIntegrationTest {
               send(Frame.Text("""{"type":"request_screenshot","requestId":"req-typed-success"}"""))
               ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
               ownerReceivedTyped.complete(Unit)
-              sendLateError.await()
-              val unexpected = withTimeoutOrNull(250) { incoming.receive() }
-              if (unexpected is Frame.Text) {
-                ownerMessages.add(unexpected.readText())
-              }
+              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
+              ownerReceivedProbe.complete(Unit)
+              readLateSequence.await()
+              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
             }
           }
 
@@ -1175,16 +1183,14 @@ class WebSocketServerIntegrationTest {
               incoming.receive() // Connection message
               bystanderReady.complete(Unit)
               sendOwnerMessage.await()
-              val unexpected = withTimeoutOrNull(250) { incoming.receive() }
-              if (unexpected is Frame.Text) {
-                bystanderMessages.add(unexpected.readText())
-              }
-              bystanderReceivedTyped.complete(Unit)
-              sendLateError.await()
-              val lateUnexpected = withTimeoutOrNull(250) { incoming.receive() }
-              if (lateUnexpected is Frame.Text) {
-                bystanderMessages.add(lateUnexpected.readText())
-              }
+              bystanderMessages.add(
+                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+              )
+              bystanderReceivedProbe.complete(Unit)
+              readLateSequence.await()
+              bystanderMessages.add(
+                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+              )
             }
           }
 
@@ -1192,11 +1198,14 @@ class WebSocketServerIntegrationTest {
           bystanderReady.await()
           sendOwnerMessage.complete(Unit)
           ownerReceivedTyped.await()
-          bystanderReceivedTyped.await()
+          typedSuccessServer.broadcast("""{"type":"probe","sequence":1}""")
+          ownerReceivedProbe.await()
+          bystanderReceivedProbe.await()
           typedSuccessServer.broadcast(
             ErrorResponse(requestId = "req-typed-success", error = "late correlated failure")
           )
-          sendLateError.complete(Unit)
+          typedSuccessServer.broadcast("""{"type":"probe","sequence":2}""")
+          readLateSequence.complete(Unit)
           ownerJob.join()
           bystanderJob.join()
 
@@ -1205,13 +1214,19 @@ class WebSocketServerIntegrationTest {
           assertEquals("req-typed-success", ownerResult["requestId"]?.jsonPrimitive?.content)
           assertEquals(
             "a terminal typed response must drop later same-ID frames",
-            1,
-            ownerMessages.size,
+            listOf(
+              """{"type":"probe","sequence":1}""",
+              """{"type":"probe","sequence":2}""",
+            ),
+            ownerMessages.drop(1),
           )
           assertEquals(
             "a terminal typed response must not leak later same-ID frames to another client",
-            0,
-            bystanderMessages.size,
+            listOf(
+              """{"type":"probe","sequence":1}""",
+              """{"type":"probe","sequence":2}""",
+            ),
+            bystanderMessages.toList(),
           )
         }
       }
@@ -1449,7 +1464,7 @@ class WebSocketServerIntegrationTest {
       val sendOwnerMessage = kotlinx.coroutines.CompletableDeferred<Unit>()
       val ownerReceivedUpdate = kotlinx.coroutines.CompletableDeferred<Unit>()
       val bystanderReceivedUpdate = kotlinx.coroutines.CompletableDeferred<Unit>()
-      val sendLateError = kotlinx.coroutines.CompletableDeferred<Unit>()
+      val readLateSequence = kotlinx.coroutines.CompletableDeferred<Unit>()
 
       val ownerClient = HttpClient(CIO) { install(WebSockets) }
       val bystanderClient = HttpClient(CIO) { install(WebSockets) }
@@ -1468,11 +1483,8 @@ class WebSocketServerIntegrationTest {
               send(Frame.Text("""{"type":"request_hierarchy","requestId":"req-hierarchy"}"""))
               ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
               ownerReceivedUpdate.complete(Unit)
-              sendLateError.await()
-              val unexpected = withTimeoutOrNull(250) { incoming.receive() }
-              if (unexpected is Frame.Text) {
-                ownerMessages.add(unexpected.readText())
-              }
+              readLateSequence.await()
+              ownerMessages.add((withTimeout(1000) { incoming.receive() } as Frame.Text).readText())
             }
           }
 
@@ -1490,11 +1502,10 @@ class WebSocketServerIntegrationTest {
                 (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
               )
               bystanderReceivedUpdate.complete(Unit)
-              sendLateError.await()
-              val lateUnexpected = withTimeoutOrNull(250) { incoming.receive() }
-              if (lateUnexpected is Frame.Text) {
-                bystanderMessages.add(lateUnexpected.readText())
-              }
+              readLateSequence.await()
+              bystanderMessages.add(
+                (withTimeout(1000) { incoming.receive() } as Frame.Text).readText()
+              )
             }
           }
 
@@ -1506,21 +1517,20 @@ class WebSocketServerIntegrationTest {
           hierarchyServer.broadcast(
             ErrorResponse(requestId = "req-hierarchy", error = "late correlated failure")
           )
-          sendLateError.complete(Unit)
+          hierarchyServer.broadcast("""{"type":"probe"}""")
+          readLateSequence.complete(Unit)
           ownerJob.join()
           bystanderJob.join()
 
-          assertEquals("""{"type":"hierarchy_update","hierarchy":{}}""", ownerMessages[0])
-          assertEquals("""{"type":"hierarchy_update","hierarchy":{}}""", bystanderMessages[0])
           assertEquals(
             "owner should not receive an unowned correlated error",
-            1,
-            ownerMessages.size,
+            listOf("""{"type":"hierarchy_update","hierarchy":{}}""", """{"type":"probe"}"""),
+            ownerMessages.toList(),
           )
           assertEquals(
             "an uncorrelated hierarchy response leaves no owner, so a later same-ID frame is dropped",
-            1,
-            bystanderMessages.size,
+            listOf("""{"type":"hierarchy_update","hierarchy":{}}""", """{"type":"probe"}"""),
+            bystanderMessages.toList(),
           )
         }
       }

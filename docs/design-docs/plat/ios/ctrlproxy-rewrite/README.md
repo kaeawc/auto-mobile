@@ -34,7 +34,7 @@ Critical path (the rewrite's actual goal — concurrency correctness + parity):
    DisplayLinkFPSMonitor, VoiceOver) ✅
 5. PerfProvider (TaskLocal call-tree + confined pool) ✅
 6. CommandHandler (Sendable POD router, async) + async serial dispatch + CtrlProxy coordinator ✅
-7. Cutover — **in progress**:
+7. Cutover — ✅ **complete** (`CtrlProxyRewrite` is the sole implementation):
    - 7A ✅ wire rewrite into XcodeGen (additive `CtrlProxyRewriteUITests` target) + first green
      iOS-simulator compile (host-hidden `ElementLocator` init fixed).
    - 7B ✅ iOS strict-concurrency warning cleanup (the ~149 non-fatal iOS-only warnings → 0;
@@ -47,8 +47,13 @@ Critical path (the rewrite's actual goal — concurrency correctness + parity):
      (`HierarchyIntegrationTests`) green on the **iOS 26.5** sim (tap/typeText/secure-field masking,
      0 failures). Skip-guarded so it skips on the 27.0-**beta** runtime (host-app launch flake, not the
      rewrite).
-   - 7E retire the reference target (ends the differential-parity harness) — gate cleared by 7D,
-     **deferred per the middle-route preference**; on request.
+   - 7E ✅ reference retired — KEEP wire-contract tests re-anchored reference-free (`JSONGolden`
+     containment/idempotence + Framing/Geometry invariants); behavioral-domain parity tests dropped;
+     `Sources/CtrlProxy`, `Tests/CtrlProxyTests`, the SwiftPM + Xcode reference targets, and the
+     differential-parity harness removed. SPM 196 tests green; sim build + runner smoke green.
+
+   Remaining after cutover: **Phase 8** fixups (below) + the deferred Phase-2 loopback/connection
+   scenarios as iOS UI tests.
 
 **8. Post-concurrency fixups (NEW).** Pure, off-critical-path improvements that we
 deliberately defer so the concurrency migration lands *parity-first*. Each is

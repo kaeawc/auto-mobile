@@ -32,6 +32,7 @@ data class DisplayCutoutInfo(
 ) {
   companion object {
     private const val MIN_NOTCH_EDGE_FRACTION = 5
+    private const val MAX_NOTCH_DEPTH_FRACTION = 4
     private const val MAX_HOLE_PUNCH_DIMENSION_FRACTION = 6
     private const val MAX_HOLE_PUNCH_AREA_PERCENT = 1
 
@@ -60,7 +61,7 @@ data class DisplayCutoutInfo(
       }
 
       val rect = bounds.single()
-      if (rect.isBroadEdgeObstruction(screenWidth, screenHeight)) {
+      if (rect.isBroadShallowEdgeObstruction(screenWidth, screenHeight)) {
         return DisplayCutoutInfo(classification = "notch", bounds = bounds)
       }
       if (rect.isSmallInsetObstruction(screenWidth, screenHeight)) {
@@ -79,9 +80,16 @@ data class DisplayCutoutInfo(
         right <= screenWidth &&
         bottom <= screenHeight
 
-    private fun ElementBounds.isBroadEdgeObstruction(screenWidth: Int, screenHeight: Int): Boolean =
-      ((top == 0 || bottom == screenHeight) && width * MIN_NOTCH_EDGE_FRACTION >= screenWidth) ||
-        ((left == 0 || right == screenWidth) && height * MIN_NOTCH_EDGE_FRACTION >= screenHeight)
+    private fun ElementBounds.isBroadShallowEdgeObstruction(
+      screenWidth: Int,
+      screenHeight: Int,
+    ): Boolean =
+      ((top == 0 || bottom == screenHeight) &&
+        width * MIN_NOTCH_EDGE_FRACTION >= screenWidth &&
+        height * MAX_NOTCH_DEPTH_FRACTION <= screenHeight) ||
+        ((left == 0 || right == screenWidth) &&
+          height * MIN_NOTCH_EDGE_FRACTION >= screenHeight &&
+          width * MAX_NOTCH_DEPTH_FRACTION <= screenWidth)
 
     private fun ElementBounds.isSmallInsetObstruction(
       screenWidth: Int,

@@ -45,7 +45,7 @@ an app request, not proof that the home indicator is currently hidden. Older And
 and iOS apps built with an older AutoMobile SDK omit `systemChrome`, so clients must treat its
 absence as unknown rather than inferring it from zero insets.
 
-### Display cutouts
+## Display cutouts
 
 `insets.displayCutoutInfo` is optional additive metadata with a `classification` of
 `none`, `notch`, `dynamic_island`, `hole_punch`, or `unknown`. When the platform

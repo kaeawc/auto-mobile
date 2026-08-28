@@ -91,6 +91,16 @@ class CtrlProxyInsetsTest {
   }
 
   @Test
+  fun `display cutout classifier leaves deep broad edge obstruction unknown`() {
+    val bounds = listOf(ElementBounds(left = 0, top = 0, right = 1080, bottom = 1200))
+
+    assertEquals(
+      DisplayCutoutInfo(classification = "unknown", bounds = bounds),
+      DisplayCutoutInfo.fromBoundingRects(screenWidth = 1080, screenHeight = 2400, bounds = bounds),
+    )
+  }
+
+  @Test
   fun `display cutout classifier reports small inset obstruction as a hole punch across rotation`() {
     val portraitBounds = listOf(ElementBounds(left = 480, top = 30, right = 600, bottom = 150))
     val landscapeBounds = listOf(ElementBounds(left = 30, top = 480, right = 150, bottom = 600))

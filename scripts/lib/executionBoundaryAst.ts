@@ -96,7 +96,14 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   const lexicalScope = (node: ts.Node): ts.Node => {
     let current: ts.Node | undefined = node.parent;
     while (current) {
-      if (ts.isSourceFile(current) || ts.isBlock(current) || ts.isCaseBlock(current)) {
+      if (
+        ts.isSourceFile(current) ||
+        ts.isBlock(current) ||
+        ts.isCaseBlock(current) ||
+        ts.isForStatement(current) ||
+        ts.isForInStatement(current) ||
+        ts.isForOfStatement(current)
+      ) {
         return current;
       }
       current = current.parent;
@@ -125,7 +132,14 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     const scopes: ts.Node[] = [];
     let current: ts.Node | undefined = node.parent;
     while (current) {
-      if (ts.isSourceFile(current) || ts.isBlock(current) || ts.isCaseBlock(current)) {
+      if (
+        ts.isSourceFile(current) ||
+        ts.isBlock(current) ||
+        ts.isCaseBlock(current) ||
+        ts.isForStatement(current) ||
+        ts.isForInStatement(current) ||
+        ts.isForOfStatement(current)
+      ) {
         scopes.push(current);
       }
       current = current.parent;
@@ -446,6 +460,15 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     node = unwrapTransparentExpression(node);
     if (ts.isStringLiteralLike(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
       return [node.text];
+    }
+    if (
+      ts.isTaggedTemplateExpression(node) &&
+      ts.isPropertyAccessExpression(node.tag) &&
+      ts.isIdentifier(node.tag.expression) &&
+      node.tag.expression.text === "String" &&
+      node.tag.name.text === "raw"
+    ) {
+      return stringAlternatives(node.template, seen);
     }
     if (ts.isConditionalExpression(node)) {
       return [

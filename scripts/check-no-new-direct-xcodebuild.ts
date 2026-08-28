@@ -107,7 +107,17 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
       // treating that operand as the command can only make the boundary louder.
       continue;
     }
-    return commandName(argument) === "xcodebuild";
+    const command = commandName(argument);
+    if (command === "xcodebuild") {
+      return true;
+    }
+    if (SHELLS.has(argument.toLowerCase())) {
+      return pending.some(containsXcodebuildCommand);
+    }
+    if (ENV_WRAPPERS.has(command)) {
+      return envDelegatesToXcodebuild([argument, ...pending]);
+    }
+    return false;
   }
   return false;
 }

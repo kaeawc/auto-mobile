@@ -42,6 +42,16 @@ release_json='{
   [ "$output" = "windows" ]
 }
 
+@test "detects Apple Silicon hardware when the installer runs under Rosetta" {
+  uname() { printf 'Darwin\n'; }
+  sysctl() { printf '1\n'; }
+
+  run detect_desktop_app_arch
+
+  [ "$status" -eq 0 ]
+  [ "$output" = "arm64" ]
+}
+
 @test "selects the exact platform installer from GitHub release metadata" {
   run resolve_desktop_app_release_asset "$release_json" "-linux.deb"
 
@@ -110,6 +120,23 @@ release_json='{
   rm -rf "${root}"
 }
 
+@test "rejects a concurrent macOS app replacement without touching the installed app" {
+  local root source_app target_app lock_dir
+  root=$(mktemp -d)
+  source_app="${root}/source/AutoMobile.app"
+  target_app="${root}/Applications/AutoMobile.app"
+  lock_dir="${root}/Applications/.automobile-install.lock"
+  mkdir -p "${source_app}" "${target_app}" "${lock_dir}"
+  printf 'old\n' > "${target_app}/old-marker"
+  run_desktop_app_privileged() { "$@"; }
+
+  run install_macos_desktop_app_bundle "${source_app}" "${target_app}"
+
+  [ "$status" -ne 0 ]
+  [ -f "${target_app}/old-marker" ]
+  rm -rf "${root}"
+}
+
 @test "preserves desktop installer temporary files while a disk image cannot detach" {
   local root
   root=$(mktemp -d)
@@ -131,7 +158,7 @@ release_json='{
   DRY_RUN=true
   detect_desktop_app_os() { printf 'linux\n'; }
   detect_arch() { printf 'x86_64\n'; }
-  desktop_app_prerequisites_available() { return 0; }
+  desktop_app_prerequisites_available() { return 1; }
   fetch_latest_desktop_app_release() { return 1; }
 
   install_desktop_app

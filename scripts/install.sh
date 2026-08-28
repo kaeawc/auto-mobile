@@ -2782,32 +2782,46 @@ cleanup_desktop_app_installer() {
 install_macos_desktop_app_bundle() {
     local source_app="$1"
     local target_app="${2:-/Applications/AutoMobile.app}"
-    local target_parent staging_dir staged_app previous_app
+    local target_parent lock_dir staging_dir staged_app previous_app previous_app_moved=false
     target_parent=$(dirname "${target_app}")
-    staging_dir=$(run_desktop_app_privileged mktemp -d "${target_parent}/.automobile-install.XXXXXX") || return 1
+    lock_dir="${target_parent}/.automobile-install.lock"
+    if ! run_desktop_app_privileged mkdir "${lock_dir}"; then
+        log_error "Another AutoMobile desktop app installation is already in progress."
+        return 1
+    fi
+    if ! staging_dir=$(run_desktop_app_privileged mktemp -d "${target_parent}/.automobile-install.XXXXXX"); then
+        run_desktop_app_privileged rmdir "${lock_dir}" || true
+        return 1
+    fi
     staged_app="${staging_dir}/AutoMobile.app"
     previous_app="${staging_dir}/Previous-AutoMobile.app"
 
     if ! run_desktop_app_privileged ditto "${source_app}" "${staged_app}"; then
         run_desktop_app_privileged rm -rf -- "${staging_dir}" || true
+        run_desktop_app_privileged rmdir "${lock_dir}" || true
         return 1
     fi
 
-    if [[ -e "${target_app}" ]] \
-        && ! run_desktop_app_privileged mv -- "${target_app}" "${previous_app}"; then
-        run_desktop_app_privileged rm -rf -- "${staging_dir}" || true
-        return 1
+    if [[ -e "${target_app}" ]]; then
+        if ! run_desktop_app_privileged mv -- "${target_app}" "${previous_app}"; then
+            run_desktop_app_privileged rm -rf -- "${staging_dir}" || true
+            run_desktop_app_privileged rmdir "${lock_dir}" || true
+            return 1
+        fi
+        previous_app_moved=true
     fi
 
     if ! run_desktop_app_privileged mv -- "${staged_app}" "${target_app}"; then
-        if [[ -e "${previous_app}" ]]; then
+        if [[ "${previous_app_moved}" == "true" ]]; then
             run_desktop_app_privileged mv -- "${previous_app}" "${target_app}" || true
         fi
         run_desktop_app_privileged rm -rf -- "${staging_dir}" || true
+        run_desktop_app_privileged rmdir "${lock_dir}" || true
         return 1
     fi
 
     run_desktop_app_privileged rm -rf -- "${staging_dir}" || true
+    run_desktop_app_privileged rmdir "${lock_dir}" || true
 }
 
 # `detect_os` intentionally treats Git Bash as Linux for the existing developer
@@ -2828,6 +2842,20 @@ detect_desktop_app_os() {
             echo "unknown"
             ;;
     esac
+}
+
+# Under Rosetta, uname reports the translated x86_64 process architecture even
+# on Apple Silicon. The published desktop app is arm64-only, so select it from
+# the native hardware signal instead.
+# This is an availability probe: unsupported sysctl keys are an expected miss.
+# shellcheck disable=SC2310
+detect_desktop_app_arch() {
+    if [[ "$(detect_desktop_app_os)" == "macos" ]] \
+        && [[ "$(sysctl -in sysctl.proc_translated 2>/dev/null || true)" == "1" ]]; then
+        echo "arm64"
+    else
+        detect_arch
+    fi
 }
 
 # Extract the matching asset URL from the GitHub releases API response without
@@ -2906,22 +2934,22 @@ desktop_app_deb_architecture_matches_host() {
 install_desktop_app() {
     local os arch suffix
     os=$(detect_desktop_app_os)
-    arch=$(detect_arch)
+    arch=$(detect_desktop_app_arch)
     if ! suffix=$(desktop_app_asset_suffix "${os}" "${arch}"); then
         log_error "The AutoMobile desktop app does not support this host (${os}/${arch})."
         return 1
     fi
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        DRY_RUN_LOG+=("[DRY-RUN] Download the latest AutoMobile desktop app for ${os}/${arch} from GitHub Releases")
+        log_info "[DRY-RUN] Would install the latest AutoMobile desktop app for ${os}/${arch}"
+        return 0
+    fi
+
     # An unavailable prerequisite is translated into the installer diagnostic below.
     # shellcheck disable=SC2310
     if ! desktop_app_prerequisites_available "${os}"; then
         log_error "This host is missing the system tools or administrator privileges required to install the AutoMobile desktop app."
         return 1
-    fi
-
-    if [[ "${DRY_RUN}" == "true" ]]; then
-        DRY_RUN_LOG+=("[DRY-RUN] Download the latest AutoMobile desktop app for ${os}/${arch} from GitHub Releases")
-        log_info "[DRY-RUN] Would install the latest AutoMobile desktop app for ${os}/${arch}"
-        return 0
     fi
 
     local release_json asset_url
@@ -3023,7 +3051,7 @@ offer_desktop_app_install() {
 
     local os arch
     os=$(detect_desktop_app_os)
-    arch=$(detect_arch)
+    arch=$(detect_desktop_app_arch)
     if ! desktop_app_asset_suffix "${os}" "${arch}" >/dev/null; then
         log_info "AutoMobile desktop app is not available for this host (${os}/${arch})."
         return 0

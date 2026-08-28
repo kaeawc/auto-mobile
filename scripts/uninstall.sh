@@ -700,7 +700,7 @@ remove_desktop_app() {
         local app_path
         for app_path in ${DESKTOP_APP_PATHS[@]+"${DESKTOP_APP_PATHS[@]}"}; do
             log_info "Removing AutoMobile desktop app from ${app_path}..."
-            if [[ "${app_path}" == "/Applications/"* ]] && [[ ! -w "/Applications" ]]; then
+            if [[ "${app_path}" == "/Applications/"* ]]; then
                 run_desktop_app_privileged rm -rf -- "${app_path}"
             else
                 rm -rf -- "${app_path}"

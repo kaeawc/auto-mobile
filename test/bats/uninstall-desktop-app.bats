@@ -92,6 +92,19 @@ setup() {
   [ "$output" = "ran directly" ]
 }
 
+@test "uses the privileged removal path for a system Applications bundle" {
+  DESKTOP_APP_INSTALLED=true
+  DESKTOP_APP_PATHS=("/Applications/AutoMobile.app")
+  detect_os() { printf 'macos\n'; }
+  run_desktop_app_privileged() { printf 'privileged: %s\n' "$*"; }
+
+  run remove_desktop_app
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"privileged: rm"* ]]
+  [[ "$output" == *"/Applications/AutoMobile.app"* ]]
+}
+
 teardown() {
   rm -rf "${TEST_ROOT}"
 }

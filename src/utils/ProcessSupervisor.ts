@@ -54,6 +54,9 @@ export class DefaultProcessSupervisor implements ProcessSupervisor {
   }
 
   private async handleProcessExit(): Promise<void> {
+    // Invalidate every probe started under the exited process before awaiting
+    // cleanup or installing a replacement monitor.
+    this.lifecycleGeneration++;
     this.stopMonitoring();
     await this.options.onExit?.();
 

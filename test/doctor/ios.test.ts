@@ -756,14 +756,14 @@ describe("checkIosCtrlProxyRunner", () => {
     expect(result.recommendation).not.toContain("AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH");
   });
 
-  test("warns when a released runner lacks a current non-command feature", async () => {
+  test("accepts the immutable 0.0.66 runner before the feature handshake release", async () => {
     const result = await checkIosCtrlProxyRunner(
       withRunners([inspection({ supportedFeatures: null })]),
     );
 
-    expect(result.status).toBe("warn");
-    expect(result.message).toContain("versionStatus=stale");
-    expect(result.message).toContain("missingFeatures=display_cutout_info");
+    expect(result.status).toBe("pass");
+    expect(result.message).toContain("versionStatus=compatible");
+    expect(result.message).not.toContain("missingFeatures");
   });
 
   test("reports unknown when the runner is installed but not running", async () => {

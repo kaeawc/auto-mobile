@@ -175,3 +175,22 @@ PY
   run grep -E 'xcpretty --color.*\|\| true' "${repository_root}/scripts/ios/ctrl-proxy-build-for-testing.sh"
   [ "$status" -eq 1 ]
 }
+
+@test "a recycled watcher PID is cleared without blocking replacement startup" {
+  local repository_root
+  repository_root="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"
+  runner_pid_file="${TEST_ROOT}/runner.pid"
+  printf '%s\n' "$$" > "${runner_pid_file}"
+
+  run env PROJECT_ROOT="${TEST_ROOT}" CTRL_PROXY_IOS_DIR="${TEST_ROOT}" \
+    IOS_RUNNER_PID_FILE="${runner_pid_file}" bash -c '
+      source "$1"
+      kill() { return 0; }
+      ps() { printf "%s\n" "unrelated-process"; }
+      log_warn() { :; }
+      stop_ctrl_proxy_ios
+    ' _ "${repository_root}/scripts/local-dev/lib/ctrl-proxy-ios.sh"
+
+  [ "$status" -eq 0 ]
+  [ ! -e "${runner_pid_file}" ]
+}

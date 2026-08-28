@@ -72,6 +72,8 @@ import {
   metadataForScreenshotFormat,
   type ScreenshotMetadata,
 } from "../ScreenshotMetadata";
+import { resolveAssetVersion, resolvePinnedVersion } from "../../../constants/release";
+import { compareStrictNumericVersions } from "../../../utils/deviceMatcher";
 
 /**
  * Factory function type for creating CtrlProxyIosManager instances.
@@ -471,8 +473,23 @@ export const IOS_RUNNER_FEATURE_COMMANDS = [
   "set_network_mock_rules",
 ] as const;
 
-/** Non-command wire capabilities required before the daemon claims a current runner. */
+/** Non-command wire capabilities advertised by runners built from this source revision. */
 export const IOS_RUNNER_FEATURE_FLAGS = ["display_cutout_info"] as const;
+
+// The immutable 0.0.66 IPA predates the feature handshake. Require the flag
+// only once the release pipeline cuts 0.0.67+ from source that advertises it.
+const IOS_RUNNER_FEATURE_FLAGS_MIN_RELEASE = "0.0.67";
+
+export function getRequiredIosRunnerFeatureFlags(
+  env: Record<string, string | undefined> = process.env,
+): readonly (typeof IOS_RUNNER_FEATURE_FLAGS)[number][] {
+  const artifactVersion = resolveAssetVersion(resolvePinnedVersion(env));
+  const comparison = compareStrictNumericVersions(
+    artifactVersion,
+    IOS_RUNNER_FEATURE_FLAGS_MIN_RELEASE,
+  );
+  return Number.isNaN(comparison) || comparison >= 0 ? IOS_RUNNER_FEATURE_FLAGS : [];
+}
 
 /**
  * IOSCtrlProxyClient - WebSocket client for iOS CtrlProxy

@@ -156,6 +156,42 @@ describe("DeviceServiceClient close() single onConnectionClosed cycle (#5657)", 
     expect(client.isConnected()).toBe(true);
   });
 
+  test("a stale socket close cannot clear its replacement handshake abort", async () => {
+    const fakeTimer = new FakeTimer();
+    const sockets: FakeWebSocket[] = [];
+
+    client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      8765,
+      (url) => {
+        const socket = new FakeWebSocket(url, "timeout", 60_000, fakeTimer);
+        sockets.push(socket);
+        return socket;
+      },
+      fakeTimer,
+    );
+
+    const firstConnection = client.ensureConnected();
+    await flushSetImmediate();
+    sockets[0].emit("error", new Error("first connection failed"));
+    expect(await firstConnection).toBe(false);
+
+    const replacementConnection = client.ensureConnected();
+    await flushSetImmediate();
+    const lifecycle = client as unknown as {
+      pendingConnectAbort: { socket: FakeWebSocket } | null;
+    };
+    expect(lifecycle.pendingConnectAbort?.socket).toBe(sockets[1]);
+
+    sockets[0].emit("close");
+    expect(lifecycle.pendingConnectAbort?.socket).toBe(sockets[1]);
+
+    await client.close();
+    expect(await replacementConnection).toBe(false);
+    expect(sockets[1].readyState).toBe(WebSocketState.CLOSING);
+    client = null;
+  });
+
   test("unsolicited socket drop immediately rejects in-flight requests", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();

@@ -257,7 +257,7 @@ stop_ctrl_proxy_ios() {
       log_warn "Refusing to stop recycled/non-CtrlProxy PID ${XCODEBUILD_PID}."
       XCODEBUILD_PID=""
       rm -f "${IOS_RUNNER_PID_FILE}"
-      return 1
+      return 0
     fi
   fi
   if [[ -n "${XCODEBUILD_PID}" ]] && kill -0 "${XCODEBUILD_PID}" 2>/dev/null; then

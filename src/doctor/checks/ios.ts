@@ -21,6 +21,7 @@ import {
   IOSCtrlProxyClient,
   IOS_RUNNER_FEATURE_COMMANDS,
   IOS_RUNNER_FEATURE_FLAGS,
+  getRequiredIosRunnerFeatureFlags,
 } from "../../features/observe/ios/IOSCtrlProxyClient";
 import { ObserveElementsBuilder } from "../../features/observe/ObserveElementsBuilder";
 import type { CtrlProxyHierarchy } from "../../features/observe/ios/types";
@@ -919,7 +920,7 @@ function classifyRunner(
     const advertised = new Set(inspection.supportedCommands);
     missingCommands = IOS_RUNNER_FEATURE_COMMANDS.filter((command) => !advertised.has(command));
     const advertisedFeatures = new Set(inspection.supportedFeatures ?? []);
-    missingFeatures = IOS_RUNNER_FEATURE_FLAGS.filter(
+    missingFeatures = getRequiredIosRunnerFeatureFlags().filter(
       (feature) => !advertisedFeatures.has(feature),
     );
     status = missingCommands.length === 0 && missingFeatures.length === 0 ? "compatible" : "stale";

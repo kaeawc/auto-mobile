@@ -18,7 +18,7 @@ import { IOSCtrlProxyBuilder } from "../utils/IOSCtrlProxyBuilder";
 import {
   IOSCtrlProxyClient,
   IOS_RUNNER_FEATURE_COMMANDS,
-  IOS_RUNNER_FEATURE_FLAGS,
+  getRequiredIosRunnerFeatureFlags,
 } from "../features/observe/ios/IOSCtrlProxyClient";
 import { resolveApkChecksum, resolveIpaChecksum } from "../constants/release";
 import { defaultTimer } from "../utils/SystemTimer";
@@ -761,10 +761,13 @@ async function queryDeviceServiceStatus(
             advertised.has(command),
           );
         }
+        const requiredFeatures = getRequiredIosRunnerFeatureFlags();
         const cachedFeatures = client?.getCachedSupportedFeatures() ?? null;
-        if (cachedFeatures !== null) {
+        if (requiredFeatures.length === 0) {
+          supportedFeaturesComplete = true;
+        } else if (cachedFeatures !== null) {
           const advertisedFeatures = new Set(cachedFeatures);
-          supportedFeaturesComplete = IOS_RUNNER_FEATURE_FLAGS.every((feature) =>
+          supportedFeaturesComplete = requiredFeatures.every((feature) =>
             advertisedFeatures.has(feature),
           );
         }

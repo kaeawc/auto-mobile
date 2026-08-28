@@ -49,6 +49,12 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
     expect(
       findViolationsInSource("fixture.ts", 'executor["executeCommand"]("ps", ["-p", "42"]);'),
     ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'import * as cp from "node:child_process"; cp["spawn"]("kill", ["-TERM", "42"]);',
+      ),
+    ).toHaveLength(1);
   });
 
   test("has a production check with documented exceptions", () => {

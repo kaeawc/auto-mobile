@@ -180,8 +180,8 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     isLauncherReference(node.arguments[0]);
   const isLauncherReference = (node: ts.Expression): boolean =>
     (ts.isIdentifier(node) && launcherAliases.has(node.text)) ||
-    (ts.isPropertyAccessExpression(node) &&
-      PROCESS_LAUNCHERS.has(node.name.text) &&
+    ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) &&
+      PROCESS_LAUNCHERS.has(propertyName(node) ?? "") &&
       ts.isIdentifier(node.expression) &&
       childProcessNamespaces.has(node.expression.text)) ||
     isPromisifiedLauncher(node);
@@ -414,17 +414,21 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     calleeName: (call) => propertyName(call.expression),
     isLauncher: (call) =>
       (ts.isIdentifier(call.expression) && launcherAliases.has(call.expression.text)) ||
-      (ts.isPropertyAccessExpression(call.expression) &&
+      ((ts.isPropertyAccessExpression(call.expression) ||
+        ts.isElementAccessExpression(call.expression)) &&
+        propertyName(call.expression) !== undefined &&
         ((ts.isIdentifier(call.expression.expression) &&
           childProcessNamespaces.has(call.expression.expression.text) &&
-          PROCESS_LAUNCHERS.has(call.expression.name.text)) ||
-          (PROCESS_LAUNCHERS.has(call.expression.name.text) &&
+          PROCESS_LAUNCHERS.has(propertyName(call.expression) ?? "")) ||
+          (PROCESS_LAUNCHERS.has(propertyName(call.expression) ?? "") &&
             /(?:executor|host|process)/i.test(call.expression.expression.getText(sourceFile))) ||
-          ["execFile", "execFileSync", "execFileAsync"].includes(call.expression.name.text) ||
-          INJECTED_LAUNCHERS.has(call.expression.name.text) ||
+          ["execFile", "execFileSync", "execFileAsync"].includes(
+            propertyName(call.expression) ?? "",
+          ) ||
+          INJECTED_LAUNCHERS.has(propertyName(call.expression) ?? "") ||
           (ts.isIdentifier(call.expression.expression) &&
             call.expression.expression.text === "Bun" &&
-            ["spawn", "spawnSync"].includes(call.expression.name.text)))),
+            ["spawn", "spawnSync"].includes(propertyName(call.expression) ?? "")))),
     isExecutionSeam: (call) => isExecutionSeamReference(call.expression),
     isRunExecSeam: (call) => isRunExecSeamReference(call.expression),
     strings,

@@ -1075,9 +1075,7 @@ class WebSocketConnection: WebSocketResponding {
 
         // Calculate accept key
         let magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
-        // A String always encodes to UTF-8, so .data(using: .utf8) is never nil.
-        let acceptKey = (key + magic).data(using: .utf8)!.sha1()
-            .base64EncodedString() // swiftlint:disable:this force_unwrapping
+        let acceptKey = Data((key + magic).utf8).sha1().base64EncodedString()
 
         // Send upgrade response
         let response = """

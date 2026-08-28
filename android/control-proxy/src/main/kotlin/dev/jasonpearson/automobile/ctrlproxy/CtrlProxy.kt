@@ -4098,31 +4098,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
 
-      // Trigger a hierarchy refresh after successful text input
-      // This ensures the next observe will get the updated text
-      if (success) {
-        // Wait for UI to settle (no accessibility events for 50ms), then extract hierarchy
-        // This dynamically adapts to how long validation/animations take, instead of using a fixed
-        // delay
-        // Flow emissions are suppressed during this to prevent race conditions with debounced
-        // broadcasts
-        val freshHierarchy =
-          hierarchyDebouncer.extractAfterQuiescence(
-            quiescenceMs = 50L, // Wait for 50ms of no events
-            maxWaitMs = 500L, // But don't wait more than 500ms total
-            pollIntervalMs = 10L, // Check every 10ms
-          )
-        if (freshHierarchy != null) {
-          // Broadcast hierarchy synchronously (sync=true) to ensure it arrives before
-          // set_text_result
-          kotlinx.coroutines.runBlocking { broadcastHierarchyUpdate(freshHierarchy, sync = true) }
-        }
-      }
-
       val totalTime = System.currentTimeMillis() - startTime
-      Log.d(TAG, "Set text total time: ${totalTime}ms")
-
-      // Broadcast set_text_result synchronously to ensure ordering after hierarchy
+      Log.d(TAG, "Set text completed in ${totalTime}ms")
+      // ACTION_SET_TEXT and the requested keyboard state are complete, so acknowledge before
+      // optional hierarchy work. Waiting for quiescence/extraction first can turn a completed
+      // write into a host-side timeout.
       kotlinx.coroutines.runBlocking {
         broadcastSetTextResult(
           requestId,
@@ -4130,6 +4110,30 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           if (success) null else "performAction returned false",
           totalTime,
         )
+      }
+
+      // Trigger a hierarchy refresh after successful text input
+      // This ensures the next observe will get the updated text
+      if (success) {
+        serviceScope.launch {
+          try {
+            // Wait for UI to settle (no accessibility events for 50ms), then extract hierarchy.
+            // This best-effort follow-up must not delay the set_text_result acknowledgement.
+            val freshHierarchy =
+              hierarchyDebouncer.extractAfterQuiescence(
+                quiescenceMs = 50L,
+                maxWaitMs = 500L,
+                pollIntervalMs = 10L,
+              )
+            if (freshHierarchy != null) {
+              broadcastHierarchyUpdate(freshHierarchy, sync = true)
+            }
+          } catch (e: CancellationException) {
+            throw e
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to refresh hierarchy after text input", e)
+          }
+        }
       }
     } catch (e: Exception) {
       perfProvider.end()
@@ -5726,7 +5730,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     }
 
     resultBroadcaster.guard(requestId, "set_text_result") {
-      webSocketServer.broadcastWithPerf { perfTiming ->
+      webSocketServer.broadcastWithPerfSync { perfTiming ->
         webSocketFrameJson("set_text_result", requestId = requestId, perfTiming = perfTiming) {
           put("success", success)
           put("totalTimeMs", totalTimeMs)

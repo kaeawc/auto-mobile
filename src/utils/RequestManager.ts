@@ -1,6 +1,6 @@
 import { logger } from "./logger";
+import { defaultIdGenerator, type IdGenerator } from "./IdGenerator";
 import { Timer, defaultTimer } from "./SystemTimer";
-import { randomUUID } from "node:crypto";
 
 /**
  * Represents a pending request with timeout handling.
@@ -38,9 +38,12 @@ type ResponseErrorFactory<T> = (error: string, totalTimeMs: number) => T;
  */
 export class RequestManager {
   private pending: Map<string, PendingRequest<unknown>> = new Map();
-  private timer: Timer;
+  private readonly timer: Timer;
 
-  constructor(timer: Timer = defaultTimer) {
+  constructor(
+    timer: Timer = defaultTimer,
+    private readonly idGenerator: IdGenerator = defaultIdGenerator,
+  ) {
     this.timer = timer;
   }
 
@@ -54,7 +57,7 @@ export class RequestManager {
     // collides when two daemon clients issue the same request in the same tick, and
     // CtrlProxy uses the ID to select the response owner. A UUID keeps that routing
     // boundary safe across clients as well as across reconnects.
-    return `${type}_${randomUUID()}`;
+    return `${type}_${this.idGenerator.next()}`;
   }
 
   /**
@@ -239,6 +242,5 @@ export class RequestManager {
       this.timer.clearTimeout(request.timeoutId);
     }
     this.pending.clear();
-    this.requestCounter = 0;
   }
 }

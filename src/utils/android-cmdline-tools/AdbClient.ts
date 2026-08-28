@@ -590,6 +590,11 @@ export class AdbClient implements AdbExecutor {
       throw this.getAbortError(signal);
     }
     const fullArgs = [...baseArgs, ...args];
+    const remainingTimeoutMs = this.getRemainingTimeoutMs(
+      options.timeoutMs,
+      startTime,
+      args.join(" "),
+    );
     const child = this.spawnFn(adbPath, fullArgs, { stdio: ["ignore", "pipe", "pipe"] });
     this.activeProcesses.add(child);
 
@@ -625,11 +630,6 @@ export class AdbClient implements AdbExecutor {
     child.once("exit", onExit);
     child.once("error", onError);
     signal?.addEventListener("abort", onAbort, { once: true });
-    const remainingTimeoutMs = this.getRemainingTimeoutMs(
-      options.timeoutMs,
-      startTime,
-      args.join(" "),
-    );
     if (remainingTimeoutMs !== undefined) {
       timeoutId = this.timer.setTimeout(onAbort, remainingTimeoutMs);
     }

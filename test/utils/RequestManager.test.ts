@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { RequestManager } from "../../src/utils/RequestManager";
+import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("RequestManager", () => {
@@ -8,7 +9,7 @@ describe("RequestManager", () => {
 
   beforeEach(() => {
     fakeTimer = new FakeTimer();
-    manager = new RequestManager(fakeTimer);
+    manager = new RequestManager(fakeTimer, new FakeIdGenerator(["first", "second", "third"]));
   });
 
   afterEach(() => {
@@ -20,15 +21,13 @@ describe("RequestManager", () => {
     const id2 = manager.generateId("screenshot");
     const id3 = manager.generateId("swipe");
 
-    expect(id1).not.toBe(id2);
-    expect(id2).not.toBe(id3);
-    expect(id1).toContain("screenshot");
-    expect(id3).toContain("swipe");
+    expect([id1, id2, id3]).toEqual(["screenshot_first", "screenshot_second", "swipe_third"]);
   });
 
   test("does not collide across managers created in the same tick", () => {
-    const otherManager = new RequestManager(fakeTimer);
-    expect(manager.generateId("screenshot")).not.toBe(otherManager.generateId("screenshot"));
+    const otherManager = new RequestManager(fakeTimer, new FakeIdGenerator(["other"]));
+    expect(manager.generateId("screenshot")).toBe("screenshot_first");
+    expect(otherManager.generateId("screenshot")).toBe("screenshot_other");
   });
 
   test("should register and resolve requests", async () => {
@@ -254,6 +253,6 @@ describe("RequestManager", () => {
     manager.reset();
 
     const newId = manager.generateId("test");
-    expect(newId).toMatch(/^test_[0-9a-f-]{36}$/);
+    expect(newId).toBe("test_fake-1");
   });
 });

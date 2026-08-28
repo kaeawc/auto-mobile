@@ -3,6 +3,7 @@ import { EventEmitter } from "events";
 import { PassThrough } from "stream";
 import {
   AdbClient,
+  AdbCommandTimeoutError,
   AdbUnavailableError,
   resetAdbClientCaches,
 } from "../../../src/utils/android-cmdline-tools/AdbClient";
@@ -286,6 +287,34 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     resolveBase!({ adbPath: "adb", baseArgs: [] });
 
     await expect(pending).rejects.toThrow("Operation cancelled");
+    expect(spawnCalls).toBe(0);
+  });
+
+  test("does not spawn when executable resolution exhausts the timeout budget", async () => {
+    const timer = new FakeTimer();
+    let spawnCalls = 0;
+    const adb = new AdbClient(
+      null,
+      async (): Promise<ExecResult> => createExecResult(""),
+      (() => {
+        spawnCalls++;
+        throw new Error("must not spawn");
+      }) as never,
+      undefined,
+      timer,
+    );
+    (
+      adb as unknown as {
+        getBaseCommandParts: () => Promise<{ adbPath: string; baseArgs: string[] }>;
+      }
+    ).getBaseCommandParts = async () => {
+      timer.advanceTime(100);
+      return { adbPath: "adb", baseArgs: [] };
+    };
+
+    await expect(adb.spawn(["get-state"], { timeoutMs: 100 })).rejects.toBeInstanceOf(
+      AdbCommandTimeoutError,
+    );
     expect(spawnCalls).toBe(0);
   });
 });

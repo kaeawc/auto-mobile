@@ -623,7 +623,9 @@ export abstract class DeviceServiceClient {
       const parsed = JSON.parse(data.toString()) as { requestId?: unknown };
       return typeof parsed.requestId === "string" ? parsed.requestId : undefined;
     } catch (error) {
-      logger.debug(`[${this.logTag}] Could not read request ID from failed WebSocket send: ${error}`);
+      logger.debug(
+        `[${this.logTag}] Could not read request ID from failed WebSocket send: ${error}`,
+      );
       return undefined;
     }
   }

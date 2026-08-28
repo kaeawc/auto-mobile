@@ -3098,7 +3098,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     try {
       const previousLocalPort = this.localPort;
       await perf.track("clearPortForward", () =>
-        this.adb.execute(["forward", "--remove", `tcp:${this.localPort}`], { signal }).catch(() => {}),
+        this.adb
+          .execute(["forward", "--remove", `tcp:${this.localPort}`], { signal })
+          .catch(() => {}),
       );
       if (this.closed) {
         return;
@@ -3111,15 +3113,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       if (this.localPort !== previousLocalPort) {
         await perf.track("clearReallocatedPortForward", () =>
-          this.adb.execute(["forward", "--remove", `tcp:${this.localPort}`], { signal }).catch(() => {}),
+          this.adb
+            .execute(["forward", "--remove", `tcp:${this.localPort}`], { signal })
+            .catch(() => {}),
         );
       }
 
       await perf.track("setupPortForward", () =>
-        this.adb.execute(
-          ["forward", `tcp:${this.localPort}`, `tcp:${PortManager.DEVICE_PORT}`],
-          { signal },
-        ),
+        this.adb.execute(["forward", `tcp:${this.localPort}`, `tcp:${PortManager.DEVICE_PORT}`], {
+          signal,
+        }),
       );
 
       if (this.closed) {

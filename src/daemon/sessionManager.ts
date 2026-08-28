@@ -159,8 +159,17 @@ interface PendingSessionCreation {
   promise: Promise<Session>;
 }
 
+interface ReleaseReasonState {
+  value: string;
+}
+
 interface PendingSessionRelease {
   promise: Promise<string | null>;
+  reason: ReleaseReasonState;
+}
+
+interface SessionReleaseOperation extends PendingSessionRelease {
+  session: Session;
 }
 
 interface PendingSessionRebind {
@@ -244,15 +253,9 @@ export class SessionManager {
   private releaseCallbacks: SessionReleaseCallback[] = [];
   private createdCallbacks: SessionCreatedCallback[] = [];
   private deviceUnboundCallbacks: SessionDeviceUnboundCallback[] = [];
-  private readonly releasePromises: Map<
-    string,
-    { session: Session; promise: Promise<string | null> }
-  > = new Map();
+  private readonly releasePromises: Map<string, SessionReleaseOperation> = new Map();
   /** Every release still running, including an older session that reused a UUID. */
-  private readonly activeReleasePromises: Set<{
-    session: Session;
-    promise: Promise<string | null>;
-  }> = new Set();
+  private readonly activeReleasePromises: Set<SessionReleaseOperation> = new Set();
   /** Setup work that can modify device state after a session has been assigned. */
   private readonly sessionSetupPromises: Set<{ session: Session; promise: Promise<void> }> =
     new Set();
@@ -808,19 +811,21 @@ export class SessionManager {
 
     const inFlightRelease = this.releasePromises.get(sessionId);
     if (inFlightRelease?.session === session) {
+      this.upgradeReleaseReason(inFlightRelease.reason, releaseReason);
       return await inFlightRelease.promise;
     }
 
     this.releasingSessions.add(session);
     const pendingRebind = this.pendingSessionRebinds.get(sessionId);
+    const reason: ReleaseReasonState = { value: releaseReason };
     const promise =
       pendingRebind?.session === session
         ? pendingRebind.promise.then(
-            () => this.releaseSessionInternal(sessionId, session, releaseReason),
-            () => this.releaseSessionInternal(sessionId, session, releaseReason),
+            () => this.releaseSessionInternal(sessionId, session, reason),
+            () => this.releaseSessionInternal(sessionId, session, reason),
           )
-        : this.releaseSessionInternal(sessionId, session, releaseReason);
-    const release = { session, promise };
+        : this.releaseSessionInternal(sessionId, session, reason);
+    const release = { session, promise, reason };
     this.releasePromises.set(sessionId, release);
     this.activeReleasePromises.add(release);
     try {
@@ -854,6 +859,7 @@ export class SessionManager {
   ): Promise<string | null> {
     const inFlightRelease = this.releasePromises.get(sessionId);
     if (inFlightRelease) {
+      this.upgradeReleaseReason(inFlightRelease.reason, releaseReason);
       return await inFlightRelease.promise;
     }
     const pendingAssignment = this.pendingSessionAssignments.get(sessionId);
@@ -879,16 +885,19 @@ export class SessionManager {
   ): Promise<string | null> {
     const existingRelease = this.pendingSessionReleases.get(sessionId);
     if (existingRelease) {
+      this.upgradeReleaseReason(existingRelease.reason, releaseReason);
       return await existingRelease.promise;
     }
 
+    const reason: ReleaseReasonState = { value: releaseReason };
     const release: PendingSessionRelease = {
       promise: this.releaseAfterPendingSessionWork(
         sessionId,
-        releaseReason,
+        reason,
         allowExpired,
         pendingSession,
       ),
+      reason,
     };
     this.pendingSessionReleases.set(sessionId, release);
     try {
@@ -902,13 +911,13 @@ export class SessionManager {
 
   private async releaseAfterPendingSessionWork(
     sessionId: string,
-    releaseReason: string,
+    reason: ReleaseReasonState,
     allowExpired: boolean,
     pendingSession: Promise<Session>,
   ): Promise<string | null> {
     try {
       await pendingSession;
-      return await this.releaseSession(sessionId, releaseReason, allowExpired);
+      return await this.releaseSession(sessionId, reason.value, allowExpired);
     } catch (error) {
       logger.warn(`Session ${sessionId} assignment failed before release: ${error}`);
       return null;
@@ -991,7 +1000,7 @@ export class SessionManager {
   private async releaseSessionInternal(
     sessionId: string,
     session: Session,
-    releaseReason: string,
+    reason: ReleaseReasonState,
   ): Promise<string | null> {
     try {
       const setups = Array.from(this.sessionSetupPromises, (setup) =>
@@ -1010,6 +1019,7 @@ export class SessionManager {
       ].filter((cleanup): cleanup is Promise<void> => cleanup !== null);
       const deviceId = session.assignedDevice;
       const releasedAtMs = this.timer.now();
+      const releaseReason = reason.value;
       const releaseSnapshot: SessionReleaseSnapshot = {
         sessionId,
         deviceId,
@@ -1026,15 +1036,17 @@ export class SessionManager {
           // monitor, which is constructed with default config. (A monitor given an
           // explicit `preFirstHeartbeatGraceMs`, as in tests, would diverge; drive
           // the grace via env to keep the snapshot consistent.)
-          timeoutMs:
-            releaseReason === "missing-first-heartbeat"
-              ? getDefaultPreFirstHeartbeatGraceMs()
-              : session.heartbeatTimeoutMs,
+          timeoutMs: this.releaseHeartbeatTimeoutMs(releaseReason, session),
           ageMs: Math.max(0, releasedAtMs - session.lastHeartbeat),
         },
       };
 
-      await this.persistTerminalReleaseIfNeeded(releaseSnapshot);
+      // A non-terminal release must not yield after freezing its reason: a
+      // concurrent terminal release can only upgrade the shared reason while
+      // this operation is awaiting teardown above.
+      if (releaseSnapshot.terminal) {
+        await this.persistTerminalReleaseIfNeeded(releaseSnapshot);
+      }
       if (!this.removeSession(sessionId, session)) {
         if (pendingCleanup.length > 0) {
           this.trackPendingDeviceCleanup(deviceId, pendingCleanup);
@@ -1071,6 +1083,18 @@ export class SessionManager {
     } finally {
       this.releasingSessions.delete(session);
     }
+  }
+
+  private upgradeReleaseReason(reason: ReleaseReasonState, candidate: string): void {
+    if (!isTerminalReleaseReason(reason.value) && isTerminalReleaseReason(candidate)) {
+      reason.value = candidate;
+    }
+  }
+
+  private releaseHeartbeatTimeoutMs(releaseReason: string, session: Session): number {
+    return releaseReason === "missing-first-heartbeat"
+      ? getDefaultPreFirstHeartbeatGraceMs()
+      : session.heartbeatTimeoutMs;
   }
 
   private async persistSessionRelease(snapshot: SessionReleaseSnapshot): Promise<void> {

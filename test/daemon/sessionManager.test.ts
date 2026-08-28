@@ -1923,8 +1923,17 @@ describe("SessionManager", () => {
   });
 
   test("device-killed UUID cannot silently allocate another device", async () => {
-    await sessionManager.createSession("killed-session", "emulator-5554", "android");
-    await sessionManager.releaseSession("killed-session", "device-killed");
+    const session = await sessionManager.createSession(
+      "killed-session",
+      "emulator-5554",
+      "android",
+    );
+    const setup = Promise.withResolvers<void>();
+    void sessionManager.trackSessionSetup(session, () => setup.promise);
+    const ordinaryRelease = sessionManager.releaseSession("killed-session", "explicit-release");
+    const killedRelease = sessionManager.releaseSession("killed-session", "device-killed");
+    setup.resolve();
+    await Promise.all([ordinaryRelease, killedRelease]);
     let assignmentCount = 0;
     const assigner: SessionDeviceAssigner = {
       async assignDeviceToSession() {

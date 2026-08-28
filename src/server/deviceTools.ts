@@ -110,6 +110,7 @@ import {
 import { DeviceTeardownService, type DeviceTeardownPhase } from "../utils/deviceTeardownService";
 import { DeviceShutdownService } from "../utils/deviceShutdownService";
 import { hasMutableDisplayName } from "../utils/ios-cmdline-tools/iosDeviceType";
+import { classifyDisplayCutout, DISPLAY_CUTOUT_PREFERENCES } from "../utils/displayCutout";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -242,6 +243,12 @@ const androidProvisionDeviceSpecSchema = z
   .object({
     runtime: z.string().min(1).describe("Installed Android system-image package identifier"),
     deviceType: z.string().min(1).describe("Android avdmanager device profile identifier"),
+    displayCutout: z
+      .enum(DISPLAY_CUTOUT_PREFERENCES)
+      .optional()
+      .describe(
+        "Required display cutout class for the exact device type; 'any' accepts every class",
+      ),
     configuration: z
       .object({
         memoryMb: z.number().int().positive().optional(),
@@ -271,6 +278,12 @@ const iosProvisionDeviceSpecSchema = z
   .object({
     runtime: z.string().min(1).describe("CoreSimulator runtime identifier"),
     deviceType: z.string().min(1).describe("CoreSimulator device-type identifier"),
+    displayCutout: z
+      .enum(DISPLAY_CUTOUT_PREFERENCES)
+      .optional()
+      .describe(
+        "Required display cutout class for the exact device type; 'any' accepts every class",
+      ),
   })
   .strict();
 
@@ -3746,12 +3759,17 @@ export function registerDeviceTools() {
     const store = deps.provisionDeviceOperationStoreFactory();
     const operation = await store.begin(args.operationId, fingerprint);
     try {
-      if (!operation.started) {
-        if (
-          await canReplayCompletedProvisionDeviceOperation(args, deps, operation.result, signal)
-        ) {
-          return operation.result;
+      if (
+        !operation.started &&
+        (await canReplayCompletedProvisionDeviceOperation(args, deps, operation.result, signal))
+      ) {
+        const replayResult = backfillProvisionDeviceCutout(args, operation.result);
+        if (replayResult !== operation.result) {
+          await completeProvisionDeviceOperation(store, args.operationId, replayResult);
         }
+        return replayResult;
+      }
+      if (!operation.started) {
         await releaseErroredProvisionDeviceSession(operation.result);
 
         // Sessions are daemon-local and are expired during daemon startup. A
@@ -3809,6 +3827,32 @@ export function registerDeviceTools() {
       name: deviceRecord.name,
       platform: deviceRecord.platform,
       deviceId: typeof deviceRecord.deviceId === "string" ? deviceRecord.deviceId : undefined,
+    };
+  }
+
+  function backfillProvisionDeviceCutout(
+    args: ProvisionDeviceArgs,
+    result: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const displayCutout = classifyDisplayCutout(args.device.platform, args.device.spec.deviceType);
+    const resolvedSpec = result.resolvedSpec;
+    const resolvedSpecRecord =
+      typeof resolvedSpec === "object" && resolvedSpec !== null && !Array.isArray(resolvedSpec)
+        ? (resolvedSpec as Record<string, unknown>)
+        : undefined;
+    const resolvedDisplayCutout = resolvedSpecRecord?.displayCutout;
+    const hasTopLevelCutout = typeof result.displayCutout === "string";
+    const hasResolvedCutout = typeof resolvedDisplayCutout === "string";
+    if (hasTopLevelCutout && hasResolvedCutout) {
+      return result;
+    }
+    return {
+      ...result,
+      displayCutout: hasTopLevelCutout ? result.displayCutout : displayCutout,
+      resolvedSpec: {
+        ...(resolvedSpecRecord ?? args.device.spec),
+        displayCutout: hasResolvedCutout ? resolvedDisplayCutout : displayCutout,
+      },
     };
   }
 
@@ -4398,6 +4442,9 @@ export function registerDeviceTools() {
       device: booted?.device ?? provisioned.device,
       requestedSpec: args.device.spec,
       resolvedSpec: provisioned.resolvedSpec,
+      displayCutout:
+        provisioned.resolvedSpec.displayCutout ??
+        classifyDisplayCutout(args.device.platform, provisioned.resolvedSpec.deviceType),
       created: createdByOperation,
       adopted: !createdByOperation,
       lifecycleState: booted ? "ready" : createdByOperation ? "created" : "adopted",

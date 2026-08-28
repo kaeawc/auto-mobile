@@ -108,7 +108,7 @@ describe("DefaultExactDeviceProvisioner", () => {
     expect(result).toEqual({
       created: true,
       device: androidImage("phone-api-36-a"),
-      resolvedSpec: ANDROID_SPEC,
+      resolvedSpec: { ...ANDROID_SPEC, displayCutout: "hole_punch" },
     });
     expect(calls).toEqual([
       {
@@ -152,6 +152,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       spec: {
         runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
         deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        displayCutout: "dynamic_island",
       },
     });
 
@@ -169,6 +170,7 @@ describe("DefaultExactDeviceProvisioner", () => {
       resolvedSpec: {
         runtime: "com.apple.CoreSimulator.SimRuntime.iOS-26-0",
         deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-17",
+        displayCutout: "dynamic_island",
       },
     });
   });
@@ -476,7 +478,7 @@ describe("DefaultExactDeviceProvisioner", () => {
     expect(result).toEqual({
       created: false,
       device: androidImage("phone-api-36-a"),
-      resolvedSpec: ANDROID_SPEC,
+      resolvedSpec: { ...ANDROID_SPEC, displayCutout: "hole_punch" },
     });
   });
 
@@ -515,5 +517,61 @@ describe("DefaultExactDeviceProvisioner", () => {
     });
 
     expect(writes).toEqual([]);
+  });
+
+  test("rejects an existing Android AVD whose exact type conflicts with the requested cutout", async () => {
+    const provisioner = new DefaultExactDeviceProvisioner({
+      listDeviceImages: async () => [androidImage("phone-api-36-a")],
+      isCreationAllowed: () => true,
+      avdManager: {} as ExactAndroidAvdClient,
+      androidConfigReader: {
+        readConfig: async () => ({
+          apiLevel: 36,
+          tag: "google_apis",
+          architecture: "x86_64",
+          deviceName: "pixel_9",
+          ramSizeMb: 4096,
+        }),
+      },
+      androidConfigWriter: {} as AndroidAvdConfigWriter,
+      iosSimulator: {} as ExactIosSimulatorClient,
+    });
+
+    await expect(
+      provisioner.provision({
+        platform: "android",
+        name: "phone-api-36-a",
+        spec: { ...ANDROID_SPEC, displayCutout: "none" },
+      }),
+    ).rejects.toMatchObject({
+      code: "identity_conflict",
+      message: expect.stringContaining("hole_punch"),
+    });
+  });
+
+  test("rejects a cutout preference when the exact device type cannot be classified", async () => {
+    const provisioner = new DefaultExactDeviceProvisioner({
+      listDeviceImages: async () => [],
+      isCreationAllowed: () => true,
+      avdManager: {} as ExactAndroidAvdClient,
+      androidConfigReader: { readConfig: async () => null },
+      androidConfigWriter: {} as AndroidAvdConfigWriter,
+      iosSimulator: {} as ExactIosSimulatorClient,
+    });
+
+    await expect(
+      provisioner.provision({
+        platform: "android",
+        name: "phone-api-36-a",
+        spec: {
+          runtime: ANDROID_SPEC.runtime,
+          deviceType: "unclassified_profile",
+          displayCutout: "notch",
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "unsupported",
+      message: expect.stringContaining("unknown"),
+    });
   });
 });

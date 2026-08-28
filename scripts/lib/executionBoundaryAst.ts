@@ -80,6 +80,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   );
   const initializers = new Map<string, ts.Expression[]>();
   const scopedValues: Array<{
+    kind: "assignment" | "declaration";
     name: string;
     value: ts.Expression;
     scope: ts.Node;
@@ -100,11 +101,17 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     }
     return sourceFile;
   };
-  const bind = (name: string, value: ts.Expression, owner: ts.Node): void => {
+  const bind = (
+    name: string,
+    value: ts.Expression,
+    owner: ts.Node,
+    kind: "assignment" | "declaration",
+  ): void => {
     initializers.set(name, [...(initializers.get(name) ?? []), value]);
     scopedValues.push({
       name,
       value,
+      kind,
       scope: lexicalScope(owner),
       position: owner.getStart(sourceFile),
     });
@@ -139,7 +146,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     }
     if (ts.isVariableDeclaration(node)) {
       if (ts.isIdentifier(node.name) && node.initializer) {
-        bind(node.name.text, node.initializer, node);
+        bind(node.name.text, node.initializer, node, "declaration");
       }
       if (ts.isObjectBindingPattern(node.name)) {
         const initializer = node.initializer;
@@ -187,7 +194,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
       ts.isIdentifier(node.left)
     ) {
-      bind(node.left.text, node.right, node);
+      bind(node.left.text, node.right, node, "assignment");
     }
     if (ts.isCallExpression(node)) {
       calls.push(node);
@@ -221,22 +228,31 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       return true;
     }
     if (ts.isIdentifier(node) && !seen.has(node.text)) {
-      const scopes = new Set<ts.Node>();
+      const scopes: ts.Node[] = [];
       let current: ts.Node | undefined = node.parent;
       while (current) {
         if (ts.isSourceFile(current) || ts.isBlock(current) || ts.isCaseBlock(current)) {
-          scopes.add(current);
+          scopes.push(current);
         }
         current = current.parent;
       }
-      const binding = scopedValues
-        .filter(
+      const usePosition = node.getStart(sourceFile);
+      let binding: (typeof scopedValues)[number] | undefined;
+      for (const scope of scopes) {
+        const candidates = scopedValues.filter(
           (candidate) =>
             candidate.name === node.text &&
-            candidate.position < node.getStart(sourceFile) &&
-            scopes.has(candidate.scope),
-        )
-        .sort((left, right) => right.position - left.position)[0];
+            candidate.scope === scope &&
+            (candidate.kind === "declaration" || candidate.position < usePosition),
+        );
+        const assignment = candidates
+          .filter((candidate) => candidate.kind === "assignment")
+          .sort((left, right) => right.position - left.position)[0];
+        binding = assignment ?? candidates.find((candidate) => candidate.kind === "declaration");
+        if (binding) {
+          break;
+        }
+      }
       return binding ? isRegExpReference(binding.value, new Set([...seen, node.text])) : false;
     }
     return false;

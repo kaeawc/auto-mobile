@@ -181,6 +181,48 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "preserves an unresolved environment argument before xcodebuild" {
+  printf '%s\n' 'spawn("env", [environmentArgument, "xcodebuild", "test"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "fails closed when conditional argv alternatives exceed the analysis bound" {
+  {
+    printf '%s' 'spawn("env", ['
+    for index in $(seq 1 20); do
+      printf '%s' "condition${index} ? \"NAME${index}=a\" : \"NAME${index}=b\","
+    done
+    printf '%s\n' '"xcodebuild", "test"]);'
+  } > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
+@test "does not stop before xcodebuild after one thousand env assignments" {
+  {
+    printf '%s' 'spawn("env", ['
+    for index in $(seq 1 1000); do
+      printf '"NAME%s=value",' "$index"
+    done
+    printf '%s\n' '"xcodebuild", "test"]);'
+  } > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
 @test "rejects a neutral injected exec seam" {
   printf '%s\n' 'runner.exec("xcodebuild -version");' > "$repo_dir/src/bypass.ts"
   git -C "$repo_dir" add src/bypass.ts

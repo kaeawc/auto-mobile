@@ -11,6 +11,9 @@ export interface XcodebuildViolation {
 
 const SHELLS = new Set(["sh", "/bin/sh", "bash", "/bin/bash", "zsh", "/bin/zsh"]);
 const ENV_WRAPPERS = new Set(["env"]);
+const OPAQUE_ARGUMENT = "\u0001";
+const ANALYSIS_OVERFLOW = "\u0002";
+const MAX_ARGV_ALTERNATIVES = 256;
 
 function commandName(value: string): string {
   return value.split(/[\\/]/).at(-1)?.toLowerCase() ?? "";
@@ -60,9 +63,13 @@ function splitEnvPayload(value: string): string[] {
 function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
   const pending = argv.slice(1);
   let optionsTerminated = false;
-  let steps = 0;
-  while (pending.length > 0 && steps++ < 1_000) {
+  while (pending.length > 0) {
     const argument = pending.shift()!;
+    if (argument === OPAQUE_ARGUMENT) {
+      // The value may be another environment assignment. Keep scanning known
+      // later slots so an unresolved value cannot hide a prohibited command.
+      continue;
+    }
     if (!optionsTerminated && argument === "--") {
       optionsTerminated = true;
       continue;
@@ -110,6 +117,9 @@ function argumentSlotAlternatives(
   node: ts.Expression,
 ) {
   const values = ast.strings(node);
+  if (values.length === 0) {
+    return [OPAQUE_ARGUMENT];
+  }
   return values.includes("\u0000") ? [values.join("")] : values;
 }
 
@@ -117,13 +127,15 @@ function argvAlternatives(
   ast: ReturnType<typeof executionBoundaryAst>,
   items: readonly ts.Expression[],
 ): string[][] {
-  return items.reduce<string[][]>(
-    (alternatives, item) =>
-      alternatives.flatMap((prefix) =>
-        argumentSlotAlternatives(ast, item).map((value) => [...prefix, value]),
-      ),
-    [[]],
-  );
+  let alternatives: string[][] = [[]];
+  for (const item of items) {
+    const values = argumentSlotAlternatives(ast, item);
+    if (alternatives.length * values.length > MAX_ARGV_ALTERNATIVES) {
+      return [[ANALYSIS_OVERFLOW]];
+    }
+    alternatives = alternatives.flatMap((prefix) => values.map((value) => [...prefix, value]));
+  }
+  return alternatives;
 }
 
 export function findDirectXcodebuildCalls(file: string, source: string): XcodebuildViolation[] {
@@ -145,7 +157,7 @@ export function findDirectXcodebuildCalls(file: string, source: string): Xcodebu
     const first = call.arguments[0];
     const firstArrayAlternatives = ast.arrayAlternatives(first);
     const argumentArrayAlternatives = ast.arrayAlternatives(call.arguments[1]);
-    const possibleArgv = firstArrayAlternatives
+    let possibleArgv = firstArrayAlternatives
       ? firstArrayAlternatives.flatMap((items) => argvAlternatives(ast, items))
       : ast
           .strings(first)
@@ -154,9 +166,13 @@ export function findDirectXcodebuildCalls(file: string, source: string): Xcodebu
               argvAlternatives(ast, items).map((arguments_) => [command, ...arguments_]),
             ),
           );
+    if (possibleArgv.length > MAX_ARGV_ALTERNATIVES) {
+      possibleArgv = [[ANALYSIS_OVERFLOW]];
+    }
     const directValues = possibleArgv.flatMap((argv) => argv.slice(0, 1));
     const direct = possibleArgv.some(
       (argv) =>
+        argv.includes(ANALYSIS_OVERFLOW) ||
         commandName(argv[0] ?? "") === "xcodebuild" ||
         (ENV_WRAPPERS.has(commandName(argv[0] ?? "")) && envDelegatesToXcodebuild(argv)),
     );

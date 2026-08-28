@@ -260,6 +260,44 @@ describe("IOSCtrlProxyClient auto-setup", function () {
     }
   });
 
+  test("late close from a timed-out socket does not disrupt a replacement handshake", async function () {
+    const manualTimer = new FakeTimer();
+    const sockets: ManualCloseWebSocket[] = [];
+    const client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      serverPort,
+      (url: string): WebSocket => {
+        const socket = new ManualCloseWebSocket(url, "timeout", 60_000, manualTimer);
+        sockets.push(socket);
+        return socket as unknown as WebSocket;
+      },
+      manualTimer,
+      createManagerFactory(),
+    );
+    const connect = (client as unknown as { connectWebSocket: () => Promise<boolean> })
+      .connectWebSocket;
+    try {
+      const first = connect.call(client);
+      await flushPromises(8);
+      manualTimer.advanceTime(5_000);
+      await expect(first).resolves.toBe(false);
+
+      const replacement = connect.call(client);
+      await flushPromises(8);
+      expect(sockets).toHaveLength(2);
+      sockets[1].readyState = WebSocketState.OPEN;
+      sockets[1].emit("open");
+      await expect(replacement).resolves.toBe(true);
+
+      sockets[0].emit("close");
+      await flushPromises(8);
+      expect(client.isConnected()).toBe(true);
+      expect(sockets).toHaveLength(2);
+    } finally {
+      await client.close();
+    }
+  });
+
   test("updatePort eagerly aborts a hung in-flight handshake so the new-port connect proceeds immediately (#5656)", async function () {
     // Frozen manual timer: it is NEVER advanced, so neither the 5s connection
     // timeout nor the "connection already in progress" poll interval can fire.

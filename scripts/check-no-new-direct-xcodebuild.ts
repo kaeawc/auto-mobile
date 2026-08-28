@@ -173,6 +173,7 @@ export function findDirectXcodebuildCalls(file: string, source: string): Xcodebu
     const direct = possibleArgv.some(
       (argv) =>
         argv.includes(ANALYSIS_OVERFLOW) ||
+        argv[0] === OPAQUE_ARGUMENT ||
         commandName(argv[0] ?? "") === "xcodebuild" ||
         (ENV_WRAPPERS.has(commandName(argv[0] ?? "")) && envDelegatesToXcodebuild(argv)),
     );

@@ -86,6 +86,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     scope: ts.Node;
     position: number;
   }> = [];
+  const declarations: Array<{ name: string; scope: ts.Node; position: number }> = [];
   const calls: ts.CallExpression[] = [];
   const launcherAliases = new Set(PROCESS_LAUNCHERS);
   const executionSeamAliases = new Set(["executeCommand", "runExecSeam", "execute"]);
@@ -100,6 +101,35 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       current = current.parent;
     }
     return sourceFile;
+  };
+  const functionScope = (node: ts.Node): ts.Node => {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (ts.isFunctionLike(current) && current.body && ts.isBlock(current.body)) {
+        return current.body;
+      }
+      if (ts.isSourceFile(current)) {
+        return current;
+      }
+      current = current.parent;
+    }
+    return sourceFile;
+  };
+  const variableDeclarationScope = (node: ts.VariableDeclaration): ts.Node =>
+    ts.isVariableDeclarationList(node.parent) &&
+    (node.parent.flags & ts.NodeFlags.BlockScoped) !== 0
+      ? lexicalScope(node)
+      : functionScope(node);
+  const scopeChain = (node: ts.Node): ts.Node[] => {
+    const scopes: ts.Node[] = [];
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (ts.isSourceFile(current) || ts.isBlock(current) || ts.isCaseBlock(current)) {
+        scopes.push(current);
+      }
+      current = current.parent;
+    }
+    return scopes;
   };
   const bind = (
     name: string,
@@ -145,8 +175,22 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       childProcessNamespaces.add(node.name.text);
     }
     if (ts.isVariableDeclaration(node)) {
-      if (ts.isIdentifier(node.name) && node.initializer) {
-        bind(node.name.text, node.initializer, node, "declaration");
+      if (ts.isIdentifier(node.name)) {
+        const scope = variableDeclarationScope(node);
+        declarations.push({ name: node.name.text, scope, position: node.getStart(sourceFile) });
+        if (node.initializer) {
+          initializers.set(node.name.text, [
+            ...(initializers.get(node.name.text) ?? []),
+            node.initializer,
+          ]);
+          scopedValues.push({
+            name: node.name.text,
+            value: node.initializer,
+            kind: "declaration",
+            scope,
+            position: node.getStart(sourceFile),
+          });
+        }
       }
       if (ts.isObjectBindingPattern(node.name)) {
         const initializer = node.initializer;
@@ -228,23 +272,29 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       return true;
     }
     if (ts.isIdentifier(node) && !seen.has(node.text)) {
-      const scopes: ts.Node[] = [];
-      let current: ts.Node | undefined = node.parent;
-      while (current) {
-        if (ts.isSourceFile(current) || ts.isBlock(current) || ts.isCaseBlock(current)) {
-          scopes.push(current);
-        }
-        current = current.parent;
-      }
+      const scopes = scopeChain(node);
       const usePosition = node.getStart(sourceFile);
       let binding: (typeof scopedValues)[number] | undefined;
       for (const scope of scopes) {
-        const candidates = scopedValues.filter(
-          (candidate) =>
+        const candidates = scopedValues.filter((candidate) => {
+          let candidateScope = candidate.scope;
+          if (candidate.kind === "assignment") {
+            const assignmentScopes = scopeChain(candidate.value);
+            const declaration = assignmentScopes
+              .map((assignmentScope) =>
+                declarations.find(
+                  (item) => item.name === candidate.name && item.scope === assignmentScope,
+                ),
+              )
+              .find((item) => item !== undefined);
+            candidateScope = declaration?.scope ?? candidateScope;
+          }
+          return (
             candidate.name === node.text &&
-            candidate.scope === scope &&
-            (candidate.kind === "declaration" || candidate.position < usePosition),
-        );
+            candidateScope === scope &&
+            (candidate.kind === "declaration" || candidate.position < usePosition)
+          );
+        });
         const assignment = candidates
           .filter((candidate) => candidate.kind === "assignment")
           .sort((left, right) => right.position - left.position)[0];

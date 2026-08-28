@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import Ajv2020 from "ajv/dist/2020";
 import { registerAppFileTools } from "../../src/server/appFileTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
@@ -18,31 +19,46 @@ describe("App file tools", () => {
       (tool) => tool.name === "putAppFile",
     );
     expect(toolDefinition).toBeDefined();
-    expect(toolDefinition!.inputSchema.properties.appId).toBeDefined();
-    expect(toolDefinition!.inputSchema.properties.container.enum).toContain("documents");
-    expect(toolDefinition!.inputSchema.properties.container.enum).toContain("externalFiles");
-    expect(toolDefinition!.inputSchema.properties.sourcePath).toBeDefined();
-    expect(toolDefinition!.inputSchema.properties.contentText).toBeDefined();
-    expect(toolDefinition!.inputSchema.properties.contentBase64).toBeDefined();
-    expect(toolDefinition!.inputSchema.properties.destinationPath).toBeDefined();
+    expect(toolDefinition!.inputSchema.properties.target).toBeDefined();
+    expect(toolDefinition!.inputSchema.properties.files).toBeDefined();
+    expect(toolDefinition!.inputSchema.properties.appId).toBeUndefined();
+    expect(toolDefinition!.inputSchema.properties.container).toBeUndefined();
+    expect(toolDefinition!.inputSchema.properties.destinationPath).toBeUndefined();
+
+    const validate = new Ajv2020({ strict: false }).compile(toolDefinition!.inputSchema);
+    const target = { domain: "app_containers", appId: "com.example.app", container: "documents" };
+    expect(validate({ target, files: [{ destinationPath: "missing-source.txt" }] })).toBe(false);
+    expect(
+      validate({
+        target,
+        files: [
+          { destinationPath: "multiple-sources.txt", contentText: "x", contentBase64: "eA==" },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      validate({ target, files: [{ destinationPath: "one-source.txt", contentText: "x" }] }),
+    ).toBe(true);
   });
 
-  test("accepts a local source file and nested destination path with spaces", () => {
+  test("accepts a canonical local-source batch with nested destination paths", () => {
     registerAppFileTools();
     const tool = ToolRegistry.getTool("putAppFile");
 
     expect(
       tool!.schema.parse({
         platform: "ios",
-        appId: "com.example.app",
-        container: "documents",
-        sourcePath: "/Users/me/fixtures/welcome.png",
-        destinationPath: "fixtures/onboarding/welcome image.png",
+        target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+        files: [
+          {
+            sourcePath: "/Users/me/fixtures/welcome.png",
+            destinationPath: "fixtures/onboarding/welcome image.png",
+          },
+        ],
       }),
     ).toMatchObject({
-      appId: "com.example.app",
-      container: "documents",
-      destinationPath: "fixtures/onboarding/welcome image.png",
+      target: { domain: "app_containers", appId: "com.example.app", container: "documents" },
+      files: [{ destinationPath: "fixtures/onboarding/welcome image.png" }],
     });
   });
 

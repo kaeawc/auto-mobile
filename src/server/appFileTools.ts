@@ -7,7 +7,7 @@ import type { BootedDevice } from "../models";
 export function registerAppFileTools(): void {
   ToolRegistry.registerDeviceAware(
     "putAppFile",
-    "Write file/text/base64 content into an app container.",
+    "Write files into a bounded logical storage target.",
     putAppFileSchema,
     async (device: BootedDevice, args: PutAppFileArgs, _progress, signal) => {
       const result = await getAppFileService().putFile({ ...args, device, signal });

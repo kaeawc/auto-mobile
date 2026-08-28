@@ -201,6 +201,16 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "preserves a literal command branch beside a dynamic template" {
+  printf '%s\n' 'Bun.spawn([condition ? "xcodebuild" : `tool-${name}`, "test"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
 @test "fails closed when conditional argv alternatives exceed the analysis bound" {
   {
     printf '%s' 'spawn("env", ['

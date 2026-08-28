@@ -21,6 +21,7 @@ export interface ExecutionBoundaryAst {
   isExecutionSeam(call: ts.CallExpression): boolean;
   isRunExecSeam(call: ts.CallExpression): boolean;
   strings(node: ts.Expression | undefined): string[];
+  stringAlternatives(node: ts.Expression | undefined): string[];
   arrayAlternatives(node: ts.Expression | undefined): ts.Expression[][] | undefined;
   arrayElements(node: ts.Expression | undefined): ts.Expression[] | undefined;
   objectPropertyValues(node: ts.Expression | undefined, propertyName: string): ts.Expression[];
@@ -289,10 +290,21 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
               .find((item) => item !== undefined);
             candidateScope = declaration?.scope ?? candidateScope;
           }
+          let crossesFunctionBoundary = false;
+          let current: ts.Node | undefined = node.parent;
+          while (current && current !== candidateScope) {
+            if (ts.isFunctionLike(current)) {
+              crossesFunctionBoundary = true;
+              break;
+            }
+            current = current.parent;
+          }
           return (
             candidate.name === node.text &&
             candidateScope === scope &&
-            (candidate.kind === "declaration" || candidate.position < usePosition)
+            (candidate.kind === "declaration" ||
+              candidate.position < usePosition ||
+              crossesFunctionBoundary)
           );
         });
         const assignment = candidates
@@ -419,6 +431,62 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       }
       return (initializers.get(node.text) ?? []).flatMap((value) =>
         strings(value, new Set([...seen, node.text])),
+      );
+    }
+    return [];
+  };
+
+  const stringAlternatives = (
+    node: ts.Expression | undefined,
+    seen = new Set<string>(),
+  ): string[] => {
+    if (!node) {
+      return [];
+    }
+    node = unwrapTransparentExpression(node);
+    if (ts.isStringLiteralLike(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      return [node.text];
+    }
+    if (ts.isConditionalExpression(node)) {
+      return [
+        ...stringAlternatives(node.whenTrue, seen),
+        ...stringAlternatives(node.whenFalse, seen),
+      ];
+    }
+    if (
+      ts.isBinaryExpression(node) &&
+      [
+        ts.SyntaxKind.QuestionQuestionToken,
+        ts.SyntaxKind.BarBarToken,
+        ts.SyntaxKind.AmpersandAmpersandToken,
+      ].includes(node.operatorToken.kind)
+    ) {
+      return [...stringAlternatives(node.left, seen), ...stringAlternatives(node.right, seen)];
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = stringAlternatives(node.left, seen);
+      const right = stringAlternatives(node.right, seen);
+      const leftValues = left.length > 0 ? left : [DYNAMIC_BOUNDARY];
+      const rightValues = right.length > 0 ? right : [DYNAMIC_BOUNDARY];
+      return leftValues.flatMap((prefix) => rightValues.map((suffix) => prefix + suffix));
+    }
+    if (ts.isTemplateExpression(node)) {
+      let alternatives = [node.head.text];
+      for (const span of node.templateSpans) {
+        const interpolation = stringAlternatives(span.expression, seen);
+        const values = interpolation.length > 0 ? interpolation : [DYNAMIC_BOUNDARY];
+        alternatives = alternatives.flatMap((prefix) =>
+          values.map((value) => prefix + value + span.literal.text),
+        );
+      }
+      return alternatives;
+    }
+    if (ts.isIdentifier(node)) {
+      if (seen.has(node.text)) {
+        return [];
+      }
+      return (initializers.get(node.text) ?? []).flatMap((value) =>
+        stringAlternatives(value, new Set([...seen, node.text])),
       );
     }
     return [];
@@ -556,6 +624,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     isExecutionSeam: (call) => isExecutionSeamReference(call.expression),
     isRunExecSeam: (call) => isRunExecSeamReference(call.expression),
     strings,
+    stringAlternatives,
     arrayAlternatives,
     arrayElements,
     objectPropertyValues,

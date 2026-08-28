@@ -116,11 +116,11 @@ function argumentSlotAlternatives(
   ast: ReturnType<typeof executionBoundaryAst>,
   node: ts.Expression,
 ) {
-  const values = ast.strings(node);
+  const values = ast.stringAlternatives(node);
   if (values.length === 0) {
     return [OPAQUE_ARGUMENT];
   }
-  return values.includes("\u0000") ? [values.join("")] : values;
+  return values;
 }
 
 function argvAlternatives(

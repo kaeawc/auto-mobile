@@ -94,6 +94,12 @@ main() {
   set -uo pipefail
   local bats_dir="${1:-test/bats}"
 
+  if [[ "${AUTOMOBILE_BATS_SERIAL_ONLY:-false}" == "true" ]]; then
+    log "Serial-only pass: bats over $bats_dir"
+    bats "$bats_dir"
+    return $?
+  fi
+
   ensure_gnu_parallel || exit 1
   silence_parallel_citation
 

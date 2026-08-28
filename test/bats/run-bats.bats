@@ -94,6 +94,14 @@ serial_pass_args() { grep -v -- '--jobs' "$ARGS_FILE"; }
   [[ "$(cat "$ARGS_FILE")" == *"test/bats"* ]]
 }
 
+@test "serial-only mode runs one stable pass without GNU parallel" {
+  run env AUTOMOBILE_BATS_SERIAL_ONLY=true HOME="$FAKE_HOME" PATH="$STUB_BIN:$PATH" bash "$SCRIPT"
+
+  [ "$status" -eq 0 ]
+  [ "$(cat "$ARGS_FILE")" = "test/bats" ]
+  [ ! -e "$FAKE_HOME/.parallel/will-cite" ]
+}
+
 # is_gnu_parallel must accept only GNU parallel, not the unrelated moreutils
 # `parallel` (which is also named `parallel` but breaks `bats --jobs`). Source
 # the script (main() is guarded) and probe the function directly.

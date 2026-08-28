@@ -325,7 +325,15 @@ desktop_app_termination_wait() {
 }
 
 desktop_app_pid_command() {
-    run_desktop_app_privileged ps -p "$1" -o command= 2>/dev/null
+    if run_desktop_app_privileged ps -p "$1" -o command= 2>/dev/null; then
+        return 0
+    fi
+    # A live PID whose command cannot be inspected is not safe to remove. A
+    # failed liveness probe confirms that the process exited instead.
+    if run_desktop_app_privileged kill -0 "$1" 2>/dev/null; then
+        return 2
+    fi
+    return 1
 }
 
 # Return 0 while the PID is alive, 1 when it has exited, and 2 when its state
@@ -337,9 +345,10 @@ desktop_app_pid_alive() {
     else
         command_status=$?
     fi
-    if [[ "${command_status}" -ne 0 ]]; then
-        # A process can exit between the signal probe and ps lookup. Treat that
-        # as stopped; a still-running matching process is reported below.
+    if [[ "${command_status}" -eq 2 ]]; then
+        return 2
+    elif [[ "${command_status}" -ne 0 ]]; then
+        # A process can exit between the signal probe and ps lookup.
         return 1
     fi
     for executable in ${DESKTOP_APP_EXECUTABLES[@]+"${DESKTOP_APP_EXECUTABLES[@]}"}; do
@@ -358,9 +367,45 @@ desktop_app_pid_alive() {
     return 1
 }
 
+# Return 0 when every PID has stopped, 1 while one is still running, and 2
+# when a PID cannot be verified safely.
+desktop_app_processes_stopped() {
+    local pid pid_state
+    for pid in "$@"; do
+        if desktop_app_pid_alive "${pid}"; then
+            pid_state=0
+        else
+            pid_state=$?
+        fi
+        if [[ "${pid_state}" -eq 0 ]]; then
+            return 1
+        elif [[ "${pid_state}" -eq 2 ]]; then
+            return 2
+        fi
+    done
+    return 0
+}
+
+# Return 0 when all PIDs exit, 1 after the bounded wait, and 2 when a PID can
+# no longer be verified.
+wait_for_desktop_app_processes_to_stop() {
+    local attempt=0 stopped_status
+    while (( attempt < 20 )); do
+        if desktop_app_processes_stopped "$@"; then
+            return 0
+        else
+            stopped_status=$?
+        fi
+        [[ "${stopped_status}" -eq 2 ]] && return 2
+        desktop_app_termination_wait
+        ((attempt += 1))
+    done
+    return 1
+}
+
 stop_desktop_app_processes() {
     local pids=()
-    local pid attempt running pid_state
+    local pid pid_state wait_status
     while IFS= read -r pid; do
         [[ -n "${pid}" ]] && pids+=("${pid}")
     done < <(desktop_app_process_pids)
@@ -391,27 +436,15 @@ stop_desktop_app_processes() {
         fi
     done
 
-    attempt=0
-    while (( attempt < 20 )); do
-        running=false
-        for pid in ${pids[@]+"${pids[@]}"}; do
-            if desktop_app_pid_alive "${pid}"; then
-                pid_state=0
-            else
-                pid_state=$?
-            fi
-            if [[ "${pid_state}" -eq 0 ]]; then
-                running=true
-                break
-            elif [[ "${pid_state}" -eq 2 ]]; then
-                log_error "Could not verify desktop app process ${pid}; refusing to remove the app."
-                return 1
-            fi
-        done
-        [[ "${running}" == "false" ]] && return 0
-        desktop_app_termination_wait
-        ((attempt += 1))
-    done
+    if wait_for_desktop_app_processes_to_stop ${pids[@]+"${pids[@]}"}; then
+        return 0
+    else
+        wait_status=$?
+    fi
+    if [[ "${wait_status}" -eq 2 ]]; then
+        log_error "Could not verify a desktop app process; refusing to remove the app."
+        return 1
+    fi
 
     for pid in ${pids[@]+"${pids[@]}"}; do
         if desktop_app_pid_alive "${pid}"; then
@@ -432,7 +465,17 @@ stop_desktop_app_processes() {
             return 1
         fi
     done
-
+    if wait_for_desktop_app_processes_to_stop ${pids[@]+"${pids[@]}"}; then
+        return 0
+    else
+        wait_status=$?
+    fi
+    if [[ "${wait_status}" -eq 2 ]]; then
+        log_error "Could not verify a desktop app process after SIGKILL; refusing to remove the app."
+    else
+        log_error "Desktop app processes remained after SIGKILL; refusing to remove the app."
+    fi
+    return 1
 }
 
 config_has_automobile() {

@@ -68,7 +68,7 @@ SCRIPT
 }
 
 @test "force-stops a desktop process that ignores the bounded TERM wait" {
-  local terminated=false killed=false waits=0
+  local terminated=false killed=false waits=0 stop_status
   DESKTOP_APP_EXECUTABLES=("/Applications/AutoMobile.app/Contents/MacOS/AutoMobile")
   desktop_app_process_pids() { printf '101\n'; }
   desktop_app_pid_command() { printf '%s\n' "/Applications/AutoMobile.app/Contents/MacOS/AutoMobile"; }
@@ -87,11 +87,40 @@ SCRIPT
     esac
   }
 
-  stop_desktop_app_processes
+  if stop_desktop_app_processes; then
+    stop_status=0
+  else
+    stop_status=$?
+  fi
 
+  [ "${stop_status}" -eq 1 ]
   [ "${terminated}" = "true" ]
   [ "${killed}" = "true" ]
-  [ "${waits}" -eq 20 ]
+  [ "${waits}" -eq 40 ]
+}
+
+@test "refuses removal when a live desktop PID cannot be inspected" {
+  local signalled=false stop_status
+  DESKTOP_APP_EXECUTABLES=("/Applications/AutoMobile.app/Contents/MacOS/AutoMobile")
+  desktop_app_process_pids() { printf '101\n'; }
+  run_desktop_app_privileged() {
+    case "$1" in
+      ps) return 1 ;;
+      kill)
+        [[ "$2" == "-0" ]] && return 0
+        signalled=true
+        ;;
+    esac
+  }
+
+  if stop_desktop_app_processes; then
+    stop_status=0
+  else
+    stop_status=$?
+  fi
+
+  [ "${stop_status}" -eq 1 ]
+  [ "${signalled}" = "false" ]
 }
 
 @test "does not signal a process whose PID was reused after TERM" {

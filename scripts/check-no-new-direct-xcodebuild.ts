@@ -39,6 +39,13 @@ function shellCommandPayloads(argv: readonly string[]): string[] {
     if (argument.startsWith("-c") && argument.length > 2) {
       return [argument.slice(2)];
     }
+    if (argument.startsWith("-") && !argument.startsWith("--")) {
+      const commandFlagIndex = argument.indexOf("c", 1);
+      if (commandFlagIndex >= 1) {
+        const attached = argument.slice(commandFlagIndex + 1);
+        return [attached || argv[index + 1] || OPAQUE_ARGUMENT];
+      }
+    }
   }
   return [];
 }
@@ -137,14 +144,13 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
       }
       return false;
     }
-    if (["-i", "--ignore-environment", "-0", "--null", "-v", "--debug"].includes(argument)) {
+    if (["-", "-i", "--ignore-environment", "-0", "--null", "-v", "--debug"].includes(argument)) {
       continue;
     }
     if (argument === "--list-signal-handling") {
       continue;
     }
     if (/^--(?:block-signal|default-signal|ignore-signal)$/.test(argument)) {
-      pending.shift();
       continue;
     }
     if (/^--(?:block-signal|default-signal|ignore-signal)=/.test(argument)) {

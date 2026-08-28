@@ -104,6 +104,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     node: ts.FunctionLikeDeclaration;
     scope: ts.Node;
     position: number;
+    receiver?: string;
   }> = [];
   const calls: ts.CallExpression[] = [];
   const launcherAliases = new Set(PROCESS_LAUNCHERS);
@@ -230,6 +231,28 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
           position: node.getStart(sourceFile),
         });
       }
+      if (
+        ts.isIdentifier(node.name) &&
+        node.initializer &&
+        ts.isObjectLiteralExpression(node.initializer)
+      ) {
+        for (const property of node.initializer.properties) {
+          const method = ts.isMethodDeclaration(property)
+            ? property
+            : ts.isPropertyAssignment(property) && ts.isFunctionLike(property.initializer)
+              ? property.initializer
+              : undefined;
+          if (method?.name && ts.isIdentifier(method.name)) {
+            functionBindings.push({
+              name: method.name.text,
+              node: method,
+              scope,
+              position: node.getStart(sourceFile),
+              receiver: node.name.text,
+            });
+          }
+        }
+      }
       for (const identifier of bindingIdentifiers(node.name)) {
         declarations.push({ name: identifier.text, scope, position: node.getStart(sourceFile) });
       }
@@ -325,7 +348,12 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       return true;
     }
     const name = functionName(target);
-    if (!name || !ts.isIdentifier(unwrapTransparentExpression(call.expression))) {
+    const callee = unwrapTransparentExpression(call.expression);
+    const receiver =
+      ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)
+        ? callee.expression.text
+        : undefined;
+    if (!name || (!ts.isIdentifier(callee) && receiver === undefined)) {
       return false;
     }
     const callScopes = scopeChain(call);
@@ -333,6 +361,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       .filter(
         (binding) =>
           binding.name === name &&
+          (receiver === undefined
+            ? binding.receiver === undefined
+            : binding.receiver === receiver) &&
           callScopes.includes(binding.scope) &&
           (ts.isFunctionDeclaration(binding.node) || binding.position < call.getStart(sourceFile)),
       )

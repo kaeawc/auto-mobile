@@ -185,10 +185,13 @@ export function findDirectXcodebuildCalls(file: string, source: string): Xcodebu
     let possibleArgv = firstArrayAlternatives
       ? firstArrayAlternatives.flatMap((items) => argvAlternatives(ast, items))
       : ast
-          .strings(first)
+          .stringAlternatives(first)
           .flatMap((command) =>
             (argumentArrayAlternatives ?? [[]]).flatMap((items) =>
-              argvAlternatives(ast, items).map((arguments_) => [command, ...arguments_]),
+              argvAlternatives(ast, items).map((arguments_) => [
+                command === STRING_ANALYSIS_OVERFLOW ? ANALYSIS_OVERFLOW : command,
+                ...arguments_,
+              ]),
             ),
           );
     if (possibleArgv.length > MAX_ARGV_ALTERNATIVES) {

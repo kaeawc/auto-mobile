@@ -283,6 +283,23 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "bounds repeated conditional alias branches" {
+  {
+    printf '%s\n' 'const a0 = condition ? "xcodebuild" : "tool";'
+    for index in $(seq 1 25); do
+      previous=$((index - 1))
+      printf 'const a%s = condition ? a%s : a%s;\n' "$index" "$previous" "$previous"
+    done
+    printf '%s\n' 'spawn(a25, ["test"]);'
+  } > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
 @test "does not stop before xcodebuild after one thousand env assignments" {
   {
     printf '%s' 'spawn("env", ['

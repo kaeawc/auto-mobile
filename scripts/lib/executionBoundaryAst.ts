@@ -95,6 +95,14 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   const executionSeamAliases = new Set(["executeCommand", "runExecSeam", "execute"]);
   const runExecSeamAliases = new Set(["runExecSeam"]);
   const childProcessNamespaces = new Set<string>();
+  const functionName = (node: ts.FunctionLikeDeclaration): string | undefined => {
+    if (node.name && ts.isIdentifier(node.name)) {
+      return node.name.text;
+    }
+    return ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)
+      ? node.parent.name.text
+      : undefined;
+  };
   const lexicalScope = (node: ts.Node): ts.Node => {
     let current: ts.Node | undefined = node.parent;
     while (current) {
@@ -316,27 +324,32 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
               .find((item) => item !== undefined);
             candidateScope = declaration?.scope ?? candidateScope;
           }
-          let crossesFunctionBoundary = false;
+          const crossedFunctions: ts.FunctionLikeDeclaration[] = [];
           let current: ts.Node | undefined = node.parent;
           while (current && current !== candidateScope) {
             if (ts.isFunctionLike(current)) {
-              crossesFunctionBoundary = true;
-              break;
+              crossedFunctions.push(current);
             }
             current = current.parent;
           }
+          const outermostFunction = crossedFunctions.at(-1);
+          const closureName = outermostFunction ? functionName(outermostFunction) : undefined;
+          const invocationPositions = closureName
+            ? calls
+                .filter(
+                  (call) => ts.isIdentifier(call.expression) && call.expression.text === closureName,
+                )
+                .map((call) => call.getStart(sourceFile))
+            : [];
+          const executesBeforeClosure =
+            invocationPositions.length > 0 && candidate.position < Math.min(...invocationPositions);
           return (
             candidate.name === node.text &&
             candidateScope === scope &&
-            (candidate.kind === "declaration" ||
-              candidate.position < usePosition ||
-              crossesFunctionBoundary)
+            (candidate.position < usePosition || executesBeforeClosure)
           );
         });
-        const assignment = candidates
-          .filter((candidate) => candidate.kind === "assignment")
-          .sort((left, right) => right.position - left.position)[0];
-        binding = assignment ?? candidates.find((candidate) => candidate.kind === "declaration");
+        binding = candidates.sort((left, right) => right.position - left.position)[0];
         if (binding) {
           break;
         }
@@ -462,10 +475,26 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     return [];
   };
 
+  const stringAlternativeCache = new Map<string, string[]>();
   const stringAlternatives = (
     node: ts.Expression | undefined,
     seen = new Set<string>(),
   ): string[] => {
+    const boundedUnion = (...groups: readonly string[][]): string[] => {
+      const values = new Set<string>();
+      for (const group of groups) {
+        for (const value of group) {
+          if (value === STRING_ANALYSIS_OVERFLOW) {
+            return [STRING_ANALYSIS_OVERFLOW];
+          }
+          values.add(value);
+          if (values.size > MAX_STRING_ALTERNATIVES) {
+            return [STRING_ANALYSIS_OVERFLOW];
+          }
+        }
+      }
+      return [...values];
+    };
     if (!node) {
       return [];
     }
@@ -483,10 +512,10 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       return stringAlternatives(node.template, seen);
     }
     if (ts.isConditionalExpression(node)) {
-      return [
-        ...stringAlternatives(node.whenTrue, seen),
-        ...stringAlternatives(node.whenFalse, seen),
-      ];
+      return boundedUnion(
+        stringAlternatives(node.whenTrue, seen),
+        stringAlternatives(node.whenFalse, seen),
+      );
     }
     if (
       ts.isBinaryExpression(node) &&
@@ -496,7 +525,10 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
         ts.SyntaxKind.AmpersandAmpersandToken,
       ].includes(node.operatorToken.kind)
     ) {
-      return [...stringAlternatives(node.left, seen), ...stringAlternatives(node.right, seen)];
+      return boundedUnion(
+        stringAlternatives(node.left, seen),
+        stringAlternatives(node.right, seen),
+      );
     }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
       const left = stringAlternatives(node.left, seen);
@@ -535,13 +567,23 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       if (seen.has(node.text)) {
         return [];
       }
-      return (initializers.get(node.text) ?? []).flatMap((value) =>
-        stringAlternatives(value, new Set([...seen, node.text])),
+      const cacheKey = `${node.text}\u0000${[...seen].sort().join("\u0000")}`;
+      const cached = stringAlternativeCache.get(cacheKey);
+      if (cached) {
+        return cached;
+      }
+      const alternatives = boundedUnion(
+        ...(initializers.get(node.text) ?? []).map((value) =>
+          stringAlternatives(value, new Set([...seen, node.text])),
+        ),
       );
+      stringAlternativeCache.set(cacheKey, alternatives);
+      return alternatives;
     }
     return [];
   };
 
+  const arrayAlternativeCache = new Map<string, ts.Expression[][] | undefined>();
   const arrayAlternatives = (
     node: ts.Expression | undefined,
     seen = new Set<string>(),
@@ -575,12 +617,18 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       return alternatives;
     }
     if (ts.isIdentifier(node) && !seen.has(node.text)) {
+      const cacheKey = `${node.text}\u0000${[...seen].sort().join("\u0000")}`;
+      if (arrayAlternativeCache.has(cacheKey)) {
+        return arrayAlternativeCache.get(cacheKey);
+      }
       const next = new Set([...seen, node.text]);
       const values = initializers.get(node.text) ?? [];
       const arrays = values
         .map((value) => arrayAlternatives(value, next))
         .filter((value): value is ts.Expression[][] => value !== undefined);
-      return arrays.length > 0 ? arrays.flat() : undefined;
+      const alternatives = arrays.length > 0 ? arrays.flat() : undefined;
+      arrayAlternativeCache.set(cacheKey, alternatives);
+      return alternatives;
     }
     return undefined;
   };

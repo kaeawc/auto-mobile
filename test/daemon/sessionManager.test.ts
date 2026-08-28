@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import {
   SessionManager,
+  type BiometricEnrollmentRestorer,
   type KeepScreenAwakeRestorer,
   type SessionDeviceAssigner,
 } from "../../src/daemon/sessionManager";
@@ -772,6 +773,29 @@ describe("SessionManager", () => {
       }
     });
 
+    test("does not admit device-state setup while a rebind is pending", async () => {
+      const repository = new DeferredDeviceSessionPersistence();
+      const manager = new SessionManager(fakeTimer, repository);
+
+      try {
+        const session = await manager.createSession("session-1", "emulator-old", "android");
+        repository.deferNextUpsert();
+
+        const rebinding = manager.rebindSession("session-1", "emulator-new", "android");
+        await repository.waitForUpsert();
+        let setupStarted = false;
+        await manager.trackSessionSetup(session, async () => {
+          setupStarted = true;
+        });
+
+        expect(setupStarted).toBe(false);
+        repository.finishUpsert();
+        await rebinding;
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
     test("serializes expiry cleanup with a pending rebind", async () => {
       const repository = new DeferredDeviceSessionPersistence();
       const manager = new SessionManager(fakeTimer, repository, () => new FakeDbWriteBarrier());
@@ -1323,6 +1347,240 @@ describe("SessionManager", () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");
       await sessionManager.releaseSession("session-1");
       expect(sessionManager.getSessionForDevice("emulator-5554")).toBeNull();
+    });
+  });
+
+  describe("biometric enrollment restoration", () => {
+    test("restores the original iOS Simulator enrollment when a session releases", async () => {
+      const restored: string[] = [];
+      const restorer: BiometricEnrollmentRestorer = {
+        restore: async (enrollment) => {
+          restored.push(enrollment);
+        },
+      };
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        () => restorer,
+      );
+      try {
+        await manager.createSession("ios-biometric", "sim-1", "ios");
+        manager.setBiometricEnrollment("ios-biometric", { initialEnrollment: "not_enrolled" });
+        // The initial state is write-once; a later change must not replace it.
+        manager.setBiometricEnrollment("ios-biometric", { initialEnrollment: "enrolled" });
+
+        await manager.releaseSession("ios-biometric");
+
+        expect(restored).toEqual(["not_enrolled"]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("restores the old simulator enrollment before a session rebinds", async () => {
+      const restored: Array<{ deviceId: string; enrollment: string }> = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        (device) => ({
+          restore: async (enrollment) => {
+            restored.push({ deviceId: device.deviceId, enrollment });
+          },
+        }),
+      );
+      try {
+        await manager.createSession("ios-rebind", "sim-a", "ios");
+        manager.setBiometricEnrollment("ios-rebind", { initialEnrollment: "enrolled" });
+
+        await manager.rebindSession("ios-rebind", "sim-b", "ios");
+
+        expect(restored).toEqual([{ deviceId: "sim-a", enrollment: "enrolled" }]);
+        expect(manager.getBiometricEnrollment("ios-rebind")).toBeUndefined();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("waits for an active biometric setup before restoring the old simulator", async () => {
+      const restored: string[] = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        () => ({ restore: async (enrollment) => restored.push(enrollment) }),
+      );
+      const started = Promise.withResolvers<void>();
+      const finished = Promise.withResolvers<void>();
+      try {
+        const session = await manager.createSession("ios-rebind-active", "sim-a", "ios");
+        manager.setBiometricEnrollment("ios-rebind-active", { initialEnrollment: "enrolled" });
+        const setup = manager.trackSessionSetup(session, async () => {
+          started.resolve();
+          await finished.promise;
+        });
+        await started.promise;
+
+        const rebind = manager.rebindSession("ios-rebind-active", "sim-b", "ios");
+        await Promise.resolve();
+        expect(restored).toEqual([]);
+
+        finished.resolve();
+        await setup;
+        await rebind;
+
+        expect(restored).toEqual(["enrolled"]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("keeps the device quarantined and retries when the restore fails", async () => {
+      const timer = new FakeTimer();
+      let attempts = 0;
+      const manager = new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        () => ({
+          restore: async () => {
+            attempts += 1;
+            if (attempts === 1) {
+              throw new Error("simctl rejected the restore");
+            }
+          },
+        }),
+      );
+      try {
+        await manager.createSession("ios-restore-retry", "sim-dirty", "ios");
+        manager.setBiometricEnrollment("ios-restore-retry", { initialEnrollment: "not_enrolled" });
+
+        await manager.releaseSession("ios-restore-retry");
+
+        // The failed first attempt must leave post-release work outstanding, so
+        // DevicePool defers the device instead of idling it dirty.
+        const cleanup = manager.getPendingDeviceCleanup("sim-dirty");
+        expect(cleanup).not.toBeNull();
+        expect(attempts).toBe(1);
+
+        await timer.advanceTimeAsync(250);
+        await cleanup;
+        expect(attempts).toBe(2);
+        expect(manager.getPendingDeviceCleanup("sim-dirty")).toBeNull();
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+
+    test("stops retrying the restore after the bounded attempts are exhausted", async () => {
+      const timer = new FakeTimer();
+      let attempts = 0;
+      const manager = new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        () => ({
+          restore: async () => {
+            attempts += 1;
+            throw new Error("simctl rejected the restore");
+          },
+        }),
+      );
+      try {
+        await manager.createSession("ios-restore-exhausted", "sim-dirty-2", "ios");
+        manager.setBiometricEnrollment("ios-restore-exhausted", {
+          initialEnrollment: "not_enrolled",
+        });
+
+        await manager.releaseSession("ios-restore-exhausted");
+        const cleanup = manager.getPendingDeviceCleanup("sim-dirty-2");
+        await timer.advanceTimeAsync(250);
+        await timer.advanceTimeAsync(250);
+        await cleanup;
+
+        // One initial attempt plus the bounded retries, then the device is freed
+        // rather than quarantined forever.
+        expect(attempts).toBe(3);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+  });
+
+  describe("biometric enrollment restoration platform independence", () => {
+    test("restores cached enrollment even when the session declares a non-iOS platform", async () => {
+      const restored: Array<{ deviceId: string; enrollment: string }> = [];
+      const manager = new SessionManager(
+        fakeTimer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        (device) => ({
+          restore: async (enrollment) => {
+            restored.push({ deviceId: device.deviceId, enrollment });
+          },
+        }),
+      );
+      try {
+        // setActiveDevice stores the caller-declared platform, which can
+        // disagree with the simulator actually bound. The cached enrollment is
+        // iOS-only evidence and must still be restored.
+        await manager.createSession("mislabelled", "sim-1", "android");
+        manager.setBiometricEnrollment("mislabelled", { initialEnrollment: "not_enrolled" });
+
+        await manager.releaseSession("mislabelled");
+
+        expect(restored).toEqual([{ deviceId: "sim-1", enrollment: "not_enrolled" }]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
+    });
+  });
+
+  describe("biometric enrollment restoration on rebind", () => {
+    test("quarantines the old simulator and retries when the rebind restore fails", async () => {
+      const timer = new FakeTimer();
+      const attempts: string[] = [];
+      const manager = new SessionManager(
+        timer,
+        new FakeDeviceSessionPersistence(),
+        () => new FakeDbWriteBarrier(),
+        () => ({ restore: async () => {} }),
+        (device) => ({
+          restore: async () => {
+            attempts.push(device.deviceId);
+            if (attempts.length === 1) {
+              throw new Error("simctl rejected the restore");
+            }
+          },
+        }),
+      );
+      try {
+        await manager.createSession("ios-rebind-dirty", "sim-old", "ios");
+        manager.setBiometricEnrollment("ios-rebind-dirty", { initialEnrollment: "not_enrolled" });
+
+        await manager.rebindSession("ios-rebind-dirty", "sim-new", "ios");
+
+        // The rebind must not complete by silently abandoning the old simulator.
+        const cleanup = manager.getPendingDeviceCleanup("sim-old");
+        expect(cleanup).not.toBeNull();
+        expect(manager.getPendingDeviceCleanup("sim-new")).toBeNull();
+
+        await timer.advanceTimeAsync(250);
+        await cleanup;
+
+        // The retry targets the OLD simulator even though the session has
+        // already been reassigned to the new one.
+        expect(attempts).toEqual(["sim-old", "sim-old"]);
+      } finally {
+        manager.stopCleanupTimer();
+      }
     });
   });
 

@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
-import { DeviceState } from "../../../src/features/utility/DeviceState";
+import {
+  DeviceState,
+  EMPTY_STATE_SELECTION_ERROR,
+} from "../../../src/features/utility/DeviceState";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeSimCtlClient } from "../../fakes/FakeSimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -35,6 +38,13 @@ const IOS_SIMULATOR_DND_SET_ON_COMMAND =
 const IOS_SIMULATOR_DND_SET_OFF_COMMAND =
   "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 0 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled";
 const IOS_DND_INDEPENDENT_READBACK_SETTLE_MS = 500;
+const IOS_BIOMETRIC_ENROLLMENT = "com.apple.BiometricKit.enrollmentChanged";
+const IOS_BIOMETRIC_GET_COMMAND =
+  "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -g com.apple.BiometricKit.enrollmentChanged";
+const IOS_BIOMETRIC_UNENROLL_COMMAND =
+  "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.BiometricKit.enrollmentChanged -s com.apple.BiometricKit.enrollmentChanged 0 -g com.apple.BiometricKit.enrollmentChanged -p com.apple.BiometricKit.enrollmentChanged";
+const IOS18_BIOMETRIC_ENROLL_COMMAND =
+  "spawn 7B3A3792-DB53-4654-BA94-27A1D305C3B7 notifyutil -1 com.apple.BiometricKit.enrollmentChanged -s com.apple.BiometricKit.enrollmentChanged 1 -g com.apple.BiometricKit.enrollmentChanged -p com.apple.BiometricKit.enrollmentChanged";
 
 function autoAdvanceTimer(): FakeTimer {
   const timer = new FakeTimer();
@@ -74,6 +84,64 @@ describe("DeviceState", () => {
       capability: "binary",
       enabled: true,
       bestEffort: true,
+    });
+  });
+
+  test("reads and sets iOS Simulator biometric enrollment", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(IOS_BIOMETRIC_GET_COMMAND, `${IOS_BIOMETRIC_ENROLLMENT} 1\n`);
+    simctl.setCommandResult(
+      IOS_BIOMETRIC_UNENROLL_COMMAND,
+      `${IOS_BIOMETRIC_ENROLLMENT} 0\n${IOS_BIOMETRIC_ENROLLMENT}\n`,
+    );
+    const deviceState = new DeviceState(iosSimulator, { simctl });
+
+    const read = await deviceState.getState(["biometrics"]);
+    const write = await deviceState.setState({
+      biometrics: { enrollment: "not_enrolled" },
+    });
+
+    expect(read).toMatchObject({
+      success: true,
+      biometrics: { enrollment: "enrolled", verified: true },
+    });
+    expect(write).toMatchObject({
+      success: true,
+      biometrics: { enrollment: "not_enrolled", verified: true },
+    });
+    expect(simctl.getMethodCalls("executeCommand")).toEqual([
+      { command: IOS_BIOMETRIC_GET_COMMAND, timeoutMs: undefined },
+      { command: IOS_BIOMETRIC_UNENROLL_COMMAND, timeoutMs: 5000 },
+    ]);
+  });
+
+  test("reports biometric enrollment unsupported outside iOS Simulator", async () => {
+    const deviceState = new DeviceState(androidDevice);
+    const result = await deviceState.setState({ biometrics: { enrollment: "enrolled" } });
+
+    expect(result.success).toBe(false);
+    expect(result.biometrics).toMatchObject({ supported: false, verified: false });
+    expect(result.error).toContain("iOS Simulator");
+  });
+
+  test("retains a verified biometric result when a sibling state request fails", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      IOS18_BIOMETRIC_ENROLL_COMMAND,
+      `${IOS_BIOMETRIC_ENROLLMENT} 1\n${IOS_BIOMETRIC_ENROLLMENT}\n`,
+    );
+    const deviceState = new DeviceState(ios18Simulator, { simctl });
+
+    const result = await deviceState.setState({
+      doNotDisturb: { enabled: true },
+      biometrics: { enrollment: "enrolled" },
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.doNotDisturb?.supported).toBe(false);
+    expect(result.biometrics).toMatchObject({
+      enrollment: "enrolled",
+      verified: true,
     });
   });
 
@@ -567,5 +635,24 @@ describe("DeviceState", () => {
     expect(result.error).toContain("Focus Filter API");
     // Early return: no simctl/notifyutil command was ever issued.
     expect(simctl.getMethodCalls("executeCommand")).toEqual([]);
+  });
+
+  test("rejects an empty state selection instead of reporting a no-op success", async () => {
+    const simulator: BootedDevice = {
+      name: "iPhone 16 Pro",
+      platform: "ios",
+      deviceId: "7B3A3792-DB53-4654-BA94-27A1D305C3B7",
+      iosVersion: "18.6",
+    };
+    const simctl = new FakeSimCtlClient();
+    const deviceState = new DeviceState(simulator, { simctl });
+
+    const result = await deviceState.getState([]);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe(EMPTY_STATE_SELECTION_ERROR);
+    expect(result.doNotDisturb).toBeUndefined();
+    expect(result.biometrics).toBeUndefined();
+    expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
   });
 });

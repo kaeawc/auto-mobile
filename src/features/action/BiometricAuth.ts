@@ -7,14 +7,10 @@ import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorDevice } from "./IosSimulatorPermissions";
-import {
-  IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS,
-  iosNotifyutilRegisteredSetReadPostCommand,
-  parseNotifyutilState,
-} from "../../utils/ios-cmdline-tools/notifyutil";
+import { DeviceState } from "../utility/DeviceState";
 
 export interface BiometricAuthOptions {
-  action: "match" | "fail" | "cancel" | "error";
+  action: "match" | "fail" | "cancel" | "error" | "enroll" | "unenroll";
   modality?: "any" | "fingerprint" | "face";
   fingerprintId?: number;
   errorCode?: number;
@@ -35,7 +31,6 @@ const DEFAULT_TTL_MS = 5000;
 export class BiometricAuth extends BaseVisualChange {
   /** Darwin notification keys the iOS Simulator's BiometricKit listens on. */
   private static readonly IOS_KEYS = {
-    enrollment: "com.apple.BiometricKit.enrollmentChanged",
     fingerTouch: {
       match: "com.apple.BiometricKit_Sim.fingerTouch.match",
       nomatch: "com.apple.BiometricKit_Sim.fingerTouch.nomatch",
@@ -75,6 +70,14 @@ export class BiometricAuth extends BaseVisualChange {
       return this.unsupported(
         options,
         "Biometric authentication is only supported on Android and iOS Simulator devices",
+      );
+    }
+
+    if (options.action === "enroll" || options.action === "unenroll") {
+      perf.end();
+      return this.unsupported(
+        options,
+        "Biometric enrollment control is currently available only on iOS Simulator.",
       );
     }
 
@@ -167,6 +170,8 @@ export class BiometricAuth extends BaseVisualChange {
    *
    * match -> *.match, fail -> *.nomatch. For modality "any" we post both fingerTouch and
    * pearl keys; a simulator only has one biometry enrolled so the other is a harmless no-op.
+   * Enrollment is preserved: callers configure it with `enroll`/`unenroll` or
+   * `setDeviceState`; match/fail never silently change it.
    * cancel/error have no simulator notification and return supported:"partial".
    * Physical iOS devices have no public injection API and return supported:false.
    */
@@ -195,6 +200,27 @@ export class BiometricAuth extends BaseVisualChange {
 
     const simctl = this.simctl ?? new SimCtlClient(this.device);
     const udid = this.device.deviceId;
+    const enrollment = new DeviceState(this.device, { simctl });
+
+    if (options.action === "enroll" || options.action === "unenroll") {
+      const enrollmentState = await enrollment.setBiometricEnrollmentState(
+        options.action === "enroll" ? "enrolled" : "not_enrolled",
+      );
+      return {
+        success:
+          enrollmentState.supported && !enrollmentState.error && enrollmentState.verified !== false,
+        action: options.action,
+        modality,
+        fingerprintId: options.fingerprintId,
+        errorCode: options.errorCode,
+        supported: enrollmentState.supported,
+        ...(enrollmentState.error ? { error: enrollmentState.error } : {}),
+        ...(enrollmentState.error
+          ? {}
+          : { message: `Biometric enrollment set to ${enrollmentState.enrollment}.` }),
+      };
+    }
+
     const wantMatch = options.action === "match";
     const keys = BiometricAuth.IOS_KEYS;
 
@@ -209,12 +235,8 @@ export class BiometricAuth extends BaseVisualChange {
     }
 
     try {
-      // Ensure biometry is enrolled before attempting a match.
-      const enrollmentResult = await simctl.executeCommand(
-        iosNotifyutilRegisteredSetReadPostCommand(udid, keys.enrollment, "1"),
-        IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS,
-      );
-      if (enrollmentResult.stderr && enrollmentResult.stderr.trim().length > 0) {
+      const enrollmentState = await enrollment.getBiometricEnrollmentState();
+      if (enrollmentState.error) {
         return {
           success: false,
           action: options.action,
@@ -222,10 +244,10 @@ export class BiometricAuth extends BaseVisualChange {
           fingerprintId: options.fingerprintId,
           errorCode: options.errorCode,
           supported: true,
-          error: `notifyutil failed: ${enrollmentResult.stderr.trim()}`,
+          error: enrollmentState.error,
         };
       }
-      if (parseNotifyutilState(enrollmentResult.stdout ?? "") !== true) {
+      if (enrollmentState.enrollment !== "enrolled") {
         return {
           success: false,
           action: options.action,
@@ -234,7 +256,7 @@ export class BiometricAuth extends BaseVisualChange {
           errorCode: options.errorCode,
           supported: true,
           error:
-            "iOS biometric enrollment did not verify: notifyutil did not read back enrolled state.",
+            "iOS Simulator biometry is not enrolled. Call biometricAuth with action 'enroll' or setDeviceState biometrics.enrollment to 'enrolled' first.",
         };
       }
 
@@ -270,7 +292,7 @@ export class BiometricAuth extends BaseVisualChange {
         fingerprintId: options.fingerprintId,
         errorCode: options.errorCode,
         supported: true,
-        error: `Failed to post iOS biometric notification: ${errorMessage(error)}`,
+        error: `Failed to simulate iOS biometric authentication: ${errorMessage(error)}`,
       };
     }
   }
@@ -333,6 +355,9 @@ export class BiometricAuth extends BaseVisualChange {
         return "CANCEL";
       case "error":
         return "ERROR";
+      case "enroll":
+      case "unenroll":
+        return "";
     }
   }
 

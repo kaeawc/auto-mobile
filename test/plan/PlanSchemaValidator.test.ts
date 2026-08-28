@@ -159,6 +159,35 @@ steps:
       expect(result.valid).toBe(true);
     });
 
+    it("should validate biometric device state steps", () => {
+      const yaml = `
+name: biometric-state
+steps:
+  - tool: getDeviceState
+    include:
+      - biometrics
+  - tool: getDeviceState
+    include:
+      - doNotDisturb
+      - biometrics
+  - tool: setDeviceState
+    biometrics:
+      enrollment: enrolled
+  - tool: setDeviceState
+    params:
+      biometrics:
+        enrollment: not_enrolled
+  - tool: setDeviceState
+    params:
+      doNotDisturb:
+        enabled: true
+      biometrics:
+        enrollment: enrolled
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
     it("should validate iOS simulator permissions through cross-platform permission tools", () => {
       const yaml = `
 name: ios-permissions
@@ -497,6 +526,30 @@ steps:
       platform: android
       permissions:
         - camera
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject an unknown biometric enrollment value", () => {
+      const yaml = `
+name: bad-biometric-enrollment
+steps:
+  - tool: setDeviceState
+    biometrics:
+      enrollment: sometimes
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject an unknown getDeviceState include field", () => {
+      const yaml = `
+name: bad-include
+steps:
+  - tool: getDeviceState
+    include:
+      - notAThing
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);

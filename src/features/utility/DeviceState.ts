@@ -55,11 +55,22 @@ export interface DoNotDisturbState {
   appliedMode?: DoNotDisturbMode;
 }
 
+export type BiometricEnrollment = "enrolled" | "not_enrolled";
+
+export interface BiometricEnrollmentState {
+  supported: boolean;
+  enrollment?: BiometricEnrollment;
+  method?: "ios_simulator_notifyutil";
+  verified?: boolean;
+  error?: string;
+}
+
 export interface DeviceStateResult {
   success: boolean;
   deviceId: string;
   platform: "android" | "ios";
   doNotDisturb?: DoNotDisturbState;
+  biometrics?: BiometricEnrollmentState;
   error?: string;
 }
 
@@ -67,6 +78,9 @@ export interface SetDeviceStateInput {
   doNotDisturb?: {
     enabled?: boolean;
     mode?: DoNotDisturbMode;
+  };
+  biometrics?: {
+    enrollment: BiometricEnrollment;
   };
 }
 
@@ -82,6 +96,9 @@ export interface DeviceStateDependencies {
 
 const IOS_DND_NOTIFICATION = "com.apple.donotdisturb.enabled";
 const IOS_DND_INDEPENDENT_READBACK_SETTLE_MS = 500;
+const IOS_BIOMETRIC_ENROLLMENT_NOTIFICATION = "com.apple.BiometricKit.enrollmentChanged";
+const IOS_BIOMETRICS_UNSUPPORTED_ERROR =
+  "Biometric enrollment state can only be read or set on an iOS Simulator.";
 
 /**
  * Physical iOS devices expose no public API to enable/disable Focus or Do Not
@@ -236,6 +253,18 @@ function modeForInput(input: SetDeviceStateInput["doNotDisturb"]): DoNotDisturbM
   return input?.enabled === false ? "off" : "none";
 }
 
+export const EMPTY_STATE_SELECTION_ERROR = "At least one device state field must be included";
+
+function doNotDisturbInputError(input: SetDeviceStateInput["doNotDisturb"]): string | undefined {
+  if (!input || input.enabled === undefined || input.mode === undefined) {
+    return undefined;
+  }
+  if ((input.enabled === false) !== (input.mode === "off")) {
+    return `doNotDisturb.enabled=${input.enabled} conflicts with doNotDisturb.mode="${input.mode}"`;
+  }
+  return undefined;
+}
+
 export class DeviceState {
   private device: BootedDevice;
 
@@ -252,23 +281,43 @@ export class DeviceState {
     this.timer = dependencies.timer ?? defaultTimer;
   }
 
-  async getState(): Promise<DeviceStateResult> {
-    const doNotDisturb =
-      this.device.platform === "android"
+  async getState(
+    include: ("doNotDisturb" | "biometrics")[] = ["doNotDisturb"],
+  ): Promise<DeviceStateResult> {
+    // An empty selection would otherwise read nothing and report success.
+    if (include.length === 0) {
+      return {
+        success: false,
+        deviceId: this.device.deviceId,
+        platform: this.device.platform,
+        error: EMPTY_STATE_SELECTION_ERROR,
+      };
+    }
+    const doNotDisturb = include.includes("doNotDisturb")
+      ? this.device.platform === "android"
         ? await this.getAndroidDoNotDisturb()
-        : await this.getIosDoNotDisturb();
+        : await this.getIosDoNotDisturb()
+      : undefined;
+    const biometrics = include.includes("biometrics")
+      ? await this.getBiometricEnrollmentState()
+      : undefined;
+    const requestedStates = [doNotDisturb, biometrics].filter(
+      (state): state is DoNotDisturbState | BiometricEnrollmentState => state !== undefined,
+    );
+    const error = requestedStates.find((state) => state.error)?.error;
 
     return {
-      success: doNotDisturb.supported && !doNotDisturb.error,
+      success: requestedStates.every((state) => state.supported && !state.error),
       deviceId: this.device.deviceId,
       platform: this.device.platform,
-      doNotDisturb,
-      ...(doNotDisturb.error ? { error: doNotDisturb.error } : {}),
+      ...(doNotDisturb ? { doNotDisturb } : {}),
+      ...(biometrics ? { biometrics } : {}),
+      ...(error ? { error } : {}),
     };
   }
 
   async setState(input: SetDeviceStateInput): Promise<DeviceStateResult> {
-    if (!input.doNotDisturb) {
+    if (!input.doNotDisturb && !input.biometrics) {
       return {
         success: false,
         deviceId: this.device.deviceId,
@@ -277,32 +326,134 @@ export class DeviceState {
       };
     }
 
-    const { enabled, mode } = input.doNotDisturb;
-    if (enabled !== undefined && mode !== undefined) {
-      const impliesOff = enabled === false;
-      const modeIsOff = mode === "off";
-      if (impliesOff !== modeIsOff) {
-        return {
-          success: false,
-          deviceId: this.device.deviceId,
-          platform: this.device.platform,
-          error: `doNotDisturb.enabled=${enabled} conflicts with doNotDisturb.mode="${mode}"`,
-        };
-      }
+    const inputError = doNotDisturbInputError(input.doNotDisturb);
+    if (inputError) {
+      return {
+        success: false,
+        deviceId: this.device.deviceId,
+        platform: this.device.platform,
+        error: inputError,
+      };
     }
 
-    const doNotDisturb =
-      this.device.platform === "android"
+    const doNotDisturb = input.doNotDisturb
+      ? this.device.platform === "android"
         ? await this.setAndroidDoNotDisturb(input.doNotDisturb)
-        : await this.setIosDoNotDisturb(input.doNotDisturb);
+        : await this.setIosDoNotDisturb(input.doNotDisturb)
+      : undefined;
+    const biometrics = input.biometrics
+      ? await this.setBiometricEnrollmentState(input.biometrics.enrollment)
+      : undefined;
+    const requestedStates = [doNotDisturb, biometrics].filter(
+      (state): state is DoNotDisturbState | BiometricEnrollmentState => state !== undefined,
+    );
+    const error = requestedStates.find((state) => state.error)?.error;
 
     return {
-      success: doNotDisturb.supported && !doNotDisturb.error && doNotDisturb.verified !== false,
+      success: requestedStates.every(
+        (state) => state.supported && !state.error && state.verified !== false,
+      ),
       deviceId: this.device.deviceId,
       platform: this.device.platform,
-      doNotDisturb,
-      ...(doNotDisturb.error ? { error: doNotDisturb.error } : {}),
+      ...(doNotDisturb ? { doNotDisturb } : {}),
+      ...(biometrics ? { biometrics } : {}),
+      ...(error ? { error } : {}),
     };
+  }
+
+  async getBiometricEnrollmentState(): Promise<BiometricEnrollmentState> {
+    if (this.device.platform !== "ios" || !isIosSimulatorDevice(this.device)) {
+      return { supported: false, error: IOS_BIOMETRICS_UNSUPPORTED_ERROR };
+    }
+    const simctl = this.simctl ?? new SimCtlClient(this.device);
+    try {
+      const result = await simctl.executeCommand(
+        iosNotifyutilGetCommand(this.device.deviceId, IOS_BIOMETRIC_ENROLLMENT_NOTIFICATION),
+      );
+      const stderr = result.stderr?.trim();
+      if (stderr) {
+        return {
+          supported: true,
+          method: "ios_simulator_notifyutil",
+          error: `notifyutil failed: ${stderr}`,
+        };
+      }
+      const enrolled = parseNotifyutilState(result.stdout ?? "");
+      if (enrolled === null) {
+        return {
+          supported: true,
+          method: "ios_simulator_notifyutil",
+          error: "Could not parse iOS Simulator biometric enrollment state from notifyutil.",
+        };
+      }
+      return {
+        supported: true,
+        enrollment: enrolled ? "enrolled" : "not_enrolled",
+        method: "ios_simulator_notifyutil",
+        verified: true,
+      };
+    } catch (error) {
+      return {
+        supported: true,
+        method: "ios_simulator_notifyutil",
+        error: errorMessage(error),
+      };
+    }
+  }
+
+  async setBiometricEnrollmentState(
+    enrollment: BiometricEnrollment,
+  ): Promise<BiometricEnrollmentState> {
+    if (this.device.platform !== "ios" || !isIosSimulatorDevice(this.device)) {
+      return {
+        supported: false,
+        enrollment,
+        verified: false,
+        error: IOS_BIOMETRICS_UNSUPPORTED_ERROR,
+      };
+    }
+    const simctl = this.simctl ?? new SimCtlClient(this.device);
+    try {
+      const result = await simctl.executeCommand(
+        iosNotifyutilRegisteredSetReadPostCommand(
+          this.device.deviceId,
+          IOS_BIOMETRIC_ENROLLMENT_NOTIFICATION,
+          enrollment === "enrolled" ? "1" : "0",
+        ),
+        IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS,
+      );
+      const stderr = result.stderr?.trim();
+      if (stderr) {
+        return {
+          supported: true,
+          enrollment,
+          method: "ios_simulator_notifyutil",
+          verified: false,
+          error: `notifyutil failed: ${stderr}`,
+        };
+      }
+      const enrolled = parseNotifyutilState(result.stdout ?? "");
+      const verified = enrolled === (enrollment === "enrolled");
+      return {
+        supported: true,
+        ...(enrolled === null ? {} : { enrollment: enrolled ? "enrolled" : "not_enrolled" }),
+        method: "ios_simulator_notifyutil",
+        verified,
+        ...(verified
+          ? {}
+          : {
+              error: `iOS Simulator biometric enrollment did not verify: expected ${enrollment}.`,
+            }),
+      };
+    } catch (error) {
+      return {
+        supported: true,
+        enrollment,
+        method: "ios_simulator_notifyutil",
+        verified: false,
+        error: errorMessage(error),
+      };
+    }
   }
 
   private async getAndroidDoNotDisturb(): Promise<DoNotDisturbState> {

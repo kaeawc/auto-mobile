@@ -2,7 +2,11 @@ import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError } from "../models/ActionableError";
 import { SystemConfigurationManager } from "../features/utility/SystemConfigurationManager";
-import { DeviceState } from "../features/utility/DeviceState";
+import {
+  DeviceState,
+  type BiometricEnrollment,
+  type DeviceStateResult,
+} from "../features/utility/DeviceState";
 import { logger } from "../utils/logger";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
@@ -16,6 +20,11 @@ import {
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
 import { DaemonState } from "../daemon/daemonState";
+import type { SessionManager } from "../daemon/sessionManager";
+import {
+  applyStateAfterBiometricCaptureFailure,
+  runSessionBiometricMutation,
+} from "./sessionBiometricEnrollment";
 
 // Schema definitions
 export const setActiveDeviceSchema = addSessionUuidToSchema(
@@ -105,12 +114,19 @@ const doNotDisturbStateInputSchema = z
     message: "Provide enabled or mode for doNotDisturb",
   });
 
+const biometricStateInputSchema = z.object({
+  enrollment: z
+    .enum(["enrolled", "not_enrolled"])
+    .describe("Set iOS Simulator biometric enrollment state."),
+});
+
 export const getDeviceStateSchema = addDeviceTargetingToSchema(
   z.object({
     include: z
-      .array(z.enum(["doNotDisturb"]))
+      .array(z.enum(["doNotDisturb", "biometrics"]))
+      .min(1)
       .optional()
-      .describe("State fields to read; supports doNotDisturb"),
+      .describe("State fields to read; supports doNotDisturb and biometrics"),
   }),
 );
 
@@ -119,8 +135,11 @@ export const setDeviceStateSchema = addDeviceTargetingToSchema(
     doNotDisturb: doNotDisturbStateInputSchema
       .optional()
       .describe("Do Not Disturb state to apply."),
+    biometrics: biometricStateInputSchema
+      .optional()
+      .describe("iOS Simulator biometric enrollment state to apply."),
   }),
-).refine((values) => values.doNotDisturb !== undefined, {
+).refine((values) => values.doNotDisturb !== undefined || values.biometrics !== undefined, {
   message: "At least one device state field must be provided",
 });
 
@@ -144,6 +163,40 @@ export interface ChangeLocalizationArgs {
 export type GetDeviceStateArgs = z.infer<typeof getDeviceStateSchema>;
 
 export type SetDeviceStateArgs = z.infer<typeof setDeviceStateSchema>;
+
+interface BiometricEnrollmentCapture {
+  sessionManager?: SessionManager;
+  initialEnrollment?: BiometricEnrollment;
+  failure?: DeviceStateResult;
+}
+
+async function captureBiometricEnrollment(
+  device: BootedDevice,
+  args: SetDeviceStateArgs,
+  deviceState: DeviceState,
+): Promise<BiometricEnrollmentCapture> {
+  if (!args.biometrics || !args.sessionUuid || !DaemonState.getInstance().isInitialized()) {
+    return {};
+  }
+  const sessionManager = DaemonState.getInstance().getSessionManager();
+  if (sessionManager.getBiometricEnrollment(args.sessionUuid)) {
+    return { sessionManager };
+  }
+  const state = await deviceState.getBiometricEnrollmentState();
+  if (!state.supported || !state.enrollment || state.error) {
+    return {
+      sessionManager,
+      failure: {
+        success: false,
+        deviceId: device.deviceId,
+        platform: device.platform,
+        biometrics: state,
+        ...(state.error ? { error: state.error } : {}),
+      },
+    };
+  }
+  return { sessionManager, initialEnrollment: state.enrollment };
+}
 
 // Register tools
 export function registerUtilityTools() {
@@ -317,9 +370,9 @@ export function registerUtilityTools() {
     });
   };
 
-  const getDeviceStateHandler = async (device: BootedDevice, _args: GetDeviceStateArgs) => {
+  const getDeviceStateHandler = async (device: BootedDevice, args: GetDeviceStateArgs) => {
     const deviceState = new DeviceState(device);
-    const result = await deviceState.getState();
+    const result = await deviceState.getState(args.include);
 
     return createJSONToolResponse({
       message: result.success
@@ -331,9 +384,29 @@ export function registerUtilityTools() {
 
   const setDeviceStateHandler = async (device: BootedDevice, args: SetDeviceStateArgs) => {
     const deviceState = new DeviceState(device);
-    const result = await deviceState.setState({
-      doNotDisturb: args.doNotDisturb,
-    });
+    const capture = await captureBiometricEnrollment(device, args, deviceState);
+    if (capture.failure) {
+      const result = await applyStateAfterBiometricCaptureFailure(
+        deviceState,
+        { doNotDisturb: args.doNotDisturb, biometrics: args.biometrics },
+        capture.failure,
+      );
+      return createJSONToolResponse({
+        message: result.error ?? "Failed to read biometric enrollment state",
+        ...result,
+      });
+    }
+    const result = await runSessionBiometricMutation(
+      capture.sessionManager,
+      args.sessionUuid,
+      device.deviceId,
+      capture.initialEnrollment,
+      () =>
+        deviceState.setState({
+          doNotDisturb: args.doNotDisturb,
+          biometrics: args.biometrics,
+        }),
+    );
 
     return createJSONToolResponse({
       message: result.success
@@ -362,7 +435,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "getDeviceState",
-    "Read device-level state such as Do Not Disturb",
+    "Read device-level state such as Do Not Disturb and iOS Simulator biometric enrollment",
     getDeviceStateSchema,
     getDeviceStateHandler,
     { defaultEnabled: false },
@@ -370,7 +443,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
-    "Set device state such as Do Not Disturb.",
+    "Set device state such as Do Not Disturb and iOS Simulator biometric enrollment.",
     setDeviceStateSchema,
     setDeviceStateHandler,
     { defaultEnabled: false },

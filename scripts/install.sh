@@ -2760,7 +2760,9 @@ desktop_app_prerequisites_available() {
             command_exists hdiutil && command_exists lipo && command_exists ditto
             ;;
         linux)
-            command_exists dpkg-deb && (command_exists apt-get || command_exists dpkg)
+            # apt resolves a .deb's dependencies atomically; dpkg alone can
+            # leave an unpacked package behind when a dependency is missing.
+            command_exists dpkg-deb && command_exists apt-get
             ;;
         *)
             return 1
@@ -2839,13 +2841,16 @@ recover_stale_macos_desktop_app_swap() {
             return 0
         fi
         run_desktop_app_privileged rm -rf -- "${swap_dir}" || return 1
-    done < <(run_desktop_app_privileged find "${target_parent}" -maxdepth 1 -type d -name '.automobile-install.*' -print 2>/dev/null)
+    done < <(run_desktop_app_privileged find "${target_parent}" -maxdepth 1 -type d -name '.automobile-install.*' ! -name '.automobile-install.lock' -print 2>/dev/null)
 }
 
 acquire_macos_desktop_app_lock() {
-    local lock_dir="$1" target_parent="$2" target_app="$3" owner_pid owner_pid_to_write="${BASHPID}"
+    local lock_dir="$1" target_parent="$2" target_app="$3" owner_pid owner_pid_to_write="${BASHPID}" reclaim_dir
     if run_desktop_app_privileged mkdir "${lock_dir}" 2>/dev/null; then
-        printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null
+        if ! printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null; then
+            run_desktop_app_privileged rmdir "${lock_dir}" || true
+            return 1
+        fi
         return 0
     fi
     if ! owner_pid=$(run_desktop_app_privileged cat "${lock_dir}/owner.pid" 2>/dev/null) \
@@ -2854,10 +2859,19 @@ acquire_macos_desktop_app_lock() {
         return 1
     fi
     log_warn "Reclaiming stale AutoMobile desktop installation lock."
-    run_desktop_app_privileged rm -rf -- "${lock_dir}" || return 1
-    recover_stale_macos_desktop_app_swap "${target_parent}" "${target_app}" || return 1
-    run_desktop_app_privileged mkdir "${lock_dir}" || return 1
-    printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null
+    reclaim_dir="${lock_dir}/reclaiming"
+    # Claim recovery inside the existing lock so only one installer can repair
+    # the stale swap while the lock continues to exclude a new installation.
+    run_desktop_app_privileged mkdir "${reclaim_dir}" 2>/dev/null || return 1
+    if ! printf '%s\n' "${owner_pid_to_write}" | run_desktop_app_privileged tee "${lock_dir}/owner.pid" >/dev/null; then
+        run_desktop_app_privileged rmdir "${reclaim_dir}" || true
+        return 1
+    fi
+    if ! recover_stale_macos_desktop_app_swap "${target_parent}" "${target_app}"; then
+        run_desktop_app_privileged rmdir "${reclaim_dir}" || true
+        return 1
+    fi
+    run_desktop_app_privileged rmdir "${reclaim_dir}"
 }
 
 # Copy into a sibling staging directory, then swap the bundle into place. This
@@ -3050,7 +3064,10 @@ install_desktop_app() {
     fi
 
     local temp_dir installer_path
-    temp_dir=$(mktemp -d)
+    if ! temp_dir=$(mktemp -d); then
+        log_error "Could not create a temporary directory for the AutoMobile desktop app installer."
+        return 1
+    fi
     DESKTOP_APP_TEMP_DIR="${temp_dir}"
     installer_path="${temp_dir}/AutoMobile${suffix}"
     if ! download_file "${asset_url}" "${installer_path}"; then
@@ -3107,16 +3124,8 @@ install_desktop_app() {
                     cleanup_desktop_app_installer
                     return 1
                 fi
-            elif command_exists dpkg; then
-                # Package-manager failure is translated into the installer diagnostic below.
-                # shellcheck disable=SC2310
-                if ! run_desktop_app_privileged dpkg --install "${installer_path}"; then
-                    log_error "Failed to install the AutoMobile desktop app package."
-                    cleanup_desktop_app_installer
-                    return 1
-                fi
             else
-                log_error "apt-get or dpkg is required to install the downloaded .deb package."
+                log_error "apt-get is required to install the downloaded .deb package."
                 cleanup_desktop_app_installer
                 return 1
             fi

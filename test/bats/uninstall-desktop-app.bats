@@ -7,9 +7,15 @@ setup() {
   TEST_HOME="${TEST_ROOT}/home"
   STUB_BIN="${TEST_ROOT}/bin"
   mkdir -p "${TEST_HOME}/Applications/AutoMobile.app/Contents" "${STUB_BIN}"
-  printf '%s\n' '<plist/>' > "${TEST_HOME}/Applications/AutoMobile.app/Contents/Info.plist"
+  printf '%s\n' '<plist><dict><key>CFBundleIdentifier</key><string>dev.jasonpearson.automobile.desktop</string></dict></plist>' > "${TEST_HOME}/Applications/AutoMobile.app/Contents/Info.plist"
   printf '#!/usr/bin/env bash\nprintf "Darwin\\n"\n' > "${STUB_BIN}/uname"
-  chmod +x "${STUB_BIN}/uname"
+  cat > "${STUB_BIN}/plutil" <<'SCRIPT'
+#!/usr/bin/env bash
+if [[ "$1" == "-extract" && "$2" == "CFBundleIdentifier" && "$3" == "raw" ]]; then
+  sed -n 's|.*<string>\([^<]*\)</string>.*|\1|p' "$4"
+fi
+SCRIPT
+  chmod +x "${STUB_BIN}/uname" "${STUB_BIN}/plutil"
 
   UNINSTALL_SH_SOURCE_ONLY=true
   # shellcheck source=/dev/null
@@ -156,4 +162,14 @@ teardown() {
   [ "$status" -eq 0 ]
   [ -d "${TEST_HOME}/Applications/AutoMobile.app" ]
   [[ "$output" == *"[DRY-RUN] Would remove ${TEST_HOME}/Applications/AutoMobile.app"* ]]
+}
+
+@test "does not remove an unrelated AutoMobile.app bundle" {
+  printf '%s\n' '<plist><dict><key>CFBundleIdentifier</key><string>com.example.unrelated</string></dict></plist>' > "${TEST_HOME}/Applications/AutoMobile.app/Contents/Info.plist"
+
+  run env HOME="${TEST_HOME}" PATH="${STUB_BIN}:${PATH}" bash "${SCRIPT}" --all --force
+
+  [ "$status" -eq 0 ]
+  [ -d "${TEST_HOME}/Applications/AutoMobile.app" ]
+  [[ "$output" == *"No AutoMobile components found to uninstall"* ]]
 }

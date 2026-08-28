@@ -53,6 +53,7 @@ DESKTOP_APP_INSTALLED=false
 DESKTOP_APP_PATHS=()
 DESKTOP_APP_PACKAGE=""
 DESKTOP_APP_EXECUTABLES=()
+DESKTOP_APP_BUNDLE_IDENTIFIER="dev.jasonpearson.automobile.desktop"
 
 # Colors
 RED='\033[0;31m'
@@ -70,6 +71,10 @@ command_exists() {
 
 desktop_app_is_root() {
     [[ "${EUID}" -eq 0 ]]
+}
+
+desktop_app_bundle_identifier() {
+    plutil -extract CFBundleIdentifier raw "$1/Contents/Info.plist" 2>/dev/null
 }
 
 # Every privileged command status is returned to an explicit caller check.
@@ -264,7 +269,8 @@ detect_desktop_app() {
     if [[ "${os}" == "macos" ]]; then
         local app_path
         for app_path in "/Applications/AutoMobile.app" "${HOME}/Applications/AutoMobile.app"; do
-            if [[ -d "${app_path}" && -f "${app_path}/Contents/Info.plist" ]]; then
+            if [[ -d "${app_path}" && -f "${app_path}/Contents/Info.plist" ]] \
+                && [[ "$(desktop_app_bundle_identifier "${app_path}")" == "${DESKTOP_APP_BUNDLE_IDENTIFIER}" ]]; then
                 DESKTOP_APP_PATHS+=("${app_path}")
                 DESKTOP_APP_EXECUTABLES+=("${app_path}/Contents/MacOS/AutoMobile")
                 DESKTOP_APP_INSTALLED=true
@@ -279,7 +285,7 @@ detect_desktop_app() {
         local package status
         for package in automobile auto-mobile; do
             status=$(dpkg-query -W -f='${db:Status-Status}' "${package}" 2>/dev/null || true)
-            if [[ "${status}" == "installed" ]]; then
+            if [[ "${status}" == "installed" || "${status}" == "unpacked" || "${status}" == "half-configured" || "${status}" == "half-installed" ]]; then
                 DESKTOP_APP_PACKAGE="${package}"
                 DESKTOP_APP_INSTALLED=true
                 local installed_path

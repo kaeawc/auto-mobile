@@ -1,42 +1,20 @@
 # UX Exploration
 
-Use AI agents to explore your app, get answers about the user experience.
+Ask an agent what to explore instead of prescribing every tap. AutoMobile finds
+or starts a suitable device, launches the app, observes each screen, and
+iterates on tool calls as it navigates.
 
-**Example Prompts**
+## Example prompts
 
-> Open my <app-name\> <Android\iOS\> app and...
->
-> Explore the main features and identify key user flows of the current app
->
-> Use the search features in the app to find <search-result\>
->
-> Explore the onboarding flow and report any confusing steps
->
-> Are there any interactive elements that are hard to interact with in the current screen?
->
-> Use <feature-x\> and choose a date 1 week in the future.
+> Explore the main features of <app-name> on <Android|iOS> and map the key user
+> flows.
 
-The agent will:
+> Explore onboarding in <app-name> and report confusing steps, dead ends, and
+> controls that are difficult to use.
 
-1. Look for available devices, launch an Android emulator or iOS simulator
-2. Look for installed apps. If the specified one is not installed it can attempt to install it.
-3. Launch the requested app.
-4. Use device interaction [tool calls](../design-docs/mcp/tools.md) to tap, swipe, pinch, drag, and generally interact to accomplish the given tasks.
-5. At each step the agent will have full device state and observations to keep iterating.
+> Use the search feature in <app-name> to find <search result>, then report the
+> steps and final screen.
 
-??? example "See demo: Google Maps exploration"
-![Exploring Google Maps](../img/google-maps.gif)
-_Demo: An AI agent exploring Google Maps, searching for locations, and interacting with map controls._
+Be specific about the outcome you want. Mention a required route—such as a
+deep link, search, or scrolling—when the route itself matters.
 
-??? example "See demo: Clock app alarm"
-![Setting an alarm in the Clock app](../img/clock-app.gif)
-_Demo: An AI agent navigating to the Clock app, opening the alarm tab, and creating a new alarm._
-
-??? example "See demo: Camera gallery"
-![Taking a photo and viewing the gallery](../img/camera-gallery.gif)
-_Demo: An AI agent opening the Camera app, taking a photo, and viewing it in the Gallery._
-
-**Best Practices**
-
-- Describe what you want to explore instead of how when you want more general explorations.
-- Specifically state interaction methods when you want the agent to take specific routes (deep links, search by scrolling, etc)

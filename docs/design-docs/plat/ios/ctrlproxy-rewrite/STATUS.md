@@ -6,10 +6,11 @@ can be given minimal guidance — e.g. *"we just finished Phase 2; read
 and orient entirely from here. See [README.md](README.md) for the fixup-note index
 and the amended phase plan.
 
-Last updated after Phase 7B (iOS strict-concurrency warnings cleared; the rewrite compiles
-**and runs** on an iOS 27.0 simulator — `testServiceStarts` green). Cutover 7C (point the
-primary runner at the rewrite; retire the reference; full observe→gesture→hierarchy validation)
-is next.
+Last updated after Phase 7C (the production XCUITest runner now compiles + runs the Swift-6
+rewrite — the `CtrlProxyUITests` target was repurposed to compile `Sources/CtrlProxyRewrite`,
+so the TS MCP integration + scripts drive it unchanged; `testServiceStarts` green on an iOS 27
+sim). Reference impl kept as the SwiftPM parity oracle. 7D (retire the reference target + full
+observe→gesture→hierarchy validation) is next.
 
 ---
 
@@ -89,7 +90,8 @@ wire fixture is `test/fixtures/ios-ctrlproxy-request-snapshots.json`.
 | 6 | CommandHandler (Sendable POD router, `handle` async) + async serial dispatch + `CtrlProxy` coordinator | `5ce6c75bd` `333e236f8` `089e4e0da` `1fb695e35` `d49358121` | ✅ |
 | 7A | Wire rewrite into XcodeGen + first green iOS-sim compile (host-hidden `ElementLocator` init fixed) | `12e7c80a1` | ✅ |
 | 7B | iOS strict-concurrency warning cleanup (`DeviceRotation`/`DefaultVoiceOverToggle`/runner) — 0 warnings + runtime-validated on sim | — | ✅ |
-| 7C | Point primary runner/app at rewrite; retire reference; full observe→gesture→hierarchy validation | — | ◻️ **NEXT** |
+| 7C | Point the production runner at the rewrite (repurpose `CtrlProxyUITests` target → compiles `Sources/CtrlProxyRewrite`; zero TS/script churn) | — | ✅ (middle route) |
+| 7D | Retire the reference target + full observe→gesture→hierarchy validation (port the rich iOS integration tests) | — | ◻️ **NEXT** |
 | 8 | Post-concurrency fixups (see README index) | — | ◻️ |
 
 **Ported so far** (all one-type-per-file, `Sendable`, differentially verified unless
@@ -227,6 +229,23 @@ on `iPhone 17` (`[CtrlProxy] Service started` → `Service stopped`), exercising
 `@MainActor` init path (incl. `DeviceRotation` signal init `assumeIsolated`) and the full server
 start→stop lifecycle on-device — so the `assumeIsolated` main-thread assumptions do not trap. SPM
 parity gate unchanged (229 green; host build 0 warnings).
+
+**Phase 7C added** (runner switch — the "middle route"). The production XCUITest runner now compiles
+and runs the rewrite. Chosen mechanism: **repurpose the existing `CtrlProxyUITests` XcodeGen target**
+to source `Sources/CtrlProxyRewrite` (with the Swift-6/`complete`/iOS-17 settings) instead of the
+reference `Sources/CtrlProxy`, keeping the target name, `CtrlProxyUITests-Runner.app`, the xctest
+bundle, and the `-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService` identifier unchanged —
+so the TS MCP layer (`IOSCtrlProxyManager`/`IOSCtrlProxyBuilder`/`IOSCtrlProxyProcessClient`, incl. the
+fragile daemon process-recovery command-shape matchers) and the `scripts/ios/ctrl-proxy-*.sh` drive it
+**with zero changes** (no TS touched → typecheck baseline unaffected). The runner class is renamed to
+`CtrlProxyUITests` (a minimal `@MainActor` runner over the public `CtrlProxy` surface); the additive
+`CtrlProxyRewriteUITests` target/dir from 7A is removed, and the reference-only UI tests
+(`PrivacyResourceMappingTests`, the fake/singleton-dependent `testHierarchyIncludes…`) are dropped
+(to be re-ported against the rewrite in 7D). The reference impl stays fully buildable as the
+differential-parity oracle (SwiftPM `CtrlProxy` library + `CtrlProxyRewriteTests`; the Xcode `CtrlProxy`
+framework target is untouched) — it just no longer backs an on-device runner. Validated: `build-for-testing`
+green (0 errors, 0 source warnings) and the **production** identifier
+`CtrlProxyUITests/CtrlProxyUITests/testServiceStarts` runs green on iPhone 17. SPM gate: 229 green.
 
 ## 6. Archetype map & load-bearing decisions
 
@@ -380,12 +399,15 @@ Suggested order:
 2. ✅ **Full iOS compile** — 7A green `build-for-testing` (one host-hidden error fixed); 7B cleared
    the ~149 iOS strict-concurrency warnings → warning-clean, matching the SPM bar; `testServiceStarts`
    runs green on the sim.
-3. **Point the runner/app at the rewrite.** Switch the XCUITest runner target to construct
-   `CtrlProxyRewrite.CtrlProxy` instead of the reference; keep the reference target buildable
-   until the UI-test smoke passes, then retire it (drop the per-target `.v5` language mode and
-   the `CtrlProxy`/`CtrlProxyTests` targets, or fold them out of `project.yml`).
-4. **On-device/simulator validation.** Run a real observe→gesture→hierarchy loop against a
-   simulator (and the `manual-test` skill) to confirm the wire behavior end-to-end; fold in the
+3. ✅ **Point the runner at the rewrite (7C, middle route).** Repurposed the `CtrlProxyUITests`
+   XcodeGen target to compile `Sources/CtrlProxyRewrite` (name/app/xctest/`-only-testing` identifier
+   kept → zero TS/script churn). Reference impl kept as the SwiftPM parity oracle.
+4. **(7D) Retire the reference + full validation.** Once a full observe→gesture→hierarchy loop passes
+   on a simulator (the `manual-test` skill; a live client, not just `testServiceStarts`), retire the
+   reference: drop the per-target `.v5` mode + the `CtrlProxy`/`CtrlProxyTests` (and Xcode `CtrlProxy`
+   framework) targets — which also ends the differential-parity harness (`CtrlProxyRewriteTests` links
+   both modules), so do it only after the on-device loop is trusted. Port the reference's rich iOS
+   integration tests (`testHierarchyIncludes…`) against the rewrite's injected seams; fold in the
    still-deferred Phase-2 loopback smoke test + connection scenarios (§8) as iOS UI tests.
 5. **Then Phase 8 fixups** (README index): the `os_signpost`/direct-interval PerfProvider
    simplification, the `HierarchyMerger` geometry-key improvement, the keyboard-focus RunLoop

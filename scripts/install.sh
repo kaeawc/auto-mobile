@@ -339,7 +339,6 @@ version_gte() {
 
 # Required versions (populated by parse_required_versions)
 REQUIRED_BUN_VERSION=""
-REQUIRED_NODE_MAJOR=""
 
 # Parse required versions from package.json (only when IS_REPO=true)
 parse_required_versions() {
@@ -362,9 +361,6 @@ parse_required_versions() {
             head -1 | sed 's/.*">=\{0,1\}\([0-9.]*\).*/\1/' || true)
     fi
 
-    # Extract node major version from @types/node (e.g., "^25.0.9" -> 25)
-    REQUIRED_NODE_MAJOR=$(grep -o '"@types/node":[[:space:]]*"[^"]*"' "${package_json}" | \
-        sed 's/.*"\^\{0,1\}\([0-9]*\).*/\1/' || true)
 }
 
 # Write environment state to a file for the caller to source
@@ -375,9 +371,6 @@ write_env_file() {
 
     {
         echo "export PATH=\"${PATH}\""
-        if [[ -n "${NVM_DIR:-}" ]]; then
-            echo "export NVM_DIR=\"${NVM_DIR}\""
-        fi
         if [[ -n "${ANDROID_HOME:-}" ]]; then
             echo "export ANDROID_HOME=\"${ANDROID_HOME}\""
         fi
@@ -475,7 +468,7 @@ Options:
   --preset NAME       Use an installation preset (minimal; contributor-only: development, local-dev)
   --contributor       Use contributor defaults (automatically selects the development preset)
   --non-interactive   Skip interactive prompts, use defaults
-  --env-file PATH     Write environment state (PATH, NVM_DIR, ANDROID_HOME) to file
+  --env-file PATH     Write environment state (PATH, ANDROID_HOME) to file
   -h, --help          Show this help message
 
 Presets:
@@ -4452,46 +4445,6 @@ main() {
         BUN_INSTALLED=true
     else
         BUN_INSTALLED=false
-    fi
-
-    # Check nvm and Node.js
-    # Source nvm if available but not yet loaded
-    if [[ -z "${NVM_DIR:-}" ]] && [[ -d "${HOME}/.nvm" ]]; then
-        export NVM_DIR="${HOME}/.nvm"
-        # shellcheck source=/dev/null
-        [[ -s "${NVM_DIR}/nvm.sh" ]] && source "${NVM_DIR}/nvm.sh"
-    fi
-
-    if spin_check "Checking Node.js (nvm)" "command -v node >/dev/null 2>&1"; then
-        local node_version
-        node_version=$(node --version 2>/dev/null || echo "unknown")
-        if [[ -n "${NVM_DIR:-}" ]]; then
-            log_info "Node.js: ${node_version} (via nvm)"
-        else
-            log_info "Node.js: ${node_version}"
-        fi
-
-        # Enforce node version requirement
-        if [[ -n "${REQUIRED_NODE_MAJOR}" ]]; then
-            local current_node_major
-            current_node_major=$(node --version 2>/dev/null | sed 's/^v//' | cut -d. -f1)
-            if [[ -n "${current_node_major}" ]] && [[ "${current_node_major}" -lt "${REQUIRED_NODE_MAJOR}" ]]; then
-                log_warn "Node.js v${current_node_major}.x found but v${REQUIRED_NODE_MAJOR}.x required"
-                # Try nvm switch if available
-                if [[ -n "${NVM_DIR:-}" ]] && [[ -s "${NVM_DIR}/nvm.sh" ]]; then
-                    # shellcheck source=/dev/null
-                    source "${NVM_DIR}/nvm.sh"
-                    if nvm ls "${REQUIRED_NODE_MAJOR}" >/dev/null 2>&1; then
-                        log_info "Switching to Node.js ${REQUIRED_NODE_MAJOR} via nvm..."
-                        nvm use "${REQUIRED_NODE_MAJOR}" >/dev/null 2>&1 || true
-                    elif [[ "${NON_INTERACTIVE}" == "true" ]]; then
-                        log_info "Installing Node.js ${REQUIRED_NODE_MAJOR} via nvm..."
-                        nvm install "${REQUIRED_NODE_MAJOR}" >/dev/null 2>&1 || true
-                        nvm use "${REQUIRED_NODE_MAJOR}" >/dev/null 2>&1 || true
-                    fi
-                fi
-            fi
-        fi
     fi
 
     # Check runtime dependencies

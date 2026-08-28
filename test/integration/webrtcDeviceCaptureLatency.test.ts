@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { parseSync } from "oxc-parser";
 import { CAPTURE_STAGES } from "../helpers/captureStageTimeline";
 
 const repoRoot = join(import.meta.dir, "../..");
@@ -28,6 +29,70 @@ function indexOfRequired(source: string, needle: string): number {
   const index = source.indexOf(needle);
   expect(`${needle} present: ${index >= 0}`).toBe(`${needle} present: true`);
   return index;
+}
+
+interface AstNode {
+  type: string;
+  [key: string]: unknown;
+}
+
+function isAstNode(value: unknown): value is AstNode {
+  return typeof value === "object" && value !== null && "type" in value;
+}
+
+function visitAst(value: unknown, visit: (node: AstNode) => void): void {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      visitAst(item, visit);
+    }
+    return;
+  }
+  if (!isAstNode(value)) {
+    return;
+  }
+  visit(value);
+  for (const child of Object.values(value)) {
+    visitAst(child, visit);
+  }
+}
+
+function execFileOptionNames(source: string): string[][] {
+  const optionNames: string[][] = [];
+  visitAst(parseSync(INTEGRATION_TEST_PATH, source).program, (node) => {
+    if (
+      node.type !== "CallExpression" ||
+      !isAstNode(node.callee) ||
+      node.callee.type !== "Identifier" ||
+      node.callee.name !== "execFileAsync" ||
+      !Array.isArray(node.arguments)
+    ) {
+      return;
+    }
+    const options = node.arguments[2];
+    if (
+      !isAstNode(options) ||
+      options.type !== "ObjectExpression" ||
+      !Array.isArray(options.properties)
+    ) {
+      optionNames.push([]);
+      return;
+    }
+    optionNames.push(
+      options.properties.flatMap((property) => {
+        if (
+          !isAstNode(property) ||
+          property.type !== "Property" ||
+          !isAstNode(property.key) ||
+          property.key.type !== "Identifier" ||
+          typeof property.key.name !== "string"
+        ) {
+          return [];
+        }
+        return [property.key.name];
+      }),
+    );
+  });
+  return optionNames;
 }
 
 /**
@@ -167,10 +232,10 @@ describe("#4343 device capture latency instrumentation", () => {
     expect(source).toContain("const REAL_IO_TIMEOUT_MS = 30_000;");
     expect(source).toContain("signal: AbortSignal.timeout(REAL_IO_TIMEOUT_MS)");
     expect(source).toContain("handshakeTimeout: REAL_IO_TIMEOUT_MS");
-    expect(source).toContain('killSignal: "SIGKILL"');
     expect(source).toContain("CDP_COMMAND_TIMEOUT_MS");
-    expect(source).toContain("async function withDeadline<T>(");
-    expect(source).toContain("await withDeadline(message, deadline - Date.now(), predicate)");
+    expect(source).toContain('import { waitFor, withDeadline } from "../helpers/abortableWaitFor"');
+    expect(source).toContain("async (signal) => {");
+    expect(source).toContain("changeFixture(signal) : launchFixture(signal)");
     expect(source).toContain("let pendingPipelineTeardown: (() => Promise<void>) | undefined;");
     expect(source).toContain("const cleanup = pendingPipelineTeardown;");
     expect(source).toContain("teardownPromise ??= teardown()");
@@ -186,6 +251,18 @@ describe("#4343 device capture latency instrumentation", () => {
     const cleanupIndex = indexOfRequired(source.slice(afterAllIndex), "await cleanup?.()");
     const recordIndex = indexOfRequired(source.slice(afterAllIndex), "timeline.toRecord(");
     expect(cleanupIndex).toBeLessThan(recordIndex);
+  });
+
+  test("gives every subprocess its own forced-kill deadline (#5715)", () => {
+    // This uses the repository's installed Oxc TypeScript parser rather than
+    // matching nested call expressions with a line regex. Adding a subprocess,
+    // or deleting options from one existing call, must fail this guard.
+    const calls = execFileOptionNames(read(INTEGRATION_TEST_PATH));
+
+    expect(calls.length).toBeGreaterThan(0);
+    for (const optionNames of calls) {
+      expect(optionNames).toEqual(expect.arrayContaining(["timeout", "killSignal"]));
+    }
   });
 
   test("keeps the default skipped-suite load path free of WebRTC and simulator runtime graphs (#5715)", () => {

@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import WebSocket from "ws";
 import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
+import { waitFor, withDeadline } from "../helpers/abortableWaitFor";
 import {
   CaptureStageTimeline,
   captureRunIdentity,
@@ -75,29 +76,6 @@ interface ReaderDiagnostics {
 interface ChromeReader {
   chrome: ChildProcessWithoutNullStreams;
   cdp: CdpClient;
-}
-
-/** Bound an operation that can otherwise hold a CI isolate indefinitely. */
-async function withDeadline<T>(step: string, timeoutMs: number, run: () => Promise<T>): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  const deadline = new Promise<never>((_, reject) => {
-    timer = defaultTimer.setTimeout(
-      () =>
-        reject(
-          new Error(
-            `${step} did not complete within ${timeoutMs}ms — bounded real-I/O deadline hit`,
-          ),
-        ),
-      timeoutMs,
-    );
-  });
-  try {
-    return await Promise.race([run(), deadline]);
-  } finally {
-    if (timer !== undefined) {
-      defaultTimer.clearTimeout(timer);
-    }
-  }
 }
 
 class CdpClient {
@@ -195,21 +173,6 @@ function start(command: string, args: string[], logFile: string): ChildProcessWi
   child.stderr.pipe(log, { end: false });
   child.once("close", () => log.end());
   return child;
-}
-
-async function waitFor(
-  predicate: () => Promise<boolean>,
-  message: string,
-  timeoutMs = 30_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await withDeadline(message, deadline - Date.now(), predicate)) {
-      return;
-    }
-    await Bun.sleep(100);
-  }
-  throw new Error(message);
 }
 
 async function waitForWebRtcStreamSocket(
@@ -713,17 +676,18 @@ async function captureProfile(): Promise<CaptureProfile> {
   }
 }
 
-async function launchFixture(): Promise<void> {
+async function launchFixture(signal?: AbortSignal): Promise<void> {
   if (platform === "android") {
     const id = androidDeviceId();
     await execFileAsync(
       "adb",
       ["-s", id, "shell", "am", "start", "-a", "android.settings.SETTINGS"],
-      { timeout: REAL_IO_TIMEOUT_MS, killSignal: "SIGKILL" },
+      { timeout: REAL_IO_TIMEOUT_MS, killSignal: "SIGKILL", signal },
     );
     await execFileAsync("adb", ["-s", id, "shell", "cmd", "uimode", "night", "no"], {
       timeout: REAL_IO_TIMEOUT_MS,
       killSignal: "SIGKILL",
+      signal,
     });
     return;
   }
@@ -731,17 +695,19 @@ async function launchFixture(): Promise<void> {
     await execFileAsync("xcrun", ["simctl", "launch", "booted", "com.apple.Preferences"], {
       timeout: REAL_IO_TIMEOUT_MS,
       killSignal: "SIGKILL",
+      signal,
     });
     await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"], {
       timeout: REAL_IO_TIMEOUT_MS,
       killSignal: "SIGKILL",
+      signal,
     });
     return;
   }
   throw new Error("AUTOMOBILE_WEBRTC_DEVICE_PLATFORM must be android or ios");
 }
 
-async function changeFixture(): Promise<void> {
+async function changeFixture(signal?: AbortSignal): Promise<void> {
   if (platform === "android") {
     const id = androidDeviceId();
     // A Home transition guarantees a visible surface change. The emulator may
@@ -750,6 +716,7 @@ async function changeFixture(): Promise<void> {
     await execFileAsync("adb", ["-s", id, "shell", "input", "keyevent", "HOME"], {
       timeout: REAL_IO_TIMEOUT_MS,
       killSignal: "SIGKILL",
+      signal,
     });
     return;
   }
@@ -757,6 +724,7 @@ async function changeFixture(): Promise<void> {
     await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "dark"], {
       timeout: REAL_IO_TIMEOUT_MS,
       killSignal: "SIGKILL",
+      signal,
     });
     return;
   }
@@ -1227,9 +1195,9 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
             let recovered: KeyframeRecoverySample | null = null;
             let toggle = false;
             await waitFor(
-              async () => {
+              async (signal) => {
                 toggle = !toggle;
-                await (toggle ? changeFixture() : launchFixture());
+                await (toggle ? changeFixture(signal) : launchFixture(signal));
                 const latest = await recoverySample(cdp!);
                 if (latest && keyframeRecovered(baseline, latest)) {
                   recovered = latest;

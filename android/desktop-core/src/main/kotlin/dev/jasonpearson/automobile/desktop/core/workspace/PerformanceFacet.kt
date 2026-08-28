@@ -23,10 +23,9 @@ import kotlinx.coroutines.delay
  * [socketAvailable] are the injected timer/daemon-availability seams that let that recovery be
  * tested with virtual time.
  *
- * Note: only the LIVE metrics here are per-device (the stream carries a deviceId). The dashboard's
- * audit-history fallback still reads via the DI graph's active-device client — device-scoping that
- * path is a separate follow-up (thread deviceId through listPerformanceAuditResults), not fixed
- * here.
+ * Both the LIVE metrics (the stream carries a deviceId) and the audit-history fallback are scoped
+ * to [column]'s device: [PerformanceDashboard] threads [DeviceColumn.deviceId] through
+ * `listPerformanceAuditResults` so a pane only surfaces its own device's audit history.
  */
 @Composable
 fun PerformanceFacet(

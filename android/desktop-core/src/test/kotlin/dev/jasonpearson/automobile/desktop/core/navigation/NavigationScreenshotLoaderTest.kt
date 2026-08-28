@@ -399,6 +399,7 @@ class FakeAutoMobileClient : AutoMobileClient {
     endTime: String?,
     limit: Int?,
     offset: Int?,
+    deviceId: String?,
   ) = notImplemented()
 
   override fun getTestTimings(

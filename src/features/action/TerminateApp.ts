@@ -129,13 +129,15 @@ export class TerminateApp extends BaseVisualChange {
       // make this operation report that the selected profile was running.
       const isRunning = await perf.track("checkRunning", async () => {
         try {
+          // Filter stdout here: grep's exit status conflates an expected
+          // no-match (the app is already stopped) with a real ADB failure.
           const result = await this.adb.executeCommand(
-            `shell dumpsys activity processes | grep -E "${packageName}/u${targetUserId}a"`,
+            "shell dumpsys activity processes",
             undefined,
             undefined,
             true,
           );
-          return result.stdout.trim().length > 0;
+          return result.stdout.includes(`${packageName}/u${targetUserId}a`);
         } catch (error) {
           logger.warn(`[TerminateApp] Running-state check failed for user ${targetUserId}`, error);
           throw new ActionableError(

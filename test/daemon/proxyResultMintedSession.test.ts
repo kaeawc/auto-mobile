@@ -39,8 +39,10 @@ function matchingDaemonManager(): FakeDaemonManager {
   return manager;
 }
 
-function deviceStartResult(sessionId: string): { content: Array<{ type: string; text: string }> } {
-  return { content: [{ type: "text", text: JSON.stringify({ sessionId }) }] };
+function deviceStartResult(sessionUuid: string): { content: Array<{ type: string; text: string }> } {
+  // Acquisition tools emit `sessionUuid` (#5870); mirror the production shape so
+  // this exercises the primary read, not the legacy `sessionId` fallback.
+  return { content: [{ type: "text", text: JSON.stringify({ sessionUuid }) }] };
 }
 
 // A FakeDaemonClient standing in for a daemon that mints a fresh device session

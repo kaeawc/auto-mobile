@@ -654,7 +654,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
     throw new ActionableError(
       "Device pool autolock is enabled and multiple devices are available. " +
-        "Call getAndroid or getApple first from this MCP session, or provide the returned sessionId (or a deviceId) to target a specific device.",
+        "Call getAndroid or getApple first from this MCP session, or provide the returned sessionUuid (or a deviceId) to target a specific device.",
     );
   }
 }

@@ -5591,7 +5591,7 @@ export class DevicePool {
           `The device may have been shut down or disconnected.\n\n` +
           `Options:\n` +
           `  - Use 'getAndroid' or 'getApple' with the target's stable identifier to prepare a device\n` +
-          `  - Use the returned sessionId to target this specific device\n` +
+          `  - Use the returned sessionUuid to target this specific device\n` +
           `  - Use 'listDevices' to see currently available devices`,
       );
     }
@@ -5630,7 +5630,7 @@ export class DevicePool {
         `The device may have been shut down or disconnected.\n\n` +
         `Options:\n` +
         `  - Use 'getAndroid' or 'getApple' with the target's stable identifier to prepare a device\n` +
-        `  - Use the returned sessionId to target this specific device\n` +
+        `  - Use the returned sessionUuid to target this specific device\n` +
         `  - Use 'listDevices' to see currently available devices`,
       readinessReservationOwners,
     );

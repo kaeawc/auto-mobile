@@ -375,6 +375,16 @@ const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
 const ABANDONED_WAIT_CONFIRM_TIMEOUT_MS = 1000;
 
 /**
+ * Upper bound on how many successive live startup-lock holders `start()` will wait
+ * on before reporting failure (issue #5878). Each distinct live holder that
+ * reclaims the lock is a process actively bringing the daemon up, so waiting for it
+ * is correct; the cap only stops a pathological churn of holders that die and are
+ * replaced from looping without end. A stuck same holder or a dead lock ends the
+ * loop immediately regardless of this cap.
+ */
+const MAX_PEER_STARTUP_WAITS = 3;
+
+/**
  * Surface of DaemonManager used by clients (e.g. DaemonMcpProxy).
  * Allows injecting fakes in tests without subclassing the concrete class.
  */
@@ -387,6 +397,13 @@ export interface DaemonManagerLike {
     signal?: AbortSignal,
     shouldContinueWaiting?: () => boolean,
   ): Promise<boolean>;
+  /**
+   * Whether the daemon startup lock is held by a still-live process — used as the
+   * early-exit predicate for readiness waits that block on another process bringing
+   * up the daemon, so a crashed holder is not waited on for the full budget while a
+   * live one keeps it (issue #5878).
+   */
+  isStartupLockHeldByLiveProcess(): boolean;
 }
 
 /**
@@ -557,16 +574,41 @@ export class DaemonManager implements DaemonManagerLike {
    * proxy processes try to start the daemon simultaneously.
    */
   async start(options: DaemonOptions = {}): Promise<void> {
-    const acquired = this.acquireLock();
-    if (!acquired) {
-      // Another process is starting the daemon — wait for it to become ready.
-      // Keep the full DAEMON_STARTUP_TIMEOUT_MS while that holder is alive (a
-      // legitimate cold start by another process — multi-simulator discovery —
-      // needs the full budget), but stop the moment the holder is gone. Without
-      // that early exit a crashed holder makes this wait run the full budget with
-      // nothing left to become ready, and the actionable failure below is produced
-      // only as the client's ~30s `tools/list` deadline expires (issue #5878).
+    if (!this.acquireLock()) {
+      await this.startByAwaitingLockHolder(options);
+      return;
+    }
+
+    try {
+      await this.startUnlocked(options);
+    } finally {
+      this.releaseLock();
+    }
+  }
+
+  /**
+   * Resolve a start where another process already holds the startup lock.
+   *
+   * Loops: wait for the current holder to publish the socket — exiting the wait the
+   * instant that holder dies, so a crashed holder cannot burn the client's ~30s
+   * `tools/list` deadline (issue #5878) — then, if it died, take over the lock, or
+   * if a *different* live process reclaimed it, wait on that replacement. A holder
+   * that stays alive keeps the full DAEMON_STARTUP_TIMEOUT_MS so a legitimate slow
+   * cold start by another process is not abandoned. Only once no live holder remains
+   * and a bounded readiness confirm still fails do we report the lock-holder startup
+   * failure — that confirm closes the race where a holder publishes its socket and
+   * releases its lock in the window between a poll's socket check and its liveness
+   * check.
+   */
+  private async startByAwaitingLockHolder(options: DaemonOptions): Promise<void> {
+    let holderLogPath: string | null = null;
+    let waitedOnPid = this.readStartupLockHolder().livePid;
+
+    for (let attempt = 1; attempt <= MAX_PEER_STARTUP_WAITS; attempt++) {
       stderrLog("Another process is starting the daemon, waiting...");
+      // Capture diagnostics while the current holder still holds the lock, so they
+      // survive into the failure message if the holder later releases on failure.
+      holderLogPath = (await this.getLockHolderStartupLogPath()) ?? holderLogPath;
       const ready = await this.waitForReady(DAEMON_STARTUP_TIMEOUT_MS, undefined, () =>
         this.isStartupLockHeldByLiveProcess(),
       );
@@ -574,9 +616,9 @@ export class DaemonManager implements DaemonManagerLike {
         stderrLog("Daemon started by another process");
         return;
       }
-      // Lock holder may have crashed — retry lock acquisition once
-      const retryAcquired = this.acquireLock();
-      if (retryAcquired) {
+
+      // The holder we waited on is gone — take over its start.
+      if (this.acquireLock()) {
         stderrLog("Previous lock holder failed, taking over daemon start...");
         try {
           await this.startUnlocked(options);
@@ -585,36 +627,23 @@ export class DaemonManager implements DaemonManagerLike {
         }
         return;
       }
-      // Another process won the retry race — wait for it to finish, again only as
-      // long as that retry holder is alive so the double-race failure stays
-      // deliverable before the client's request timeout (issue #5878).
-      stderrLog("Another process is retrying daemon start, waiting...");
-      const retryHolderLogPath = await this.getLockHolderStartupLogPath();
-      const retryReady = await this.waitForReady(DAEMON_STARTUP_TIMEOUT_MS, undefined, () =>
-        this.isStartupLockHeldByLiveProcess(),
-      );
-      if (retryReady) {
-        stderrLog("Daemon started by another process (retry)");
-        return;
+
+      // We could not take over, so the lock is still held. Keep waiting only for a
+      // genuinely different live holder (a replacement that reclaimed the lock while
+      // the prior one died); a stuck same holder or a now-dead lock ends the loop.
+      const current = this.readStartupLockHolder().livePid;
+      if (current === undefined || current === waitedOnPid) {
+        break;
       }
-      // The retry holder could publish its socket and release its lock in the
-      // narrow window between a poll's socket check and its liveness check, so the
-      // wait above can observe the lock gone the instant startup actually
-      // succeeded. Unlike the first contention pass, this path throws without a
-      // reacquire, so confirm the daemon really is not up — bounded so a genuine
-      // failure is still reported fast — before reporting failure (issue #5878).
-      if (await this.waitForReady(ABANDONED_WAIT_CONFIRM_TIMEOUT_MS)) {
-        stderrLog("Daemon became ready before reporting retry-holder failure");
-        return;
-      }
-      throw await this.createLockHolderStartupFailure(retryHolderLogPath);
+      waitedOnPid = current;
+      stderrLog("Startup lock reclaimed by another process, waiting again...");
     }
 
-    try {
-      await this.startUnlocked(options);
-    } finally {
-      this.releaseLock();
+    if (await this.waitForReady(ABANDONED_WAIT_CONFIRM_TIMEOUT_MS)) {
+      stderrLog("Daemon became ready before reporting startup failure");
+      return;
     }
+    throw await this.createLockHolderStartupFailure(holderLogPath);
   }
 
   /**
@@ -921,21 +950,18 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   /**
-   * Whether the daemon startup lock is currently held by a still-live process.
+   * Read the current owner of the daemon startup lock.
    *
-   * Early-exit predicate for the two lock-contention waits in {@link start}. When
-   * another process holds the startup lock and is bringing up the daemon, this
-   * process waits for the socket to publish. If the holder crashes — or fails and
-   * releases the lock — the plain readiness wait would keep polling for the full
-   * DAEMON_STARTUP_TIMEOUT_MS even though nothing will ever become ready, so the
-   * actionable lock-holder-startup-failure error is produced only as the client's
-   * own `tools/list` deadline expires (issue #5878). Giving up the instant the
-   * holder is gone makes that error deliverable, while a holder that is still alive
-   * keeps the full budget so a legitimate slow cold start by another process is not
-   * abandoned. Reuses the injected liveness checker and the shared lock format so
-   * there is one canonical primitive per concern rather than a second PID reader.
+   * `present` is true while there is a holder worth waiting for — a live PID, or a
+   * lock file mid-write whose PID is not yet readable; it is false once the lock is
+   * gone or its holder has died. `livePid` is that holder's PID when it is both
+   * readable and alive, else `undefined`, so a caller can tell a *replacement*
+   * holder (a different live PID) from the same one it was already waiting on.
+   *
+   * Reuses the injected liveness checker and the shared lock format so there is one
+   * canonical primitive per concern rather than a second PID reader (issue #5878).
    */
-  private isStartupLockHeldByLiveProcess(): boolean {
+  private readStartupLockHolder(): { present: boolean; livePid: number | undefined } {
     let content: string;
     try {
       content = readFileSync(this.lockFilePath, "utf-8").trim();
@@ -945,19 +971,40 @@ export class DaemonManager implements DaemonManagerLike {
       logger.debug(
         `[DaemonManager] Startup lock unreadable while waiting for holder: ${this.describeError(error)}`,
       );
-      return false;
+      return { present: false, livePid: undefined };
     }
     if (content.length === 0) {
       // A holder created the lock but has not written its PID yet (mirrors the
-      // fileLock mid-write window); treat as still held so we do not abandon it.
-      return true;
+      // fileLock mid-write window); treat as still held so we do not abandon it,
+      // but with no comparable identity yet.
+      return { present: true, livePid: undefined };
     }
     const { pid } = parseLockContent(content);
     if (!Number.isSafeInteger(pid) || pid <= 0) {
       // Unreadable PID — a holder may still be filling it in; keep waiting.
-      return true;
+      return { present: true, livePid: undefined };
     }
-    return this.isProcessRunning(pid);
+    return this.isProcessRunning(pid)
+      ? { present: true, livePid: pid }
+      : { present: false, livePid: undefined };
+  }
+
+  /**
+   * Whether the daemon startup lock is currently held by a still-live process.
+   *
+   * Early-exit predicate for the readiness waits that block on another process
+   * bringing up the daemon (in {@link start} and in `DaemonMcpProxy.startDaemon`'s
+   * "reports running but socket not yet published" branch). A plain readiness wait
+   * polls only the socket, so when the holder crashes — or fails and releases the
+   * lock — it keeps polling for the full DAEMON_STARTUP_TIMEOUT_MS even though
+   * nothing will ever become ready, and the actionable failure is produced only as
+   * the client's own `tools/list` deadline expires (issue #5878). Giving up the
+   * instant the holder is gone makes that error deliverable, while a holder that is
+   * still alive keeps the full budget so a legitimate slow cold start by another
+   * process is not abandoned.
+   */
+  isStartupLockHeldByLiveProcess(): boolean {
+    return this.readStartupLockHolder().present;
   }
 
   private async getLockHolderStartupLogPath(): Promise<string | null> {

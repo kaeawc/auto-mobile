@@ -1139,6 +1139,81 @@ describe("Daemon manager process detection", () => {
     }
   });
 
+  test("a live holder that publishes its socket between the reachability and startup budgets still succeeds (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-lock-contention-slow-publish-"));
+    const lockPath = join(dir, "daemon.lock");
+    const socketPath = join(dir, "daemon.sock");
+    const holderPid = 55559;
+    // The holder is alive and legitimately cold-starting; its socket only becomes
+    // connectable at ~15s — past the 10s reachability budget a blind bound would
+    // have used, but well within the 30s startup budget. The liveness pivot must
+    // keep waiting and reuse the daemon rather than reject the start (#5878).
+    const publishAtMs = 15_000;
+    writeFileSync(lockPath, formatLockContent(holderPid));
+    writeFileSync(socketPath, "socket placeholder");
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [],
+      isProcessRunning: (pid: number) => pid === holderPid,
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        throw new Error("should not spawn while the holder is alive");
+      },
+    };
+
+    class ContentionDaemonManager extends DaemonManager {
+      override acquireLock(): boolean {
+        return false;
+      }
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+    }
+
+    try {
+      const manager = new ContentionDaemonManager(
+        () => ({
+          async connect() {
+            // The socket is not connectable until the holder finishes publishing it.
+            if (fakeTimer.now() < publishAtMs) {
+              throw new Error("socket not published yet");
+            }
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        lockPath,
+        join(dir, "daemon.pid"),
+        socketPath,
+        processFinder,
+        processSpawner,
+      );
+
+      const startedAt = fakeTimer.now();
+      // Resolves (reuse) rather than rejecting — the slow-but-alive cold start is
+      // not abandoned at the reachability budget.
+      await manager.start();
+      const elapsed = fakeTimer.now() - startedAt;
+
+      expect(elapsed).toBeGreaterThanOrEqual(DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS);
+      expect(elapsed).toBeLessThan(DAEMON_STARTUP_TIMEOUT_MS);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("a dead holder plus a stalling stale socket still abandons fast — the probe cannot absorb the full budget (#5878)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "daemon-manager-lock-contention-stalling-socket-"));
     const lockPath = join(dir, "daemon.lock");

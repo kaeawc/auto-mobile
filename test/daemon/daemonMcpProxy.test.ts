@@ -17,7 +17,6 @@ import {
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
   DAEMON_STARTUP_TIMEOUT_MS,
-  DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
 } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -480,13 +479,19 @@ describe("DaemonMcpProxy", () => {
         waitForReadyCalls = 0;
         publishOnWaitForReady = true;
         lastWaitForReadyTimeout: number | undefined;
+        lastShouldContinueWaiting: (() => boolean) | undefined;
 
-        override async waitForReady(timeout: number): Promise<boolean> {
+        override async waitForReady(
+          timeout: number,
+          _signal?: AbortSignal,
+          shouldContinueWaiting?: () => boolean,
+        ): Promise<boolean> {
           this.waitForReadyCalls++;
           this.lastWaitForReadyTimeout = timeout;
+          this.lastShouldContinueWaiting = shouldContinueWaiting;
           if (this.publishOnWaitForReady) {
-            // Model the bounded readiness path observing the socket become
-            // connectable once the starting daemon finishes publishing it.
+            // Model the readiness path observing the socket become connectable once
+            // the starting daemon finishes publishing it.
             this.socketPublished = true;
             return true;
           }
@@ -576,7 +581,7 @@ describe("DaemonMcpProxy", () => {
           // The unreachable-running-daemon branch surfaces an actionable error
           // rather than the client seeing zero tools with no text (issue #5878).
           await expect(proxy.listTools()).rejects.toThrow(
-            /socket did not become reachable within \d+ms/,
+            /socket did not become reachable, and no live process is completing its startup/,
           );
           // The readiness deadline gates the connect: the client is never asked to
           // connect against a socket that was never published.
@@ -588,9 +593,10 @@ describe("DaemonMcpProxy", () => {
         }
       });
 
-      test("bounds the unreachable-running-daemon wait to the reachability budget so the error beats the client timeout (#5878)", async () => {
+      test("keeps the full startup budget and exits on holder liveness rather than a shorter bound (#5878)", async () => {
         const fakeManager = new StartingDaemonManager();
         fakeManager.publishOnWaitForReady = false;
+        fakeManager.startupLockHeldByLiveProcess = true;
         fakeManager.statusResult = {
           running: true,
           pid: 1234,
@@ -609,16 +615,20 @@ describe("DaemonMcpProxy", () => {
 
         try {
           await expect(proxy.listTools()).rejects.toThrow(
-            new RegExp(`within ${DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS}ms`),
+            /socket did not become reachable, and no live process is completing its startup/,
           );
-          // The wait for an already-running daemon's socket must use the bounded
-          // reachability budget, NOT the full 30s startup budget — otherwise the
-          // actionable error is produced only as the client's own ~30s tools/list
-          // deadline expires and the client sees zero tools (issue #5878). This is
-          // the existing-daemon branch; a daemon we spawn ourselves keeps the full
-          // budget.
-          expect(fakeManager.lastWaitForReadyTimeout).toBe(DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS);
-          expect(fakeManager.lastWaitForReadyTimeout).toBeLessThan(DAEMON_STARTUP_TIMEOUT_MS);
+          // A concurrent cold start writes its early-owner PID (status.running) well
+          // before it publishes the socket, so this wait must keep the FULL startup
+          // budget — not a shorter bound that would reject a start about to succeed —
+          // and instead exit early via the startup-lock liveness predicate (#5878).
+          expect(fakeManager.lastWaitForReadyTimeout).toBe(DAEMON_STARTUP_TIMEOUT_MS);
+          expect(fakeManager.lastShouldContinueWaiting).toBeDefined();
+          // The predicate delegates to the manager's live-holder check: flipping the
+          // manager flips what the predicate reports.
+          fakeManager.startupLockHeldByLiveProcess = true;
+          expect(fakeManager.lastShouldContinueWaiting?.()).toBe(true);
+          fakeManager.startupLockHeldByLiveProcess = false;
+          expect(fakeManager.lastShouldContinueWaiting?.()).toBe(false);
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();

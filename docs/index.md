@@ -1,43 +1,111 @@
 # AutoMobile
 
-AutoMobile is an MCP server that lets AI agents control your Android & iOS devices using natural language. [Install it now](install.md) and [get started](using/ux-exploration.md).
+AutoMobile is an MCP server that lets AI agents control your Android & iOS
+devices using natural language. It uses standard platform tools like `adb` &
+`simctl` paired with its own additional Kotlin & Swift libraries and apps. All
+components are open source. The point is to provide mobile engineers with AI
+workflow tools to perform UX deep dives, reproduce bugs, and run automated
+tests.
 
-It uses standard platform tools like `adb` & `simctl` paired with its own additional Kotlin & Swift libraries and apps. All components are open source. The point is to provide mobile engineers with AI workflow tools to perform UX deep dives, reproduce bugs, and run automated tests.
+<style>
+  .install-command {
+    max-width: 42rem;
+  }
 
-??? example "See demo: Clock app alarm"
-![Setting an alarm in the Clock app](img/clock-app.gif)
-_An AI agent navigating to the Clock app, creating a new alarm_
+  .install-command code {
+    font-size: 0.72rem;
+  }
 
-??? example "See demo: YouTube search"
-![Searching YouTube for a video](img/youtube-search.gif)
-_An AI agent searching YouTube and browsing results_
+  .desktop-install-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin: 0.75rem 0 1.5rem;
+  }
 
-### Explore and Test
+  .desktop-install-options a {
+    border: 1px solid var(--md-default-fg-color--lighter);
+    border-radius: 0.5rem;
+    color: var(--md-default-fg-color);
+    min-width: 9rem;
+    padding: 0.5rem 0.75rem;
+    text-align: center;
+    text-decoration: none;
+  }
 
-| Task                                                                          | What it does                                                                         |
-| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| **[Explore app UX](using/ux-exploration.md)**                                 | Navigate your app, discover screens, map user flows, identify confusing interactions |
-| **[Reproduce bugs](using/reproducing-bugs.md)**                               | Paste a bug report and get exact reproduction steps with screenshots                 |
-| **[Create UI tests](using/ui-tests.md)**                                      | Describe test scenarios in plain English, get executable test plans                  |
-| **[Stage Android picker fixtures](using/android-shared-storage-fixtures.md)** | Prepare bounded Downloads files for system document and media pickers                |
-| **[Measure startup time](using/perf-analysis/startup.md)**                    | Profile cold and warm launch performance                                             |
-| **[Check scroll performance](using/perf-analysis/scroll-framerate.md)**       | Detect jank and dropped frames                                                       |
-| **[Audit contrast](using/a11y.md#contrast)**                                  | Find accessibility issues with color contrast                                        |
-| **[Check tap targets](using/a11y.md#tap-targets)**                            | Ensure touch targets meet size guidelines                                            |
+  .desktop-install-options a:hover {
+    border-color: var(--md-accent-fg-color);
+  }
 
-## How it works
+  .desktop-install-options span {
+    color: var(--md-default-fg-color--light);
+    display: block;
+    font-size: 0.7rem;
+  }
 
-- 🤖 **Fast UX Inspection** Kotlin [Accessibility Service](design-docs/plat/android/control-proxy.md) and Swift [CtrlProxy iOS](design-docs/plat/ios/ctrl-proxy-ios.md) to enable fast, accurate observations. 10x faster than the next fastest observation toolkit.
-- 🦾 **Full Touch Injection** Tap, Swipe, Pinch, Drag & Drop, Shake with automatic element targeting.
-- ♻️ **Tool Feedback** [Observations](design-docs/mcp/observe/index.md) drive the [interaction loop](design-docs/mcp/interaction-loop.md) for all [tool calls](design-docs/mcp/tools.md).
-- 🧪 **Test Execution** [Kotlin JUnitRunner](design-docs/plat/android/junit-runner/index.md) & [Swift XCTestRunner](design-docs/plat/ios/xctestrunner/index.md) execute tests natively handling device pooling, multi-device tests, and automatically optimizing test timing.
+</style>
 
-## License
+## Install
 
-```yaml
-Copyright 2025 Zillow, Inc.
-Copyright 2025-2026 Jason Pearson
+<details open markdown>
+<summary>One-line install</summary>
 
-Licensed under the Apache License, Version 2.0
-https://www.apache.org/licenses/LICENSE-2.0
+<div class="install-command" markdown>
+~~~bash
+curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/install.sh | bash
+~~~
+</div>
+
+Run this in your app repository for project configuration, or elsewhere for
+global configuration. Restart your MCP client when it finishes.
+
+![Install Demo](img/install.gif)
+
+<div class="desktop-install-options">
+  <a data-platform="macos" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.66/AutoMobile-0.0.66-macos.dmg" aria-label="Download AutoMobile Desktop App for macOS x86-64">
+    <strong>macOS</strong>
+    <span>x86_64 · DMG</span>
+  </a>
+  <a data-platform="linux" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.66/AutoMobile-0.0.66-linux.deb" aria-label="Download AutoMobile Desktop App for Linux x86-64">
+    <strong>Linux</strong>
+    <span>x86_64 · DEB</span>
+  </a>
+  <a data-platform="windows" href="https://github.com/kaeawc/auto-mobile/releases/download/0.0.66/AutoMobile-0.0.66-windows.msi" aria-label="Download AutoMobile Desktop App for Windows x86-64">
+    <strong>Windows</strong>
+    <span>x86_64 · MSI</span>
+  </a>
+</div>
+
+</details>
+
+<details markdown>
+<summary>Manual MCP configuration</summary>
+
+```json
+{
+  "command": "bunx",
+  "args": ["@kaeawc/auto-mobile@latest"]
+}
+```
+
+Place this server in the client’s documented MCP configuration, then restart
+the client. Going this route means you're going to handle dependencies like having
+bun and ffmpeg.
+
+</details>
+
+### First use
+
+Open your configured agent and ask it to explore your mobile app. If you have a connected physical device it'll recognize it, otherwise it'll look for emulators / simulators to use or provision.
+
+Some common workflows:
+
+- [Explore an app](using/ux-exploration.md)
+- [Reproduce a bug](using/reproducing-bugs.md)
+- [Measure performance](using/performance.md)
+
+### Uninstall
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/uninstall.sh | bash
 ```

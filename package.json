@@ -44,7 +44,6 @@
     "test:fast": "bash scripts/test-fast.sh",
     "test:startup:bun": "bash scripts/ci/mcp-startup-smoke.sh",
     "test:image:bun": "bun scripts/ci/image-runtime-smoke.ts",
-    "test:image:sharp-bun-repro": "bash scripts/validate-sharp-bun-repro.sh",
     "test:memory-leaks": "bun --expose-gc scripts/detect-memory-leaks.ts",
     "test:integration:webrtc-mediamtx": "bash scripts/webrtc/run-mediamtx-publisher-integration.sh",
     "test:integration:webrtc-device": "bash scripts/webrtc/run-mediamtx-device-integration.sh",

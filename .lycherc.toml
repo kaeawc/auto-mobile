@@ -36,6 +36,14 @@ exclude_path = [
   ".git/",
   # Files not deployed (in .gitignore)
   "docs/contributing/index.md",
+  # Redirect shims target MkDocs' generated directory URLs, which do not exist
+  # in the source tree that lychee checks.
+  "docs/design-docs/mcp/tool-registration/index.html",
+  "docs/metrics/downloads/index.html",
+  "docs/using/a11y/index.html",
+  "docs/using/talkback/index.html",
+  "docs/using/tool-capabilities/index.html",
+  "docs/using/voiceover/index.html",
 ]
 
 # Accept status codes

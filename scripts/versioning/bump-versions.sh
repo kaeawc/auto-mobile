@@ -12,9 +12,8 @@ managed_path_patterns=(
   ".claude-plugin/plugin.json"
   "android/gradle.properties"
   "android/*/build.gradle.kts"
-  "docs/design-docs/mcp/daemon/client-frame-snapshot.md"
-  "docs/design-docs/mcp/daemon/client-screen-control.md"
-  "docs/design-docs/mcp/daemon/unix-socket-api.md"
+  "docs/index.md"
+  "docs/using/ui-tests.md"
   "ios/XCTestRunner/Sources/XCTestRunner/AutoMobileVersion.swift"
   "package.json"
   "server.json"
@@ -255,23 +254,20 @@ update_gradle_properties_version "android/gradle.properties" "${snapshot_version
 update_json_version_at ".claude-plugin/marketplace.json" "$new_version" "$dry_run" \
   "plugins.0.version"
 
-# Keep daemon consumer documentation aligned with the CtrlProxy artifacts that
-# ship in the release. These references are intentionally updated as part of
-# the same atomic version bump so prepare-release cannot leave main with a
-# stale docs-test fixture.
-update_ctrl_proxy_docs_version() {
+# Keep public installation and test-runner documentation aligned with the
+# released desktop installers and package coordinates.
+update_public_docs_version() {
   local version="$1"
   local dry="$2"
   local path
   local docs=(
-    "docs/design-docs/mcp/daemon/client-screen-control.md"
-    "docs/design-docs/mcp/daemon/client-frame-snapshot.md"
-    "docs/design-docs/mcp/daemon/unix-socket-api.md"
+    "docs/index.md"
+    "docs/using/ui-tests.md"
   )
 
   for path in "${docs[@]}"; do
     if [[ "$dry" == true ]]; then
-      echo "Would update CtrlProxy version references to $version in $path"
+      echo "Would update public documentation version references to $version in $path"
       continue
     fi
     python3 - "$path" "$version" <<'PY'
@@ -282,18 +278,31 @@ from pathlib import Path
 path = Path(sys.argv[1])
 version = sys.argv[2]
 text = path.read_text(encoding="utf-8")
-updated, count = re.subn(
-    r"(default `)[^`]+(` CtrlProxy artifacts)",
-    rf"\g<1>{version}\g<2>",
-    text,
+patterns = (
+    (r"(releases/download/)[^/]+", rf"\g<1>{version}"),
+    (
+        r"(AutoMobile-)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?(?=-(?:macos\.dmg|linux\.deb|windows\.msi))",
+        rf"\g<1>{version}",
+    ),
+    (r"(auto-mobile-junit-runner:)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", rf"\g<1>{version}"),
+    (r"(AUTOMOBILE_VERSION=)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", rf"\g<1>{version}"),
+    (r"(@kaeawc/auto-mobile@)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", rf"\g<1>{version}"),
+    (
+        r"(Replace `)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?(` with the version used by your test runner dependency\.)",
+        rf"\g<1>{version}\g<2>",
+    ),
 )
+count = 0
+for pattern, replacement in patterns:
+    text, replacements = re.subn(pattern, replacement, text)
+    count += replacements
 if count == 0:
-    raise SystemExit(f"no default CtrlProxy version reference found in {path}")
-path.write_text(updated, encoding="utf-8")
+    raise SystemExit(f"no version reference found in {path}")
+path.write_text(text, encoding="utf-8")
 PY
   done
 }
-update_ctrl_proxy_docs_version "$new_version" "$dry_run"
+update_public_docs_version "$new_version" "$dry_run"
 
 # Keep the iOS XCTestRunner's baked client version in sync (mirrors Android's jar
 # Implementation-Version). The daemon's version handshake compares the release portion,

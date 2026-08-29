@@ -15,7 +15,7 @@ setup() {
   mkdir -p "${TEST_ROOT}/.claude-plugin" \
     "${TEST_ROOT}/android/junit-runner" \
     "${TEST_ROOT}/android/playground/app" \
-    "${TEST_ROOT}/docs/design-docs/mcp/daemon" \
+    "${TEST_ROOT}/docs/using" \
     "${TEST_ROOT}/ios/XCTestRunner/Sources/XCTestRunner" \
     "$BIN_DIR"
   write_fake_rg
@@ -55,14 +55,13 @@ EOF
 { "version": "0.0.1", "packages": [ { "identifier": "@kaeawc/auto-mobile", "version": "0.0.1" } ] }
 EOF
 
-  cat > "${TEST_ROOT}/docs/design-docs/mcp/daemon/client-screen-control.md" <<'EOF'
-- **Release availability:** the default `0.0.1` CtrlProxy artifacts predate `frameContext`
+  cat > "${TEST_ROOT}/docs/index.md" <<'EOF'
+https://github.com/kaeawc/auto-mobile/releases/download/0.0.1/AutoMobile-0.0.1-macos.dmg
 EOF
-  cat > "${TEST_ROOT}/docs/design-docs/mcp/daemon/client-frame-snapshot.md" <<'EOF'
-The default `0.0.1` CtrlProxy artifacts predate this protocol.
-EOF
-  cat > "${TEST_ROOT}/docs/design-docs/mcp/daemon/unix-socket-api.md" <<'EOF'
-default `0.0.1` CtrlProxy artifacts are legacy and cannot supply one.
+  cat > "${TEST_ROOT}/docs/using/ui-tests.md" <<'EOF'
+testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.1")
+export AUTOMOBILE_VERSION=0.0.1
+Replace `0.0.1` with the version used by your test runner dependency.
 EOF
 
   cat > "${TEST_ROOT}/android/gradle.properties" <<'EOF'
@@ -116,12 +115,12 @@ run_bump() {
   grep -q "^VERSION_NAME=${VERSION}-SNAPSHOT$" "${TEST_ROOT}/android/gradle.properties"
   grep -q "^version = \"${VERSION}-SNAPSHOT\"$" "${TEST_ROOT}/android/junit-runner/build.gradle.kts"
   grep -q "versionName = \"${VERSION}-SNAPSHOT\"" "${TEST_ROOT}/android/playground/app/build.gradle.kts"
-  grep -q "default \`${VERSION}\` CtrlProxy artifacts" \
-    "${TEST_ROOT}/docs/design-docs/mcp/daemon/client-screen-control.md"
-  grep -q "default \`${VERSION}\` CtrlProxy artifacts" \
-    "${TEST_ROOT}/docs/design-docs/mcp/daemon/client-frame-snapshot.md"
-  grep -q "default \`${VERSION}\` CtrlProxy artifacts" \
-    "${TEST_ROOT}/docs/design-docs/mcp/daemon/unix-socket-api.md"
+  grep -q "releases/download/${VERSION}/AutoMobile-${VERSION}-macos.dmg" \
+    "${TEST_ROOT}/docs/index.md"
+  grep -q "auto-mobile-junit-runner:${VERSION}" "${TEST_ROOT}/docs/using/ui-tests.md"
+  grep -q "AUTOMOBILE_VERSION=${VERSION}" "${TEST_ROOT}/docs/using/ui-tests.md"
+  grep -q "Replace \`${VERSION}\` with the version used by your test runner dependency" \
+    "${TEST_ROOT}/docs/using/ui-tests.md"
   # The Swift constant must be *regenerated* (not regex-edited in place): assert
   # the generator's output markers so a regression back to an in-place edit fails.
   grep -q "public static let current = \"${VERSION}\"" \

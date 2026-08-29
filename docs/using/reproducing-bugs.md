@@ -1,25 +1,36 @@
-# Reproducing Bugs
+# Reproducing bugs
 
-Use AutoMobile to systematically reproduce bugs and create reproducible test cases.
+Give an agent the app, platform, starting state, steps, and expected versus
+actual behavior. It can reproduce the issue, record what happened, and save a
+device snapshot for someone else to inspect.
 
-**Example Prompt**
+## Bug-report prompt
 
-> We're reproducing a bug report for the <app-name\> <Android\iOS\> app. When you encounter a defect or notice something off, highlight it, especially if it will help reproduce the bug. If reproduced take a device snapshot to make further reproduction and debugging easier.
+> Reproduce this bug in the <app-name> <Android|iOS> app:
 >
-> <bug-report-details-here>
+> <bug report>
+>
+> Report the exact steps, expected and actual results, device and OS version,
+> app version, and whether the issue reproduced consistently. Highlight defects
+> that will help another person reproduce it, then take a device snapshot.
 
-The agent will:
+<details open markdown>
+<summary>Workflow</summary>
 
-1. Attempt to find the relevant screen or behavior in the app
-2. Reproduce any steps or context provided to approximate the state.
-3. Draw [visual highlights](../design-docs/mcp/observe/visual-highlighting.md) around defects or important elements.
-4. Take a [snapshot](../design-docs/mcp/storage/snapshots.md) of device state to be shared on other machines.
+## What the agent does
 
-??? example "See demo: Bug reproduction"
-![Bug reproduction workflow](../img/bug-repro.gif)
-_Demo: An AI agent reproducing a sample counter bug and [highlighting](../design-docs/mcp/observe/visual-highlighting.md) the main issue._
+1. Finds the relevant screen and recreates the supplied context.
+2. Follows the suspected steps and records the observed result.
+3. Highlights the defect or important UI state.
+4. Captures a device snapshot when the reproduced state should be shared.
 
-**Best Practices**
+</details>
 
-- Include app state, user actions, expected vs actual behavior, stacktraces, any additional context.
-- Document the environment by noting device, OS version, app version.
+<details markdown>
+<summary>Demo</summary>
+
+## Bug reproduction
+
+![An AI agent reproducing a sample counter bug and highlighting the issue](../img/bug-repro.gif)
+
+</details>

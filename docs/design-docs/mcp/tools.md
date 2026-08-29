@@ -1,209 +1,141 @@
 # Tools
 
-> All tools listed here are <kbd>✅ Implemented</kbd> and <kbd>🧪 Tested</kbd> unless noted otherwise. See the [Status Glossary](../status-glossary.md) for chip definitions.
+This page reflects the current MCP tool schema. Availability can still vary by
+platform, runner, and enabled feature gates; inspect the registered schema for
+the exact arguments supported by your connection.
 
-#### Observe
+## Observe & navigate
 
-Almost all other tool calls have built-in observation via the [interaction loop](interaction-loop.md), but we also have a standalone [observe](observe/index.md) tool that specifically performs just that action to get the AI agent up to speed. Its `waitFor` DSL can wait for `appear`, `disappear`, `clickable`, `textEquals`, `countStable`, or whole-screen `stable`; wait responses include the final observation, state, poll count, elapsed time, and relevant match or timeout candidates. The legacy `waitFor` forms remain supported.
+| Tool                                 | What it does                                               |
+| ------------------------------------ | ---------------------------------------------------------- |
+| 👀 <code>observe</code>              | Gets the current screen view hierarchy.                    |
+| 🔍 <code>explore</code>              | Explores an app to build a navigation graph.               |
+| 🗺️ <code>navigateTo</code>           | Navigates using the learned navigation graph.              |
+| 📊 <code>getNavigationGraph</code>   | Retrieves the navigation graph for debugging.              |
+| 🔗 <code>identifyInteractions</code> | Suggests likely interactions.                              |
+| 🖍️ <code>highlight</code>            | Draws a visual highlight around a UI element.              |
+| 🔍 <code>debugSearch</code>          | Shows selector matches, the chosen match, and near-misses. |
 
-#### Interactions
+## Interact with the UI
 
-- 👆 `tapOn` supports tap, double-tap, long press, and long-press drag actions. Selectors include `selector.text`, `selector.textAny`, and `selector.elementId`; `sibling: true` taps a clickable sibling of the selector match. When multiple elements match, `index` (0-based) taps the Nth on-screen match instead of applying `selectionStrategy`. Semantic links are activated natively on Android and iOS with `selector: { accessibilityLink: "Terms of Service" }` (use `index` for duplicate labels), or `subtext: { text: "Terms of Service", occurrence: 0 }` scoped to a stable outer selector. Unsupported, flattened, stale, or ambiguous links fail explicitly and never fall back to tapping the container.
-- 👉 `swipeOn` handles directional swipes and scrolling within container bounds.
-- ↔️ `dragAndDrop` for element-to-element moves.
-- 🔍 `pinchOn` for zoom in/out gestures.
-- 📳 `shake` for accelerometer simulation.
+| Tool                          | What it does                                                         |
+| ----------------------------- | -------------------------------------------------------------------- |
+| 👆 <code>tapOn</code>         | Taps by text, content description, resource ID, or Android test tag. |
+| 🎯 <code>tapAny</code>        | Taps any clickable element, optionally scoped to a container.        |
+| 👉 <code>swipeOn</code>       | Swipes or scrolls the screen or an element.                          |
+| ↔️ <code>dragAndDrop</code>   | Drags one element to another.                                        |
+| 🤏 <code>pinchOn</code>       | Pinches to zoom.                                                     |
+| ⌨️ <code>inputText</code>     | Types text; its optional mode is Android-only.                       |
+| 🧩 <code>setUIState</code>    | Sets multiple form fields to a desired state.                        |
+| 🗑️ <code>clearText</code>     | Clears the focused input.                                            |
+| ✨ <code>selectAllText</code> | Selects all text in the focused input.                               |
+| ↩️ <code>imeAction</code>     | Performs an IME action.                                              |
+| 🔘 <code>pressButton</code>   | Presses a device or navigation button.                               |
+| ⌨️ <code>keyboard</code>      | Opens, closes, or detects the on-screen keyboard.                    |
+| 📋 <code>clipboard</code>     | Copies, pastes, clears, or reads the clipboard.                      |
 
-All Interactions tools — including `pinchOn`, which routes coordinate-based pinch/zoom through the runner's synthesized two-finger events — run on **Android** (physical devices and emulators) and **iOS** via the XCUITest CtrlProxy runner. iOS support is currently <kbd>📱 Simulator Only</kbd> (see the [iOS overview](../plat/ios/index.md)). `shake` is the one exception with no physical-iOS path even once physical support lands, because XCTest exposes no shake API for real devices — it returns an actionable error there.
+??? note "Pinch rotation semantics"
 
-> **`pinchOn` `rotationDegrees` semantics.** `rotationDegrees` (default `0`) is how far the two-finger axis rotates _during_ the pinch: the fingers start on the horizontal axis and finish on an axis rotated by `rotationDegrees`. A non-zero value therefore performs a combined **pinch + rotate**, not a pinch along a fixed rotated axis. The default `0` is a plain pinch/zoom and is unaffected. Both the Android and iOS runners deliberately share this convention so pinch results match across platforms — if you ever change it, change both runners together (see issue #2911). **Decision (#2911):** this start-horizontal / end-rotated behavior is intentional and documented rather than changed, to preserve existing cross-platform pinch results; revisit only if a concrete caller needs a pinch along a fixed rotated axis, and then only as a coordinated Android + iOS change.
+    <code>pinchOn.rotationDegrees</code> describes how far the two-finger axis rotates
+    during the pinch. The fingers start horizontally and finish on the rotated
+    axis, so a non-zero value combines pinch and rotation. The default <code>0</code> is
+    a plain pinch. Android and iOS share this convention.
 
-#### App Management
+## Apps, files & app data
 
-- 📱 Installed apps are exposed via the `automobile:apps` resource with query filters.
-- 🚀 `launchApp` starts apps by package name (with optional clear-app-data support).
-- ❌ `terminateApp` force-stops an app by package name.
-- 📦 `installApp` installs an APK.
-- 📄 `putAppFile` writes a local file, UTF-8 text, or base64 binary content into logical `app_containers`, Android `user_files`, and Android or iOS Simulator `media_library` targets.
-- 📂 `stageSharedStorageFixtures` writes a batch of local, UTF-8, or base64 fixtures beneath an isolated Android `Download/<namespace>` directory for document and media picker workflows.
-- 🔗 `getDeepLinks` reads registered deep links/intent filters for an Android package.
+| Tool                                                                                             | What it does                                                                                                               |
+| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| 📱 <code>listApps</code>                                                                         | Provides guidance for listing installed apps through MCP resources.                                                        |
+| 🚀 <code>launchApp</code>                                                                        | Launches an app by package name.                                                                                           |
+| ❌ <code>terminateApp</code>                                                                     | Terminates an app by package name.                                                                                         |
+| 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                       |
+| 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                    |
+| 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                               |
+| 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 content into an app container.                                                         |
+| ⚙️ <code>getPreference</code> / ⚙️ <code>setPreference</code>                                    | Reads or writes Android system properties, SharedPreferences, or iOS UserDefaults.                                         |
+| 🔑 <code>setKeyValue</code> / 🔑 <code>removeKeyValue</code> / 🔑 <code>clearKeyValueFile</code> | Manages an app key-value storage file.                                                                                     |
+| 🗃️ <code>listDataStores</code> / 🗃️ <code>getDataStore</code>                                    | Lists or reads Android Jetpack DataStore entries with the SDK adapter.                                                     |
+| 🗄️ <code>sqlQuery</code>                                                                         | Executes SQL against an app SQLite database.                                                                               |
+| 🔐 <code>resetKeychain</code>                                                                    | Resets all Keychain data on an iOS Simulator after explicit confirmation; unsupported on Android and physical iOS devices. |
 
-Copy a fixture into an app container:
+??? example "Copy a fixture into an app container"
 
-```json
-{
-  "tool": "putAppFile",
-  "params": {
-    "appId": "com.example.app",
-    "container": "documents",
-    "sourcePath": "/Users/me/fixtures/welcome.png",
-    "destinationPath": "fixtures/welcome.png",
-    "platform": "ios"
-  }
-}
-```
-
-Write inline configuration without a temporary file:
-
-```json
-{
-  "tool": "putAppFile",
-  "params": {
-    "appId": "com.example.app",
-    "container": "documents",
-    "contentText": "{\"experiments\":{\"newOnboarding\":false}}",
-    "destinationPath": "config/experiments.json",
-    "platform": "android"
-  }
-}
-```
-
-After writing, use `automobile:devices/{deviceId}/apps/{appId}/files/{container}` to list files or `automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}` to read one back. Prefer this API over direct `adb push`, `run-as`, or `simctl get_app_container` copy commands.
-
-Stage shared-storage fixtures for a system picker:
-
-```json
-{
-  "tool": "stageSharedStorageFixtures",
-  "params": {
-    "namespace": "checkout-123",
-    "reset": true,
-    "files": [
-      {
-        "destinationPath": "receipts/order.pdf",
-        "contentText": "receipt"
-      },
-      {
-        "destinationPath": "photos/item.png",
-        "sourcePath": "/Users/me/fixtures/item.png"
+    ~~~json
+    {
+      "tool": "putAppFile",
+      "params": {
+        "platform": "ios",
+        "target": {
+          "domain": "app_containers",
+          "appId": "com.example.app",
+          "container": "documents"
+        },
+        "files": [
+          {
+            "sourcePath": "/Users/me/fixtures/welcome.png",
+            "destinationPath": "fixtures/welcome.png"
+          }
+        ]
       }
-    ],
-    "platform": "android"
-  }
-}
-```
+    }
+    ~~~
 
-The namespace is limited to one safe child directory; file paths must be
-relative, and reset deletes only that namespace. `putAppFile` should be used
-for new picker fixtures: `target.domain: "user_files"` uses the resolved
-profile's `Download/<namespace>` location. On Android, `media_library` uses
-the bounded AutoMobile media namespace and reports success only once MediaStore
-discovers the file. On iOS Simulators, it imports a supported image or video
-filename through `simctl addmedia` and reports import separately from
-unverified picker visibility. `stageSharedStorageFixtures` remains a
-compatibility alias for existing callers.
+??? note "File containers"
 
-Android app files support `externalFiles` through `/sdcard/Android/data/{appId}/files`. Use this for app-readable fixture files that do not require private app storage:
+    Android <code>externalFiles</code> maps to <code>/sdcard/Android/data/{appId}/files</code>.
+    Private containers (<code>documents</code>, <code>cache</code>, and <code>tmp</code>) use
+    <code>run-as</code> and require a debuggable app. iOS simulator containers include
+    <code>documents</code>, <code>library</code>, <code>cache</code>, and <code>tmp</code>.
 
-```json
-{
-  "tool": "putAppFile",
-  "params": {
-    "appId": "com.example.app",
-    "container": "externalFiles",
-    "sourcePath": "/Users/me/fixtures/document.pdf",
-    "destinationPath": "fixtures/document.pdf",
-    "platform": "android"
-  }
-}
-```
+## Devices & system state
 
-Android private containers (`documents`, `cache`, and `tmp`) use `run-as {appId}` and require a debuggable app build. Non-debuggable apps fail with an actionable error instead of reporting a successful write. `library` is not an Android container; use `documents`, `cache`, `tmp`, or `externalFiles`.
+| Tool                                                                           | What it does                                                               |
+| ------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| 📋 <code>listDevices</code>                                                    | Provides guidance for listing devices through MCP resources.               |
+| 🖼️ <code>listDeviceImages</code>                                               | Lists available device images.                                             |
+| 🤖 <code>getAndroid</code> / 🍎 <code>getApple</code>                          | Finds or recovers an Android AVD or iOS Simulator for automation.          |
+| 🧱 <code>provisionDevice</code>                                                | Provisions an exact virtual-device identity.                               |
+| 🔧 <code>setActiveDevice</code>                                                | Sets the active device.                                                    |
+| ❌ <code>killDevice</code> / 🧹 <code>deleteDevice</code>                      | Stops a device, or stops and permanently deletes it.                       |
+| 📸 <code>deviceSnapshot</code>                                                 | Captures or restores a device snapshot.                                    |
+| 🔄 <code>rotate</code>                                                         | Changes device orientation.                                                |
+| 🌐 <code>openLink</code>                                                       | Opens web URLs or routes app and universal deep links.                     |
+| 🧰 <code>homeScreen</code> / <code>recentApps</code> / <code>systemTray</code> | Controls core system surfaces and notifications.                           |
+| 🔓 <code>wakeAndUnlock</code>                                                  | Wakes and unlocks the keyguard.                                            |
+| 🌍 <code>changeLocalization</code>                                             | Changes locale, time zone, text direction, time format, and calendar.      |
+| ⚙️ <code>getDeviceState</code> / ⚙️ <code>setDeviceState</code>                | Reads or changes Do Not Disturb and simulator biometric enrollment.        |
+| 🧬 <code>getIosSimulatorCapabilities</code>                                    | Discovers biometrics for a selected iOS Simulator device type and runtime. |
+| 🫆 <code>biometricAuth</code>                                                  | Simulates biometric authentication.                                        |
+| 📳 <code>shake</code>                                                          | Shakes an Android emulator or iOS Simulator.                               |
+| 📞 <code>phoneCall</code> / 💬 <code>sendSms</code>                            | Simulates an Android emulator phone call or incoming SMS.                  |
+| 🔔 <code>postNotification</code>                                               | Posts a notification through Android SDK hooks or iOS Simulator push.      |
+| 🔔 <code>getNotificationPolicy</code> / 🔔 <code>setNotificationPolicy</code>  | Reads or changes app notification and Do Not Disturb policy.               |
+| 🛂 <code>getAppPermissions</code> / 🛂 <code>setAppPermissions</code>          | Reads or changes app permissions.                                          |
 
-iOS app files are supported for simulators through `xcrun simctl get_app_container {deviceId} {bundleId} data`. Logical containers map to the app data container as follows:
+## Network, plans & recording
 
-| Container   | iOS path         |
-| ----------- | ---------------- |
-| `documents` | `Documents`      |
-| `library`   | `Library`        |
-| `cache`     | `Library/Caches` |
-| `tmp`       | `tmp`            |
+| Tool                                                           | What it does                                                                              |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| 🌐 <code>network</code>                                        | Controls network capture and error simulation.                                            |
+| 🎭 <code>mockNetwork</code> / 🧹 <code>clearMockNetwork</code> | Adds or clears mock network response rules.                                               |
+| 🕸️ <code>getNetworkGraph</code>                                | Returns the aggregate captured network graph.                                             |
+| 🧪 <code>executePlan</code>                                    | Executes YAML plan steps and stops at the first failure.                                  |
+| 🔒 <code>criticalSection</code>                                | Synchronizes devices, then runs steps serially.                                           |
+| 🚧 <code>barrier</code>                                        | Synchronizes devices, then lets them proceed concurrently.                                |
+| 📝 <code>recordSteps</code>                                    | Records MCP calls to YAML; begin and end require <code>--mcp-recording</code>.            |
+| ⏺️ <code>startTestRecording</code>                             | Starts recording user interactions for <code>exportPlan</code>.                           |
+| 📤 <code>exportPlan</code>                                     | Stops the active recording and exports a YAML plan.                                       |
+| 🎥 <code>videoRecording</code>                                 | Starts or stops device video recording.                                                   |
+| 🐛 <code>bugReport</code>                                      | Saves screen state, hierarchy, logs, window info, and a screenshot to a shareable report. |
 
-Use `documents` for user-visible fixtures, `cache` for cache-like test data, and `tmp` for temporary files:
+## Accessibility & session tools
 
-```json
-{
-  "tool": "putAppFile",
-  "params": {
-    "appId": "com.example.app",
-    "container": "cache",
-    "contentBase64": "AAEC/w==",
-    "destinationPath": "fixtures/image.bin",
-    "platform": "ios"
-  }
-}
-```
+| Tool                               | What it does                                                                        |
+| ---------------------------------- | ----------------------------------------------------------------------------------- |
+| ♿ <code>accessibility</code>      | Reads or controls Android TalkBack and iOS VoiceOver, returning fresh device state. |
+| 🎯 <code>accessibilityFocus</code> | Sets or clears Android TalkBack focus by resource ID, text, or content description. |
+| 🔀 <code>setToolEnabled</code>     | Enables or disables one exact AutoMobile tool for the current MCP session.          |
 
-Manual emulator validation for Android:
-
-```sh
-printf '{"enabled":true}\n' > /tmp/automobile-settings.json
-# Call putAppFile with appId=com.example.app, container=externalFiles,
-# sourcePath=/tmp/automobile-settings.json, destinationPath=config/settings.json.
-adb shell cat /sdcard/Android/data/com.example.app/files/config/settings.json
-```
-
-Manual simulator validation for iOS:
-
-```sh
-printf 'hello simulator\n' > /tmp/automobile-ios-fixture.txt
-# Call putAppFile with appId=com.example.app, container=documents,
-# sourcePath=/tmp/automobile-ios-fixture.txt, destinationPath=fixtures/hello.txt.
-APP_CONTAINER=$(xcrun simctl get_app_container booted com.example.app data)
-cat "$APP_CONTAINER/Documents/fixtures/hello.txt"
-```
-
-#### Input Methods
-
-- ⌨️ `inputText` and `imeAction` for typing and IME actions.
-- 🗑️ `clearText` and `selectAllText` act on the focused field.
-- 🔘 `pressButton` or `pressKey` for back/home/recent/power/volume.
-
-#### Device Configuration
-
-- 🔄 `rotate` sets portrait or landscape.
-- 🌐 `openLink` launches URLs or deep links.
-- 🧰 `systemTray`, `homeScreen`, and `recentApps` control system surfaces.
-- 🔔 `postNotification` posts notifications from the app-under-test when SDK hooks are installed.
-- 🌍 `changeLocalization` sets locale, time zone, text direction, and time format in one call. Android locale changes require `appId`; Android 13+ uses non-root app-scoped locales, while older Android versions automatically verify root-capable ADB before using the system locale fallback.
-
-#### Navigation & Exploration
-
-- 🗺️ `navigateTo` navigates to a specific screen using learned paths from the navigation graph.
-- 🔍 [`explore`](nav/explore.md) automatically explores the app and builds the navigation graph by intelligently selecting and interacting with UI elements.
-- 📊 `getNavigationGraph` retrieves the current navigation graph for debugging and analysis.
-
-#### Advanced Device Management
-
-- 📋 Device inventory and pool status are exposed via the `automobile:devices/booted` resource.
-- 🚀 `startDevice` starts a device with the specified device image.
-- 🧱 `provisionDevice` creates or adopts an exact virtual-device identity. Its optional `device.spec.displayCutout` preference (`none`, `notch`, `dynamic_island`, `hole_punch`, or `any`) verifies the supplied exact device type; it never substitutes a different type. Successful responses report the resolved classification. It requires the `device-control` capability.
-- ❌ `killDevice` terminates a running device.
-- 🧹 `deleteDevice` stops and permanently deletes a device identified by its `platform` and stable identity from `automobile:devices/booted`, then verifies its absence from that platform inventory.
-- 🔧 `setActiveDevice` sets the active device for subsequent operations. It is a
-  compatibility API; new multi-client daemon integrations should bind a
-  device-pool session when the MCP connection starts.
-
-#### Testing & Debugging {#testing-debugging}
-
-- 🧪 `executePlan` (daemon mode only) executes a series of tool calls from a YAML plan content, stopping if any step fails.
-- 🔒 `criticalSection` (daemon mode only) coordinates multiple devices at a synchronization barrier for serialized steps.
-- 🩺 `doctor` runs diagnostic checks to verify AutoMobile setup and environment configuration.
-- 🐛 `bugReport` generates a comprehensive bug report including screen state, view hierarchy, a bounded device-log tail (Android logcat, or a bounded/timestamped iOS device log — default 1000 entries, 256 KiB), screenshot, and optional highlight metadata.
-- 🔍 `debugSearch` debugs element search operations to understand why elements aren't found or wrong elements are selected.
-- 📸 `rawViewHierarchy` gets raw view hierarchy data (XML/JSON) without parsing for debugging.
-- 🖍️ `highlight` draws visual overlays to highlight areas of the screen during debugging. <kbd>🤖 Android</kbd> <kbd>🍎 iOS</kbd>
-- 🔗 `identifyInteractions` suggests likely interactions with ready-to-use tool calls (debug-only; enable the debug feature flag).
-
-#### Network & Connectivity
-
-- `setNetworkState` — Wi-Fi, cellular, and airplane mode control. ADB commands validated on API 35. <kbd>❌ Not Implemented</kbd> _(MCP tool not yet built; see [network-state.md](../plat/android/network-state.md))_
-
-#### Accessibility
-
-- `setTalkBackEnabled`, `setA11yFocus`, `announce` — TalkBack simulation and enablement. ADB commands validated. <kbd>❌ Not Implemented</kbd> _(MCP tools not yet built; see [talkback.md](../plat/android/talkback.md))_
-
-#### Daemon & Session Management
-
-- 📋 Device pool status is exposed via the `automobile:devices/booted` resource.
-- Daemon management and IDE operations are exposed via the [Unix Socket API](daemon/unix-socket-api.md) (not MCP tools).
+For the observe → act → observe behavior behind interaction tools, see the
+[interaction loop](interaction-loop.md). For per-session public tool
+selection, see [Dynamic Tools](../../using/dynamic-tools.md).

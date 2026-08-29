@@ -3,7 +3,7 @@ name: "Release Download Metrics"
 # Snapshot cumulative GitHub release-asset download counts + npm daily downloads
 # once a day and commit the dated snapshot to main. GitHub's API exposes only the
 # cumulative count per asset, so daily figures are only recoverable by diffing
-# consecutive daily snapshots (see docs/metrics/downloads.md). History before the
+# consecutive daily snapshots (see docs/metrics/usage-data.md). History before the
 # first run is unrecoverable — the first run seeds day-0.
 on:
   workflow_dispatch:

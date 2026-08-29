@@ -1,86 +1,74 @@
 # FAQ
 
-#### What can I use this for?
+## What does AutoMobile do?
 
-- [Explore app ux](using/ux-exploration.md), [create UI tests](using/ui-tests.md), and easily create [bug reports](using/reproducing-bugs.md) with built-in [video recording](design-docs/mcp/observe/video-recording.md) and [visual highlights](design-docs/mcp/observe/visual-highlighting.md).
-- Measure [startup](using/perf-analysis/startup.md), [scroll framerate](using/perf-analysis/scroll-framerate.md), and [screen transitions](using/perf-analysis/screen-transition.md).
-- Audit accessibility compliance with [contrast ratios](using/a11y.md#contrast) & [tap targets](using/a11y.md#tap-targets).
-- (Coming soon) record tests via AutoMobile's companion Android Studio plugin.
-- Run tests natively via [JUnitRunner for Android](design-docs/plat/android/junit-runner/index.md) and [XCTestRunner for iOS](design-docs/plat/ios/xctestrunner/index.md).
+It gives an MCP-compatible AI client tools to observe screens, interact with
+apps, manage devices, create plans, and collect workflow or performance data.
+See the [workflow guides](using/ux-exploration.md).
 
-#### Why another MCP? Aren't they all worthless?
+## Which devices are supported?
 
-MCP is currently the best way to give AI agents **deterministic tools**. Most MCPs just provide simple data access as API wrappers. There is no simple API to wrap to truly conduct mobile device automation as of 2026 and it does not appear that anyone else is creating one.
+Android devices and emulators, plus iOS devices and simulators. Android host
+support uses the Android SDK and `adb`; iOS simulator support requires macOS
+and Xcode. The installer checks the available host tooling and reports missing
+requirements.
 
-#### Won't this bloat my context window a lot?
+## How do I see or start a device?
 
-As for context bloat there are MCP benchmarks we run on every change that keep context usage as low as possible while delivering value. Most MCPs take up 50-100k tokens just being loaded into memory. AutoMobile keeps all of its tools, resources, and templates around 12k. We're committed to keeping this usage low and finding new ways to reduce it.
+MCP clients can acquire a device with `getAndroid` or `getApple`; use
+`listDevices` to inspect devices that are already available. The CLI also
+exposes the compatibility `startDevice` command:
 
-#### Is my AI agent supported?
-
-Any MCP tool-compatible client. See [installation](install.md) for configuration examples. The project does make use of MCP resources because they have significant advantages and adoption across AI agents, please file an issue if this is not supported in your workflow.
-
-#### Do I need root access?
-
-No. Core automation works with standard `adb` permissions on emulators and physical devices. Some advanced features are emulator-only and are called out as such.
-
-#### After installation how do I get it to look at a device?
-
-If you have already connected an Android or iOS device to your computer AutoMobile will automatically detect and assume it should run automation on it. Otherwise it looks for installed system images and provides tools to start one of them.
-
-#### What happens if I have more than one device?
-
-Yes. AutoMobile supports multiple connected devices with automatic selection for CI/parallel testing. For consistent device selection, use `setActiveDevice` or connect only one device.
-
-#### Does it affect app performance?
-
-No. Almost all functionality works without adding the Android AutoMobile SDK to your app. That library currently provides better navigation graph alignment and Compose recomposition count data and is only meant to be run in internal variants.
-
-#### Where is data stored?
-
-| Location                        | Contents                                                                                            |
-| ------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `~/.auto-mobile/logs/`          | Structured daemon/client logs and daemon-launch captures (overridable with `AUTOMOBILE_LOG_DIR`)    |
-| `~/.auto-mobile/`               | Caches, screenshots, tool outputs, and other non-log state (overridable with `AUTOMOBILE_DATA_DIR`) |
-| `~/.auto-mobile/auto-mobile.db` | Navigation graph, tool history, test records, performance records                                   |
-
-Logs rotate at 10MB. Observe caches expire after a short TTL.
-
-#### My app crashed while using AutoMobile
-
-Assuming you haven't tried out the platform specific SDK integration, that's your app. If AutoMobile can cause a crash, so can a user.
-
-#### What data is collected?
-
-View hierarchy and screenshots for the foreground app, stored locally. Vision fallback (if enabled) sends screenshots to your configured model provider. No built-in analytics.
-
-### How do I report bugs or request features?
-
-- [File issues on the GitHub repository](https://github.com/kaeawc/auto-mobile/issues)
-- Include device information, logs, and reproduction steps. For bonus points include an AutoMobile plan. It would be best
-  if reproductions could point at publicly available apps that have been released. I've done my testing against
-  Zillow, Slack, Google Keep, YouTube Music, Bluesky, Google Calendar, and more.
-- Feature requests are welcomed as are contributions. Please file an issue before starting a contribution.
-
-#### What about existing `androidTest` code?
-
-[`rm -rf`](https://www.github.com/kaeawc/auto-mobile/blob/main/scripts/delete_androidTest.sh)
-
-No seriously, once you're fully on AutoMobile you should just delete them. Use the above script; by default it performs
-a dry run and tells you exactly what it would delete. Only do this after you've fully migrated your project.
-
-```shell
-../scripts/delete_androidTest.sh --execute
-🧹 Cleaning up androidTest sources and dependencies...
-📍 Working in: ~/kaeawc/auto-mobile/junitrunner
-🗂️ [DRY RUN] Removing androidTest source directories...
-📝 [DRY RUN] Removing androidTestImplementation dependencies...
-🧽 [DRY RUN] Cleaning up empty test directories...
-✅ Cleanup complete!
-🔍 You may want to review changes before committing
+```bash
+auto-mobile --cli listDevices
+auto-mobile --cli startDevice --platform android
 ```
 
-## Getting Help
+Replace `android` with `ios` when needed. `startDevice` selects or boots a
+matching existing device; use `auto-mobile --cli help startDevice` for filters
+and options.
 
-- **Issues**: [GitHub Issues](https://github.com/kaeawc/auto-mobile/issues)
-- **Include**: Device info, logs, reproduction steps, AutoMobile plan if possible
+## What if I have more than one device?
+
+Use `listDevices` to inspect them and `setActiveDevice` to select one. For
+repeatable CLI calls, associate calls with the session UUID returned when you
+acquire a device and pass it with `--session-uuid`.
+
+## My MCP client cannot see AutoMobile. What should I do?
+
+Run the installer again and select the intended client and configuration scope,
+then restart the client. For a direct check, run:
+
+```bash
+auto-mobile --cli help
+```
+
+If the CLI is not installed, use:
+
+```bash
+bunx @kaeawc/auto-mobile@latest --cli help
+```
+
+## Does AutoMobile require root access?
+
+No. Core automation uses normal `adb` permissions for Android and the standard
+Apple development tools for iOS. Some capabilities are limited to emulators
+or simulators.
+
+## Where is AutoMobile data stored?
+
+By default, AutoMobile stores its database, caches, screenshots, and logs under
+`~/.auto-mobile`. Set `AUTOMOBILE_DATA_DIR` to move non-log state or
+`AUTOMOBILE_LOG_DIR` to move logs. See [environment variables](using/environment-variables.md)
+for the complete list.
+
+## Does AutoMobile send my app data anywhere?
+
+State and logs are stored locally by default. If vision fallback is enabled,
+screenshots are sent to the configured model provider. Configure or disable
+that feature according to your client and model-provider setup.
+
+## How do I report a problem?
+
+[Open a GitHub issue](https://github.com/kaeawc/auto-mobile/issues) with the
+device and host details, reproduction steps, and relevant AutoMobile logs.

@@ -2,7 +2,9 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** `systemTray` MCP tool is fully implemented with open/close/find/tap/dismiss/clearAll actions. Collapsed notification groups are automatically expanded before tapping. See the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Current state:** `systemTray` is implemented with
+> open/close/find/tap/dismiss/clearAll actions. Collapsed notification groups
+> are automatically expanded before tapping.
 
 ## Goal
 

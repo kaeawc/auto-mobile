@@ -42,10 +42,7 @@ function deepEqualJsonish(a: unknown, b: unknown): boolean {
     return ka.every(
       (k) =>
         Object.prototype.hasOwnProperty.call(b, k) &&
-        deepEqualJsonish(
-          (a as Record<string, unknown>)[k],
-          (b as Record<string, unknown>)[k],
-        ),
+        deepEqualJsonish((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
     );
   }
   return a === b;
@@ -99,7 +96,9 @@ describe("nonFiniteJson (property-based)", () => {
     // must be a structural no-op: the common case is every tool request that
     // carries no non-finite argument.
     fc.assert(
-      fc.property(fc.jsonValue(), (value) => deepEqualJsonish(reviveNonFiniteNumbers(value), value)),
+      fc.property(fc.jsonValue(), (value) =>
+        deepEqualJsonish(reviveNonFiniteNumbers(value), value),
+      ),
       RUN_OPTIONS,
     );
   });

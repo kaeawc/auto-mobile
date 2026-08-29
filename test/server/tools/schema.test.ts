@@ -258,9 +258,8 @@ describe("MCP Tools Schema", () => {
   // one-way door (the footgun PR #5885 avoided). Every tool the finalize step
   // skeletonizes by default MUST therefore advertise the opt-out.
   test("every SKELETON_DEFAULT_ACTION_TOOLS member advertises the raw/project opt-out", async () => {
-    const { SKELETON_DEFAULT_ACTION_TOOLS } = await import(
-      "../../../src/server/finalizeToolResponse"
-    );
+    const { SKELETON_DEFAULT_ACTION_TOOLS } =
+      await import("../../../src/server/finalizeToolResponse");
     expect(SKELETON_DEFAULT_ACTION_TOOLS.size).toBeGreaterThan(0);
     for (const toolName of SKELETON_DEFAULT_ACTION_TOOLS) {
       const tool = ADVERTISED_TOOLS.find((t) => t.name === toolName);

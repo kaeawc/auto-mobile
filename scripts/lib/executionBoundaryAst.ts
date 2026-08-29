@@ -573,6 +573,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     if (!name) {
       return finish(false);
     }
+    if (receiver !== undefined && propertyName(callee) !== name) {
+      return finish(false);
+    }
     const receiverDeclaration = receiver
       ? resolveReceiverDeclaration(receiver, callScopes)
       : undefined;
@@ -594,6 +597,67 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   };
 
   const callExecutionCache = new Map<InvocationExpression, Map<number, boolean>>();
+
+  const statementDefinitelyAwaits = (statement: ts.Statement): boolean => {
+    if (ts.isExpressionStatement(statement)) {
+      return ts.isAwaitExpression(unwrapTransparentExpression(statement.expression));
+    }
+    if (ts.isVariableStatement(statement)) {
+      return statement.declarationList.declarations.some(
+        (declaration) =>
+          declaration.initializer !== undefined &&
+          ts.isAwaitExpression(unwrapTransparentExpression(declaration.initializer)),
+      );
+    }
+    return false;
+  };
+
+  const assignmentRequiresCompletedAsyncCall = (
+    assignment: ts.Expression,
+    owner: ts.FunctionLikeDeclaration,
+  ): boolean => {
+    if (!owner.body || !ts.isBlock(owner.body)) {
+      return false;
+    }
+    let containingStatement: ts.Statement | undefined;
+    let current: ts.Node | undefined = assignment;
+    while (current && current.parent !== owner.body) {
+      current = current.parent;
+    }
+    if (current && ts.isStatement(current)) {
+      containingStatement = current;
+    }
+    if (!containingStatement) {
+      return false;
+    }
+    for (const statement of owner.body.statements) {
+      if (statement === containingStatement) {
+        return false;
+      }
+      // Only a direct, unconditional top-level await is enough evidence that an
+      // unawaited invocation has suspended. Conditional/nested awaits stay
+      // conservative so the boundary check cannot silently miss a launcher.
+      if (statementDefinitelyAwaits(statement)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const invocationIsAwaited = (invocation: InvocationExpression): boolean => {
+    let current: ts.Node = invocation;
+    while (
+      ts.isParenthesizedExpression(current.parent) ||
+      ts.isAsExpression(current.parent) ||
+      ts.isTypeAssertionExpression(current.parent) ||
+      ts.isNonNullExpression(current.parent) ||
+      ts.isSatisfiesExpression(current.parent)
+    ) {
+      current = current.parent;
+    }
+    return ts.isAwaitExpression(current.parent);
+  };
+
   const callCanExecuteBefore = (
     call: InvocationExpression,
     beforePosition: number,
@@ -716,6 +780,8 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
                   (call) =>
                     callResolvesToFunction(call, candidateFunction!) &&
                     callCanExecuteBefore(call, useExecutionPosition) &&
+                    (!assignmentRequiresCompletedAsyncCall(candidate.value, candidateFunction!) ||
+                      invocationIsAwaited(call)) &&
                     (call.getStart(sourceFile) < useExecutionPosition ||
                       (candidateFunction === useFunction &&
                         useInvocationPositions.includes(call.getStart(sourceFile)))),

@@ -221,6 +221,26 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "keeps single-quoted env split-string variables literal" {
+  printf '%s\n' 'spawn("env", ["-S", "'\''${BUILD_TOOL}'\'' test"], { env: { BUILD_TOOL: "xcodebuild" } });' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new direct production xcodebuild invocations"* ]]
+}
+
+@test "keeps escaped env split-string variables literal" {
+  printf '%s\n' 'spawn("env", ["-S", String.raw`\${BUILD_TOOL} test`], { env: { BUILD_TOOL: "xcodebuild" } });' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new direct production xcodebuild invocations"* ]]
+}
+
 @test "honors GNU env split-string termination" {
   printf '%s\n' 'spawn("env", ["-S", String.raw`tool \c xcodebuild test`]);' > "$repo_dir/src/bypass.ts"
   git -C "$repo_dir" add src/bypass.ts

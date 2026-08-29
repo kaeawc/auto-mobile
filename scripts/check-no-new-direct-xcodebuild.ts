@@ -51,20 +51,24 @@ function shellCommandPayloads(argv: readonly string[]): string[] {
 
 function splitEnvPayload(value: string): string[] {
   const words: string[] = [];
-  const withOpaqueExpansions = (values: string[]): string[] =>
-    values.map((candidate) =>
-      /\$\{[A-Za-z_][A-Za-z0-9_]*\}/.test(candidate) ? OPAQUE_ARGUMENT : candidate,
-    );
   let word = "";
+  let wordHasExpansion = false;
   let quote: "'" | '"' | null = null;
   let escaped = false;
-  for (const character of value) {
+  const pushWord = (): void => {
+    if (!word) {
+      return;
+    }
+    words.push(wordHasExpansion ? OPAQUE_ARGUMENT : word);
+    word = "";
+    wordHasExpansion = false;
+  };
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]!;
     if (escaped) {
       if (character === "c") {
-        if (word) {
-          words.push(word);
-        }
-        return withOpaqueExpansions(words);
+        pushWord();
+        return words;
       }
       if (["_", "t", "n", "v", "f", "r"].includes(character)) {
         if (quote === '"') {
@@ -82,8 +86,7 @@ function splitEnvPayload(value: string): string[] {
                       : " ";
           word += whitespace;
         } else if (word) {
-          words.push(word);
-          word = "";
+          pushWord();
         }
       } else {
         word += character;
@@ -96,25 +99,30 @@ function splitEnvPayload(value: string): string[] {
         quote = null;
       } else {
         word += character;
+        if (
+          quote !== "'" &&
+          character === "$" &&
+          /^\{[A-Za-z_][A-Za-z0-9_]*\}/.test(value.slice(index + 1))
+        ) {
+          wordHasExpansion = true;
+        }
       }
     } else if (character === "'" || character === '"') {
       quote = character;
     } else if (/\s/.test(character)) {
-      if (word) {
-        words.push(word);
-        word = "";
-      }
+      pushWord();
     } else {
       word += character;
+      if (character === "$" && /^\{[A-Za-z_][A-Za-z0-9_]*\}/.test(value.slice(index + 1))) {
+        wordHasExpansion = true;
+      }
     }
   }
   if (escaped) {
     word += "\\";
   }
-  if (word) {
-    words.push(word);
-  }
-  return withOpaqueExpansions(words);
+  pushWord();
+  return words;
 }
 
 function envDelegatesToXcodebuild(argv: readonly string[]): boolean {

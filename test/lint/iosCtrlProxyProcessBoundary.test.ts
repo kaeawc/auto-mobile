@@ -173,6 +173,12 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
     expect(
       findViolationsInSource(
         "fixture.ts",
+        'let runner = executor; const config = { configure(){ runner = /x/; }, unrelated(){} }; config.unrelated(); runner.exec("kill");',
+      ),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
         'let runner: RegExp; let configure = () => { runner = /x/; }; configure = () => {}; configure(); runner.exec("kill");',
       ),
     ).toHaveLength(1);
@@ -242,6 +248,30 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
         'let runner=executor; class Config { constructor(){runner=/x/;} } new Config(); runner.exec("kill");',
       ),
     ).toHaveLength(0);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'let runner = /x/; async function configure(){ await Promise.resolve(); runner = executor; } configure(); runner.exec("kill");',
+      ),
+    ).toHaveLength(0);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'let runner = /x/; async function configure(){ await Promise.resolve(); runner = executor; } await configure(); runner.exec("kill");',
+      ),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'let runner = /x/; async function configure(){ runner = executor; await Promise.resolve(); } configure(); runner.exec("kill");',
+      ),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'let runner = /x/; async function configure(flag: boolean){ if (flag) await Promise.resolve(); runner = executor; } configure(false); runner.exec("kill");',
+      ),
+    ).toHaveLength(1);
   });
 
   test("has a production check with documented exceptions", () => {

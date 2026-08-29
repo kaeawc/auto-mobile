@@ -80,6 +80,16 @@ function boundCachedLayoutWarnings(result: ObserveResult | undefined): ObserveRe
   return capped === result.layoutWarnings ? result : { ...result, layoutWarnings: capped };
 }
 
+/**
+ * Packages that legitimately present as the accessibility active window without
+ * being the device's resumed activity — a system-UI panel (notification shade,
+ * quick settings, volume, power dialog, keyguard) is a window, not an
+ * ActivityRecord, so it never appears as the resumed activity behind it. The
+ * window-identity freshness check (issue #5867) excludes these to avoid
+ * misreporting an expanded shade as a stale wrong-window capture.
+ */
+const SYSTEM_UI_WINDOW_PACKAGES = new Set<string>(["com.android.systemui"]);
+
 export class RealObserveScreen implements ObserveScreen {
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -312,7 +322,8 @@ export class RealObserveScreen implements ObserveScreen {
 
       // Ground-truth foreground app for the window-identity freshness check
       // (issue #5867). Started here so it overlaps hierarchy collection and adds
-      // no serial latency; Android only (dumpsys `topResumedActivity`), best-effort.
+      // no serial latency; Android only (dumpsys resumed/focused activity),
+      // best-effort.
       const foregroundIdentity: Promise<string | undefined> =
         this.device.platform === "android"
           ? this.deviceStateCollector.collectForegroundIdentity(signal)
@@ -758,12 +769,20 @@ export class RealObserveScreen implements ObserveScreen {
 
   /**
    * Compare the app the observed hierarchy was captured from against the
-   * device's ground-truth top resumed activity (issue #5867). Returns a mismatch
+   * device's ground-truth resumed activity (issue #5867). Returns a mismatch
    * descriptor only when both are known and their package names differ — the
    * cross-app stale-window case. A same-package activity change, an unknown
    * ground truth, or an unknown observed window all yield `undefined` (no
    * comparison, no false alarm). iOS never supplies a ground truth and so is
    * always `undefined`.
+   *
+   * A system-UI window (`com.android.systemui`) on either side is excluded: when
+   * the notification shade, quick settings, volume, or power dialog takes
+   * accessibility focus, the a11y active window is systemui while the resumed
+   * activity behind the panel is the underlying app — a legitimate divergence,
+   * not a stale capture. Excluding it keeps first-class shade workflows (the
+   * `systemTray` tool) from misfiring while still catching the app-vs-app case
+   * the issue reported.
    */
   private async resolveWindowIdentityMismatch(
     result: ObserveResult,
@@ -772,6 +791,12 @@ export class RealObserveScreen implements ObserveScreen {
     const foreground = await foregroundIdentity;
     const observed = result.activeWindow?.appId;
     if (!foreground || !observed || observed === foreground) {
+      return undefined;
+    }
+    if (
+      SYSTEM_UI_WINDOW_PACKAGES.has(observed) ||
+      SYSTEM_UI_WINDOW_PACKAGES.has(foreground)
+    ) {
       return undefined;
     }
     return { observed, foreground };

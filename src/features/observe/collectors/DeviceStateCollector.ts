@@ -72,11 +72,13 @@ export class DeviceStateCollector {
   }
 
   /**
-   * Ground-truth foreground app package from dumpsys `topResumedActivity`
-   * (issue #5867), used to validate that the observed hierarchy actually belongs
-   * to the app currently resumed on the device. Best-effort: a failed or absent
-   * read returns `undefined`, which the caller treats as "cannot compare" (no
-   * false alarm) rather than a mismatch.
+   * Ground-truth foreground app package from dumpsys (the resumed/focused
+   * activity — `adb.getForegroundApp` reads `mResumedActivity` /
+   * `mFocusedActivity` / `topResumedActivity`), used to validate that the
+   * observed hierarchy actually belongs to the app currently resumed on the
+   * device (issue #5867). Best-effort: a failed or absent read returns
+   * `undefined`, which the caller treats as "cannot compare" (no false alarm)
+   * rather than a mismatch.
    */
   async collectForegroundIdentity(signal?: AbortSignal): Promise<string | undefined> {
     const { adb } = this.opts;

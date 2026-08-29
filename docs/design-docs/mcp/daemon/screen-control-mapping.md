@@ -101,11 +101,11 @@ plain scale + translate.
 
 A client builds a geometry snapshot once per rendered frame:
 
-| Field                           | Meaning                                                                |
-| ------------------------------- | ---------------------------------------------------------------------- |
-| `frameWidthPx`, `frameHeightPx` | fitted frame size at zoom 1.0 (from fit-to-viewport)                   |
-| `scale`                         | current zoom multiplier                                                |
-| `offsetX`, `offsetY`            | current pan offset, in viewport pixels                                 |
+| Field                           | Meaning                                                                 |
+| ------------------------------- | ----------------------------------------------------------------------- |
+| `frameWidthPx`, `frameHeightPx` | fitted frame size at zoom 1.0 (from fit-to-viewport)                    |
+| `scale`                         | current zoom multiplier                                                 |
+| `offsetX`, `offsetY`            | current pan offset, in viewport pixels                                  |
 | `deviceWidth`, `deviceHeight`   | coordinate-space size: positive root bounds or paired screen dimensions |
 
 ## Viewport-to-device mapping
@@ -191,6 +191,17 @@ preserves a 24-point threshold at every supported scale. Android publishes
 A pixel frame without matching finite, positive scale metadata is not safe for
 control. The client must fail closed rather than guess a threshold or retain a
 frame after its scale changes.
+
+**Paired declarations are all-or-nothing.** A screenshot/hierarchy pair is a
+canonical-pixel frame only when **both** messages declare `coordinateSpace:
+"px"` and carry the same finite, positive `nativeScale`. If one message omits
+the declaration or the two declarations differ, the reference client binds
+neither `coordinateSpace` nor `nativeScale` into the snapshot: it uses the
+legacy aspect-only geometry check and the unscaled 24-unit threshold. It never
+combines the `px` message's scale with an undeclared counterpart. That is the
+conservative transition behavior for a pair that cannot prove one common unit;
+when both messages declare pixels but their scale metadata is absent, invalid,
+or unequal, control instead fails closed as described above.
 
 A below-threshold drag is **not** promoted to a tap. Actuating an input the user
 did not ask for is worse than ignoring an ambiguous one, and a click that barely

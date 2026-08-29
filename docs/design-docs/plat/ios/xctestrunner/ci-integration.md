@@ -80,9 +80,7 @@ automobile-tests:
         echo "LOG_STREAM_PID=$!" >> "$GITHUB_ENV"
 
     - name: Start AutoMobile daemon
-      run: |
-        auto-mobile --daemon start &
-        echo "AUTOMOBILE_DAEMON_PID=$!" >> "$GITHUB_ENV"
+      run: auto-mobile --daemon start
 
     - name: Wait for daemon and register simulator
       run: auto-mobile --cli observe --platform ios
@@ -92,7 +90,7 @@ automobile-tests:
 
     - name: Stop AutoMobile daemon
       if: always()
-      run: kill "$AUTOMOBILE_DAEMON_PID" 2>/dev/null || true
+      run: auto-mobile --daemon stop || true
 
     - name: Stop simulator log stream
       if: always()
@@ -161,15 +159,15 @@ xcrun simctl list devices booted   # confirm it booted
 
 ### 4. Daemon startup
 
-Start the daemon in the background and save its PID for clean shutdown:
+Start the daemon and wait for its detached process to become ready:
 
 ```bash
-auto-mobile --daemon start &
-echo "AUTOMOBILE_DAEMON_PID=$!" >> "$GITHUB_ENV"
+auto-mobile --daemon start
 ```
 
-The `--cli observe` step below implicitly waits for the daemon to be ready, so no explicit socket
-poll is needed here.
+The start command launches the managed daemon process, waits for readiness, and
+then exits. Its launcher PID is not the daemon PID, so it must not be saved for
+cleanup.
 
 ### 5. CtrlProxy pre-installation
 
@@ -211,12 +209,13 @@ xcodebuild test-without-building \
 The `if: always()` guards ensure cleanup runs even when tests fail:
 
 ```bash
-kill "$AUTOMOBILE_DAEMON_PID" 2>/dev/null || true
+auto-mobile --daemon stop || true
 kill "$LOG_STREAM_PID" 2>/dev/null || true
 ```
 
-The daemon process exits cleanly; the simulator remains booted for the remainder of the runner's
-lifetime (macOS runners are ephemeral so no explicit teardown is needed).
+The daemon manager resolves and stops the detached process recorded in its PID
+file. The simulator remains booted for the remainder of the runner's lifetime
+(macOS runners are ephemeral so no explicit teardown is needed).
 
 ### 8. Artifacts
 

@@ -158,13 +158,13 @@ not rescale the gesture or map its two ends through different frames.
 
 ### Threshold
 
-| Rule                                                               | Value                                                                              |
-| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| Minimum travelled distance, frame declares `coordinateSpace: "px"` | **`24 * nativeScale` device coordinates** (physical pixels)                        |
-| Minimum travelled distance, legacy frame (no declaration)          | **24 device coordinates** (logical points)                                         |
-| Measurement                                                        | straight-line (Euclidean), in **device** coordinates, **after** the end is clamped |
-| Below the threshold                                                | send **nothing** — not a swipe, and **not** a tap either                           |
-| Duration sent                                                      | **300 ms**, a fixed client value                                                   |
+| Rule                                                               | Value                                                                                           |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| Minimum travelled distance, frame declares `coordinateSpace: "px"` | **`24 * nativeScale` device coordinates** (physical pixels)                                     |
+| Minimum travelled distance, legacy frame (no declaration)          | **24 device coordinates** (logical points)                                                      |
+| Measurement                                                        | straight-line (Euclidean), in **device** coordinates, **after** the end is clamped              |
+| Below the threshold                                                | send **nothing** — not a swipe, and **not** a tap either                                        |
+| Duration sent                                                      | measured pointer-down duration, clamped to **40–1000 ms**; **300 ms** fallback when unavailable |
 
 The threshold is measured in **device** coordinates, not viewport pixels, so it
 means the same thing regardless of the client's zoom level: a viewport-space
@@ -191,11 +191,13 @@ between the UI toolkit's touch slop (where the client starts treating the gestur
 as a drag and stops treating it as a click) and this threshold there is a **dead
 band** in which a gesture sends no input at all. That is deliberate.
 
-The duration is a fixed policy value, not a measurement of the pointer gesture.
-Reproducing pointer velocity would make the same on-screen gesture behave
-differently depending on how fast the user's hand moved over a mirror whose frame
-rate is unrelated to the device's. `300` is inside the daemon's accepted
-`[1, 60000]` range for `durationMs`.
+The duration preserves the user's measured pointer-down time so a fast flick
+remains high velocity and a slow drag remains gentle. Clients clamp that
+measurement to `40–1000` ms: the lower bound still gives the device enough
+motion events to recognize a fling, while the upper bound avoids an unnaturally
+long replay. When the client cannot measure the gesture, it sends the neutral
+`300` ms fallback. Every value remains inside the daemon's accepted `[1, 60000]`
+range for `durationMs`.
 
 ### Cancellation and out-of-bounds
 

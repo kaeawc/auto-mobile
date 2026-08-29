@@ -487,6 +487,17 @@ export class FakeNavigationGraphManager
       return this.historyPage;
     }
 
+    // Mirror NavigationGraphManager.parseHistoryCursor: with an active app, a
+    // cursor is only valid as a numeric `timestamp:id`. Real production rejects a
+    // malformed cursor rather than echoing it, so replicate that here to keep the
+    // malformed-cursor regression test faithful to the shipped behavior.
+    if (this.currentAppId && options?.cursor) {
+      const [timestampRaw, idRaw] = options.cursor.split(":");
+      if (!Number.isFinite(Number(timestampRaw)) || !Number.isFinite(Number(idRaw))) {
+        throw new Error(`Invalid history cursor: ${options.cursor}`);
+      }
+    }
+
     return {
       appId: this.currentAppId,
       currentScreen: this.currentScreen,

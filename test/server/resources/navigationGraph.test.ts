@@ -693,18 +693,45 @@ describe("MCP Navigation Graph Resource", () => {
       expect(body.error).toContain("not found");
     });
 
-    test("a literal-% cursor returns a graceful JSON envelope, not an uncaught URIError", async () => {
+    test("a literal-% cursor returns a graceful JSON error envelope, not an uncaught URIError", async () => {
       fakeGraph.setCurrentAppId("com.example.a");
 
       const { client } = fixture.getContext();
 
-      // "100%" is a malformed cursor; the guarded decode degrades to the raw value
-      // and the history export proceeds, returning its normal JSON page instead of
-      // throwing a URIError past the handler.
+      // "100%" is a malformed cursor. The bug was the decode itself: before the fix
+      // decodeURIComponent("100%") threw a URIError past the handler (-32603). Now
+      // the guarded decode degrades to the raw value, which the history export then
+      // rejects as an invalid `timestamp:id` cursor (mirroring the real
+      // NavigationGraphManager.parseHistoryCursor) — surfacing the resource's JSON
+      // error envelope instead of a URIError. Pre-fix this request rejected with
+      // -32603; post-fix it resolves with an error body.
       const result = await client.request(
         {
           method: "resources/read",
           params: { uri: "automobile:navigation/history?cursor=100%" },
+        },
+        readResourceResponseSchema,
+      );
+
+      const content = result.contents[0];
+      expect(content.mimeType).toBe("application/json");
+      const body = JSON.parse(content.text!);
+      expect(typeof body.error).toBe("string");
+      expect(body.error).toContain("cursor");
+    });
+
+    test("a well-formed cursor returns a normal (non-error) JSON page", async () => {
+      fakeGraph.setCurrentAppId("com.example.a");
+
+      const { client } = fixture.getContext();
+
+      // Guards against over-broad rejection: a valid `timestamp:id` cursor must
+      // still produce a normal history page, so the fix does not turn every cursor
+      // into an error envelope.
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: { uri: "automobile:navigation/history?cursor=123:45" },
         },
         readResourceResponseSchema,
       );

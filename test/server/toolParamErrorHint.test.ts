@@ -227,30 +227,34 @@ describe("formatToolParamError observe union noise (#5854)", () => {
     const message = formatToolParamError("observe", result.error);
     expect(message).toBe("shared must be a finite number");
   });
-});
 
-// The union-noise classifier keys off zod v4's default issue shape: a missing
-// field leaves `received` unset and ends the message with "received undefined",
-// while a genuine wrong type ends with "received <type>". This pins that contract
-// so a future zod bump that changes the message shape fails loudly here rather
-// than silently regressing the suppression in `issueReportsMissingValue` (#5854).
-describe("zod v4 issue-shape contract the classifier depends on", () => {
-  const schema = z.object({ n: z.number() });
-
-  test("a missing field's message ends with 'received undefined'", () => {
-    const result = schema.safeParse({});
+  // Regression (#5854, PR review): a required field MISSING from every branch of a
+  // top-level union is a genuine "you forgot a required field", not branch noise —
+  // it must survive alongside another provided-bad field, not be dropped.
+  test("a required field missing from every branch is kept", () => {
+    const schema = z.union([
+      z.object({ id: z.string(), key: z.string(), name: z.string() }),
+      z.object({ id: z.string(), key: z.string(), fileName: z.string() }),
+    ]);
+    // `id` is wrong-typed and `key` is missing; both branches require `key`, so the
+    // missing-`key` error is genuine and must appear next to the `id` error.
+    const result = schema.safeParse({ id: 42, name: "n" } as unknown as object);
     expect(result.success).toBe(false);
-    const issue = result.error!.issues[0];
-    expect(issue.code).toBe("invalid_type");
-    expect(issue.message).toMatch(/received undefined$/);
+    const message = formatToolParamError("setKeyValue", result.error);
+    expect(message).toContain("id expected string, received number");
+    expect(message).toContain("key expected string, received undefined");
   });
 
-  test("a genuine wrong type reports the type, not 'received undefined'", () => {
-    const result = schema.safeParse({ n: "x" });
+  // A missing field whose value type is ITSELF a union must not be mistaken for a
+  // shared constraint: every arm of the inner type-union reports it missing, which
+  // would look "universal" if coverage were measured at the nearest union instead
+  // of the outermost discriminating one. `observe`'s `waitFor.activeWindow` is such
+  // a field, so a bad `timeoutMs` must still lead alone (#5854).
+  test("a missing union-typed predicate is not resurrected as a shared constraint", () => {
+    const result = waitForSchema.safeParse({ timeoutMs: 1e999 } as unknown as object);
     expect(result.success).toBe(false);
-    const issue = result.error!.issues[0];
-    expect(issue.code).toBe("invalid_type");
-    expect(issue.message).toMatch(/received string$/);
-    expect(issue.message).not.toMatch(/received undefined$/);
+    const message = formatToolParamError("observe", result.error);
+    expect(message).toBe("timeoutMs must be a finite number");
+    expect(message).not.toContain("activeWindow");
   });
 });

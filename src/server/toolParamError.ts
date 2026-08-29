@@ -1,11 +1,14 @@
 import { ZodError, type ZodIssue } from "zod/v4";
 
-// Provenance of a flattened issue relative to the nearest `z.union` it came from.
-// A field that fails in EVERY branch of a union is a shared constraint the caller
-// must satisfy no matter which branch they meant (genuine); one that fails in only
-// SOME branches is branch-discrimination noise. `unionId` scopes the "every
-// branch" test to a specific union (nested unions get their own id); `branchCount`
-// is that union's arm count (#5854).
+// Provenance of a flattened issue relative to the OUTERMOST `z.union` it came from
+// — the union that actually discriminates the caller's shape. A field that fails in
+// EVERY branch of that union is a shared constraint the caller must satisfy no
+// matter which branch they meant (genuine); one that fails in only SOME branches is
+// branch-discrimination noise. The outermost union is used deliberately: a missing
+// field whose value type is ITSELF a union would otherwise look "universal" inside
+// that inner type-union (every inner arm reports it missing) even though the field
+// is an optional predicate the caller simply omitted. `unionId` scopes the "every
+// branch" test; `branchCount` is that union's arm count (#5854).
 interface UnionContext {
   unionId: number;
   branchIndex: number;
@@ -31,16 +34,19 @@ function flattenZodIssues(issues: ZodIssue[]): FlattenResult {
 
   const visit = (issue: ZodIssue, union: UnionContext | null) => {
     if (issue.code === "invalid_union" && Array.isArray(issue.errors) && issue.errors.length) {
-      const unionId = unionCounter++;
-      const branchCount = issue.errors.length;
+      // Establish a context only for the outermost union; a nested union keeps the
+      // outer branch's context so its issues stay attributed to the discriminating
+      // arm the caller actually took.
+      const outer = union;
+      const unionId = outer ? outer.unionId : unionCounter++;
+      const branchCount = outer ? outer.branchCount : issue.errors.length;
       issue.errors.forEach((unionIssues, branchIndex) => {
+        const branchContext: UnionContext = outer ?? { unionId, branchIndex, branchCount };
         unionIssues.forEach((unionIssue) => {
           const normalizedIssue = issue.path.length
             ? { ...unionIssue, path: [...issue.path, ...unionIssue.path] }
             : unionIssue;
-          // Re-tag with this union's context so the nearest enclosing union wins
-          // for nested unions.
-          visit(normalizedIssue as ZodIssue, { unionId, branchIndex, branchCount });
+          visit(normalizedIssue as ZodIssue, branchContext);
         });
       });
       return;
@@ -52,29 +58,14 @@ function flattenZodIssues(issues: ZodIssue[]): FlattenResult {
   return { issues: flattened, sawUnion: unionCounter > 0 };
 }
 
-// zod v4 does not reliably populate `issue.received`: a non-finite number carries
-// `received: "Infinity"`, but a genuine wrong type (string→number) or an absent
-// field leaves it undefined and encodes the value only in the message text
-// ("… received string" / "… received undefined"). So "was this field actually
-// supplied?" must be read from the message, not the (often-missing) field.
-function issueReportsMissingValue(issue: ZodIssue): boolean {
-  const received = (issue as { received?: unknown }).received;
-  if (received !== undefined) {
-    return received === "undefined";
-  }
-  return /received undefined$/.test(issue.message ?? "");
-}
-
-// A field the caller did not supply on this branch (`received undefined`) or one
-// that is `never` on this branch — pure branch-discrimination artifacts, never the
-// caller's real mistake, so always suppressible when union-derived. A provided-bad
-// value (a non-finite number, a wrong type, a bad enum) is NOT an artifact; whether
-// it is genuine is decided separately by the across-all-branches test (#5854).
-function isMissingOrNeverArtifact(issue: ZodIssue): boolean {
-  if (issue.code !== "invalid_type") {
-    return false;
-  }
-  return issue.expected === "never" || issueReportsMissingValue(issue);
+// A field declared `never` on this branch — a structural "this field is forbidden
+// here" marker that only ever fires because the union tried an inapplicable branch.
+// Always noise, so it is dropped before the across-all-branches test. Missing and
+// wrong-value issues are NOT pre-filtered: the coverage test keeps them when the
+// field fails in every branch (a genuinely-required field, or a shared constraint)
+// and drops them otherwise (a branch-specific discriminator) (#5854).
+function isNeverArtifact(issue: ZodIssue): boolean {
+  return issue.code === "invalid_type" && issue.expected === "never";
 }
 
 // Key for the (union, path) coverage map. `unionId` is a number and "#" cannot
@@ -144,7 +135,7 @@ function selectGenuineIssues(
     if (!entry.union) {
       return true;
     }
-    if (isMissingOrNeverArtifact(entry.issue)) {
+    if (isNeverArtifact(entry.issue)) {
       return false;
     }
     const key = coverageKey(entry.union.unionId, entry.issue.path);

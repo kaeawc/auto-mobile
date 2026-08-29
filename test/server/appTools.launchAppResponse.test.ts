@@ -84,6 +84,25 @@ describe("buildLaunchAppResponse", () => {
     expect(payload.message).toBe("Launched app com.android.settings");
   });
 
+  // LaunchApp reconciles a launch via viewHierarchy.packageName when the active
+  // window is absent; the response must report that verified app rather than
+  // dropping the signal and forcing the client to re-observe.
+  test("falls back to viewHierarchy.packageName when the active window is absent", () => {
+    const result: LaunchAppResult = {
+      success: true,
+      packageName: "com.android.settings",
+      observation: {
+        viewHierarchy: { packageName: "com.android.settings" },
+      } as ObserveResult,
+    };
+
+    const payload = buildLaunchAppResponse("com.android.settings", result);
+
+    expect(payload.observedAppId).toBe("com.android.settings");
+    expect(payload.verified).toBe(true);
+    expect(payload.message).toBe("Launched app com.android.settings (foreground verified)");
+  });
+
   test("omits verification when no observation is available", () => {
     const result: LaunchAppResult = {
       success: true,

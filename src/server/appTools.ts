@@ -114,7 +114,11 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
     throw new ActionableError(result.error || `Failed to launch app ${appId}`);
   }
 
-  const observedAppId = result.observation?.activeWindow?.appId;
+  // Mirror `LaunchApp`'s own reconciliation, which accepts either the active
+  // window's appId or the view hierarchy's packageName — so a launch verified via
+  // the hierarchy (active window absent) still reports the observed app.
+  const observedAppId =
+    result.observation?.activeWindow?.appId ?? result.observation?.viewHierarchy?.packageName;
   // Only assert verification on an exact foreground match. `LaunchApp.execute`
   // returns `success:true` only when the foreground reconciles with the request —
   // an exact match, an accepted surface (e.g. a notification-permission dialog

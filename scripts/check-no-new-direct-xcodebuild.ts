@@ -52,15 +52,17 @@ function shellCommandPayloads(argv: readonly string[]): string[] {
 function splitEnvPayload(value: string): string[] {
   const words: string[] = [];
   let word = "";
+  let wordOpened = false;
   let wordHasExpansion = false;
   let quote: "'" | '"' | null = null;
   let escaped = false;
   const pushWord = (): void => {
-    if (!word) {
+    if (!wordOpened) {
       return;
     }
     words.push(wordHasExpansion ? OPAQUE_ARGUMENT : word);
     word = "";
+    wordOpened = false;
     wordHasExpansion = false;
   };
   for (let index = 0; index < value.length; index += 1) {
@@ -85,11 +87,13 @@ function splitEnvPayload(value: string): string[] {
                       ? "\r"
                       : " ";
           word += whitespace;
-        } else if (word) {
+          wordOpened = true;
+        } else if (wordOpened) {
           pushWord();
         }
       } else {
         word += character;
+        wordOpened = true;
       }
       escaped = false;
     } else if (character === "\\" && quote !== "'") {
@@ -109,10 +113,12 @@ function splitEnvPayload(value: string): string[] {
       }
     } else if (character === "'" || character === '"') {
       quote = character;
+      wordOpened = true;
     } else if (/\s/.test(character)) {
       pushWord();
     } else {
       word += character;
+      wordOpened = true;
       if (character === "$" && /^\{[A-Za-z_][A-Za-z0-9_]*\}/.test(value.slice(index + 1))) {
         wordHasExpansion = true;
       }
@@ -120,6 +126,7 @@ function splitEnvPayload(value: string): string[] {
   }
   if (escaped) {
     word += "\\";
+    wordOpened = true;
   }
   pushWord();
   return words;
@@ -142,6 +149,11 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
     }
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(argument)) {
       continue;
+    }
+    // An empty argv slot is still the command. GNU env cannot skip it to run a
+    // later xcodebuild argument.
+    if (argument === "") {
+      return false;
     }
     if (optionsTerminated) {
       const command = commandName(argument);

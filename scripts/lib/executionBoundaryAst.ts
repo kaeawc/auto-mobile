@@ -107,6 +107,13 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     position: number;
     receiverDeclaration?: DeclarationBinding;
   }> = [];
+  const classInstanceMethods: Array<{
+    className: string;
+    name: string;
+    node: ts.MethodDeclaration;
+    scope: ts.Node;
+    position: number;
+  }> = [];
   type InvocationExpression = ts.CallExpression | ts.NewExpression;
   const calls: ts.CallExpression[] = [];
   const invocations: InvocationExpression[] = [];
@@ -384,6 +391,17 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
               receiverDeclaration,
             });
           }
+        } else if (ts.isMethodDeclaration(member)) {
+          const methodName = propertyNameOf(member.name);
+          if (methodName) {
+            classInstanceMethods.push({
+              className: node.name.text,
+              name: methodName,
+              node: member,
+              scope,
+              position: member.getStart(sourceFile),
+            });
+          }
         }
       }
     }
@@ -426,6 +444,38 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     ts.forEachChild(node, collect);
   };
   collect(sourceFile);
+
+  for (const binding of scopedValues) {
+    const value = unwrapTransparentExpression(binding.value);
+    if (
+      binding.kind !== "declaration" ||
+      !ts.isNewExpression(value) ||
+      !ts.isIdentifier(value.expression)
+    ) {
+      continue;
+    }
+    const receiverDeclaration = declarations.find(
+      (declaration) =>
+        declaration.name === binding.name &&
+        declaration.scope === binding.scope &&
+        declaration.position === binding.position,
+    );
+    if (!receiverDeclaration) {
+      continue;
+    }
+    const visibleScopes = scopeChain(value);
+    for (const method of classInstanceMethods) {
+      if (method.className === value.expression.text && visibleScopes.includes(method.scope)) {
+        functionBindings.push({
+          name: method.name,
+          node: method.node,
+          scope: binding.scope,
+          position: binding.position,
+          receiverDeclaration,
+        });
+      }
+    }
+  }
 
   const receiverDeclarationCache = new Map<ts.Identifier, DeclarationBinding | null>();
   const resolveReceiverDeclaration = (
@@ -654,6 +704,21 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       ts.isSatisfiesExpression(current.parent)
     ) {
       current = current.parent;
+    }
+    if (ts.isArrayLiteralExpression(current.parent)) {
+      const array = current.parent;
+      const combinator = array.parent;
+      if (
+        ts.isCallExpression(combinator) &&
+        combinator.arguments.includes(array) &&
+        (ts.isPropertyAccessExpression(combinator.expression) ||
+          ts.isElementAccessExpression(combinator.expression)) &&
+        ts.isIdentifier(combinator.expression.expression) &&
+        combinator.expression.expression.text === "Promise" &&
+        new Set(["all", "allSettled", "any", "race"]).has(propertyName(combinator.expression) ?? "")
+      ) {
+        current = combinator;
+      }
     }
     return ts.isAwaitExpression(current.parent);
   };

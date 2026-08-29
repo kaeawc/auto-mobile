@@ -54,4 +54,29 @@ describe("proxy server lazy tools/list", () => {
       await proxy.close();
     }
   });
+
+  test("advertises tools.listChanged so clients honor the reconciliation notification", async () => {
+    isAvailableSpy = spyOn(DaemonClient, "isAvailable");
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        clientFactory: () => new FakeDaemonClient(),
+        daemonManager: new FakeDaemonManager(),
+        autoStartDaemon: false,
+      },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "cap-test-client", version: "0.0.1" });
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const capabilities = client.getServerCapabilities();
+      expect(capabilities?.tools).toEqual({ listChanged: true });
+      expect(capabilities?.resources).toEqual({ listChanged: true });
+    } finally {
+      await client.close();
+      await proxy.close();
+    }
+  });
 });

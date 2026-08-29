@@ -141,8 +141,14 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     },
     {
       capabilities: {
-        resources: {},
-        tools: {},
+        // Declare listChanged: this proxy is the boundary external MCP clients
+        // connect to, and it emits notifications/{tools,resources}/list_changed —
+        // both the daemon-forwarded invalidations (issue #3223) and the
+        // post-lazy-connect tools reconciliation (issue #5879). Without the
+        // capability a spec-strict client may ignore those notifications and keep
+        // a stale (cold, over-broad) tool list for the session.
+        resources: { listChanged: true },
+        tools: { listChanged: true },
         prompts: {},
       },
     },

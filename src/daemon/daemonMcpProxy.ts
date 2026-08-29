@@ -296,6 +296,10 @@ export interface ProxiedToolDefinition {
   description?: string;
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
+  // Passed through verbatim from the daemon (live path) or the committed static
+  // surface (cold path) — e.g. the MCP Apps UI pointer `_meta.ui.resourceUri`
+  // (issue #4669). Non-Apps hosts ignore it.
+  _meta?: Record<string, unknown>;
 }
 
 /**

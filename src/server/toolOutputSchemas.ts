@@ -98,6 +98,7 @@ export const selectedElementSchema = z
   .object({
     text: z.string().optional(),
     resourceId: z.string().optional(),
+    testTag: z.string().optional(),
     contentDesc: z.string().optional(),
     bounds: elementBoundsSchema.optional(),
     indexInMatches: z.number().int().optional(),
@@ -138,6 +139,10 @@ const screenIdentitySchema = z
   })
   .passthrough();
 
+// `.passthrough()` — action tools default their embedded observation to the
+// compact `skeleton` (issue #5872) and carry the raw `viewHierarchy` under
+// raw/project:"full"; both flow through without an explicit field here (the
+// schemas they'd reference are declared later in this module).
 export const observationSummarySchema = z
   .object({
     selectedElements: z.array(selectedElementSchema).optional(),
@@ -541,6 +546,7 @@ export const skeletonElementSchema = z
   .object({
     id: z.string().optional(),
     label: z.string().optional(),
+    sublabel: z.string().optional(),
     testTag: z.string().optional(),
     semanticLinks: z.array(semanticLinkSchema).optional(),
     bounds: compactBoundsTupleSchema.describe(

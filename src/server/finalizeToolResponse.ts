@@ -110,6 +110,22 @@ function classifyObservationAction(
 }
 
 /**
+ * Action tools that embed a post-action observation AND expose the `raw`/`project`
+ * response-shape control (issue #5872). Their embedded observation defaults to the
+ * compact skeleton, opt-out-able per call. The default is scoped to exactly the
+ * tools that carry the opt-out so the two never diverge: a tool that skeletonizes
+ * by default but cannot be asked for the raw tree would be a silent one-way door.
+ * Extending both to every observation-producing action tool is tracked as a
+ * follow-up. `observe` is not here — it owns the projection at the payload top
+ * level, not under `.observation`.
+ */
+const SKELETON_DEFAULT_ACTION_TOOLS: ReadonlySet<string> = new Set([
+  "tapOn",
+  "inputText",
+  "launchApp",
+]);
+
+/**
  * Resolve the observe output projection (issue #4388). An explicit per-call
  * `project` arg always wins; otherwise `raw: true` forces `"full"` (the raw tree
  * is the documented disambiguation escape hatch). The skeleton projection is now
@@ -346,7 +362,27 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       sanitizedPayload = stripped;
     } else if (isObserveResult(payload.observation)) {
       const sanitized = sanitizeObserveResult(payload.observation as ObserveResult, cfg);
-      let observationOut: unknown = sanitized;
+      // Action observations default to the compact skeleton (issue #5872) — the
+      // same response-shape control `observe` already has — so a client no longer
+      // pays the full raw hierarchy on every tapOn/inputText/launchApp. Scoped to
+      // SKELETON_DEFAULT_ACTION_TOOLS (the tools that also expose the `raw`/`project`
+      // opt-out), so the default and the escape hatch never diverge. The compact
+      // form lands under the same `skeleton` key `observe` uses; `raw:true` /
+      // `project:"full"` opts back into the raw `viewHierarchy`. Two paths always
+      // keep the full tree: internal tool-to-tool consumers read
+      // `.observation.viewHierarchy`, and the opt-in `--actions-diff-observe`
+      // pipeline diffs against (and emits) the full hierarchy.
+      const servedObservation =
+        !ctx.internal &&
+        !diffActive &&
+        SKELETON_DEFAULT_ACTION_TOOLS.has(ctx.name) &&
+        resolveObserveProjection(ctx.args) === "skeleton"
+          ? sanitizeObserveResult(payload.observation as ObserveResult, {
+              ...cfg,
+              project: "skeleton",
+            })
+          : sanitized;
+      let observationOut: unknown = servedObservation;
       let observationDiff: ObservationDiffMetadata | undefined;
       if (ctx.internal) {
         // Internal envelopes are consumed by in-process tool callers, not agents.

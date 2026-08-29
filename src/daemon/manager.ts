@@ -24,6 +24,7 @@ import {
   SOCKET_PATH,
   LOCK_FILE_PATH,
   DAEMON_STARTUP_TIMEOUT_MS,
+  DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   READINESS_PROBE_MAX_ATTEMPTS,
   READINESS_PROBE_BACKOFF_MS,
@@ -601,14 +602,22 @@ export class DaemonManager implements DaemonManagerLike {
       for (const pid of liveDaemons) {
         stderrLog(`  - PID ${pid}`);
       }
-      if (await this.waitForExistingDaemon(DAEMON_STARTUP_TIMEOUT_MS)) {
+      // Bound this reachability wait well under a client's request timeout. It is
+      // nested inside a `tools/list` that clients cut off at ~30s
+      // (DAEMON_STARTUP_TIMEOUT_MS); if it consumed the full startup budget the
+      // actionable error below would be produced only as the client's own
+      // deadline expired, so the client would see an AutoMobile server with zero
+      // tools and no error text instead (issue #5871). A daemon that has not
+      // become reachable within this shorter budget is one the client is better
+      // off hearing about now than waiting on.
+      if (await this.waitForExistingDaemon(DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS)) {
         stderrLog("Reusing existing responsive daemon");
         return;
       }
 
       throw new ActionableError(
         `Found live AutoMobile daemon process(es) (${liveDaemons.join(", ")}) but none became reachable within ` +
-          `${DAEMON_STARTUP_TIMEOUT_MS}ms. Refusing to terminate a live daemon during start; ` +
+          `${DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS}ms. Refusing to terminate a live daemon during start; ` +
           `inspect it or run \`bunx ${resolveDaemonInstallSpecifier()} --daemon restart\` explicitly.`,
       );
     }

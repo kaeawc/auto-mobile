@@ -54,11 +54,19 @@ class FakeHierarchyCollector implements Pick<
 
 class FakeDeviceStateCollector implements Pick<
   DeviceStateCollector,
-  "collectBackStack" | "collectWakefulness" | "collectDeviceLock" | "collectActiveWindow"
+  | "collectBackStack"
+  | "collectWakefulness"
+  | "collectDeviceLock"
+  | "collectActiveWindow"
+  | "collectForegroundIdentity"
 > {
   backStackCalls = 0;
   activeWindowCalls = 0;
   deviceLockCalls = 0;
+
+  async collectForegroundIdentity(_signal?: AbortSignal): Promise<string | undefined> {
+    return undefined;
+  }
 
   async collectBackStack(
     result: ObserveResult,

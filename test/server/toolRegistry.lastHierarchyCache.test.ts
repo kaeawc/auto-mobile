@@ -160,6 +160,9 @@ describe("ToolRegistry observe lastHierarchy cache repair (#2758)", () => {
 
     const response = await tool.handler({
       platform: "android",
+      // project:"full" opts out of the #5872 skeleton default so this test can
+      // assert the raw hierarchy is sanitized end-to-end through the chokepoint.
+      project: "full",
       __mcpSessionId: "mcp-session-1",
     });
 

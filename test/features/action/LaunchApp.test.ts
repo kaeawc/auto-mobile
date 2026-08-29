@@ -610,6 +610,29 @@ describe("LaunchApp", () => {
     expect(result.observation).toBeUndefined();
   });
 
+  // Deterministic launch payload shape (issue #5872 AC2): when the observation is
+  // dropped because it is stale, the response must EXPLAIN which shape it is rather
+  // than silently omitting the observation with nothing distinguishing it.
+  test("explains the omitted observation with observationOmitted when the launch is stale", async () => {
+    fakeTimer.enableAutoAdvance();
+    const previousPackageName = "com.example.previous";
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse(
+      `shell dumpsys activity processes | grep -E "${packageName}/u0a" | wc -l`,
+      { stdout: "0\n", stderr: "" },
+    );
+    fakeObserveScreen.setObserveResult(() => createObserveResult(previousPackageName));
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.observation).toBeUndefined();
+    expect(result.observationOmitted).toBeDefined();
+    expect(result.observationOmitted!.reason).toBe("stale_launch_observation");
+    expect(result.observationOmitted!.expectedPackage).toBe(packageName);
+    expect(result.observationOmitted!.reportedPackages).toContain(previousPackageName);
+  });
+
   test("runs target user detection and install check in parallel", async () => {
     const targetUserDetector = new FakeTargetUserDetector(fakeTimer, {
       delayMs: 50,

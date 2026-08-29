@@ -128,7 +128,14 @@ jobs:
       - halt_if_no_ios_changes
       - run:
           name: "Install XcodeGen"
-          command: ./scripts/ios/install-xcodegen.sh
+          # CircleCI's macOS image has a non-writable /usr/local/share, which the
+          # script's default prefix can't create. The script honors an override,
+          # so install into $HOME/.local and persist that on PATH (via CircleCI's
+          # $BASH_ENV) for the drift-check and build steps that follow.
+          command: |
+            export XCODEGEN_PREFIX="${HOME}/.local"
+            ./scripts/ios/install-xcodegen.sh
+            echo 'export PATH="${HOME}/.local/bin:${PATH}"' >> "${BASH_ENV}"
       - run:
           name: "Check XcodeGen project drift"
           command: ./scripts/ios/xcodegen-drift-check.sh --all

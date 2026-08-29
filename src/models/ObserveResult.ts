@@ -77,8 +77,22 @@ export type Affordance = "tap" | "long-press" | "input" | "scroll" | "toggle";
 export interface SkeletonElement {
   /** `resource-id ?? view-id` (the stable content-hash id from #3228). */
   id?: string;
-  /** `text ?? content-desc`. */
+  /**
+   * `text ?? content-desc`, else the hoisted primary text of descendants (issue
+   * #5869). A clickable container whose own node carries no text/content-desc
+   * (the standard Android `clickable container > TextView` preference-row layout)
+   * takes the top-most descendant text as its label, so the row is no longer
+   * `label: null`.
+   */
   label?: string;
+  /**
+   * Secondary descendant text hoisted onto a clickable row (issue #5869): the
+   * remaining descendant text after `label`, joined with `", "`. Present only
+   * when a clickable container encloses text beyond its primary label — e.g. a
+   * preference row's summary line or an alarm's day-of-week schedule — so compact
+   * state text is not lost. Omitted when there is no secondary text.
+   */
+  sublabel?: string;
   /** Compose test tag, when supplied by the app; usable as the stable owner key for `subtext`. */
   testTag?: string;
   /** Embedded accessibility links, omitted unless this element exposes one. */

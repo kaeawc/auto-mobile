@@ -76,7 +76,11 @@ class NoOpAuditor implements Pick<
 
 class FakeDeviceStateCollector implements Pick<
   DeviceStateCollector,
-  "collectBackStack" | "collectWakefulness" | "collectDeviceLock" | "collectActiveWindow"
+  | "collectBackStack"
+  | "collectWakefulness"
+  | "collectDeviceLock"
+  | "collectActiveWindow"
+  | "collectForegroundIdentity"
 > {
   async collectBackStack(): Promise<void> {}
   async collectWakefulness(result: ObserveResult): Promise<void> {
@@ -84,6 +88,9 @@ class FakeDeviceStateCollector implements Pick<
   }
   async collectDeviceLock(): Promise<void> {}
   async collectActiveWindow(): Promise<void> {}
+  async collectForegroundIdentity(): Promise<string | undefined> {
+    return undefined;
+  }
 }
 
 /** Hands `execute()` a caller-controlled `result.viewHierarchy` directly. */

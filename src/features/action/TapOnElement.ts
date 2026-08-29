@@ -1016,10 +1016,13 @@ export class TapOnElement extends BaseVisualChange {
             : "";
     const resourceId =
       typeof selection.element["resource-id"] === "string" ? selection.element["resource-id"] : "";
+    const testTag =
+      typeof selection.element["test-tag"] === "string" ? selection.element["test-tag"] : undefined;
 
     return {
       text,
       resourceId,
+      ...(testTag ? { testTag } : {}),
       bounds: {
         left: bounds.left,
         top: bounds.top,

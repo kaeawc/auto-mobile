@@ -26,6 +26,7 @@ import {
   ClipboardResult,
   OpenURLResult,
   SwipeOnToolPayload,
+  type TapOnSelectedElement,
 } from "../models";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -51,6 +52,7 @@ import {
   withAppIdAliases,
   withJsonSchemaOverride,
   compactExclusiveSelectorProperties,
+  responseShapeControlFields,
 } from "./toolSchemaHelpers";
 import { serverConfig } from "../utils/ServerConfig";
 import {
@@ -254,6 +256,7 @@ export const tapOnSchema = withJsonSchemaOverride(
         // #5870: a `sessionUuid` resolves the platform, so `platform` is not
         // required — a device handle from getAndroid is sufficient on its own.
         platform: platformSchema.optional(),
+        ...responseShapeControlFields,
       })
       .strict(),
   ).superRefine((value, ctx) => {
@@ -573,9 +576,43 @@ export const clearStateSchema = withAppIdAliases(
   ),
 );
 
+// A selector focuses the target field before typing (issue #5872 AC3), so a
+// form field no longer costs a mandatory tapOn-then-inputText pair. Kept to the
+// selector variants that identify an input; semantic-link activation is a tapOn
+// concern, not a field to type into.
+const inputTextSelectorSchema = z
+  .union([
+    z
+      .object({ elementId: z.string().min(1).describe("Resource ID, e.g. com.app:id/field") })
+      .strict(),
+    z.object({ testTag: z.string().min(1).describe("Android accessibility test tag") }).strict(),
+    z
+      .object({
+        text: z.string().min(1).describe("Text, content-desc, or placeholder of the field"),
+      })
+      .strict(),
+    z
+      .object({
+        textAny: z
+          .array(z.string().min(1))
+          .min(1)
+          .describe("Ordered text variants; first visible match wins"),
+      })
+      .strict(),
+  ])
+  .describe(
+    "Field to focus before typing: elementId, Android testTag, text, or ordered text variants",
+  );
+
 export const inputTextSchema = addDeviceTargetingToSchema(
   z.object({
     text: z.string().min(1),
+    selector: inputTextSelectorSchema
+      .optional()
+      .describe(
+        "Focus this field before typing, collapsing the mandatory focus-then-type pair into " +
+          "one call. Without it, text goes to whatever is currently focused.",
+      ),
     mode: z
       .enum(["a11y", "eventLast", "eventAll", "eventOnly"])
       .optional()
@@ -588,6 +625,7 @@ export const inputTextSchema = addDeviceTargetingToSchema(
       .describe("IME action after input"),
     dismissKeyboard: z.boolean().optional().describe("Android: dismiss keyboard after input"),
     platform: platformSchema,
+    ...responseShapeControlFields,
   }),
 );
 
@@ -771,6 +809,58 @@ export function formatSwipeOnMessage(
     : `Swiped ${direction}`;
 }
 
+/**
+ * Build the tapOn success message so it says *what* it matched, not just
+ * "Tapped on element" (#5868). A correct tap and a wrong tap were byte-identical;
+ * now the message carries the resolved match identity and match count (so an
+ * ambiguous selector is distinguishable from a precise one) alongside the
+ * existing hierarchy-changed search summary. The structured `selectedElement`
+ * (resourceId/text/bounds/totalMatches) still rides on the result for clients
+ * that read the payload.
+ */
+export function buildTapOnResultMessage(
+  selectedElement: TapOnSelectedElement | undefined,
+  searchSummary: string | undefined,
+  activatedSubtext?: { text: string; occurrence: number },
+): string {
+  const details: string[] = [];
+  if (selectedElement) {
+    // Include every available identity field, not just the resource id: Android
+    // list rows commonly reuse an id such as `...:id/title`, so the id alone can't
+    // tell "Internet" from "Calendar" — the text can.
+    const identity: string[] = [];
+    if (selectedElement.resourceId) {
+      identity.push(`id=${selectedElement.resourceId}`);
+    }
+    if (selectedElement.testTag) {
+      identity.push(`testTag=${selectedElement.testTag}`);
+    }
+    if (selectedElement.text) {
+      identity.push(`text=${JSON.stringify(selectedElement.text)}`);
+    }
+    details.push(`matched ${identity.length > 0 ? identity.join(" ") : "element"}`);
+    const count = selectedElement.totalMatches;
+    // For an ambiguous selector, name which occurrence was tapped so index 0 vs 2
+    // (or a random pick) among identical rows is distinguishable.
+    const index = count > 1 ? ` (index ${selectedElement.indexInMatches})` : "";
+    details.push(`${count} ${count === 1 ? "match" : "matches"}${index}`);
+  }
+  // Append the activated semantic link whenever present, additively: an
+  // owner-scoped subtext tap resolves BOTH an owner (selectedElement) and the
+  // activated link, and the accessibilityLink selector resolves only the link —
+  // either way, naming the link keeps taps on different links from being
+  // byte-identical.
+  if (activatedSubtext) {
+    const occurrence =
+      activatedSubtext.occurrence > 0 ? ` [occurrence ${activatedSubtext.occurrence}]` : "";
+    details.push(`activated link ${JSON.stringify(activatedSubtext.text)}${occurrence}`);
+  }
+  if (searchSummary) {
+    details.push(searchSummary);
+  }
+  return details.length > 0 ? `Tapped on element (${details.join("; ")})` : "Tapped on element";
+}
+
 // ============================================================================
 // Tool Registration
 // ============================================================================
@@ -824,7 +914,11 @@ export function registerInteractionTools() {
         : undefined;
 
     return createStructuredToolResponse({
-      message: searchSummary ? `Tapped on element (${searchSummary})` : "Tapped on element",
+      message: buildTapOnResultMessage(
+        result.selectedElement,
+        searchSummary,
+        result.activatedSubtext,
+      ),
       observation: result.observation,
       ...result,
     });
@@ -1251,6 +1345,7 @@ export function registerInteractionTools() {
       dismissKeyboard,
       mode,
       signal,
+      args.selector,
     );
     return createJSONToolResponse({
       message: `Input text`,

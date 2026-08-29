@@ -15,6 +15,13 @@ import type { Affordance, ObserveResult, SkeletonElement } from "../../../models
  * walk. The output is what an agent needs to decide "what can I do here, and
  * what does it say?", at a fraction of the token cost of the full hierarchy.
  *
+ * A clickable container commonly carries no text of its own — the label lives on
+ * descendant `TextView`s (the standard Android `clickable container > TextView`
+ * preference-row layout). `hoistContainerLabels` (issue #5869) folds that
+ * descendant text back onto the container's `label` / `sublabel` using the
+ * already-flattened `text` category's geometry, so those rows are no longer
+ * `label: null` and non-clickable state text is not lost.
+ *
  * `id` / `label` map directly onto the `tapOn` selector union (`elementId` /
  * `text`), so a skeleton row is issued as `tapOn({ elementId })` with no new
  * selector semantics (issue #4388 acceptance criterion 2).
@@ -109,6 +116,7 @@ function boundsTuple(el: Element): SkeletonElement["bounds"] | undefined {
 interface SkeletonAccumulator {
   id?: string;
   label?: string;
+  sublabel?: string;
   testTag?: string;
   semanticLinks?: SkeletonElement["semanticLinks"];
   bounds: SkeletonElement["bounds"];
@@ -205,6 +213,127 @@ function shouldKeep(
   return !clickableBounds.some((bounds) => strictlyContains(bounds, acc.bounds));
 }
 
+/**
+ * Hoist descendant text onto clickable containers (issue #5869). The standard
+ * Android `clickable container > TextView` preference-row layout puts the visible
+ * label on descendant `TextView`s, not on the clickable node itself — so the
+ * container's own `label` is `null` and, without this, every such row (most of
+ * Settings and most well-built apps) is `label: null`.
+ *
+ * This mirrors what an accessibility service does: for each pure-text accumulator
+ * (a labelled row with no affordances) that is strictly enclosed by a clickable
+ * container, fold its text into that container's **smallest** enclosing clickable
+ * ancestor. Texts are ordered top-to-bottom, left-to-right; the first becomes the
+ * container's `label` when it has none, and the remainder join into `sublabel`
+ * (so a preference summary line or an alarm's day-of-week schedule survives in the
+ * compact form). Text equal to the container's own label is not duplicated.
+ *
+ * The folded text accumulators are left in place — {@link shouldKeep} already
+ * suppresses labelled text that has a clickable ancestor, so they drop out and
+ * are not re-emitted as separate rows (semantic-link rows are the deliberate
+ * exception and stay discoverable).
+ */
+function hoistContainerLabels(
+  accumulators: SkeletonAccumulator[],
+  clickable: SkeletonAccumulator[],
+): void {
+  if (clickable.length === 0) {
+    return;
+  }
+  for (const [container, texts] of groupTextByContainer(accumulators, clickable)) {
+    texts.sort(byReadingOrder);
+    applyHoistedLabels(container, distinctHoistParts(container, texts));
+  }
+}
+
+/**
+ * Bucket each pure-text accumulator (a label, no affordance of its own) under
+ * its smallest enclosing clickable container. Nested clickable/toggle rows keep
+ * their own identity and are never folded.
+ */
+function groupTextByContainer(
+  accumulators: SkeletonAccumulator[],
+  clickable: SkeletonAccumulator[],
+): Map<SkeletonAccumulator, SkeletonAccumulator[]> {
+  const byContainer = new Map<SkeletonAccumulator, SkeletonAccumulator[]>();
+  for (const acc of accumulators) {
+    if (acc.affordances.size > 0 || acc.label === undefined) {
+      continue;
+    }
+    const container = smallestClickableAncestor(acc.bounds, clickable);
+    if (!container) {
+      continue;
+    }
+    const bucket = byContainer.get(container);
+    if (bucket) {
+      bucket.push(acc);
+    } else {
+      byContainer.set(container, [acc]);
+    }
+  }
+  return byContainer;
+}
+
+/** Distinct descendant labels, excluding any equal to the container's own label. */
+function distinctHoistParts(
+  container: SkeletonAccumulator,
+  texts: SkeletonAccumulator[],
+): string[] {
+  const parts: string[] = [];
+  for (const text of texts) {
+    const label = text.label;
+    if (label !== undefined && label !== container.label && !parts.includes(label)) {
+      parts.push(label);
+    }
+  }
+  return parts;
+}
+
+/**
+ * Fold `parts` onto the container: the first becomes `label` when it has none,
+ * and the remainder join into `sublabel`. A container with an own label keeps it
+ * and takes every part as `sublabel`.
+ */
+function applyHoistedLabels(container: SkeletonAccumulator, parts: string[]): void {
+  if (parts.length === 0) {
+    return;
+  }
+  if (container.label === undefined) {
+    container.label = parts[0];
+    if (parts.length > 1) {
+      container.sublabel = parts.slice(1).join(", ");
+    }
+  } else {
+    container.sublabel = parts.join(", ");
+  }
+}
+
+/** Order two rows top-to-bottom, then left-to-right, by their bounds tuple. */
+function byReadingOrder(a: SkeletonAccumulator, b: SkeletonAccumulator): number {
+  return a.bounds[1] - b.bounds[1] || a.bounds[0] - b.bounds[0];
+}
+
+/**
+ * The smallest-area clickable accumulator that strictly encloses `bounds`, or
+ * `undefined` when none does. Smallest-area so text folds into its immediate row
+ * rather than an outer clickable card or list that also encloses it.
+ */
+function smallestClickableAncestor(
+  bounds: SkeletonElement["bounds"],
+  clickable: SkeletonAccumulator[],
+): SkeletonAccumulator | undefined {
+  let best: SkeletonAccumulator | undefined;
+  for (const candidate of clickable) {
+    if (!strictlyContains(candidate.bounds, bounds)) {
+      continue;
+    }
+    if (!best || area(candidate.bounds) < area(best.bounds)) {
+      best = candidate;
+    }
+  }
+  return best;
+}
+
 /** Materialize one accumulator into an emitted skeleton row (omitting absent optionals). */
 function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
   const entry: SkeletonElement = {
@@ -216,6 +345,9 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
   }
   if (acc.label !== undefined) {
     entry.label = acc.label;
+  }
+  if (acc.sublabel !== undefined) {
+    entry.sublabel = acc.sublabel;
   }
   if (acc.testTag !== undefined) {
     entry.testTag = acc.testTag;
@@ -236,10 +368,12 @@ function toSkeletonEntry(acc: SkeletonAccumulator): SkeletonElement {
  */
 export function toSkeleton(elements: ObserveElements): SkeletonElement[] {
   const accumulators = accumulateByIdentity(elements);
+  const clickable = accumulators.filter((acc) => acc.affordances.has("tap"));
+  // Hoist descendant text onto labelless/underlabelled clickable rows (issue
+  // #5869) before the keep filter suppresses the now-folded text accumulators.
+  hoistContainerLabels(accumulators, clickable);
   // Bounds of every tappable row, for the clickable-ancestor suppression test.
-  const clickableBounds = accumulators
-    .filter((acc) => acc.affordances.has("tap"))
-    .map((acc) => acc.bounds);
+  const clickableBounds = clickable.map((acc) => acc.bounds);
 
   return accumulators.filter((acc) => shouldKeep(acc, clickableBounds)).map(toSkeletonEntry);
 }

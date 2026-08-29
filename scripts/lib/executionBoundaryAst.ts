@@ -107,12 +107,21 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     position: number;
     receiverDeclaration?: DeclarationBinding;
   }> = [];
+  type InvocationExpression = ts.CallExpression | ts.NewExpression;
   const calls: ts.CallExpression[] = [];
+  const invocations: InvocationExpression[] = [];
   const launcherAliases = new Set(PROCESS_LAUNCHERS);
   const executionSeamAliases = new Set(["executeCommand", "runExecSeam", "execute"]);
   const runExecSeamAliases = new Set(["runExecSeam"]);
   const childProcessNamespaces = new Set<string>();
   const functionName = (node: ts.FunctionLikeDeclaration): string | undefined => {
+    if (
+      ts.isConstructorDeclaration(node) &&
+      ts.isClassDeclaration(node.parent) &&
+      node.parent.name
+    ) {
+      return node.parent.name.text;
+    }
     if (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
       return node.parent.name.text;
     }
@@ -353,6 +362,14 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       };
       declarations.push(receiverDeclaration);
       for (const member of node.members) {
+        if (ts.isConstructorDeclaration(member)) {
+          functionBindings.push({
+            name: node.name.text,
+            node: member,
+            scope,
+            position: member.getStart(sourceFile),
+          });
+        }
         if (
           ts.isMethodDeclaration(member) &&
           member.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword)
@@ -402,6 +419,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     }
     if (ts.isCallExpression(node)) {
       calls.push(node);
+      invocations.push(node);
+    } else if (ts.isNewExpression(node)) {
+      invocations.push(node);
     }
     ts.forEachChild(node, collect);
   };
@@ -437,13 +457,85 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     receiverDeclarationCache.set(receiver, null);
     return undefined;
   };
+  const identifierResolvesToFunction = (
+    name: string,
+    target: ts.FunctionLikeDeclaration,
+    callScopes: readonly ts.Node[],
+    beforePosition: number,
+    seen = new Set<string>(),
+  ): boolean => {
+    if (seen.has(name)) {
+      return false;
+    }
+    const nextSeen = new Set([...seen, name]);
+    const definitions: Array<
+      | { kind: "function"; node: ts.FunctionLikeDeclaration; scope: ts.Node; position: number }
+      | { kind: "value"; value: ts.Expression; scope: ts.Node; position: number }
+    > = [
+      ...functionBindings
+        .filter(
+          (binding) =>
+            binding.name === name &&
+            binding.receiverDeclaration === undefined &&
+            callScopes.includes(binding.scope) &&
+            (ts.isFunctionDeclaration(binding.node) || binding.position < beforePosition),
+        )
+        .map((binding) => ({
+          kind: "function" as const,
+          node: binding.node,
+          scope: binding.scope,
+          position:
+            ts.isFunctionDeclaration(binding.node) && binding.position >= beforePosition
+              ? -1
+              : binding.position,
+        })),
+      ...scopedValues
+        .filter(
+          (binding) =>
+            binding.name === name &&
+            callScopes.includes(binding.scope) &&
+            binding.position < beforePosition,
+        )
+        .map((binding) => ({
+          kind: "value" as const,
+          value: binding.value,
+          scope: binding.scope,
+          position: binding.position,
+        })),
+    ].sort((left, right) => {
+      const scopeDelta = callScopes.indexOf(left.scope) - callScopes.indexOf(right.scope);
+      if (scopeDelta !== 0) {
+        return scopeDelta;
+      }
+      const positionDelta = right.position - left.position;
+      if (positionDelta !== 0) {
+        return positionDelta;
+      }
+      return left.kind === "function" ? -1 : 1;
+    });
+    const definition = definitions[0];
+    if (!definition) {
+      return false;
+    }
+    if (definition.kind === "function") {
+      return definition.node === target;
+    }
+    const value = unwrapTransparentExpression(definition.value);
+    if (value === target) {
+      return true;
+    }
+    return ts.isIdentifier(value)
+      ? identifierResolvesToFunction(value.text, target, callScopes, definition.position, nextSeen)
+      : false;
+  };
+
   const callResolutionCache = new Map<
-    ts.CallExpression,
+    InvocationExpression,
     Map<ts.FunctionLikeDeclaration, boolean>
   >();
 
   const callResolvesToFunction = (
-    call: ts.CallExpression,
+    call: InvocationExpression,
     target: ts.FunctionLikeDeclaration,
   ): boolean => {
     const cached = callResolutionCache.get(call)?.get(target);
@@ -462,20 +554,25 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     if (unwrapTransparentExpression(call.expression) === target) {
       return finish(true);
     }
-    const name = functionName(target);
     const callee = unwrapTransparentExpression(call.expression);
     const receiver =
       (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
       ts.isIdentifier(callee.expression)
         ? callee.expression
         : undefined;
-    if (!name || (!ts.isIdentifier(callee) && receiver === undefined)) {
-      return finish(false);
-    }
-    if (receiver === undefined && ts.isIdentifier(callee) && callee.text !== name) {
+    if (!ts.isIdentifier(callee) && receiver === undefined) {
       return finish(false);
     }
     const callScopes = scopeChain(call);
+    if (receiver === undefined && ts.isIdentifier(callee)) {
+      return finish(
+        identifierResolvesToFunction(callee.text, target, callScopes, call.getStart(sourceFile)),
+      );
+    }
+    const name = functionName(target);
+    if (!name) {
+      return finish(false);
+    }
     const receiverDeclaration = receiver
       ? resolveReceiverDeclaration(receiver, callScopes)
       : undefined;
@@ -496,9 +593,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     return finish(candidates[0]?.node === target);
   };
 
-  const callExecutionCache = new Map<ts.CallExpression, Map<number, boolean>>();
+  const callExecutionCache = new Map<InvocationExpression, Map<number, boolean>>();
   const callCanExecuteBefore = (
-    call: ts.CallExpression,
+    call: InvocationExpression,
     beforePosition: number,
     seenFunctions = new Set<ts.FunctionLikeDeclaration>(),
   ): boolean => {
@@ -523,7 +620,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       return false;
     }
     const nextSeen = new Set([...seenFunctions, current]);
-    const executable = calls.some(
+    const executable = invocations.some(
       (invocation) =>
         invocation.getStart(sourceFile) < beforePosition &&
         callResolvesToFunction(invocation, current) &&
@@ -590,7 +687,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
           const useFunction = useFunctions.at(-1);
           const useFunctionName = useFunction ? functionName(useFunction) : undefined;
           const useInvocationPositions = useFunctionName
-            ? calls
+            ? invocations
                 .filter(
                   (call) =>
                     callResolvesToFunction(call, useFunction!) &&
@@ -614,15 +711,17 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
             ? functionName(candidateFunction)
             : undefined;
           const candidateInvocationPositions = candidateFunctionName
-            ? calls
+            ? invocations
                 .filter(
                   (call) =>
                     callResolvesToFunction(call, candidateFunction!) &&
                     callCanExecuteBefore(call, useExecutionPosition) &&
-                    call.getStart(sourceFile) < useExecutionPosition,
+                    (call.getStart(sourceFile) < useExecutionPosition ||
+                      (candidateFunction === useFunction &&
+                        useInvocationPositions.includes(call.getStart(sourceFile)))),
                 )
                 .map((call) => call.getStart(sourceFile))
-            : calls
+            : invocations
                 .filter(
                   (call) =>
                     unwrapTransparentExpression(call.expression) === candidateFunction &&
@@ -636,14 +735,23 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
             candidateInvocationPositions.length > 0
               ? Math.max(...candidateInvocationPositions)
               : candidate.position;
+          const earlierInSameInvocation =
+            candidateFunction === useFunction &&
+            candidate.position < usePosition &&
+            candidateInvocationPositions.some((position) =>
+              useInvocationPositions.includes(position),
+            );
           return candidate.name === node.text &&
             candidateScope === scope &&
-            effectivePosition < useExecutionPosition
-            ? [{ candidate, effectivePosition }]
+            (effectivePosition < useExecutionPosition || earlierInSameInvocation)
+            ? [{ candidate, effectivePosition, earlierInSameInvocation }]
             : [];
         });
         binding = candidates.sort(
-          (left, right) => right.effectivePosition - left.effectivePosition,
+          (left, right) =>
+            right.effectivePosition - left.effectivePosition ||
+            Number(right.earlierInSameInvocation) - Number(left.earlierInSameInvocation) ||
+            right.candidate.position - left.candidate.position,
         )[0]?.candidate;
         if (binding) {
           break;

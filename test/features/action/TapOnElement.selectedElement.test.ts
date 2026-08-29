@@ -238,6 +238,29 @@ describe("TapOnElement selectedElement metadata", () => {
     });
   });
 
+  // A Compose node selected by testTag may carry only a test tag (no text, no
+  // resource-id); the metadata must retain it so the tap message can name it.
+  test("retains the Compose test tag as selected-element identity", () => {
+    const tapOnElement = createTapOnElement();
+    const element: Element = {
+      "test-tag": "message_row_42",
+      class: "android.view.View",
+      bounds: { left: 0, top: 0, right: 100, bottom: 40 },
+    } as Element;
+    const selection: ElementSelectionResult = {
+      element,
+      indexInMatches: 0,
+      totalMatches: 1,
+      strategy: "first",
+    };
+
+    const selectedElement = (tapOnElement as any).buildSelectedElementMetadata(selection);
+
+    expect(selectedElement.testTag).toBe("message_row_42");
+    expect(selectedElement.text).toBe("");
+    expect(selectedElement.resourceId).toBe("");
+  });
+
   test("handles text, button, and list item element types", () => {
     const tapOnElement = createTapOnElement();
     const cases: Array<{ label: string; element: Element }> = [

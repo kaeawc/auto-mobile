@@ -1,6 +1,11 @@
 import { z } from "zod/v4";
 import { ToolRegistry } from "./toolRegistry";
-import { ActionableError, BootedDevice, type TerminateAppResult } from "../models";
+import {
+  ActionableError,
+  BootedDevice,
+  type LaunchAppResult,
+  type TerminateAppResult,
+} from "../models";
 import { LaunchApp } from "../features/action/LaunchApp";
 import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
@@ -87,6 +92,49 @@ export function setTerminateAppToolDependencies(deps: Partial<TerminateAppToolDe
 
 export function resetTerminateAppToolDependencies(): void {
   terminateAppToolDependencies = null;
+}
+
+/**
+ * Build the launchApp tool response from a {@link LaunchAppResult}, enforcing the
+ * launch postcondition instead of reporting a flat "Launched app X" success
+ * regardless of what actually happened (#5868).
+ *
+ * `LaunchApp.execute` already resolves the package (returning `success:false`
+ * with "App is not installed" for an uninstalled package) and reconciles the
+ * launch observation against the requested app (returning `success:false` when
+ * the foreground app never matches). This surfaces those typed failures as a
+ * real error — mirroring the terminate handler (#5621) — rather than swallowing
+ * them behind a success message. On success it additionally reports the observed
+ * foreground appId and whether it matched, so a client can skip a confirming
+ * `observe` round-trip.
+ */
+export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
+  if (!result.success) {
+    // `||` not `??`: an empty-string error must still yield the non-empty
+    // fallback rather than surfacing a blank message.
+    throw new ActionableError(result.error || `Failed to launch app ${appId}`);
+  }
+
+  // Mirror `LaunchApp`'s own reconciliation, which accepts either the active
+  // window's appId or the view hierarchy's packageName — so a launch verified via
+  // the hierarchy (active window absent) still reports the observed app.
+  const observedAppId =
+    result.observation?.activeWindow?.appId ?? result.observation?.viewHierarchy?.packageName;
+  // Only assert verification on an exact foreground match. `LaunchApp.execute`
+  // returns `success:true` only when the foreground reconciles with the request —
+  // an exact match, an accepted surface (e.g. a notification-permission dialog
+  // whose foreground is the permission controller), or no observation at all — so
+  // a non-matching `observedAppId` here is such an accepted surface, not a failed
+  // launch. Emit `verified` as true-or-undefined; never a misleading `false`.
+  const verified = observedAppId === appId ? true : undefined;
+
+  return {
+    message: verified ? `Launched app ${appId} (foreground verified)` : `Launched app ${appId}`,
+    verified,
+    observedAppId,
+    observation: result.observation,
+    ...result,
+  };
 }
 
 // Schema definitions
@@ -336,13 +384,15 @@ export function registerAppTools() {
       );
       signal?.throwIfAborted();
 
-      return createJSONToolResponse({
-        message: `Launched app ${args.appId}`,
-        observation: result.observation,
-        ...result,
-      });
+      return createJSONToolResponse(buildLaunchAppResponse(args.appId, result));
     } catch (error) {
       if (isDeviceLostError(error)) {
+        throw error;
+      }
+      // A typed launch failure (uninstalled package, foreground mismatch) is
+      // already an actionable error — surface it verbatim rather than re-wrapping
+      // it as "Failed to launch app: Error: ..." (#5868).
+      if (error instanceof ActionableError) {
         throw error;
       }
       throw new ActionableError(`Failed to launch app: ${error}`);

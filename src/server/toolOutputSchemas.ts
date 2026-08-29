@@ -98,6 +98,7 @@ export const selectedElementSchema = z
   .object({
     text: z.string().optional(),
     resourceId: z.string().optional(),
+    testTag: z.string().optional(),
     contentDesc: z.string().optional(),
     bounds: elementBoundsSchema.optional(),
     indexInMatches: z.number().int().optional(),

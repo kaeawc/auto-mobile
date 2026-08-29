@@ -108,7 +108,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     receiverDeclaration?: DeclarationBinding;
   }> = [];
   const classInstanceMethods: Array<{
-    className: string;
+    classDeclaration: DeclarationBinding;
     name: string;
     node: ts.MethodDeclaration;
     scope: ts.Node;
@@ -395,7 +395,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
           const methodName = propertyNameOf(member.name);
           if (methodName) {
             classInstanceMethods.push({
-              className: node.name.text,
+              classDeclaration: receiverDeclaration,
               name: methodName,
               node: member,
               scope,
@@ -463,9 +463,37 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     if (!receiverDeclaration) {
       continue;
     }
-    const visibleScopes = scopeChain(value);
+    // A later assignment can replace the instance with an unrelated subclass.
+    // Do not associate that mutable receiver with its declaration initializer.
+    if (
+      scopedValues.some(
+        (candidate) =>
+          candidate.kind === "assignment" &&
+          candidate.name === binding.name &&
+          candidate.position > binding.position,
+      )
+    ) {
+      continue;
+    }
+    const constructorScopes = scopeChain(value.expression);
+    const classDeclaration = declarations
+      .filter(
+        (declaration) =>
+          declaration.name === value.expression.text &&
+          constructorScopes.includes(declaration.scope) &&
+          declaration.position <= value.expression.getStart(sourceFile) &&
+          classInstanceMethods.some((method) => method.classDeclaration === declaration),
+      )
+      .sort((left, right) => {
+        const scopeDelta =
+          constructorScopes.indexOf(left.scope) - constructorScopes.indexOf(right.scope);
+        return scopeDelta !== 0 ? scopeDelta : right.position - left.position;
+      })[0];
+    if (!classDeclaration) {
+      continue;
+    }
     for (const method of classInstanceMethods) {
-      if (method.className === value.expression.text && visibleScopes.includes(method.scope)) {
+      if (method.classDeclaration === classDeclaration) {
         functionBindings.push({
           name: method.name,
           node: method.node,
@@ -715,7 +743,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
           ts.isElementAccessExpression(combinator.expression)) &&
         ts.isIdentifier(combinator.expression.expression) &&
         combinator.expression.expression.text === "Promise" &&
-        new Set(["all", "allSettled", "any", "race"]).has(propertyName(combinator.expression) ?? "")
+        propertyName(combinator.expression) === "all"
       ) {
         current = combinator;
       }

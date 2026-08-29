@@ -646,4 +646,147 @@ describe("MCP Navigation Graph Resource", () => {
       expect(Array.isArray(body.nodes)).toBe(true);
     });
   });
+
+  // #5853: siblings of #5748. The `screenName`, `cursor`, and `limit` params were
+  // decoded (and `limit` validated) OUTSIDE each handler's try/catch, so a
+  // malformed percent-sequence (or an invalid `limit`) threw past the JSON error
+  // envelope and surfaced as JSON-RPC -32603 instead. Same guarded-decode contract
+  // as the `{?appId}` fix: a bad param degrades to the resource's own JSON envelope.
+  describe("screen/cursor/limit params are guarded against uncaught URIError (#5853)", () => {
+    const readResourceResponseSchema = z.object({
+      contents: z.array(
+        z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+        }),
+      ),
+    });
+
+    test("a literal-% screen name returns a graceful JSON envelope, not an uncaught URIError", async () => {
+      fakeGraph.setCurrentAppId("com.example.a");
+      fakeGraph.addNode({
+        screenName: "Home",
+        firstSeenAt: 100,
+        lastSeenAt: 200,
+        visitCount: 1,
+      });
+
+      const { client } = fixture.getContext();
+
+      // Raw "100%" is not a valid percent-sequence: decodeURIComponent throws.
+      // Before the fix, that URIError escaped the handler's try/catch and failed
+      // the read with -32603. Now the guarded decode degrades to the raw value,
+      // which resolves to no node → the resource's normal not-found JSON envelope.
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: { uri: "automobile:navigation/nodes?screen=100%" },
+        },
+        readResourceResponseSchema,
+      );
+
+      const content = result.contents[0];
+      expect(content.mimeType).toBe("application/json");
+      const body = JSON.parse(content.text!);
+      expect(typeof body.error).toBe("string");
+      expect(body.error).toContain("not found");
+    });
+
+    test("a literal-% cursor returns a graceful JSON error envelope, not an uncaught URIError", async () => {
+      fakeGraph.setCurrentAppId("com.example.a");
+
+      const { client } = fixture.getContext();
+
+      // "100%" is a malformed cursor. The bug was the decode itself: before the fix
+      // decodeURIComponent("100%") threw a URIError past the handler (-32603). Now
+      // the guarded decode degrades to the raw value, which the history export then
+      // rejects as an invalid `timestamp:id` cursor (mirroring the real
+      // NavigationGraphManager.parseHistoryCursor) — surfacing the resource's JSON
+      // error envelope instead of a URIError. Pre-fix this request rejected with
+      // -32603; post-fix it resolves with an error body.
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: { uri: "automobile:navigation/history?cursor=100%" },
+        },
+        readResourceResponseSchema,
+      );
+
+      const content = result.contents[0];
+      expect(content.mimeType).toBe("application/json");
+      const body = JSON.parse(content.text!);
+      expect(typeof body.error).toBe("string");
+      expect(body.error).toContain("cursor");
+    });
+
+    test("a well-formed cursor returns a normal (non-error) JSON page", async () => {
+      fakeGraph.setCurrentAppId("com.example.a");
+
+      const { client } = fixture.getContext();
+
+      // Guards against over-broad rejection: a valid `timestamp:id` cursor must
+      // still produce a normal history page, so the fix does not turn every cursor
+      // into an error envelope.
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: { uri: "automobile:navigation/history?cursor=123:45" },
+        },
+        readResourceResponseSchema,
+      );
+
+      const content = result.contents[0];
+      expect(content.mimeType).toBe("application/json");
+      const body = JSON.parse(content.text!);
+      expect(body.error).toBeUndefined();
+      expect(Array.isArray(body.nodes)).toBe(true);
+    });
+
+    test("a literal-% limit returns a graceful JSON error envelope, not an uncaught URIError", async () => {
+      fakeGraph.setCurrentAppId("com.example.a");
+
+      const { client } = fixture.getContext();
+
+      // "100%" decodes (guarded) to the raw value, which is not a finite positive
+      // number, so parseHistoryParams throws a plain Error. Before the fix that
+      // throw was uncaught (-32603); now historyHandler catches it and returns the
+      // resource's JSON error envelope.
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: { uri: "automobile:navigation/history?limit=100%" },
+        },
+        readResourceResponseSchema,
+      );
+
+      const content = result.contents[0];
+      expect(content.mimeType).toBe("application/json");
+      const body = JSON.parse(content.text!);
+      expect(typeof body.error).toBe("string");
+      expect(body.error).toContain("limit");
+    });
+
+    test("a non-numeric limit returns a graceful JSON error envelope, not an uncaught throw", async () => {
+      fakeGraph.setCurrentAppId("com.example.a");
+
+      const { client } = fixture.getContext();
+
+      // Well-formed but invalid limit: parseHistoryParams throws a plain Error that
+      // is likewise uncaught before the fix. historyHandler must catch it too.
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: { uri: "automobile:navigation/history?limit=abc" },
+        },
+        readResourceResponseSchema,
+      );
+
+      const content = result.contents[0];
+      expect(content.mimeType).toBe("application/json");
+      const body = JSON.parse(content.text!);
+      expect(typeof body.error).toBe("string");
+      expect(body.error).toContain("limit");
+    });
+  });
 });

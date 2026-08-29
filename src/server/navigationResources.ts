@@ -46,15 +46,16 @@ export interface NavigationAppsResourceContent {
 
 const GRAPH_RESOURCE_UPDATE_DEBOUNCE_MS = 1000;
 
-// Decode the `?appId={appId}` query param captured by these navigation templates.
-// The registry compiles the literal `?appId=` form to a RAW regex group (it only
-// URL-decodes params for RFC-6570 `{?appId}` templates like storageCapabilities),
-// so this single decodeURIComponent is the first-and-only decode — NOT the #5686
-// double-decode, and it must stay. Guard it so a malformed percent-sequence (a
-// bad-client `%`) falls back to the raw value instead of throwing an uncaught
-// URIError past each handler's try/catch and bypassing the JSON error envelope —
-// matching #5686's graceful handling of the same input (#5748).
-function decodeAppIdParam(raw: string | undefined): string | undefined {
+// Decode a query param captured by these navigation templates (`appId`,
+// `screenName`, `cursor`, `limit`). The registry compiles the literal `?name=`
+// form to a RAW regex group (it only URL-decodes params for RFC-6570 `{?name}`
+// templates like storageCapabilities), so this single decodeURIComponent is the
+// first-and-only decode — NOT the #5686 double-decode, and it must stay. Guard it
+// so a malformed percent-sequence (a bad-client `%`) falls back to the raw value
+// instead of throwing an uncaught URIError past each handler's try/catch and
+// bypassing the JSON error envelope — matching #5686's graceful handling of the
+// same input (#5748 for `{?appId}`; #5853 extended it to the sibling params).
+function decodeUriParam(raw: string | undefined): string | undefined {
   if (!raw) {
     return undefined;
   }
@@ -62,9 +63,10 @@ function decodeAppIdParam(raw: string | undefined): string | undefined {
     return decodeURIComponent(raw).trim();
   } catch (error) {
     // Malformed percent-encoding is bad client input, not a server fault: return
-    // the raw value so the handler emits its own JSON error envelope for a
-    // non-existent app rather than throwing. Safe to swallow after tracing.
-    logger.debug(`[NavigationResources] appId decode failed for '${raw}': ${error}`);
+    // the raw value so the handler emits its own JSON error envelope (unresolvable
+    // app / screen / cursor / limit) rather than throwing. Safe to swallow after
+    // tracing.
+    logger.debug(`[NavigationResources] param decode failed for '${raw}': ${error}`);
     return raw.trim();
   }
 }
@@ -287,8 +289,8 @@ function parseHistoryParams(params: Record<string, string>): {
   cursor?: string;
   limit?: number;
 } {
-  const cursorRaw = params.cursor ? decodeURIComponent(params.cursor).trim() : "";
-  const limitRaw = params.limit ? decodeURIComponent(params.limit).trim() : "";
+  const cursorRaw = decodeUriParam(params.cursor) ?? "";
+  const limitRaw = decodeUriParam(params.limit) ?? "";
 
   const cursor = cursorRaw || undefined;
   if (!limitRaw) {
@@ -418,7 +420,7 @@ export function registerNavigationResources(
     "High-level navigation graph filtered by app ID.",
     "application/json",
     async (params) => {
-      const appId = decodeAppIdParam(params.appId);
+      const appId = decodeUriParam(params.appId);
       return getNavigationGraphResource(appId);
     },
   );
@@ -432,19 +434,38 @@ export function registerNavigationResources(
   );
 
   const historyHandler = async (params: Record<string, string>) => {
-    const { cursor, limit } = parseHistoryParams(params);
-    const query = new URLSearchParams();
-    if (cursor) {
-      query.set("cursor", cursor);
+    try {
+      const { cursor, limit } = parseHistoryParams(params);
+      const query = new URLSearchParams();
+      if (cursor) {
+        query.set("cursor", cursor);
+      }
+      if (limit) {
+        query.set("limit", limit.toString());
+      }
+      const queryString = query.toString();
+      const uri = queryString
+        ? `${NAVIGATION_RESOURCE_URIS.HISTORY}?${queryString}`
+        : NAVIGATION_RESOURCE_URIS.HISTORY;
+      return getNavigationGraphHistoryResource(uri, { cursor, limit });
+    } catch (error) {
+      // parseHistoryParams throws a plain Error on an invalid `limit`. That throw
+      // runs outside getNavigationGraphHistoryResource's try/catch, so without this
+      // it would escape past the JSON error envelope as a JSON-RPC -32603 (#5853).
+      // Log and return the resource's own error envelope instead.
+      logger.error(`[NavigationResources] Failed to parse navigation history params: ${error}`);
+      return {
+        uri: NAVIGATION_RESOURCE_URIS.HISTORY,
+        mimeType: "application/json",
+        text: JSON.stringify(
+          {
+            error: `Failed to retrieve navigation history: ${error}`,
+          },
+          null,
+          2,
+        ),
+      };
     }
-    if (limit) {
-      query.set("limit", limit.toString());
-    }
-    const queryString = query.toString();
-    const uri = queryString
-      ? `${NAVIGATION_RESOURCE_URIS.HISTORY}?${queryString}`
-      : NAVIGATION_RESOURCE_URIS.HISTORY;
-    return getNavigationGraphHistoryResource(uri, { cursor, limit });
   };
 
   ResourceRegistry.registerTemplate(
@@ -480,7 +501,7 @@ export function registerNavigationResources(
     "application/json",
     async (params) => {
       const nodeId = Number(params.nodeId);
-      const appId = decodeAppIdParam(params.appId);
+      const appId = decodeUriParam(params.appId);
       if (!Number.isFinite(nodeId)) {
         return buildNavigationNodeError(
           `automobile:navigation/nodes/${params.nodeId}`,
@@ -514,7 +535,7 @@ export function registerNavigationResources(
     "Detailed navigation graph node by screen name, including relationships.",
     "application/json",
     async (params) => {
-      const screenName = decodeURIComponent(params.screenName ?? "").trim();
+      const screenName = decodeUriParam(params.screenName) ?? "";
       if (!screenName) {
         return buildNavigationNodeError(
           "automobile:navigation/nodes?screen=",
@@ -535,7 +556,7 @@ export function registerNavigationResources(
     "image/webp",
     async (params) => {
       const nodeId = Number(params.nodeId);
-      const appId = decodeAppIdParam(params.appId);
+      const appId = decodeUriParam(params.appId);
       if (!Number.isFinite(nodeId)) {
         return {
           uri: `automobile:navigation/nodes/${params.nodeId}/screenshot`,

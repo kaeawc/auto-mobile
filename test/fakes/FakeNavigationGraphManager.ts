@@ -18,6 +18,8 @@ import {
   NavigationGraphNodeResourceProvider,
   NavigationAppSummary,
   NavigationAppListProvider,
+  NavigationGraphHistoryProvider,
+  NavigationGraphHistoryPage,
 } from "../../src/utils/interfaces/NavigationGraph";
 
 /**
@@ -29,7 +31,8 @@ export class FakeNavigationGraphManager
     NavigationGraph,
     NavigationGraphSummaryProvider,
     NavigationGraphNodeResourceProvider,
-    NavigationAppListProvider
+    NavigationAppListProvider,
+    NavigationGraphHistoryProvider
 {
   private currentAppId: string | null = null;
   private currentScreen: string | null = null;
@@ -48,6 +51,7 @@ export class FakeNavigationGraphManager
 
   // Configurable responses
   private pathResult: PathResult | null = null;
+  private historyPage: NavigationGraphHistoryPage | null = null;
 
   // ==================== Configuration Methods ====================
 
@@ -463,5 +467,44 @@ export class FakeNavigationGraphManager
     this.nodeSummaryIds.set(screenName, nodeId);
 
     return this.buildNodeResource(node, nodeId, this.currentAppId);
+  }
+
+  /**
+   * Configure the page returned by exportGraphHistory. Defaults to an empty page
+   * scoped to the current app when unset.
+   */
+  setHistoryPage(page: NavigationGraphHistoryPage | null): void {
+    this.historyPage = page;
+  }
+
+  async exportGraphHistory(options?: {
+    cursor?: string;
+    limit?: number;
+  }): Promise<NavigationGraphHistoryPage> {
+    this.trackCall("exportGraphHistory", [options]);
+
+    if (this.historyPage) {
+      return this.historyPage;
+    }
+
+    // Mirror NavigationGraphManager.parseHistoryCursor: with an active app, a
+    // cursor is only valid as a numeric `timestamp:id`. Real production rejects a
+    // malformed cursor rather than echoing it, so replicate that here to keep the
+    // malformed-cursor regression test faithful to the shipped behavior.
+    if (this.currentAppId && options?.cursor) {
+      const [timestampRaw, idRaw] = options.cursor.split(":");
+      if (!Number.isFinite(Number(timestampRaw)) || !Number.isFinite(Number(idRaw))) {
+        throw new Error(`Invalid history cursor: ${options.cursor}`);
+      }
+    }
+
+    return {
+      appId: this.currentAppId,
+      currentScreen: this.currentScreen,
+      cursor: options?.cursor ?? null,
+      nextCursor: null,
+      nodes: [],
+      edges: [],
+    };
   }
 }

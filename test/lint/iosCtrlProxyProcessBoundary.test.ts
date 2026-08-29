@@ -206,6 +206,12 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
         'const base = {}; const config = { ...base }; runner.exec("kill");',
       ),
     ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'let runner: RegExp; class Config { static configure(){ runner = /x/; } } Config.configure(); runner.exec("kill");',
+      ),
+    ).toHaveLength(0);
   });
 
   test("has a production check with documented exceptions", () => {

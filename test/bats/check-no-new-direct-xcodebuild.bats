@@ -331,6 +331,16 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "recognizes attached env unset and chdir operands" {
+  printf '%s\n' 'spawn("env", ["-uPATH", "-C/tmp", "echo", "xcodebuild"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new direct production xcodebuild invocations"* ]]
+}
+
 @test "recognizes bundled shell command flags" {
   printf '%s\n' "spawn(\"env\", [\"-S\", \"bash -lc 'xcodebuild test'\"]);" > "$repo_dir/src/bypass.ts"
   git -C "$repo_dir" add src/bypass.ts

@@ -344,6 +344,32 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
         position: node.getStart(sourceFile),
       });
     }
+    if (ts.isClassDeclaration(node) && node.name) {
+      const scope = lexicalScope(node);
+      const receiverDeclaration: DeclarationBinding = {
+        name: node.name.text,
+        scope,
+        position: node.getStart(sourceFile),
+      };
+      declarations.push(receiverDeclaration);
+      for (const member of node.members) {
+        if (
+          ts.isMethodDeclaration(member) &&
+          member.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword)
+        ) {
+          const methodName = propertyNameOf(member.name);
+          if (methodName) {
+            functionBindings.push({
+              name: methodName,
+              node: member,
+              scope,
+              position: member.getStart(sourceFile),
+              receiverDeclaration,
+            });
+          }
+        }
+      }
+    }
     if (ts.isParameter(node)) {
       const scope = functionScope(node);
       for (const identifier of bindingIdentifiers(node.name)) {

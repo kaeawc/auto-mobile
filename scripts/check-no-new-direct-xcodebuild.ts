@@ -157,6 +157,9 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
       pending.shift();
       continue;
     }
+    if (/^-(?:u|C|P).+/.test(argument)) {
+      continue;
+    }
     if (["-S", "--split-string"].includes(argument)) {
       splitStringSeen = true;
       pending.unshift(...splitEnvPayload(pending.shift() ?? ""));

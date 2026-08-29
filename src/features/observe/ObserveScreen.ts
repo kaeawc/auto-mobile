@@ -821,10 +821,7 @@ export class RealObserveScreen implements ObserveScreen {
     if (!foreground || !observed || observed === foreground) {
       return undefined;
     }
-    if (
-      SYSTEM_UI_WINDOW_PACKAGES.has(observed) ||
-      SYSTEM_UI_WINDOW_PACKAGES.has(foreground)
-    ) {
+    if (SYSTEM_UI_WINDOW_PACKAGES.has(observed) || SYSTEM_UI_WINDOW_PACKAGES.has(foreground)) {
       return undefined;
     }
     // Confirm the mismatch is steady-state, not a transient transition (see above).

@@ -9,6 +9,7 @@ import {
   setNavigationScreenshotProvider,
 } from "../../../src/server/navigationResources";
 import { FakeNavigationGraphManager } from "../../fakes/FakeNavigationGraphManager";
+import { ResourceRegistry } from "../../../src/server/resourceRegistry";
 import { z } from "zod/v4";
 
 describe("MCP Navigation Graph Resource", () => {
@@ -545,5 +546,104 @@ describe("MCP Navigation Graph Resource", () => {
     expect(content.mimeType).toBe("application/json");
     const payload = JSON.parse(content.text!);
     expect(payload.error).toContain("No screenshot available");
+  });
+
+  // #5748: sibling of #5686. storageCapabilities double-decoded appId because its
+  // RFC-6570 `{?appId}` template makes the registry URL-decode the query param, so
+  // the handler's second decodeURIComponent was redundant. These navigation
+  // templates use the literal `?appId={appId}` form instead, which the registry
+  // captures as a RAW regex group (no URLSearchParams) — so navigation's single
+  // decodeURIComponent is correct and must NOT be removed. What navigation still
+  // needed was to stop that decode throwing an uncaught URIError past the
+  // handler's try/catch on a malformed `%` (the other harm #5686 flagged).
+  describe("appId query param is single-decoded, not double-decoded (#5748)", () => {
+    test("registry hands the handler the RAW query param (not URLSearchParams-decoded)", () => {
+      // URI value %2541: a double-decode path (storageCapabilities' `{?appId}`)
+      // would hand the handler "%41"; navigation's literal `?appId=` template
+      // captures it raw, so the single handler decode is the first-and-only one.
+      const match = ResourceRegistry.matchTemplate("automobile:navigation/graph?appId=%2541");
+      expect(match?.template.uriTemplate).toBe(NAVIGATION_RESOURCE_URIS.GRAPH_WITH_APP_ID);
+      expect(match?.params.appId).toBe("%2541");
+    });
+
+    test("a %-bearing appId round-trips through the resource (identity contract)", async () => {
+      fakeGraph.setCurrentAppId("com.example.a");
+      fakeGraph.addNode({
+        screenName: "Home",
+        firstSeenAt: 100,
+        lastSeenAt: 200,
+        visitCount: 1,
+      });
+
+      const { client } = fixture.getContext();
+      const readResourceResponseSchema = z.object({
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+          }),
+        ),
+      });
+
+      // URI value 100%25 → single decode → "100%". Same external contract as
+      // #5686 (100%25 → "100%"), reached via regex capture + one decode here.
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: { uri: "automobile:navigation/nodes/1?appId=100%25" },
+        },
+        readResourceResponseSchema,
+      );
+
+      const content = result.contents[0];
+      const nodeResource: NavigationNodeResourceContent = JSON.parse(content.text!);
+      expect(nodeResource.appId).toBe("100%");
+    });
+
+    test("a literal-% appId returns a graceful JSON envelope, not an uncaught URIError", async () => {
+      fakeGraph.setCurrentAppId("com.example.a");
+      fakeGraph.addNode({
+        screenName: "Home",
+        firstSeenAt: 100,
+        lastSeenAt: 200,
+        visitCount: 1,
+      });
+
+      const { client } = fixture.getContext();
+      const readResourceResponseSchema = z.object({
+        contents: z.array(
+          z.object({
+            uri: z.string(),
+            mimeType: z.string().optional(),
+            text: z.string().optional(),
+          }),
+        ),
+      });
+
+      // Raw "100%" is not a valid percent-sequence: decodeURIComponent throws.
+      // The decode runs outside the handler's try/catch, so before the fix this
+      // URIError escaped the JSON error envelope and failed the read.
+      const result = await client.request(
+        {
+          method: "resources/read",
+          params: { uri: "automobile:navigation/graph?appId=100%" },
+        },
+        readResourceResponseSchema,
+      );
+
+      const content = result.contents[0];
+      expect(content.mimeType).toBe("application/json");
+      // Deliberate contract: a malformed `%` appId degrades to a normal graph
+      // envelope (its fields present, no `error`), NOT an uncaught URIError and
+      // NOT a bespoke malformed-input rejection. This mirrors #5686, which treats
+      // a `%`-bearing id as an ordinary (here, unknown) app id rather than
+      // rejecting it — decoding is best-effort, so an unresolvable id degrades the
+      // same way any unknown id does. Asserting the shape (not just "some JSON
+      // parses") pins that intended degradation.
+      const body = JSON.parse(content.text!);
+      expect(body.error).toBeUndefined();
+      expect(Array.isArray(body.nodes)).toBe(true);
+    });
   });
 });

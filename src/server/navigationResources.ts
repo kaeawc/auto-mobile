@@ -46,6 +46,29 @@ export interface NavigationAppsResourceContent {
 
 const GRAPH_RESOURCE_UPDATE_DEBOUNCE_MS = 1000;
 
+// Decode the `?appId={appId}` query param captured by these navigation templates.
+// The registry compiles the literal `?appId=` form to a RAW regex group (it only
+// URL-decodes params for RFC-6570 `{?appId}` templates like storageCapabilities),
+// so this single decodeURIComponent is the first-and-only decode — NOT the #5686
+// double-decode, and it must stay. Guard it so a malformed percent-sequence (a
+// bad-client `%`) falls back to the raw value instead of throwing an uncaught
+// URIError past each handler's try/catch and bypassing the JSON error envelope —
+// matching #5686's graceful handling of the same input (#5748).
+function decodeAppIdParam(raw: string | undefined): string | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(raw).trim();
+  } catch (error) {
+    // Malformed percent-encoding is bad client input, not a server fault: return
+    // the raw value so the handler emits its own JSON error envelope for a
+    // non-existent app rather than throwing. Safe to swallow after tracing.
+    logger.debug(`[NavigationResources] appId decode failed for '${raw}': ${error}`);
+    return raw.trim();
+  }
+}
+
 type NavigationGraphResourceProvider = NavigationGraphSummaryProvider &
   NavigationGraphNodeResourceProvider &
   NavigationGraphHistoryProvider &
@@ -395,7 +418,7 @@ export function registerNavigationResources(
     "High-level navigation graph filtered by app ID.",
     "application/json",
     async (params) => {
-      const appId = params.appId ? decodeURIComponent(params.appId).trim() : undefined;
+      const appId = decodeAppIdParam(params.appId);
       return getNavigationGraphResource(appId);
     },
   );
@@ -457,7 +480,7 @@ export function registerNavigationResources(
     "application/json",
     async (params) => {
       const nodeId = Number(params.nodeId);
-      const appId = params.appId ? decodeURIComponent(params.appId).trim() : undefined;
+      const appId = decodeAppIdParam(params.appId);
       if (!Number.isFinite(nodeId)) {
         return buildNavigationNodeError(
           `automobile:navigation/nodes/${params.nodeId}`,
@@ -512,7 +535,7 @@ export function registerNavigationResources(
     "image/webp",
     async (params) => {
       const nodeId = Number(params.nodeId);
-      const appId = params.appId ? decodeURIComponent(params.appId).trim() : undefined;
+      const appId = decodeAppIdParam(params.appId);
       if (!Number.isFinite(nodeId)) {
         return {
           uri: `automobile:navigation/nodes/${params.nodeId}/screenshot`,

@@ -41,9 +41,9 @@ function formatToolError(error: unknown): string {
 // must read identically instead of leaking the raw zod issue dump (#5854 §3).
 // Non-Zod errors fall through unchanged; the `instanceof ZodError` shape is left
 // intact for callers that branch on it (e.g. optional-step handling below).
-function formatStepError(toolName: string, error: unknown): string {
+function formatStepError(toolName: string, error: unknown, rawInput?: unknown): string {
   if (error instanceof ZodError) {
-    return `Invalid parameters for tool ${toolName}: ${formatToolParamError(toolName, error)}`;
+    return `Invalid parameters for tool ${toolName}: ${formatToolParamError(toolName, error, rawInput)}`;
   }
   return `${error}`;
 }
@@ -535,7 +535,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (isDeviceLostError(error)) {
         throw error;
       }
-      const errorMsg = formatStepError(step.tool, error);
+      const errorMsg = formatStepError(step.tool, error, step.params);
       if (step.optional && !context.signal?.aborted && !(error instanceof ZodError)) {
         this.logger.warn(
           `${context.logPrefix} optional step ${step.tool} threw; returning skipped status`,

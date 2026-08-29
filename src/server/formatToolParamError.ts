@@ -1,6 +1,6 @@
 import { ZodError, type ZodIssue } from "zod/v4";
 
-export function flattenZodIssues(issues: ZodIssue[]): ZodIssue[] {
+function flattenZodIssues(issues: ZodIssue[]): ZodIssue[] {
   const flattened: ZodIssue[] = [];
 
   const visit = (issue: ZodIssue) => {
@@ -90,9 +90,7 @@ export function formatToolParamError(toolName: string, error: unknown): string {
   // Stable-sort by priority (Array.prototype.sort is stable) so first-seen order
   // is preserved within each tier, then dedup identical rendered fragments — a
   // union surfaces the same real error from several branches.
-  const ordered = flattenedIssues
-    .slice()
-    .sort((a, b) => issuePriority(a) - issuePriority(b));
+  const ordered = flattenedIssues.slice().sort((a, b) => issuePriority(a) - issuePriority(b));
 
   const seen = new Set<string>();
   const issues: string[] = [];

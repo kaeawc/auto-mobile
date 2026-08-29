@@ -284,7 +284,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
       // (`observe` always resets it). This capture is for the plan's failure
       // summary, not shown to the agent. Parse against the tool schema first, then
       // pass the resolved tool to the seam so the timeout race stays local.
-      const parsedParams = this.parseToolParams(observeTool.name, observeTool.schema, enhancedParams);
+      const parsedParams = this.parseToolParams(
+        observeTool.name,
+        observeTool.schema,
+        enhancedParams,
+      );
 
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       const response = await Promise.race([

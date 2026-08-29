@@ -186,7 +186,6 @@ function stripInternalToolParams(params: unknown): unknown {
   return rest;
 }
 
-
 /**
  * Populate the canonical production registry and validate exact-tool startup
  * defaults. The process entrypoint calls this before opening daemon listeners;

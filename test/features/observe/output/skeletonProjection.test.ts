@@ -311,6 +311,162 @@ describe("toSkeleton — acceptance criteria", () => {
     });
   });
 
+  describe("AC1 (#5869): hoist descendant text onto a labelless clickable container", () => {
+    test("a clickable row with no own text takes its descendant text as label + sublabel", () => {
+      // The standard Android `clickable container > TextView` preference row:
+      // the container is clickable but carries no text of its own; the visible
+      // title/summary live on descendant TextViews strictly inside it.
+      const row: Element = {
+        bounds: bounds(0, 200, 1080, 400),
+        "view-id": "s-53a78106563f5449",
+        clickable: "true",
+      };
+      const title: Element = {
+        bounds: bounds(72, 240, 600, 300),
+        text: "Network & internet",
+      };
+      const summary: Element = {
+        bounds: bounds(72, 310, 600, 360),
+        text: "Mobile, Wi-Fi, hotspot",
+      };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [row], text: [title, summary] }));
+
+      // Only the container row survives; its inner labels are folded in.
+      const entry = findById(skeleton, "s-53a78106563f5449");
+      expect(entry).toBeDefined();
+      expect(entry?.affordances).toEqual(["tap"]);
+      expect(entry?.label).toBe("Network & internet");
+      expect(entry?.sublabel).toBe("Mobile, Wi-Fi, hotspot");
+      // The two inner text nodes are not emitted as separate rows.
+      expect(skeleton).toHaveLength(1);
+    });
+
+    test("primary label is the top-most descendant; remaining texts join into sublabel", () => {
+      const row: Element = {
+        bounds: bounds(0, 0, 1080, 300),
+        "view-id": "s-multi",
+        clickable: "true",
+      };
+      // Deliberately out of document order to prove positional (top,left) sort.
+      const third: Element = { bounds: bounds(72, 200, 600, 260), text: "Third" };
+      const first: Element = { bounds: bounds(72, 20, 600, 80), text: "First" };
+      const second: Element = { bounds: bounds(72, 110, 600, 170), text: "Second" };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [row], text: [third, first, second] }));
+
+      const entry = findById(skeleton, "s-multi");
+      expect(entry?.label).toBe("First");
+      expect(entry?.sublabel).toBe("Second, Third");
+    });
+  });
+
+  describe("AC2 (#5869): descendant state text is preserved, not dropped", () => {
+    test("a clickable row with its own label folds descendant state text into sublabel", () => {
+      // Clock alarm row: the row is clickable and labelled (the time), and the
+      // schedule lives on a non-clickable descendant TextView. Previously the
+      // schedule was dropped from the skeleton entirely.
+      const alarmRow: Element = {
+        bounds: bounds(0, 0, 1080, 240),
+        "resource-id": "com.android.deskclock:id/alarm_item",
+        text: "7:00 AM",
+        clickable: "true",
+      };
+      const daysOfWeek: Element = {
+        bounds: bounds(72, 140, 600, 200),
+        "resource-id": "com.android.deskclock:id/days_of_week",
+        text: "Mon, Tue, Wed, Thu, Fri",
+      };
+
+      const skeleton = toSkeleton(
+        makeElements({ clickable: [alarmRow], text: [alarmRow, daysOfWeek] }),
+      );
+
+      const entry = findById(skeleton, "com.android.deskclock:id/alarm_item");
+      expect(entry?.label).toBe("7:00 AM");
+      expect(entry?.sublabel).toBe("Mon, Tue, Wed, Thu, Fri");
+      // The schedule text is not lost, and not emitted as a separate row.
+      expect(skeleton).toHaveLength(1);
+    });
+
+    test("descendant text equal to the container's own label is not duplicated into sublabel", () => {
+      const row: Element = {
+        bounds: bounds(0, 0, 300, 80),
+        "resource-id": "row",
+        text: "Settings",
+        clickable: "true",
+      };
+      const innerLabel: Element = {
+        bounds: bounds(20, 20, 120, 60),
+        text: "Settings",
+      };
+
+      const skeleton = toSkeleton(makeElements({ clickable: [row], text: [row, innerLabel] }));
+
+      const entry = findById(skeleton, "row");
+      expect(entry?.label).toBe("Settings");
+      expect("sublabel" in (entry as SkeletonElement)).toBe(false);
+      expect(skeleton).toHaveLength(1);
+    });
+  });
+
+  describe("AC1 (#5869): hoist targets the smallest clickable ancestor", () => {
+    test("descendant text is hoisted onto the innermost clickable container", () => {
+      const outerCard: Element = {
+        bounds: bounds(0, 0, 1080, 500),
+        "view-id": "s-outer",
+        clickable: "true",
+      };
+      const innerRow: Element = {
+        bounds: bounds(20, 20, 1060, 240),
+        "view-id": "s-inner",
+        clickable: "true",
+      };
+      const label: Element = {
+        bounds: bounds(72, 60, 600, 120),
+        text: "Inner label",
+      };
+
+      const skeleton = toSkeleton(
+        makeElements({ clickable: [outerCard, innerRow], text: [label] }),
+      );
+
+      // The text belongs to the innermost enclosing clickable, not the outer card.
+      expect(findById(skeleton, "s-inner")?.label).toBe("Inner label");
+      expect(findById(skeleton, "s-outer")?.label).toBeUndefined();
+    });
+
+    test("a nested clickable child's own text is not swallowed into the parent", () => {
+      // A clickable parent with no own text, enclosing a clickable child that
+      // carries its own text. The child owns a `tap` affordance, so it is not a
+      // hoist candidate — its label stays on the child, and the parent is not
+      // relabelled from it.
+      const parentCard: Element = {
+        bounds: bounds(0, 0, 1080, 300),
+        "view-id": "s-parent",
+        clickable: "true",
+      };
+      const childButton: Element = {
+        bounds: bounds(800, 40, 1040, 160),
+        "resource-id": "child-btn",
+        text: "OK",
+        clickable: "true",
+      };
+
+      const skeleton = toSkeleton(
+        // The child, carrying text, appears in both categories on a real capture.
+        makeElements({ clickable: [parentCard, childButton], text: [childButton] }),
+      );
+
+      expect(findById(skeleton, "child-btn")?.label).toBe("OK");
+      expect(findById(skeleton, "child-btn")?.affordances).toEqual(["tap"]);
+      // The parent keeps no label hoisted from the child's own text.
+      const parent = findById(skeleton, "s-parent");
+      expect(parent?.label).toBeUndefined();
+      expect("sublabel" in (parent as SkeletonElement)).toBe(false);
+    });
+  });
+
   describe("empty input", () => {
     test("no elements yields an empty skeleton", () => {
       expect(toSkeleton(makeElements({}))).toEqual([]);

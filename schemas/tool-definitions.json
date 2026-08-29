@@ -4400,6 +4400,9 @@
               "label": {
                 "type": "string"
               },
+              "sublabel": {
+                "type": "string"
+              },
               "testTag": {
                 "type": "string"
               },

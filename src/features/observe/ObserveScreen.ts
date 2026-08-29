@@ -80,6 +80,16 @@ function boundCachedLayoutWarnings(result: ObserveResult | undefined): ObserveRe
   return capped === result.layoutWarnings ? result : { ...result, layoutWarnings: capped };
 }
 
+/**
+ * Packages that legitimately present as the accessibility active window without
+ * being the device's resumed activity — a system-UI panel (notification shade,
+ * quick settings, volume, power dialog, keyguard) is a window, not an
+ * ActivityRecord, so it never appears as the resumed activity behind it. The
+ * window-identity freshness check (issue #5867) excludes these to avoid
+ * misreporting an expanded shade as a stale wrong-window capture.
+ */
+const SYSTEM_UI_WINDOW_PACKAGES = new Set<string>(["com.android.systemui"]);
+
 export class RealObserveScreen implements ObserveScreen {
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -310,6 +320,15 @@ export class RealObserveScreen implements ObserveScreen {
 
       perf.serial("observe");
 
+      // Ground-truth foreground app for the window-identity freshness check
+      // (issue #5867). Started here so it overlaps hierarchy collection and adds
+      // no serial latency; Android only (dumpsys resumed/focused activity),
+      // best-effort.
+      const foregroundIdentity: Promise<string | undefined> =
+        this.device.platform === "android"
+          ? this.deviceStateCollector.collectForegroundIdentity(signal)
+          : Promise.resolve(undefined);
+
       // Phase 1+2: hierarchy + derived device state (platform-specific orchestration).
       await this.collectAllData(
         result,
@@ -372,13 +391,6 @@ export class RealObserveScreen implements ObserveScreen {
         }
       }
 
-      // Cache the result for future use
-      await perf.track("cacheResult", () =>
-        getObserveCacheStore().put(this.device.deviceId, result),
-      );
-
-      perf.end();
-
       // Freshness diagnostics.
       //
       // This used to read `isFresh = requestedAfter === undefined ? true : …`,
@@ -388,6 +400,13 @@ export class RealObserveScreen implements ObserveScreen {
       // property in question measured nothing. It is now always a measurement:
       // capture age, plus whether the delegate verified the tree against the
       // device on this call. See ./observationFreshness.ts.
+      //
+      // Computed BEFORE caching so the persisted result carries the verdict: the
+      // observe cache serializes the result at `put` time (the filesystem store),
+      // so a verdict attached afterward would be lost on a daemon-restart cache
+      // reload within the TTL, and a consumer reading the cached tree directly
+      // (e.g. `SwipeOn.getScrollableContext`, nav/registry embeds) would accept a
+      // phantom hierarchy without its `isFresh: false` signal (issue #5867).
       result.freshness = computeFreshness({
         requestedAfter: minTimestamp > 0 ? minTimestamp : undefined,
         actualTimestamp: this.resolveObservationTimestampMs(result),
@@ -401,7 +420,19 @@ export class RealObserveScreen implements ObserveScreen {
           !hierarchyPlatformValid ||
           result.viewHierarchy?.hierarchy === undefined ||
           result.viewHierarchy?.hierarchy?.error !== undefined,
+        windowIdentityMismatch: await this.resolveWindowIdentityMismatch(
+          result,
+          foregroundIdentity,
+          signal,
+        ),
       });
+
+      // Cache the result for future use
+      await perf.track("cacheResult", () =>
+        getObserveCacheStore().put(this.device.deviceId, result),
+      );
+
+      perf.end();
 
       // Attach the windowed performance snapshot when opted in (independent of --debug-perf).
       await this.attachPerfSnapshot(result);
@@ -746,6 +777,60 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   // ---------- Helpers ----------
+
+  /**
+   * Compare the app the observed hierarchy was captured from against the
+   * device's ground-truth resumed activity (issue #5867). Returns a mismatch
+   * descriptor only when both are known and their package names differ — the
+   * cross-app stale-window case. A same-package activity change, an unknown
+   * ground truth, or an unknown observed window all yield `undefined` (no
+   * comparison, no false alarm). iOS never supplies a ground truth and so is
+   * always `undefined`.
+   *
+   * A system-UI window (`com.android.systemui`) on either side is excluded: when
+   * the notification shade, quick settings, volume, or power dialog takes
+   * accessibility focus, the a11y active window is systemui while the resumed
+   * activity behind the panel is the underlying app — a legitimate divergence,
+   * not a stale capture. Excluding it keeps first-class shade workflows (the
+   * `systemTray` tool) from misfiring while still catching the app-vs-app case
+   * the issue reported.
+   *
+   * The parallel sample is taken before hierarchy capture, so during an A→B app
+   * transition it can lag the (valid, newer) captured window and read a spurious
+   * mismatch. A detected mismatch is therefore confirmed against a second read
+   * taken now — after capture: freshness is retracted only when the device is
+   * *stably* on a different app (both samples agree, and still differ from the
+   * observed window). The extra dumpsys runs only on the rare mismatch path.
+   *
+   * The observed package is `viewHierarchy.packageName` — the package of the
+   * tree actually being validated — in preference to `activeWindow.appId`. The
+   * latter is derived from the accessibility `foregroundActivity`, which with an
+   * active soft keyboard can be the IME root's package while the captured
+   * hierarchy is the underlying app; comparing the IME package would falsely
+   * retract a valid application hierarchy. Falls back to `activeWindow.appId`
+   * only when the hierarchy carries no package (e.g. the bootstrap path, whose
+   * appId is itself a resumed-activity read in the same domain as the ground truth).
+   */
+  private async resolveWindowIdentityMismatch(
+    result: ObserveResult,
+    foregroundIdentity: Promise<string | undefined>,
+    signal?: AbortSignal,
+  ): Promise<{ observed: string; foreground: string } | undefined> {
+    const foreground = await foregroundIdentity;
+    const observed = result.viewHierarchy?.packageName ?? result.activeWindow?.appId;
+    if (!foreground || !observed || observed === foreground) {
+      return undefined;
+    }
+    if (SYSTEM_UI_WINDOW_PACKAGES.has(observed) || SYSTEM_UI_WINDOW_PACKAGES.has(foreground)) {
+      return undefined;
+    }
+    // Confirm the mismatch is steady-state, not a transient transition (see above).
+    const confirmed = await this.deviceStateCollector.collectForegroundIdentity(signal);
+    if (!confirmed || confirmed !== foreground || confirmed === observed) {
+      return undefined;
+    }
+    return { observed, foreground };
+  }
 
   private resolveObservationTimestampMs(result: ObserveResult): number | undefined {
     const candidate = result.viewHierarchy?.updatedAt ?? result.updatedAt;

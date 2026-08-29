@@ -185,6 +185,58 @@ describe("computeFreshness", () => {
     });
   });
 
+  // --- issue #5867: window-identity mismatch retracts freshness ---
+  describe("window-identity mismatch (issue #5867)", () => {
+    test("a wrong-window capture is NOT verified and NOT fresh, even when device-verified and recent", () => {
+      // The delegate said the tree was verified (`verified: true`) and it is
+      // brand new, but it belongs to a different app than the one currently
+      // resumed on the device. That is the stale wrong-window bug: it must not
+      // read as fresh, and `verified` must be retracted to false.
+      const v = computeFreshness({
+        actualTimestamp: NOW - 100,
+        now: NOW,
+        verified: true,
+        windowIdentityMismatch: {
+          observed: "com.google.android.calendar",
+          foreground: "com.android.settings",
+        },
+      });
+      expect(v.verified).toBe(false);
+      expect(v.isFresh).toBe(false);
+      expect(v.warning).toContain("com.google.android.calendar");
+      expect(v.warning).toContain("com.android.settings");
+    });
+
+    test("the mismatch dominates a requested-minimum poll too", () => {
+      const v = computeFreshness({
+        requestedAfter: NOW - 1_000,
+        actualTimestamp: NOW,
+        now: NOW,
+        windowIdentityMismatch: {
+          observed: "com.google.android.calendar",
+          foreground: "com.android.settings",
+        },
+      });
+      expect(v.verified).toBe(false);
+      expect(v.isFresh).toBe(false);
+    });
+
+    test("a hierarchy that could not be retrieved still reports unavailable, not a mismatch", () => {
+      // No hierarchy means no window to compare — unavailable dominates.
+      const v = computeFreshness({
+        actualTimestamp: NOW,
+        now: NOW,
+        unavailable: true,
+        windowIdentityMismatch: {
+          observed: "com.google.android.calendar",
+          foreground: "com.android.settings",
+        },
+      });
+      expect(v.isFresh).toBe(false);
+      expect(v.warning).toContain("could not be retrieved");
+    });
+  });
+
   test("every `isFresh: false` names its cause", () => {
     const falseCases = [
       computeFreshness({ actualTimestamp: NOW - 999_999, now: NOW }),

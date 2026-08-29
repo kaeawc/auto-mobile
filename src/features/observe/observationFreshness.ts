@@ -67,6 +67,16 @@ export interface FreshnessInputs {
   verified?: boolean;
   /** The hierarchy could not be retrieved, so no freshness verdict is possible. */
   unavailable?: boolean;
+  /**
+   * The observed hierarchy's window identity does not match the device's current
+   * top resumed activity — the tree is a stale wrong-window capture (issue
+   * #5867). `observed` is the app the hierarchy was captured from; `foreground`
+   * is the app actually resumed on the device. When set, freshness is retracted
+   * unconditionally: `verified: false`, `isFresh: false`, regardless of age or
+   * the delegate's own `verified` signal — a tree from the wrong window was
+   * never verified against the foreground app no matter how recently captured.
+   */
+  windowIdentityMismatch?: { observed: string; foreground: string };
   /** Age budget; defaults to {@link maxObservationAgeMs}. */
   maxAgeMs?: number;
 }
@@ -152,6 +162,7 @@ function resolveAgeMs(
  */
 export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
   const { requestedAfter, actualTimestamp, hostAgeBasisMs, now, verified, unavailable } = inputs;
+  const windowIdentityMismatch = inputs.windowIdentityMismatch;
   const maxAgeMs = inputs.maxAgeMs ?? maxObservationAgeMs();
 
   const ageMs = resolveAgeMs(hostAgeBasisMs, actualTimestamp, now);
@@ -164,6 +175,21 @@ export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
       verified,
       isFresh: false,
       warning: "View hierarchy could not be retrieved, so its freshness cannot be established.",
+    };
+  }
+
+  // The tree belongs to a different app than the one currently resumed on the
+  // device (issue #5867). This dominates every other signal — a wrong-window
+  // capture is unfresh at any age, and `verified` is retracted to false so a
+  // consumer reading that field alone is not green-lit onto a phantom.
+  if (windowIdentityMismatch) {
+    return {
+      requestedAfter,
+      actualTimestamp,
+      ageMs,
+      verified: false,
+      isFresh: false,
+      warning: `Observed hierarchy is from ${windowIdentityMismatch.observed}, but the device's current top resumed activity is ${windowIdentityMismatch.foreground}. This is a stale wrong-window capture; it was not verified against the foreground app.`,
     };
   }
 

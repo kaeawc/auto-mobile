@@ -435,6 +435,36 @@ describe("toSkeleton — acceptance criteria", () => {
       expect(findById(skeleton, "s-inner")?.label).toBe("Inner label");
       expect(findById(skeleton, "s-outer")?.label).toBeUndefined();
     });
+
+    test("a nested clickable child's own text is not swallowed into the parent", () => {
+      // A clickable parent with no own text, enclosing a clickable child that
+      // carries its own text. The child owns a `tap` affordance, so it is not a
+      // hoist candidate — its label stays on the child, and the parent is not
+      // relabelled from it.
+      const parentCard: Element = {
+        bounds: bounds(0, 0, 1080, 300),
+        "view-id": "s-parent",
+        clickable: "true",
+      };
+      const childButton: Element = {
+        bounds: bounds(800, 40, 1040, 160),
+        "resource-id": "child-btn",
+        text: "OK",
+        clickable: "true",
+      };
+
+      const skeleton = toSkeleton(
+        // The child, carrying text, appears in both categories on a real capture.
+        makeElements({ clickable: [parentCard, childButton], text: [childButton] }),
+      );
+
+      expect(findById(skeleton, "child-btn")?.label).toBe("OK");
+      expect(findById(skeleton, "child-btn")?.affordances).toEqual(["tap"]);
+      // The parent keeps no label hoisted from the child's own text.
+      const parent = findById(skeleton, "s-parent");
+      expect(parent?.label).toBeUndefined();
+      expect("sublabel" in (parent as SkeletonElement)).toBe(false);
+    });
   });
 
   describe("empty input", () => {

@@ -91,7 +91,7 @@ the exact arguments supported by your connection.
 
 | Tool                                                                           | What it does                                                               |
 | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| 📋 <code>listDevices</code>                                                    | Provides guidance for listing devices through MCP resources.               |
+| 📋 <code>listDevices</code>                                                    | Lists booted devices; a note points to MCP resources for images and detail. |
 | 🖼️ <code>listDeviceImages</code>                                               | Lists available device images.                                             |
 | 🤖 <code>getAndroid</code> / 🍎 <code>getApple</code>                          | Finds or recovers an Android AVD or iOS Simulator for automation.          |
 | 🧱 <code>provisionDevice</code>                                                | Provisions an exact virtual-device identity.                               |

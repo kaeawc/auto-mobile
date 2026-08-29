@@ -144,8 +144,8 @@ describe("startDevice handler", () => {
     expect(result.isReady).toBe(true);
     expect(result.source).toBe("booted");
     expect(result.osVersion).toBe("14");
-    expect(result.sessionId).toBeDefined();
-    expect(typeof result.sessionId).toBe("string");
+    expect(result.sessionUuid).toBeDefined();
+    expect(typeof result.sessionUuid).toBe("string");
   });
 
   it("does not reach runner readiness or session binding after an externally cancelled boot", async () => {
@@ -273,7 +273,7 @@ describe("startDevice handler", () => {
 
     const result = await callStartDevice({ platform: "android" });
 
-    expect(result.sessionId).toBe("session-1");
+    expect(result.sessionUuid).toBe("session-1");
     expect(resolveDirectSessionDevice("session-1")).toEqual({
       sessionUuid: "session-1",
       device: androidDevice,
@@ -367,10 +367,10 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "android" });
 
     expect(result.source).toBe("cold-boot");
-    expect(result.sessionId).toBeDefined();
+    expect(result.sessionUuid).toBeDefined();
     expect(pool.getDevice(androidDevice.deviceId)).toMatchObject({
       transportId: "23",
-      sessionId: result.sessionId,
+      sessionId: result.sessionUuid,
     });
     expect(childProcess.killed).toBe(false);
   });
@@ -408,13 +408,13 @@ describe("startDevice handler", () => {
 
     try {
       const result = await callStartDevice({ platform: "android" });
-      expect(daemonSessionManager.getSession(result.sessionId as string)).not.toBeNull();
+      expect(daemonSessionManager.getSession(result.sessionUuid as string)).not.toBeNull();
 
       childProcess.emit("exit", 1, null);
       await new Promise((resolve) => setImmediate(resolve));
       await new Promise((resolve) => setImmediate(resolve));
 
-      expect(daemonSessionManager.getSession(result.sessionId as string)).toBeNull();
+      expect(daemonSessionManager.getSession(result.sessionUuid as string)).toBeNull();
       expect(pool.getDevice(androidDevice.deviceId)).toBeNull();
     } finally {
       for (const key of recoveryKeys) {
@@ -477,7 +477,7 @@ describe("startDevice handler", () => {
     } finally {
       releaseResources();
       const result = await start;
-      expect(result.sessionId).toBe("session-1");
+      expect(result.sessionUuid).toBe("session-1");
     }
   });
 
@@ -526,7 +526,7 @@ describe("startDevice handler", () => {
 
     releaseReadiness();
     const result = await start;
-    expect(result.sessionId).toBe("session-1");
+    expect(result.sessionUuid).toBe("session-1");
     expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe("session-1");
   });
 
@@ -608,7 +608,7 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "android" });
 
     expect(result.deviceId).toBe("emulator-5556");
-    expect(result.sessionId).toBe("owner-session");
+    expect(result.sessionUuid).toBe("owner-session");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain("killDevice:Unknown (emulator-5554)");
     expect(fakeDeviceUtils.getExecutedOperations()).toContain("startDevice:Pixel_7_API_34:120000");
     expect(pool.getDevice("emulator-5556")).toMatchObject({
@@ -666,7 +666,7 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "android" });
 
     expect(result.deviceId).toBe("emulator-5556");
-    expect(result.sessionId).toBe("session-1");
+    expect(result.sessionUuid).toBe("session-1");
     expect(pool.getDevice("emulator-5556")).toMatchObject({
       sessionId: "session-1",
       status: "busy",
@@ -1285,9 +1285,9 @@ describe("startDevice handler", () => {
     const ownerResult = await ownerStart;
     await expect(adopterStart).rejects.toThrow(/Freshly started device .* assigned to session/);
 
-    expect(ownerResult.sessionId).toBeDefined();
+    expect(ownerResult.sessionUuid).toBeDefined();
     expect(childProcess.killed).toBe(false);
-    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(ownerResult.sessionId);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(ownerResult.sessionUuid);
   });
 
   it("does not kill a shared cold boot when autolock rejects the later caller", async () => {
@@ -1355,9 +1355,9 @@ describe("startDevice handler", () => {
     const ownerResult = await ownerStart;
     await expect(adopterStart).rejects.toThrow(/Freshly started device .* assigned to session/);
 
-    expect(ownerResult.sessionId).toBeDefined();
+    expect(ownerResult.sessionUuid).toBeDefined();
     expect(childProcess.killed).toBe(false);
-    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(ownerResult.sessionId);
+    expect(pool.getDevice(androidDevice.deviceId)?.sessionId).toBe(ownerResult.sessionUuid);
   });
 
   it("passes timeout to the cold boot start operation", async () => {
@@ -1803,9 +1803,9 @@ describe("startDevice handler", () => {
       __mcpSessionId: "mcp-session-1",
     });
 
-    expect(typeof result.sessionId).toBe("string");
+    expect(typeof result.sessionUuid).toBe("string");
     expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBe(
-      result.sessionId,
+      result.sessionUuid,
     );
   });
 
@@ -1967,13 +1967,13 @@ describe("startDevice handler", () => {
     const result = await callStartDevice({ platform: "ios" });
     const repeated = await callStartDevice({ platform: "ios" });
 
-    expect(typeof result.sessionId).toBe("string");
-    expect(repeated.sessionId).toBe(result.sessionId);
-    const session = daemonSessionManager.getSession(result.sessionId as string);
+    expect(typeof result.sessionUuid).toBe("string");
+    expect(repeated.sessionUuid).toBe(result.sessionUuid);
+    const session = daemonSessionManager.getSession(result.sessionUuid as string);
     expect(session).not.toBeNull();
     expect(session!.assignedDevice).toBe(iosDevice.deviceId);
     expect(session!.platform).toBe("ios");
-    expect(pool.getDevice(iosDevice.deviceId)?.sessionId).toBe(result.sessionId);
+    expect(pool.getDevice(iosDevice.deviceId)?.sessionId).toBe(result.sessionUuid);
     expect(pool.getDevice(iosDevice.deviceId)?.status).toBe("busy");
   });
 });

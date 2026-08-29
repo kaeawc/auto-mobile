@@ -251,7 +251,9 @@ export const tapOnSchema = withJsonSchemaOverride(
           .optional()
           .describe("Retry once if the view hierarchy is unchanged after tap"),
         ensureTap: z.boolean().optional().describe("Enable preTapStability and retryIfNoChange"),
-        platform: platformSchema,
+        // #5870: a `sessionUuid` resolves the platform, so `platform` is not
+        // required — a device handle from getAndroid is sufficient on its own.
+        platform: platformSchema.optional(),
       })
       .strict(),
   ).superRefine((value, ctx) => {

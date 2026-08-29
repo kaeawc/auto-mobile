@@ -218,13 +218,65 @@ const devicePreparationTimeoutSchema = z
     }
   });
 
-export const getAndroidSchema = devicePreparationTimeoutSchema.extend({
-  avdName: z.string().min(1).describe("Configured Android Virtual Device name"),
-});
+// #5870: `deviceId` — the identifier every device resource leads with — is
+// accepted alongside the platform-native identifier. Either is sufficient; the
+// refine names both sources when neither is given so the caller is never left
+// guessing which field of which resource to read.
+export const getAndroidSchema = devicePreparationTimeoutSchema
+  .extend({
+    avdName: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android)",
+      ),
+    deviceId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Booted device serial, e.g. emulator-5554 (the `deviceId` field of automobile:devices/booted/android)",
+      ),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.avdName && !value.deviceId) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Provide avdName (the `name` field of automobile:devices/images/android) or deviceId (the `deviceId` field of automobile:devices/booted/android)",
+        path: ["avdName"],
+      });
+    }
+  });
 
-export const getAppleSchema = devicePreparationTimeoutSchema.extend({
-  udid: z.string().min(1).describe("iOS Simulator UDID"),
-});
+export const getAppleSchema = devicePreparationTimeoutSchema
+  .extend({
+    udid: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "iOS Simulator UDID (the `deviceId` field of automobile:devices/booted/ios or `name` of automobile:devices/images/ios)",
+      ),
+    deviceId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Booted device identifier (the `deviceId` field of automobile:devices/booted/ios); alias for udid",
+      ),
+  })
+  .superRefine((value, ctx) => {
+    if (!value.udid && !value.deviceId) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Provide udid or deviceId (the `deviceId` field of automobile:devices/booted/ios)",
+        path: ["udid"],
+      });
+    }
+  });
 
 const MODERN_PLAY_IMAGE_MIN_API_LEVEL = 30;
 
@@ -470,13 +522,15 @@ export interface StartDeviceArgs {
 }
 
 export interface GetAndroidArgs {
-  avdName: string;
+  avdName?: string;
+  deviceId?: string;
   bootTimeoutMs?: number;
   automationReadyTimeoutMs?: number;
 }
 
 export interface GetAppleArgs {
-  udid: string;
+  udid?: string;
+  deviceId?: string;
   bootTimeoutMs?: number;
   automationReadyTimeoutMs?: number;
 }
@@ -3736,32 +3790,49 @@ export function registerDeviceTools() {
   };
 
   const listDevicesHandler = async (args: ListDevicesArgs) => {
+    // #5870: a tool named `listDevices` returns the devices. The data is right
+    // here — enumerate booted devices directly instead of forcing a modality
+    // switch to resources. The resource pointers (which also cover not-yet-booted
+    // images and richer per-device detail) survive as a `note`.
+    const platform: SomePlatform = args.platform ?? "either";
+    const deviceManager = getDeviceToolsDependencies().deviceManagerFactory();
+    let booted: BootedDevice[] = [];
+    try {
+      booted = await deviceManager.getBootedDevices(platform);
+    } catch (error) {
+      // Discovery is best-effort — a partial/failed probe still returns the
+      // resource guidance rather than failing the whole call.
+      logger.warn(`listDevices booted-device discovery failed: ${errorMessage(error)}`, error);
+    }
+
+    const devices = booted.map((device) => ({
+      deviceId: device.deviceId,
+      name: device.name,
+      platform: device.platform,
+      osVersion: device.osVersion ?? device.iosVersion,
+      formFactor: device.formFactor,
+    }));
     const platformFilter = args.platform ? ` (${args.platform} only)` : "";
 
     return createJSONToolResponse({
-      message:
-        `To list devices${platformFilter}, use these MCP resources:\n\n` +
-        "RUNNING DEVICES (booted/active):\n" +
-        `  - automobile:devices/booted - All running devices\n` +
-        `  - automobile:devices/booted/android - Android devices only\n` +
-        `  - automobile:devices/booted/ios - Booted iOS simulators and connected physical iOS devices\n\n` +
-        "AVAILABLE DEVICE IMAGES (can be started):\n" +
-        `  - automobile:devices/images - All available images\n` +
-        `  - automobile:devices/images/android - Android AVDs\n` +
-        `  - automobile:devices/images/ios - iOS simulator runtimes\n\n` +
-        "WORKFLOW:\n" +
-        "  1. Read 'automobile:devices/images/android' to select an Android AVD by name\n" +
-        "  2. Read 'automobile:devices/images/ios' to select an iOS simulator by UDID\n" +
-        "  3. Call getAndroid or getApple, then use its returned sessionId for automation",
-      resources: [
-        BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
-        `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/android`,
-        `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/ios`,
-        DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES,
-        `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/android`,
-        `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/ios`,
-      ],
-      note: "All resource URIs use the 'automobile:' prefix. URIs like 'android://devices' are not supported.",
+      message: `Found ${devices.length} booted device${devices.length === 1 ? "" : "s"}${platformFilter}`,
+      devices,
+      count: devices.length,
+      note: {
+        message:
+          "Acquire a booted device with getAndroid { deviceId } or getApple { deviceId }. " +
+          "For available (not-yet-booted) images and richer per-device detail, read these MCP resources:",
+        resources: [
+          BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED,
+          `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/android`,
+          `${BOOTED_DEVICE_RESOURCE_URIS.ALL_BOOTED}/ios`,
+          DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES,
+          `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/android`,
+          `${DEVICE_IMAGE_RESOURCE_URIS.ALL_IMAGES}/ios`,
+        ],
+        uriPrefix:
+          "All resource URIs use the 'automobile:' prefix. URIs like 'android://devices' are not supported.",
+      },
     });
   };
 
@@ -4943,22 +5014,39 @@ export function registerDeviceTools() {
     const automationReadyTimeoutMs =
       args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
     const startedAtMs = getDeviceToolsDependencies().timer.now();
+    const mcpSessionId = typeof __mcpSessionId === "string" ? __mcpSessionId : undefined;
+    // Prefer the AVD name (exact virtual-device identity); otherwise target the
+    // booted serial by deviceId (#5870). The AVD path also coordinates lifecycle
+    // by the stable AVD name, which the deviceId path cannot infer.
+    const target: StartDeviceArgs = args.avdName
+      ? {
+          platform: "android",
+          name: args.avdName,
+          matchExactName: true,
+          preferRunning: true,
+          createIfMissing: false,
+          __mcpSessionId: mcpSessionId,
+        }
+      : {
+          platform: "android",
+          deviceId: args.deviceId,
+          preferRunning: true,
+          createIfMissing: false,
+          __mcpSessionId: mcpSessionId,
+        };
     return await prepareDevice(
-      {
-        platform: "android",
-        name: args.avdName,
-        matchExactName: true,
-        preferRunning: true,
-        createIfMissing: false,
-        __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
-      },
+      target,
       {
         bootTimeoutMs,
         automationReadyTimeoutMs,
         automationDeadlineMs: startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
         operationName: "getAndroid",
-        androidAvdName: args.avdName,
-        stableTarget: { platform: "android", stableId: args.avdName },
+        ...(args.avdName
+          ? {
+              androidAvdName: args.avdName,
+              stableTarget: { platform: "android", stableId: args.avdName },
+            }
+          : {}),
       },
       progress,
       signal,
@@ -4976,6 +5064,8 @@ export function registerDeviceTools() {
     delete externalArgs.__executionId;
     delete externalArgs.__executionStartTime;
     const args = getAppleSchema.parse(externalArgs);
+    // #5870: `deviceId` is an accepted alias for `udid` on iOS.
+    const udid = args.udid ?? args.deviceId!;
     const bootTimeoutMs = args.bootTimeoutMs ?? DEFAULT_DEVICE_READY_TIMEOUT_MS;
     const automationReadyTimeoutMs =
       args.automationReadyTimeoutMs ?? DEFAULT_RUNNER_READINESS_TIMEOUT_MS;
@@ -4983,7 +5073,7 @@ export function registerDeviceTools() {
     return await prepareDevice(
       {
         platform: "ios",
-        deviceId: args.udid,
+        deviceId: udid,
         preferRunning: true,
         createIfMissing: false,
         __mcpSessionId: typeof __mcpSessionId === "string" ? __mcpSessionId : undefined,
@@ -4993,7 +5083,7 @@ export function registerDeviceTools() {
         automationReadyTimeoutMs,
         automationDeadlineMs: startedAtMs + bootTimeoutMs + automationReadyTimeoutMs,
         operationName: "getApple",
-        stableTarget: { platform: "ios", stableId: args.udid },
+        stableTarget: { platform: "ios", stableId: udid },
       },
       progress,
       signal,
@@ -5090,9 +5180,13 @@ export function registerDeviceTools() {
       timing: (timing ?? {}) as unknown as Record<string, number>,
     };
 
+    // #5870: emit the session handle as `sessionUuid` — the key every consumer
+    // tool's schema declares — so the obvious copy-paste is correct.
+    const { sessionId: sessionUuid, ...resultWithoutSessionId } = result;
     return createJSONToolResponse({
       message: `${device.platform} '${device.name}' is ready (${source})`,
-      ...result,
+      ...resultWithoutSessionId,
+      sessionUuid,
       deviceIdentity: deviceIdentityPayload(device, sourceImage),
     });
   }
@@ -5302,7 +5396,7 @@ export function registerDeviceTools() {
 
   ToolRegistry.register(
     "listDevices",
-    "List devices (resource guidance)",
+    "List booted devices; resource pointers for images and detail in the note",
     listDevicesSchema,
     listDevicesHandler,
     { defaultEnabled: true },

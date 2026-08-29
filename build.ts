@@ -95,6 +95,18 @@ if (existsSync(vendorSource)) {
 // checkout builds it from ios/screen-capture. Copying the Swift package source
 // into dist/ would bloat the tarball with source that installs never build.
 
+// The simulator-only Files fixture provider is deliberately source-shipped:
+// an iOS Simulator host already has Xcode, and putAppFile builds and installs
+// this small managed app on first use without depending on an unpublished
+// release asset.
+const filesFixtureProviderSource = join(import.meta.dir, "ios", "FilesFixtureProvider");
+const filesFixtureProviderDest = join(import.meta.dir, "dist", "ios", "FilesFixtureProvider");
+if (existsSync(filesFixtureProviderSource)) {
+  mkdirSync(filesFixtureProviderDest, { recursive: true });
+  cpSync(filesFixtureProviderSource, filesFixtureProviderDest, { recursive: true });
+  console.log("✓ Copied iOS Files fixture provider sources");
+}
+
 // Copy schemas for runtime validation (PlanSchemaValidator reads from disk)
 const schemasSource = join(import.meta.dir, "schemas");
 const schemasDest = join(import.meta.dir, "dist", "schemas");

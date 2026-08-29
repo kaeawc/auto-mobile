@@ -1,74 +1,87 @@
 #!/usr/bin/env bash
-# Proves the bounded iOS Files-picker fixture seam selected in #5806.
+# Proves the bounded iOS user_files provider and independent picker verifier from #5807.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 device_id="${1:-}"
-app_id="dev.jasonpearson.automobile.Playground"
-fixture_namespace="automobile-issue-5806"
-fixture_name="automobile-files-probe.txt"
-fixture_source="${repo_root}/ios/Playground/Fixtures/${fixture_name}"
+app_id="dev.jasonpearson.automobile.files-fixture-provider"
+fixture_content="picker fixture $RANDOM-$$-$(date +%s)"
 derived_data="$(mktemp -d "${TMPDIR:-/tmp}/auto-mobile-ios-files-picker.XXXXXX")"
 
 cleanup() {
-    find "${derived_data}" -depth -delete
+  find "$derived_data" -depth -delete
 }
 trap cleanup EXIT
 
-if [[ -z "${device_id}" ]]; then
-    device_id="$(xcrun simctl list devices booted | awk -F '[()]' '/iPhone|iPad/ { print $2; exit }')"
+if [[ -z "$device_id" ]]; then
+  device_id="$(xcrun simctl list devices booted | awk -F '[()]' '/iPhone|iPad/ { print $2; exit }')"
 fi
 
-if [[ -z "${device_id}" ]]; then
-    echo "No booted iOS Simulator found. Pass its UDID as the first argument." >&2
-    exit 1
+if [[ -z "$device_id" ]]; then
+  echo "No booted iOS Simulator found. Pass its UDID as the first argument." >&2
+  exit 1
 fi
 
-if [[ ! -f "${fixture_source}" ]]; then
-    echo "Missing fixture source: ${fixture_source}" >&2
-    exit 1
-fi
+xcrun simctl bootstatus "$device_id" -b
+# The app is dedicated test infrastructure. Removing it first proves the
+# production putAppFile provider can build and install its packaged project on
+# first use instead of relying on this smoke to preinstall it.
+xcrun simctl uninstall "$device_id" "$app_id" >/dev/null 2>&1 || true
 
-xcrun simctl bootstatus "${device_id}" -b
+stage_fixture() {
+  local expected_picker_status="$1"
+  # The single-quoted program is intentional: JavaScript template literals must
+  # reach Bun unchanged rather than expand in the host shell.
+  # shellcheck disable=SC2016
+  AUTOMOBILE_PICKER_SMOKE_CONTENT="$fixture_content" bun -e '
+    import { createAppFileServiceForTesting } from "./src/server/appFileService";
+    const deviceId = process.argv[1];
+    const expectedPickerStatus = process.argv[2];
+    const content = process.env.AUTOMOBILE_PICKER_SMOKE_CONTENT;
+    if (!deviceId || !expectedPickerStatus || !content) throw new Error("smoke inputs are required");
+    const service = createAppFileServiceForTesting();
+    const result = await service.putFile({
+      device: { deviceId, name: deviceId, platform: "ios" as const },
+      target: { domain: "user_files", namespace: "issue-5807-smoke", reset: false },
+      files: [{ destinationPath: "issue-5807-fixture.txt", contentText: content }],
+    });
+    const effects = result.files[0]?.effects ?? [];
+    if (!effects.some((effect) => effect.type === "host_stage" && effect.status === "completed")) {
+      throw new Error(`putAppFile did not complete host staging: ${JSON.stringify(result)}`);
+    }
+    const picker = effects.find((effect) => effect.type === "document_picker");
+    if (picker?.status !== expectedPickerStatus) {
+      throw new Error(`expected picker ${expectedPickerStatus}, got ${JSON.stringify(result)}`);
+    }
+  ' "$device_id" "$expected_picker_status"
+}
+
+# A unique payload cannot match a stale provider-authored marker, so the first
+# write proves host staging does not infer picker visibility.
+stage_fixture unavailable
+
+# Build the UI-test runner only after putAppFile has independently built and
+# installed the runtime provider.
+xcodebuild \
+  -project "$repo_root/ios/FilesFixtureProvider/FilesFixtureProvider.xcodeproj" \
+  -scheme FilesFixtureProviderPickerSmoke \
+  -destination "platform=iOS Simulator,id=$device_id" \
+  -derivedDataPath "$derived_data" \
+  build-for-testing
+
+xcrun simctl launch "$device_id" "$app_id" >/dev/null
+xcrun simctl terminate "$device_id" "$app_id"
 
 xcodebuild \
-    -project "${repo_root}/ios/Playground/Playground.xcodeproj" \
-    -scheme PlaygroundFilesPickerSmoke \
-    -destination "platform=iOS Simulator,id=${device_id}" \
-    -derivedDataPath "${derived_data}" \
-    build-for-testing
+  -project "$repo_root/ios/FilesFixtureProvider/FilesFixtureProvider.xcodeproj" \
+  -scheme FilesFixtureProviderPickerSmoke \
+  -destination "platform=iOS Simulator,id=$device_id" \
+  -derivedDataPath "$derived_data" \
+  -only-testing:FilesFixtureProviderUITests \
+  test-without-building
 
-app_path="${derived_data}/Build/Products/Debug-iphonesimulator/Playground.app"
-xcrun simctl install "${device_id}" "${app_path}"
+# The app records the selected logical path plus exact content hash. Restaging
+# the same bytes now proves the verifier observed this specific fixture.
+stage_fixture completed
 
-data_container="$(xcrun simctl get_app_container "${device_id}" "${app_id}" data)"
-documents_root="${data_container}/Documents"
-fixture_root="${documents_root}/${fixture_namespace}"
-
-if [[ "${fixture_root}" != "${documents_root}/${fixture_namespace}" ]]; then
-    echo "Refusing to reset a path outside the declared fixture namespace." >&2
-    exit 1
-fi
-
-# The reset target is one fixed child of the managed fixture app's Documents
-# directory; it never reaches the simulator's Files-provider implementation.
-if [[ -e "${fixture_root}" ]]; then
-    find "${fixture_root}" -depth -delete
-fi
-mkdir -p "${fixture_root}"
-cp "${fixture_source}" "${fixture_root}/${fixture_name}"
-
-# Launching after staging gives the managed app a chance to observe its Documents
-# directory before the real document-picker test starts.
-xcrun simctl launch "${device_id}" "${app_id}" >/dev/null
-xcrun simctl terminate "${device_id}" "${app_id}"
-
-xcodebuild \
-    -project "${repo_root}/ios/Playground/Playground.xcodeproj" \
-    -scheme PlaygroundFilesPickerSmoke \
-    -destination "platform=iOS Simulator,id=${device_id}" \
-    -derivedDataPath "${derived_data}" \
-    -only-testing:PlaygroundFilesPickerUITests \
-    test-without-building
-
-echo "iOS Files picker smoke passed for ${device_id}"
+echo "iOS putAppFile Files picker smoke passed for $device_id"

@@ -42,6 +42,15 @@ import {
   SimctlIosSimulatorMediaClient,
   type IosSimulatorMediaClient,
 } from "./iosSimulatorMediaClient";
+import {
+  IosUserFilesProvider,
+  MarkerDocumentPickerVisibilityVerifier,
+  SimctlIosFilesFixtureContainer,
+  createDefaultIosFilesFixtureInstaller,
+  type DocumentPickerVisibilityVerifier,
+  type IosFilesFixtureContainer,
+  type IosFilesFixtureInstaller,
+} from "./iosUserFilesProvider";
 
 export type PutAppFileRequest = Omit<PutAppFileArgs, "device"> & {
   device: BootedDevice;
@@ -139,6 +148,9 @@ export interface AppFileServiceDependencies {
   idGenerator?: IdGenerator;
   sharedStorageService?: SharedStorageService;
   iosSimulatorMediaClient?: IosSimulatorMediaClient;
+  iosFilesFixtureContainer?: IosFilesFixtureContainer;
+  iosFilesFixtureInstaller?: IosFilesFixtureInstaller;
+  documentPickerVisibilityVerifier?: DocumentPickerVisibilityVerifier;
 }
 
 const nodeAppFileFileSystem: AppFileFileSystem = {
@@ -202,6 +214,7 @@ export function createAppFileServiceForTesting(
     fileSystem: deps.fileSystem ?? defaultDependencies.fileSystem,
     deviceResolver: deps.deviceResolver ?? defaultDependencies.deviceResolver,
   };
+  const iosFilesFixture = resolveIosFilesFixtureDependencies(deps, resolvedDeps.simctlFactory);
   return new DefaultAppFileService(
     deps.providers ??
       createDefaultProviders(
@@ -210,10 +223,25 @@ export function createAppFileServiceForTesting(
         deps.sharedStorageService ?? getSharedStorageService(),
         deps.iosSimulatorMediaClient ??
           new SimctlIosSimulatorMediaClient(resolvedDeps.simctlFactory),
+        iosFilesFixture.container,
+        deps.documentPickerVisibilityVerifier ?? new MarkerDocumentPickerVisibilityVerifier(),
+        iosFilesFixture.installer,
       ),
     resolvedDeps.deviceResolver,
     resolvedDeps.fileSystem,
   );
+}
+
+function resolveIosFilesFixtureDependencies(
+  deps: AppFileServiceDependencies,
+  simctlFactory: (device: BootedDevice) => SimCtlClient,
+): { container: IosFilesFixtureContainer; installer: IosFilesFixtureInstaller } {
+  const container =
+    deps.iosFilesFixtureContainer ?? new SimctlIosFilesFixtureContainer(simctlFactory);
+  const installer =
+    deps.iosFilesFixtureInstaller ??
+    createDefaultIosFilesFixtureInstaller(container, simctlFactory);
+  return { container, installer };
 }
 
 function createDefaultProviders(
@@ -223,12 +251,25 @@ function createDefaultProviders(
   iosSimulatorMediaClient: IosSimulatorMediaClient = new SimctlIosSimulatorMediaClient(
     deps.simctlFactory,
   ),
+  iosFilesFixtureContainer: IosFilesFixtureContainer = new SimctlIosFilesFixtureContainer(
+    deps.simctlFactory,
+  ),
+  documentPickerVisibilityVerifier: DocumentPickerVisibilityVerifier = new MarkerDocumentPickerVisibilityVerifier(),
+  iosFilesFixtureInstaller: IosFilesFixtureInstaller = createDefaultIosFilesFixtureInstaller(
+    iosFilesFixtureContainer,
+    deps.simctlFactory,
+  ),
 ): AppFileProvider[] {
   return [
     new AndroidAppFileProvider(deps.adbFactory, idGenerator),
     new AndroidUserFilesProvider(sharedStorageService),
     new AndroidMediaLibraryProvider(sharedStorageService),
     new IosSimulatorAppFileProvider(deps.simctlFactory, deps.fileSystem),
+    new IosUserFilesProvider(
+      iosFilesFixtureContainer,
+      documentPickerVisibilityVerifier,
+      iosFilesFixtureInstaller,
+    ),
     new IosSimulatorMediaLibraryProvider(iosSimulatorMediaClient, deps.fileSystem),
   ];
 }

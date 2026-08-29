@@ -54,6 +54,8 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // PinchGeometryTest.kt / PinchGeometryTests.swift (issue #2997).
     "android/control-proxy/src/test/kotlin/**",
     "ios/control-proxy/Tests/**",
+    // iosUserFilesProvider.test.ts probes the packaged fixture app project.
+    "ios/FilesFixtureProvider/**",
     // coordinateMappingGoldenVectorParity.test.ts parses the inline golden
     // tables out of CoordinateMappingGoldenVectorTest.kt (issue #4547).
     "android/desktop-core/src/test/kotlin/**",

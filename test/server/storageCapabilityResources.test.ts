@@ -3,6 +3,7 @@ import {
   registerStorageCapabilityResources,
   resolveDeviceType,
   resolveStorageCapabilityContext,
+  resolveStorageCapabilityContextForDevice,
 } from "../../src/server/storageCapabilityResources";
 import { registerStorageResources } from "../../src/server/storageResources";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
@@ -27,6 +28,11 @@ describe("storageCapabilityResources", () => {
     platform: "ios",
     // 25-char device UDID (not a simulator UUID) => physical.
     deviceId: "00008110-000A1B2C3D4E5F60",
+  };
+  const iosSimulator: BootedDevice = {
+    name: "iPhone 15 Pro",
+    platform: "ios",
+    deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
   };
 
   afterEach(() => {
@@ -157,6 +163,32 @@ describe("storageCapabilityResources", () => {
     } finally {
       serverConfig.setEmbeddedSdkEnabled(previous);
     }
+  });
+
+  test("probes the managed Files fixture provider only for iOS Simulators", async () => {
+    const probed: string[] = [];
+    const probe = {
+      isAvailable: async (device: BootedDevice) => {
+        probed.push(device.deviceId);
+        return true;
+      },
+    };
+
+    const simulatorContext = await resolveStorageCapabilityContextForDevice(
+      iosSimulator,
+      undefined,
+      probe,
+    );
+    expect(simulatorContext.iosUserFilesProviderAvailable).toBe(true);
+    expect(probed).toEqual([iosSimulator.deviceId]);
+
+    const physicalContext = await resolveStorageCapabilityContextForDevice(
+      iosPhysical,
+      undefined,
+      probe,
+    );
+    expect(physicalContext.iosUserFilesProviderAvailable).toBe(false);
+    expect(probed).toEqual([iosSimulator.deviceId]);
   });
 
   // Regression: the resource registry already percent-decodes query params via

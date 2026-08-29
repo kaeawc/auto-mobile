@@ -4,6 +4,12 @@ import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { serverConfig } from "../utils/ServerConfig";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
+import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { XcodebuildClient } from "../utils/ios-cmdline-tools/XcodebuildClient";
+import {
+  SimctlIosFilesFixtureContainer,
+  XcodebuildIosFilesFixtureInstaller,
+} from "./iosUserFilesProvider";
 import {
   computeStorageCapabilities,
   STORAGE_CAPABILITIES_SCHEMA_VERSION,
@@ -72,6 +78,44 @@ export function resolveStorageCapabilityContext(
   };
 }
 
+export interface IosUserFilesAvailabilityProbe {
+  isAvailable(device: BootedDevice, signal?: AbortSignal): Promise<boolean>;
+}
+
+const defaultIosUserFilesAvailabilityProbe: IosUserFilesAvailabilityProbe = {
+  isAvailable: async (device, signal) => {
+    const simctlFactory = (resolvedDevice: BootedDevice) => new SimCtlClient(resolvedDevice);
+    const container = new SimctlIosFilesFixtureContainer(simctlFactory);
+    if (await container.isAvailable(device, signal)) {
+      return true;
+    }
+    return new XcodebuildIosFilesFixtureInstaller(
+      container,
+      simctlFactory,
+      new XcodebuildClient(),
+    ).isInstallable();
+  },
+};
+
+/** Resolve runtime provider availability without making the pure capability model perform I/O. */
+export async function resolveStorageCapabilityContextForDevice(
+  device: BootedDevice,
+  appId?: string,
+  iosUserFilesAvailabilityProbe: IosUserFilesAvailabilityProbe = defaultIosUserFilesAvailabilityProbe,
+): Promise<StorageCapabilityContext> {
+  const context = resolveStorageCapabilityContext(device, appId);
+  if (device.platform !== "ios") {
+    return context;
+  }
+  if (resolveDeviceType(device) !== "simulator") {
+    return { ...context, iosUserFilesProviderAvailable: false };
+  }
+  return {
+    ...context,
+    iosUserFilesProviderAvailable: await iosUserFilesAvailabilityProbe.isAvailable(device),
+  };
+}
+
 function buildUri(deviceId: string, appId?: string): string {
   const base = `automobile:devices/${deviceId}/storage/capabilities`;
   return appId ? `${base}?appId=${encodeURIComponent(appId)}` : base;
@@ -108,7 +152,9 @@ export async function getStorageCapabilitiesResource(
       };
     }
 
-    const report = computeStorageCapabilities(resolveStorageCapabilityContext(device, appId));
+    const report = computeStorageCapabilities(
+      await resolveStorageCapabilityContextForDevice(device, appId),
+    );
 
     return {
       uri,

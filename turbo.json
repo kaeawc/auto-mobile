@@ -7,7 +7,7 @@
     "build": {
       "description": "Compile TypeScript source to dist/",
       "outputs": ["dist/**"],
-      "inputs": ["src/**", "build.ts", "schemas/**", "package.json"],
+      "inputs": ["src/**", "build.ts", "schemas/**", "ios/FilesFixtureProvider/**", "package.json"],
       "outputLogs": "new-only",
       "env": [
         "AUTOMOBILE_SOURCEMAP_INCLUDE_DEPS",
@@ -52,7 +52,8 @@
         "android/video-server/src/main/kotlin/**",
         "ios/auto-mobile-sdk/Sources/**",
         "ios/control-proxy/Sources/**",
-        "ios/control-proxy/Tests/**"
+        "ios/control-proxy/Tests/**",
+        "ios/FilesFixtureProvider/**"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -224,7 +225,8 @@
         "android/video-server/src/main/kotlin/**",
         "ios/auto-mobile-sdk/Sources/**",
         "ios/control-proxy/Sources/**",
-        "ios/control-proxy/Tests/**"
+        "ios/control-proxy/Tests/**",
+        "ios/FilesFixtureProvider/**"
       ],
       "outputs": ["coverage/**"],
       "outputLogs": "new-only",

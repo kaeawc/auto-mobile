@@ -1,0 +1,90 @@
+name: FilesFixtureProvider
+options:
+  bundleIdPrefix: dev.jasonpearson.automobile
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "15.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "5"
+
+targets:
+  FilesFixtureProvider:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.files-fixture-provider
+        PRODUCT_NAME: AutoMobile Files
+        INFOPLIST_FILE: Sources/Info.plist
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: NO
+
+  FilesFixtureProviderUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: FilesFixtureProvider
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.files-fixture-provider-uitests
+        TEST_TARGET_NAME: FilesFixtureProvider
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+
+  FilesFixtureProviderTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: UnitTests
+    dependencies:
+      - target: FilesFixtureProvider
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.files-fixture-provider-tests
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/AutoMobile Files.app/AutoMobile Files"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  FilesFixtureProvider:
+    build:
+      targets:
+        FilesFixtureProvider: all
+        FilesFixtureProviderTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - FilesFixtureProviderTests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release
+
+  FilesFixtureProviderPickerSmoke:
+    build:
+      targets:
+        FilesFixtureProvider: all
+        FilesFixtureProviderUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - FilesFixtureProviderUITests
+    profile:
+      config: Release
+    analyze:
+      config: Debug
+    archive:
+      config: Release

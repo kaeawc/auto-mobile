@@ -1,8 +1,8 @@
 # iOS `user_files` provider
 
-Status: accepted for implementation in #5807. This decision records the
-research and simulator experiment from #5806; it does not add the production
-provider.
+Status: implemented by #5807. The production provider uses the dedicated
+`ios/FilesFixtureProvider` app; the Playground remains only the #5806 research
+harness.
 
 ## Decision
 
@@ -13,6 +13,13 @@ its `Documents` directory through the local File Provider and the Files document
 picker. The staging adapter resolves the provider app's data container at runtime
 with `simctl get_app_container <udid> <provider-bundle-id> data`; it must never
 derive or persist a CoreSimulator path.
+
+The npm package ships this small provider's Xcode project under `dist/ios`.
+On the first `putAppFile` call for a simulator where the app is missing,
+AutoMobile builds it through the existing argv-safe Xcode boundary, installs it
+with `simctl`, verifies that its container resolves, and then stages the batch.
+No separate repository clone or manual app build is required beyond the Xcode
+toolchain already needed for iOS Simulator automation.
 
 The provider writes only:
 
@@ -26,18 +33,19 @@ resolved target remains below the provider's `Documents/automobile` root. It
 must not reset Files, `Documents`, another namespace, or a caller-supplied host
 path.
 
-The Playground configuration and `PlaygroundFilesPickerUITests` are an
-experiment harness. #5807 must use a dedicated, internally owned fixture app
-instead of treating Playground as the runtime provider.
+The Playground configuration and `PlaygroundFilesPickerUITests` remain an
+experiment harness. Production uses the dedicated, internally owned
+`FilesFixtureProvider` app instead of treating Playground as the runtime
+provider.
 
 ## What is and is not supported
 
-| Target                              | Status                | Behavior                                                                                                          |
-| ----------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| iOS Simulator                       | supported after #5807 | Stage in the managed provider's bounded Documents namespace.                                                      |
-| iOS physical device                 | unsupported           | `simctl` cannot resolve or mutate an on-device app container; do not infer support from the simulator.            |
-| Direct Files local-provider storage | unsupported           | No public `simctl` staging command exists, and internal provider paths are not an AutoMobile API.                 |
-| A custom File Provider extension    | not selected          | Apple positions one for apps that provide and sync remote documents; it is unnecessary for local fixture sharing. |
+| Target                              | Status       | Behavior                                                                                                          |
+| ----------------------------------- | ------------ | ----------------------------------------------------------------------------------------------------------------- |
+| iOS Simulator                       | supported    | Stage in the installed managed provider's bounded Documents namespace.                                            |
+| iOS physical device                 | unsupported  | `simctl` cannot resolve or mutate an on-device app container; do not infer support from the simulator.            |
+| Direct Files local-provider storage | unsupported  | No public `simctl` staging command exists, and internal provider paths are not an AutoMobile API.                 |
+| A custom File Provider extension    | not selected | Apple positions one for apps that provide and sync remote documents; it is unnecessary for local fixture sharing. |
 
 A future physical-device implementation requires explicit app integration: an
 `IosFilesFixtureClient` seam owned by the installed fixture app, with an opt-in
@@ -46,12 +54,15 @@ identity, or generic `app_containers` access alone is not that opt-in.
 
 ## Effects, capabilities, and resources
 
-The #5807 provider should report two independent facts:
+The provider reports two independent facts:
 
 - `host_stage: completed` only after the bounded copy succeeds in the resolved
   provider container.
 - `document_picker: unavailable` unless a document-picker verifier has observed
-  the exact logical destination. A copied host file must not be reported as
+  the exact logical destination, staged bytes, and staging generation. The
+  generation persists across an identical repeat write so the result can be
+  queried after picker selection, but namespace reset creates a new generation
+  and invalidates stale evidence. A copied host file must not be reported as
   picker-visible by inference.
 
 `user_files` does not gain a public list/read resource in this slice. Existing
@@ -59,15 +70,15 @@ app-container resources remain scoped to an explicit app id and container; they
 are not a Files-provider browsing API. The completion payload and the
 document-picker verifier are the observation surfaces for this domain.
 
-Until #5807 lands, the storage capability descriptor must continue to report
-iOS `user_files` as unsupported. Once its managed provider is registered, an
-iOS Simulator can report the capability as available only when the fixture app
-is installed and the provider seam resolves its container. Physical iOS remains
-unsupported regardless of `iosFileIntegration`.
+The storage capability descriptor reports iOS Simulator writes and namespace
+reset as supported when the fixture app is installed or the packaged project
+and Xcode toolchain make first-use installation available. A missing package or
+Xcode toolchain is unavailable, an unprobed simulator is partial, and physical
+iOS remains unsupported regardless of `iosFileIntegration`.
 
-## Verification contract for #5807
+## Verification
 
-The implementation needs fakes for both seams:
+The implementation uses fakes for both seams:
 
 1. `IosFilesFixtureContainer` resolves the provider data container and performs
    bounded mkdir/copy/reset operations. Unit tests cover traversal rejection,
@@ -79,9 +90,9 @@ The implementation needs fakes for both seams:
 
 Run `scripts/ios/put-app-file-picker-smoke.sh [simulator-udid]` for the
 device-backed proof. On 2026-08-28 it passed on an iPhone 15 Pro simulator
-running iOS 17.5 with Xcode 26.3 (build 17C529): the picker identified the
-source as `com.apple.FileProvider.LocalStorage`, displayed the bounded fixture,
-and returned `automobile-files-probe.txt` after selection.
+running iOS 17.5 with Xcode 26.3 (build 17C529): `putAppFile` staged the unique
+fixture, the real picker returned `issue-5807-fixture.txt`, and a second write
+matched the provider-authored logical-path, byte-count, and SHA-256 marker.
 
 ## Evidence
 

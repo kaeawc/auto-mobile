@@ -1838,6 +1838,9 @@ jobs:
       - name: "Run Playground Tests"
         run: ./scripts/ios/xcode-test.sh Playground
 
+      - name: "Run Files Fixture Provider Tests"
+        run: ./scripts/ios/xcode-test.sh FilesFixtureProvider
+
   ios-xctest-runner-simulator-tests:
     name: "XCTestRunner Simulator Tests"
     runs-on: macos-26
@@ -1993,6 +1996,12 @@ jobs:
       # Re-sync before the test, which needs both the build artifacts and the
       # booted sim's UDID.
       - wait: ctrlproxy-simulator
+
+      - name: "Run iOS Files picker putAppFile smoke"
+        timeout-minutes: 5
+        run: >
+          ./scripts/ios/put-app-file-picker-smoke.sh
+          "${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}"
 
       - name: "Run selected CtrlProxy iOS tests (Xcode 26.5)"
         timeout-minutes: 5

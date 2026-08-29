@@ -95,12 +95,50 @@ describe("AC1: availability is queryable before invocation", () => {
 
 // AC2: Android-only user-visible storage and simulator-only app-container access.
 describe("AC2: platform-qualified domains", () => {
-  it("user_files is unsupported on iOS (Android-only concept)", () => {
-    const report = computeStorageCapabilities(ctx({ platform: "ios", deviceType: "simulator" }));
+  it("qualifies iOS Simulator user_files by managed provider availability", () => {
+    const report = computeStorageCapabilities(
+      ctx({
+        platform: "ios",
+        deviceType: "simulator",
+        iosUserFilesProviderAvailable: true,
+      }),
+    );
     const userFiles = report.domains.find((d) => d.domain === "user_files")!;
-    expect(userFiles.platformScope).toBe("android");
-    for (const op of userFiles.operations) {
-      expect(op.state).toBe("unsupported");
+    expect(userFiles.platformScope).toBe("cross-platform");
+    expect(findOperationCapability(report, "user_files", "write")?.state).toBe("supported");
+    expect(findOperationCapability(report, "user_files", "namespace_reset")?.state).toBe(
+      "supported",
+    );
+    expect(findOperationCapability(report, "user_files", "list")?.state).toBe("unavailable");
+    expect(findOperationCapability(report, "user_files", "read")?.state).toBe("unavailable");
+
+    const missing = computeStorageCapabilities(
+      ctx({
+        platform: "ios",
+        deviceType: "simulator",
+        iosUserFilesProviderAvailable: false,
+      }),
+    );
+    expect(findOperationCapability(missing, "user_files", "write")?.state).toBe("unavailable");
+
+    const unverified = computeStorageCapabilities(
+      ctx({ platform: "ios", deviceType: "simulator" }),
+    );
+    expect(findOperationCapability(unverified, "user_files", "write")?.state).toBe("partial");
+  });
+
+  it("keeps physical-iOS user_files unsupported even with an app-file integration", () => {
+    const report = computeStorageCapabilities(
+      ctx({
+        platform: "ios",
+        deviceType: "physical",
+        iosFileIntegration: true,
+        iosUserFilesProviderAvailable: true,
+      }),
+    );
+    const userFiles = report.domains.find((d) => d.domain === "user_files")!;
+    for (const operation of userFiles.operations) {
+      expect(operation.state).toBe("unsupported");
     }
   });
 

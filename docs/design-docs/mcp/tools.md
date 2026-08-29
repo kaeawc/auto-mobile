@@ -52,7 +52,7 @@ the exact arguments supported by your connection.
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                       |
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                    |
 | 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                               |
-| 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 content into an app container.                                                         |
+| 📄 <code>putAppFile</code>                                                                       | Writes local-file, UTF-8, or base64 content into a bounded app-container, user-files, or media-library target.             |
 | 📥 <code>stageSharedStorage</code>                                                               | Stages host-file, UTF-8, or base64 fixtures into a bounded Android Downloads namespace for system pickers (Android only).  |
 | ⚙️ <code>getPreference</code> / ⚙️ <code>setPreference</code>                                    | Reads or writes Android system properties, SharedPreferences, or iOS UserDefaults.                                         |
 | 🔑 <code>setKeyValue</code> / 🔑 <code>removeKeyValue</code> / 🔑 <code>clearKeyValueFile</code> | Manages an app key-value storage file.                                                                                     |
@@ -105,6 +105,32 @@ the exact arguments supported by your connection.
     Private containers (<code>documents</code>, <code>cache</code>, and <code>tmp</code>) use
     <code>run-as</code> and require a debuggable app. iOS simulator containers include
     <code>documents</code>, <code>library</code>, <code>cache</code>, and <code>tmp</code>.
+
+??? example "Stage an iOS Simulator document-picker fixture"
+
+    AutoMobile ships the managed Files fixture project and builds/installs it on first use when
+    it is missing from the simulator. Physical iOS, arbitrary Files locations, and public
+    list/read access are not supported.
+
+    ~~~json
+    {
+      "tool": "putAppFile",
+      "params": {
+        "platform": "ios",
+        "target": {
+          "domain": "user_files",
+          "namespace": "checkout-flow",
+          "reset": true
+        },
+        "files": [
+          {
+            "contentText": "fixture contents",
+            "destinationPath": "documents/receipt.txt"
+          }
+        ]
+      }
+    }
+    ~~~
 
 ## Devices & system state
 

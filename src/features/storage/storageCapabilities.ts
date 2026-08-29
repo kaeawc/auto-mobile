@@ -74,6 +74,8 @@ export interface StorageCapabilityContext {
    * Without it, iOS physical file behavior is unsupported.
    */
   iosFileIntegration?: boolean;
+  /** Managed Files fixture app is installed, or its packaged project can be built on first use. */
+  iosUserFilesProviderAvailable?: boolean;
   /** Optional app scope the report was computed for. */
   appId?: string;
 }
@@ -123,6 +125,7 @@ export interface StorageCapabilitiesReport {
     authorized?: boolean;
     activeUserProfile?: boolean;
     iosFileIntegration?: boolean;
+    iosUserFilesProviderAvailable?: boolean;
   };
   domains: DomainCapability[];
   extensionPoints: StorageExtensionPoint[];
@@ -261,16 +264,34 @@ function appContainersDomain(ctx: StorageCapabilityContext): DomainCapability {
 
 function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
   if (ctx.platform === "ios") {
-    const reason =
-      "User-visible shared storage is an Android-only concept; iOS apps are sandboxed to per-app containers.";
+    if (ctx.deviceType === "physical") {
+      const reason =
+        "The managed AutoMobile Files fixture provider uses simctl and is unsupported on physical iOS devices.";
+      return {
+        domain: "user_files",
+        portable: false,
+        platformScope: "cross-platform",
+        note: reason,
+        operations: (["list", "read", "write", "namespace_reset"] as StorageOperation[]).map(
+          (operation) => deriveOperation(operation, reason, []),
+        ),
+      };
+    }
+    const providerRequirement = req(
+      "managed AutoMobile Files fixture provider installed or buildable",
+      ctx.iosUserFilesProviderAvailable,
+    );
     return {
       domain: "user_files",
       portable: false,
-      platformScope: "android",
-      note: reason,
-      operations: (["list", "read", "write"] as StorageOperation[]).map((operation) =>
-        deriveOperation(operation, reason, []),
-      ),
+      platformScope: "cross-platform",
+      note: "iOS Simulator putAppFile writes bounded namespaces in the managed Files fixture provider; list/read is not exposed and physical iOS is unsupported.",
+      operations: [
+        unavailableOperation("list", "No iOS user-files listing surface is exposed."),
+        unavailableOperation("read", "No iOS user-files read surface is exposed."),
+        deriveOperation("write", undefined, [providerRequirement]),
+        deriveOperation("namespace_reset", undefined, [providerRequirement]),
+      ],
     };
   }
   return {
@@ -377,7 +398,13 @@ function extensionPoints(): StorageExtensionPoint[] {
       domain: "user_files",
       platform: "android",
       description:
-        "User-visible shared storage is Android-only and must not be advertised as portable behavior.",
+        "Android user-files staging uses bounded Downloads namespaces and is not portable filesystem behavior.",
+    },
+    {
+      domain: "user_files",
+      platform: "ios",
+      description:
+        "iOS user-files staging uses an installed managed Files fixture provider on Simulators only; physical iOS is unsupported.",
     },
     {
       domain: "app_containers",
@@ -413,6 +440,7 @@ export function computeStorageCapabilities(
       authorized: ctx.authorized,
       activeUserProfile: ctx.activeUserProfile,
       iosFileIntegration: ctx.iosFileIntegration,
+      iosUserFilesProviderAvailable: ctx.iosUserFilesProviderAvailable,
     },
     domains: [
       appContainersDomain(ctx),

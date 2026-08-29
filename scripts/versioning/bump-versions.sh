@@ -288,6 +288,11 @@ patterns = (
     (r"(AUTOMOBILE_VERSION=)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", rf"\g<1>{version}"),
     (r"(@kaeawc/auto-mobile@)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", rf"\g<1>{version}"),
     (
+        r'(\.package\(url: "https://github\.com/kaeawc/auto-mobile\.git", from: ")'
+        r'\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?(?=")',
+        rf"\g<1>{version}",
+    ),
+    (
         r"(Replace `)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?(` with the version used by your test runner dependency\.)",
         rf"\g<1>{version}\g<2>",
     ),

@@ -98,10 +98,14 @@ nav:
       - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
       - "Daemon": design-docs/mcp/daemon.md
+      - "Screen control mapping": design-docs/mcp/daemon/screen-control-mapping.md
       - "Android JUnit runner": design-docs/plat/android/junit-runner/index.md
       - "Android system tray": design-docs/plat/android/system-tray-lookfor.md
       - "Desktop App": design-docs/plat/android/desktop-app.md
       - "iOS Simulator continuity": release/ios-simulator-continuity.md
+      - "XCTestRunner CI integration": design-docs/plat/ios/xctestrunner/ci-integration.md
       - "iOS Files picker provider": decisions/ios-user-files-provider.md
+  - "Contributing":
+      - "Standard library first": contributing/stdlib-first.md
   - "Usage Data": metrics/usage-data.md
   - "FAQ": faq.md

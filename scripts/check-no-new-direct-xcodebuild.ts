@@ -36,14 +36,10 @@ function shellCommandPayloads(argv: readonly string[]): string[] {
     if (argument === "-c" || argument === "--command") {
       return [argv[index + 1] ?? OPAQUE_ARGUMENT];
     }
-    if (argument.startsWith("-c") && argument.length > 2) {
-      return [argument.slice(2)];
-    }
     if (argument.startsWith("-") && !argument.startsWith("--")) {
       const commandFlagIndex = argument.indexOf("c", 1);
       if (commandFlagIndex >= 1) {
-        const attached = argument.slice(commandFlagIndex + 1);
-        return [attached || argv[index + 1] || OPAQUE_ARGUMENT];
+        return [argv[index + 1] ?? OPAQUE_ARGUMENT];
       }
     }
   }

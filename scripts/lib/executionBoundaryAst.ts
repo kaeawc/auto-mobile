@@ -98,13 +98,14 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     scope: ts.Node;
     position: number;
   }> = [];
-  const declarations: Array<{ name: string; scope: ts.Node; position: number }> = [];
+  type DeclarationBinding = { name: string; scope: ts.Node; position: number };
+  const declarations: DeclarationBinding[] = [];
   const functionBindings: Array<{
     name: string;
     node: ts.FunctionLikeDeclaration;
     scope: ts.Node;
     position: number;
-    receiver?: string;
+    receiverDeclaration?: DeclarationBinding;
   }> = [];
   const calls: ts.CallExpression[] = [];
   const launcherAliases = new Set(PROCESS_LAUNCHERS);
@@ -112,12 +113,19 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   const runExecSeamAliases = new Set(["runExecSeam"]);
   const childProcessNamespaces = new Set<string>();
   const functionName = (node: ts.FunctionLikeDeclaration): string | undefined => {
+    if (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
+      return node.parent.name.text;
+    }
+    if (ts.isPropertyAssignment(node.parent)) {
+      const assignedName = propertyNameOf(node.parent.name);
+      if (assignedName) {
+        return assignedName;
+      }
+    }
     if (node.name && ts.isIdentifier(node.name)) {
       return node.name.text;
     }
-    return ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)
-      ? node.parent.name.text
-      : undefined;
+    return undefined;
   };
   const lexicalScope = (node: ts.Node): ts.Node => {
     let current: ts.Node | undefined = node.parent;
@@ -223,6 +231,15 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     }
     if (ts.isVariableDeclaration(node)) {
       const scope = variableDeclarationScope(node);
+      const variableDeclarations = bindingIdentifiers(node.name).map((identifier) => ({
+        name: identifier.text,
+        scope,
+        position: node.getStart(sourceFile),
+      }));
+      declarations.push(...variableDeclarations);
+      const receiverDeclaration = ts.isIdentifier(node.name)
+        ? variableDeclarations.find((declaration) => declaration.name === node.name.text)
+        : undefined;
       if (ts.isIdentifier(node.name) && node.initializer && ts.isFunctionLike(node.initializer)) {
         functionBindings.push({
           name: node.name.text,
@@ -242,19 +259,20 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
             : ts.isPropertyAssignment(property) && ts.isFunctionLike(property.initializer)
               ? property.initializer
               : undefined;
-          if (method?.name && ts.isIdentifier(method.name)) {
+          const methodName =
+            ts.isMethodDeclaration(property) || ts.isPropertyAssignment(property)
+              ? propertyNameOf(property.name)
+              : undefined;
+          if (method && methodName) {
             functionBindings.push({
-              name: method.name.text,
+              name: methodName,
               node: method,
               scope,
               position: node.getStart(sourceFile),
-              receiver: node.name.text,
+              receiverDeclaration,
             });
           }
         }
-      }
-      for (const identifier of bindingIdentifiers(node.name)) {
-        declarations.push({ name: identifier.text, scope, position: node.getStart(sourceFile) });
       }
       if (ts.isIdentifier(node.name)) {
         if (node.initializer) {
@@ -326,6 +344,15 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
         declarations.push({ name: identifier.text, scope, position: node.getStart(sourceFile) });
       }
     }
+    if (ts.isCatchClause(node) && node.variableDeclaration) {
+      for (const identifier of bindingIdentifiers(node.variableDeclaration.name)) {
+        declarations.push({
+          name: identifier.text,
+          scope: node.block,
+          position: node.variableDeclaration.getStart(sourceFile),
+        });
+      }
+    }
     if (
       ts.isBinaryExpression(node) &&
       node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
@@ -352,6 +379,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     call: ts.CallExpression,
     target: ts.FunctionLikeDeclaration,
   ): boolean => {
+    if (target.asteriskToken) {
+      return false;
+    }
     if (unwrapTransparentExpression(call.expression) === target) {
       return true;
     }
@@ -360,19 +390,32 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     const receiver =
       (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
       ts.isIdentifier(callee.expression)
-        ? callee.expression.text
+        ? callee.expression
         : undefined;
     if (!name || (!ts.isIdentifier(callee) && receiver === undefined)) {
       return false;
     }
     const callScopes = scopeChain(call);
+    const receiverDeclaration = receiver
+      ? declarations
+          .filter(
+            (declaration) =>
+              declaration.name === receiver.text &&
+              callScopes.includes(declaration.scope) &&
+              declaration.position <= receiver.getStart(sourceFile),
+          )
+          .sort((left, right) => {
+            const scopeDelta = callScopes.indexOf(left.scope) - callScopes.indexOf(right.scope);
+            return scopeDelta !== 0 ? scopeDelta : right.position - left.position;
+          })[0]
+      : undefined;
     const candidates = functionBindings
       .filter(
         (binding) =>
           binding.name === name &&
           (receiver === undefined
-            ? binding.receiver === undefined
-            : binding.receiver === receiver) &&
+            ? binding.receiverDeclaration === undefined
+            : binding.receiverDeclaration === receiverDeclaration) &&
           callScopes.includes(binding.scope) &&
           (ts.isFunctionDeclaration(binding.node) || binding.position < call.getStart(sourceFile)),
       )

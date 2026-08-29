@@ -48,15 +48,33 @@ describe("daemon existing-daemon reachability timeout configuration", () => {
     expect(constants.DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS).toBe(5000);
   });
 
-  test("clamps an override at or above the startup timeout back to the startup timeout", async () => {
-    process.env[STARTUP_TIMEOUT_ENV] = "20000";
+  test("caps an override at or above the startup timeout with headroom below the deadline", async () => {
+    process.env[STARTUP_TIMEOUT_ENV] = "30000";
     process.env[REACHABILITY_ENV] = "999999";
     delete process.env[LEGACY_REACHABILITY_ENV];
 
     const constants = await importFreshConstants();
 
+    // Two-thirds of the 30s startup timeout: never equal to the timeout, so the
+    // actionable error is produced with headroom before the client's request
+    // deadline rather than at it (issue #5871).
     expect(constants.DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS).toBe(20000);
-    expect(constants.DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS).toBeLessThanOrEqual(
+    expect(constants.DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS).toBeLessThan(
+      constants.DAEMON_STARTUP_TIMEOUT_MS,
+    );
+  });
+
+  test("keeps headroom below a lowered startup timeout", async () => {
+    process.env[STARTUP_TIMEOUT_ENV] = "6000";
+    process.env[REACHABILITY_ENV] = "10000";
+    delete process.env[LEGACY_REACHABILITY_ENV];
+
+    const constants = await importFreshConstants();
+
+    // The default 10s candidate exceeds the lowered startup budget, so it is
+    // capped to two-thirds of it (4000ms), preserving headroom.
+    expect(constants.DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS).toBe(4000);
+    expect(constants.DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS).toBeLessThan(
       constants.DAEMON_STARTUP_TIMEOUT_MS,
     );
   });

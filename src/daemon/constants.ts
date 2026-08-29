@@ -113,8 +113,15 @@ export const DAEMON_STARTUP_TIMEOUT_MS =
  * Budgeting this wait well under the client request timeout guarantees the
  * error is delivered rather than raced by the timeout it lives inside. This is
  * only the reachability wait for an EXISTING daemon; cold-start bring-up still
- * uses the full `DAEMON_STARTUP_TIMEOUT_MS`. The override is clamped to the
- * startup timeout — a value at or above it would defeat the purpose.
+ * uses the full `DAEMON_STARTUP_TIMEOUT_MS`.
+ *
+ * The value is capped at two-thirds of the startup timeout, never at the full
+ * timeout: a budget EQUAL to `DAEMON_STARTUP_TIMEOUT_MS` (which the client uses
+ * as its request deadline) would produce the actionable error at the exact
+ * deadline it must beat, re-opening the zero-tools race for an override at or
+ * above the ceiling. Capping below the timeout reserves headroom so the error
+ * is always deliverable, and scaling with the timeout keeps that headroom
+ * meaningful when the startup budget is itself lowered.
  */
 const existingDaemonReachabilityOverride =
   process.env.AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS ??
@@ -122,11 +129,15 @@ const existingDaemonReachabilityOverride =
 const parsedExistingDaemonReachability = existingDaemonReachabilityOverride
   ? Number.parseInt(existingDaemonReachabilityOverride, 10)
   : NaN;
+const maxExistingDaemonReachabilityMs = Math.max(
+  1,
+  Math.floor((DAEMON_STARTUP_TIMEOUT_MS * 2) / 3),
+);
 export const DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS = Math.min(
   Number.isFinite(parsedExistingDaemonReachability) && parsedExistingDaemonReachability > 0
     ? parsedExistingDaemonReachability
     : 10000,
-  DAEMON_STARTUP_TIMEOUT_MS,
+  maxExistingDaemonReachabilityMs,
 );
 
 /**

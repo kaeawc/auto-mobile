@@ -738,8 +738,16 @@ export class DaemonMcpProxy {
       this.initialSessionBindingConfigured = true;
       this.ownedDeviceSessions.add(this.boundSessionUuid);
     }
+    // The default provider derives outputSchema suppression from the daemon
+    // options this proxy is configured with (the flag the connected daemon will
+    // enforce) — NOT from this process's serverConfig, which proxy-mode startup
+    // never sets for this flag (issue #5879 review).
     this.staticToolDefinitionsProvider =
-      config.staticToolDefinitionsProvider ?? getStaticToolDefinitions;
+      config.staticToolDefinitionsProvider ??
+      (() =>
+        getStaticToolDefinitions({
+          suppressOutputSchema: this.config.daemonOptions?.toolResultsNoStructuredContent === true,
+        }));
     this.buildIdentity = config.buildIdentity ?? getCurrentBuildIdentity();
     this.clientVersion = config.clientVersion ?? DAEMON_VERSION;
     this.clientAssetVersion = isExplicitPin() ? resolveAssetVersion(resolvePinnedVersion()) : null;

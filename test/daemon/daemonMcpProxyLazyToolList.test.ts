@@ -165,6 +165,29 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     }
   });
 
+  test("derives outputSchema suppression from daemon options, not serverConfig (AC #5879 review)", async () => {
+    // The default provider must drop outputSchema when the daemon the proxy will
+    // connect to runs with toolResultsNoStructuredContent — read from the proxy's
+    // daemonOptions, since proxy-mode startup never sets this on serverConfig.
+    const suppressed = new DaemonMcpProxy({
+      autoStartDaemon: false,
+      daemonOptions: { toolResultsNoStructuredContent: true },
+    });
+    const advertised = new DaemonMcpProxy({
+      autoStartDaemon: false,
+      daemonOptions: { toolResultsNoStructuredContent: false },
+    });
+    try {
+      const suppressedTools = await suppressed.listAdvertisedTools();
+      const advertisedTools = await advertised.listAdvertisedTools();
+      expect(suppressedTools.some((tool) => tool.outputSchema !== undefined)).toBe(false);
+      expect(advertisedTools.some((tool) => tool.outputSchema !== undefined)).toBe(true);
+    } finally {
+      await suppressed.close();
+      await advertised.close();
+    }
+  });
+
   test("honors an injected static tool definitions provider", async () => {
     const proxy = new DaemonMcpProxy({
       autoStartDaemon: false,

@@ -1,5 +1,4 @@
 import toolDefinitionsJson from "../../schemas/tool-definitions.json";
-import { serverConfig } from "../utils/ServerConfig";
 import type { ProxiedToolDefinition } from "./daemonMcpProxy";
 
 /**
@@ -30,29 +29,52 @@ interface RawToolDefinition {
 }
 
 // Parse once at module load; the per-call mapping below is cheap (tools/list is
-// not a hot path) and must re-read the structured-content flag each call.
+// not a hot path) and must re-read the runtime inputs (suppression flag, env)
+// each call.
 const RAW_DEFINITIONS: RawToolDefinition[] = toolDefinitionsJson as RawToolDefinition[];
+
+export interface StaticToolDefinitionsOptions {
+  /**
+   * Drop `outputSchema` from the advertised surface, mirroring
+   * `ToolRegistry.getToolDefinitions()` when `toolResultsNoStructuredContent` is
+   * enabled: a server advertising an output schema is expected to return matching
+   * `structuredContent`, which that flag strips (issue #2899). The proxy derives
+   * this from the daemon options it is configured with — NOT from its own
+   * `serverConfig`, which proxy-mode startup never populates for this flag.
+   */
+  suppressOutputSchema?: boolean;
+}
 
 /**
  * The static tool surface served by `tools/list` before a daemon connection is
- * established.
- *
- * `outputSchema` is dropped when `toolResultsNoStructuredContent` is enabled,
- * mirroring `ToolRegistry.getToolDefinitions()`: a server that advertises an
- * output schema is expected to return matching `structuredContent`, which that
- * flag strips (issue #2899). The flag is reuse-critical, so the proxy's value
- * matches the daemon it will connect to. `_meta` (e.g. the MCP Apps UI pointer,
- * issue #4669) is preserved verbatim.
+ * established. `_meta` (e.g. the MCP Apps UI pointer, issue #4669) is preserved
+ * verbatim, and `_meta["anthropic/alwaysLoad"]` is synthesized when
+ * `AUTOMOBILE_ALWAYS_LOAD_TOOLS=true`, both matching
+ * `ToolRegistry.getToolDefinitions()`.
  */
-export function getStaticToolDefinitions(): ProxiedToolDefinition[] {
-  const suppressOutputSchema = serverConfig.isToolResultsNoStructuredContentEnabled();
-  return RAW_DEFINITIONS.map((tool) => ({
-    name: tool.name,
-    ...(tool.description !== undefined ? { description: tool.description } : {}),
-    inputSchema: tool.inputSchema,
-    ...(tool.outputSchema !== undefined && !suppressOutputSchema
-      ? { outputSchema: tool.outputSchema }
-      : {}),
-    ...(tool._meta !== undefined ? { _meta: tool._meta } : {}),
-  }));
+export function getStaticToolDefinitions(
+  options: StaticToolDefinitionsOptions = {},
+): ProxiedToolDefinition[] {
+  const suppressOutputSchema = options.suppressOutputSchema ?? false;
+  const alwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true";
+  return RAW_DEFINITIONS.map((tool) => {
+    const meta: Record<string, unknown> = {
+      ...(tool._meta ?? {}),
+      ...(alwaysLoad ? { "anthropic/alwaysLoad": true } : {}),
+    };
+    const definition: ProxiedToolDefinition = {
+      name: tool.name,
+      inputSchema: tool.inputSchema,
+    };
+    if (tool.description !== undefined) {
+      definition.description = tool.description;
+    }
+    if (tool.outputSchema !== undefined && !suppressOutputSchema) {
+      definition.outputSchema = tool.outputSchema;
+    }
+    if (Object.keys(meta).length > 0) {
+      definition._meta = meta;
+    }
+    return definition;
+  });
 }

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { formatToolParamError } from "../../src/server/index";
 import { swipeOnSchema, tapOnSchema } from "../../src/server/interactionTools";
+import { observeSchema } from "../../src/server/observeTools";
 
 // Issue #4181, rank 7 (A6): the "container must be an object …" hint is
 // appended only for tapOn/swipeOn when a validation issue lands on the
@@ -133,5 +134,60 @@ describe("formatToolParamError non-finite numbers", () => {
     expect(formatToolParamError("tapOn", result.error)).toContain(
       "duration must be a finite number",
     );
+  });
+});
+
+// Issue #5854, AC1: `observe`'s `waitForSchema` is a `z.union`, so a single bad
+// field produces one issue per union branch — plus per-branch "presence"
+// artifacts (`<field> expected <type>, received undefined`) for every field the
+// caller never passed. The formatter must dedup repeated fragments and reorder so
+// the actionable message leads instead of being buried in the branch dump.
+describe("formatToolParamError union noise (observe waitFor)", () => {
+  test("non-finite waitFor.timeoutMs leads with the finite-number message", () => {
+    const result = observeSchema.safeParse({
+      platform: "android",
+      waitFor: { timeoutMs: Infinity },
+    });
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("observe", result.error);
+    const fragments = message.split("; ");
+
+    // The actionable message must be the first fragment, not buried.
+    expect(fragments[0]).toBe("waitFor.timeoutMs must be a finite number");
+
+    // Deduped: the finite-number fragment appears exactly once even though the
+    // union surfaces it in three branches.
+    const finiteCount = fragments.filter(
+      (f) => f === "waitFor.timeoutMs must be a finite number",
+    ).length;
+    expect(finiteCount).toBe(1);
+
+    // Branch-presence artifacts (missing fields) must not lead.
+    expect(fragments[0]).not.toContain("received undefined");
+  });
+
+  test("a genuinely bad enum value still leads with the enum message", () => {
+    const result = observeSchema.safeParse({
+      platform: "android",
+      waitFor: { for: "bogus" },
+    });
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("observe", result.error);
+    const fragments = message.split("; ");
+    expect(fragments[0]).toContain("waitFor.for");
+    expect(fragments[0]).toContain("Invalid option");
+  });
+
+  test("repeated branch artifacts are collapsed (no 5x activeWindow dump)", () => {
+    const result = observeSchema.safeParse({
+      platform: "android",
+      waitFor: { timeoutMs: Infinity },
+    });
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("observe", result.error);
+    const activeWindowCount = message
+      .split("; ")
+      .filter((f) => f === "waitFor.activeWindow expected object, received undefined").length;
+    expect(activeWindowCount).toBeLessThanOrEqual(1);
   });
 });

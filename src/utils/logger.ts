@@ -308,6 +308,13 @@ const safeStringify = (obj: any): string => {
   const ancestors: Array<{ holder: object; original: object }> = [];
   try {
     return JSON.stringify(obj, function (this: unknown, _key, value) {
+      // JSON can't represent non-finite numbers, so JSON.stringify coerces them
+      // to `null` — which hid the offending value in daemon request logs (a
+      // rejected `duration: Infinity` argument showed as `null`). Emit the marker
+      // instead so the trace shows what the caller actually sent (#5854).
+      if (typeof value === "number" && !Number.isFinite(value)) {
+        return Number.isNaN(value) ? "NaN" : value > 0 ? "Infinity" : "-Infinity";
+      }
       if (typeof value === "object" && value !== null) {
         // Unwind the path back to this value's holder before testing/pushing, so
         // siblings don't inherit each other's descendants as false ancestors.

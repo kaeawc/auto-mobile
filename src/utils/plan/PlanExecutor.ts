@@ -24,6 +24,7 @@ import { Timer, defaultTimer } from "../SystemTimer";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
 import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
 import { isDeviceLostError } from "../../server/deviceLossOutcome";
+import { invalidParamsMessage } from "../../server/formatToolParamError";
 import { formatStructuredToolError } from "../formatStructuredToolError";
 import {
   summarizeObserveResultForFailure,
@@ -32,6 +33,16 @@ import {
 
 function formatToolError(error: unknown): string {
   return formatStructuredToolError(error) ?? String(error);
+}
+
+// A schema validation error is a plan-authoring mistake that must stay fatal even
+// for optional steps. `parseToolParams` now rewraps the ZodError as a formatted
+// ActionableError (keeping the ZodError as `cause`), so classify both forms.
+function isSchemaValidationError(error: unknown): boolean {
+  return (
+    error instanceof ZodError ||
+    (error instanceof ActionableError && error.cause instanceof ZodError)
+  );
 }
 
 type StepExecutionStatus = "completed" | "failed" | "skipped";
@@ -94,6 +105,30 @@ export class DefaultPlanExecutor implements PlanExecutor {
   constructor(timer: Timer = defaultTimer, loggerInstance: Logger = logger) {
     this.timer = timer;
     this.logger = loggerInstance;
+  }
+
+  /**
+   * Validate step params against a tool schema, routing any `ZodError` through
+   * the same `formatToolParamError` rendering the MCP call boundary uses so a
+   * non-finite/invalid value reads identically on the plan path instead of
+   * surfacing the raw, self-contradictory zod default (issue #5854 AC3).
+   */
+  private parseToolParams(
+    toolName: string,
+    schema: { parse: (value: unknown) => unknown },
+    params: Record<string, unknown>,
+  ): Record<string, unknown> {
+    try {
+      return schema.parse(params) as Record<string, unknown>;
+    } catch (error) {
+      if (error instanceof ZodError) {
+        // Keep the ZodError as `cause` so the optional-step guard still classifies
+        // this as a plan-authoring schema error (stays fatal) even though the
+        // thrown value is now the formatted ActionableError.
+        throw new ActionableError(invalidParamsMessage(toolName, error), { cause: error });
+      }
+      throw error;
+    }
   }
 
   /**
@@ -249,7 +284,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       // (`observe` always resets it). This capture is for the plan's failure
       // summary, not shown to the agent. Parse against the tool schema first, then
       // pass the resolved tool to the seam so the timeout race stays local.
-      const parsedParams = observeTool.schema.parse(enhancedParams) as Record<string, unknown>;
+      const parsedParams = this.parseToolParams(observeTool.name, observeTool.schema, enhancedParams);
 
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       const response = await Promise.race([
@@ -396,7 +431,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       // below so finalize emits the full observation on the step envelope - never
       // a diff or a stripped payload - regardless of
       // `--actions-diff-observe`/`--actions-no-observe`.
-      const parsedParams = tool.schema.parse(enhancedParams) as Record<string, unknown>;
+      const parsedParams = this.parseToolParams(tool.name, tool.schema, enhancedParams);
 
       if (context.deviceId) {
         ScreenshotJobTracker.cancelJob(context.deviceId);
@@ -519,7 +554,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         throw error;
       }
       const errorMsg = `${error}`;
-      if (step.optional && !context.signal?.aborted && !(error instanceof ZodError)) {
+      if (step.optional && !context.signal?.aborted && !isSchemaValidationError(error)) {
         this.logger.warn(
           `${context.logPrefix} optional step ${step.tool} threw; returning skipped status`,
           error,

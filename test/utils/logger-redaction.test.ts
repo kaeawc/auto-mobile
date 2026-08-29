@@ -90,6 +90,35 @@ describe("safeStringify redacts sensitive data", () => {
       '{"a":{"x":1},"b":{"child":{"x":1},"self":"[circular]"}}',
     );
   });
+
+  // Issue #5854, AC2: JSON.stringify renders non-finite numbers as `null`, so a
+  // request log for a rejected `duration: Infinity` argument showed `null` and
+  // hid what the caller actually sent. The replacer must preserve the marker.
+  test("renders a nested Infinity as the string marker instead of null", () => {
+    expect(safeStringify({ duration: Infinity })).toBe('{"duration":"Infinity"}');
+  });
+
+  test("renders a nested -Infinity as its signed marker", () => {
+    expect(safeStringify({ duration: -Infinity })).toBe('{"duration":"-Infinity"}');
+  });
+
+  test("renders a nested NaN as the string marker instead of null", () => {
+    expect(safeStringify({ returnSpeed: NaN })).toBe('{"returnSpeed":"NaN"}');
+  });
+
+  test("preserves the marker inside the request-log argument shape", () => {
+    const request = {
+      method: "tools/call",
+      params: { name: "tapOn", arguments: { duration: Infinity } },
+    };
+    expect(safeStringify(request)).toBe(
+      '{"method":"tools/call","params":{"name":"tapOn","arguments":{"duration":"Infinity"}}}',
+    );
+  });
+
+  test("leaves finite numbers untouched", () => {
+    expect(safeStringify({ a: 0, b: -3.5, c: 1000 })).toBe('{"a":0,"b":-3.5,"c":1000}');
+  });
 });
 
 describe("SENSITIVE_ENV_KEYS", () => {

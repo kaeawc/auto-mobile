@@ -1,6 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { ZodError, type ZodIssue } from "zod/v4";
+import { invalidParamsMessage } from "./formatToolParamError";
+// Re-exported so existing consumers/tests keep importing it from the server entry.
+export { formatToolParamError } from "./formatToolParamError";
 import { ActionableError } from "../models";
 import { logger } from "../utils/logger";
 import { defaultTimer } from "../utils/SystemTimer";
@@ -184,75 +186,6 @@ function stripInternalToolParams(params: unknown): unknown {
   return rest;
 }
 
-function flattenZodIssues(issues: ZodIssue[]): ZodIssue[] {
-  const flattened: ZodIssue[] = [];
-
-  const visit = (issue: ZodIssue) => {
-    if (issue.code === "invalid_union" && Array.isArray(issue.errors) && issue.errors.length) {
-      issue.errors.forEach((unionIssues) => {
-        unionIssues.forEach((unionIssue) => {
-          const normalizedIssue = issue.path.length
-            ? { ...unionIssue, path: [...issue.path, ...unionIssue.path] }
-            : unionIssue;
-          visit(normalizedIssue as ZodIssue);
-        });
-      });
-      return;
-    }
-    flattened.push(issue);
-  };
-
-  issues.forEach(visit);
-  return flattened;
-}
-
-// Exported for direct unit testing of the container-hint branch (issue #4181,
-// rank 7). The hint is only appended for tapOn/swipeOn container issues.
-export function formatToolParamError(toolName: string, error: unknown): string {
-  if (!(error instanceof ZodError)) {
-    return String(error);
-  }
-
-  const flattenedIssues = flattenZodIssues(error.issues);
-  const issues = flattenedIssues.map((issue) => {
-    const path = issue.path.length ? issue.path.join(".") : "parameters";
-    if (issue.code === "invalid_type") {
-      // zod v4 rejects non-finite numbers (Infinity/-Infinity/NaN) at the base
-      // `z.number()` check, so no `.finite()` refinement can carry a custom
-      // message. Those surface as an invalid_type whose value is still a number
-      // (`received` is "Infinity"/"NaN", or "number" from a typeof-based error
-      // map), collapsing the default text to the self-contradictory "expected
-      // number, received number". A finite number never trips invalid_type, so
-      // any of these markers means non-finite — name the real constraint (#5769).
-      const received = (issue as { received?: unknown }).received;
-      if (
-        issue.expected === "number" &&
-        (received === "Infinity" || received === "NaN" || received === "number")
-      ) {
-        return `${path} must be a finite number`;
-      }
-      // zod v4 issues otherwise carry a usable default message that already
-      // reads "Invalid input: expected X, received Y", so reuse it minus the
-      // prefix to keep the historical "<path> expected X" format.
-      return `${path} ${issue.message.replace(/^Invalid input: /, "")}`;
-    }
-    return `${path} ${issue.message}`;
-  });
-
-  const hints: string[] = [];
-  if (toolName === "swipeOn" || toolName === "tapOn") {
-    const containerIssue = flattenedIssues.find((issue) => issue.path[0] === "container");
-    if (containerIssue) {
-      hints.push(
-        'container must be an object like { "elementId": "<id>" } or { "text": "<text>" }',
-      );
-    }
-  }
-
-  const issueSummary = issues.join("; ");
-  const hintSummary = hints.length > 0 ? ` Hint: ${hints.join(" ")}` : "";
-  return `${issueSummary}${hintSummary}`;
-}
 
 /**
  * Populate the canonical production registry and validate exact-tool startup
@@ -638,9 +571,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     try {
       parsedParams = tool.schema.parse(stripInternalToolParams(toolParams));
     } catch (error) {
-      throw new ActionableError(
-        `Invalid parameters for tool ${name}: ${formatToolParamError(name, error)}`,
-      );
+      throw new ActionableError(invalidParamsMessage(name, error));
     }
 
     const executionSessionUuid =

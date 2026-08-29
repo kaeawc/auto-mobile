@@ -418,6 +418,15 @@
           "description": "SDK override TTL ms (default 5000)",
           "type": "number"
         },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
@@ -628,6 +637,15 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -1055,6 +1073,15 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2373,6 +2400,15 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -2477,6 +2513,15 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -6898,6 +6943,15 @@
           "required": ["quietPeriodMs"],
           "additionalProperties": false
         },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -7050,6 +7104,15 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -7167,6 +7230,15 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -7467,6 +7539,15 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -7638,6 +7719,15 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -7664,6 +7754,15 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -8227,6 +8326,15 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -8557,6 +8665,15 @@
           "type": "string",
           "enum": ["android", "ios"]
         },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
+        },
         "sessionUuid": {
           "description": "Session",
           "type": "string"
@@ -8615,6 +8732,15 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -8698,6 +8824,15 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -10645,6 +10780,15 @@
       "properties": {
         "appId": {
           "type": "string"
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
         },
         "platform": {
           "type": "string",

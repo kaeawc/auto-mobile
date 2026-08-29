@@ -111,18 +111,37 @@ function classifyObservationAction(
 
 /**
  * Action tools that embed a post-action observation AND expose the `raw`/`project`
- * response-shape control (issue #5872). Their embedded observation defaults to the
- * compact skeleton, opt-out-able per call. The default is scoped to exactly the
- * tools that carry the opt-out so the two never diverge: a tool that skeletonizes
- * by default but cannot be asked for the raw tree would be a silent one-way door.
- * Extending both to every observation-producing action tool is tracked as a
- * follow-up. `observe` is not here — it owns the projection at the payload top
- * level, not under `.observation`.
+ * response-shape control (issues #5872, #5886). Their embedded observation defaults
+ * to the compact skeleton, opt-out-able per call. The default is scoped to exactly
+ * the tools that carry the opt-out so the two never diverge: a tool that
+ * skeletonizes by default but cannot be asked for the raw tree would be a silent
+ * one-way door. #5872 shipped the first three; #5886 extends both the default and
+ * the opt-out to every remaining observation-producing action tool, together.
+ * Membership is bound to the advertised opt-out by an anti-divergence test
+ * (test/server/tools/schema.test.ts) so the two can never diverge in CI.
+ * `observe` is not here — it owns the projection at the payload top level, not
+ * under `.observation`.
  */
-const SKELETON_DEFAULT_ACTION_TOOLS: ReadonlySet<string> = new Set([
+export const SKELETON_DEFAULT_ACTION_TOOLS: ReadonlySet<string> = new Set([
   "tapOn",
   "inputText",
   "launchApp",
+  "tapAny",
+  "dragAndDrop",
+  "clearText",
+  "selectAllText",
+  "pressButton",
+  "systemTray",
+  "swipeOn",
+  "pinchOn",
+  "openLink",
+  "shake",
+  "imeAction",
+  "recentApps",
+  "homeScreen",
+  "rotate",
+  "terminateApp",
+  "biometricAuth",
 ]);
 
 /**

@@ -3,7 +3,7 @@ import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { BiometricAuth, BiometricAuthOptions } from "../features/action/BiometricAuth";
 import { ActionableError, BootedDevice } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema, responseShapeControlFields } from "./toolSchemaHelpers";
 import { computeIosSimulatorCapabilities } from "../features/utility/iosSimulatorCapabilities";
 import { DeviceState, type BiometricEnrollment } from "../features/utility/DeviceState";
 import { DaemonState } from "../daemon/daemonState";
@@ -35,6 +35,7 @@ export const biometricAuthSchema = addDeviceTargetingToSchema(
         .describe("Fingerprint ID: default 1 for match/error, 2 for fail/cancel"),
       errorCode: z.number().optional().describe("BiometricPrompt error code; action=error only"),
       ttlMs: z.number().optional().describe("SDK override TTL ms (default 5000)"),
+      ...responseShapeControlFields,
     })
     .refine((data) => data.errorCode === undefined || data.action === "error", {
       message: "errorCode is only applicable when action is 'error'",

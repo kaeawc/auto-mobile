@@ -98,6 +98,18 @@ export const packageNameSchema = withAppIdAliases(
   ),
 );
 
+// terminateApp embeds a post-action observation, so it carries the same
+// response-shape control as the other action tools (issue #5886): the embedded
+// observation defaults to the compact skeleton, opt-out-able via raw/project.
+export const terminateAppSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z.object({
+      appId: z.string(),
+      ...responseShapeControlFields,
+    }),
+  ),
+);
+
 export const launchAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
     z.object({
@@ -527,7 +539,7 @@ export function registerAppTools() {
   ToolRegistry.registerDeviceAware(
     "terminateApp",
     "Terminate app by package name",
-    packageNameSchema,
+    terminateAppSchema,
     terminateAppHandler,
     { defaultEnabled: true },
   );

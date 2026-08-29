@@ -144,6 +144,7 @@ export const shakeSchema = addDeviceTargetingToSchema(
     duration: z.number().optional().describe("Shake duration ms (default 1000)"),
     intensity: z.number().optional().describe("Shake intensity (Android; default 100)"),
     platform: platformSchema,
+    ...responseShapeControlFields,
   }),
 );
 
@@ -374,6 +375,7 @@ export const tapAnySchema = withJsonSchemaOverride(
           .optional()
           .describe("Poll for clickable element before tapping"),
         platform: platformSchema,
+        ...responseShapeControlFields,
       })
       .strict(),
   ),
@@ -415,6 +417,7 @@ export const dragAndDropSchema = withJsonSchemaOverride(
         .optional()
         .describe("Hold duration ms (min: 100, max: 3000, default: 100)"),
       platform: platformSchema,
+      ...responseShapeControlFields,
     }),
   ),
   (js) => compactExclusiveSelectorProperties(js, ["source", "target"]),
@@ -453,6 +456,7 @@ export const swipeOnSchema = withJsonSchemaOverride(
         .describe("Speed multiplier for return swipe (0.1-3.0)"),
       speed: z.enum(["slow", "normal", "fast"]).optional().describe("Swipe speed preset"),
       platform: platformSchema,
+      ...responseShapeControlFields,
     }),
   ),
   (js) => compactExclusiveSelectorProperties(js, ["container", "lookFor"]),
@@ -479,6 +483,7 @@ export const pinchOnSchema = withJsonSchemaOverride(
       container: elementContainerSchema.optional().describe("Scope search to a container"),
       autoTarget: z.boolean().optional().describe("Auto-target pinchable containers"),
       platform: platformSchema,
+      ...responseShapeControlFields,
     }),
   ),
   (js) => compactExclusiveSelectorProperties(js, ["container"]),
@@ -487,12 +492,14 @@ export const pinchOnSchema = withJsonSchemaOverride(
 export const clearTextSchema = addDeviceTargetingToSchema(
   z.object({
     platform: platformSchema,
+    ...responseShapeControlFields,
   }),
 );
 
 export const selectAllTextSchema = addDeviceTargetingToSchema(
   z.object({
     platform: platformSchema,
+    ...responseShapeControlFields,
   }),
 );
 
@@ -500,6 +507,7 @@ export const pressButtonSchema = addDeviceTargetingToSchema(
   z.object({
     button: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"]),
     platform: platformSchema,
+    ...responseShapeControlFields,
   }),
 );
 
@@ -520,6 +528,7 @@ const systemTraySchemaBase = z.object({
     .optional()
     .describe("Timeout in ms to wait for notification (default: 5000)"),
   platform: platformSchema,
+  ...responseShapeControlFields,
 });
 
 export const systemTraySchema = withAppIdAliases(
@@ -653,6 +662,7 @@ export const openLinkSchema = withAppIdAliases(
         settled: settledSchema
           .optional()
           .describe("After waitFor matches, wait for a quiet hierarchy period (requires waitFor)"),
+        ...responseShapeControlFields,
       }),
     ).superRefine(refineWaitForArgs),
     overrideWaitForJsonSchema,
@@ -700,18 +710,21 @@ export const imeActionSchema = addDeviceTargetingToSchema(
   z.object({
     action: z.enum(["done", "next", "search", "send", "go", "previous"]).describe("IME action"),
     platform: platformSchema,
+    ...responseShapeControlFields,
   }),
 );
 
 export const recentAppsSchema = addDeviceTargetingToSchema(
   z.object({
     platform: platformSchema,
+    ...responseShapeControlFields,
   }),
 );
 
 export const homeScreenSchema = addDeviceTargetingToSchema(
   z.object({
     platform: platformSchema,
+    ...responseShapeControlFields,
   }),
 );
 
@@ -719,6 +732,7 @@ export const rotateSchema = addDeviceTargetingToSchema(
   z.object({
     orientation: z.enum(["portrait", "landscape"]),
     platform: platformSchema,
+    ...responseShapeControlFields,
   }),
 );
 

@@ -801,6 +801,15 @@ export class RealObserveScreen implements ObserveScreen {
    * taken now — after capture: freshness is retracted only when the device is
    * *stably* on a different app (both samples agree, and still differ from the
    * observed window). The extra dumpsys runs only on the rare mismatch path.
+   *
+   * The observed package is `viewHierarchy.packageName` — the package of the
+   * tree actually being validated — in preference to `activeWindow.appId`. The
+   * latter is derived from the accessibility `foregroundActivity`, which with an
+   * active soft keyboard can be the IME root's package while the captured
+   * hierarchy is the underlying app; comparing the IME package would falsely
+   * retract a valid application hierarchy. Falls back to `activeWindow.appId`
+   * only when the hierarchy carries no package (e.g. the bootstrap path, whose
+   * appId is itself a resumed-activity read in the same domain as the ground truth).
    */
   private async resolveWindowIdentityMismatch(
     result: ObserveResult,
@@ -808,7 +817,7 @@ export class RealObserveScreen implements ObserveScreen {
     signal?: AbortSignal,
   ): Promise<{ observed: string; foreground: string } | undefined> {
     const foreground = await foregroundIdentity;
-    const observed = result.activeWindow?.appId;
+    const observed = result.viewHierarchy?.packageName ?? result.activeWindow?.appId;
     if (!foreground || !observed || observed === foreground) {
       return undefined;
     }

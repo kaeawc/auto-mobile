@@ -43,6 +43,7 @@ function calendarHierarchy(now: number): any {
     fresh: true,
     screenWidth: 1080,
     screenHeight: 2400,
+    packageName: "com.google.android.calendar",
     foregroundActivity: "com.google.android.calendar/.MainActivity",
     hierarchy: {
       node: {
@@ -189,6 +190,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       fresh: true,
       screenWidth: 1080,
       screenHeight: 2400,
+      packageName: "com.android.systemui",
       foregroundActivity: "com.android.systemui/.shade.NotificationPanelView",
       hierarchy: {
         node: {
@@ -245,6 +247,55 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       }
     }
     const fakeAdb = new SequencedForegroundAdb();
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.verified).toBe(true);
+  });
+
+  test("an active IME is not flagged: the check uses the captured hierarchy's package", async () => {
+    // With a soft keyboard active, the a11y foregroundActivity (→ activeWindow.appId)
+    // can be the IME root's package while the captured hierarchy is the underlying
+    // app. The window-identity check must compare the hierarchy's own package
+    // (viewHierarchy.packageName), so a valid app hierarchy is not retracted.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      packageName: "com.google.android.calendar", // the captured tree is the app
+      foregroundActivity: "com.google.android.inputmethod.latin/.LatinIME", // IME root
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [{ text: "Note", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    // Ground truth: the app is the resumed activity (the IME is not an activity).
+    fakeAdb.setForegroundApp({ packageName: "com.google.android.calendar", userId: 0 });
 
     const screen = new RealObserveScreen(
       androidDevice,

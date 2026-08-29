@@ -336,7 +336,10 @@ describe("TerminateApp (Android)", () => {
     expect(invalidated[0].deviceId).toBe("emulator-5554");
   });
 
-  test("does not invalidate the cache when the app was not running (issue #5867)", async () => {
+  test("invalidates the cache when an installed app's process is already gone (issue #5867)", async () => {
+    // The dead-process state is exactly what terminate-then-observe recovers
+    // from, so the already-stopped path must invalidate the stale window record
+    // too — not only the force-stop path.
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
     fakeAdb.setCommandResult(
@@ -363,6 +366,37 @@ describe("TerminateApp (Android)", () => {
     const result = await terminateApp.execute("com.example.app", { skipObservation: true });
 
     expect(result.wasRunning).toBe(false);
+    expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(false);
+    expect(invalidated).toHaveLength(1);
+    expect(invalidated[0].deviceId).toBe("emulator-5554");
+  });
+
+  test("does not invalidate the cache when the package is not installed (issue #5867)", async () => {
+    fakeAdb.setForegroundApp(null);
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
+    fakeAdb.setCommandResult(
+      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
+      "0",
+    );
+
+    const invalidated: BootedDevice[] = [];
+    const cacheInvalidator = {
+      invalidate: (device: BootedDevice) => {
+        invalidated.push(device);
+      },
+    };
+
+    const terminateApp = new TerminateApp(
+      androidDevice,
+      fakeAdb as any,
+      null,
+      fakeTimer,
+      null,
+      cacheInvalidator,
+    );
+    const result = await terminateApp.execute("com.example.app", { skipObservation: true });
+
+    expect(result.wasInstalled).toBe(false);
     expect(invalidated).toHaveLength(0);
   });
 

@@ -176,6 +176,11 @@ export class TerminateApp extends BaseVisualChange {
       });
 
       if (!isRunning) {
+        // The process is already gone — the exact dead-process state that
+        // terminate-then-observe is meant to recover from (issue #5867). Any
+        // cached window/hierarchy record for it is stale, so invalidate here too,
+        // not only on the force-stop path below.
+        this.cacheInvalidator.invalidate(this.device);
         return {
           success: true,
           packageName,

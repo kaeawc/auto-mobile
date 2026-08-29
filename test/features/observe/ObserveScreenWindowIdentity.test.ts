@@ -92,6 +92,55 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.warning).toContain("com.android.settings");
   });
 
+  test("the freshness verdict is present when the result is cached (survives serialization)", async () => {
+    // The filesystem observe cache serializes the result at put() time, so the
+    // verdict must be attached BEFORE caching — otherwise a daemon-restart cache
+    // reload loses the isFresh:false signal (issue #5867). Snapshot the result as
+    // the real store would (deep clone at put) and assert the verdict is there.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(calendarHierarchy(now));
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    let putSnapshot: any;
+    const snapshotStore = {
+      async put(_deviceId: string, result: any): Promise<void> {
+        putSnapshot = JSON.parse(JSON.stringify(result));
+      },
+      async getMostRecent(): Promise<any> {
+        return undefined;
+      },
+      getRecentInMemory: () => undefined,
+      getRecentInMemoryForDevice: () => undefined,
+      clear: () => undefined,
+    };
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: snapshotStore as any,
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(putSnapshot).toBeDefined();
+    expect(putSnapshot.freshness?.verified).toBe(false);
+    expect(putSnapshot.freshness?.isFresh).toBe(false);
+    expect(putSnapshot.freshness?.warning).toContain("wrong-window");
+  });
+
   test("does not retract freshness when the observed window matches the top resumed activity", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();

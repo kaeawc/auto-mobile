@@ -391,13 +391,6 @@ export class RealObserveScreen implements ObserveScreen {
         }
       }
 
-      // Cache the result for future use
-      await perf.track("cacheResult", () =>
-        getObserveCacheStore().put(this.device.deviceId, result),
-      );
-
-      perf.end();
-
       // Freshness diagnostics.
       //
       // This used to read `isFresh = requestedAfter === undefined ? true : …`,
@@ -407,6 +400,13 @@ export class RealObserveScreen implements ObserveScreen {
       // property in question measured nothing. It is now always a measurement:
       // capture age, plus whether the delegate verified the tree against the
       // device on this call. See ./observationFreshness.ts.
+      //
+      // Computed BEFORE caching so the persisted result carries the verdict: the
+      // observe cache serializes the result at `put` time (the filesystem store),
+      // so a verdict attached afterward would be lost on a daemon-restart cache
+      // reload within the TTL, and a consumer reading the cached tree directly
+      // (e.g. `SwipeOn.getScrollableContext`, nav/registry embeds) would accept a
+      // phantom hierarchy without its `isFresh: false` signal (issue #5867).
       result.freshness = computeFreshness({
         requestedAfter: minTimestamp > 0 ? minTimestamp : undefined,
         actualTimestamp: this.resolveObservationTimestampMs(result),
@@ -426,6 +426,13 @@ export class RealObserveScreen implements ObserveScreen {
           signal,
         ),
       });
+
+      // Cache the result for future use
+      await perf.track("cacheResult", () =>
+        getObserveCacheStore().put(this.device.deviceId, result),
+      );
+
+      perf.end();
 
       // Attach the windowed performance snapshot when opted in (independent of --debug-perf).
       await this.attachPerfSnapshot(result);

@@ -236,16 +236,77 @@ describe("finalizeToolResponse", () => {
       expect(observation.skeleton).toBeUndefined();
     });
 
-    test("an action tool without the response-shape opt-out keeps the full hierarchy (no silent one-way skeleton)", () => {
-      // The skeleton default is scoped to the tools that also expose raw/project
-      // (tapOn/inputText/launchApp). A tool like swipeOn, which has no opt-out,
-      // must NOT be silently skeletonized — otherwise a client could never recover
-      // the raw tree from it. Broader coverage is a tracked follow-up.
+    // Issue #5886: the skeleton default + raw/project opt-out now extends to
+    // every observation-producing action tool, not just the original three.
+    // swipeOn is the representative extra tool named in the issue's test AC.
+    describe("extended to all observation-producing action tools (#5886)", () => {
+      test("swipeOn's observation defaults to the compact skeleton", () => {
+        const response = createStructuredToolResponse({
+          success: true,
+          observation: makeObserveResult(),
+        });
+        const finalized = finalizeToolResponse(response, { name: "swipeOn" });
+        const observation = (finalized.structuredContent as any).observation;
+        expect(Array.isArray(observation.skeleton)).toBe(true);
+        expect(observation.viewHierarchy).toBeUndefined();
+        expect(observation.elements).toBeUndefined();
+      });
+
+      test('swipeOn honors project:"full" back into the raw viewHierarchy', () => {
+        const response = createStructuredToolResponse({
+          success: true,
+          observation: makeObserveResult(),
+        });
+        const finalized = finalizeToolResponse(response, {
+          name: "swipeOn",
+          args: { project: "full" },
+        });
+        const observation = (finalized.structuredContent as any).observation;
+        expect(observation.viewHierarchy).toBeDefined();
+        expect(observation.skeleton).toBeUndefined();
+      });
+
+      test("swipeOn honors raw:true back into the raw viewHierarchy", () => {
+        const response = createStructuredToolResponse({
+          success: true,
+          observation: makeObserveResult(),
+        });
+        const finalized = finalizeToolResponse(response, {
+          name: "swipeOn",
+          args: { raw: true },
+        });
+        const observation = (finalized.structuredContent as any).observation;
+        expect(observation.viewHierarchy).toBeDefined();
+        expect(observation.skeleton).toBeUndefined();
+      });
+
+      // A representative sample of the newly-covered tools all skeletonize by
+      // default (the full roster is bound to the opt-out by the anti-divergence
+      // test in test/server/tools/schema.test.ts).
+      test.each(["dragAndDrop", "pressButton", "rotate", "homeScreen", "terminateApp"])(
+        "%s defaults its observation to the compact skeleton",
+        (toolName) => {
+          const response = createStructuredToolResponse({
+            success: true,
+            observation: makeObserveResult(),
+          });
+          const finalized = finalizeToolResponse(response, { name: toolName });
+          const observation = (finalized.structuredContent as any).observation;
+          expect(Array.isArray(observation.skeleton)).toBe(true);
+          expect(observation.viewHierarchy).toBeUndefined();
+        },
+      );
+    });
+
+    test("a tool NOT in the skeleton-default set keeps the full hierarchy", () => {
+      // The default remains scoped to the advertised set: a tool outside it (here
+      // a synthetic name that embeds an observation but never opts in) must NOT be
+      // silently skeletonized — the raw tree stays recoverable.
       const response = createStructuredToolResponse({
         success: true,
         observation: makeObserveResult(),
       });
-      const finalized = finalizeToolResponse(response, { name: "swipeOn" });
+      const finalized = finalizeToolResponse(response, { name: "someUncoveredTool" });
       const observation = (finalized.structuredContent as any).observation;
       expect(observation.viewHierarchy).toBeDefined();
       expect(observation.skeleton).toBeUndefined();

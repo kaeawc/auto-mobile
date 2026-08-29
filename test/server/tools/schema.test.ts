@@ -220,18 +220,55 @@ describe("MCP Tools Schema", () => {
     expect(result.action).toBe("tap");
   });
 
-  // Issue #5872: the action tools gain observe's response-shape control so a
-  // client can opt out of the skeleton default back to the raw hierarchy.
-  test.each(["tapOn", "inputText", "launchApp"])(
-    "%s advertises the raw/project response-shape control",
-    async (toolName) => {
+  // Issue #5872 / #5886: every observation-producing action tool gains observe's
+  // response-shape control so a client can opt out of the skeleton default back
+  // to the raw hierarchy. #5872 shipped the first three; #5886 extends both the
+  // default and the opt-out to the full set (never one without the other).
+  test.each([
+    "tapOn",
+    "inputText",
+    "launchApp",
+    "tapAny",
+    "dragAndDrop",
+    "clearText",
+    "selectAllText",
+    "pressButton",
+    "systemTray",
+    "swipeOn",
+    "pinchOn",
+    "openLink",
+    "shake",
+    "imeAction",
+    "recentApps",
+    "homeScreen",
+    "rotate",
+    "terminateApp",
+    "biometricAuth",
+  ])("%s advertises the raw/project response-shape control", async (toolName) => {
+    const tool = ADVERTISED_TOOLS.find((t) => t.name === toolName);
+    expect(tool).toBeDefined();
+    const props = (tool!.inputSchema as any).properties ?? {};
+    expect(props.raw).toBeDefined();
+    expect(props.project).toBeDefined();
+  });
+
+  // Issue #5886: structural anti-divergence gate. The skeleton default and the
+  // raw/project opt-out must move together — a tool that skeletonizes its
+  // observation by default but cannot be asked for the raw tree is a silent
+  // one-way door (the footgun PR #5885 avoided). Every tool the finalize step
+  // skeletonizes by default MUST therefore advertise the opt-out.
+  test("every SKELETON_DEFAULT_ACTION_TOOLS member advertises the raw/project opt-out", async () => {
+    const { SKELETON_DEFAULT_ACTION_TOOLS } =
+      await import("../../../src/server/finalizeToolResponse");
+    expect(SKELETON_DEFAULT_ACTION_TOOLS.size).toBeGreaterThan(0);
+    for (const toolName of SKELETON_DEFAULT_ACTION_TOOLS) {
       const tool = ADVERTISED_TOOLS.find((t) => t.name === toolName);
-      expect(tool).toBeDefined();
+      expect(tool, `${toolName} should be an advertised tool`).toBeDefined();
       const props = (tool!.inputSchema as any).properties ?? {};
-      expect(props.raw).toBeDefined();
-      expect(props.project).toBeDefined();
-    },
-  );
+      expect(props.raw, `${toolName} must advertise raw`).toBeDefined();
+      expect(props.project, `${toolName} must advertise project`).toBeDefined();
+    }
+  });
 
   test("inputText accepts a project override and a selector", async () => {
     const { inputTextSchema } = await import("../../../src/server/interactionTools");

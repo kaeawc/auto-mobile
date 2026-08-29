@@ -239,6 +239,30 @@ describe("iOS CtrlProxy process execution boundary (issue #4063)", () => {
     expect(
       findViolationsInSource(
         "fixture.ts",
+        'let runner=executor; class Config { configure(){runner=/x/;} } const config=new Config(); config.configure=()=>{}; config.configure(); runner.exec("kill");',
+      ),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'let runner=executor; class Config { configure(){runner=/x/;} } const config=new Config(); config["configure"]=()=>{}; config.configure(); runner.exec("kill");',
+      ),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'let runner=executor; class Config { configure(){runner=/x/;} } const config=new Config(); delete config.configure; config.configure(); runner.exec("kill");',
+      ),
+    ).toHaveLength(1);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
+        'let runner=executor; class Config { configure(){runner=/x/;} } const config=new Config(); config.other=()=>{}; config.configure(); runner.exec("kill");',
+      ),
+    ).toHaveLength(0);
+    expect(
+      findViolationsInSource(
+        "fixture.ts",
         'let runner = /x/; function configure(){ runner = executor; } unrelated(); runner.exec("kill");',
       ),
     ).toHaveLength(0);

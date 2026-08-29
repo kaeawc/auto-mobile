@@ -117,6 +117,11 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   type InvocationExpression = ts.CallExpression | ts.NewExpression;
   const calls: ts.CallExpression[] = [];
   const invocations: InvocationExpression[] = [];
+  // Receiver method properties written or deleted somewhere (`config.configure = ...` or
+  // `delete config.configure`), keyed by receiver name and method name, scope-insensitively.
+  // A single such mutation is enough to stop trusting the class body for that receiver method:
+  // the call site may resolve to the replacement rather than the declared instance method.
+  const mutatedReceiverMethods = new Set<string>();
   const launcherAliases = new Set(PROCESS_LAUNCHERS);
   const executionSeamAliases = new Set(["executeCommand", "runExecSeam", "execute"]);
   const runExecSeamAliases = new Set(["runExecSeam"]);
@@ -435,6 +440,28 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
         });
       }
     }
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      (ts.isPropertyAccessExpression(node.left) || ts.isElementAccessExpression(node.left)) &&
+      ts.isIdentifier(node.left.expression)
+    ) {
+      const method = propertyName(node.left);
+      if (method) {
+        mutatedReceiverMethods.add(`${node.left.expression.text}\u0000${method}`);
+      }
+    }
+    if (
+      ts.isDeleteExpression(node) &&
+      (ts.isPropertyAccessExpression(node.expression) ||
+        ts.isElementAccessExpression(node.expression)) &&
+      ts.isIdentifier(node.expression.expression)
+    ) {
+      const method = propertyName(node.expression);
+      if (method) {
+        mutatedReceiverMethods.add(`${node.expression.expression.text}\u0000${method}`);
+      }
+    }
     if (ts.isCallExpression(node)) {
       calls.push(node);
       invocations.push(node);
@@ -493,7 +520,12 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       continue;
     }
     for (const method of classInstanceMethods) {
-      if (method.classDeclaration === classDeclaration) {
+      if (
+        method.classDeclaration === classDeclaration &&
+        // A `config.configure = ...` write (or delete) anywhere can replace the declared body,
+        // so the call site is no longer guaranteed to run it. Stay conservative and do not bind.
+        !mutatedReceiverMethods.has(`${binding.name}\u0000${method.name}`)
+      ) {
         functionBindings.push({
           name: method.name,
           node: method.node,

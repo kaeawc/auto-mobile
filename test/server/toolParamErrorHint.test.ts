@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { formatToolParamError } from "../../src/server/index";
 import { swipeOnSchema, tapOnSchema } from "../../src/server/interactionTools";
-import { waitForSchema } from "../../src/server/observeTools";
+import { observeSchema, waitForSchema } from "../../src/server/observeTools";
 import { setPreferenceSchema } from "../../src/server/preferenceTools";
 
 // Issue #4181, rank 7 (A6): the "container must be an object …" hint is
@@ -323,5 +323,39 @@ describe("formatToolParamError viable-arm provided value (#5862)", () => {
     const message = formatToolParamError("observe", result.error, input);
     expect(message).toBe("shared must be a finite number");
     expect(message).not.toContain("mode");
+  });
+
+  // End-to-end through the real `observeSchema` (the tool the issue's repro names),
+  // not `waitForSchema` directly: the path carries the `waitFor.` prefix and the
+  // union nesting is a level deeper, so this pins acceptance criterion 1 exactly as
+  // written and guards against regressions a shallower `waitForSchema`-only test
+  // could miss. This mirrors how the MCP boundary calls `formatToolParamError` with
+  // the same object it handed to `schema.parse`.
+  test("criterion 1 end-to-end: the observe repro surfaces the nested provided-value error", () => {
+    const input = {
+      platform: "android",
+      waitFor: { timeoutMs: Infinity, activeWindow: { activityName: 123 } },
+    };
+    const result = observeSchema.safeParse(input as unknown as object);
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("observe", result.error, input);
+    expect(message).toContain("waitFor.activeWindow.activityName expected string, received number");
+    expect(message.startsWith("waitFor.timeoutMs must be a finite number")).toBe(true);
+    expect(message).not.toContain("received undefined");
+    expect(message).not.toContain("expected never");
+  });
+
+  // Criterion 2 on the production path: the real call sites now always thread
+  // rawInput, so exercise `setPreferenceSchema` (top-level enums beside a union-typed
+  // `value`) WITH rawInput to prove the new code path preserves the genuine enum
+  // errors rather than only the two-arg path the #5854 tests cover.
+  test("criterion 2: setPreference enum errors survive with rawInput threaded", () => {
+    const input = { scope: "bogus", key: "k", type: "bogus", value: {} };
+    const result = setPreferenceSchema.safeParse(input as unknown as object);
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("setPreference", result.error, input);
+    expect(message).toContain("scope Invalid option");
+    expect(message).toContain("type Invalid option");
+    expect(message).toContain("value expected string");
   });
 });

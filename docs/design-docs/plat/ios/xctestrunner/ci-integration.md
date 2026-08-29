@@ -125,7 +125,10 @@ runner so `auto-mobile --daemon start` works correctly.
 
 ```yaml
 - uses: oven-sh/setup-bun@v2
-- run: bun install -g @kaeawc/auto-mobile
+  env:
+    # Match the AutoMobile version pinned by the XCTestRunner package resolution.
+    AUTOMOBILE_VERSION: "<runner-version>"
+- run: bun install -g "@kaeawc/auto-mobile@${AUTOMOBILE_VERSION}"
 ```
 
 ### 2. Build products artifact

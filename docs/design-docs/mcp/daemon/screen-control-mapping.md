@@ -147,8 +147,10 @@ advertise `input/gestureStream`, a pointer drag in **Control** mode becomes
 exactly one `input/swipe`. With the experimental
 `-Dautomobile.gesture.streaming=true` client flag and a capable daemon, the
 reference client instead sends an `input/gestureStream` start/move/end sequence
-from the first move. If streaming cannot start, it falls back to the atomic
-policy below; that fallback reapplies the same threshold and duration rules.
+from the first move. If streaming cannot start, the workspace video surface
+falls back to the atomic policy below; that fallback reapplies the same threshold
+and duration rules. The inspector-control surface instead reports the rejected
+stream and does not synthesize an atomic swipe.
 Everything below is **client-side policy**: the daemon faithfully executes whatever
 endpoints and duration it is handed, so it can neither reject an accidental
 one-pixel swipe nor repair an off-screen one. Clients should converge on these

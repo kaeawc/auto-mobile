@@ -107,6 +107,13 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     position: number;
     receiverDeclaration?: DeclarationBinding;
   }> = [];
+  const classInstanceMethods: Array<{
+    classDeclaration: DeclarationBinding;
+    name: string;
+    node: ts.MethodDeclaration;
+    scope: ts.Node;
+    position: number;
+  }> = [];
   type InvocationExpression = ts.CallExpression | ts.NewExpression;
   const calls: ts.CallExpression[] = [];
   const invocations: InvocationExpression[] = [];
@@ -384,6 +391,17 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
               receiverDeclaration,
             });
           }
+        } else if (ts.isMethodDeclaration(member)) {
+          const methodName = propertyNameOf(member.name);
+          if (methodName) {
+            classInstanceMethods.push({
+              classDeclaration: receiverDeclaration,
+              name: methodName,
+              node: member,
+              scope,
+              position: member.getStart(sourceFile),
+            });
+          }
         }
       }
     }
@@ -426,6 +444,66 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     ts.forEachChild(node, collect);
   };
   collect(sourceFile);
+
+  for (const binding of scopedValues) {
+    const value = unwrapTransparentExpression(binding.value);
+    if (
+      binding.kind !== "declaration" ||
+      !ts.isNewExpression(value) ||
+      !ts.isIdentifier(value.expression)
+    ) {
+      continue;
+    }
+    const receiverDeclaration = declarations.find(
+      (declaration) =>
+        declaration.name === binding.name &&
+        declaration.scope === binding.scope &&
+        declaration.position === binding.position,
+    );
+    if (!receiverDeclaration) {
+      continue;
+    }
+    // A later assignment can replace the instance with an unrelated subclass.
+    // Do not associate that mutable receiver with its declaration initializer.
+    if (
+      scopedValues.some(
+        (candidate) =>
+          candidate.kind === "assignment" &&
+          candidate.name === binding.name &&
+          candidate.position > binding.position,
+      )
+    ) {
+      continue;
+    }
+    const constructorScopes = scopeChain(value.expression);
+    const classDeclaration = declarations
+      .filter(
+        (declaration) =>
+          declaration.name === value.expression.text &&
+          constructorScopes.includes(declaration.scope) &&
+          declaration.position <= value.expression.getStart(sourceFile) &&
+          classInstanceMethods.some((method) => method.classDeclaration === declaration),
+      )
+      .sort((left, right) => {
+        const scopeDelta =
+          constructorScopes.indexOf(left.scope) - constructorScopes.indexOf(right.scope);
+        return scopeDelta !== 0 ? scopeDelta : right.position - left.position;
+      })[0];
+    if (!classDeclaration) {
+      continue;
+    }
+    for (const method of classInstanceMethods) {
+      if (method.classDeclaration === classDeclaration) {
+        functionBindings.push({
+          name: method.name,
+          node: method.node,
+          scope: binding.scope,
+          position: binding.position,
+          receiverDeclaration,
+        });
+      }
+    }
+  }
 
   const receiverDeclarationCache = new Map<ts.Identifier, DeclarationBinding | null>();
   const resolveReceiverDeclaration = (
@@ -654,6 +732,21 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       ts.isSatisfiesExpression(current.parent)
     ) {
       current = current.parent;
+    }
+    if (ts.isArrayLiteralExpression(current.parent)) {
+      const array = current.parent;
+      const combinator = array.parent;
+      if (
+        ts.isCallExpression(combinator) &&
+        combinator.arguments.includes(array) &&
+        (ts.isPropertyAccessExpression(combinator.expression) ||
+          ts.isElementAccessExpression(combinator.expression)) &&
+        ts.isIdentifier(combinator.expression.expression) &&
+        combinator.expression.expression.text === "Promise" &&
+        propertyName(combinator.expression) === "all"
+      ) {
+        current = combinator;
+      }
     }
     return ts.isAwaitExpression(current.parent);
   };

@@ -24,6 +24,7 @@ import { Timer, defaultTimer } from "../SystemTimer";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
 import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
 import { isDeviceLostError } from "../../server/deviceLossOutcome";
+import { formatToolParamError } from "../../server/toolParamError";
 import { formatStructuredToolError } from "../formatStructuredToolError";
 import {
   summarizeObserveResultForFailure,
@@ -32,6 +33,19 @@ import {
 
 function formatToolError(error: unknown): string {
   return formatStructuredToolError(error) ?? String(error);
+}
+
+// The MCP boundary (`src/server/index.ts`) renders a schema `ZodError` through
+// `formatToolParamError` as "Invalid parameters for tool <name>: …". PlanExecutor
+// parses against the same tool schemas, so a validation failure on the plan path
+// must read identically instead of leaking the raw zod issue dump (#5854 §3).
+// Non-Zod errors fall through unchanged; the `instanceof ZodError` shape is left
+// intact for callers that branch on it (e.g. optional-step handling below).
+function formatStepError(toolName: string, error: unknown): string {
+  if (error instanceof ZodError) {
+    return `Invalid parameters for tool ${toolName}: ${formatToolParamError(toolName, error)}`;
+  }
+  return `${error}`;
 }
 
 type StepExecutionStatus = "completed" | "failed" | "skipped";
@@ -270,9 +284,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
       }
       return summarizeObserveResultForFailure(raw);
     } catch (error) {
+      // The observe schema parse above can throw a ZodError; render it the same
+      // way the MCP boundary does rather than leaking the raw issue dump (#5854).
       return {
         capturedAtMs: Date.now(),
-        observeError: errorMessage(error),
+        observeError:
+          error instanceof ZodError ? formatStepError("observe", error) : errorMessage(error),
       };
     }
   }
@@ -518,7 +535,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (isDeviceLostError(error)) {
         throw error;
       }
-      const errorMsg = `${error}`;
+      const errorMsg = formatStepError(step.tool, error);
       if (step.optional && !context.signal?.aborted && !(error instanceof ZodError)) {
         this.logger.warn(
           `${context.logPrefix} optional step ${step.tool} threw; returning skipped status`,

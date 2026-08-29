@@ -92,6 +92,35 @@ describe("safeStringify redacts sensitive data", () => {
   });
 });
 
+// Issue #5854 §2: the daemon request log serializes non-finite arguments
+// (Infinity/-Infinity/NaN) as `null`, because JSON has no representation for
+// them, so a caller debugging a rejected non-finite value sees `null` in the
+// trace and can't tell what was actually sent. safeStringify must render the
+// literal marker instead.
+describe("safeStringify preserves non-finite numbers (#5854)", () => {
+  test('renders a nested Infinity as the string "Infinity" instead of null', () => {
+    expect(safeStringify({ arguments: { duration: Infinity } })).toBe(
+      '{"arguments":{"duration":"Infinity"}}',
+    );
+  });
+
+  test('renders -Infinity as the string "-Infinity"', () => {
+    expect(safeStringify({ v: -Infinity })).toBe('{"v":"-Infinity"}');
+  });
+
+  test('renders NaN as the string "NaN"', () => {
+    expect(safeStringify({ v: NaN })).toBe('{"v":"NaN"}');
+  });
+
+  test("leaves finite numbers untouched", () => {
+    expect(safeStringify({ a: 0, b: -3.5, c: 1000 })).toBe('{"a":0,"b":-3.5,"c":1000}');
+  });
+
+  test("renders a top-level non-finite primitive via String() (unchanged)", () => {
+    expect(safeStringify(Infinity)).toBe("Infinity");
+  });
+});
+
 describe("SENSITIVE_ENV_KEYS", () => {
   test("includes the common secret-bearing environment key names", () => {
     expect(SENSITIVE_ENV_KEYS.has("PASSWORD")).toBe(true);

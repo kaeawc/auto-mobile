@@ -327,6 +327,13 @@ const safeStringify = (obj: any): string => {
         ancestors.push({ holder: filtered, original: value });
         return filtered;
       }
+      // JSON has no representation for non-finite numbers, so JSON.stringify would
+      // emit them as `null` — masking what a caller actually sent (e.g. the daemon
+      // request log showing a rejected `Infinity`/`NaN` argument as `null`, #5854).
+      // Render the literal marker instead so the trace is faithful.
+      if (typeof value === "number" && !Number.isFinite(value)) {
+        return String(value);
+      }
       return value;
     });
   } catch (error) {

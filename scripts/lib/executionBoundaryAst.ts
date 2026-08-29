@@ -166,7 +166,12 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     (node.parent.flags & ts.NodeFlags.BlockScoped) !== 0
       ? lexicalScope(node)
       : functionScope(node);
+  const scopeChainCache = new Map<ts.Node, ts.Node[]>();
   const scopeChain = (node: ts.Node): ts.Node[] => {
+    const cached = scopeChainCache.get(node);
+    if (cached) {
+      return cached;
+    }
     const scopes: ts.Node[] = [];
     let current: ts.Node | undefined = node.parent;
     while (current) {
@@ -184,6 +189,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       }
       current = current.parent;
     }
+    scopeChainCache.set(node, scopes);
     return scopes;
   };
   const bind = (
@@ -375,15 +381,60 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
   };
   collect(sourceFile);
 
+  const receiverDeclarationCache = new Map<ts.Identifier, DeclarationBinding | null>();
+  const resolveReceiverDeclaration = (
+    receiver: ts.Identifier,
+    callScopes: readonly ts.Node[],
+  ): DeclarationBinding | undefined => {
+    const cached = receiverDeclarationCache.get(receiver);
+    if (cached !== undefined) {
+      return cached ?? undefined;
+    }
+    const usePosition = receiver.getStart(sourceFile);
+    for (const scope of callScopes) {
+      let nearest: DeclarationBinding | undefined;
+      for (const declaration of declarations) {
+        if (
+          declaration.name === receiver.text &&
+          declaration.scope === scope &&
+          declaration.position <= usePosition &&
+          (!nearest || declaration.position > nearest.position)
+        ) {
+          nearest = declaration;
+        }
+      }
+      if (nearest) {
+        receiverDeclarationCache.set(receiver, nearest);
+        return nearest;
+      }
+    }
+    receiverDeclarationCache.set(receiver, null);
+    return undefined;
+  };
+  const callResolutionCache = new Map<
+    ts.CallExpression,
+    Map<ts.FunctionLikeDeclaration, boolean>
+  >();
+
   const callResolvesToFunction = (
     call: ts.CallExpression,
     target: ts.FunctionLikeDeclaration,
   ): boolean => {
+    const cached = callResolutionCache.get(call)?.get(target);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const finish = (result: boolean): boolean => {
+      const resolutions = callResolutionCache.get(call) ?? new Map();
+      resolutions.set(target, result);
+      callResolutionCache.set(call, resolutions);
+      return result;
+    };
     if (target.asteriskToken) {
-      return false;
+      return finish(false);
     }
     if (unwrapTransparentExpression(call.expression) === target) {
-      return true;
+      return finish(true);
     }
     const name = functionName(target);
     const callee = unwrapTransparentExpression(call.expression);
@@ -393,21 +444,11 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
         ? callee.expression
         : undefined;
     if (!name || (!ts.isIdentifier(callee) && receiver === undefined)) {
-      return false;
+      return finish(false);
     }
     const callScopes = scopeChain(call);
     const receiverDeclaration = receiver
-      ? declarations
-          .filter(
-            (declaration) =>
-              declaration.name === receiver.text &&
-              callScopes.includes(declaration.scope) &&
-              declaration.position <= receiver.getStart(sourceFile),
-          )
-          .sort((left, right) => {
-            const scopeDelta = callScopes.indexOf(left.scope) - callScopes.indexOf(right.scope);
-            return scopeDelta !== 0 ? scopeDelta : right.position - left.position;
-          })[0]
+      ? resolveReceiverDeclaration(receiver, callScopes)
       : undefined;
     const candidates = functionBindings
       .filter(
@@ -423,7 +464,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
         const scopeDelta = callScopes.indexOf(left.scope) - callScopes.indexOf(right.scope);
         return scopeDelta !== 0 ? scopeDelta : right.position - left.position;
       });
-    return candidates[0]?.node === target;
+    return finish(candidates[0]?.node === target);
   };
 
   const isPromisifiedLauncher = (node: ts.Expression): boolean =>

@@ -330,9 +330,7 @@ describe("toSkeleton — acceptance criteria", () => {
         text: "Mobile, Wi-Fi, hotspot",
       };
 
-      const skeleton = toSkeleton(
-        makeElements({ clickable: [row], text: [title, summary] }),
-      );
+      const skeleton = toSkeleton(makeElements({ clickable: [row], text: [title, summary] }));
 
       // Only the container row survives; its inner labels are folded in.
       const entry = findById(skeleton, "s-53a78106563f5449");
@@ -355,9 +353,7 @@ describe("toSkeleton — acceptance criteria", () => {
       const first: Element = { bounds: bounds(72, 20, 600, 80), text: "First" };
       const second: Element = { bounds: bounds(72, 110, 600, 170), text: "Second" };
 
-      const skeleton = toSkeleton(
-        makeElements({ clickable: [row], text: [third, first, second] }),
-      );
+      const skeleton = toSkeleton(makeElements({ clickable: [row], text: [third, first, second] }));
 
       const entry = findById(skeleton, "s-multi");
       expect(entry?.label).toBe("First");

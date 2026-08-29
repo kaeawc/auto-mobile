@@ -29,6 +29,10 @@ import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { FakeTimer } from "../fakes/FakeTimer";
+import {
+  DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
+  DAEMON_STARTUP_TIMEOUT_MS,
+} from "../../src/daemon/constants";
 
 describe("daemonBuildIdentityStatusLines", () => {
   const client: BuildIdentity = {
@@ -888,6 +892,92 @@ describe("Daemon manager process detection", () => {
       );
 
       expect(killCalls).toEqual([]);
+    } finally {
+      killSpy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("bounds the wait for an unreachable live daemon to the reachability budget, not the full startup timeout (#5871)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-reachability-budget-test-"));
+    process.env.AUTOMOBILE_DATA_DIR = dir;
+    const pidFilePath = join(dir, "daemon.pid");
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses() {
+        return [
+          {
+            pid: 86961,
+            ppid: 1,
+            command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
+          },
+        ];
+      },
+      isProcessRunning(pid: number) {
+        return pid === 86961;
+      },
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        throw new Error("should not spawn while a live daemon exists");
+      },
+    };
+    const killSpy = spyOn(process, "kill").mockImplementation(
+      ((_pid: number) => true) as typeof process.kill,
+    );
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+    }
+
+    try {
+      const manager = new TestDaemonManager(
+        () => ({
+          // A live-but-useless daemon: every reachability probe is refused, so it
+          // never becomes reachable and the start must give up at the budget.
+          async connect() {
+            throw new Error("connection refused");
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        join(dir, "daemon.lock"),
+        pidFilePath,
+        join(dir, "daemon.sock"),
+        processFinder,
+        processSpawner,
+      );
+
+      const startedAt = fakeTimer.now();
+      const error = await manager.start().then(
+        () => {
+          throw new Error("expected start to reject");
+        },
+        (rejection: unknown) => rejection as Error,
+      );
+      const elapsed = fakeTimer.now() - startedAt;
+
+      // The actionable error must be delivered within the reachability budget so
+      // it beats the client's ~30s tools/list timeout (issue #5871).
+      expect(error.message).toContain("Refusing to terminate a live daemon during start");
+      expect(error.message).toContain(`within ${DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS}ms`);
+      expect(error.message).not.toContain(`within ${DAEMON_STARTUP_TIMEOUT_MS}ms`);
+      expect(elapsed).toBeLessThanOrEqual(DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS);
+      // Guard against a regression that reintroduces the full 30s wait.
+      expect(elapsed).toBeLessThan(DAEMON_STARTUP_TIMEOUT_MS);
     } finally {
       killSpy.mockRestore();
       rmSync(dir, { recursive: true, force: true });

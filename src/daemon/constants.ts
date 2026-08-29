@@ -99,6 +99,37 @@ export const DAEMON_STARTUP_TIMEOUT_MS =
     : 30000;
 
 /**
+ * Reachability budget for an already-live daemon during start (milliseconds).
+ *
+ * When a start request finds a live daemon process without a usable PID record,
+ * it waits for that daemon to become reachable before deciding what to do. This
+ * wait is nested INSIDE a client's `tools/list` request, and clients time that
+ * request out at ~30s (`DAEMON_STARTUP_TIMEOUT_MS`). If the wait itself consumed
+ * the full startup budget, the actionable "refusing to terminate a live daemon"
+ * error would be produced only as the client's own deadline expires — so the one
+ * useful diagnostic in the flow never reaches the client and AutoMobile appears
+ * connected with zero tools (issue #5871).
+ *
+ * Budgeting this wait well under the client request timeout guarantees the
+ * error is delivered rather than raced by the timeout it lives inside. This is
+ * only the reachability wait for an EXISTING daemon; cold-start bring-up still
+ * uses the full `DAEMON_STARTUP_TIMEOUT_MS`. The override is clamped to the
+ * startup timeout — a value at or above it would defeat the purpose.
+ */
+const existingDaemonReachabilityOverride =
+  process.env.AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS ??
+  process.env.AUTO_MOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS;
+const parsedExistingDaemonReachability = existingDaemonReachabilityOverride
+  ? Number.parseInt(existingDaemonReachabilityOverride, 10)
+  : NaN;
+export const DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS = Math.min(
+  Number.isFinite(parsedExistingDaemonReachability) && parsedExistingDaemonReachability > 0
+    ? parsedExistingDaemonReachability
+    : 10000,
+  DAEMON_STARTUP_TIMEOUT_MS,
+);
+
+/**
  * Daemon shutdown timeout in milliseconds
  * How long to wait for graceful shutdown before SIGKILL
  */

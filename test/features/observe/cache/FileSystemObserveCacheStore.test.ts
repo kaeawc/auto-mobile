@@ -117,6 +117,75 @@ describe("FileSystemObserveCacheStore", function () {
     expect(store.getRecentInMemoryForDevice("device-2")).toBeUndefined();
   });
 
+  test("currentGeneration starts at 0 and is stable across reads", function () {
+    expect(store.currentGeneration("device-1")).toBe(0);
+    expect(store.currentGeneration("device-1")).toBe(0);
+    expect(store.currentGeneration("device-2")).toBe(0);
+  });
+
+  test("clear(deviceId) bumps only that device's generation", function () {
+    store.clear("device-1");
+    expect(store.currentGeneration("device-1")).toBe(1);
+    expect(store.currentGeneration("device-2")).toBe(0);
+    store.clear("device-1");
+    expect(store.currentGeneration("device-1")).toBe(2);
+  });
+
+  test("clear() (all devices) bumps every device's generation", function () {
+    expect(store.currentGeneration("device-1")).toBe(0);
+    expect(store.currentGeneration("device-2")).toBe(0);
+    store.clear();
+    expect(store.currentGeneration("device-1")).toBe(1);
+    expect(store.currentGeneration("device-2")).toBe(1);
+  });
+
+  test("put with the current generation stores normally", async function () {
+    const gen = store.currentGeneration("device-1");
+    await store.put("device-1", makeResult("fresh"), gen);
+    expect(store.getRecentInMemoryForDevice("device-1")).toBeDefined();
+  });
+
+  test("put with no generation stores unconditionally (back-compat)", async function () {
+    store.clear("device-1"); // advance generation
+    await store.put("device-1", makeResult("no-gen"));
+    expect(store.getRecentInMemoryForDevice("device-1")).toBeDefined();
+  });
+
+  test("put with a stale generation is rejected (race: invalidate then late put)", async function () {
+    // An observation captures the generation at its start...
+    const capturedGen = store.currentGeneration("device-1");
+    // ...a concurrent terminate invalidates the device cache mid-flight...
+    store.clear("device-1");
+    // ...and the in-flight observation's put lands afterwards with the stale gen.
+    await store.put("device-1", makeResult("stale-app-hierarchy"), capturedGen);
+
+    // The stale record must not repopulate the cache (memory and disk).
+    expect(store.getRecentInMemoryForDevice("device-1")).toBeUndefined();
+    expect(await store.getMostRecent("device-1")).toBeUndefined();
+    expect(readdirSync(cacheDir).filter((f) => f.endsWith(".json")).length).toBe(0);
+  });
+
+  test("put is rejected when clear() interleaves mid-write (in-flight put, not just pre-put)", async function () {
+    const capturedGen = store.currentGeneration("device-1");
+    // Start the put but do not await it: its body runs synchronously up to the
+    // internal `await this.pendingDiskCleanup`, then yields with the generation
+    // still current. A clear() landing in that hop must still fence the write.
+    const putPromise = store.put("device-1", makeResult("stale-mid-write"), capturedGen);
+    store.clear("device-1");
+    await putPromise;
+
+    expect(store.getRecentInMemoryForDevice("device-1")).toBeUndefined();
+    expect(await store.getMostRecent("device-1")).toBeUndefined();
+    expect(readdirSync(cacheDir).filter((f) => f.endsWith(".json")).length).toBe(0);
+  });
+
+  test("put with a stale generation from clear-all is rejected", async function () {
+    const capturedGen = store.currentGeneration("device-1");
+    store.clear();
+    await store.put("device-1", makeResult("stale"), capturedGen);
+    expect(store.getRecentInMemoryForDevice("device-1")).toBeUndefined();
+  });
+
   test("put writes a JSON file with the sanitized device id in the name", async function () {
     await store.put("emulator-5554:abcd", makeResult("with-colon"));
     const files = readdirSync(cacheDir).filter((f) => f.endsWith(".json"));

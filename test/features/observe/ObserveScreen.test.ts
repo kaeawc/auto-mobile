@@ -130,6 +130,48 @@ describe("ObserveScreen", function () {
       }
     });
 
+    test("does not repopulate the observe cache when invalidated mid-observation (#5884)", async function () {
+      const viewHierarchy = new FakeViewHierarchy();
+      viewHierarchy.configureHierarchy({
+        updatedAt: 123,
+        screenWidth: 1080,
+        screenHeight: 1920,
+        systemInsets: { top: 24, right: 0, bottom: 48, left: 0 },
+        wakefulness: "Awake",
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+            node: [{ text: "Ready", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+          },
+        },
+      } as any);
+
+      const cacheStore = new FakeObserveCacheStore(new FakeTimer());
+      // Simulate a concurrent terminate invalidating the device cache the instant
+      // this observation captures its generation, before its own put() lands.
+      cacheStore.onCurrentGeneration = (deviceId) => {
+        cacheStore.clear(deviceId);
+      };
+
+      try {
+        const screen = new RealObserveScreen(mockDevice, new FakeAdbClientFactory(fakeAdb), {
+          viewHierarchy,
+          cacheStore,
+          performanceAuditor: { run: async () => undefined } as any,
+          accessibilityAuditor: { run: async () => undefined } as any,
+          accessibilityStateDetector: { run: async () => undefined } as any,
+        });
+
+        await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+        // The in-flight observation's put must be rejected: the terminated app's
+        // hierarchy must not repopulate the cache for the device.
+        expect(cacheStore.getRecentInMemoryForDevice(mockDevice.deviceId)).toBeUndefined();
+      } finally {
+        resetObserveCacheStore();
+      }
+    });
+
     test("should populate iOS heuristic screen identity from the view hierarchy", async function () {
       const viewHierarchy = new FakeViewHierarchy();
       viewHierarchy.configureHierarchy({

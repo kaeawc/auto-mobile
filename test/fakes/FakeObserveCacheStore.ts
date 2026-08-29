@@ -23,18 +23,42 @@ interface FakeCacheEntry {
 export class FakeObserveCacheStore implements ObserveResultCacheStore {
   private readonly entries: Map<string, FakeCacheEntry> = new Map();
   private readonly timer: Timer;
+  private globalGeneration: number = 0;
+  private readonly deviceGeneration: Map<string, number> = new Map();
+
+  /**
+   * Test seam: invoked with `(deviceId, generation)` each time
+   * {@link currentGeneration} is read. Lets a test simulate a concurrent
+   * invalidation landing the instant an observation captures its generation
+   * (issue #5884). Defaults to a no-op.
+   */
+  onCurrentGeneration?: (deviceId: string, generation: number) => void;
 
   constructor(timer: Timer = defaultTimer) {
     this.timer = timer;
   }
 
-  async put(deviceId: string, result: ObserveResult): Promise<void> {
+  currentGeneration(deviceId: string): number {
+    const generation = this.globalGeneration + (this.deviceGeneration.get(deviceId) ?? 0);
+    this.onCurrentGeneration?.(deviceId, generation);
+    return generation;
+  }
+
+  async put(deviceId: string, result: ObserveResult, generation?: number): Promise<void> {
+    if (generation !== undefined && generation !== this.rawGeneration(deviceId)) {
+      return;
+    }
     const timestamp = this.timer.now();
     this.entries.set(`${deviceId}:${timestamp}`, {
       deviceId,
       timestamp,
       observeResult: result,
     });
+  }
+
+  /** Generation without firing {@link onCurrentGeneration} — used by put's fence. */
+  private rawGeneration(deviceId: string): number {
+    return this.globalGeneration + (this.deviceGeneration.get(deviceId) ?? 0);
   }
 
   async getMostRecent(deviceId: string): Promise<ObserveResult | undefined> {
@@ -51,9 +75,11 @@ export class FakeObserveCacheStore implements ObserveResultCacheStore {
 
   clear(deviceId?: string): void {
     if (!deviceId) {
+      this.globalGeneration += 1;
       this.entries.clear();
       return;
     }
+    this.deviceGeneration.set(deviceId, (this.deviceGeneration.get(deviceId) ?? 0) + 1);
     for (const [key, entry] of this.entries.entries()) {
       if (entry.deviceId === deviceId) {
         this.entries.delete(key);

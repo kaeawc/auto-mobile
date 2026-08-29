@@ -1396,6 +1396,12 @@ export class DaemonMcpProxy {
    * accurate (session-scoped) list is served. The first successful connect after
    * a static serve emits a tools `list_changed` (see {@link doConnect}) so the
    * client re-fetches and reconciles any difference.
+   *
+   * The static path deliberately does NOT call `throwIfBoundSessionUnavailable()`
+   * (unlike {@link listTools}): re-coupling `tools/list` to daemon/session state
+   * is exactly what issue #5879 removes. A fenced/expired bound session still
+   * surfaces its ownership-lost error on the next actual tool call, which routes
+   * through {@link callTool}'s gate.
    */
   async listAdvertisedTools(): Promise<ProxiedToolDefinition[]> {
     if (this.connected && this.client) {

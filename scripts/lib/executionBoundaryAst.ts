@@ -358,7 +358,8 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     const name = functionName(target);
     const callee = unwrapTransparentExpression(call.expression);
     const receiver =
-      ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)
+      (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
+      ts.isIdentifier(callee.expression)
         ? callee.expression.text
         : undefined;
     if (!name || (!ts.isIdentifier(callee) && receiver === undefined)) {
@@ -544,6 +545,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       node.tag.expression.text === "String" &&
       node.tag.name.text === "raw"
     ) {
+      if (ts.isNoSubstitutionTemplateLiteral(node.template)) {
+        return [node.template.rawText ?? node.template.text];
+      }
       return strings(node.template, seen);
     }
     if (ts.isTemplateExpression(node)) {
@@ -644,6 +648,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       node.tag.expression.text === "String" &&
       node.tag.name.text === "raw"
     ) {
+      if (ts.isNoSubstitutionTemplateLiteral(node.template)) {
+        return [node.template.rawText ?? node.template.text];
+      }
       return stringAlternatives(node.template, seen);
     }
     if (ts.isConditionalExpression(node)) {

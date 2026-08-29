@@ -251,6 +251,16 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "rejects an unrecognized wrapper produced by env split-string" {
+  printf '%s\n' "spawn(\"env\", [\"-S\", \"dash -c 'xcodebuild test'\"]);" > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
 @test "preserves String.raw split-string options" {
   printf '%s\n' 'spawn("env", [String.raw`--split-string=xcodebuild -version`]);' > "$repo_dir/src/bypass.ts"
   git -C "$repo_dir" add src/bypass.ts

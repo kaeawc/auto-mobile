@@ -117,6 +117,7 @@ function splitEnvPayload(value: string): string[] {
 function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
   const pending = argv.slice(1);
   let optionsTerminated = false;
+  let splitStringSeen = false;
   let unknownFlagSeen = false;
   while (pending.length > 0) {
     const argument = pending.shift()!;
@@ -142,7 +143,7 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
       if (ENV_WRAPPERS.has(command)) {
         return envDelegatesToXcodebuild([argument, ...pending]);
       }
-      return false;
+      return splitStringSeen && [argument, ...pending].some(containsXcodebuildCommand);
     }
     if (["-", "-i", "--ignore-environment", "-0", "--null", "-v", "--debug"].includes(argument)) {
       continue;
@@ -161,10 +162,12 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
       continue;
     }
     if (["-S", "--split-string"].includes(argument)) {
+      splitStringSeen = true;
       pending.unshift(...splitEnvPayload(pending.shift() ?? ""));
       continue;
     }
     if (argument.startsWith("-S") && argument.length > 2) {
+      splitStringSeen = true;
       pending.unshift(...splitEnvPayload(argument.slice(2)));
       continue;
     }
@@ -172,6 +175,7 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
       continue;
     }
     if (argument.startsWith("--split-string=")) {
+      splitStringSeen = true;
       pending.unshift(...splitEnvPayload(argument.slice("--split-string=".length)));
       continue;
     }
@@ -191,7 +195,9 @@ function envDelegatesToXcodebuild(argv: readonly string[]): boolean {
     if (ENV_WRAPPERS.has(command)) {
       return envDelegatesToXcodebuild([argument, ...pending]);
     }
-    return unknownFlagSeen && [argument, ...pending].some(containsXcodebuildCommand);
+    return (
+      (unknownFlagSeen || splitStringSeen) && [argument, ...pending].some(containsXcodebuildCommand)
+    );
   }
   return false;
 }

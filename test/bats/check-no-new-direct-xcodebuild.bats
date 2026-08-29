@@ -171,6 +171,16 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "preserves an empty quoted env split-string command slot" {
+  printf '%s\n' "spawn(\"env\", [\"--debug\", \"-S\", \"''\", \"xcodebuild\"]);" > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new direct production xcodebuild invocations"* ]]
+}
+
 @test "rejects a shell wrapper produced by env split-string" {
   printf '%s\n' "spawn(\"env\", [\"-S\", \"sh -c 'xcodebuild test'\"]);" > "$repo_dir/src/bypass.ts"
   git -C "$repo_dir" add src/bypass.ts

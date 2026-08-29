@@ -14,6 +14,32 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { RealObserveScreen } from "../observe/ObserveScreen";
+
+/**
+ * Invalidates the host-side cached window/hierarchy record for a device after
+ * its foreground process is force-stopped (issue #5867). Without this, a client
+ * that terminates a stuck app and re-observes to recover is re-served the same
+ * stale wrong-window hierarchy from cache. Injected so the invalidation is
+ * exercised in tests without a real CtrlProxy connection.
+ */
+export interface DeviceWindowCacheInvalidator {
+  invalidate(device: BootedDevice): void;
+}
+
+/**
+ * Default invalidator: drops the Android CtrlProxy hierarchy cache (an existing
+ * instance only — never bootstraps a connection just to clear it) and the
+ * observe-result cache for the device, so the next observe re-syncs fresh.
+ */
+export class DefaultDeviceWindowCacheInvalidator implements DeviceWindowCacheInvalidator {
+  invalidate(device: BootedDevice): void {
+    if (device.platform === "android") {
+      AndroidCtrlProxyClient.getExistingInstance(device.deviceId)?.invalidateCache();
+    }
+    RealObserveScreen.clearCache(device.deviceId);
+  }
+}
 
 /**
  * Physical-device app terminator. `DeviceAppManager` satisfies this
@@ -31,6 +57,7 @@ export interface DeviceAppTerminator {
 export class TerminateApp extends BaseVisualChange {
   private simctl: SimCtlClient;
   private deviceTerminator: DeviceAppTerminator;
+  private cacheInvalidator: DeviceWindowCacheInvalidator;
 
   /**
    * Create an TerminateApp instance
@@ -46,11 +73,13 @@ export class TerminateApp extends BaseVisualChange {
     simctl: SimCtlClient | null = null,
     timer: Timer = defaultTimer,
     deviceTerminator: DeviceAppTerminator | null = null,
+    cacheInvalidator: DeviceWindowCacheInvalidator | null = null,
   ) {
     super(device, adb, timer);
     this.device = device;
     this.simctl = simctl || new SimCtlClient(device);
     this.deviceTerminator = deviceTerminator || new DeviceAppManager();
+    this.cacheInvalidator = cacheInvalidator || new DefaultDeviceWindowCacheInvalidator();
   }
 
   /**
@@ -170,6 +199,11 @@ export class TerminateApp extends BaseVisualChange {
       await perf.track("forceStop", async () => {
         await this.adb.executeCommand(`shell am force-stop --user ${targetUserId} ${packageName}`);
       });
+
+      // The process is now gone, so any cached window/hierarchy record for it is
+      // stale. Invalidate it so a client re-observing to recover gets a fresh
+      // sync instead of the same phantom window (issue #5867).
+      this.cacheInvalidator.invalidate(this.device);
 
       return {
         success: true,

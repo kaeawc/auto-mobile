@@ -50,8 +50,15 @@ class FakeHierarchyCollector implements Pick<
 
 class FakeDeviceStateCollector implements Pick<
   DeviceStateCollector,
-  "collectBackStack" | "collectWakefulness" | "collectDeviceLock" | "collectActiveWindow"
+  | "collectBackStack"
+  | "collectWakefulness"
+  | "collectDeviceLock"
+  | "collectActiveWindow"
+  | "collectForegroundIdentity"
 > {
+  async collectForegroundIdentity(): Promise<string | undefined> {
+    return undefined;
+  }
   async collectBackStack(result: ObserveResult): Promise<void> {
     result.backStack = [{ activity: "com.example/.MainActivity", taskId: 1 }] as any;
   }

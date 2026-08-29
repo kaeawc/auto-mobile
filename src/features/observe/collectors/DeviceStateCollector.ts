@@ -71,6 +71,26 @@ export class DeviceStateCollector {
     }
   }
 
+  /**
+   * Ground-truth foreground app package from dumpsys `topResumedActivity`
+   * (issue #5867), used to validate that the observed hierarchy actually belongs
+   * to the app currently resumed on the device. Best-effort: a failed or absent
+   * read returns `undefined`, which the caller treats as "cannot compare" (no
+   * false alarm) rather than a mismatch.
+   */
+  async collectForegroundIdentity(signal?: AbortSignal): Promise<string | undefined> {
+    const { adb } = this.opts;
+    try {
+      const foreground = await adb.getForegroundApp(signal);
+      return foreground?.packageName ?? undefined;
+    } catch (error) {
+      // Best-effort window-identity check: a failed foreground read must not fail
+      // the observation, only skip the comparison.
+      logger.debug("Failed to get ground-truth foreground app:", error);
+      return undefined;
+    }
+  }
+
   async collectActiveWindow(result: ObserveResult): Promise<void> {
     const { window, timer } = this.opts;
     try {

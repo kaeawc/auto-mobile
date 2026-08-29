@@ -1,0 +1,143 @@
+/**
+ * Issue #5867: `observe` could return a stale wrong-window hierarchy (e.g. a
+ * status-bar-only Calendar tree) while the device's top resumed activity was a
+ * different app entirely, and still report `freshness.verified: true`.
+ *
+ * These tests drive the real `RealObserveScreen` Android path through fakes.
+ * They pin the fix: when the app the hierarchy was captured from does not match
+ * the device's current top resumed activity (`adb getForegroundApp`, i.e.
+ * dumpsys `topResumedActivity`), freshness is retracted — `verified: false`,
+ * `isFresh: false`, with a warning naming both apps.
+ */
+
+import { afterEach, describe, expect, test } from "bun:test";
+import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
+import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
+import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
+import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
+import type { BootedDevice } from "../../../src/models";
+
+const androidDevice: BootedDevice = {
+  deviceId: "emulator-5554",
+  name: "Pixel 7",
+  platform: "android",
+};
+
+function makeScreen(viewHierarchy: FakeViewHierarchy, fakeAdb: FakeAdbExecutor): RealObserveScreen {
+  return new RealObserveScreen(androidDevice, new FakeAdbClientFactory(fakeAdb), {
+    viewHierarchy,
+    cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+    performanceAuditor: { run: async () => undefined } as any,
+    accessibilityAuditor: { run: async () => undefined } as any,
+    accessibilityStateDetector: { run: async () => undefined } as any,
+  });
+}
+
+function calendarHierarchy(now: number): any {
+  return {
+    updatedAt: now,
+    receivedAt: now,
+    fresh: true,
+    screenWidth: 1080,
+    screenHeight: 2400,
+    foregroundActivity: "com.google.android.calendar/.MainActivity",
+    hierarchy: {
+      node: {
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        node: [{ text: "12:34", bounds: { left: 0, top: 0, right: 200, bottom: 60 } }],
+      },
+    },
+  };
+}
+
+describe("ObserveScreen window-identity freshness (issue #5867)", () => {
+  afterEach(() => {
+    resetObserveCacheStore();
+  });
+
+  test("retracts freshness when the observed window is not the top resumed activity", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(calendarHierarchy(now));
+
+    const fakeAdb = new FakeAdbExecutor();
+    // Ground truth: Settings is the resumed activity, not Calendar.
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBe("com.google.android.calendar");
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("com.google.android.calendar");
+    expect(result.freshness?.warning).toContain("com.android.settings");
+  });
+
+  test("does not retract freshness when the observed window matches the top resumed activity", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(calendarHierarchy(now));
+
+    const fakeAdb = new FakeAdbExecutor();
+    // Ground truth agrees with the observed window.
+    fakeAdb.setForegroundApp({ packageName: "com.google.android.calendar", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.verified).toBe(true);
+  });
+
+  test("no ground-truth foreground app leaves freshness unchanged (no false alarm)", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(calendarHierarchy(now));
+
+    const fakeAdb = new FakeAdbExecutor();
+    // getForegroundApp returns null (default) — cannot compare, must not flag.
+    const screen = makeScreen(viewHierarchy, fakeAdb);
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.verified).toBe(true);
+  });
+});

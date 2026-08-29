@@ -303,6 +303,69 @@ describe("TerminateApp (Android)", () => {
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(true);
   });
 
+  test("invalidates the cached window record after a successful force-stop (issue #5867)", async () => {
+    fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
+    fakeAdb.setCommandResult(
+      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
+      "1",
+    );
+    fakeAdb.setCommandResult("shell dumpsys activity processes", "3220:com.example.app/u0a123");
+    fakeAdb.setCommandResult("shell am force-stop --user 0 com.example.app", "");
+
+    const invalidated: BootedDevice[] = [];
+    const cacheInvalidator = {
+      invalidate: (device: BootedDevice) => {
+        invalidated.push(device);
+      },
+    };
+
+    const terminateApp = new TerminateApp(
+      androidDevice,
+      fakeAdb as any,
+      null,
+      fakeTimer,
+      null,
+      cacheInvalidator,
+    );
+    const result = await terminateApp.execute("com.example.app", { skipObservation: true });
+
+    expect(result.success).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(true);
+    expect(invalidated).toHaveLength(1);
+    expect(invalidated[0].deviceId).toBe("emulator-5554");
+  });
+
+  test("does not invalidate the cache when the app was not running (issue #5867)", async () => {
+    fakeAdb.setForegroundApp(null);
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
+    fakeAdb.setCommandResult(
+      "shell pm list packages --user 0 -f com.example.app | grep -c com.example.app",
+      "1",
+    );
+    fakeAdb.setCommandResult("shell dumpsys activity processes", "3271:com.example.other/u0a123");
+
+    const invalidated: BootedDevice[] = [];
+    const cacheInvalidator = {
+      invalidate: (device: BootedDevice) => {
+        invalidated.push(device);
+      },
+    };
+
+    const terminateApp = new TerminateApp(
+      androidDevice,
+      fakeAdb as any,
+      null,
+      fakeTimer,
+      null,
+      cacheInvalidator,
+    );
+    const result = await terminateApp.execute("com.example.app", { skipObservation: true });
+
+    expect(result.wasRunning).toBe(false);
+    expect(invalidated).toHaveLength(0);
+  });
+
   test("returns not installed when package is missing", async () => {
     fakeAdb.setForegroundApp(null);
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);

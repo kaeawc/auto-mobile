@@ -310,6 +310,14 @@ export class RealObserveScreen implements ObserveScreen {
 
       perf.serial("observe");
 
+      // Ground-truth foreground app for the window-identity freshness check
+      // (issue #5867). Started here so it overlaps hierarchy collection and adds
+      // no serial latency; Android only (dumpsys `topResumedActivity`), best-effort.
+      const foregroundIdentity: Promise<string | undefined> =
+        this.device.platform === "android"
+          ? this.deviceStateCollector.collectForegroundIdentity(signal)
+          : Promise.resolve(undefined);
+
       // Phase 1+2: hierarchy + derived device state (platform-specific orchestration).
       await this.collectAllData(
         result,
@@ -401,6 +409,7 @@ export class RealObserveScreen implements ObserveScreen {
           !hierarchyPlatformValid ||
           result.viewHierarchy?.hierarchy === undefined ||
           result.viewHierarchy?.hierarchy?.error !== undefined,
+        windowIdentityMismatch: await this.resolveWindowIdentityMismatch(result, foregroundIdentity),
       });
 
       // Attach the windowed performance snapshot when opted in (independent of --debug-perf).
@@ -746,6 +755,27 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   // ---------- Helpers ----------
+
+  /**
+   * Compare the app the observed hierarchy was captured from against the
+   * device's ground-truth top resumed activity (issue #5867). Returns a mismatch
+   * descriptor only when both are known and their package names differ — the
+   * cross-app stale-window case. A same-package activity change, an unknown
+   * ground truth, or an unknown observed window all yield `undefined` (no
+   * comparison, no false alarm). iOS never supplies a ground truth and so is
+   * always `undefined`.
+   */
+  private async resolveWindowIdentityMismatch(
+    result: ObserveResult,
+    foregroundIdentity: Promise<string | undefined>,
+  ): Promise<{ observed: string; foreground: string } | undefined> {
+    const foreground = await foregroundIdentity;
+    const observed = result.activeWindow?.appId;
+    if (!foreground || !observed || observed === foreground) {
+      return undefined;
+    }
+    return { observed, foreground };
+  }
 
   private resolveObservationTimestampMs(result: ObserveResult): number | undefined {
     const candidate = result.viewHierarchy?.updatedAt ?? result.updatedAt;

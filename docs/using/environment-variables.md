@@ -7,12 +7,12 @@ state directory, logs, tool set, or device behavior.
 
 <div class="environment-variable-table" markdown>
 
-| Variable                | Use                                                                  | Default               |
-| ----------------------- | -------------------------------------------------------------------- | --------------------- |
-| `AUTOMOBILE_DATA_DIR`   | Base directory for caches, screenshots, and other non-database state | `~/.auto-mobile`      |
-| `AUTOMOBILE_LOG_DIR`    | Directory for daemon and client logs                                 | `~/.auto-mobile/logs` |
-| `AUTOMOBILE_LOG_FORMAT` | `text` or newline-delimited `json`                                   | `text`                |
-| `AUTOMOBILE_LOG_SINK`   | `file`, `stderr`, or `both`                                          | `file`                |
+| Variable                | Use                                                                                                                                         | Default               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| `AUTOMOBILE_DATA_DIR`   | Base directory for observe, accessibility, navigation, CtrlProxy-build, screen-streaming, WebRTC, tool-output, and daemon-failure artifacts | `~/.auto-mobile`      |
+| `AUTOMOBILE_LOG_DIR`    | Directory for daemon and client logs                                                                                                        | `~/.auto-mobile/logs` |
+| `AUTOMOBILE_LOG_FORMAT` | `text` or newline-delimited `json`                                                                                                          | `text`                |
+| `AUTOMOBILE_LOG_SINK`   | `file`, `stderr`, or `both`                                                                                                                 | `file`                |
 
 </div>
 
@@ -23,6 +23,11 @@ export AUTOMOBILE_DATA_DIR=/var/lib/automobile
 export AUTOMOBILE_LOG_FORMAT=json
 export AUTOMOBILE_LOG_SINK=stderr
 ```
+
+Some persistent stores still use fixed paths under `~/.auto-mobile`, including
+device snapshots, video archives, and downloaded libwebp tools. Set their
+feature-specific options where available; `AUTOMOBILE_DATA_DIR` does not
+currently relocate them.
 
 ## Database
 

@@ -57,10 +57,12 @@ or simulators.
 
 ## Where is AutoMobile data stored?
 
-By default, AutoMobile stores its database, caches, screenshots, and logs under
-`~/.auto-mobile`. Set `AUTOMOBILE_DATA_DIR` to move non-log state or
-`AUTOMOBILE_LOG_DIR` to move logs. See [environment variables](using/environment-variables.md)
-for the complete list.
+By default, AutoMobile stores its database, caches, snapshots, video archives,
+and logs under `~/.auto-mobile`. `AUTOMOBILE_DATA_DIR` relocates temporary
+artifacts used by observation, accessibility, navigation, CtrlProxy builds,
+screen streaming, WebRTC, tool output, and daemon failure tracking;
+`AUTOMOBILE_LOG_DIR` relocates logs. Some persistent stores retain fixed paths.
+See [environment variables](using/environment-variables.md) for the exact scope.
 
 ## Does AutoMobile send my app data anywhere?
 

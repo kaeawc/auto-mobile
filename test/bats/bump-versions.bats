@@ -60,6 +60,7 @@ https://github.com/kaeawc/auto-mobile/releases/download/0.0.1/AutoMobile-0.0.1-m
 EOF
   cat > "${TEST_ROOT}/docs/using/ui-tests.md" <<'EOF'
 testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.1")
+.package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.1")
 export AUTOMOBILE_VERSION=0.0.1
 Replace `0.0.1` with the version used by your test runner dependency.
 EOF
@@ -118,6 +119,8 @@ run_bump() {
   grep -q "releases/download/${VERSION}/AutoMobile-${VERSION}-macos.dmg" \
     "${TEST_ROOT}/docs/index.md"
   grep -q "auto-mobile-junit-runner:${VERSION}" "${TEST_ROOT}/docs/using/ui-tests.md"
+  grep -Fq ".package(url: \"https://github.com/kaeawc/auto-mobile.git\", from: \"${VERSION}\")" \
+    "${TEST_ROOT}/docs/using/ui-tests.md"
   grep -q "AUTOMOBILE_VERSION=${VERSION}" "${TEST_ROOT}/docs/using/ui-tests.md"
   grep -q "Replace \`${VERSION}\` with the version used by your test runner dependency" \
     "${TEST_ROOT}/docs/using/ui-tests.md"

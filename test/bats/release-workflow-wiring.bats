@@ -212,6 +212,50 @@
   [[ "$commit_step" == *'allowed_patterns+=("CHANGELOG.md")'* ]]
 }
 
+@test "prepare-release oxfmt-formats the generated files before committing them (#5817)" {
+  wiring_requires_yq
+  local workflow=".github/workflows/prepare-release.yml"
+
+  # The version-bump and changelog steps write .claude-plugin/{marketplace,plugin}.json
+  # and CHANGELOG.md in a shape that must be oxfmt-clean, but the commit carries
+  # [skip ci] so the format gate never runs on it. The durable fix (#5817) runs
+  # oxfmt on the tree before committing so those files land clean on main.
+  local install_step format_step
+  install_step="$(yq -r '.jobs."prepare-version".steps[] | select(.name == "Install Bun dependencies") | .run' "$workflow")"
+  [ -n "$install_step" ]
+  [ "$install_step" != "null" ]
+  [[ "$install_step" == *"bun install --frozen-lockfile"* ]]
+
+  format_step="$(yq -r '.jobs."prepare-version".steps[] | select(.name == "Format generated files") | .run' "$workflow")"
+  [ -n "$format_step" ]
+  [ "$format_step" != "null" ]
+  [[ "$format_step" == *"bun run format"* ]]
+
+  # Ordering: the tree must be written (bump + changelog) and formatted BEFORE it
+  # is committed, otherwise the unformatted shape is what lands on main.
+  local names bump changelog format install commit
+  names="$(yq -r '.jobs."prepare-version".steps[].name // ""' "$workflow")"
+  bump="$(printf '%s\n' "$names" | grep -nxF 'Bump versions' | cut -d: -f1)"
+  changelog="$(printf '%s\n' "$names" | grep -nxF 'Update changelog' | cut -d: -f1)"
+  install="$(printf '%s\n' "$names" | grep -nxF 'Install Bun dependencies' | cut -d: -f1)"
+  format="$(printf '%s\n' "$names" | grep -nxF 'Format generated files' | cut -d: -f1)"
+  commit="$(printf '%s\n' "$names" | grep -nxF 'Commit versioned release tree to staging ref' | cut -d: -f1)"
+  [ -n "$bump" ] && [ -n "$changelog" ] && [ -n "$install" ] && [ -n "$format" ] && [ -n "$commit" ]
+  # oxfmt needs the toolchain installed before it can run.
+  [ "$install" -lt "$format" ]
+  # Format only after every generator has written its files.
+  [ "$bump" -lt "$format" ]
+  [ "$changelog" -lt "$format" ]
+  # And commit the already-formatted tree.
+  [ "$format" -lt "$commit" ]
+
+  # #5817 chose the run-oxfmt option, not the drop-[skip ci] option: the bump
+  # commit must still carry [skip ci] so the release pipeline is not double-run.
+  local commit_step
+  commit_step="$(yq -r '.jobs."prepare-version".steps[] | select(.id == "commit") | .run' "$workflow")"
+  [[ "$commit_step" == *"[skip ci]"* ]]
+}
+
 @test "bump script managed paths cover version-synchronized public docs" {
   local managed
   managed="$(bash scripts/versioning/bump-versions.sh --print-managed-paths)"

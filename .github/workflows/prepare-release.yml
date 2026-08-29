@@ -33,6 +33,9 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      - name: Install Bun dependencies
+        run: bun install --frozen-lockfile
+
       - name: Install ripgrep
         run: |
           if ! command -v rg >/dev/null 2>&1; then
@@ -52,6 +55,16 @@ jobs:
           CURRENT_TAG: v${{ inputs.version }}
           GH_TOKEN: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
         run: scripts/changelog/update_changelog_from_issues.sh
+
+      # The bump and changelog steps write .claude-plugin/{marketplace,plugin}.json
+      # and CHANGELOG.md, and the commit below carries [skip ci] so the Check
+      # Formatting gate never runs on it. Format the tree here so those generated
+      # files land oxfmt-clean on main instead of reddening the next PR (#5817).
+      # Whole-tree format (oxfmt honours .oxfmtrc ignorePatterns) guarantees the
+      # commit passes format:check; the managed-path guard below fails closed if
+      # formatting ever touches an unexpected file.
+      - name: Format generated files
+        run: bun run format
 
       - name: Commit versioned release tree to staging ref
         id: commit

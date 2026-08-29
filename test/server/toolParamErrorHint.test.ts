@@ -194,6 +194,39 @@ describe("formatToolParamError observe union noise (#5854)", () => {
     expect(message).toContain("type Invalid option");
     expect(message).toContain("value expected string");
   });
+
+  // Regression (#5854, PR review): when the whole schema is a `z.union` and a
+  // required enum fails in EVERY branch (a shared constraint), it is the caller's
+  // real mistake and must survive — the fact that a sibling field also failed
+  // must not suppress it via the missing-branch fallback being unavailable.
+  test("an enum that fails in every branch of a top-level union is kept", () => {
+    const schema = z.union([
+      z.object({ id: z.string(), name: z.string(), kind: z.enum(["a", "b"]) }),
+      z.object({ id: z.string(), label: z.string(), kind: z.enum(["a", "b"]) }),
+    ]);
+    // `id` is wrong-typed and `kind` is a bad enum; both are required in both
+    // branches, so both are genuine and must appear.
+    const result = schema.safeParse({ id: 42, name: "n", kind: "BOGUS" } as unknown as object);
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("setKeyValue", result.error);
+    expect(message).toContain("id expected string, received number");
+    expect(message).toContain("kind Invalid option");
+  });
+
+  // The complement of the above: an enum that is only required on ONE branch (a
+  // discriminator the caller didn't supply) is branch noise and must NOT lead.
+  test("a discriminator required on only one branch is suppressed when a real error exists", () => {
+    const schema = z.union([
+      z.object({ mode: z.enum(["x", "y"]), shared: z.number() }),
+      z.object({ shared: z.number() }),
+    ]);
+    // `shared` is bad in both branches (genuine); `mode` is missing but required
+    // only on branch 0 (discrimination noise).
+    const result = schema.safeParse({ shared: 1e999 } as unknown as object);
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("observe", result.error);
+    expect(message).toBe("shared must be a finite number");
+  });
 });
 
 // The union-noise classifier keys off zod v4's default issue shape: a missing

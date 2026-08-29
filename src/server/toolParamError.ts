@@ -1,47 +1,55 @@
 import { ZodError, type ZodIssue } from "zod/v4";
 
+// Provenance of a flattened issue relative to the nearest `z.union` it came from.
+// A field that fails in EVERY branch of a union is a shared constraint the caller
+// must satisfy no matter which branch they meant (genuine); one that fails in only
+// SOME branches is branch-discrimination noise. `unionId` scopes the "every
+// branch" test to a specific union (nested unions get their own id); `branchCount`
+// is that union's arm count (#5854).
+interface UnionContext {
+  unionId: number;
+  branchIndex: number;
+  branchCount: number;
+}
+
 interface FlattenedIssue {
   issue: ZodIssue;
-  // True when this issue was produced by expanding a `z.union` branch. Only such
-  // issues can be branch-discrimination noise; a top-level sibling issue — e.g. a
-  // bad enum on a field that sits next to a union-typed field — is always the
-  // caller's real mistake and must never be suppressed (#5854).
-  fromUnion: boolean;
+  // null when the issue is not union-derived (a top-level sibling, e.g. a bad enum
+  // on a field beside a union-typed field) — those are always the caller's real
+  // mistake and are never suppressed.
+  union: UnionContext | null;
 }
 
 interface FlattenResult {
   issues: FlattenedIssue[];
-  // A `z.union` was expanded somewhere during flattening. Union expansion produces
-  // one issue per branch, so the same real problem repeats and every branch also
-  // reports its own discriminator/required fields as missing — noise that only
-  // exists because a union was tried (#5854).
   sawUnion: boolean;
 }
 
 function flattenZodIssues(issues: ZodIssue[]): FlattenResult {
   const flattened: FlattenedIssue[] = [];
-  let sawUnion = false;
+  let unionCounter = 0;
 
-  const visit = (issue: ZodIssue, fromUnion: boolean) => {
+  const visit = (issue: ZodIssue, union: UnionContext | null) => {
     if (issue.code === "invalid_union" && Array.isArray(issue.errors) && issue.errors.length) {
-      sawUnion = true;
-      issue.errors.forEach((unionIssues) => {
+      const unionId = unionCounter++;
+      const branchCount = issue.errors.length;
+      issue.errors.forEach((unionIssues, branchIndex) => {
         unionIssues.forEach((unionIssue) => {
           const normalizedIssue = issue.path.length
             ? { ...unionIssue, path: [...issue.path, ...unionIssue.path] }
             : unionIssue;
-          // Everything reached through a union branch is union-derived, so nested
-          // unions stay tagged too.
-          visit(normalizedIssue as ZodIssue, true);
+          // Re-tag with this union's context so the nearest enclosing union wins
+          // for nested unions.
+          visit(normalizedIssue as ZodIssue, { unionId, branchIndex, branchCount });
         });
       });
       return;
     }
-    flattened.push({ issue, fromUnion });
+    flattened.push({ issue, union });
   };
 
-  issues.forEach((issue) => visit(issue, false));
-  return { issues: flattened, sawUnion };
+  issues.forEach((issue) => visit(issue, null));
+  return { issues: flattened, sawUnion: unionCounter > 0 };
 }
 
 // zod v4 does not reliably populate `issue.received`: a non-finite number carries
@@ -57,21 +65,23 @@ function issueReportsMissingValue(issue: ZodIssue): boolean {
   return /received undefined$/.test(issue.message ?? "");
 }
 
-// A union branch reports fields it needs but the caller didn't supply, and fields
-// that are `never` on that branch — pure branch-discrimination artifacts, not the
-// caller's actual mistake. Recognizing them lets the formatter lead with the real
-// problem (a field the caller DID provide with a bad value) instead of a
-// per-branch dump (#5854). This is only consulted for union-derived errors; a
-// plain object schema's "missing required field" is genuine signal.
-function isBranchDiscriminationNoise(issue: ZodIssue): boolean {
-  if (issue.code === "invalid_type") {
-    // Field not valid on this branch (`never`), or a required field the caller
-    // omitted. A provided-but-bad value (e.g. a non-finite number or a wrong
-    // type) is the real problem and is kept.
-    return issue.expected === "never" || issueReportsMissingValue(issue);
+// A field the caller did not supply on this branch (`received undefined`) or one
+// that is `never` on this branch — pure branch-discrimination artifacts, never the
+// caller's real mistake, so always suppressible when union-derived. A provided-bad
+// value (a non-finite number, a wrong type, a bad enum) is NOT an artifact; whether
+// it is genuine is decided separately by the across-all-branches test (#5854).
+function isMissingOrNeverArtifact(issue: ZodIssue): boolean {
+  if (issue.code !== "invalid_type") {
+    return false;
   }
-  // A missing/misused literal-or-enum discriminator selecting the branch.
-  return issue.code === "invalid_value";
+  return issue.expected === "never" || issueReportsMissingValue(issue);
+}
+
+// Key for the (union, path) coverage map. `unionId` is a number and "#" cannot
+// appear in it, so the boundary with the joined path is unambiguous even when a
+// path segment contains digits.
+function coverageKey(unionId: number, path: ReadonlyArray<PropertyKey>): string {
+  return `${unionId}#${path.map(String).join(".")}`;
 }
 
 function formatIssue(issue: ZodIssue): string {
@@ -99,6 +109,52 @@ function formatIssue(issue: ZodIssue): string {
   return `${path} ${issue.message}`;
 }
 
+// Lead with the actionable message rather than a union-branch dump (#5854).
+// A union-derived issue is genuine only if its path fails in EVERY branch of its
+// union (a shared constraint the caller must fix regardless of intended branch);
+// an issue in only some branches is branch-discrimination noise. Non-union issues
+// (top-level siblings) are always kept. Returns the full list unchanged when no
+// union expanded, or when suppression would leave nothing — that fallback is
+// never worse than the raw dump this replaces.
+function selectGenuineIssues(
+  flattenedIssues: FlattenedIssue[],
+  sawUnion: boolean,
+): FlattenedIssue[] {
+  if (!sawUnion) {
+    return flattenedIssues;
+  }
+
+  // Per (union, path): which branches reported any issue there. A path covered by
+  // all `branchCount` branches is a shared constraint.
+  const branchCoverage = new Map<string, Set<number>>();
+  for (const entry of flattenedIssues) {
+    if (!entry.union) {
+      continue;
+    }
+    const key = coverageKey(entry.union.unionId, entry.issue.path);
+    let branches = branchCoverage.get(key);
+    if (!branches) {
+      branches = new Set<number>();
+      branchCoverage.set(key, branches);
+    }
+    branches.add(entry.union.branchIndex);
+  }
+
+  const isGenuine = (entry: FlattenedIssue): boolean => {
+    if (!entry.union) {
+      return true;
+    }
+    if (isMissingOrNeverArtifact(entry.issue)) {
+      return false;
+    }
+    const key = coverageKey(entry.union.unionId, entry.issue.path);
+    return (branchCoverage.get(key)?.size ?? 0) === entry.union.branchCount;
+  };
+
+  const primary = flattenedIssues.filter(isGenuine);
+  return primary.length > 0 ? primary : flattenedIssues;
+}
+
 // Exported for direct unit testing of the container-hint branch (issue #4181,
 // rank 7). The hint is only appended for tapOn/swipeOn container issues.
 export function formatToolParamError(toolName: string, error: unknown): string {
@@ -107,22 +163,7 @@ export function formatToolParamError(toolName: string, error: unknown): string {
   }
 
   const { issues: flattenedIssues, sawUnion } = flattenZodIssues(error.issues);
-
-  // Lead with the actionable message rather than a union-branch dump (#5854).
-  // Only union-derived issues can be branch-discrimination noise — top-level
-  // sibling issues (a bad enum next to a union-typed field) are the caller's real
-  // mistake and are always kept. Fall back to the full list if suppression would
-  // leave nothing (e.g. the caller supplied no bad value, only ambiguous/missing
-  // fields — then the per-branch requirements ARE the guidance to show).
-  let selectedIssues = flattenedIssues;
-  if (sawUnion) {
-    const primary = flattenedIssues.filter(
-      (entry) => !(entry.fromUnion && isBranchDiscriminationNoise(entry.issue)),
-    );
-    if (primary.length > 0) {
-      selectedIssues = primary;
-    }
-  }
+  const selectedIssues = selectGenuineIssues(flattenedIssues, sawUnion);
 
   // Dedupe formatted messages: union expansion repeats the same real issue once
   // per branch that carries the field.

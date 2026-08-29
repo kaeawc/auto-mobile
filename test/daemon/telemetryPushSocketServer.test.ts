@@ -825,11 +825,7 @@ describe("TelemetryPushSocketServer navigation screenshot URI scoping (#5851)", 
         drainPending: false,
       });
 
-      await (server as any).backfillRecentEvents(
-        "nav-scope",
-        filter,
-        socket as unknown as Socket,
-      );
+      await (server as any).backfillRecentEvents("nav-scope", filter, socket as unknown as Socket);
 
       const messages = socket.getWrittenMessages<{
         data: TelemetryEvent & { data: { screenshotUri: string | null } };

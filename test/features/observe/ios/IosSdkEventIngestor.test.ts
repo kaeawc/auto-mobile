@@ -545,11 +545,12 @@ describe("DefaultIosSdkEventIngestor", () => {
         .returning("id")
         .executeTakeFirstOrThrow();
 
-      const screenshotManagerSpy = spyOn(NavigationScreenshotManager, "getInstance").mockReturnValue(
-        {
-          storeScreenshot: async () => "/screens/com.app/Home.webp",
-        } as unknown as NavigationScreenshotManager,
-      );
+      const screenshotManagerSpy = spyOn(
+        NavigationScreenshotManager,
+        "getInstance",
+      ).mockReturnValue({
+        storeScreenshot: async () => "/screens/com.app/Home.webp",
+      } as unknown as NavigationScreenshotManager);
 
       try {
         const withScreenshots = new DefaultIosSdkEventIngestor({
@@ -565,7 +566,10 @@ describe("DefaultIosSdkEventIngestor", () => {
           navigationScreenshotsEnabled: () => true,
         });
 
-        await withScreenshots.recordSdkEvent(event("navigation", { destination: "Home" }), "com.app");
+        await withScreenshots.recordSdkEvent(
+          event("navigation", { destination: "Home" }),
+          "com.app",
+        );
 
         expect(recorder.navigation).toHaveLength(1);
         expect(

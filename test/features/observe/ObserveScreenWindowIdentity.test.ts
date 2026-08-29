@@ -119,6 +119,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       getRecentInMemory: () => undefined,
       getRecentInMemoryForDevice: () => undefined,
       clear: () => undefined,
+      currentGeneration: () => 0,
     };
 
     const screen = new RealObserveScreen(

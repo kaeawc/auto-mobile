@@ -33,6 +33,9 @@ function shellCommandPayloads(argv: readonly string[]): string[] {
     if (argument === OPAQUE_ARGUMENT) {
       return [OPAQUE_ARGUMENT];
     }
+    if (argument === "--") {
+      return [];
+    }
     if (argument === "-c" || argument === "--command") {
       return [argv[index + 1] ?? OPAQUE_ARGUMENT];
     }
@@ -48,6 +51,10 @@ function shellCommandPayloads(argv: readonly string[]): string[] {
 
 function splitEnvPayload(value: string): string[] {
   const words: string[] = [];
+  const withOpaqueExpansions = (values: string[]): string[] =>
+    values.map((candidate) =>
+      /\$\{[A-Za-z_][A-Za-z0-9_]*\}/.test(candidate) ? OPAQUE_ARGUMENT : candidate,
+    );
   let word = "";
   let quote: "'" | '"' | null = null;
   let escaped = false;
@@ -57,7 +64,7 @@ function splitEnvPayload(value: string): string[] {
         if (word) {
           words.push(word);
         }
-        return words;
+        return withOpaqueExpansions(words);
       }
       if (["_", "t", "n", "v", "f", "r"].includes(character)) {
         if (quote === '"') {
@@ -107,7 +114,7 @@ function splitEnvPayload(value: string): string[] {
   if (word) {
     words.push(word);
   }
-  return words;
+  return withOpaqueExpansions(words);
 }
 
 function envDelegatesToXcodebuild(argv: readonly string[]): boolean {

@@ -211,6 +211,16 @@ teardown() {
   [[ "$output" == *"bypass.ts"* ]]
 }
 
+@test "fails closed for env split-string variable expansion" {
+  printf '%s\n' 'spawn("env", ["-S", "${BUILD_TOOL} test"], { env: { BUILD_TOOL: "xcodebuild" } });' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"bypass.ts"* ]]
+}
+
 @test "honors GNU env split-string termination" {
   printf '%s\n' 'spawn("env", ["-S", String.raw`tool \c xcodebuild test`]);' > "$repo_dir/src/bypass.ts"
   git -C "$repo_dir" add src/bypass.ts
@@ -303,6 +313,16 @@ teardown() {
 
 @test "inspects only a shell command operand" {
   printf '%s\n' 'spawn("env", ["sh", "-c", "printf %s $1", "_", "xcodebuild"]);' > "$repo_dir/src/bypass.ts"
+  git -C "$repo_dir" add src/bypass.ts
+
+  run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no new direct production xcodebuild invocations"* ]]
+}
+
+@test "stops parsing shell options at the option terminator" {
+  printf '%s\n' 'spawn("env", ["bash", "--", "-c", "xcodebuild"]);' > "$repo_dir/src/bypass.ts"
   git -C "$repo_dir" add src/bypass.ts
 
   run bash -c 'cd "$1" && bash scripts/check-no-new-direct-xcodebuild.sh HEAD' _ "$repo_dir"

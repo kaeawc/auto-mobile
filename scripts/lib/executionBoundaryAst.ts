@@ -472,6 +472,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     if (!name || (!ts.isIdentifier(callee) && receiver === undefined)) {
       return finish(false);
     }
+    if (receiver === undefined && ts.isIdentifier(callee) && callee.text !== name) {
+      return finish(false);
+    }
     const callScopes = scopeChain(call);
     const receiverDeclaration = receiver
       ? resolveReceiverDeclaration(receiver, callScopes)
@@ -491,6 +494,47 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
         return scopeDelta !== 0 ? scopeDelta : right.position - left.position;
       });
     return finish(candidates[0]?.node === target);
+  };
+
+  const callExecutionCache = new Map<ts.CallExpression, Map<number, boolean>>();
+  const callCanExecuteBefore = (
+    call: ts.CallExpression,
+    beforePosition: number,
+    seenFunctions = new Set<ts.FunctionLikeDeclaration>(),
+  ): boolean => {
+    const cached =
+      seenFunctions.size === 0 ? callExecutionCache.get(call)?.get(beforePosition) : undefined;
+    if (cached !== undefined) {
+      return cached;
+    }
+    let current: ts.Node | undefined = call.parent;
+    while (current && !ts.isFunctionLike(current)) {
+      current = current.parent;
+    }
+    if (!current || !ts.isFunctionLike(current)) {
+      if (seenFunctions.size === 0) {
+        const positions = callExecutionCache.get(call) ?? new Map();
+        positions.set(beforePosition, true);
+        callExecutionCache.set(call, positions);
+      }
+      return true;
+    }
+    if (seenFunctions.has(current)) {
+      return false;
+    }
+    const nextSeen = new Set([...seenFunctions, current]);
+    const executable = calls.some(
+      (invocation) =>
+        invocation.getStart(sourceFile) < beforePosition &&
+        callResolvesToFunction(invocation, current) &&
+        callCanExecuteBefore(invocation, beforePosition, nextSeen),
+    );
+    if (seenFunctions.size === 0) {
+      const positions = callExecutionCache.get(call) ?? new Map();
+      positions.set(beforePosition, executable);
+      callExecutionCache.set(call, positions);
+    }
+    return executable;
   };
 
   const isPromisifiedLauncher = (node: ts.Expression): boolean =>
@@ -547,7 +591,11 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
           const useFunctionName = useFunction ? functionName(useFunction) : undefined;
           const useInvocationPositions = useFunctionName
             ? calls
-                .filter((call) => callResolvesToFunction(call, useFunction!))
+                .filter(
+                  (call) =>
+                    callResolvesToFunction(call, useFunction!) &&
+                    callCanExecuteBefore(call, Number.POSITIVE_INFINITY),
+                )
                 .map((call) => call.getStart(sourceFile))
             : [];
           const useExecutionPosition =
@@ -570,6 +618,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
                 .filter(
                   (call) =>
                     callResolvesToFunction(call, candidateFunction!) &&
+                    callCanExecuteBefore(call, useExecutionPosition) &&
                     call.getStart(sourceFile) < useExecutionPosition,
                 )
                 .map((call) => call.getStart(sourceFile))

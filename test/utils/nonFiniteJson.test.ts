@@ -75,4 +75,19 @@ describe("reviveNonFiniteNumbers restores the real numbers", () => {
     expect(reviveNonFiniteNumbers("s")).toBe("s");
     expect(reviveNonFiniteNumbers(null)).toBe(null);
   });
+
+  // Every tool request passes through this walk, so an own "__proto__" key in a
+  // valid payload (e.g. a header map) must be preserved as data, not routed to the
+  // prototype setter (which would drop it and could pollute the prototype).
+  test("an own __proto__ key is preserved as a data property, not the prototype", () => {
+    const parsed = JSON.parse('{"headers":{"__proto__":"keep","X-Ok":"1"}}') as {
+      headers: Record<string, unknown>;
+    };
+    const revived = reviveNonFiniteNumbers(parsed) as { headers: Record<string, unknown> };
+    expect(Object.prototype.hasOwnProperty.call(revived.headers, "__proto__")).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(revived.headers, "__proto__")?.value).toBe("keep");
+    expect(revived.headers["X-Ok"]).toBe("1");
+    // The reconstructed object keeps a normal prototype (no pollution).
+    expect(Object.getPrototypeOf(revived.headers)).toBe(Object.prototype);
+  });
 });

@@ -73,9 +73,10 @@ export function reviveNonFiniteNumbers(value: unknown): unknown {
   if (marker) {
     return numberFor(marker);
   }
-  const out: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(value)) {
-    out[key] = reviveNonFiniteNumbers(child);
-  }
-  return out;
+  // Build with Object.fromEntries so an own "__proto__" key (valid JSON, e.g. a
+  // header map) is set as an own data property rather than invoking the prototype
+  // setter — plain `out[key] = …` would drop it and could pollute the prototype.
+  return Object.fromEntries(
+    Object.entries(value).map(([key, child]) => [key, reviveNonFiniteNumbers(child)]),
+  );
 }

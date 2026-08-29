@@ -8,7 +8,6 @@ import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -276,16 +275,19 @@ class LiveVideoStreamTest {
     waitUntil { source.connectedDeviceId == "emulator-5554" }
     val connectsAtResume = source.connectCalls
 
-    // waitUntil pumps the test clock, firing the watchdog's stallCheck ticks (Thread.sleep would
-    // not advance it). No fresh frame arrives, so with the stale baseline the watchdog reconnects
-    // within a tick or two; with the fix the frozen nowMs yields zero no-progress time forever, so
-    // the wait times out with connectCalls unchanged.
-    var reconnected = true
-    try {
-      waitUntil(timeoutMillis = 1_000) { source.connectCalls > connectsAtResume }
-    } catch (_: androidx.compose.ui.test.ComposeTimeoutException) {
-      reconnected = false
-    }
-    assertFalse(reconnected, "watchdog must not reconnect off the retained pre-pause frame")
+    // Freeze auto-advance and step the test clock deterministically through a bounded run of the
+    // watchdog's stallCheck ticks (stallCheckIntervalMs = 20, so 500 ms = 25 ticks, well past the
+    // 100 ms stallReconnectMs window). No fresh frame arrives: with the stale baseline the watchdog
+    // would reconnect within the first tick, but with the fix the frozen nowMs yields zero
+    // no-progress time forever, so connectCalls stays put. Advancing the clock ourselves keeps the
+    // passing path off the wall clock (the old waitUntil timeout burned a full second per run).
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeBy(500L)
+    waitForIdle()
+    assertEquals(
+      connectsAtResume,
+      source.connectCalls,
+      "watchdog must not reconnect off the retained pre-pause frame",
+    )
   }
 }

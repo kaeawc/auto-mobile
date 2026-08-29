@@ -235,6 +235,21 @@ describe("finalizeToolResponse", () => {
       expect(observation.viewHierarchy).toBeDefined();
       expect(observation.skeleton).toBeUndefined();
     });
+
+    test("an action tool without the response-shape opt-out keeps the full hierarchy (no silent one-way skeleton)", () => {
+      // The skeleton default is scoped to the tools that also expose raw/project
+      // (tapOn/inputText/launchApp). A tool like swipeOn, which has no opt-out,
+      // must NOT be silently skeletonized — otherwise a client could never recover
+      // the raw tree from it. Broader coverage is a tracked follow-up.
+      const response = createStructuredToolResponse({
+        success: true,
+        observation: makeObserveResult(),
+      });
+      const finalized = finalizeToolResponse(response, { name: "swipeOn" });
+      const observation = (finalized.structuredContent as any).observation;
+      expect(observation.viewHierarchy).toBeDefined();
+      expect(observation.skeleton).toBeUndefined();
+    });
   });
 
   test("EC4: elements are kept only when the include-elements gate is enabled", () => {

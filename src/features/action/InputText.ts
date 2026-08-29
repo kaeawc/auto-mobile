@@ -272,6 +272,13 @@ export class InputText extends BaseVisualChange {
     if (a11yResult.success) {
       logger.info(`[InputText] Text input via accessibility service: ${a11yResult.totalTimeMs}ms`);
 
+      // Run the IME action (submit/next) BEFORE dismissing: dismissing first can
+      // move focus so Enter/Tab/Search lands on the wrong target, and a dismissal
+      // failure must not skip the action the caller actually asked for (#5887).
+      if (imeAction) {
+        await this.executeImeAction(imeAction, signal);
+      }
+
       // Dismiss via the confirmed Keyboard.close() route (KEYCODE_BACK + state
       // poll), the same path eventOnly/append use (issue #5887).
       if (dismissKeyboard) {
@@ -284,11 +291,6 @@ export class InputText extends BaseVisualChange {
             method: "a11y",
           };
         }
-      }
-
-      // Handle IME action if specified
-      if (imeAction) {
-        await this.executeImeAction(imeAction, signal);
       }
 
       return {
@@ -384,6 +386,11 @@ export class InputText extends BaseVisualChange {
       }
     }
 
+    // IME action before dismiss — see the a11y path for why (issue #5887).
+    if (imeAction) {
+      await this.executeImeAction(imeAction, signal);
+    }
+
     // Dismiss via the confirmed Keyboard.close() route (issue #5887).
     if (dismissKeyboard) {
       const dismissError = await this.dismissKeyboardViaCloser("eventLast", signal);
@@ -395,10 +402,6 @@ export class InputText extends BaseVisualChange {
           method: "eventLast",
         };
       }
-    }
-
-    if (imeAction) {
-      await this.executeImeAction(imeAction, signal);
     }
 
     return {
@@ -490,7 +493,15 @@ export class InputText extends BaseVisualChange {
           "eventAll",
         );
       }
-      // Dismiss via the confirmed Keyboard.close() route (issue #5887).
+    }
+
+    // IME action before dismiss — see the a11y path for why (issue #5887).
+    if (imeAction) {
+      await this.executeImeAction(imeAction, signal);
+    }
+
+    // Dismiss via the confirmed Keyboard.close() route (issue #5887).
+    if (dismissKeyboard) {
       const dismissError = await this.dismissKeyboardViaCloser("eventAll", signal);
       if (dismissError) {
         return {
@@ -500,10 +511,6 @@ export class InputText extends BaseVisualChange {
           method: "eventAll",
         };
       }
-    }
-
-    if (imeAction) {
-      await this.executeImeAction(imeAction, signal);
     }
 
     return {
@@ -603,6 +610,11 @@ export class InputText extends BaseVisualChange {
       return this.appendFailure(text, typed.error, typed.charsSent);
     }
 
+    // IME action before dismiss — see the a11y path for why (issue #5887).
+    if (imeAction) {
+      await this.executeImeAction(imeAction, signal);
+    }
+
     if (dismissKeyboard) {
       const dismissError = await this.dismissKeyboardViaCloser("append", signal);
       if (dismissError) {
@@ -610,10 +622,6 @@ export class InputText extends BaseVisualChange {
         // so the full text was sent — a retry must NOT re-append any of it.
         return this.appendFailure(text, dismissError, typed.charsSent);
       }
-    }
-
-    if (imeAction) {
-      await this.executeImeAction(imeAction, signal);
     }
 
     return {
@@ -872,6 +880,11 @@ export class InputText extends BaseVisualChange {
       await this.executeKeyEventPlan(keyEventPlan, undefined, false, undefined, signal);
     }
 
+    // IME action before dismiss — see the a11y path for why (issue #5887).
+    if (imeAction) {
+      await this.executeImeAction(imeAction, signal);
+    }
+
     if (dismissKeyboard) {
       const dismissError = await this.dismissKeyboardViaCloser("eventOnly", signal);
       if (dismissError) {
@@ -882,10 +895,6 @@ export class InputText extends BaseVisualChange {
           method: "eventOnly",
         };
       }
-    }
-
-    if (imeAction) {
-      await this.executeImeAction(imeAction, signal);
     }
 
     return {

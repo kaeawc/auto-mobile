@@ -115,7 +115,13 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   }
 
   const observedAppId = result.observation?.activeWindow?.appId;
-  const verified = observedAppId !== undefined ? observedAppId === appId : undefined;
+  // Only assert verification on an exact foreground match. `LaunchApp.execute`
+  // returns `success:true` only when the foreground reconciles with the request —
+  // an exact match, an accepted surface (e.g. a notification-permission dialog
+  // whose foreground is the permission controller), or no observation at all — so
+  // a non-matching `observedAppId` here is such an accepted surface, not a failed
+  // launch. Emit `verified` as true-or-undefined; never a misleading `false`.
+  const verified = observedAppId === appId ? true : undefined;
 
   return {
     message: verified

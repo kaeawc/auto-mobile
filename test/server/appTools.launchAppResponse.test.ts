@@ -68,6 +68,24 @@ describe("buildLaunchAppResponse", () => {
     expect(payload.success).toBe(true);
   });
 
+  // A successful launch that lands on an accepted surface (e.g. a notification
+  // permission dialog, whose foreground is the permission controller) must not
+  // emit a misleading verified:false — execute already returns success:false for a
+  // genuine wrong-app landing. It still reports the observed appId.
+  test("omits verification (never false) on a successful launch with a differing foreground", () => {
+    const result: LaunchAppResult = {
+      success: true,
+      packageName: "com.android.settings",
+      observation: observationForApp("com.google.android.permissioncontroller"),
+    };
+
+    const payload = buildLaunchAppResponse("com.android.settings", result);
+
+    expect(payload.verified).toBeUndefined();
+    expect(payload.observedAppId).toBe("com.google.android.permissioncontroller");
+    expect(payload.message).toBe("Launched app com.android.settings");
+  });
+
   test("omits verification when no observation is available", () => {
     const result: LaunchAppResult = {
       success: true,

@@ -117,9 +117,9 @@ describe("listDevices tool (#5870)", () => {
     );
 
     // The device manager is actually consulted now.
-    expect(fakeDeviceUtils.getExecutedOperations().some((op) => op.startsWith("getBootedDevices"))).toBe(
-      true,
-    );
+    expect(
+      fakeDeviceUtils.getExecutedOperations().some((op) => op.startsWith("getBootedDevices")),
+    ).toBe(true);
   });
 
   test("keeps the resource pointers as a note", async () => {

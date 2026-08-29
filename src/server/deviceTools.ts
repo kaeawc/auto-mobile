@@ -275,8 +275,7 @@ export const getAppleSchema = devicePreparationTimeoutSchema
     if (!value.udid && !value.deviceId) {
       ctx.addIssue({
         code: "custom",
-        message:
-          "Provide udid or deviceId (the `deviceId` field of automobile:devices/booted/ios)",
+        message: "Provide udid or deviceId (the `deviceId` field of automobile:devices/booted/ios)",
         path: ["udid"],
       });
     }

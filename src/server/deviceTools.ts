@@ -222,6 +222,10 @@ const devicePreparationTimeoutSchema = z
 // accepted alongside the platform-native identifier. Either is sufficient; the
 // refine names both sources when neither is given so the caller is never left
 // guessing which field of which resource to read.
+// The at-least-one rule lives in `.superRefine()` + a sourced error message, not
+// in the advertised JSON Schema: a top-level `anyOf`/`oneOf` is exactly what
+// `TopLevelUnionFlattener` strips (the Anthropic API rejects top-level
+// combinators), so it cannot be advertised in the flat object schema.
 export const getAndroidSchema = devicePreparationTimeoutSchema
   .extend({
     avdName: z
@@ -257,7 +261,7 @@ export const getAppleSchema = devicePreparationTimeoutSchema
       .min(1)
       .optional()
       .describe(
-        "iOS Simulator UDID (the `deviceId` field of automobile:devices/booted/ios or `name` of automobile:devices/images/ios)",
+        "iOS Simulator UDID (the `deviceId` field of automobile:devices/booted/ios or automobile:devices/images/ios)",
       ),
     deviceId: z
       .string()

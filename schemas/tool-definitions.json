@@ -1454,7 +1454,7 @@
           "maximum": 120000
         },
         "udid": {
-          "description": "iOS Simulator UDID (the `deviceId` field of automobile:devices/booted/ios or `name` of automobile:devices/images/ios)",
+          "description": "iOS Simulator UDID (the `deviceId` field of automobile:devices/booted/ios or automobile:devices/images/ios)",
           "type": "string",
           "minLength": 1
         },

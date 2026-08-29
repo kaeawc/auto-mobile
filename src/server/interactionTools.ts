@@ -786,17 +786,29 @@ export function buildTapOnResultMessage(
 ): string {
   const details: string[] = [];
   if (selectedElement) {
-    const identity = selectedElement.resourceId
-      ? `id=${selectedElement.resourceId}`
-      : selectedElement.text
-        ? `text=${JSON.stringify(selectedElement.text)}`
-        : "element";
+    // Include every available identity field, not just the resource id: Android
+    // list rows commonly reuse an id such as `...:id/title`, so the id alone can't
+    // tell "Internet" from "Calendar" — the text can.
+    const identity: string[] = [];
+    if (selectedElement.resourceId) {
+      identity.push(`id=${selectedElement.resourceId}`);
+    }
+    if (selectedElement.text) {
+      identity.push(`text=${JSON.stringify(selectedElement.text)}`);
+    }
+    details.push(`matched ${identity.length > 0 ? identity.join(" ") : "element"}`);
     const count = selectedElement.totalMatches;
-    details.push(`matched ${identity}`, `${count} ${count === 1 ? "match" : "matches"}`);
-  } else if (activatedSubtext) {
-    // The accessibilityLink selector activates a semantic link without resolving a
-    // selectedElement, so name the activated link (and occurrence, when it
-    // disambiguates) — otherwise taps on different links stay byte-identical.
+    // For an ambiguous selector, name which occurrence was tapped so index 0 vs 2
+    // (or a random pick) among identical rows is distinguishable.
+    const index = count > 1 ? ` (index ${selectedElement.indexInMatches})` : "";
+    details.push(`${count} ${count === 1 ? "match" : "matches"}${index}`);
+  }
+  // Append the activated semantic link whenever present, additively: an
+  // owner-scoped subtext tap resolves BOTH an owner (selectedElement) and the
+  // activated link, and the accessibilityLink selector resolves only the link —
+  // either way, naming the link keeps taps on different links from being
+  // byte-identical.
+  if (activatedSubtext) {
     const occurrence =
       activatedSubtext.occurrence > 0 ? ` [occurrence ${activatedSubtext.occurrence}]` : "";
     details.push(`activated link ${JSON.stringify(activatedSubtext.text)}${occurrence}`);

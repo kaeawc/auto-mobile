@@ -31,12 +31,49 @@ describe("buildTapOnResultMessage", () => {
     expect(message).toContain("3 matches");
   });
 
-  test("prefers the resource id as the match identity when present", () => {
+  // Both identity fields must appear: Android rows commonly share a resource id
+  // like ...:id/title, so id alone leaves "Internet" and "Calendar" byte-identical.
+  test("includes both the resource id and the text as the match identity", () => {
     const message = buildTapOnResultMessage(
       selected({ text: "Internet", resourceId: "com.android.settings:id/title" }),
       undefined,
     );
     expect(message).toContain("matched id=com.android.settings:id/title");
+    expect(message).toContain('text="Internet"');
+  });
+
+  test("two rows sharing a resource id stay distinguishable via their text", () => {
+    const internet = buildTapOnResultMessage(
+      selected({ text: "Internet", resourceId: "android:id/title" }),
+      undefined,
+    );
+    const calendar = buildTapOnResultMessage(
+      selected({ text: "Calendar", resourceId: "android:id/title" }),
+      undefined,
+    );
+    expect(internet).not.toBe(calendar);
+  });
+
+  // For an ambiguous selector the chosen occurrence must be named — index 0 vs 2
+  // (or a random pick) among identical rows is otherwise indistinguishable.
+  test("names the chosen index when the selector is ambiguous", () => {
+    const first = buildTapOnResultMessage(
+      selected({ text: "Row", totalMatches: 3, indexInMatches: 0 }),
+      undefined,
+    );
+    const third = buildTapOnResultMessage(
+      selected({ text: "Row", totalMatches: 3, indexInMatches: 2 }),
+      undefined,
+    );
+    expect(first).toContain("3 matches (index 0)");
+    expect(third).toContain("3 matches (index 2)");
+    expect(first).not.toBe(third);
+  });
+
+  test("omits the index for a precise single match", () => {
+    const message = buildTapOnResultMessage(selected({ text: "Internet" }), undefined);
+    expect(message).toContain("1 match");
+    expect(message).not.toContain("index");
   });
 
   test("a different matched text yields a different message", () => {
@@ -80,13 +117,21 @@ describe("buildTapOnResultMessage", () => {
     expect(terms).not.toBe(privacy);
   });
 
-  test("prefers the matched element over the activated link when both are present", () => {
-    const message = buildTapOnResultMessage(selected({ text: "Internet" }), undefined, {
+  // Owner-scoped subtext taps resolve BOTH an owner and an activated link, so the
+  // message must carry both — the owner identity and which link was activated —
+  // otherwise activating "Terms" vs "Privacy" on the same owner is byte-identical.
+  test("includes both the owner identity and the activated link when both are present", () => {
+    const terms = buildTapOnResultMessage(selected({ text: "Legal" }), undefined, {
       text: "Terms",
       occurrence: 0,
     });
-    expect(message).toContain('matched text="Internet"');
-    expect(message).not.toContain("activated link");
+    const privacy = buildTapOnResultMessage(selected({ text: "Legal" }), undefined, {
+      text: "Privacy",
+      occurrence: 0,
+    });
+    expect(terms).toContain('matched text="Legal"');
+    expect(terms).toContain('activated link "Terms"');
+    expect(terms).not.toBe(privacy);
   });
 
   test("keeps the plain message when nothing was resolved", () => {

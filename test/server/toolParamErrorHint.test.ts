@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { formatToolParamError } from "../../src/server/index";
 import { swipeOnSchema, tapOnSchema } from "../../src/server/interactionTools";
+import { waitForSchema } from "../../src/server/observeTools";
 
 // Issue #4181, rank 7 (A6): the "container must be an object …" hint is
 // appended only for tapOn/swipeOn when a validation issue lands on the
@@ -133,5 +134,44 @@ describe("formatToolParamError non-finite numbers", () => {
     expect(formatToolParamError("tapOn", result.error)).toContain(
       "duration must be a finite number",
     );
+  });
+});
+
+// Issue #5854 §1: `waitForSchema` is a `z.union`, so a single bad field fails
+// every branch and `flattenZodIssues` surfaces one fragment per branch — the real
+// problem (`timeoutMs must be a finite number`) is buried among ~15
+// `expected <T>, received undefined` / `expected never, received …` fragments for
+// fields the caller never passed. The formatter must lead with the actionable
+// message and drop the union-branch discrimination noise.
+describe("formatToolParamError observe union noise (#5854)", () => {
+  test("a non-finite waitFor field leads with the finite constraint, no branch dump", () => {
+    const result = waitForSchema.safeParse({ timeoutMs: 1e999 } as unknown as object);
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("observe", result.error);
+    expect(message).toBe("timeoutMs must be a finite number");
+    expect(message).not.toContain("expected never");
+    expect(message).not.toContain("received undefined");
+  });
+
+  test("a wrong-type waitFor field leads with the type mismatch, deduplicated", () => {
+    const result = waitForSchema.safeParse({ timeoutMs: "abc" } as unknown as object);
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("observe", result.error);
+    expect(message).toBe("timeoutMs expected number, received string");
+  });
+
+  test("the actionable message is never repeated once per union branch", () => {
+    const result = waitForSchema.safeParse({ timeoutMs: 1e999 } as unknown as object);
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("observe", result.error);
+    const occurrences = message.split("must be a finite number").length - 1;
+    expect(occurrences).toBe(1);
+  });
+
+  test("with no actionable field, falls back to the full guidance instead of an empty message", () => {
+    const result = waitForSchema.safeParse({} as unknown as object);
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("observe", result.error);
+    expect(message.length).toBeGreaterThan(0);
   });
 });

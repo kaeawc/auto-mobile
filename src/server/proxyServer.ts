@@ -182,10 +182,13 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     };
   });
 
-  // Register tools/list handler - forward to daemon
+  // Register tools/list handler. Serves the static tool surface without
+  // connecting to the daemon when no connection exists yet, deferring the daemon
+  // connect/start to the first actual tool call (issue #5879). Once connected,
+  // the accurate session-scoped list is served.
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
     try {
-      const tools = await proxy.listTools();
+      const tools = await proxy.listAdvertisedTools();
       return { tools };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {

@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import { formatToolParamError } from "../../src/server/index";
 import { swipeOnSchema, tapOnSchema } from "../../src/server/interactionTools";
 import { waitForSchema } from "../../src/server/observeTools";
+import { setPreferenceSchema } from "../../src/server/preferenceTools";
 
 // Issue #4181, rank 7 (A6): the "container must be an object …" hint is
 // appended only for tapOn/swipeOn when a validation issue lands on the
@@ -173,5 +174,50 @@ describe("formatToolParamError observe union noise (#5854)", () => {
     expect(result.success).toBe(false);
     const message = formatToolParamError("observe", result.error);
     expect(message.length).toBeGreaterThan(0);
+  });
+
+  // Regression (#5854, PR review): noise suppression must be scoped to issues that
+  // actually came from a union branch. `setPreferenceSchema` has top-level enums
+  // (`scope`, `type`) beside a union-typed `value`; the union failure must not
+  // suppress the sibling enum errors — those are the caller's real mistakes.
+  test("a union-typed field does not suppress genuine enum errors on sibling fields", () => {
+    const result = setPreferenceSchema.safeParse({
+      scope: "bogus",
+      key: "k",
+      type: "bogus",
+      value: {},
+    } as unknown as object);
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("setPreference", result.error);
+    // Both top-level enum failures survive alongside the union-valued failures.
+    expect(message).toContain("scope Invalid option");
+    expect(message).toContain("type Invalid option");
+    expect(message).toContain("value expected string");
+  });
+});
+
+// The union-noise classifier keys off zod v4's default issue shape: a missing
+// field leaves `received` unset and ends the message with "received undefined",
+// while a genuine wrong type ends with "received <type>". This pins that contract
+// so a future zod bump that changes the message shape fails loudly here rather
+// than silently regressing the suppression in `issueReportsMissingValue` (#5854).
+describe("zod v4 issue-shape contract the classifier depends on", () => {
+  const schema = z.object({ n: z.number() });
+
+  test("a missing field's message ends with 'received undefined'", () => {
+    const result = schema.safeParse({});
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues[0];
+    expect(issue.code).toBe("invalid_type");
+    expect(issue.message).toMatch(/received undefined$/);
+  });
+
+  test("a genuine wrong type reports the type, not 'received undefined'", () => {
+    const result = schema.safeParse({ n: "x" });
+    expect(result.success).toBe(false);
+    const issue = result.error!.issues[0];
+    expect(issue.code).toBe("invalid_type");
+    expect(issue.message).toMatch(/received string$/);
+    expect(issue.message).not.toMatch(/received undefined$/);
   });
 });

@@ -1,19 +1,28 @@
 import { ZodError, type ZodIssue } from "zod/v4";
 
+interface FlattenedIssue {
+  issue: ZodIssue;
+  // True when this issue was produced by expanding a `z.union` branch. Only such
+  // issues can be branch-discrimination noise; a top-level sibling issue — e.g. a
+  // bad enum on a field that sits next to a union-typed field — is always the
+  // caller's real mistake and must never be suppressed (#5854).
+  fromUnion: boolean;
+}
+
 interface FlattenResult {
-  issues: ZodIssue[];
-  // A `z.union` was expanded during flattening. Union expansion produces one
-  // issue per branch, so the same real problem repeats and every branch also
+  issues: FlattenedIssue[];
+  // A `z.union` was expanded somewhere during flattening. Union expansion produces
+  // one issue per branch, so the same real problem repeats and every branch also
   // reports its own discriminator/required fields as missing — noise that only
   // exists because a union was tried (#5854).
   sawUnion: boolean;
 }
 
 function flattenZodIssues(issues: ZodIssue[]): FlattenResult {
-  const flattened: ZodIssue[] = [];
+  const flattened: FlattenedIssue[] = [];
   let sawUnion = false;
 
-  const visit = (issue: ZodIssue) => {
+  const visit = (issue: ZodIssue, fromUnion: boolean) => {
     if (issue.code === "invalid_union" && Array.isArray(issue.errors) && issue.errors.length) {
       sawUnion = true;
       issue.errors.forEach((unionIssues) => {
@@ -21,15 +30,17 @@ function flattenZodIssues(issues: ZodIssue[]): FlattenResult {
           const normalizedIssue = issue.path.length
             ? { ...unionIssue, path: [...issue.path, ...unionIssue.path] }
             : unionIssue;
-          visit(normalizedIssue as ZodIssue);
+          // Everything reached through a union branch is union-derived, so nested
+          // unions stay tagged too.
+          visit(normalizedIssue as ZodIssue, true);
         });
       });
       return;
     }
-    flattened.push(issue);
+    flattened.push({ issue, fromUnion });
   };
 
-  issues.forEach(visit);
+  issues.forEach((issue) => visit(issue, false));
   return { issues: flattened, sawUnion };
 }
 
@@ -98,13 +109,16 @@ export function formatToolParamError(toolName: string, error: unknown): string {
   const { issues: flattenedIssues, sawUnion } = flattenZodIssues(error.issues);
 
   // Lead with the actionable message rather than a union-branch dump (#5854).
-  // When a union expanded, drop the per-branch discrimination noise so the real
-  // problem surfaces first; fall back to the full list if suppression would leave
-  // nothing (e.g. the caller supplied no bad value, only ambiguous/missing
+  // Only union-derived issues can be branch-discrimination noise — top-level
+  // sibling issues (a bad enum next to a union-typed field) are the caller's real
+  // mistake and are always kept. Fall back to the full list if suppression would
+  // leave nothing (e.g. the caller supplied no bad value, only ambiguous/missing
   // fields — then the per-branch requirements ARE the guidance to show).
   let selectedIssues = flattenedIssues;
   if (sawUnion) {
-    const primary = flattenedIssues.filter((issue) => !isBranchDiscriminationNoise(issue));
+    const primary = flattenedIssues.filter(
+      (entry) => !(entry.fromUnion && isBranchDiscriminationNoise(entry.issue)),
+    );
     if (primary.length > 0) {
       selectedIssues = primary;
     }
@@ -114,7 +128,7 @@ export function formatToolParamError(toolName: string, error: unknown): string {
   // per branch that carries the field.
   const seen = new Set<string>();
   const issues: string[] = [];
-  for (const issue of selectedIssues) {
+  for (const { issue } of selectedIssues) {
     const formatted = formatIssue(issue);
     if (!seen.has(formatted)) {
       seen.add(formatted);
@@ -124,7 +138,7 @@ export function formatToolParamError(toolName: string, error: unknown): string {
 
   const hints: string[] = [];
   if (toolName === "swipeOn" || toolName === "tapOn") {
-    const containerIssue = flattenedIssues.find((issue) => issue.path[0] === "container");
+    const containerIssue = flattenedIssues.find((entry) => entry.issue.path[0] === "container");
     if (containerIssue) {
       hints.push(
         'container must be an object like { "elementId": "<id>" } or { "text": "<text>" }',

@@ -742,3 +742,99 @@ describe("TelemetryPushSocketServer failure backfill (#4209)", () => {
     });
   });
 });
+
+/**
+ * Regression (#5851, follow-up to #5600/#5534/#4933): the navigation backfill
+ * push must carry the app-SCOPED screenshot URI (`?appId=<app>`), built via
+ * `buildNavigationNodeScreenshotUri(node.id, node.app_id)`. An unscoped URI
+ * resolves against the daemon's current foreground app — a telemetry-dashboard
+ * client following it while a different app is foregrounded gets the wrong
+ * app's screenshot or "No current app set". The `app_id` is already SELECTed at
+ * the node lookup, so scoping is free.
+ */
+describe("TelemetryPushSocketServer navigation screenshot URI scoping (#5851)", () => {
+  it("backfills a navigation event with an app-scoped screenshot URI", async () => {
+    await withInMemorySingletonDatabase(async () => {
+      const db = getDatabase() as unknown as Kysely<Database>;
+      await runMigrations(db as unknown as Kysely<unknown>);
+
+      const APP_B = "com.example.b";
+      await db
+        .insertInto("navigation_apps")
+        .values([{ app_id: "com.example.a" }, { app_id: APP_B }])
+        .execute();
+
+      // Colliding "Home" node under app A (a different app) — the same
+      // cross-app collision #5534 fixed in the resolver but left in this emitter.
+      await db
+        .insertInto("navigation_nodes")
+        .values({
+          app_id: "com.example.a",
+          screen_name: "Home",
+          first_seen_at: 1000,
+          last_seen_at: 1000,
+          visit_count: 1,
+          back_stack_depth: null,
+          task_id: null,
+          screenshot_path: "/screens/com.example.a/Home.webp",
+        })
+        .execute();
+      const homeB = await db
+        .insertInto("navigation_nodes")
+        .values({
+          app_id: APP_B,
+          screen_name: "Home",
+          first_seen_at: 1000,
+          last_seen_at: 1000,
+          visit_count: 1,
+          back_stack_depth: null,
+          task_id: null,
+          screenshot_path: "/screens/com.example.b/Home.webp",
+        })
+        .returning("id")
+        .executeTakeFirstOrThrow();
+
+      await db
+        .insertInto("navigation_events")
+        .values({
+          device_id: "emulator-5554",
+          timestamp: 2000,
+          application_id: APP_B,
+          session_id: "session-b",
+          destination: "Home",
+          source: null,
+          arguments_json: null,
+          metadata_json: null,
+        })
+        .execute();
+
+      const server = new TestableTelemetryPushSocketServer(new FakeTimer());
+      const socket = new FakeSocket();
+      const filter = {
+        category: "navigation",
+        deviceSessionUuid: null,
+        deviceId: "emulator-5554",
+        sessionId: null,
+      };
+      (server as any).subscribers.set("nav-scope", {
+        socket: socket as unknown as Socket,
+        subscriptionId: "nav-scope",
+        lastActivity: 0,
+        filter,
+        backfilling: true,
+        drainPending: false,
+      });
+
+      await (server as any).backfillRecentEvents("nav-scope", filter, socket as unknown as Socket);
+
+      const messages = socket.getWrittenMessages<{
+        data: TelemetryEvent & { data: { screenshotUri: string | null } };
+      }>();
+      const nav = messages.find((m) => m.data.category === "navigation");
+      expect(nav).toBeDefined();
+      expect(nav!.data.data.screenshotUri).toBe(
+        `automobile:navigation/nodes/${homeB.id}/screenshot?appId=com.example.b`,
+      );
+    });
+  });
+});

@@ -10,6 +10,12 @@ import type { CtrlProxyScreenshotResult } from "../../../../src/features/observe
 import type { ViewHierarchyResult } from "../../../../src/models";
 import type { NavigationEvent } from "../../../../src/utils/interfaces/NavigationGraph";
 import { FakeFailureRecorder } from "../../../fakes/FakeFailureRecorder";
+import { NavigationScreenshotManager } from "../../../../src/features/navigation/NavigationScreenshotManager";
+import { withInMemorySingletonDatabase } from "../../../db/inMemorySingletonDatabase";
+import { getDatabase } from "../../../../src/db/database";
+import { runMigrations } from "../../../../src/db/migrator";
+import type { Database } from "../../../../src/db/types";
+import type { Kysely } from "kysely";
 
 const DEVICE_ID = "A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
 
@@ -490,6 +496,89 @@ describe("DefaultIosSdkEventIngestor", () => {
     expect(
       (recorder.navigation[0].event as { screenshotUri: string | null }).screenshotUri,
     ).toBeNull();
+  });
+
+  /**
+   * Regression (#5851, follow-up to #5600/#5534/#4933): when a screenshot is
+   * captured and stored, the telemetry event's screenshotUri must be the
+   * app-SCOPED resource URI (`?appId=<applicationId>`), built via
+   * buildNavigationNodeScreenshotUri(node.id, applicationId). An unscoped URI
+   * resolves against the daemon's current foreground app, so a client following
+   * it while another app is foregrounded gets the wrong app's screenshot.
+   */
+  test("navigation screenshot URI is scoped by applicationId (#5851)", async () => {
+    await withInMemorySingletonDatabase(async () => {
+      const db = getDatabase() as unknown as Kysely<Database>;
+      await runMigrations(db as unknown as Kysely<unknown>);
+
+      await db
+        .insertInto("navigation_apps")
+        .values([{ app_id: "com.other" }, { app_id: "com.app" }])
+        .execute();
+
+      // Colliding "Home" node under a different app to make scoping meaningful.
+      await db
+        .insertInto("navigation_nodes")
+        .values({
+          app_id: "com.other",
+          screen_name: "Home",
+          first_seen_at: 1000,
+          last_seen_at: 1000,
+          visit_count: 1,
+          back_stack_depth: null,
+          task_id: null,
+          screenshot_path: "/screens/com.other/Home.webp",
+        })
+        .execute();
+      const node = await db
+        .insertInto("navigation_nodes")
+        .values({
+          app_id: "com.app",
+          screen_name: "Home",
+          first_seen_at: 1000,
+          last_seen_at: 1000,
+          visit_count: 1,
+          back_stack_depth: null,
+          task_id: null,
+          screenshot_path: "/screens/com.app/Home.webp",
+        })
+        .returning("id")
+        .executeTakeFirstOrThrow();
+
+      const screenshotManagerSpy = spyOn(
+        NavigationScreenshotManager,
+        "getInstance",
+      ).mockReturnValue({
+        storeScreenshot: async () => "/screens/com.app/Home.webp",
+      } as unknown as NavigationScreenshotManager);
+
+      try {
+        const withScreenshots = new DefaultIosSdkEventIngestor({
+          deviceId: DEVICE_ID,
+          getNavigationGraphManager: () => navSink,
+          captureScreenshot: async (): Promise<CtrlProxyScreenshotResult> => ({
+            success: true,
+            data: "AAAA",
+            format: "png",
+          }),
+          telemetryRecorder: recorder as unknown as IosTelemetryRecorder,
+          failureRecorder,
+          navigationScreenshotsEnabled: () => true,
+        });
+
+        await withScreenshots.recordSdkEvent(
+          event("navigation", { destination: "Home" }),
+          "com.app",
+        );
+
+        expect(recorder.navigation).toHaveLength(1);
+        expect(
+          (recorder.navigation[0].event as { screenshotUri: string | null }).screenshotUri,
+        ).toBe(`automobile:navigation/nodes/${node.id}/screenshot?appId=com.app`);
+      } finally {
+        screenshotManagerSpy.mockRestore();
+      }
+    });
   });
 
   test("handled_exception routes to failure recorder as non-fatal", async () => {

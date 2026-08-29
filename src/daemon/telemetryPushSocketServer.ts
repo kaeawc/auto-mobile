@@ -14,6 +14,7 @@ import type { Database } from "../db/types";
 import type { Kysely } from "kysely";
 import { TELEMETRY_PUSH_SOCKET_CONFIG } from "./daemonFiles";
 import { truncateBodyText, boundStructuredField } from "../utils/truncateBodyText";
+import { buildNavigationNodeScreenshotUri } from "../utils/navigationResourceUri";
 import { type DeviceSessionResolver, nullDeviceSessionResolver } from "./deviceSessionResolver";
 
 /**
@@ -266,7 +267,10 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
             .execute();
           for (const node of nodes) {
             const key = `${node.app_id}:${node.screen_name}`;
-            screenshotUris.set(key, `automobile:navigation/nodes/${node.id}/screenshot`);
+            // Scope by the node's app_id (already selected) so a telemetry client
+            // following this URI resolves the screenshot under the named app, not
+            // the daemon's current foreground app (#5851 / #5534).
+            screenshotUris.set(key, buildNavigationNodeScreenshotUri(node.id, node.app_id));
           }
         } catch {
           /* best-effort screenshot URI lookup */

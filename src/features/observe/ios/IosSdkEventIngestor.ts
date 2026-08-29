@@ -20,6 +20,7 @@ import { serverConfig } from "../../../utils/ServerConfig";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import { getDbWriteBarrier } from "../../../db/dbWriteBarrier";
 import type { NavigationEvent } from "../../../utils/interfaces/NavigationGraph";
+import { buildNavigationNodeScreenshotUri } from "../../../utils/navigationResourceUri";
 import type { ViewHierarchyResult } from "../../../models";
 import type { SdkEvent, SdkEventIngestor } from "../interfaces/SdkEventIngestor";
 import type { CtrlProxyScreenshotResult } from "./types";
@@ -201,7 +202,10 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
                         .where("screen_name", "=", destination)
                         .executeTakeFirst();
                       if (node) {
-                        screenshotUri = `automobile:navigation/nodes/${node.id}/screenshot`;
+                        // Scope by applicationId (in scope) so a cross-app client
+                        // resolves this node's screenshot under the named app, not
+                        // the daemon's current foreground app (#5851 / #5534).
+                        screenshotUri = buildNavigationNodeScreenshotUri(node.id, applicationId);
                       }
                     } catch {
                       /* non-fatal */

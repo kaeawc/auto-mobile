@@ -2505,6 +2505,63 @@
           "type": "string",
           "minLength": 1
         },
+        "selector": {
+          "description": "Focus this field before typing, collapsing the mandatory focus-then-type pair into one call. Without it, text goes to whatever is currently focused.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "description": "Resource ID, e.g. com.app:id/field",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": ["elementId"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "testTag": {
+                  "description": "Android accessibility test tag",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": ["testTag"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Text, content-desc, or placeholder of the field",
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": ["text"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "textAny": {
+                  "description": "Ordered text variants; first visible match wins",
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": ["textAny"],
+              "additionalProperties": false
+            }
+          ]
+        },
         "mode": {
           "description": "Android text mode: a11y default; eventLast and eventAll start with accessibility setText; eventOnly clears and types supported ASCII with key events only",
           "type": "string",
@@ -2522,6 +2579,15 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
         },
         "sessionUuid": {
           "description": "Session",
@@ -2652,6 +2718,15 @@
         "coldBoot": {
           "description": "Cold boot app (default false)",
           "type": "boolean"
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
         },
         "platform": {
           "type": "string",
@@ -8796,6 +8871,15 @@
         "platform": {
           "type": "string",
           "enum": ["android", "ios"]
+        },
+        "raw": {
+          "description": "Return the raw view hierarchy instead of the compact skeleton",
+          "type": "boolean"
+        },
+        "project": {
+          "description": "Observation projection. 'skeleton' (default) returns a flat, actionable-only list (id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+          "type": "string",
+          "enum": ["full", "skeleton"]
         },
         "sessionUuid": {
           "description": "Session",

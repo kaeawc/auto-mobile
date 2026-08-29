@@ -1025,12 +1025,21 @@ export class LaunchApp extends BaseVisualChange {
     expectedPackageName: string,
     staleObservation: ObserveResult,
   ): LaunchAppResult {
+    const reportedPackages = this.describeLaunchObservationPackages(staleObservation);
     logger.warn(
       `[LaunchApp] Omitting stale launch observation for ${expectedPackageName}; ` +
-        `last observation reported ${this.describeLaunchObservationPackages(staleObservation)}`,
+        `last observation reported ${reportedPackages}`,
     );
     const resultWithoutObservation = { ...result };
     delete resultWithoutObservation.observation;
+    // Explain the omission (issue #5872) so the payload shape is deterministic:
+    // a launch either carries `observation` or carries `observationOmitted`
+    // naming why, never a silently-vanishing observation.
+    resultWithoutObservation.observationOmitted = {
+      reason: "stale_launch_observation",
+      expectedPackage: expectedPackageName,
+      reportedPackages,
+    };
     return resultWithoutObservation;
   }
 

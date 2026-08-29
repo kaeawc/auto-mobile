@@ -145,7 +145,13 @@ describe("finalizeToolResponse", () => {
     const actionPayload = { success: true, observation: obs };
     const response = createStructuredToolResponse(actionPayload);
 
-    const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1" });
+    // project:"full" keeps the raw hierarchy under test; the skeleton default is
+    // covered separately in "action-tool skeleton default (#5872)".
+    const finalized = finalizeToolResponse(response, {
+      name: "tapOn",
+      sessionUuid: "s1",
+      args: { project: "full" },
+    });
 
     const obsSc = (finalized.structuredContent as any).observation as ObserveResult;
     const rootSc = obsSc.viewHierarchy!.hierarchy.node as any;
@@ -156,6 +162,94 @@ describe("finalizeToolResponse", () => {
     const parsed = JSON.parse(finalized.content[0].text);
     expect(parsed.observation.viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
     expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+  });
+
+  // Action tools default their embedded observation to the compact skeleton
+  // (issue #5872): the same response-shape control `observe` already has, so a
+  // client no longer pays the full raw hierarchy on every tapOn/inputText/launchApp.
+  describe("action-tool skeleton default (#5872)", () => {
+    test("an action observation defaults to the compact skeleton (no viewHierarchy)", () => {
+      const response = createStructuredToolResponse({
+        success: true,
+        observation: makeObserveResult(),
+      });
+      const finalized = finalizeToolResponse(response, { name: "tapOn" });
+      const observation = (finalized.structuredContent as any).observation;
+      expect(Array.isArray(observation.skeleton)).toBe(true);
+      expect(observation.viewHierarchy).toBeUndefined();
+      expect(observation.elements).toBeUndefined();
+      // The compact form is under the SAME `skeleton` key `observe` uses (#5872 AC2).
+      const parsed = JSON.parse(finalized.content[0].text);
+      expect(Array.isArray(parsed.observation.skeleton)).toBe(true);
+      expect(parsed.observation.viewHierarchy).toBeUndefined();
+      expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
+    });
+
+    test('project:"full" opts an action observation back into the raw viewHierarchy', () => {
+      const response = createStructuredToolResponse({
+        success: true,
+        observation: makeObserveResult(),
+      });
+      const finalized = finalizeToolResponse(response, {
+        name: "tapOn",
+        args: { project: "full" },
+      });
+      const observation = (finalized.structuredContent as any).observation;
+      expect(observation.viewHierarchy).toBeDefined();
+      expect(observation.skeleton).toBeUndefined();
+    });
+
+    test("raw:true opts an action observation back into the raw viewHierarchy", () => {
+      const response = createStructuredToolResponse({
+        success: true,
+        observation: makeObserveResult(),
+      });
+      const finalized = finalizeToolResponse(response, {
+        name: "inputText",
+        args: { raw: true },
+      });
+      const observation = (finalized.structuredContent as any).observation;
+      expect(observation.viewHierarchy).toBeDefined();
+      expect(observation.skeleton).toBeUndefined();
+    });
+
+    test("launchApp's observation also defaults to the compact skeleton", () => {
+      const response = createStructuredToolResponse({
+        success: true,
+        packageName: "com.example",
+        observation: makeObserveResult(),
+      });
+      const finalized = finalizeToolResponse(response, { name: "launchApp" });
+      const observation = (finalized.structuredContent as any).observation;
+      expect(Array.isArray(observation.skeleton)).toBe(true);
+      expect(observation.viewHierarchy).toBeUndefined();
+    });
+
+    test("internal tool-to-tool calls keep the full viewHierarchy for in-process consumers", () => {
+      const response = createStructuredToolResponse({
+        success: true,
+        observation: makeObserveResult(),
+      });
+      const finalized = finalizeToolResponse(response, { name: "tapOn", internal: true });
+      const observation = (finalized.structuredContent as any).observation;
+      expect(observation.viewHierarchy).toBeDefined();
+      expect(observation.skeleton).toBeUndefined();
+    });
+
+    test("an action tool without the response-shape opt-out keeps the full hierarchy (no silent one-way skeleton)", () => {
+      // The skeleton default is scoped to the tools that also expose raw/project
+      // (tapOn/inputText/launchApp). A tool like swipeOn, which has no opt-out,
+      // must NOT be silently skeletonized — otherwise a client could never recover
+      // the raw tree from it. Broader coverage is a tracked follow-up.
+      const response = createStructuredToolResponse({
+        success: true,
+        observation: makeObserveResult(),
+      });
+      const finalized = finalizeToolResponse(response, { name: "swipeOn" });
+      const observation = (finalized.structuredContent as any).observation;
+      expect(observation.viewHierarchy).toBeDefined();
+      expect(observation.skeleton).toBeUndefined();
+    });
   });
 
   test("EC4: elements are kept only when the include-elements gate is enabled", () => {
@@ -351,7 +445,11 @@ describe("finalizeToolResponse", () => {
       success: true,
       observation: makeObserveResultWithBounds(),
     });
-    const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1" });
+    const finalized = finalizeToolResponse(response, {
+      name: "tapOn",
+      sessionUuid: "s1",
+      args: { project: "full" },
+    });
 
     const obsSc = (finalized.structuredContent as any).observation;
     expect(obsSc.viewHierarchy.hierarchy.node.bounds).toEqual([0, 0, 1080, 1920]);
@@ -624,6 +722,10 @@ describe("finalizeToolResponse", () => {
         name: "tapOn",
         sessionUuid: "s1",
         baselineStore: store,
+        // project:"full" opts out of the #5872 skeleton default so the "full, not a
+        // diff" path under test keeps its raw hierarchy; the diff/store behavior is
+        // the actual subject here.
+        args: { project: "full" },
       });
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -1307,7 +1409,15 @@ describe("finalizeToolResponse", () => {
       const writer = new FakeObservationArtifactWriter();
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: makeObserveResult() }),
-        { name: "tapOn", sessionUuid: "s1", artifactWriter: writer } as any,
+        // project:"full" keeps the raw hierarchy under test; the assertions below
+        // check that the FULL observation (not the #5872 skeleton default) is the
+        // payload handed to the artifact writer.
+        {
+          name: "tapOn",
+          sessionUuid: "s1",
+          args: { project: "full" },
+          artifactWriter: writer,
+        } as any,
       );
 
       expect((finalized.structuredContent as any).success).toBe(true);
@@ -1470,7 +1580,9 @@ describe("finalizeToolResponse", () => {
           65536,
         );
         expect(writer.writes).toHaveLength(0);
-        expect((finalized.structuredContent as any).observation.viewHierarchy).toBeDefined();
+        // Inline (not artifacted): the observation is present as the #5872 skeleton
+        // default, not replaced by artifact metadata.
+        expect((finalized.structuredContent as any).observation.skeleton).toBeDefined();
         expect((finalized.structuredContent as any).observation.artifact).toBeUndefined();
       });
 
@@ -2073,7 +2185,7 @@ describe("finalizeToolResponse", () => {
       expect(sc.viewHierarchy?.hierarchy).toBeDefined();
     });
 
-    test("embedded action observations are never skeletonized (scoped to observe)", () => {
+    test("embedded action observations now skeletonize by default too (#5872 superseded #4388's scoping)", () => {
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({
           success: true,
@@ -2082,8 +2194,10 @@ describe("finalizeToolResponse", () => {
         { name: "tapOn", sessionUuid: "s1" },
       );
       const obsSc = (finalized.structuredContent as any).observation as ObserveResult;
-      expect(obsSc.skeleton).toBeUndefined();
-      expect(obsSc.viewHierarchy?.hierarchy).toBeDefined();
+      // Issue #5872: the skeleton default extended to the action tools' embedded
+      // observation, using the same `skeleton` key `observe` uses.
+      expect(obsSc.skeleton).toBeDefined();
+      expect(obsSc.viewHierarchy).toBeUndefined();
     });
   });
 });

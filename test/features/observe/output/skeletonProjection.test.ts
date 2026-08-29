@@ -600,6 +600,44 @@ describe("toSkeleton — acceptance criteria", () => {
       expect(skeleton).toHaveLength(1);
     });
 
+    test("a bounds-less wrapper does not leak a preceding sibling's ancestry to its descendants", () => {
+      // Regression for the ancestor-stack skipped-sibling bug (Codex P1): a
+      // clickable sibling followed by a bounds-less wrapper whose descendant text
+      // sits at disjoint bounds. The text is NOT a tree descendant of the
+      // clickable, and geometry does not contain it either — so it must not be
+      // hoisted onto the clickable.
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 1080 },
+            node: [
+              {
+                "resource-id": "clickable-a",
+                clickable: "true",
+                bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+              },
+              {
+                // Bounds-less wrapper (skipped by parseNodeBounds) — its child
+                // must reparent to the root, not to `clickable-a`.
+                node: {
+                  text: "Faraway",
+                  bounds: { left: 200, top: 200, right: 250, bottom: 250 },
+                },
+              },
+            ],
+          },
+        },
+      } as unknown as NonNullable<ObserveResult["viewHierarchy"]>;
+
+      const elements = new DefaultObserveElementCollector().collect(viewHierarchy, "android");
+      const skeleton = toSkeleton(elements!);
+
+      // The clickable is not mislabelled from the disjoint faraway text...
+      expect(findById(skeleton, "clickable-a")?.label).toBeUndefined();
+      // ...and the faraway text survives as its own row.
+      expect(skeleton.some((entry) => entry.label === "Faraway")).toBe(true);
+    });
+
     test("end-to-end: the real collector emits provenance that hoists the exact-fill descendant", () => {
       const elements = new DefaultObserveElementCollector().collect(
         scrollBeforeFixture.viewHierarchy as NonNullable<ObserveResult["viewHierarchy"]>,

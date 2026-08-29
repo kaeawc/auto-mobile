@@ -79,14 +79,20 @@ export class DefaultObserveElementCollector implements ObserveElementCollector {
     const ancestors: { depth: number; provenance: ElementProvenance }[] = [];
 
     this.parser.traverseNode(rootNode, (node: ViewHierarchyNode, depth: number) => {
+      // Pop stale same-or-deeper entries for EVERY visited node, before the
+      // bounds-less early return — otherwise a skipped wrapper never terminates a
+      // preceding parsed sibling's ancestry, and the wrapper's parsed descendants
+      // would inherit that sibling as their parent, mislabelling it with disjoint
+      // text (issue #5881).
+      while (ancestors.length > 0 && ancestors[ancestors.length - 1].depth >= depth) {
+        ancestors.pop();
+      }
+
       const parsedNode = this.parser.parseNodeBounds(node);
       if (!parsedNode) {
         return;
       }
 
-      while (ancestors.length > 0 && ancestors[ancestors.length - 1].depth >= depth) {
-        ancestors.pop();
-      }
       const parent = ancestors.length > 0 ? ancestors[ancestors.length - 1].provenance : undefined;
       const enter = provenanceState.enter++;
       const provenance: ElementProvenance = { group, enter, exit: enter };

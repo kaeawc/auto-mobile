@@ -363,6 +363,18 @@ function hasProcessLivenessChecker(value: unknown): value is DaemonProcessLivene
 const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
 
 /**
+ * Budget for the confirming socket probe once the process a readiness wait was
+ * waiting on has died (issue #5878). A daemon that genuinely published its socket
+ * answers a probe near-instantly, so this only needs to cover the readiness
+ * probe's own retry/backoff — not a real cold start. Capping it here keeps a
+ * stale or stalling socket from consuming the client's whole `tools/list`
+ * deadline before the wait abandons: without the cap, the per-poll probe is
+ * handed the full remaining startup budget and runs before the liveness check
+ * gets another turn.
+ */
+const ABANDONED_WAIT_CONFIRM_TIMEOUT_MS = 1000;
+
+/**
  * Surface of DaemonManager used by clients (e.g. DaemonMcpProxy).
  * Allows injecting fakes in tests without subclassing the concrete class.
  */
@@ -583,6 +595,16 @@ export class DaemonManager implements DaemonManagerLike {
       );
       if (retryReady) {
         stderrLog("Daemon started by another process (retry)");
+        return;
+      }
+      // The retry holder could publish its socket and release its lock in the
+      // narrow window between a poll's socket check and its liveness check, so the
+      // wait above can observe the lock gone the instant startup actually
+      // succeeded. Unlike the first contention pass, this path throws without a
+      // reacquire, so confirm the daemon really is not up — bounded so a genuine
+      // failure is still reported fast — before reporting failure (issue #5878).
+      if (await this.waitForReady(ABANDONED_WAIT_CONFIRM_TIMEOUT_MS)) {
+        stderrLog("Daemon became ready before reporting retry-holder failure");
         return;
       }
       throw await this.createLockHolderStartupFailure(retryHolderLogPath);
@@ -1275,9 +1297,19 @@ export class DaemonManager implements DaemonManagerLike {
         return false;
       }
       pollCount++;
+      // Evaluated before the socket probe so a probe against a stale/stalling
+      // socket cannot be handed the full remaining budget while the thing we are
+      // waiting on is already gone. Readiness still wins (the probe runs first),
+      // but when the holder is gone the probe is capped so it merely confirms an
+      // already-connectable daemon rather than absorbing the client's deadline
+      // (issue #5878).
+      const keepWaiting = shouldContinueWaiting();
       if (existsSync(this.socketPath)) {
         socketObserved = true;
-        const outcome = await this.probeObservedSocket(deadline, signal);
+        const probeDeadline = keepWaiting
+          ? deadline
+          : Math.min(deadline, this.timer.now() + ABANDONED_WAIT_CONFIRM_TIMEOUT_MS);
+        const outcome = await this.probeObservedSocket(probeDeadline, signal);
         if (outcome === "ready") {
           stderrLog(
             `Daemon readiness probe succeeded after ${this.timer.now() - startTime}ms ` +
@@ -1296,7 +1328,7 @@ export class DaemonManager implements DaemonManagerLike {
       // short-circuits a wait that would otherwise run the full budget with nothing
       // left to become ready, producing the caller's actionable error only as the
       // client's request times out (issue #5878).
-      if (!shouldContinueWaiting()) {
+      if (!keepWaiting) {
         stderrLog(
           `Daemon readiness wait abandoned after ${this.timer.now() - startTime}ms ` +
             `(${pollCount} polls); the process it was waiting on is no longer running`,

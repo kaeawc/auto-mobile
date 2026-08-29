@@ -1139,6 +1139,169 @@ describe("Daemon manager process detection", () => {
     }
   });
 
+  test("a dead holder plus a stalling stale socket still abandons fast — the probe cannot absorb the full budget (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-lock-contention-stalling-socket-"));
+    const lockPath = join(dir, "daemon.lock");
+    const socketPath = join(dir, "daemon.sock");
+    const holderPid = 55557;
+    // Dead holder, but a stale socket file is present and every connect probe
+    // stalls until aborted — the case Codex flagged, where the per-poll probe was
+    // handed the full remaining budget and ran before the liveness check.
+    writeFileSync(lockPath, formatLockContent(holderPid));
+    writeFileSync(socketPath, "stale socket placeholder");
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [],
+      isProcessRunning: (pid: number) => pid !== holderPid,
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        throw new Error("should not spawn on the stalling-socket contention path");
+      },
+    };
+
+    class ContentionDaemonManager extends DaemonManager {
+      override acquireLock(): boolean {
+        return false;
+      }
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+    }
+
+    try {
+      const manager = new ContentionDaemonManager(
+        () => ({
+          async connect(_timeoutMs?: number, signal?: AbortSignal) {
+            // Never resolves; only the probe's own abort ends it — modelling a
+            // socket that accepts but never completes the handshake.
+            await new Promise<void>((_resolve, reject) => {
+              if (signal?.aborted) {
+                reject(new Error("probe aborted"));
+                return;
+              }
+              signal?.addEventListener("abort", () => reject(new Error("probe aborted")), {
+                once: true,
+              });
+            });
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        lockPath,
+        join(dir, "daemon.pid"),
+        socketPath,
+        processFinder,
+        processSpawner,
+      );
+
+      const startedAt = fakeTimer.now();
+      const error = await manager.start().then(
+        () => {
+          throw new Error("expected start to reject");
+        },
+        (rejection: unknown) => rejection as Error,
+      );
+      const elapsed = fakeTimer.now() - startedAt;
+
+      expect(error.message).toContain(
+        "Another process is starting the daemon but it failed to become ready",
+      );
+      // Each stalling probe is capped to the confirm budget (two contention waits
+      // plus the final confirm), so the failure is delivered in a few seconds —
+      // far under the full startup timeout the uncapped probe would have burned.
+      expect(elapsed).toBeLessThan(DAEMON_STARTUP_TIMEOUT_MS);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the retry-holder failure path confirms readiness before throwing, reusing a daemon that just became ready (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-retry-confirm-"));
+    const lockPath = join(dir, "daemon.lock");
+    writeFileSync(lockPath, formatLockContent(55558));
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [],
+      isProcessRunning: () => false,
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        throw new Error("should not spawn on the retry-confirm path");
+      },
+    };
+
+    // Both predicate-driven contention waits abandon (holder dead); the FINAL
+    // no-predicate confirm finds the daemon ready — the race window where the
+    // retry holder published its socket and released its lock just as the wait
+    // observed the lock gone. start() must reuse, not throw (Codex P2, #5878).
+    class RetryConfirmDaemonManager extends DaemonManager {
+      confirmCalls = 0;
+      override acquireLock(): boolean {
+        return false;
+      }
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+      override async waitForReady(
+        _timeout: number,
+        _signal?: AbortSignal,
+        shouldContinueWaiting?: () => boolean,
+      ): Promise<boolean> {
+        if (shouldContinueWaiting) {
+          // The two contention waits abandon on the dead holder.
+          return false;
+        }
+        // The final bounded confirm observes the now-ready daemon.
+        this.confirmCalls++;
+        return true;
+      }
+    }
+
+    try {
+      const manager = new RetryConfirmDaemonManager(
+        () => ({
+          async connect() {},
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        lockPath,
+        join(dir, "daemon.pid"),
+        join(dir, "daemon.sock"),
+        processFinder,
+        processSpawner,
+      );
+
+      // Resolves (reuse) rather than throwing the lock-holder startup failure.
+      await manager.start();
+      expect(manager.confirmCalls).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("explicit restart force-stops an unreachable daemon without the default namespace PID record", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();

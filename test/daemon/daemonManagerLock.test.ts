@@ -194,7 +194,11 @@ describe("DaemonManager file lock", () => {
       await expect(manager.start()).rejects.toThrow(
         /Another process is starting the daemon but it failed to become ready[\s\S]*holder-logs[\s\S]*SIMULATOR-B/,
       );
-      expect(timeouts).toEqual([30_000, 30_000]);
+      // Both contention waits run the full cold-start budget; a bounded readiness
+      // confirm then runs before the failure is reported (#5878).
+      expect(timeouts.slice(0, 2)).toEqual([30_000, 30_000]);
+      expect(timeouts).toHaveLength(3);
+      expect(timeouts[2]).toBeLessThan(30_000);
 
       holder.releaseLock();
     });
@@ -238,7 +242,10 @@ describe("DaemonManager file lock", () => {
       await expect(manager.start()).rejects.toThrow(
         /Another process is starting the daemon but it failed to become ready[\s\S]*retry-holder-logs[\s\S]*Retry holder failed/,
       );
-      expect(waitCount).toBe(2);
+      // Two contention waits plus the bounded readiness confirm before the failure
+      // is reported (#5878); diagnostics are captured before the retry holder
+      // releases, so they survive into the thrown error.
+      expect(waitCount).toBe(3);
     });
 
     test("releases lock after successful start", async () => {

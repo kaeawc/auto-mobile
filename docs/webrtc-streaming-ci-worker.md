@@ -29,7 +29,7 @@ The daemon accepts newline-delimited JSON on
 `~/.auto-mobile/webrtc-stream.sock`:
 
 ```bash
-SESSION_UUID="<sessionId returned by the MCP getAndroid or getApple tool>"
+SESSION_UUID="<sessionUuid returned by the MCP getAndroid or getApple tool>"
 DEVICE_ID="<device id returned by the same tool>"
 PLATFORM="android" # Use "ios" for an iOS Simulator.
 STREAM_ID="$CI_JOB_ID"
@@ -66,7 +66,7 @@ jq -nc \
 
 Acquire a fresh daemon session with the public MCP `getAndroid` or `getApple`
 tool before opening the socket; every request must carry that tool's
-`sessionId`. The example always includes `deviceId` and `platform` so the iOS
+`sessionUuid`. The example always includes `deviceId` and `platform` so the iOS
 path cannot silently fall back to Android. The stream reconnects after transient
 network failures; browser viewers may need to reconnect too.
 

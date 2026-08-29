@@ -1202,13 +1202,7 @@
           "enum": ["summary", "full"]
         }
       },
-      "required": [
-        "planContent",
-        "startStep",
-        "platform",
-        "deviceAllocationTimeoutMs",
-        "abortStrategy"
-      ],
+      "required": ["planContent", "platform"],
       "additionalProperties": false
     },
     "outputSchema": {
@@ -1379,7 +1373,6 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
       "additionalProperties": false
     }
   },
@@ -1455,12 +1448,16 @@
           "maximum": 120000
         },
         "avdName": {
-          "description": "Configured Android Virtual Device name",
+          "description": "Configured Android Virtual Device name (the `name` field of automobile:devices/images/android)",
+          "type": "string",
+          "minLength": 1
+        },
+        "deviceId": {
+          "description": "Booted device serial, e.g. emulator-5554 (the `deviceId` field of automobile:devices/booted/android)",
           "type": "string",
           "minLength": 1
         }
       },
-      "required": ["avdName"],
       "additionalProperties": false
     }
   },
@@ -1484,12 +1481,16 @@
           "maximum": 120000
         },
         "udid": {
-          "description": "iOS Simulator UDID",
+          "description": "iOS Simulator UDID (the `deviceId` field of automobile:devices/booted/ios or automobile:devices/images/ios)",
+          "type": "string",
+          "minLength": 1
+        },
+        "deviceId": {
+          "description": "Booted device identifier (the `deviceId` field of automobile:devices/booted/ios); alias for udid",
           "type": "string",
           "minLength": 1
         }
       },
-      "required": ["udid"],
       "additionalProperties": false
     }
   },
@@ -1684,7 +1685,6 @@
           "type": "string"
         }
       },
-      "required": ["platform"],
       "additionalProperties": false
     }
   },
@@ -2855,7 +2855,7 @@
   },
   {
     "name": "listDevices",
-    "description": "List devices (resource guidance)",
+    "description": "List booted devices; resource pointers for images and detail in the note",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2965,7 +2965,7 @@
           "type": "string"
         }
       },
-      "required": ["targetScreen", "platform"],
+      "required": ["targetScreen"],
       "additionalProperties": false
     }
   },
@@ -7840,7 +7840,7 @@
           "type": "boolean"
         }
       },
-      "required": ["deviceId", "platform"],
+      "required": ["deviceId"],
       "additionalProperties": false
     }
   },
@@ -8849,7 +8849,7 @@
           "type": "string"
         }
       },
-      "required": ["action", "platform"],
+      "required": ["platform"],
       "additionalProperties": false
     }
   },
@@ -9031,7 +9031,7 @@
           "type": "string"
         }
       },
-      "required": ["selector", "action", "platform"],
+      "required": ["selector"],
       "additionalProperties": false,
       "if": {
         "anyOf": [

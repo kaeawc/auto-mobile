@@ -5,6 +5,7 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import type { BootedDevice } from "../../src/models";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -50,8 +51,29 @@ const resolveWithFakeTimer = async <T>(
   return result as T;
 };
 
-describe("listDevices tool", () => {
+describe("listDevices tool (#5870)", () => {
   let fakeDeviceUtils: FakeDeviceUtils;
+
+  const android: BootedDevice = {
+    platform: "android",
+    name: "Pixel_9_API_36",
+    deviceId: "emulator-5554",
+  };
+  const ios: BootedDevice = {
+    platform: "ios",
+    name: "iPhone 17",
+    deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
+    iosVersion: "18.0",
+  };
+
+  const callListDevices = async (args: Record<string, unknown> = {}) => {
+    const tool = ToolRegistry.getTool("listDevices");
+    expect(tool).toBeDefined();
+    const fakeTimer = new FakeTimer();
+    const response = await resolveWithFakeTimer(tool!.handler(args), fakeTimer);
+    expect(response.content?.[0]?.type).toBe("text");
+    return JSON.parse(response.content?.[0]?.text ?? "{}");
+  };
 
   beforeAll(() => {
     fakeDeviceUtils = new FakeDeviceUtils();
@@ -66,73 +88,55 @@ describe("listDevices tool", () => {
 
   beforeEach(() => {
     fakeDeviceUtils.clearHistory();
+    fakeDeviceUtils.setBootedDevices("android", [android]);
+    fakeDeviceUtils.setBootedDevices("ios", [ios]);
   });
 
   afterAll(() => {
     resetDeviceToolsDependencies();
   });
 
-  test("returns resource guidance without calling device manager", async () => {
-    const tool = ToolRegistry.getTool("listDevices");
-    expect(tool).toBeDefined();
+  test("returns the actual booted devices instead of prose", async () => {
+    const payload = await callListDevices();
 
-    const fakeTimer = new FakeTimer();
+    expect(payload.count).toBe(2);
+    expect(Array.isArray(payload.devices)).toBe(true);
+    expect(payload.devices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          platform: "android",
+          deviceId: "emulator-5554",
+          name: "Pixel_9_API_36",
+        }),
+        expect.objectContaining({
+          platform: "ios",
+          deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
+          name: "iPhone 17",
+        }),
+      ]),
+    );
 
-    const response = await resolveWithFakeTimer(tool!.handler({}), fakeTimer);
-
-    expect(response.content?.[0]?.type).toBe("text");
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
-
-    // Verify resources include all platform-specific URIs
-    expect(payload.resources).toEqual([
-      "automobile:devices/booted",
-      "automobile:devices/booted/android",
-      "automobile:devices/booted/ios",
-      "automobile:devices/images",
-      "automobile:devices/images/android",
-      "automobile:devices/images/ios",
-    ]);
-
-    // Verify the message contains workflow guidance
-    expect(payload.message).toContain("RUNNING DEVICES");
-    expect(payload.message).toContain("AVAILABLE DEVICE IMAGES");
-    expect(payload.message).toContain("WORKFLOW");
-    expect(payload.message).toContain("automobile:devices/booted");
-    expect(payload.message).toContain("automobile:devices/images");
-
-    // Verify note about URI prefix
-    expect(payload.note).toContain("automobile:");
-    expect(payload.note).toContain("android://devices");
-
-    expect(fakeDeviceUtils.getExecutedOperations()).toHaveLength(0);
+    // The device manager is actually consulted now.
+    expect(
+      fakeDeviceUtils.getExecutedOperations().some((op) => op.startsWith("getBootedDevices")),
+    ).toBe(true);
   });
 
-  test("returns platform-specific resource guidance when platform is provided", async () => {
-    const tool = ToolRegistry.getTool("listDevices");
-    expect(tool).toBeDefined();
+  test("keeps the resource pointers as a note", async () => {
+    const payload = await callListDevices();
 
-    const fakeTimer = new FakeTimer();
+    expect(payload.note).toBeDefined();
+    const noteText = JSON.stringify(payload.note);
+    expect(noteText).toContain("automobile:devices/booted");
+    expect(noteText).toContain("automobile:devices/images");
+  });
 
-    const response = await resolveWithFakeTimer(tool!.handler({ platform: "android" }), fakeTimer);
+  test("filters by platform when provided", async () => {
+    const payload = await callListDevices({ platform: "android" });
 
-    expect(response.content?.[0]?.type).toBe("text");
-    const payload = JSON.parse(response.content?.[0]?.text ?? "{}");
-
-    // Same resources regardless of platform filter (guidance tool shows all options)
-    expect(payload.resources).toEqual([
-      "automobile:devices/booted",
-      "automobile:devices/booted/android",
-      "automobile:devices/booted/ios",
-      "automobile:devices/images",
-      "automobile:devices/images/android",
-      "automobile:devices/images/ios",
+    expect(payload.count).toBe(1);
+    expect(payload.devices).toEqual([
+      expect.objectContaining({ platform: "android", deviceId: "emulator-5554" }),
     ]);
-
-    // Message should include platform filter indicator
-    expect(payload.message).toContain("android only");
-    expect(payload.message).toContain("automobile:devices/booted/android");
-    expect(payload.message).toContain("automobile:devices/images/android");
-
-    expect(fakeDeviceUtils.getExecutedOperations()).toHaveLength(0);
   });
 });

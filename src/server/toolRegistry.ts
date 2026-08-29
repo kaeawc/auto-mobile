@@ -57,11 +57,39 @@ import { executionTracker } from "./executionTracker";
 // ./TopLevelUnionFlattener so the schema-flattening concern is independently testable.
 export { flattenTopLevelUnion } from "./TopLevelUnionFlattener";
 
+/**
+ * A field with a default is never truly required — the default supplies it when
+ * the caller omits it. zod v4's `toJSONSchema` nonetheless lists defaulted keys
+ * in `required`, which reads to a client as "you must send `action` on every
+ * tap" (issue #5870). Drop any `required` entry whose property carries a
+ * `default`; runtime validation is unaffected (the default still applies).
+ */
+function dropDefaultedKeysFromRequired(jsonSchema: Record<string, unknown>): void {
+  const required = jsonSchema.required;
+  const properties = jsonSchema.properties as Record<string, unknown> | undefined;
+  if (!Array.isArray(required) || !properties) {
+    return;
+  }
+  const pruned = required.filter((key) => {
+    const prop = properties[key as string];
+    return !(prop && typeof prop === "object" && "default" in (prop as Record<string, unknown>));
+  });
+  if (pruned.length === required.length) {
+    return;
+  }
+  if (pruned.length === 0) {
+    delete jsonSchema.required;
+  } else {
+    jsonSchema.required = pruned;
+  }
+}
+
 function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
   return flattenTopLevelUnion(
     toJSONSchema(schema, {
       override: ({ zodSchema, jsonSchema }) => {
         applyJsonSchemaOverride(zodSchema, jsonSchema);
+        dropDefaultedKeysFromRequired(jsonSchema);
         if (isInjectedDeviceIdSchema(zodSchema)) {
           const properties = jsonSchema.properties as Record<string, unknown> | undefined;
           if (properties) {
@@ -626,7 +654,7 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
 
     throw new ActionableError(
       "Device pool autolock is enabled and multiple devices are available. " +
-        "Call getAndroid or getApple first from this MCP session, or provide the returned sessionId (or a deviceId) to target a specific device.",
+        "Call getAndroid or getApple first from this MCP session, or provide the returned sessionUuid (or a deviceId) to target a specific device.",
     );
   }
 }

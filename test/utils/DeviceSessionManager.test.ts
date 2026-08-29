@@ -963,6 +963,19 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     expect(result.deviceId).toBe("ios-sim-1");
   });
 
+  test("resolves the other platform by providedDeviceId even when setActiveDevice selected a different one (#5870)", async () => {
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+
+    // Ambient platform is Android (a prior setActiveDevice), but the caller now
+    // targets the iOS device by id with no explicit platform — switching must
+    // honor the named device over the ambient platform, not throw.
+    manager.setCurrentDevice(androidDevice, "android");
+
+    const result = await manager.ensureDeviceReady("either", iosDevice.deviceId);
+    expect(result.platform).toBe("ios");
+    expect(result.deviceId).toBe("ios-sim-1");
+  });
+
   test("should resolve to active platform without deviceId when setActiveDevice was called", async () => {
     const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
 

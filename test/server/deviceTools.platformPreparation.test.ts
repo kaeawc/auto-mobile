@@ -70,7 +70,10 @@ describe("platform device preparation tools", () => {
 
     const result = await callTool("getAndroid", { avdName: "Pixel_9_API_36" });
 
-    expect(result.sessionId).toBeDefined();
+    // #5870: acquisition tools return `sessionUuid` (the key every consumer
+    // tool's schema declares), not `sessionId`.
+    expect(result.sessionUuid).toBeDefined();
+    expect(result.sessionId).toBeUndefined();
     expect(result.deviceIdentity).toEqual({
       platform: "android",
       avdName: "Pixel_9_API_36",
@@ -127,10 +130,50 @@ describe("platform device preparation tools", () => {
       readinessTimeoutMs: 20_000,
       totalDeadlineMs: 60_000,
     });
+    // #5870: `deviceId` — the identifier every device resource leads with — is
+    // now an accepted target on getAndroid alongside `avdName`.
     expect(() =>
       getAndroidSchema.parse({ avdName: image.name, deviceId: "emulator-5554" }),
-    ).toThrow();
+    ).not.toThrow();
+    // `platform` remains an unrecognized key on getApple (strict schema).
     expect(() => getAppleSchema.parse({ udid: "sim-udid", platform: "ios" })).toThrow();
+  });
+
+  test("getAndroid accepts a deviceId target and prepares that serial (#5870)", async () => {
+    const emulator: BootedDevice = {
+      platform: "android",
+      name: "Pixel_9_API_36",
+      deviceId: "emulator-5554",
+    };
+    deviceUtils.setBootedDevices("android", [emulator]);
+    matcher.setBootedResult(emulator);
+
+    const result = await callTool("getAndroid", { deviceId: "emulator-5554" });
+
+    expect(result.sessionUuid).toBeDefined();
+    expect(result.deviceIdentity).toMatchObject({ adbSerial: "emulator-5554" });
+  });
+
+  test("getApple accepts a deviceId target alongside udid (#5870)", async () => {
+    const simulator: DeviceInfo = {
+      platform: "ios",
+      name: "iPhone 17",
+      deviceId: "E2F46BCE-4C97-4AA0-BD9D-544756FAB545",
+      isRunning: false,
+    };
+    deviceUtils.setDeviceImages("ios", [simulator]);
+
+    const result = await callTool("getApple", { deviceId: simulator.deviceId });
+
+    expect(result.deviceIdentity).toMatchObject({ simulatorUdid: simulator.deviceId });
+  });
+
+  test("getAndroid rejects a call with neither avdName nor deviceId, naming the source (#5870)", () => {
+    expect(() => getAndroidSchema.parse({})).toThrow(/avdName.*deviceId|deviceId.*avdName/i);
+  });
+
+  test("getApple rejects a call with neither udid nor deviceId (#5870)", () => {
+    expect(() => getAppleSchema.parse({})).toThrow(/udid.*deviceId|deviceId.*udid/i);
   });
 
   test("matches the requested Android AVD name exactly", async () => {
@@ -174,7 +217,7 @@ describe("platform device preparation tools", () => {
     const first = await callTool("getAndroid", { avdName: emulator.name });
     const second = await callTool("getAndroid", { avdName: emulator.name });
 
-    expect(second.sessionId).toBe(first.sessionId);
+    expect(second.sessionUuid).toBe(first.sessionUuid);
     expect(pool.getDevice(emulator.deviceId)).toMatchObject({ avdName: emulator.name });
   });
 

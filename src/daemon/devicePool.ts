@@ -5591,7 +5591,7 @@ export class DevicePool {
           `The device may have been shut down or disconnected.\n\n` +
           `Options:\n` +
           `  - Use 'getAndroid' or 'getApple' with the target's stable identifier to prepare a device\n` +
-          `  - Use the returned sessionId to target this specific device\n` +
+          `  - Use the returned sessionUuid to target this specific device\n` +
           `  - Use 'listDevices' to see currently available devices`,
       );
     }
@@ -5630,7 +5630,7 @@ export class DevicePool {
         `The device may have been shut down or disconnected.\n\n` +
         `Options:\n` +
         `  - Use 'getAndroid' or 'getApple' with the target's stable identifier to prepare a device\n` +
-        `  - Use the returned sessionId to target this specific device\n` +
+        `  - Use the returned sessionUuid to target this specific device\n` +
         `  - Use 'listDevices' to see currently available devices`,
       readinessReservationOwners,
     );
@@ -5854,9 +5854,9 @@ export class DevicePool {
       throw new ActionableError(
         `Device '${deviceId}' is locked to another session.\n` +
           `Autolock is enabled, so tool calls must either come from the same MCP session ` +
-          `that called 'getAndroid' or 'getApple', or include the sessionId returned for this device.\n\n` +
+          `that called 'getAndroid' or 'getApple', or include the sessionUuid returned for this device.\n\n` +
           `Options:\n` +
-          `  - Pass the sessionId from getAndroid or getApple that locked this device\n` +
+          `  - Pass the sessionUuid from getAndroid or getApple that locked this device\n` +
           `  - Use getAndroid or getApple to lock a different available device\n` +
           `  - Wait for the idle timeout to release this device`,
       );

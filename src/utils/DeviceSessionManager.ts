@@ -442,13 +442,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
       default:
         // Only check for mixed platforms when auto-detecting (not explicitly specified)
         if (androidDevices.length > 0 && iosDevices.length > 0) {
-          // If setActiveDevice was called, use that platform to resolve ambiguity
-          if (this.currentDevice && this.currentPlatform) {
-            platformDevices = this.currentPlatform === "android" ? androidDevices : iosDevices;
-            resolvedPlatform = this.currentPlatform;
-            break;
-          }
-          // If a specific deviceId was provided, find which platform it belongs to
+          // An explicit deviceId names the target unambiguously, so it resolves
+          // the platform ahead of the ambient one — otherwise switching to a
+          // device on the other platform by id would be pinned to whatever
+          // setActiveDevice last selected and fail (issue #5870).
           if (providedDeviceId) {
             const allDevices = [...androidDevices, ...iosDevices];
             const match = allDevices.find((d) => d.deviceId === providedDeviceId);
@@ -457,6 +454,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
               resolvedPlatform = match.platform;
               break;
             }
+          }
+          // With no matching deviceId, fall back to the platform setActiveDevice selected.
+          if (this.currentDevice && this.currentPlatform) {
+            platformDevices = this.currentPlatform === "android" ? androidDevices : iosDevices;
+            resolvedPlatform = this.currentPlatform;
+            break;
           }
           throw new ActionableError(
             "Both Android and iOS devices are connected. Please disconnect devices from one platform or call setActiveDevice to select a platform.",

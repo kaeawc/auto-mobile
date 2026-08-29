@@ -30,7 +30,9 @@ import {
 export const setActiveDeviceSchema = addSessionUuidToSchema(
   z.object({
     deviceId: z.string(),
-    platform: platformSchema,
+    // #5870: the platform is inferred from the resolved device (or the session),
+    // so callers targeting a concrete `deviceId` need not also send `platform`.
+    platform: platformSchema.optional(),
   }),
 );
 
@@ -146,7 +148,7 @@ export const setDeviceStateSchema = addDeviceTargetingToSchema(
 // Export interfaces for type safety
 export interface SetActiveDeviceArgs {
   deviceId: string;
-  platform: Platform;
+  platform?: Platform;
 }
 
 export interface ChangeLocalizationArgs {
@@ -227,10 +229,12 @@ export function registerUtilityTools() {
         // one, so a failed write leaves the caller's existing session intact.
         const existing = sessionManager.getSession(args.sessionUuid);
         if (!existing || existing.assignedDevice !== args.deviceId) {
+          // #5870: infer the platform from the resolved pool device when the
+          // caller did not send one.
           const boundSession = await devicePool.bindOrReuseDeviceSession(
             args.sessionUuid,
             args.deviceId,
-            args.platform,
+            args.platform ?? pooledDevice.platform,
             undefined,
             undefined,
             undefined,
@@ -251,13 +255,19 @@ export function registerUtilityTools() {
         const previousDevice = sessionManager.getCurrentDevice();
         const previousPlatform = sessionManager.getCurrentPlatform();
 
-        await sessionManager.ensureDeviceReady(args.platform, args.deviceId);
+        // #5870: with no explicit platform, "either" lets the deviceId
+        // disambiguate; the resolved device carries the effective platform.
+        const readyDevice = await sessionManager.ensureDeviceReady(
+          args.platform ?? "either",
+          args.deviceId,
+        );
+        const resolvedPlatform = args.platform ?? readyDevice.platform;
 
         // When switching platforms, clear observation caches to prevent stale
         // data from the previous platform contaminating subsequent observe calls.
-        if (previousPlatform && previousPlatform !== args.platform && previousDevice) {
+        if (previousPlatform && previousPlatform !== resolvedPlatform && previousDevice) {
           logger.info(
-            `[setActiveDevice] Platform switch detected (${previousPlatform} -> ${args.platform}), ` +
+            `[setActiveDevice] Platform switch detected (${previousPlatform} -> ${resolvedPlatform}), ` +
               `clearing observation cache for previous device ${previousDevice.deviceId}`,
           );
           RealObserveScreen.clearCache(previousDevice.deviceId);

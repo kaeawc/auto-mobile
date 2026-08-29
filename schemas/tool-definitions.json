@@ -8601,7 +8601,8 @@
         },
         "duration": {
           "description": "Long press duration (ms)",
-          "type": "number"
+          "type": "number",
+          "minimum": 0
         },
         "searchUntil": {
           "description": "Poll for clickable element before tapping",
@@ -8742,7 +8743,8 @@
         },
         "duration": {
           "description": "Long press duration (ms)",
-          "type": "number"
+          "type": "number",
+          "minimum": 0
         },
         "subtext": {
           "description": "Semantic link inside the selected element; fails if the platform does not expose that link",

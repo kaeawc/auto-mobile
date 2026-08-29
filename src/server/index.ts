@@ -217,9 +217,23 @@ export function formatToolParamError(toolName: string, error: unknown): string {
   const issues = flattenedIssues.map((issue) => {
     const path = issue.path.length ? issue.path.join(".") : "parameters";
     if (issue.code === "invalid_type") {
-      // zod v4 issues carry no runtime `received` field; the default message
-      // already reads "Invalid input: expected X, received Y", so reuse it
-      // minus the prefix to keep the historical "<path> expected X" format.
+      // zod v4 rejects non-finite numbers (Infinity/-Infinity/NaN) at the base
+      // `z.number()` check, so no `.finite()` refinement can carry a custom
+      // message. Those surface as an invalid_type whose value is still a number
+      // (`received` is "Infinity"/"NaN", or "number" from a typeof-based error
+      // map), collapsing the default text to the self-contradictory "expected
+      // number, received number". A finite number never trips invalid_type, so
+      // any of these markers means non-finite — name the real constraint (#5769).
+      const received = (issue as { received?: unknown }).received;
+      if (
+        issue.expected === "number" &&
+        (received === "Infinity" || received === "NaN" || received === "number")
+      ) {
+        return `${path} must be a finite number`;
+      }
+      // zod v4 issues otherwise carry a usable default message that already
+      // reads "Invalid input: expected X, received Y", so reuse it minus the
+      // prefix to keep the historical "<path> expected X" format.
       return `${path} ${issue.message.replace(/^Invalid input: /, "")}`;
     }
     return `${path} ${issue.message}`;

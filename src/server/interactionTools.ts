@@ -26,6 +26,7 @@ import {
   ClipboardResult,
   OpenURLResult,
   SwipeOnToolPayload,
+  type TapOnSelectedElement,
 } from "../models";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
@@ -769,6 +770,35 @@ export function formatSwipeOnMessage(
     : `Swiped ${direction}`;
 }
 
+/**
+ * Build the tapOn success message so it says *what* it matched, not just
+ * "Tapped on element" (#5868). A correct tap and a wrong tap were byte-identical;
+ * now the message carries the resolved match identity and match count (so an
+ * ambiguous selector is distinguishable from a precise one) alongside the
+ * existing hierarchy-changed search summary. The structured `selectedElement`
+ * (resourceId/text/bounds/totalMatches) still rides on the result for clients
+ * that read the payload.
+ */
+export function buildTapOnResultMessage(
+  selectedElement: TapOnSelectedElement | undefined,
+  searchSummary: string | undefined,
+): string {
+  const details: string[] = [];
+  if (selectedElement) {
+    const identity = selectedElement.resourceId
+      ? `id=${selectedElement.resourceId}`
+      : selectedElement.text
+        ? `text=${JSON.stringify(selectedElement.text)}`
+        : "element";
+    const count = selectedElement.totalMatches;
+    details.push(`matched ${identity}`, `${count} ${count === 1 ? "match" : "matches"}`);
+  }
+  if (searchSummary) {
+    details.push(searchSummary);
+  }
+  return details.length > 0 ? `Tapped on element (${details.join("; ")})` : "Tapped on element";
+}
+
 // ============================================================================
 // Tool Registration
 // ============================================================================
@@ -822,7 +852,7 @@ export function registerInteractionTools() {
         : undefined;
 
     return createStructuredToolResponse({
-      message: searchSummary ? `Tapped on element (${searchSummary})` : "Tapped on element",
+      message: buildTapOnResultMessage(result.selectedElement, searchSummary),
       observation: result.observation,
       ...result,
     });

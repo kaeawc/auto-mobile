@@ -99,6 +99,48 @@ export const DAEMON_STARTUP_TIMEOUT_MS =
     : 30000;
 
 /**
+ * Reachability budget for an already-live daemon during start (milliseconds).
+ *
+ * When a start request finds a live daemon process without a usable PID record,
+ * it waits for that daemon to become reachable before deciding what to do. This
+ * wait is nested INSIDE a client's `tools/list` request, and clients time that
+ * request out at ~30s (`DAEMON_STARTUP_TIMEOUT_MS`). If the wait itself consumed
+ * the full startup budget, the actionable "refusing to terminate a live daemon"
+ * error would be produced only as the client's own deadline expires — so the one
+ * useful diagnostic in the flow never reaches the client and AutoMobile appears
+ * connected with zero tools (issue #5871).
+ *
+ * Budgeting this wait well under the client request timeout guarantees the
+ * error is delivered rather than raced by the timeout it lives inside. This is
+ * only the reachability wait for an EXISTING daemon; cold-start bring-up still
+ * uses the full `DAEMON_STARTUP_TIMEOUT_MS`.
+ *
+ * The value is capped at two-thirds of the startup timeout, never at the full
+ * timeout: a budget EQUAL to `DAEMON_STARTUP_TIMEOUT_MS` (which the client uses
+ * as its request deadline) would produce the actionable error at the exact
+ * deadline it must beat, re-opening the zero-tools race for an override at or
+ * above the ceiling. Capping below the timeout reserves headroom so the error
+ * is always deliverable, and scaling with the timeout keeps that headroom
+ * meaningful when the startup budget is itself lowered.
+ */
+const existingDaemonReachabilityOverride =
+  process.env.AUTOMOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS ??
+  process.env.AUTO_MOBILE_DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS;
+const parsedExistingDaemonReachability = existingDaemonReachabilityOverride
+  ? Number.parseInt(existingDaemonReachabilityOverride, 10)
+  : NaN;
+const maxExistingDaemonReachabilityMs = Math.max(
+  1,
+  Math.floor((DAEMON_STARTUP_TIMEOUT_MS * 2) / 3),
+);
+export const DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS = Math.min(
+  Number.isFinite(parsedExistingDaemonReachability) && parsedExistingDaemonReachability > 0
+    ? parsedExistingDaemonReachability
+    : 10000,
+  maxExistingDaemonReachabilityMs,
+);
+
+/**
  * Daemon shutdown timeout in milliseconds
  * How long to wait for graceful shutdown before SIGKILL
  */

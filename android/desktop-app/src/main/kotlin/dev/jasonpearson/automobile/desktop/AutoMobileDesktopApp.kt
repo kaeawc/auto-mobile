@@ -18,6 +18,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
@@ -413,6 +414,13 @@ fun AutoMobileDesktopApp(
             )
           else ->
             Box(Modifier.fillMaxSize()) {
+              // Pause every pane's live video when this window is unfocused or minimized (#5219):
+              // the grid thumbnails are one-shot screenshots, so the panes are the only standing
+              // decode/encode cost. Focus is read once here and threaded into both pane surfaces
+              // (stream + inspect), so an unfocused window disconnects all pane sources and a
+              // refocus reconnects them via the existing auto-reconnect machinery.
+              val streamingEnabled = LocalWindowInfo.current.isWindowFocused
+
               // Roll live connection health up into the top-bar status dot. The daemon signal is
               // polled here; per-device stream health is not yet fed in — device streams are
               // facet-owned and carry screenshots, so opening extra status-only streams would be
@@ -440,6 +448,7 @@ fun AutoMobileDesktopApp(
                   LayoutFacet(
                     column,
                     sessionUuidProvider = desktopDaemonSession?.sessionUuidProvider ?: { null },
+                    streamingEnabled = streamingEnabled,
                   )
                 },
                 // Live device mirror in each pane's stream area, fed by the daemon's video-stream
@@ -479,6 +488,7 @@ fun AutoMobileDesktopApp(
                     // Wires the per-pane quality overlay (manual Low/Medium/High + live FPS +
                     // auto-adjust) and persists the choice across sessions.
                     settings = settings,
+                    streamingEnabled = streamingEnabled,
                   )
                 },
               )

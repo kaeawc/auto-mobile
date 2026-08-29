@@ -69,5 +69,23 @@ state before a destructive flow:
 ```
 
 Android emulators can restore full VM snapshots. iOS simulators back up the
-specified app containers; physical Android devices restore settings only.
-Restore with `action: "restore"` and the same `snapshotName`.
+specified app containers, so an iOS capture that includes app data must list
+the bundle IDs:
+
+```json
+{
+  "name": "deviceSnapshot",
+  "arguments": {
+    "action": "capture",
+    "snapshotName": "signed-in",
+    "platform": "ios",
+    "appBundleIds": ["com.example.app"],
+    "includeAppData": true,
+    "includeSettings": true
+  }
+}
+```
+
+For an iOS settings-only capture, set `includeAppData` to `false`. Physical
+Android devices restore settings only. Restore with `action: "restore"` and the
+same `snapshotName`.

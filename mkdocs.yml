@@ -95,6 +95,7 @@ nav:
       - "CI screen streaming": webrtc-streaming-ci-worker.md
   - "How it Works":
       - "System design": design-docs/index.md
+      - "Runtime dependency pinning": design-docs/release/runtime-dependency-pinning.md
       - "Interaction loop": design-docs/mcp/interaction-loop.md
       - "Daemon": design-docs/mcp/daemon.md
       - "Android JUnit runner": design-docs/plat/android/junit-runner/index.md

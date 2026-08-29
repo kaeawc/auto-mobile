@@ -164,7 +164,11 @@ Add device labels when a flow spans two users or devices. Steps for different
 labels run concurrently:
 
 ```yaml
-devices: [sender, recipient]
+devices:
+  - label: sender
+    platform: ios
+  - label: recipient
+    platform: ios
 steps:
   - tool: launchApp
     device: sender

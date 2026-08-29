@@ -352,7 +352,13 @@ internal fun rememberLiveVideoFrame(
       return@LaunchedEffect
     if (stallReconnectMs == null && firstFrameTimeoutMs == null) return@LaunchedEffect
     var noProgressSinceMs = nowMs()
-    var lastSeenSequence = -1L
+    // Seed from the frame already on screen so a RETAINED frame is not mistaken for fresh progress.
+    // On a streamingEnabled resume this watchdog restarts while liveFrame still holds the pre-pause
+    // frame; keyed at -1 the first tick would adopt that frame's ancient receivedAtMs as the
+    // baseline and, for a pause longer than stallReconnectMs, reconnect immediately (issue #5219).
+    // frameSequence is a monotonic per-source counter, so the next real frame always outranks the
+    // retained one and still registers as progress.
+    var lastSeenSequence = liveFrame?.sequence ?: -1L
     fun reconnect(reason: String) {
       LOG.info("Live mirror for $deviceId reconnecting: $reason")
       noProgressSinceMs = nowMs()

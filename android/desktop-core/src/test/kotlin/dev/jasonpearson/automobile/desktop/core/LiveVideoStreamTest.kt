@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -236,5 +237,55 @@ class LiveVideoStreamTest {
     source.emitFrame(width = 1, height = 1)
     waitForIdle()
     assertNull(observedFrame)
+  }
+
+  @Test
+  fun `resuming after a long pause does not reconnect off the retained frame`() = runComposeUiTest {
+    // #5219 regression: a streamingEnabled resume restarts the stall watchdog while liveFrame still
+    // holds the pre-pause frame. It must not adopt that stale frame's ancient receivedAtMs as the
+    // progress baseline — otherwise a pause longer than stallReconnectMs makes the first tick judge
+    // the freshly-resumed stream stalled and reconnect immediately. The logical clock (nowMs) is
+    // frozen at the resume instant so the assertion is deterministic: with the fix the watchdog
+    // sees
+    // zero elapsed no-progress time and never reconnects.
+    val clock = java.util.concurrent.atomic.AtomicLong(0L)
+    val nowMs = { clock.get() }
+    val source = FakeVideoStreamSource(nowMs = nowMs)
+    val streaming = mutableStateOf(true)
+    setContent {
+      rememberLiveVideoFrame(
+        source,
+        "emulator-5554",
+        autoReconnect = true,
+        streamingEnabled = streaming.value,
+        reconnectInitialMs = 10,
+        nowMs = nowMs,
+        stallReconnectMs = 100,
+        stallCheckIntervalMs = 20,
+      )
+    }
+    waitUntil { source.connectedDeviceId == "emulator-5554" }
+    source.emitFrame(width = 1, height = 1) // retained frame, receivedAtMs = 0
+    waitUntil { source.state.value is VideoStreamState.Streaming }
+
+    runOnUiThread { streaming.value = false } // window unfocused → pause/disconnect
+    waitUntil { source.connectedDeviceId == null }
+    clock.set(10_000) // 10s elapse while unfocused, far exceeding stallReconnectMs
+
+    runOnUiThread { streaming.value = true } // refocus → a single reconnect
+    waitUntil { source.connectedDeviceId == "emulator-5554" }
+    val connectsAtResume = source.connectCalls
+
+    // waitUntil pumps the test clock, firing the watchdog's stallCheck ticks (Thread.sleep would
+    // not advance it). No fresh frame arrives, so with the stale baseline the watchdog reconnects
+    // within a tick or two; with the fix the frozen nowMs yields zero no-progress time forever, so
+    // the wait times out with connectCalls unchanged.
+    var reconnected = true
+    try {
+      waitUntil(timeoutMillis = 1_000) { source.connectCalls > connectsAtResume }
+    } catch (_: androidx.compose.ui.test.ComposeTimeoutException) {
+      reconnected = false
+    }
+    assertFalse(reconnected, "watchdog must not reconnect off the retained pre-pause frame")
   }
 }

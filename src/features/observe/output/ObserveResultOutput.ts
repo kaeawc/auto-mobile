@@ -132,8 +132,12 @@ export function sanitizeObserveResult(
   // Skeleton projection (issue #4388): runs before `compact`/`dropElements` so it
   // reads object-shaped element bounds. It emits its own compact tuple bounds and
   // removes the tree + elements, so the later steps become no-ops on those fields.
+  // It projects from the pre-clone `obs`, not `out`: the collector's ancestry
+  // provenance (issue #5881) is a non-enumerable Symbol property that the line-119
+  // JSON round-trip strips, so reading `out.elements` would silently lose it and
+  // revert hoisting/suppression to the pre-#5881 geometry fallback.
   if (cfg.project === "skeleton") {
-    projectSkeleton(out);
+    projectSkeleton(out, obs);
   }
 
   if (cfg.compact) {
@@ -155,12 +159,17 @@ export function sanitizeObserveResult(
 
 /**
  * Replace the full tree with the actionable-only skeleton (issue #4388): set
- * `out.skeleton` from the already-computed `elements`, then drop `viewHierarchy`
- * and `elements`. A hierarchy-less observation (capture failure) yields an empty
- * skeleton — still a valid, if empty, projection. Operates on the cloned copy.
+ * `out.skeleton` from the collector's `elements`, then drop `viewHierarchy` and
+ * `elements` from the emitted copy. A hierarchy-less observation (capture
+ * failure) yields an empty skeleton — still a valid, if empty, projection.
+ *
+ * `source` is the pre-clone `obs`: its elements still carry the non-enumerable
+ * ancestry provenance (issue #5881) that the `sanitizeObserveResult` JSON clone
+ * strips from `out`. The projection reads but never mutates them, so the "input
+ * is never mutated" contract holds; only `out` (the clone) is edited.
  */
-function projectSkeleton(out: ObserveResult): void {
-  out.skeleton = out.elements ? toSkeleton(out.elements) : [];
+function projectSkeleton(out: ObserveResult, source: ObserveResult): void {
+  out.skeleton = source.elements ? toSkeleton(source.elements) : [];
   delete out.viewHierarchy;
   delete out.elements;
 }

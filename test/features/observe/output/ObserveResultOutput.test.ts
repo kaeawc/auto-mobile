@@ -12,6 +12,8 @@ import {
   loadIosRemindersNoiseObservePair,
   measureValue,
 } from "../../../fixtures/observe/observeFixture";
+import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
+import scrollBeforeFixture from "../../../fixtures/observe/diff/scroll-before.json";
 
 /**
  * Unit tests for `sanitizeObserveResult` — the output-only transform for issue
@@ -943,6 +945,30 @@ describe("sanitizeObserveResult", () => {
       const before = JSON.stringify(observe);
       sanitizeObserveResult(observe, { dropElements: false, project: "skeleton" });
       expect(JSON.stringify(observe)).toBe(before);
+    });
+
+    test("hoists the exact-fill descendant through the JSON-clone boundary (#5881)", () => {
+      // The collector tags each element with non-enumerable Symbol ancestry
+      // provenance (#5881). `sanitizeObserveResult` JSON-clones its input before
+      // projecting, which strips that Symbol — so the projection must read the
+      // pre-clone elements. This drives the real collector on the checked-in
+      // `long_press_card` fixture (an exact-fill content-desc descendant) through
+      // the full sanitize path: if provenance is lost, the exact-fill child is
+      // dropped and the card comes back label:"Long press me" (geometry fallback).
+      const observe: ObserveResult = {
+        ...(scrollBeforeFixture as unknown as ObserveResult),
+        elements: new DefaultObserveElementCollector().collect(
+          scrollBeforeFixture.viewHierarchy as NonNullable<ObserveResult["viewHierarchy"]>,
+          "android",
+        ),
+      };
+
+      const out = sanitizeObserveResult(observe, { dropElements: true, project: "skeleton" });
+
+      const card = out.skeleton?.find((entry) => entry.id === "long_press_card");
+      expect(card).toBeDefined();
+      expect(card?.label).toBe("Basic long press card");
+      expect(card?.sublabel).toContain("Long press me");
     });
   });
 

@@ -41,6 +41,9 @@ automobile-tests:
   runs-on: macos-26
   needs: [build-for-testing]
   timeout-minutes: 30
+  env:
+    # Match the AutoMobile version pinned by the XCTestRunner package resolution.
+    AUTOMOBILE_VERSION: "<runner-version>"
   steps:
     - uses: actions/checkout@v6
 
@@ -53,7 +56,7 @@ automobile-tests:
       uses: oven-sh/setup-bun@v2
 
     - name: Install auto-mobile CLI
-      run: bun install -g @kaeawc/auto-mobile
+      run: bun install -g "@kaeawc/auto-mobile@${AUTOMOBILE_VERSION}"
 
     - name: Ensure iOS Simulator runtime
       uses: ./.github/actions/ensure-ios-simulator-runtime
@@ -67,7 +70,7 @@ automobile-tests:
     - name: Boot iOS Simulator
       run: |
         ios_version="$(xcrun --sdk iphonesimulator --show-sdk-version)"
-        auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 600000 \\
+        auto-mobile --boot-device --platform ios --create-if-missing --timeout-ms 600000 \
           --min-os-version "${ios_version}" --max-os-version "${ios_version}"
 
     - name: Start simulator log stream

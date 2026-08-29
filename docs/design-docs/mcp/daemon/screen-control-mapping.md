@@ -142,8 +142,14 @@ deviceHeight - 1)` if pinning to the edge is desired. Clamping is only valid
 
 ## Drag-to-swipe policy
 
-A pointer drag in **Control** mode becomes exactly one `input/swipe`. Everything
-below is **client-side policy**: the daemon faithfully executes whatever
+With gesture streaming disabled (the default), or when the daemon does not
+advertise `input/gestureStream`, a pointer drag in **Control** mode becomes
+exactly one `input/swipe`. With the experimental
+`-Dautomobile.gesture.streaming=true` client flag and a capable daemon, the
+reference client instead sends an `input/gestureStream` start/move/end sequence
+from the first move. If streaming cannot start, it falls back to the atomic
+policy below; that fallback reapplies the same threshold and duration rules.
+Everything below is **client-side policy**: the daemon faithfully executes whatever
 endpoints and duration it is handed, so it can neither reject an accidental
 one-pixel swipe nor repair an off-screen one. Clients should converge on these
 rules rather than each inventing their own. The reference implementation is the
@@ -549,9 +555,10 @@ The drag policy is likewise pure and unit tested directly
 coordinate below it must not swipe and exactly at it must — plus end-clamping,
 the off-screen start, and the degenerate-screen case. View-level routing
 (`DeviceScreenViewControlTest`) renders the real view with fakes and covers a
-control-mode drag reporting exactly one swipe and **no** tap, a sub-threshold
-movement still reporting a tap and no swipe, and an inspector-mode drag reporting
-nothing.
+control-mode drag reporting exactly one swipe and **no** tap, a movement below
+Compose touch slop still reporting a tap and no swipe, and an inspector-mode drag
+reporting nothing. The pure policy tests, rather than this view test, cover the
+dead band between touch slop and the 24-device-coordinate swipe threshold.
 
 The keyboard policy is pure too (`DeviceKeyboardInputPolicyTest`), pinning the
 chord rule from **both** sides — every chord modifier must stay with the host,

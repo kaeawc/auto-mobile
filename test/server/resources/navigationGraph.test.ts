@@ -561,9 +561,7 @@ describe("MCP Navigation Graph Resource", () => {
       // URI value %2541: a double-decode path (storageCapabilities' `{?appId}`)
       // would hand the handler "%41"; navigation's literal `?appId=` template
       // captures it raw, so the single handler decode is the first-and-only one.
-      const match = ResourceRegistry.matchTemplate(
-        "automobile:navigation/graph?appId=%2541",
-      );
+      const match = ResourceRegistry.matchTemplate("automobile:navigation/graph?appId=%2541");
       expect(match?.template.uriTemplate).toBe(NAVIGATION_RESOURCE_URIS.GRAPH_WITH_APP_ID);
       expect(match?.params.appId).toBe("%2541");
     });

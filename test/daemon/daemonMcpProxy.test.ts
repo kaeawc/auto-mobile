@@ -16,6 +16,8 @@ import {
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
+  DAEMON_STARTUP_TIMEOUT_MS,
+  DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
 } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -477,9 +479,11 @@ describe("DaemonMcpProxy", () => {
         socketPublished = false;
         waitForReadyCalls = 0;
         publishOnWaitForReady = true;
+        lastWaitForReadyTimeout: number | undefined;
 
-        override async waitForReady(_timeout: number): Promise<boolean> {
+        override async waitForReady(timeout: number): Promise<boolean> {
           this.waitForReadyCalls++;
+          this.lastWaitForReadyTimeout = timeout;
           if (this.publishOnWaitForReady) {
             // Model the bounded readiness path observing the socket become
             // connectable once the starting daemon finishes publishing it.
@@ -569,11 +573,52 @@ describe("DaemonMcpProxy", () => {
         });
 
         try {
-          await expect(proxy.listTools()).rejects.toThrow(/failed to start within \d+ms/);
+          // The unreachable-running-daemon branch surfaces an actionable error
+          // rather than the client seeing zero tools with no text (issue #5878).
+          await expect(proxy.listTools()).rejects.toThrow(
+            /socket did not become reachable within \d+ms/,
+          );
           // The readiness deadline gates the connect: the client is never asked to
           // connect against a socket that was never published.
           expect(fakeManager.waitForReadyCalls).toBeGreaterThanOrEqual(1);
           expect(client.connectCallCount).toBe(0);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("bounds the unreachable-running-daemon wait to the reachability budget so the error beats the client timeout (#5878)", async () => {
+        const fakeManager = new StartingDaemonManager();
+        fakeManager.publishOnWaitForReady = false;
+        fakeManager.statusResult = {
+          running: true,
+          pid: 1234,
+          port: 3000,
+          socketPath: "/tmp/test.sock",
+          version: DAEMON_VERSION,
+        };
+        const client = new SocketGatedClient(fakeManager);
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
+
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => client,
+          daemonManager: fakeManager,
+          autoStartDaemon: true,
+        });
+
+        try {
+          await expect(proxy.listTools()).rejects.toThrow(
+            new RegExp(`within ${DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS}ms`),
+          );
+          // The wait for an already-running daemon's socket must use the bounded
+          // reachability budget, NOT the full 30s startup budget — otherwise the
+          // actionable error is produced only as the client's own ~30s tools/list
+          // deadline expires and the client sees zero tools (issue #5878). This is
+          // the existing-daemon branch; a daemon we spawn ourselves keeps the full
+          // budget.
+          expect(fakeManager.lastWaitForReadyTimeout).toBe(DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS);
+          expect(fakeManager.lastWaitForReadyTimeout).toBeLessThan(DAEMON_STARTUP_TIMEOUT_MS);
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();

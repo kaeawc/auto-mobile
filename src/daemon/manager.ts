@@ -1,7 +1,7 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { execSync, type ChildProcess } from "node:child_process";
 import { open, readFile, rm, unlink } from "node:fs/promises";
-import { existsSync, openSync, closeSync } from "node:fs";
+import { existsSync, openSync, closeSync, readFileSync } from "node:fs";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import { devNull, tmpdir } from "node:os";
 import { isStructuredLoggingEnabled, logger, resolveAutomobileLogSink } from "../utils/logger";
@@ -370,7 +370,11 @@ export interface DaemonManagerLike {
   status(): Promise<DaemonStatus>;
   start(options?: DaemonOptions): Promise<void>;
   restart(options?: DaemonOptions): Promise<void>;
-  waitForReady(timeout: number, signal?: AbortSignal): Promise<boolean>;
+  waitForReady(
+    timeout: number,
+    signal?: AbortSignal,
+    shouldContinueWaiting?: () => boolean,
+  ): Promise<boolean>;
 }
 
 /**
@@ -543,9 +547,17 @@ export class DaemonManager implements DaemonManagerLike {
   async start(options: DaemonOptions = {}): Promise<void> {
     const acquired = this.acquireLock();
     if (!acquired) {
-      // Another process is starting the daemon — wait for it to become ready
+      // Another process is starting the daemon — wait for it to become ready.
+      // Keep the full DAEMON_STARTUP_TIMEOUT_MS while that holder is alive (a
+      // legitimate cold start by another process — multi-simulator discovery —
+      // needs the full budget), but stop the moment the holder is gone. Without
+      // that early exit a crashed holder makes this wait run the full budget with
+      // nothing left to become ready, and the actionable failure below is produced
+      // only as the client's ~30s `tools/list` deadline expires (issue #5878).
       stderrLog("Another process is starting the daemon, waiting...");
-      const ready = await this.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
+      const ready = await this.waitForReady(DAEMON_STARTUP_TIMEOUT_MS, undefined, () =>
+        this.isStartupLockHeldByLiveProcess(),
+      );
       if (ready) {
         stderrLog("Daemon started by another process");
         return;
@@ -561,10 +573,14 @@ export class DaemonManager implements DaemonManagerLike {
         }
         return;
       }
-      // Another process won the retry race — wait for it to finish
+      // Another process won the retry race — wait for it to finish, again only as
+      // long as that retry holder is alive so the double-race failure stays
+      // deliverable before the client's request timeout (issue #5878).
       stderrLog("Another process is retrying daemon start, waiting...");
       const retryHolderLogPath = await this.getLockHolderStartupLogPath();
-      const retryReady = await this.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
+      const retryReady = await this.waitForReady(DAEMON_STARTUP_TIMEOUT_MS, undefined, () =>
+        this.isStartupLockHeldByLiveProcess(),
+      );
       if (retryReady) {
         stderrLog("Daemon started by another process (retry)");
         return;
@@ -880,6 +896,46 @@ export class DaemonManager implements DaemonManagerLike {
       );
     }
     return new ActionableError(await this.formatDaemonStartupFailure(summary, logPath));
+  }
+
+  /**
+   * Whether the daemon startup lock is currently held by a still-live process.
+   *
+   * Early-exit predicate for the two lock-contention waits in {@link start}. When
+   * another process holds the startup lock and is bringing up the daemon, this
+   * process waits for the socket to publish. If the holder crashes — or fails and
+   * releases the lock — the plain readiness wait would keep polling for the full
+   * DAEMON_STARTUP_TIMEOUT_MS even though nothing will ever become ready, so the
+   * actionable lock-holder-startup-failure error is produced only as the client's
+   * own `tools/list` deadline expires (issue #5878). Giving up the instant the
+   * holder is gone makes that error deliverable, while a holder that is still alive
+   * keeps the full budget so a legitimate slow cold start by another process is not
+   * abandoned. Reuses the injected liveness checker and the shared lock format so
+   * there is one canonical primitive per concern rather than a second PID reader.
+   */
+  private isStartupLockHeldByLiveProcess(): boolean {
+    let content: string;
+    try {
+      content = readFileSync(this.lockFilePath, "utf-8").trim();
+    } catch (error) {
+      // Lock file is gone: the holder released it (finished or crashed). Nothing
+      // left to wait on — stop so start() can re-acquire or surface its failure.
+      logger.debug(
+        `[DaemonManager] Startup lock unreadable while waiting for holder: ${this.describeError(error)}`,
+      );
+      return false;
+    }
+    if (content.length === 0) {
+      // A holder created the lock but has not written its PID yet (mirrors the
+      // fileLock mid-write window); treat as still held so we do not abandon it.
+      return true;
+    }
+    const { pid } = parseLockContent(content);
+    if (!Number.isSafeInteger(pid) || pid <= 0) {
+      // Unreadable PID — a holder may still be filling it in; keep waiting.
+      return true;
+    }
+    return this.isProcessRunning(pid);
   }
 
   private async getLockHolderStartupLogPath(): Promise<string | null> {
@@ -1200,7 +1256,14 @@ export class DaemonManager implements DaemonManagerLike {
   /**
    * Wait for daemon to be ready (socket listening)
    */
-  async waitForReady(timeout: number, signal?: AbortSignal): Promise<boolean> {
+  async waitForReady(
+    timeout: number,
+    signal?: AbortSignal,
+    // Defaults to "always keep waiting" so the common no-predicate call stays
+    // synchronous through to the poll sleep (a caller that inspects pending timers
+    // right after invocation relies on that); a predicate is consulted each poll.
+    shouldContinueWaiting: () => boolean = () => true,
+  ): Promise<boolean> {
     const startTime = this.timer.now();
     const deadline = startTime + timeout;
     const pollInterval = 100; // Poll every 100ms
@@ -1214,23 +1277,31 @@ export class DaemonManager implements DaemonManagerLike {
       pollCount++;
       if (existsSync(this.socketPath)) {
         socketObserved = true;
-        // A daemon started from another checkout can own this namespace's socket
-        // without writing this namespace's PID record. The socket connection is
-        // authoritative readiness in that case; status() cannot prove ownership.
-        if (await this.verifyDaemonConnection(this.remainingTime(deadline), signal)) {
+        const outcome = await this.probeObservedSocket(deadline, signal);
+        if (outcome === "ready") {
           stderrLog(
             `Daemon readiness probe succeeded after ${this.timer.now() - startTime}ms ` +
               `(${pollCount} polls; socket observed)`,
           );
           return true;
         }
-        if (signal?.aborted) {
+        if (outcome === "aborted") {
           return false;
         }
-        const status = await this.status();
-        if (status.running) {
-          await this.removeInvalidSocketPath();
-        }
+      }
+
+      // Give up early when the caller's precondition for waiting no longer holds —
+      // e.g. the process that was bringing up the daemon has died. Readiness is
+      // checked first (a daemon that just became reachable wins), so this only
+      // short-circuits a wait that would otherwise run the full budget with nothing
+      // left to become ready, producing the caller's actionable error only as the
+      // client's request times out (issue #5878).
+      if (!shouldContinueWaiting()) {
+        stderrLog(
+          `Daemon readiness wait abandoned after ${this.timer.now() - startTime}ms ` +
+            `(${pollCount} polls); the process it was waiting on is no longer running`,
+        );
+        return false;
       }
 
       const remainingPollTimeMs = this.remainingTime(deadline);
@@ -1245,6 +1316,33 @@ export class DaemonManager implements DaemonManagerLike {
         `(${pollCount} polls; socket ${socketObserved ? "observed" : "not observed"})`,
     );
     return false;
+  }
+
+  /**
+   * Probe an observed socket for readiness within a single {@link waitForReady}
+   * poll. Returns `"ready"` when the daemon is connectable, `"aborted"` when the
+   * caller's signal fired mid-probe, or `"unready"` otherwise. A daemon started
+   * from another checkout can own this namespace's socket without writing this
+   * namespace's PID record, so a successful socket connection is authoritative
+   * readiness even when `status()` cannot prove ownership; an unready socket for a
+   * daemon that nonetheless reports running has its stale path unlinked as a side
+   * effect, mirroring the pre-extraction behavior.
+   */
+  private async probeObservedSocket(
+    deadline: number,
+    signal?: AbortSignal,
+  ): Promise<"ready" | "aborted" | "unready"> {
+    if (await this.verifyDaemonConnection(this.remainingTime(deadline), signal)) {
+      return "ready";
+    }
+    if (signal?.aborted) {
+      return "aborted";
+    }
+    const status = await this.status();
+    if (status.running) {
+      await this.removeInvalidSocketPath();
+    }
+    return "unready";
   }
 
   private async waitForExistingDaemon(timeout: number): Promise<boolean> {

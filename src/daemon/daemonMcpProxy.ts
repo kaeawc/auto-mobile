@@ -10,6 +10,7 @@ import { logger } from "../utils/logger";
 import {
   SOCKET_PATH,
   DAEMON_STARTUP_TIMEOUT_MS,
+  DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
   CONNECTION_TIMEOUT_MS,
   DAEMON_VERSION,
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
@@ -1234,10 +1235,24 @@ export class DaemonMcpProxy {
     // the "do not replace a live daemon's socket" contract are preserved. A
     // genuinely wedged daemon that never publishes still fails promptly at the
     // deadline with an actionable error.
-    const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
+    //
+    // Bound this reachability wait to DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS
+    // rather than the full startup budget. This branch is nested inside a
+    // `tools/list` request that clients cut off at ~30s (DAEMON_STARTUP_TIMEOUT_MS);
+    // if it consumed the full budget the actionable error below would be produced
+    // only as the client's own deadline expired, so the client would see an
+    // AutoMobile server with zero tools and no error text (issue #5878, residual of
+    // #5871/#5874). The daemon here already reports running — it is an EXISTING
+    // daemon whose socket has not published, the same "already-live daemon must
+    // become reachable" class #5874 bounded — not one we spawned in this call
+    // (that path keeps the full budget above). A daemon that has not published its
+    // socket within this shorter budget is one the client is better off hearing
+    // about now than waiting on.
+    const ready = await this.daemonManager.waitForReady(DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS);
     if (!ready) {
       throw new DaemonUnavailableError(
-        `Daemon failed to start within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
+        `Daemon reported running but its socket did not become reachable within ` +
+          `${DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS}ms`,
       );
     }
     logger.info("[DaemonMcpProxy] Daemon reported running; socket became ready");

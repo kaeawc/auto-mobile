@@ -74,6 +74,19 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
   private readonly timer: Timer;
   private pendingDiskCleanup: Promise<void> = Promise.resolve();
 
+  /**
+   * Per-device cache generation. `currentGeneration(deviceId)` is
+   * `globalGeneration + (deviceGeneration.get(deviceId) ?? 0)`, so a scoped
+   * `clear(deviceId)` advances only that device while a `clear()` (all) advances
+   * every device at once. Used to fence stale in-flight writes (issue #5884).
+   */
+  private globalGeneration: number = 0;
+  private readonly deviceGeneration: Map<string, number> = new Map();
+
+  currentGeneration(deviceId: string): number {
+    return this.globalGeneration + (this.deviceGeneration.get(deviceId) ?? 0);
+  }
+
   constructor(timer: Timer = defaultTimer, cacheDir?: string) {
     this.timer = timer;
     this.cacheDir = cacheDir ?? getTempDir(TEMP_SUBDIRS.OBSERVE_RESULTS);
@@ -84,7 +97,17 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     mkdirSync(this.cacheDir, { recursive: true });
   }
 
-  async put(deviceId: string, result: ObserveResult): Promise<void> {
+  async put(deviceId: string, result: ObserveResult, generation?: number): Promise<void> {
+    if (generation !== undefined && generation !== this.currentGeneration(deviceId)) {
+      // The cache was invalidated for this device while the observation that
+      // produced `result` was in flight (issue #5884). Dropping the write keeps
+      // the just-cleared cache from being repopulated with a now-stale hierarchy.
+      logger.debug(
+        `[OBSERVE_CACHE] Dropping stale observe result for device ${deviceId} ` +
+          `(captured generation ${generation}, current ${this.currentGeneration(deviceId)})`,
+      );
+      return;
+    }
     const timestamp = this.timer.now();
     const cacheKey = `${deviceId}:${timestamp}`;
     try {
@@ -120,6 +143,9 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
 
   clear(deviceId?: string): void {
     if (deviceId) {
+      // Advance the device's generation before deleting so any in-flight
+      // observation that captured the prior generation is fenced out on put.
+      this.deviceGeneration.set(deviceId, (this.deviceGeneration.get(deviceId) ?? 0) + 1);
       for (const [key, entry] of this.cache.entries()) {
         if (entry.deviceId === deviceId) {
           this.cache.delete(key);
@@ -127,6 +153,8 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       }
       this.deleteDiskFilesForDevice(deviceId);
     } else {
+      // A clear-all advances every device's generation at once.
+      this.globalGeneration += 1;
       this.cache.clear();
       this.deleteAllDiskFiles();
     }

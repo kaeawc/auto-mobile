@@ -318,6 +318,13 @@ export class RealObserveScreen implements ObserveScreen {
 
       const result = this.createBaseResult();
 
+      // Capture the device's cache generation before the hierarchy is captured so
+      // a concurrent invalidation (e.g. terminateApp force-stop) that lands while
+      // this observation is in flight fences out our late put() below, instead of
+      // repopulating the just-cleared cache with the terminated app's hierarchy
+      // (issue #5884).
+      const cacheGeneration = getObserveCacheStore().currentGeneration(this.device.deviceId);
+
       perf.serial("observe");
 
       // Ground-truth foreground app for the window-identity freshness check
@@ -429,7 +436,7 @@ export class RealObserveScreen implements ObserveScreen {
 
       // Cache the result for future use
       await perf.track("cacheResult", () =>
-        getObserveCacheStore().put(this.device.deviceId, result),
+        getObserveCacheStore().put(this.device.deviceId, result, cacheGeneration),
       );
 
       perf.end();

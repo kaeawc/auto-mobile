@@ -2,6 +2,7 @@ import { createConnection, Socket } from "node:net";
 import { existsSync, statSync } from "node:fs";
 import { platform } from "node:os";
 import { logger } from "../utils/logger";
+import { nonFiniteReplacer } from "../utils/nonFiniteJson";
 import { ActionableError } from "../models";
 import { DaemonRequest, DaemonResponse, DaemonNotification, isDaemonNotification } from "./types";
 import {
@@ -495,7 +496,7 @@ export class DaemonClient {
         return;
       }
 
-      this.socket.write(JSON.stringify(request) + "\n");
+      this.socket.write(JSON.stringify(request, nonFiniteReplacer) + "\n");
     });
   }
 
@@ -544,7 +545,7 @@ export class DaemonClient {
         return;
       }
 
-      this.socket.write(JSON.stringify(request) + "\n");
+      this.socket.write(JSON.stringify(request, nonFiniteReplacer) + "\n");
     });
   }
 

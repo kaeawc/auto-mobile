@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { ActionableError } from "../models";
 import { formatToolParamError } from "./toolParamError";
+import { reviveNonFiniteNumbers } from "../utils/nonFiniteJson";
 import { logger } from "../utils/logger";
 import { defaultTimer } from "../utils/SystemTimer";
 import { executionTracker } from "./executionTracker";
@@ -450,6 +451,16 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   });
 
   server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    // Revive non-finite arguments the daemon client encoded as sentinels so they
+    // survive the socket + loopback-HTTP hops (#5854 §2). Done BEFORE logging and
+    // validation so the request trace shows the real Infinity/-Infinity/NaN
+    // instead of `null`, and the schema rejects it with "must be a finite number".
+    if (request.params && request.params.arguments) {
+      request.params.arguments = reviveNonFiniteNumbers(request.params.arguments) as Record<
+        string,
+        unknown
+      >;
+    }
     logger.info("Request: ", request);
 
     // Extract tool name and arguments from the request

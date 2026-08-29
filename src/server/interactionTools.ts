@@ -782,6 +782,7 @@ export function formatSwipeOnMessage(
 export function buildTapOnResultMessage(
   selectedElement: TapOnSelectedElement | undefined,
   searchSummary: string | undefined,
+  activatedSubtext?: { text: string; occurrence: number },
 ): string {
   const details: string[] = [];
   if (selectedElement) {
@@ -792,6 +793,13 @@ export function buildTapOnResultMessage(
         : "element";
     const count = selectedElement.totalMatches;
     details.push(`matched ${identity}`, `${count} ${count === 1 ? "match" : "matches"}`);
+  } else if (activatedSubtext) {
+    // The accessibilityLink selector activates a semantic link without resolving a
+    // selectedElement, so name the activated link (and occurrence, when it
+    // disambiguates) — otherwise taps on different links stay byte-identical.
+    const occurrence =
+      activatedSubtext.occurrence > 0 ? ` [occurrence ${activatedSubtext.occurrence}]` : "";
+    details.push(`activated link ${JSON.stringify(activatedSubtext.text)}${occurrence}`);
   }
   if (searchSummary) {
     details.push(searchSummary);
@@ -852,7 +860,11 @@ export function registerInteractionTools() {
         : undefined;
 
     return createStructuredToolResponse({
-      message: buildTapOnResultMessage(result.selectedElement, searchSummary),
+      message: buildTapOnResultMessage(
+        result.selectedElement,
+        searchSummary,
+        result.activatedSubtext,
+      ),
       observation: result.observation,
       ...result,
     });

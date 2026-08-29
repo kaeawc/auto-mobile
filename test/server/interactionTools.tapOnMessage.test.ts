@@ -49,6 +49,37 @@ describe("buildTapOnResultMessage", () => {
     expect(message).toContain(summary);
   });
 
+  // The accessibilityLink selector resolves no selectedElement; the message must
+  // still say which semantic link was activated so different links are not
+  // byte-identical.
+  test("names the activated semantic link when there is no selected element", () => {
+    const message = buildTapOnResultMessage(undefined, undefined, {
+      text: "Terms and privacy",
+      occurrence: 0,
+    });
+    expect(message).toBe('Tapped on element (activated link "Terms and privacy")');
+  });
+
+  test("includes the occurrence when it disambiguates repeated link text", () => {
+    const message = buildTapOnResultMessage(undefined, undefined, { text: "Learn more", occurrence: 2 });
+    expect(message).toContain('activated link "Learn more" [occurrence 2]');
+  });
+
+  test("different activated links yield different messages", () => {
+    const terms = buildTapOnResultMessage(undefined, undefined, { text: "Terms", occurrence: 0 });
+    const privacy = buildTapOnResultMessage(undefined, undefined, { text: "Privacy", occurrence: 0 });
+    expect(terms).not.toBe(privacy);
+  });
+
+  test("prefers the matched element over the activated link when both are present", () => {
+    const message = buildTapOnResultMessage(selected({ text: "Internet" }), undefined, {
+      text: "Terms",
+      occurrence: 0,
+    });
+    expect(message).toContain('matched text="Internet"');
+    expect(message).not.toContain("activated link");
+  });
+
   test("keeps the plain message when nothing was resolved", () => {
     expect(buildTapOnResultMessage(undefined, undefined)).toBe("Tapped on element");
   });

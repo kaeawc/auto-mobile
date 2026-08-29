@@ -18,10 +18,7 @@
     },
     "platform": {
       "type": "string",
-      "enum": [
-        "android",
-        "ios"
-      ],
+      "enum": ["android", "ios"],
       "description": "Optional platform hint for plan execution"
     },
     "devices": {
@@ -140,10 +137,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ],
+          "enum": ["android", "ios"],
           "description": "Target platform for this device"
         },
         "simulatorType": {
@@ -178,6 +172,10 @@
           "type": "string",
           "description": "Human-readable description of what this step does"
         },
+        "optional": {
+          "type": "boolean",
+          "description": "Best-effort step: if the tool fails (returns success:false, an observe waitFor times out, or throws), the executor logs it, records the step as skipped, and continues instead of aborting the plan. Use for steps that guard against intermittent UI (e.g. dismissing a dialog that may or may not be present)."
+        },
         "description": {
           "type": "string",
           "description": "DEPRECATED: Use 'label' instead (legacy field)"
@@ -199,9 +197,7 @@
                 "const": "dragAndDrop"
               }
             },
-            "required": [
-              "tool"
-            ]
+            "required": ["tool"]
           },
           "then": {
             "properties": {
@@ -234,10 +230,7 @@
               },
               "platform": {
                 "type": "string",
-                "enum": [
-                  "android",
-                  "ios"
-                ],
+                "enum": ["android", "ios"],
                 "description": "Platform"
               },
               "sessionUuid": {
@@ -253,42 +246,30 @@
               {
                 "anyOf": [
                   {
-                    "required": [
-                      "source"
-                    ]
+                    "required": ["source"]
                   },
                   {
                     "properties": {
                       "params": {
-                        "required": [
-                          "source"
-                        ]
+                        "required": ["source"]
                       }
                     },
-                    "required": [
-                      "params"
-                    ]
+                    "required": ["params"]
                   }
                 ]
               },
               {
                 "anyOf": [
                   {
-                    "required": [
-                      "target"
-                    ]
+                    "required": ["target"]
                   },
                   {
                     "properties": {
                       "params": {
-                        "required": [
-                          "target"
-                        ]
+                        "required": ["target"]
                       }
                     },
-                    "required": [
-                      "params"
-                    ]
+                    "required": ["params"]
                   }
                 ]
               }
@@ -302,9 +283,7 @@
                 "const": "highlight"
               }
             },
-            "required": [
-              "tool"
-            ]
+            "required": ["tool"]
           },
           "then": {
             "properties": {
@@ -323,15 +302,24 @@
                 "type": "string",
                 "description": "Element text content to match"
               },
+              "container": {
+                "$ref": "#/$defs/highlightContainer"
+              },
+              "containerOf": {
+                "type": "boolean",
+                "description": "Whether to highlight the container of the selected element"
+              },
               "shape": {
                 "$ref": "#/$defs/highlightShape"
               },
+              "selectionStrategy": {
+                "type": "string",
+                "enum": ["first", "random"],
+                "description": "Element selection strategy when multiple matches are found (default: first)"
+              },
               "platform": {
                 "type": "string",
-                "enum": [
-                  "android",
-                  "ios"
-                ],
+                "enum": ["android", "ios"],
                 "description": "Platform"
               },
               "timeoutMs": {
@@ -351,55 +339,37 @@
               {
                 "anyOf": [
                   {
-                    "required": [
-                      "shape"
-                    ]
+                    "required": ["shape"]
                   },
                   {
-                    "required": [
-                      "id"
-                    ]
+                    "required": ["id"]
                   },
                   {
-                    "required": [
-                      "text"
-                    ]
+                    "required": ["text"]
                   },
                   {
                     "properties": {
                       "params": {
-                        "required": [
-                          "shape"
-                        ]
+                        "required": ["shape"]
                       }
                     },
-                    "required": [
-                      "params"
-                    ]
+                    "required": ["params"]
                   },
                   {
                     "properties": {
                       "params": {
-                        "required": [
-                          "id"
-                        ]
+                        "required": ["id"]
                       }
                     },
-                    "required": [
-                      "params"
-                    ]
+                    "required": ["params"]
                   },
                   {
                     "properties": {
                       "params": {
-                        "required": [
-                          "text"
-                        ]
+                        "required": ["text"]
                       }
                     },
-                    "required": [
-                      "params"
-                    ]
+                    "required": ["params"]
                   }
                 ]
               }
@@ -413,9 +383,7 @@
                 "const": "setAppPermissions"
               }
             },
-            "required": [
-              "tool"
-            ]
+            "required": ["tool"]
           },
           "then": {
             "properties": {
@@ -429,11 +397,7 @@
               },
               "action": {
                 "type": "string",
-                "enum": [
-                  "grant",
-                  "revoke",
-                  "reset"
-                ],
+                "enum": ["grant", "revoke", "reset"],
                 "description": "Permission action. Defaults to grant. Android reset requires permissions=['all'] and resets runtime permissions device-wide."
               },
               "permissions": {
@@ -460,18 +424,12 @@
               },
               "scheduleExactAlarm": {
                 "type": "string",
-                "enum": [
-                  "allow",
-                  "deny"
-                ],
+                "enum": ["allow", "deny"],
                 "description": "Android only: set UID-level SCHEDULE_EXACT_ALARM appop"
               },
               "platform": {
                 "type": "string",
-                "enum": [
-                  "android",
-                  "ios"
-                ],
+                "enum": ["android", "ios"],
                 "description": "Platform"
               },
               "sessionUuid": {
@@ -493,33 +451,19 @@
             },
             "anyOf": [
               {
-                "required": [
-                  "appId",
-                  "permissions"
-                ]
+                "required": ["appId", "permissions"]
               },
               {
-                "required": [
-                  "appId",
-                  "notificationsEnabled"
-                ]
+                "required": ["appId", "notificationsEnabled"]
               },
               {
-                "required": [
-                  "appId",
-                  "notificationPolicyAccess"
-                ]
+                "required": ["appId", "notificationPolicyAccess"]
               },
               {
-                "required": [
-                  "appId",
-                  "scheduleExactAlarm"
-                ]
+                "required": ["appId", "scheduleExactAlarm"]
               },
               {
-                "required": [
-                  "params"
-                ]
+                "required": ["params"]
               }
             ],
             "allOf": [
@@ -530,18 +474,12 @@
                       "const": "reset"
                     }
                   },
-                  "required": [
-                    "action"
-                  ]
+                  "required": ["action"]
                 },
                 "then": {
-                  "required": [
-                    "permissions"
-                  ],
+                  "required": ["permissions"],
                   "not": {
-                    "required": [
-                      "userId"
-                    ]
+                    "required": ["userId"]
                   }
                 }
               },
@@ -555,10 +493,7 @@
                       "const": "android"
                     }
                   },
-                  "required": [
-                    "action",
-                    "platform"
-                  ]
+                  "required": ["action", "platform"]
                 },
                 "then": {
                   "properties": {
@@ -572,6 +507,190 @@
                     }
                   }
                 }
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "getAppPermissions"
+              }
+            },
+            "required": ["tool"]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/getAppPermissionsParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "App package ID or bundle identifier",
+                "minLength": 1
+              },
+              "permissions": {
+                "type": "array",
+                "description": "Optional permission names or simulator privacy services to query",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "platform": {
+                "type": "string",
+                "enum": ["android", "ios"],
+                "description": "Platform"
+              },
+              "sessionUuid": {
+                "type": "string",
+                "description": "Session UUID for device targeting"
+              },
+              "keepScreenAwake": {
+                "type": "boolean",
+                "description": "Keep physical Android devices awake during the session (default: true)"
+              },
+              "device": {
+                "type": "string",
+                "description": "Device label for multi-device plans (e.g., \"A\", \"B\")"
+              },
+              "deviceId": {
+                "type": "string",
+                "description": "Device ID override"
+              }
+            },
+            "anyOf": [
+              {
+                "required": ["appId"]
+              },
+              {
+                "required": ["params"]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "getNotificationPolicy"
+              }
+            },
+            "required": ["tool"]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/getNotificationPolicyParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "App package ID or bundle identifier",
+                "minLength": 1
+              }
+            },
+            "anyOf": [
+              {
+                "required": ["appId"]
+              },
+              {
+                "required": ["params"]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "setNotificationPolicy"
+              }
+            },
+            "required": ["tool"]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/setNotificationPolicyParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "App package ID or bundle identifier",
+                "minLength": 1
+              },
+              "policyAccess": {
+                "type": "boolean",
+                "description": "Android only: allow or revoke app notification policy / DND access"
+              }
+            },
+            "anyOf": [
+              {
+                "required": ["appId", "policyAccess"]
+              },
+              {
+                "required": ["params"]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "getDeviceState"
+              }
+            },
+            "required": ["tool"]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/getDeviceStateParams"
+              },
+              "include": {
+                "type": "array",
+                "minItems": 1,
+                "description": "Optional device state fields to read",
+                "items": {
+                  "type": "string",
+                  "enum": ["doNotDisturb", "biometrics"]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "setDeviceState"
+              }
+            },
+            "required": ["tool"]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/setDeviceStateParams"
+              },
+              "doNotDisturb": {
+                "$ref": "#/$defs/doNotDisturbStateInput"
+              },
+              "biometrics": {
+                "$ref": "#/$defs/biometricStateInput"
+              }
+            },
+            "anyOf": [
+              {
+                "required": ["doNotDisturb"]
+              },
+              {
+                "required": ["biometrics"]
+              },
+              {
+                "required": ["params"]
               }
             ]
           }
@@ -596,14 +715,10 @@
       "description": "Selector for dragAndDrop elements",
       "oneOf": [
         {
-          "required": [
-            "text"
-          ]
+          "required": ["text"]
         },
         {
-          "required": [
-            "elementId"
-          ]
+          "required": ["elementId"]
         }
       ]
     },
@@ -638,10 +753,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ],
+          "enum": ["android", "ios"],
           "description": "Platform"
         },
         "sessionUuid": {
@@ -682,36 +794,22 @@
           "description": "Bounds height"
         },
         "sourceWidth": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": ["number", "null"],
           "exclusiveMinimum": 0,
           "description": "Optional source width for coordinate normalization"
         },
         "sourceHeight": {
-          "type": [
-            "number",
-            "null"
-          ],
+          "type": ["number", "null"],
           "exclusiveMinimum": 0,
           "description": "Optional source height for coordinate normalization"
         }
       },
-      "required": [
-        "x",
-        "y",
-        "width",
-        "height"
-      ],
+      "required": ["x", "y", "width", "height"],
       "additionalProperties": false,
       "description": "Highlight bounds"
     },
     "highlightStyle": {
-      "type": [
-        "object",
-        "null"
-      ],
+      "type": ["object", "null"],
       "properties": {
         "strokeColor": {
           "type": "string",
@@ -743,10 +841,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": [
-            "box",
-            "circle"
-          ],
+          "enum": ["box", "circle"],
           "description": "Highlight shape type"
         },
         "bounds": {
@@ -756,12 +851,59 @@
           "$ref": "#/$defs/highlightStyle"
         }
       },
-      "required": [
-        "type",
-        "bounds"
-      ],
+      "required": ["type", "bounds"],
       "additionalProperties": false,
       "description": "Highlight shape definition"
+    },
+    "highlightSelector": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "Element text",
+          "minLength": 1
+        },
+        "id": {
+          "type": "string",
+          "description": "Element ID",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "description": "Selector for highlight elements",
+      "oneOf": [
+        {
+          "required": ["text"]
+        },
+        {
+          "required": ["id"]
+        }
+      ]
+    },
+    "highlightContainer": {
+      "type": "object",
+      "properties": {
+        "elementId": {
+          "type": "string",
+          "description": "Container element ID",
+          "minLength": 1
+        },
+        "text": {
+          "type": "string",
+          "description": "Container text",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false,
+      "description": "Container selector to scope highlight search",
+      "oneOf": [
+        {
+          "required": ["elementId"]
+        },
+        {
+          "required": ["text"]
+        }
+      ]
     },
     "highlightParams": {
       "type": "object",
@@ -778,15 +920,24 @@
           "type": "string",
           "description": "Element text content to match"
         },
+        "container": {
+          "$ref": "#/$defs/highlightContainer"
+        },
+        "containerOf": {
+          "type": "boolean",
+          "description": "Whether to highlight the container of the selected element"
+        },
         "shape": {
           "$ref": "#/$defs/highlightShape"
         },
+        "selectionStrategy": {
+          "type": "string",
+          "enum": ["first", "random"],
+          "description": "Element selection strategy when multiple matches are found (default: first)"
+        },
         "platform": {
           "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ],
+          "enum": ["android", "ios"],
           "description": "Platform"
         },
         "timeoutMs": {
@@ -813,11 +964,113 @@
       "additionalProperties": true,
       "description": "Parameters for highlight"
     },
+    "doNotDisturbStateInput": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable or disable Do Not Disturb"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["off", "none", "priority", "alarms"],
+          "description": "Do Not Disturb mode"
+        }
+      },
+      "anyOf": [
+        {
+          "required": ["enabled"]
+        },
+        {
+          "required": ["mode"]
+        }
+      ],
+      "description": "Do Not Disturb state input"
+    },
+    "biometricStateInput": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["enrollment"],
+      "properties": {
+        "enrollment": {
+          "type": "string",
+          "enum": ["enrolled", "not_enrolled"],
+          "description": "iOS Simulator biometric enrollment state"
+        }
+      },
+      "description": "iOS Simulator biometric state input"
+    },
+    "getDeviceStateParams": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "include": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": ["doNotDisturb", "biometrics"]
+          },
+          "description": "Optional device state fields to read"
+        }
+      },
+      "description": "Parameters for getDeviceState"
+    },
+    "setDeviceStateParams": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "doNotDisturb": {
+          "$ref": "#/$defs/doNotDisturbStateInput"
+        },
+        "biometrics": {
+          "$ref": "#/$defs/biometricStateInput"
+        }
+      },
+      "anyOf": [
+        {
+          "required": ["doNotDisturb"]
+        },
+        {
+          "required": ["biometrics"]
+        }
+      ],
+      "description": "Parameters for setDeviceState"
+    },
+    "getNotificationPolicyParams": {
+      "type": "object",
+      "required": ["appId"],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App package ID or bundle identifier"
+        }
+      },
+      "description": "Parameters for getNotificationPolicy"
+    },
+    "setNotificationPolicyParams": {
+      "type": "object",
+      "required": ["appId", "policyAccess"],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App package ID or bundle identifier"
+        },
+        "policyAccess": {
+          "type": "boolean",
+          "description": "Android only: allow or revoke app notification policy / DND access"
+        }
+      },
+      "description": "Parameters for setNotificationPolicy"
+    },
     "setAppPermissionsParams": {
       "type": "object",
-      "required": [
-        "appId"
-      ],
+      "required": ["appId"],
       "additionalProperties": true,
       "properties": {
         "appId": {
@@ -827,11 +1080,7 @@
         },
         "action": {
           "type": "string",
-          "enum": [
-            "grant",
-            "revoke",
-            "reset"
-          ],
+          "enum": ["grant", "revoke", "reset"],
           "description": "Permission action. Defaults to grant. Android reset requires permissions=['all'] and resets runtime permissions device-wide."
         },
         "permissions": {
@@ -858,18 +1107,12 @@
         },
         "scheduleExactAlarm": {
           "type": "string",
-          "enum": [
-            "allow",
-            "deny"
-          ],
+          "enum": ["allow", "deny"],
           "description": "Android only: set UID-level SCHEDULE_EXACT_ALARM appop"
         },
         "platform": {
           "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ],
+          "enum": ["android", "ios"],
           "description": "Platform"
         },
         "sessionUuid": {
@@ -891,24 +1134,16 @@
       },
       "anyOf": [
         {
-          "required": [
-            "notificationsEnabled"
-          ]
+          "required": ["notificationsEnabled"]
         },
         {
-          "required": [
-            "permissions"
-          ]
+          "required": ["permissions"]
         },
         {
-          "required": [
-            "notificationPolicyAccess"
-          ]
+          "required": ["notificationPolicyAccess"]
         },
         {
-          "required": [
-            "scheduleExactAlarm"
-          ]
+          "required": ["scheduleExactAlarm"]
         }
       ],
       "allOf": [
@@ -919,18 +1154,12 @@
                 "const": "reset"
               }
             },
-            "required": [
-              "action"
-            ]
+            "required": ["action"]
           },
           "then": {
-            "required": [
-              "permissions"
-            ],
+            "required": ["permissions"],
             "not": {
-              "required": [
-                "userId"
-              ]
+              "required": ["userId"]
             }
           }
         },
@@ -944,10 +1173,7 @@
                 "const": "android"
               }
             },
-            "required": [
-              "action",
-              "platform"
-            ]
+            "required": ["action", "platform"]
           },
           "then": {
             "properties": {
@@ -964,6 +1190,49 @@
         }
       ],
       "description": "Parameters for setAppPermissions"
+    },
+    "getAppPermissionsParams": {
+      "type": "object",
+      "required": ["appId"],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App package ID or bundle identifier"
+        },
+        "permissions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Optional permission names or simulator privacy services to query"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"],
+          "description": "Platform"
+        },
+        "sessionUuid": {
+          "type": "string",
+          "description": "Session UUID for device targeting"
+        },
+        "keepScreenAwake": {
+          "type": "boolean",
+          "description": "Keep physical Android devices awake during the session (default: true)"
+        },
+        "device": {
+          "type": "string",
+          "description": "Device label for multi-device plans"
+        },
+        "deviceId": {
+          "type": "string",
+          "description": "Device ID override"
+        }
+      },
+      "description": "Parameters for getAppPermissions"
     },
     "expectation": {
       "type": "object",

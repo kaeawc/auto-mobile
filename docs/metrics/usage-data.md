@@ -389,6 +389,8 @@ come from the GitHub Releases API and npm download counts.
   function section(root, title, subtitle) {
     var wrap = document.createElement("div");
     wrap.className = "dl-section";
+    wrap.appendChild(el("h2", {}, title));
+    wrap.appendChild(el("p", {}, subtitle));
     root.appendChild(wrap);
     return wrap;
   }

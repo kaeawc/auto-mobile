@@ -43,28 +43,12 @@ tests.
     font-size: 0.7rem;
   }
 
-  .desktop-install-options.is-filtered [data-platform]:not(.is-recommended) {
-    display: none;
-  }
-
-  .desktop-install-toggle {
-    background: transparent;
-    border: 0;
-    color: var(--md-primary-fg-color);
-    cursor: pointer;
-    padding: 0.5rem 0;
-    text-decoration: underline;
-  }
 </style>
 
 ## Install
 
-<div class="doc-switcher" data-doc-switcher="install-method" data-doc-switcher-default="one-line" role="group" aria-label="Installation method">
-  <button type="button" data-doc-switcher-option="one-line">One-line install</button>
-  <button type="button" data-doc-switcher-option="manual">Manual</button>
-</div>
-
-<div data-doc-switcher-panel="install-method" data-doc-switcher-value="one-line" markdown>
+<details open markdown>
+<summary>One-line install</summary>
 
 <div class="install-command" markdown>
 ~~~bash
@@ -92,44 +76,10 @@ global configuration. Restart your MCP client when it finishes.
   </a>
 </div>
 
-<script>
-  (() => {
-    const options = document.querySelector(".desktop-install-options");
-    if (!options) return;
+</details>
 
-    const platform = navigator.userAgentData?.platform || navigator.platform || navigator.userAgent;
-    const detected = /win/i.test(platform)
-      ? "windows"
-      : /mac/i.test(platform)
-        ? "macos"
-        : /linux/i.test(platform)
-          ? "linux"
-          : null;
-    const recommended = detected && options.querySelector(`[data-platform="${detected}"]`);
-    if (!recommended) return;
-
-    recommended.classList.add("is-recommended");
-    options.classList.add("is-filtered");
-
-    const toggle = document.createElement("button");
-    toggle.className = "desktop-install-toggle";
-    toggle.type = "button";
-    toggle.textContent = "Other desktop downloads";
-    toggle.setAttribute("aria-expanded", "false");
-    toggle.addEventListener("click", () => {
-      const showingRecommendedOnly = options.classList.toggle("is-filtered");
-      toggle.textContent = showingRecommendedOnly
-        ? "Other desktop downloads"
-        : `Show ${recommended.textContent.trim().split(/\s+/)[0]} download`;
-      toggle.setAttribute("aria-expanded", String(!showingRecommendedOnly));
-    });
-    options.append(toggle);
-  })();
-</script>
-
-</div>
-
-<div data-doc-switcher-panel="install-method" data-doc-switcher-value="manual" markdown>
+<details markdown>
+<summary>Manual MCP configuration</summary>
 
 ```json
 {
@@ -142,7 +92,7 @@ Place this server in the client’s documented MCP configuration, then restart
 the client. Going this route means you're going to handle dependencies like having
 bun and ffmpeg.
 
-</div>
+</details>
 
 ### First use
 

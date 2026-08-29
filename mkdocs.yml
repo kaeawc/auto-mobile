@@ -44,11 +44,7 @@ theme:
     - content.code.select
 
 extra_css:
-  - assets/stylesheets/doc-switcher.css
   - assets/stylesheets/automobile-brand.css
-
-extra_javascript:
-  - assets/javascripts/doc-switcher.js
 
 markdown_extensions:
   - smarty
@@ -102,6 +98,9 @@ nav:
       - "Interaction loop": design-docs/mcp/interaction-loop.md
       - "Daemon": design-docs/mcp/daemon.md
       - "Android JUnit runner": design-docs/plat/android/junit-runner/index.md
+      - "Android system tray": design-docs/plat/android/system-tray-lookfor.md
       - "Desktop App": design-docs/plat/android/desktop-app.md
+      - "iOS Simulator continuity": release/ios-simulator-continuity.md
+      - "iOS Files picker provider": decisions/ios-user-files-provider.md
   - "Usage Data": metrics/usage-data.md
   - "FAQ": faq.md

@@ -14,12 +14,8 @@ device snapshot for someone else to inspect.
 > app version, and whether the issue reproduced consistently. Highlight defects
 > that will help another person reproduce it, then take a device snapshot.
 
-<div class="doc-switcher" data-doc-switcher="bug-reproduction" data-doc-switcher-default="workflow" role="group" aria-label="Bug reproduction details">
-  <button type="button" data-doc-switcher-option="workflow">Workflow</button>
-  <button type="button" data-doc-switcher-option="demo">Demo</button>
-</div>
-
-<div data-doc-switcher-panel="bug-reproduction" data-doc-switcher-value="workflow" markdown>
+<details open markdown>
+<summary>Workflow</summary>
 
 ## What the agent does
 
@@ -28,12 +24,13 @@ device snapshot for someone else to inspect.
 3. Highlights the defect or important UI state.
 4. Captures a device snapshot when the reproduced state should be shared.
 
-</div>
+</details>
 
-<div data-doc-switcher-panel="bug-reproduction" data-doc-switcher-value="demo" markdown>
+<details markdown>
+<summary>Demo</summary>
 
 ## Bug reproduction
 
 ![An AI agent reproducing a sample counter bug and highlighting the issue](../img/bug-repro.gif)
 
-</div>
+</details>

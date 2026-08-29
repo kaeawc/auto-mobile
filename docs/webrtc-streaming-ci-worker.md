@@ -29,20 +29,46 @@ The daemon accepts newline-delimited JSON on
 `~/.auto-mobile/webrtc-stream.sock`:
 
 ```bash
+SESSION_UUID="<sessionId returned by the MCP getAndroid or getApple tool>"
+DEVICE_ID="<device id returned by the same tool>"
+PLATFORM="android" # Use "ios" for an iOS Simulator.
+STREAM_ID="$CI_JOB_ID"
 WHIP="https://mediamtx.example.com:8889/$CI_JOB_ID/whip"
-echo '{"action":"start","streamId":"'"$CI_JOB_ID"'","whipEndpoint":"'"$WHIP"'"}' \
-  | nc -U ~/.auto-mobile/webrtc-stream.sock
+START_RESPONSE="$(
+  jq -nc \
+    --arg sessionUuid "$SESSION_UUID" \
+    --arg deviceId "$DEVICE_ID" \
+    --arg platform "$PLATFORM" \
+    --arg streamId "$STREAM_ID" \
+    --arg whipEndpoint "$WHIP" \
+    '{action:"start",$sessionUuid,$deviceId,$platform,$streamId,$whipEndpoint}' \
+    | nc -U ~/.auto-mobile/webrtc-stream.sock
+)"
+LEASE_ID="$(jq -er '.stream.lease.id' <<<"$START_RESPONSE")"
 
 # Watch: https://mediamtx.example.com:8889/$CI_JOB_ID
-echo '{"action":"status","streamId":"'"$CI_JOB_ID"'"}' \
+# Send this status request at least once every 60 seconds while the job runs;
+# carrying leaseId renews the stream lease.
+jq -nc \
+  --arg sessionUuid "$SESSION_UUID" \
+  --arg streamId "$STREAM_ID" \
+  --arg leaseId "$LEASE_ID" \
+  '{action:"status",$sessionUuid,$streamId,$leaseId}' \
   | nc -U ~/.auto-mobile/webrtc-stream.sock
 
-echo '{"action":"stop","streamId":"'"$CI_JOB_ID"'"}' \
+jq -nc \
+  --arg sessionUuid "$SESSION_UUID" \
+  --arg streamId "$STREAM_ID" \
+  --arg leaseId "$LEASE_ID" \
+  '{action:"stop",$sessionUuid,$streamId,$leaseId}' \
   | nc -U ~/.auto-mobile/webrtc-stream.sock
 ```
 
-Pass `deviceId` when more than one device is connected. The stream reconnects
-after transient network failures; browser viewers may need to reconnect too.
+Acquire a fresh daemon session with the public MCP `getAndroid` or `getApple`
+tool before opening the socket; every request must carry that tool's
+`sessionId`. The example always includes `deviceId` and `platform` so the iOS
+path cannot silently fall back to Android. The stream reconnects after transient
+network failures; browser viewers may need to reconnect too.
 
 ## Troubleshooting
 

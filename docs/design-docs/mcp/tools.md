@@ -64,11 +64,18 @@ the exact arguments supported by your connection.
     {
       "tool": "putAppFile",
       "params": {
-        "appId": "com.example.app",
-        "container": "documents",
-        "sourcePath": "/Users/me/fixtures/welcome.png",
-        "destinationPath": "fixtures/welcome.png",
-        "platform": "ios"
+        "platform": "ios",
+        "target": {
+          "domain": "app_containers",
+          "appId": "com.example.app",
+          "container": "documents"
+        },
+        "files": [
+          {
+            "sourcePath": "/Users/me/fixtures/welcome.png",
+            "destinationPath": "fixtures/welcome.png"
+          }
+        ]
       }
     }
     ~~~
@@ -92,14 +99,14 @@ the exact arguments supported by your connection.
 | ❌ <code>killDevice</code> / 🧹 <code>deleteDevice</code>                      | Stops a device, or stops and permanently deletes it.                       |
 | 📸 <code>deviceSnapshot</code>                                                 | Captures or restores a device snapshot.                                    |
 | 🔄 <code>rotate</code>                                                         | Changes device orientation.                                                |
-| 🌐 <code>openLink</code>                                                       | Opens a URL in the browser.                                                |
+| 🌐 <code>openLink</code>                                                       | Opens web URLs or routes app and universal deep links.                     |
 | 🧰 <code>homeScreen</code> / <code>recentApps</code> / <code>systemTray</code> | Controls core system surfaces and notifications.                           |
 | 🔓 <code>wakeAndUnlock</code>                                                  | Wakes and unlocks the keyguard.                                            |
 | 🌍 <code>changeLocalization</code>                                             | Changes locale, time zone, text direction, time format, and calendar.      |
 | ⚙️ <code>getDeviceState</code> / ⚙️ <code>setDeviceState</code>                | Reads or changes Do Not Disturb and simulator biometric enrollment.        |
 | 🧬 <code>getIosSimulatorCapabilities</code>                                    | Discovers biometrics for a selected iOS Simulator device type and runtime. |
 | 🫆 <code>biometricAuth</code>                                                  | Simulates biometric authentication.                                        |
-| 📳 <code>shake</code>                                                          | Shakes an iOS Simulator.                                                   |
+| 📳 <code>shake</code>                                                          | Shakes an Android emulator or iOS Simulator.                               |
 | 📞 <code>phoneCall</code> / 💬 <code>sendSms</code>                            | Simulates an Android emulator phone call or incoming SMS.                  |
 | 🔔 <code>postNotification</code>                                               | Posts a notification through Android SDK hooks or iOS Simulator push.      |
 | 🔔 <code>getNotificationPolicy</code> / 🔔 <code>setNotificationPolicy</code>  | Reads or changes app notification and Do Not Disturb policy.               |

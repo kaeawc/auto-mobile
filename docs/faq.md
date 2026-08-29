@@ -15,7 +15,9 @@ requirements.
 
 ## How do I see or start a device?
 
-Use the MCP tools `listDevices` and `startDevice`, or run the CLI:
+MCP clients can acquire a device with `getAndroid` or `getApple`; use
+`listDevices` to inspect devices that are already available. The CLI also
+exposes the compatibility `startDevice` command:
 
 ```bash
 auto-mobile --cli listDevices

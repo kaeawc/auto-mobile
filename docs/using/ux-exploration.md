@@ -22,32 +22,29 @@ iterates as it navigates.
 State the outcome you want. Mention a required route—such as a deep link,
 search, or scrolling—when the route itself matters.
 
-<div class="doc-switcher" data-doc-switcher="ux-exploration" data-doc-switcher-default="maps" role="group" aria-label="UX exploration demo">
-  <button type="button" data-doc-switcher-option="maps">Google Maps</button>
-  <button type="button" data-doc-switcher-option="clock">Clock alarm</button>
-  <button type="button" data-doc-switcher-option="camera">Camera gallery</button>
-</div>
-
-<div data-doc-switcher-panel="ux-exploration" data-doc-switcher-value="maps" markdown>
+<details open markdown>
+<summary>Google Maps</summary>
 
 ## Google Maps exploration
 
 ![An AI agent exploring Google Maps, searching for locations, and using map controls](../img/google-maps.gif)
 
-</div>
+</details>
 
-<div data-doc-switcher-panel="ux-exploration" data-doc-switcher-value="clock" markdown>
+<details markdown>
+<summary>Clock alarm</summary>
 
 ## Clock app alarm
 
 ![An AI agent opening the Clock app, selecting the alarm tab, and creating an alarm](../img/clock-app.gif)
 
-</div>
+</details>
 
-<div data-doc-switcher-panel="ux-exploration" data-doc-switcher-value="camera" markdown>
+<details markdown>
+<summary>Camera gallery</summary>
 
 ## Camera gallery
 
 ![An AI agent opening Camera, taking a photo, and viewing it in Gallery](../img/camera-gallery.gif)
 
-</div>
+</details>

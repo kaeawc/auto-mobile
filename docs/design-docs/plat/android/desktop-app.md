@@ -11,10 +11,12 @@ flowchart LR
   UI[Desktop App] --> Client[AutoMobile client]
   Client --> HTTP[Streamable HTTP]
   Client --> Socket[Local daemon socket]
-  Client --> Stdio[Launched process]
   HTTP --> MCP[MCP server]
   Socket --> MCP
-  Stdio --> MCP
 ```
 
-The Desktop App automatically uses the available AutoMobile connection, whether that is a local daemon, HTTP server, or launched process. While it is controlling a selected device, that device is reserved for the Desktop App. Close or disconnect the app before using the same device from another agent or CLI session.
+The Desktop App automatically uses an available local daemon socket or
+Streamable HTTP connection. It cannot connect externally to an MCP process over
+stdio. While it is controlling a selected device, that device is reserved for
+the Desktop App. Close or disconnect the app before using the same device from
+another agent or CLI session.

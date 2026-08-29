@@ -61,6 +61,7 @@ EOF
   cat > "${TEST_ROOT}/docs/using/ui-tests.md" <<'EOF'
 testImplementation("dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:0.0.1")
 export AUTOMOBILE_VERSION=0.0.1
+Replace `0.0.1` with the version used by your test runner dependency.
 EOF
 
   cat > "${TEST_ROOT}/android/gradle.properties" <<'EOF'
@@ -118,6 +119,8 @@ run_bump() {
     "${TEST_ROOT}/docs/index.md"
   grep -q "auto-mobile-junit-runner:${VERSION}" "${TEST_ROOT}/docs/using/ui-tests.md"
   grep -q "AUTOMOBILE_VERSION=${VERSION}" "${TEST_ROOT}/docs/using/ui-tests.md"
+  grep -q "Replace \`${VERSION}\` with the version used by your test runner dependency" \
+    "${TEST_ROOT}/docs/using/ui-tests.md"
   # The Swift constant must be *regenerated* (not regex-edited in place): assert
   # the generator's output markers so a regression back to an in-place edit fails.
   grep -q "public static let current = \"${VERSION}\"" \

@@ -287,6 +287,10 @@ patterns = (
     (r"(auto-mobile-junit-runner:)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", rf"\g<1>{version}"),
     (r"(AUTOMOBILE_VERSION=)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", rf"\g<1>{version}"),
     (r"(@kaeawc/auto-mobile@)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", rf"\g<1>{version}"),
+    (
+        r"(Replace `)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?(` with the version used by your test runner dependency\.)",
+        rf"\g<1>{version}\g<2>",
+    ),
 )
 count = 0
 for pattern, replacement in patterns:

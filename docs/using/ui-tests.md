@@ -4,19 +4,10 @@ AutoMobile UI tests keep the test assertion in Kotlin or Swift and the device
 steps in a YAML plan. The same plan can be reviewed, reused, and run locally or
 in CI.
 
-<div class="doc-switcher" data-doc-switcher="ui-tests-platform" role="group" aria-label="Test platform">
-  <button type="button" data-doc-switcher-option="android">Android</button>
-  <button type="button" data-doc-switcher-option="ios">iOS</button>
-</div>
-
 ## 1. Install a test runner
 
-<div class="doc-switcher" data-doc-switcher="ui-tests-platform" role="group" aria-label="Test platform">
-  <button type="button" data-doc-switcher-option="android">Android</button>
-  <button type="button" data-doc-switcher-option="ios">iOS</button>
-</div>
-
-<div data-doc-switcher-panel="ui-tests-platform" data-doc-switcher-value="android" markdown>
+<details open markdown>
+<summary>Android</summary>
 
 ### Android / Gradle
 
@@ -33,9 +24,10 @@ The runner executes as a normal JVM test, so no test APK or
 `connectedAndroidTest` task is required. Ensure `adb` is on `PATH` and an
 Android device or emulator is available.
 
-</div>
+</details>
 
-<div data-doc-switcher-panel="ui-tests-platform" data-doc-switcher-value="ios" markdown>
+<details markdown>
+<summary>iOS</summary>
 
 ### iOS / Swift Package Manager
 
@@ -49,16 +41,12 @@ For a Swift package manifest, use the released package:
 
 `from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6, macOS 14, and iOS 17.
 
-</div>
+</details>
 
 ## 2. Create a plan
 
-<div class="doc-switcher" data-doc-switcher="ui-tests-platform" role="group" aria-label="Test platform">
-  <button type="button" data-doc-switcher-option="android">Android</button>
-  <button type="button" data-doc-switcher-option="ios">iOS</button>
-</div>
-
-<div data-doc-switcher-panel="ui-tests-platform" data-doc-switcher-value="android" markdown>
+<details open markdown>
+<summary>Android</summary>
 
 Put the plan in `src/test/resources/test-plans/`:
 
@@ -80,9 +68,10 @@ steps:
     appId: com.example.app
 ```
 
-</div>
+</details>
 
-<div data-doc-switcher-panel="ui-tests-platform" data-doc-switcher-value="ios" markdown>
+<details markdown>
+<summary>iOS</summary>
 
 Put the plan in the iOS test bundle's `test-plans/` directory:
 
@@ -104,16 +93,12 @@ steps:
     appId: com.example.app
 ```
 
-</div>
+</details>
 
 ## 3. Consume the plan
 
-<div class="doc-switcher" data-doc-switcher="ui-tests-platform" role="group" aria-label="Test platform">
-  <button type="button" data-doc-switcher-option="android">Android</button>
-  <button type="button" data-doc-switcher-option="ios">iOS</button>
-</div>
-
-<div data-doc-switcher-panel="ui-tests-platform" data-doc-switcher-value="android" markdown>
+<details open markdown>
+<summary>Android</summary>
 
 Place this test under `app/src/test/`:
 
@@ -140,9 +125,10 @@ Run it with:
 ./gradlew :app:testDebugUnitTest --tests LaunchTest
 ```
 
-</div>
+</details>
 
-<div data-doc-switcher-panel="ui-tests-platform" data-doc-switcher-value="ios" markdown>
+<details markdown>
+<summary>iOS</summary>
 
 Add the plan to the iOS test bundle and create an `AutoMobileTestCase`:
 
@@ -170,7 +156,7 @@ Run the test target from Xcode or with `xcodebuild test` against a booted iOS
 Simulator. Keep selectors semantic and add `observe.waitFor` steps at important
 checkpoints so failures explain which state was missing.
 
-</div>
+</details>
 
 ## 4. Run a multi-device plan
 
@@ -194,7 +180,27 @@ steps:
 Use `barrier` to make device tracks meet at a point, or `criticalSection` only
 when they must serialize access to a shared resource.
 
-## 5. Pin CI releases
+## 5. Accessibility workflows
+
+Use semantic labels and identifiers in plans, then verify the same elements in
+`observe` output before interacting with them. To exercise a screen reader,
+enable the default-off `accessibility` tool for the current MCP connection:
+
+```json
+{
+  "name": "setToolEnabled",
+  "arguments": { "toolName": "accessibility", "enabled": true }
+}
+```
+
+Call `accessibility` with `talkback: true` on Android or `voiceover: true` on
+iOS, run the flow, and disable it afterward. Android also supports the
+default-off debug tool `accessibilityFocus` for setting or clearing TalkBack
+focus. Check text alternatives, content descriptions or accessibility labels,
+focus order, contrast, and tap-target size as part of the assertions; support
+for toggling services varies by device type and OS version.
+
+## 6. Pin CI releases
 
 Use one release version for the runner, daemon, and device helpers. Restart a
 shared daemon so it receives the pin, then check the environment before tests:

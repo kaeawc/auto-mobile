@@ -18,12 +18,8 @@ sequenceDiagram
   Runner-->>Gradle: pass or fail
 ```
 
-<div class="doc-switcher" data-doc-switcher="junit-runner-format" data-doc-switcher-default="kotlin" role="group" aria-label="JUnit runner example format">
-  <button type="button" data-doc-switcher-option="kotlin">Kotlin JUnit test</button>
-  <button type="button" data-doc-switcher-option="yaml">AutoMobile YAML plan</button>
-</div>
-
-<div data-doc-switcher-panel="junit-runner-format" data-doc-switcher-value="kotlin">
+<details open markdown>
+<summary>Kotlin JUnit test</summary>
 
 ```kotlin
 import dev.jasonpearson.automobile.junit.AutoMobilePlan
@@ -42,9 +38,10 @@ class LaunchTest {
 }
 ```
 
-</div>
+</details>
 
-<div data-doc-switcher-panel="junit-runner-format" data-doc-switcher-value="yaml">
+<details markdown>
+<summary>AutoMobile YAML plan</summary>
 
 ```yaml
 name: launch-app
@@ -59,4 +56,4 @@ steps:
       timeout: 10000
 ```
 
-</div>
+</details>

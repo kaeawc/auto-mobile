@@ -7,12 +7,12 @@ state directory, logs, tool set, or device behavior.
 
 <div class="environment-variable-table" markdown>
 
-| Variable                | Use                                                                   | Default               |
-| ----------------------- | --------------------------------------------------------------------- | --------------------- |
-| `AUTOMOBILE_DATA_DIR`   | Base directory for the database, caches, screenshots, and other state | `~/.auto-mobile`      |
-| `AUTOMOBILE_LOG_DIR`    | Directory for daemon and client logs                                  | `~/.auto-mobile/logs` |
-| `AUTOMOBILE_LOG_FORMAT` | `text` or newline-delimited `json`                                    | `text`                |
-| `AUTOMOBILE_LOG_SINK`   | `file`, `stderr`, or `both`                                           | `file`                |
+| Variable                | Use                                                                  | Default               |
+| ----------------------- | -------------------------------------------------------------------- | --------------------- |
+| `AUTOMOBILE_DATA_DIR`   | Base directory for caches, screenshots, and other non-database state | `~/.auto-mobile`      |
+| `AUTOMOBILE_LOG_DIR`    | Directory for daemon and client logs                                 | `~/.auto-mobile/logs` |
+| `AUTOMOBILE_LOG_FORMAT` | `text` or newline-delimited `json`                                   | `text`                |
+| `AUTOMOBILE_LOG_SINK`   | `file`, `stderr`, or `both`                                          | `file`                |
 
 </div>
 

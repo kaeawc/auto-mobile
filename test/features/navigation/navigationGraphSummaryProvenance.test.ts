@@ -98,4 +98,41 @@ describe("exportGraphSummaryForApp provenance (#4985)", () => {
     expect(summary.nodes).toEqual([]);
     expect(summary.edges).toEqual([]);
   });
+
+  /**
+   * Regression (#5600, follow-up to #5534/#4933): the exported summary for app B
+   * must carry the app-SCOPED screenshot URI (`?appId=B`), even while a different
+   * app A is foregrounded. An unscoped URI resolves against the daemon's current
+   * app, returning A's colliding screen or "No current app set" — the exact
+   * cross-app failure #5534 fixed in the resolver but left in the exporter.
+   * navigationGraph.test.ts already proves such a B-scoped URI resolves to B's
+   * screenshot regardless of the current app; this pins that the exporter emits it.
+   */
+  test("exported summary emits an app-scoped screenshot URI while another app is foregrounded", async () => {
+    const APP_B = "com.example.b";
+    await seedRepo.getOrCreateApp(APP_B);
+    // App A (this test's APP) also has a Home node/screenshot — the collision.
+    const homeA = await seedRepo.getOrCreateNode(APP, "Home", 100);
+    await seedRepo.updateNodeScreenshotById(homeA.id, "/screens/com.example.app/Home.webp");
+    const homeB = await seedRepo.getOrCreateNode(APP_B, "Home", 100);
+    await seedRepo.updateNodeScreenshotById(homeB.id, "/screens/com.example.b/Home.webp");
+
+    // Foreground app A, then export B: the classic cross-app browse.
+    await harness.manager.setCurrentApp(APP);
+    const summary = await harness.manager.exportGraphSummaryForApp(APP_B);
+
+    const node = summary.nodes.find((n) => n.screenName === "Home")!;
+    expect(node.screenshotPath).toBe(
+      `automobile:navigation/nodes/${homeB.id}/screenshot?appId=com.example.b`,
+    );
+  });
+
+  test("exported summary omits the scope suffix for a node without a screenshot", async () => {
+    // appId present but the node has no stored screenshot → screenshotPath is null,
+    // never a bare unscoped URI.
+    await seedRepo.getOrCreateNode(APP, "Home", 100);
+    const summary = await harness.manager.exportGraphSummaryForApp(APP);
+    const node = summary.nodes.find((n) => n.screenName === "Home")!;
+    expect(node.screenshotPath).toBeNull();
+  });
 });

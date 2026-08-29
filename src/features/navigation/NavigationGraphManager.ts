@@ -1,4 +1,5 @@
 import { logger } from "../../utils/logger";
+import { buildNavigationNodeScreenshotUri } from "../../utils/navigationResourceUri";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { BackStackInfo } from "../../models";
 import { NavigationRepository } from "../../db/navigationRepository";
@@ -873,7 +874,10 @@ export class NavigationGraphManager implements NavigationGraphService {
       arguments: event.arguments ?? null,
       metadata: event.metadata ?? null,
       triggeringInteraction: event.triggeringInteraction ?? null,
-      screenshotUri: `automobile:navigation/nodes/${node.id}/screenshot`,
+      // Scope to `appId` (== the app that just navigated): this URI is pushed live
+      // to telemetry-dashboard subscribers, which may be foregrounding a different
+      // app when they follow it, so an unscoped form would resolve cross-app (#5600).
+      screenshotUri: buildNavigationNodeScreenshotUri(node.id, appId),
     });
   }
 
@@ -1767,9 +1771,11 @@ export class NavigationGraphManager implements NavigationGraphService {
       id: node.id,
       screenName: node.screen_name,
       visitCount: node.visit_count,
-      // Include screenshot path as resource URI if available
+      // Include screenshot path as resource URI if available, scoped to the
+      // exported app so an offline / cross-app browse resolves this app's
+      // screenshot rather than the daemon's current foreground app (#5600).
       screenshotPath: node.screenshot_path
-        ? `automobile:navigation/nodes/${node.id}/screenshot`
+        ? buildNavigationNodeScreenshotUri(node.id, appId)
         : null,
       provenance: nodeProvenanceByNodeId.get(node.id) ?? [],
     }));

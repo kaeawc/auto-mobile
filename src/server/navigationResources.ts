@@ -12,6 +12,7 @@ import {
   NavigationAppListProvider,
 } from "../utils/interfaces/NavigationGraph";
 import { logger } from "../utils/logger";
+import { buildNavigationNodeScreenshotUri } from "../utils/navigationResourceUri";
 import { defaultTimer } from "../utils/SystemTimer";
 
 export const NAVIGATION_RESOURCE_URIS = {
@@ -286,9 +287,7 @@ async function getNavigationNodeScreenshotResource(
   nodeId: number,
   appId?: string,
 ): Promise<ResourceContent> {
-  const uri = appId
-    ? `automobile:navigation/nodes/${nodeId}/screenshot?appId=${encodeURIComponent(appId)}`
-    : `automobile:navigation/nodes/${nodeId}/screenshot`;
+  const uri = buildNavigationNodeScreenshotUri(nodeId, appId);
 
   try {
     // Resolve the screenshot under the requested app, not the daemon's current

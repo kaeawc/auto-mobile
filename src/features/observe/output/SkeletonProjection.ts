@@ -2,6 +2,11 @@ import type { Element } from "../../../models/Element";
 import { isTruthy } from "../../../models/Element";
 import { hasAccessibilityAction } from "../../../utils/elementProperties";
 import type { Affordance, ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
+import {
+  ElementProvenance,
+  getElementProvenance,
+  isStrictAncestor,
+} from "./elementProvenance";
 
 /**
  * Interactable Skeleton Projection (issue #4388).
@@ -122,6 +127,12 @@ interface SkeletonAccumulator {
   bounds: SkeletonElement["bounds"];
   affordances: Set<Affordance>;
   checked?: boolean;
+  /**
+   * Root/window ancestry, when the collector supplied it (issue #5881). Present
+   * on real captures; absent on hand-built fixtures and non-provenance producers,
+   * where hoisting/suppression fall back to geometric containment.
+   */
+  provenance?: ElementProvenance;
 }
 
 /** NUL-joined identity so `(id, label, bounds)` triples dedup without straddling. */
@@ -175,6 +186,9 @@ function accumulateByIdentity(elements: ObserveElements): SkeletonAccumulator[] 
       acc = { id, label, bounds, affordances: new Set<Affordance>() };
       byIdentity.set(key, acc);
     }
+    if (acc.provenance === undefined) {
+      acc.provenance = getElementProvenance(el);
+    }
     for (const affordance of affordances) {
       acc.affordances.add(affordance);
     }
@@ -192,15 +206,35 @@ function accumulateByIdentity(elements: ObserveElements): SkeletonAccumulator[] 
 }
 
 /**
+ * Whether `container` encloses `inner` for hoisting/suppression. When both
+ * carry collector provenance (issue #5881) this is true tree ancestry — same
+ * window/root and an enclosing Euler interval — so cross-window geometry never
+ * matches and an exact-fill (equal-bounds) descendant still does. Without
+ * provenance (hand-built fixtures, non-provenance producers) it falls back to
+ * strict geometric containment, preserving the pre-#5881 behavior.
+ */
+function containerEnclosesText(
+  container: SkeletonAccumulator,
+  inner: SkeletonAccumulator,
+): boolean {
+  if (container.provenance && inner.provenance) {
+    return isStrictAncestor(container.provenance, inner.provenance);
+  }
+  return strictlyContains(container.bounds, inner.bounds);
+}
+
+/**
  * Keep rule (issue #4388): a row is kept if it has ≥1 affordance, carries
  * semantic links, OR carries a non-empty label with no clickable ancestor.
  * Semantic links remain independently discoverable even when the linked text is
  * inside a generic tappable card that would otherwise suppress its text row.
+ *
+ * The clickable-ancestor test is scoped to same-window/same-root descendants
+ * when provenance is present (issue #5881), so a labelled overlay in a topmost
+ * window is no longer dropped by a geometrically-overlapping clickable in a
+ * lower window.
  */
-function shouldKeep(
-  acc: SkeletonAccumulator,
-  clickableBounds: SkeletonElement["bounds"][],
-): boolean {
+function shouldKeep(acc: SkeletonAccumulator, clickable: SkeletonAccumulator[]): boolean {
   if (acc.affordances.size > 0) {
     return true;
   }
@@ -210,7 +244,7 @@ function shouldKeep(
   if (acc.label === undefined) {
     return false;
   }
-  return !clickableBounds.some((bounds) => strictlyContains(bounds, acc.bounds));
+  return !clickable.some((container) => containerEnclosesText(container, acc));
 }
 
 /**
@@ -260,7 +294,7 @@ function groupTextByContainer(
     if (acc.affordances.size > 0 || acc.label === undefined) {
       continue;
     }
-    const container = smallestClickableAncestor(acc.bounds, clickable);
+    const container = smallestClickableAncestor(acc, clickable);
     if (!container) {
       continue;
     }
@@ -314,24 +348,41 @@ function byReadingOrder(a: SkeletonAccumulator, b: SkeletonAccumulator): number 
 }
 
 /**
- * The smallest-area clickable accumulator that strictly encloses `bounds`, or
- * `undefined` when none does. Smallest-area so text folds into its immediate row
- * rather than an outer clickable card or list that also encloses it.
+ * The innermost clickable accumulator that encloses `text`, or `undefined` when
+ * none does. With provenance (issue #5881) "innermost" is the deepest true tree
+ * ancestor (greatest `enter`), so an exact-fill descendant folds into its proven
+ * parent; without it, the smallest-area geometric container, so text folds into
+ * its immediate row rather than an outer clickable card or list.
  */
 function smallestClickableAncestor(
-  bounds: SkeletonElement["bounds"],
+  text: SkeletonAccumulator,
   clickable: SkeletonAccumulator[],
 ): SkeletonAccumulator | undefined {
   let best: SkeletonAccumulator | undefined;
   for (const candidate of clickable) {
-    if (!strictlyContains(candidate.bounds, bounds)) {
+    if (!containerEnclosesText(candidate, text)) {
       continue;
     }
-    if (!best || area(candidate.bounds) < area(best.bounds)) {
+    if (!best || isTighterContainer(candidate, best)) {
       best = candidate;
     }
   }
   return best;
+}
+
+/**
+ * Whether `candidate` is a tighter (more immediate) container than the current
+ * `best`. With provenance, the deeper tree ancestor wins (greater `enter`);
+ * otherwise the smaller-area geometric container.
+ */
+function isTighterContainer(
+  candidate: SkeletonAccumulator,
+  best: SkeletonAccumulator,
+): boolean {
+  if (candidate.provenance && best.provenance) {
+    return candidate.provenance.enter > best.provenance.enter;
+  }
+  return area(candidate.bounds) < area(best.bounds);
 }
 
 /** Materialize one accumulator into an emitted skeleton row (omitting absent optionals). */
@@ -372,8 +423,6 @@ export function toSkeleton(elements: ObserveElements): SkeletonElement[] {
   // Hoist descendant text onto labelless/underlabelled clickable rows (issue
   // #5869) before the keep filter suppresses the now-folded text accumulators.
   hoistContainerLabels(accumulators, clickable);
-  // Bounds of every tappable row, for the clickable-ancestor suppression test.
-  const clickableBounds = clickable.map((acc) => acc.bounds);
 
-  return accumulators.filter((acc) => shouldKeep(acc, clickableBounds)).map(toSkeletonEntry);
+  return accumulators.filter((acc) => shouldKeep(acc, clickable)).map(toSkeletonEntry);
 }

@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { toSkeleton } from "../../../../src/features/observe/output/SkeletonProjection";
+import { setElementProvenance } from "../../../../src/features/observe/output/elementProvenance";
+import { DefaultObserveElementCollector } from "../../../../src/features/observe/ObserveElementCollector";
 import type { Element } from "../../../../src/models/Element";
 import type { ObserveResult } from "../../../../src/models/ObserveResult";
 import type { SkeletonElement } from "../../../../src/models/ObserveResult";
+import scrollBeforeFixture from "../../../fixtures/observe/diff/scroll-before.json";
 
 type ObserveElements = NonNullable<ObserveResult["elements"]>;
 
@@ -464,6 +467,154 @@ describe("toSkeleton — acceptance criteria", () => {
       const parent = findById(skeleton, "s-parent");
       expect(parent?.label).toBeUndefined();
       expect("sublabel" in (parent as SkeletonElement)).toBe(false);
+    });
+  });
+
+  describe("#5881: window/root provenance gates hoisting and suppression", () => {
+    // Tag an element with a root/window group and its Euler interval so the
+    // projection can restrict hoisting/suppression to true tree ancestry.
+    const withProvenance = (el: Element, group: number, enter: number, exit: number): Element => {
+      setElementProvenance(el, { group, enter, exit });
+      return el;
+    };
+
+    test("cross-window text is NOT hoisted onto a clickable in a lower window (mislabel fixed)", () => {
+      // An underlying clickable in the base window (group 0) with no own text.
+      const underlying = withProvenance(
+        { bounds: bounds(0, 0, 300, 100), "view-id": "s-underlying", clickable: "true" },
+        0,
+        0,
+        0,
+      );
+      // Overlay text in a topmost dialog window (group 1) that geometrically —
+      // but not by ancestry — sits inside the underlying clickable.
+      const overlayText = withProvenance(
+        { bounds: bounds(20, 20, 280, 80), text: "Permission required" },
+        1,
+        1,
+        1,
+      );
+
+      const skeleton = toSkeleton(
+        makeElements({ clickable: [underlying], text: [overlayText] }),
+      );
+
+      // The underlying action keeps its own (absent) label — not relabelled from
+      // the unrelated overlay text in another window.
+      expect(findById(skeleton, "s-underlying")?.label).toBeUndefined();
+    });
+
+    test("cross-window text is NOT suppressed by a clickable in a lower window", () => {
+      const underlying = withProvenance(
+        { bounds: bounds(0, 0, 300, 100), "view-id": "s-underlying", clickable: "true" },
+        0,
+        0,
+        0,
+      );
+      const overlayText = withProvenance(
+        { bounds: bounds(20, 20, 280, 80), text: "Permission required" },
+        1,
+        1,
+        1,
+      );
+
+      const skeleton = toSkeleton(
+        makeElements({ clickable: [underlying], text: [overlayText] }),
+      );
+
+      // The overlay text survives as its own affordance-less row — the
+      // clickable-ancestor suppression no longer crosses the window boundary.
+      const overlay = skeleton.find((entry) => entry.label === "Permission required");
+      expect(overlay).toBeDefined();
+      expect(overlay?.affordances).toEqual([]);
+    });
+
+    test("same-window descendant text IS still hoisted (geometry gate is ancestry, not window count)", () => {
+      // Identical geometry to the cross-window case, but now a genuine descendant
+      // in the same group — proving it is ancestry, not bounds, that gates.
+      const container = withProvenance(
+        { bounds: bounds(0, 0, 300, 100), "view-id": "s-row", clickable: "true" },
+        0,
+        0,
+        1,
+      );
+      const innerText = withProvenance(
+        { bounds: bounds(20, 20, 280, 80), text: "Permission required" },
+        0,
+        1,
+        1,
+      );
+
+      const skeleton = toSkeleton(makeElements({ clickable: [container], text: [innerText] }));
+
+      expect(findById(skeleton, "s-row")?.label).toBe("Permission required");
+      // Folded in, not emitted as a separate row.
+      expect(skeleton).toHaveLength(1);
+    });
+
+    test("exact-fill descendant is hoisted onto its proven parent (no geometry >= relaxation)", () => {
+      // A clickable card whose genuine descendant fills it exactly (identical
+      // bounds — a match_parent child). Strict geometric containment (`>`) rejects
+      // it; true tree ancestry hoists it. Mirrors the checked-in scroll-before
+      // fixture's `long_press_card`.
+      const card = withProvenance(
+        {
+          bounds: bounds(42, 1404, 1038, 1635),
+          "resource-id": "long_press_card",
+          clickable: "true",
+          "long-clickable": "true",
+        },
+        0,
+        0,
+        3,
+      );
+      const exactFill = withProvenance(
+        { bounds: bounds(42, 1404, 1038, 1635), "content-desc": "Basic long press card" },
+        0,
+        1,
+        1,
+      );
+      const inner1 = withProvenance(
+        { bounds: bounds(84, 1446, 381, 1509), text: "Long press me" },
+        0,
+        2,
+        2,
+      );
+      const inner2 = withProvenance(
+        { bounds: bounds(84, 1530, 334, 1593), text: "Hold to trigger" },
+        0,
+        3,
+        3,
+      );
+
+      const skeleton = toSkeleton(
+        makeElements({ clickable: [card], text: [exactFill, inner1, inner2] }),
+      );
+
+      const entry = findById(skeleton, "long_press_card");
+      expect(entry?.affordances).toEqual(["tap", "long-press"]);
+      // The exact-fill child becomes the label (top-most by reading order).
+      expect(entry?.label).toBe("Basic long press card");
+      expect(entry?.sublabel).toBe("Long press me, Hold to trigger");
+      // The exact-fill descendant is not emitted as its own affordance-less row.
+      expect(skeleton).toHaveLength(1);
+    });
+
+    test("end-to-end: the real collector emits provenance that hoists the exact-fill descendant", () => {
+      const elements = new DefaultObserveElementCollector().collect(
+        scrollBeforeFixture.viewHierarchy as NonNullable<ObserveResult["viewHierarchy"]>,
+        "android",
+      );
+      expect(elements).toBeDefined();
+
+      const skeleton = toSkeleton(elements!);
+      const card = skeleton.find((entry) => entry.id === "long_press_card");
+      expect(card).toBeDefined();
+      // Without ancestry provenance the exact-fill child is dropped and the card
+      // stays label:null; with it, the label lands on the tappable row.
+      expect(card?.label).toBe("Basic long press card");
+      expect(card?.sublabel).toContain("Long press me");
+      expect(card?.sublabel).toContain("Hold to trigger");
     });
   });
 

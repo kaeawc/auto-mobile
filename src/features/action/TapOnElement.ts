@@ -726,7 +726,13 @@ export class TapOnElement extends BaseVisualChange {
     requireResourceId: boolean,
     signal?: AbortSignal,
   ): Promise<
-    | { ok: true; viewHierarchy: ViewHierarchyResult; tapElement: Element; usedParent: boolean }
+    | {
+        ok: true;
+        viewHierarchy: ViewHierarchyResult;
+        tapElement: Element;
+        usedParent: boolean;
+        selection: ElementSelectionResult;
+      }
     | { ok: false; error: string }
   > {
     const stableMatchesRequired = androidPreTapConsecutiveStableMatchesRequired(options);
@@ -736,6 +742,7 @@ export class TapOnElement extends BaseVisualChange {
       viewHierarchy: ViewHierarchyResult;
       tapElement: Element;
       usedParent: boolean;
+      selection: ElementSelectionResult;
     } | null = null;
 
     const startTime = this.timer.now();
@@ -872,6 +879,10 @@ export class TapOnElement extends BaseVisualChange {
         viewHierarchy: freshHierarchy,
         tapElement: refreshed.element,
         usedParent: refreshed.usedParent,
+        // Carry the refreshed selection so the caller can rebuild selectedElement
+        // metadata (bounds/indexInMatches/totalMatches) from the node actually
+        // tapped, not the stale pre-refresh selection (#5888).
+        selection: refind.selection,
       };
 
       if (consecutiveStable >= stableMatchesRequired) {
@@ -1389,7 +1400,7 @@ export class TapOnElement extends BaseVisualChange {
           }
           const selection = searchOutcome.selection;
           const element = selection.element as Element;
-          const selectedElementMetadata = this.buildSelectedElementMetadata(selection);
+          let selectedElementMetadata = this.buildSelectedElementMetadata(selection);
           if (options.subtext) {
             const occurrence = options.subtext.occurrence ?? 0;
             const activation = await this.activateSemanticLink(
@@ -1471,6 +1482,11 @@ export class TapOnElement extends BaseVisualChange {
             viewHierarchy = stable.viewHierarchy;
             tapElement = stable.tapElement;
             usedParent = stable.usedParent;
+            // Rebuild from the refreshed selection so the reported selectedElement
+            // (bounds/indexInMatches/totalMatches) describes the node actually
+            // tapped after re-resolution, not the stale pre-refresh match (#5888).
+            selectedElementMetadata =
+              this.buildSelectedElementMetadata(stable.selection) ?? selectedElementMetadata;
           }
 
           this.logClickableParentSelection(usedParent);

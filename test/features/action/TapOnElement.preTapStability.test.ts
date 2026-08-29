@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Element, ViewHierarchyResult } from "../../../src/models";
+import type { Element, ElementSelectionResult, ViewHierarchyResult } from "../../../src/models";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -492,5 +492,77 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     );
 
     await expect(resultPromise).rejects.toThrow();
+  });
+
+  // Regression for #5888: on a dynamic/reordered hierarchy the stability path
+  // re-resolves the tap target against a REFRESHED hierarchy, so the reported
+  // selectedElement metadata (bounds, indexInMatches, totalMatches) must describe
+  // the refreshed node actually tapped — not the pre-refresh selection. The helper
+  // must carry the refreshed ElementSelectionResult out so execute can rebuild it.
+  describe("carries the refreshed ElementSelectionResult out (#5888)", () => {
+    // Reorders the matched row on the first refresh: the pre-refresh selection is
+    // index 0 of 5 at STALE_BOUNDS; the refreshed one is index 3 of 4 at FRESH_BOUNDS.
+    const STALE_SELECTION: ElementSelectionResult = {
+      element: makeElement(STABLE_BOUNDS),
+      indexInMatches: 0,
+      totalMatches: 5,
+      strategy: "first",
+    };
+    const FRESH_BOUNDS: Element["bounds"] = { left: 200, top: 400, right: 300, bottom: 450 };
+    const FRESH_SELECTION: ElementSelectionResult = {
+      element: makeElement(FRESH_BOUNDS),
+      indexInMatches: 3,
+      totalMatches: 4,
+      strategy: "first",
+    };
+
+    function stubRefreshedSelection(tap: TapOnElement, selection: ElementSelectionResult): void {
+      (tap as any).refreshViewHierarchy = async () => makeHierarchy();
+      (tap as any).findElementInHierarchy = () => ({ selection, containerFound: false });
+      (tap as any).resolveTapTargetElement = (el: Element) => ({ element: el, usedParent: false });
+    }
+
+    test("ok result exposes the refreshed selection, not the pre-refresh one", async () => {
+      const { tap } = createTapOnElement();
+      stubRefreshedSelection(tap, FRESH_SELECTION);
+
+      const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+        { text: "Contact Name", action: "tap" },
+        { screenSize: { width: 1080, height: 1920 } },
+        "tap",
+        false,
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.selection).toBe(FRESH_SELECTION);
+      expect(result.selection.indexInMatches).toBe(3);
+      expect(result.selection.totalMatches).toBe(4);
+      expect(result.selection.element.bounds).toEqual(FRESH_BOUNDS);
+    });
+
+    test("metadata rebuilt from the refreshed selection reflects the tapped node, not stale positional fields", async () => {
+      const { tap } = createTapOnElement();
+      stubRefreshedSelection(tap, FRESH_SELECTION);
+
+      const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+        { text: "Contact Name", action: "tap" },
+        { screenSize: { width: 1080, height: 1920 } },
+        "tap",
+        false,
+      );
+
+      const stale = (tap as any).buildSelectedElementMetadata(STALE_SELECTION);
+      const rebuilt = (tap as any).buildSelectedElementMetadata(result.selection);
+
+      // The fix must yield the refreshed positional fields...
+      expect(rebuilt.indexInMatches).toBe(3);
+      expect(rebuilt.totalMatches).toBe(4);
+      expect(rebuilt.bounds.left).toBe(FRESH_BOUNDS.left);
+      expect(rebuilt.bounds.top).toBe(FRESH_BOUNDS.top);
+      // ...which must differ from the stale pre-refresh metadata it replaces.
+      expect(rebuilt.indexInMatches).not.toBe(stale.indexInMatches);
+      expect(rebuilt.totalMatches).not.toBe(stale.totalMatches);
+      expect(rebuilt.bounds.top).not.toBe(stale.bounds.top);
+    });
   });
 });

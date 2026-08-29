@@ -71,7 +71,7 @@ export type AppendKeyEventValidator = (
 ) => Promise<{ success: boolean; error?: string }>;
 
 interface KeyboardCloser {
-  close(): Promise<KeyboardResult>;
+  close(signal?: AbortSignal): Promise<KeyboardResult>;
 }
 
 type KeyboardCloserFactory = (device: BootedDevice, adbFactory: AdbClientFactory) => KeyboardCloser;
@@ -79,7 +79,7 @@ type KeyboardCloserFactory = (device: BootedDevice, adbFactory: AdbClientFactory
 const defaultKeyboardCloserFactory: KeyboardCloserFactory = (device, adbFactory) => {
   const keyboard = new Keyboard(device, adbFactory);
   return {
-    close: () => keyboard.execute("close"),
+    close: (signal) => keyboard.execute("close", signal),
   };
 };
 
@@ -267,6 +267,21 @@ export class InputText extends BaseVisualChange {
     if (a11yResult.success) {
       logger.info(`[InputText] Text input via accessibility service: ${a11yResult.totalTimeMs}ms`);
 
+      // The runner's SHOW_MODE_HIDDEN (requestSetText dismissKeyboard) suppresses
+      // re-showing the keyboard but does not dismiss an already-visible IME window,
+      // so confirm the dismissal via the Keyboard.close() route (issue #5887).
+      if (dismissKeyboard) {
+        const dismissError = await this.dismissKeyboardViaCloser("a11y", signal);
+        if (dismissError) {
+          return {
+            success: false,
+            text,
+            error: dismissError,
+            method: "a11y",
+          };
+        }
+      }
+
       // Handle IME action if specified
       if (imeAction) {
         await this.executeImeAction(imeAction, signal);
@@ -365,6 +380,20 @@ export class InputText extends BaseVisualChange {
       }
     }
 
+    // Confirm the dismissal via the Keyboard.close() route; the runner's
+    // SHOW_MODE_HIDDEN alone leaves a visible IME foregrounded (issue #5887).
+    if (dismissKeyboard) {
+      const dismissError = await this.dismissKeyboardViaCloser("eventLast", signal);
+      if (dismissError) {
+        return {
+          success: false,
+          text,
+          error: dismissError,
+          method: "eventLast",
+        };
+      }
+    }
+
     if (imeAction) {
       await this.executeImeAction(imeAction, signal);
     }
@@ -457,6 +486,17 @@ export class InputText extends BaseVisualChange {
           finalResult.error,
           "eventAll",
         );
+      }
+      // Confirm the dismissal via the Keyboard.close() route; the runner's
+      // SHOW_MODE_HIDDEN alone leaves a visible IME foregrounded (issue #5887).
+      const dismissError = await this.dismissKeyboardViaCloser("eventAll", signal);
+      if (dismissError) {
+        return {
+          success: false,
+          text,
+          error: dismissError,
+          method: "eventAll",
+        };
       }
     }
 
@@ -562,8 +602,7 @@ export class InputText extends BaseVisualChange {
     }
 
     if (dismissKeyboard) {
-      const dismissError = await this.dismissKeyboardAfterAppend();
-      assertInputNotAborted(signal);
+      const dismissError = await this.dismissKeyboardViaCloser("append", signal);
       if (dismissError) {
         // All characters landed; only the post-typing keyboard dismissal failed,
         // so the full text was sent — a retry must NOT re-append any of it.
@@ -719,14 +758,33 @@ export class InputText extends BaseVisualChange {
     return { charsSent };
   }
 
-  /** Returns an error message when the keyboard could not be dismissed, else null. */
-  private async dismissKeyboardAfterAppend(): Promise<string | null> {
-    const keyboardResult = await this.keyboardCloserFactory(this.device, this.adbFactory).close();
+  /**
+   * Dismiss the soft keyboard through the confirmed `Keyboard.close()` route
+   * (KEYCODE_BACK + state-confirmation poll), returning an error message when the
+   * dismissal could not be confirmed, else null.
+   *
+   * Every Android mode routes `dismissKeyboard:true` here rather than relying on
+   * the runner-side `SHOW_MODE_HIDDEN`: that flag suppresses the a11y service from
+   * *re-showing* the keyboard but does not dismiss an already-visible IME window,
+   * leaving `SoftInputWindow` foregrounded after the call (issue #5887). The closer
+   * detects the current keyboard state first, so when SHOW_MODE_HIDDEN did hide it
+   * the closer short-circuits to "already closed" without sending a stray Back.
+   *
+   * @param method - The input mode label, used in the failure message.
+   */
+  private async dismissKeyboardViaCloser(
+    method: InputTextMode,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    const keyboardResult = await this.keyboardCloserFactory(this.device, this.adbFactory).close(
+      signal,
+    );
+    assertInputNotAborted(signal);
     if (keyboardResult.success) {
       return null;
     }
     const cause = keyboardResult.error ?? keyboardResult.message ?? "unknown error";
-    return `append input completed but keyboard dismissal failed: ${cause}`;
+    return `${method} input completed but keyboard dismissal failed: ${cause}`;
   }
 
   /**
@@ -810,15 +868,12 @@ export class InputText extends BaseVisualChange {
     }
 
     if (dismissKeyboard) {
-      const keyboardResult = await this.keyboardCloserFactory(this.device, this.adbFactory).close();
-      assertInputNotAborted(signal);
-      if (!keyboardResult.success) {
+      const dismissError = await this.dismissKeyboardViaCloser("eventOnly", signal);
+      if (dismissError) {
         return {
           success: false,
           text,
-          error: `eventOnly input completed but keyboard dismissal failed: ${
-            keyboardResult.error ?? keyboardResult.message ?? "unknown error"
-          }`,
+          error: dismissError,
           method: "eventOnly",
         };
       }

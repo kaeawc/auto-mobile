@@ -220,7 +220,7 @@ describe("InputText", () => {
     expect(result.success).toBe(true);
     expect(setTextCalls).toEqual([
       { text: "abc de", dismissKeyboard: undefined },
-      { text: "abc def  ", dismissKeyboard: false },
+      { text: "abc def  ", dismissKeyboard: undefined },
     ]);
     expect(inputCommands(factory)).toEqual(["shell input keyevent KEYCODE_F"]);
   });
@@ -265,7 +265,7 @@ describe("InputText", () => {
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("a11y");
-    expect(setTextCalls).toEqual([{ text: "HellO", dismissKeyboard: false }]);
+    expect(setTextCalls).toEqual([{ text: "HellO", dismissKeyboard: undefined }]);
     expect(inputCommands(factory)).toEqual([]);
   });
 
@@ -990,7 +990,10 @@ describe("InputText", () => {
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("a11y");
-    expect(setTextCalls).toEqual([{ text: "hello", dismissKeyboard: true }]);
+    // setText must NOT carry the runner dismissKeyboard flag — the confirmed
+    // Keyboard.close() route owns dismissal so close() never decides to send Back
+    // off a cached "IME open" tree the runner had already hidden (issue #5887).
+    expect(setTextCalls).toEqual([{ text: "hello", dismissKeyboard: undefined }]);
     expect(closeCalls).toEqual(["close"]);
   });
 

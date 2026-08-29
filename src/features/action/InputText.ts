@@ -259,17 +259,21 @@ export class InputText extends BaseVisualChange {
     }
 
     // Use accessibility service exclusively (fastest method, ~10-30ms vs ~200-300ms for ADB)
-    // It also natively supports Unicode without needing virtual keyboard
+    // It also natively supports Unicode without needing virtual keyboard.
+    // Text is set WITHOUT the runner's dismissKeyboard flag: SHOW_MODE_HIDDEN
+    // suppresses re-showing the keyboard but does not dismiss an already-visible
+    // IME window, and combining it with the Keyboard.close() route below would
+    // leave close() deciding to send Back off a cached "IME open" tree after the
+    // runner had already hidden the window — navigating the app instead (#5887).
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const a11yResult = await a11yClient.requestSetText(text, { dismissKeyboard });
+    const a11yResult = await a11yClient.requestSetText(text);
     assertInputNotAborted(signal);
 
     if (a11yResult.success) {
       logger.info(`[InputText] Text input via accessibility service: ${a11yResult.totalTimeMs}ms`);
 
-      // The runner's SHOW_MODE_HIDDEN (requestSetText dismissKeyboard) suppresses
-      // re-showing the keyboard but does not dismiss an already-visible IME window,
-      // so confirm the dismissal via the Keyboard.close() route (issue #5887).
+      // Dismiss via the confirmed Keyboard.close() route (KEYCODE_BACK + state
+      // poll), the same path eventOnly/append use (issue #5887).
       if (dismissKeyboard) {
         const dismissError = await this.dismissKeyboardViaCloser("a11y", signal);
         if (dismissError) {
@@ -366,8 +370,8 @@ export class InputText extends BaseVisualChange {
 
     await this.executeKeyEventPlan(keyEventPlan, undefined, false, undefined, signal);
 
-    if (suffix.length > 0 || dismissKeyboard) {
-      const finalResult = await a11yClient.requestSetText(text, { dismissKeyboard });
+    if (suffix.length > 0) {
+      const finalResult = await a11yClient.requestSetText(text);
       assertInputNotAborted(signal);
       if (!finalResult.success) {
         return this.setTextFailure(
@@ -380,8 +384,7 @@ export class InputText extends BaseVisualChange {
       }
     }
 
-    // Confirm the dismissal via the Keyboard.close() route; the runner's
-    // SHOW_MODE_HIDDEN alone leaves a visible IME foregrounded (issue #5887).
+    // Dismiss via the confirmed Keyboard.close() route (issue #5887).
     if (dismissKeyboard) {
       const dismissError = await this.dismissKeyboardViaCloser("eventLast", signal);
       if (dismissError) {
@@ -476,7 +479,7 @@ export class InputText extends BaseVisualChange {
     }
 
     if (dismissKeyboard) {
-      const finalResult = await a11yClient.requestSetText(text, { dismissKeyboard: true });
+      const finalResult = await a11yClient.requestSetText(text);
       assertInputNotAborted(signal);
       if (!finalResult.success) {
         return this.setTextFailure(
@@ -487,8 +490,7 @@ export class InputText extends BaseVisualChange {
           "eventAll",
         );
       }
-      // Confirm the dismissal via the Keyboard.close() route; the runner's
-      // SHOW_MODE_HIDDEN alone leaves a visible IME foregrounded (issue #5887).
+      // Dismiss via the confirmed Keyboard.close() route (issue #5887).
       const dismissError = await this.dismissKeyboardViaCloser("eventAll", signal);
       if (dismissError) {
         return {
@@ -763,12 +765,15 @@ export class InputText extends BaseVisualChange {
    * (KEYCODE_BACK + state-confirmation poll), returning an error message when the
    * dismissal could not be confirmed, else null.
    *
-   * Every Android mode routes `dismissKeyboard:true` here rather than relying on
-   * the runner-side `SHOW_MODE_HIDDEN`: that flag suppresses the a11y service from
+   * Every Android mode routes `dismissKeyboard:true` here rather than through the
+   * runner-side `SHOW_MODE_HIDDEN`: that flag suppresses the a11y service from
    * *re-showing* the keyboard but does not dismiss an already-visible IME window,
-   * leaving `SoftInputWindow` foregrounded after the call (issue #5887). The closer
-   * detects the current keyboard state first, so when SHOW_MODE_HIDDEN did hide it
-   * the closer short-circuits to "already closed" without sending a stray Back.
+   * leaving `SoftInputWindow` foregrounded after the call (issue #5887). setText is
+   * issued WITHOUT the runner flag so the IME stays genuinely visible until the
+   * closer dismisses it — otherwise the closer could decide to send Back off a
+   * cached "IME open" tree after the runner had already hidden the window,
+   * navigating the app instead. The closer detects the current keyboard state
+   * first, so when the keyboard is already closed it short-circuits without a Back.
    *
    * @param method - The input mode label, used in the failure message.
    */

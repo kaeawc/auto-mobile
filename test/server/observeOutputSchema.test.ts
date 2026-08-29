@@ -602,6 +602,8 @@ describe("observe tool registration advertises the schema (#3025)", () => {
       expect(json).toContain('"affordances"');
       expect(json).toContain('"semanticLinks"');
       expect(json).toContain('"testTag"');
+      // Hoisted secondary state text (#5869) is advertised like its siblings.
+      expect(json).toContain('"sublabel"');
     });
   });
 });

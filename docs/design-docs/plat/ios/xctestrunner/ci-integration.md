@@ -24,7 +24,7 @@ device service or additional secrets are needed.
 
 The reference workflow splits testing into two independent jobs that share the same build artifact:
 
-```
+```text
 build-for-testing ──┬──► simulator-tests      (unit tests, skips AutoMobile bundle)
                     └──► automobile-tests      (AutoMobile tests only)
 ```
@@ -125,10 +125,12 @@ runner so `auto-mobile --daemon start` works correctly.
 
 ```yaml
 - uses: oven-sh/setup-bun@v2
+
+- name: Install matching auto-mobile CLI
   env:
     # Match the AutoMobile version pinned by the XCTestRunner package resolution.
     AUTOMOBILE_VERSION: "<runner-version>"
-- run: bun install -g "@kaeawc/auto-mobile@${AUTOMOBILE_VERSION}"
+  run: bun install -g "@kaeawc/auto-mobile@${AUTOMOBILE_VERSION}"
 ```
 
 ### 2. Build products artifact

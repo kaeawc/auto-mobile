@@ -106,9 +106,9 @@ A client builds a geometry snapshot once per rendered frame:
 | `frameWidthPx`, `frameHeightPx` | fitted frame size at zoom 1.0 (from fit-to-viewport)                   |
 | `scale`                         | current zoom multiplier                                                |
 | `offsetX`, `offsetY`            | current pan offset, in viewport pixels                                 |
-| `deviceWidth`, `deviceHeight`   | device coordinate-space size (root hierarchy bounds, rotation-aligned) |
+| `deviceWidth`, `deviceHeight`   | coordinate-space size: positive root bounds or paired screen dimensions |
 
-## Viewport → device mapping
+## Viewport-to-device mapping
 
 ```text
 frameX = (viewportX - offsetX) / scale
@@ -219,7 +219,7 @@ range for `durationMs`.
 
 Dragging _past_ an edge is the ordinary way to scroll to the end of a list, so an
 out-of-bounds end is clamped rather than dropped — this is the clamping option
-the [out-of-bounds rule](#viewport-device-mapping) already sanctions, and it
+the [out-of-bounds rule](#viewport-to-device-mapping) already sanctions, and it
 yields well-formed input. Clamping happens **before** the distance check, so the
 threshold is applied to what would actually be sent.
 
@@ -314,7 +314,7 @@ policy) must resolve it. The rule is:
 
 ```text
 altComposesText = printable && !meta && when {
-  isMac -> alt
+  isMac -> alt && !ctrl
   isLinux && nativeAltGraph != null -> alt && nativeAltGraph
   else -> ctrl && alt
 }
@@ -331,7 +331,8 @@ altComposesText = printable && !meta && when {
   it too, so it must not count as composition.
 - **macOS:** composition is the **Option** key, which is plain **Alt** (Option+L =
   `@`, Option+5 = `[`), and macOS menus use **Cmd/Meta, never Alt** — so plain Alt
-  is safe to treat as composition on macOS only.
+  without Ctrl is safe to treat as composition on macOS only. Ctrl+Option remains
+  with the host as a shortcut.
 
 **Meta held never qualifies** on any platform: `Cmd`/`Meta` shortcuts never compose
 characters, so Meta-held is the reliable "this is a shortcut, not typing" signal.

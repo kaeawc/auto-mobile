@@ -157,7 +157,7 @@ object DeviceKeyboardEventTranslator {
   ): Boolean {
     if (modifiers.meta || !modifiers.alt) return false
     return when {
-      isMac -> true
+      isMac -> !modifiers.ctrl
       isLinux && isAltGraphDown != null -> isAltGraphDown
       else -> modifiers.ctrl
     }

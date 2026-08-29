@@ -113,6 +113,18 @@ class DeviceKeyboardEventTranslatorTest {
   }
 
   @Test
+  fun `on macOS plain Option composes while Control Option stays with the host`() {
+    assertTrue(
+      resolvedAltComposition(DeviceKeyModifiers(alt = true), isMac = true),
+      "plain Option composes on macOS",
+    )
+    assertFalse(
+      resolvedAltComposition(DeviceKeyModifiers(ctrl = true, alt = true), isMac = true),
+      "Control Option is a host shortcut, not composition",
+    )
+  }
+
+  @Test
   fun `on Linux only native AltGraph is composition`() {
     val modifiers = DeviceKeyModifiers(ctrl = true, alt = true)
     assertTrue(

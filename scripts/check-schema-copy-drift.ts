@@ -94,8 +94,33 @@ export function schemasStructurallyEqual(canonical: JsonValue, android: JsonValu
   return structuralDiffPaths(canonical, android).length === 0;
 }
 
+// Integers beyond 2^53 lose precision as IEEE-754 doubles, so `JSON.parse`
+// collapses distinct large-integer literals (e.g. a `const` or `enum` bound)
+// to the same `number` — which would let a real divergence slip past the
+// structural comparison. `JSON.parse`'s reviver `context.source` (TC39
+// JSON-parse-with-source, supported by Bun's engine) hands back the original
+// numeric token, so we preserve any unsafe integer as a NUL-tagged sentinel
+// string: distinct tokens then compare unequal and identical ones compare
+// equal, losslessly. Normal (safe) numbers and floats are left untouched, and
+// on a runtime that does not expose `source` this degrades to plain parsing.
+const BIGINT_SENTINEL_PREFIX = `${String.fromCharCode(0)}bigint:`;
+
+export function parseSchemaJson(text: string): JsonValue {
+  return JSON.parse(text, function (_key, value, context?: { source?: string }) {
+    if (
+      typeof value === "number" &&
+      !Number.isSafeInteger(value) &&
+      typeof context?.source === "string" &&
+      /^-?\d+$/.test(context.source)
+    ) {
+      return `${BIGINT_SENTINEL_PREFIX}${context.source}`;
+    }
+    return value;
+  }) as JsonValue;
+}
+
 function readJson(filePath: string): JsonValue {
-  return JSON.parse(readFileSync(filePath, "utf8")) as JsonValue;
+  return parseSchemaJson(readFileSync(filePath, "utf8"));
 }
 
 /**

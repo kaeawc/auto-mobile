@@ -5,6 +5,7 @@ import {
   ANDROID_SCHEMA_PATH,
   CANONICAL_SCHEMA_PATH,
   diffSchemaCopies,
+  parseSchemaJson,
   schemasStructurallyEqual,
   structuralDiffPaths,
 } from "../../scripts/check-schema-copy-drift";
@@ -57,6 +58,37 @@ describe("#5819 structuralDiffPaths — structural, not byte-for-byte", () => {
     const android = JSON.parse(`{ "allOf": [1, 2] }`);
     const diffs = structuralDiffPaths(canonical, android);
     expect(diffs.some((d) => d.includes("array length"))).toBe(true);
+  });
+});
+
+// AC2 (hardening): `JSON.parse` collapses integers beyond 2^53 to the same
+// IEEE-754 double, which would let a divergence in a large numeric literal slip
+// past the structural comparison. `parseSchemaJson` preserves the original token.
+describe("#5819 parseSchemaJson preserves large-integer precision", () => {
+  test("two consts differing only past 2^53 are NOT judged equal", () => {
+    const canonical = parseSchemaJson(`{ "const": 9007199254740992 }`);
+    const android = parseSchemaJson(`{ "const": 9007199254740993 }`);
+    // Sanity: a plain JSON.parse would collapse these to the same number.
+    expect(JSON.parse(`9007199254740992`)).toBe(JSON.parse(`9007199254740993`));
+    expect(schemasStructurallyEqual(canonical, android)).toBe(false);
+  });
+
+  test("identical large integers remain equal", () => {
+    const a = parseSchemaJson(`{ "const": 9007199254740993 }`);
+    const b = parseSchemaJson(`{ "const": 9007199254740993 }`);
+    expect(schemasStructurallyEqual(a, b)).toBe(true);
+  });
+
+  test("safe integers and floats are left as plain numbers", () => {
+    expect(parseSchemaJson(`{ "minItems": 1 }`)).toEqual({ minItems: 1 });
+    expect(parseSchemaJson(`{ "x": 1.5 }`)).toEqual({ x: 1.5 });
+    // A safe integer compared across two documents still behaves normally.
+    expect(
+      schemasStructurallyEqual(parseSchemaJson(`{ "n": 42 }`), parseSchemaJson(`{ "n": 42 }`)),
+    ).toBe(true);
+    expect(
+      schemasStructurallyEqual(parseSchemaJson(`{ "n": 42 }`), parseSchemaJson(`{ "n": 43 }`)),
+    ).toBe(false);
   });
 });
 

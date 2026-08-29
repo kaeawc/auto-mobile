@@ -214,6 +214,28 @@ describe("tapOn schema", () => {
       key,
     );
   });
+
+  // Issue #5769: duration had no lower bound, so a negative longPress duration
+  // was accepted and silently degraded into an ordinary tap. It must be rejected
+  // with a too_small issue on ["duration"], matching the bounded sibling params.
+  test.each([-1, -100000])("rejects negative duration %p", (duration) => {
+    const tooSmall = zodIssues(() =>
+      tapOnSchema.parse({
+        platform: "android",
+        selector: { text: "Gmail" },
+        action: "longPress",
+        duration,
+      }),
+    ).find((issue) => issue.code === "too_small" && issue.path[0] === "duration");
+    expect(tooSmall, "expected a too_small issue on duration").toBeDefined();
+    expect(tooSmall!.message).toBe("must be >= 0");
+  });
+
+  test("accepts a zero duration (the lower bound is inclusive)", () => {
+    expect(
+      tapOnSchema.parse({ platform: "android", selector: { text: "Gmail" }, duration: 0 }),
+    ).toMatchObject({ duration: 0 });
+  });
 });
 
 describe("tapAny schema", () => {
@@ -278,5 +300,18 @@ describe("tapAny schema", () => {
     ["selector", "use tapOn instead", { text: "Login" }],
   ])("rejects removed field %s (%s) by name", (key, _reason, value) => {
     expectRejectedKey(tapAnySchema, { platform: "android", [key]: value }, key);
+  });
+
+  // Issue #5769: same missing lower bound as tapOn.duration.
+  test.each([-1, -100000])("rejects negative duration %p", (duration) => {
+    const tooSmall = zodIssues(() =>
+      tapAnySchema.parse({ platform: "android", action: "longPress", duration }),
+    ).find((issue) => issue.code === "too_small" && issue.path[0] === "duration");
+    expect(tooSmall, "expected a too_small issue on duration").toBeDefined();
+    expect(tooSmall!.message).toBe("must be >= 0");
+  });
+
+  test("accepts a zero duration (the lower bound is inclusive)", () => {
+    expect(tapAnySchema.parse({ platform: "android", duration: 0 })).toMatchObject({ duration: 0 });
   });
 });

@@ -82,6 +82,17 @@ describe("MCP Tools Schema", () => {
     });
   });
 
+  // Issue #5769: the advertised JSON Schema for tapOn/tapAny duration must
+  // declare `minimum: 0`, matching the bounded sibling gesture params, so a
+  // negative long-press duration is rejected at the envelope.
+  test.each(["tapOn", "tapAny"])("%s advertises duration minimum 0", (toolName) => {
+    const tool = ToolRegistry.getToolDefinitions().find((t) => t.name === toolName);
+    expect(tool, `${toolName} should be advertised`).toBeDefined();
+    const duration = (tool!.inputSchema as any).properties?.duration;
+    expect(duration?.type).toBe("number");
+    expect(duration?.minimum).toBe(0);
+  });
+
   test("should not publish top-level schema combinators", () => {
     const toolDefinitions = ToolRegistry.getToolDefinitions();
 

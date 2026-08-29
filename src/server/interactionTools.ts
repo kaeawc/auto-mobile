@@ -209,7 +209,9 @@ export const tapOnSchema = withJsonSchemaOverride(
               "for a vertical list) instead of applying " +
               "selectionStrategy — for repeated controls with no unique text. Out of range → no match.",
           ),
-        duration: z.number().optional().describe("Long press duration (ms)"),
+        // A negative duration used to be accepted and silently degraded a
+        // longPress into a plain tap (#5769); bound it like the sibling params.
+        duration: z.number().min(0, "must be >= 0").optional().describe("Long press duration (ms)"),
         subtext: z
           .object({
             text: z
@@ -355,7 +357,9 @@ export const tapAnySchema = withJsonSchemaOverride(
           .enum(["tap", "doubleTap", "longPress"])
           .default("tap")
           .describe("Action type (default: tap)"),
-        duration: z.number().optional().describe("Long press duration (ms)"),
+        // Bounded like tapOn.duration so a negative longPress cannot silently
+        // become a plain tap (#5769).
+        duration: z.number().min(0, "must be >= 0").optional().describe("Long press duration (ms)"),
         searchUntil: z
           .object({
             duration: z

@@ -14,6 +14,7 @@ import {
 } from "../utils/toolUtils";
 import {
   addDeviceTargetingToSchema,
+  responseShapeControlFields,
   withAppIdAliases,
   withJsonSchemaOverride,
 } from "./toolSchemaHelpers";
@@ -103,6 +104,7 @@ export const launchAppSchema = withAppIdAliases(
       appId: z.string(),
       clearAppData: z.boolean().optional().describe("Clear app data before launch (default false)"),
       coldBoot: z.boolean().optional().describe("Cold boot app (default false)"),
+      ...responseShapeControlFields,
     }),
   ),
 );
@@ -268,6 +270,8 @@ export interface LaunchAppActionArgs {
   appId: string;
   clearAppData?: boolean;
   coldBoot?: boolean;
+  raw?: boolean;
+  project?: "full" | "skeleton";
 }
 
 export interface InstallAppArgs {

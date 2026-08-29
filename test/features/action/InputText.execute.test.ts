@@ -148,4 +148,54 @@ describe("InputText.execute", () => {
     ]);
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
+
+  // A `selector` focuses the field first, collapsing the mandatory focus-then-type
+  // pair into a single call (issue #5872 AC3).
+  describe("selector focuses the target before typing (#5872)", () => {
+    test("focuses the selected element, then types into it", async () => {
+      serverConfig.setEventAllMarkers([]);
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeA11yService as unknown as AndroidCtrlProxyClient,
+      );
+
+      const focusCalls: unknown[] = [];
+      const inputText = new InputText(androidDevice, fakeAdb as any);
+      wireFakes(inputText);
+      (inputText as any).targetFocuser = {
+        focus: async (selector: unknown) => {
+          focusCalls.push(selector);
+          return { success: true };
+        },
+      };
+
+      const result = await inputText.execute("Ada", undefined, false, undefined, undefined, {
+        text: "First name",
+      });
+
+      expect(result.success).toBe(true);
+      // The field was focused with the caller's selector before any text landed.
+      expect(focusCalls).toEqual([{ text: "First name" }]);
+      expect(fakeA11yService.getTextInputHistory()).toEqual([
+        { text: "Ada", resourceId: undefined },
+      ]);
+    });
+
+    test("returns the focus failure without typing when the selector cannot be focused", async () => {
+      const inputText = new InputText(androidDevice, fakeAdb as any);
+      wireFakes(inputText);
+      (inputText as any).targetFocuser = {
+        focus: async () => ({ success: false, error: "no element matches text=Missing" }),
+      };
+
+      const result = await inputText.execute("Ada", undefined, false, undefined, undefined, {
+        text: "Missing",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("no element matches");
+      // Focus failed, so nothing was ever typed.
+      expect(fakeA11yService.getTextInputHistory()).toEqual([]);
+      expect(fakeAdb.getExecutedCommands().some((cmd) => cmd.includes("keyevent"))).toBe(false);
+    });
+  });
 });

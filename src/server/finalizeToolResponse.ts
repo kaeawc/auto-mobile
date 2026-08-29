@@ -346,7 +346,22 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       sanitizedPayload = stripped;
     } else if (isObserveResult(payload.observation)) {
       const sanitized = sanitizeObserveResult(payload.observation as ObserveResult, cfg);
-      let observationOut: unknown = sanitized;
+      // Action observations default to the compact skeleton (issue #5872) — the
+      // same response-shape control `observe` already has — so a client no longer
+      // pays the full raw hierarchy on every tapOn/inputText/launchApp. The compact
+      // form lands under the same `skeleton` key `observe` uses; `raw:true` /
+      // `project:"full"` opts back into the raw `viewHierarchy`. Two paths always
+      // keep the full tree: internal tool-to-tool consumers read
+      // `.observation.viewHierarchy`, and the opt-in `--actions-diff-observe`
+      // pipeline diffs against (and emits) the full hierarchy.
+      const servedObservation =
+        !ctx.internal && !diffActive && resolveObserveProjection(ctx.args) === "skeleton"
+          ? sanitizeObserveResult(payload.observation as ObserveResult, {
+              ...cfg,
+              project: "skeleton",
+            })
+          : sanitized;
+      let observationOut: unknown = servedObservation;
       let observationDiff: ObservationDiffMetadata | undefined;
       if (ctx.internal) {
         // Internal envelopes are consumed by in-process tool callers, not agents.

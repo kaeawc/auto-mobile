@@ -220,6 +220,41 @@ describe("MCP Tools Schema", () => {
     expect(result.action).toBe("tap");
   });
 
+  // Issue #5872: the action tools gain observe's response-shape control so a
+  // client can opt out of the skeleton default back to the raw hierarchy.
+  test.each(["tapOn", "inputText", "launchApp"])(
+    "%s advertises the raw/project response-shape control",
+    async (toolName) => {
+      const tool = ADVERTISED_TOOLS.find((t) => t.name === toolName);
+      expect(tool).toBeDefined();
+      const props = (tool!.inputSchema as any).properties ?? {};
+      expect(props.raw).toBeDefined();
+      expect(props.project).toBeDefined();
+    },
+  );
+
+  test("inputText accepts a project override and a selector", async () => {
+    const { inputTextSchema } = await import("../../../src/server/interactionTools");
+    const parsed = inputTextSchema.parse({
+      platform: "android",
+      text: "Ada",
+      project: "full",
+      selector: { text: "First name" },
+    });
+    expect(parsed.project).toBe("full");
+    expect(parsed.selector).toEqual({ text: "First name" });
+  });
+
+  test("launchApp accepts raw:true to opt back into the full hierarchy", async () => {
+    const { launchAppSchema } = await import("../../../src/server/appTools");
+    const parsed = launchAppSchema.parse({
+      platform: "android",
+      appId: "com.example",
+      raw: true,
+    });
+    expect(parsed.raw).toBe(true);
+  });
+
   test("an unknown tool name is rejected with an Unknown tool error", async function () {
     const { client } = fixture.getContext();
 

@@ -27,8 +27,42 @@ import {
   type KeyEventPlan,
 } from "./asciiKeyEvents";
 import { Keyboard } from "./Keyboard";
+import { TapOnElement } from "./TapOnElement";
 
 export type InputTextMode = "a11y" | "eventLast" | "eventAll" | "eventOnly" | "append";
+
+/** Selector variants that identify a field to focus before typing (issue #5872). */
+export interface TextInputTargetSelector {
+  elementId?: string;
+  testTag?: string;
+  text?: string;
+  textAny?: string[];
+}
+
+/**
+ * Focuses the field a `selector` names before {@link InputText} types into it,
+ * collapsing the mandatory focus-then-type pair into one call (issue #5872 AC3).
+ * Interface + fake so the focus step is unit-testable without a real tap.
+ */
+export interface TextInputTargetFocuser {
+  focus(
+    selector: TextInputTargetSelector,
+    signal?: AbortSignal,
+  ): Promise<{ success: boolean; error?: string }>;
+}
+
+type TextInputTargetFocuserFactory = (device: BootedDevice) => TextInputTargetFocuser;
+
+const defaultTargetFocuserFactory: TextInputTargetFocuserFactory = (device) => ({
+  focus: async (selector, signal) => {
+    const result = await new TapOnElement(device).execute(
+      { ...selector, action: "focus" },
+      undefined,
+      signal,
+    );
+    return { success: result.success, error: result.error };
+  },
+});
 
 const DEVICE_TIMESTAMP_SECOND_GRANULARITY_MARGIN_MS = 1000;
 
@@ -55,15 +89,18 @@ function assertInputNotAborted(signal?: AbortSignal): void {
 
 export class InputText extends BaseVisualChange {
   private androidInputKeyCombinationSupported: boolean | undefined;
+  private targetFocuser: TextInputTargetFocuser;
 
   constructor(
     device: BootedDevice,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = null,
     private readonly keyboardCloserFactory: KeyboardCloserFactory = defaultKeyboardCloserFactory,
     timer: Timer = defaultTimer,
+    targetFocuserFactory: TextInputTargetFocuserFactory = defaultTargetFocuserFactory,
   ) {
     super(device, adbFactoryOrExecutor, timer);
     this.device = device;
+    this.targetFocuser = targetFocuserFactory(device);
   }
 
   async execute(
@@ -72,6 +109,7 @@ export class InputText extends BaseVisualChange {
     dismissKeyboard: boolean = false,
     mode?: InputTextMode,
     signal?: AbortSignal,
+    selector?: TextInputTargetSelector,
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("inputText");
@@ -99,6 +137,25 @@ export class InputText extends BaseVisualChange {
         logger.debug(
           "[InputText] auto-promoted a11y -> eventAll (text matched a configured event-all marker)",
         );
+      }
+    }
+
+    // A selector focuses the target field first (issue #5872 AC3), so the text
+    // lands where the caller means rather than in whatever happened to be focused.
+    // Focus before the observedInteraction captures its baseline, so the "before"
+    // snapshot already reflects the focused field. A focus failure short-circuits —
+    // typing into an unknown field would be worse than reporting the miss.
+    if (selector) {
+      assertInputNotAborted(signal);
+      const focusResult = await this.targetFocuser.focus(selector, signal);
+      if (!focusResult.success) {
+        perf.end();
+        return {
+          success: false,
+          text,
+          error: focusResult.error ?? "Failed to focus the target element before typing",
+          method: this.device.platform === "android" ? resolvedMode : "a11y",
+        };
       }
     }
 

@@ -51,6 +51,7 @@ import {
   withAppIdAliases,
   withJsonSchemaOverride,
   compactExclusiveSelectorProperties,
+  responseShapeControlFields,
 } from "./toolSchemaHelpers";
 import { serverConfig } from "../utils/ServerConfig";
 import {
@@ -252,6 +253,7 @@ export const tapOnSchema = withJsonSchemaOverride(
           .describe("Retry once if the view hierarchy is unchanged after tap"),
         ensureTap: z.boolean().optional().describe("Enable preTapStability and retryIfNoChange"),
         platform: platformSchema,
+        ...responseShapeControlFields,
       })
       .strict(),
   ).superRefine((value, ctx) => {
@@ -571,9 +573,43 @@ export const clearStateSchema = withAppIdAliases(
   ),
 );
 
+// A selector focuses the target field before typing (issue #5872 AC3), so a
+// form field no longer costs a mandatory tapOn-then-inputText pair. Kept to the
+// selector variants that identify an input; semantic-link activation is a tapOn
+// concern, not a field to type into.
+const inputTextSelectorSchema = z
+  .union([
+    z
+      .object({ elementId: z.string().min(1).describe("Resource ID, e.g. com.app:id/field") })
+      .strict(),
+    z.object({ testTag: z.string().min(1).describe("Android accessibility test tag") }).strict(),
+    z
+      .object({
+        text: z.string().min(1).describe("Text, content-desc, or placeholder of the field"),
+      })
+      .strict(),
+    z
+      .object({
+        textAny: z
+          .array(z.string().min(1))
+          .min(1)
+          .describe("Ordered text variants; first visible match wins"),
+      })
+      .strict(),
+  ])
+  .describe(
+    "Field to focus before typing: elementId, Android testTag, text, or ordered text variants",
+  );
+
 export const inputTextSchema = addDeviceTargetingToSchema(
   z.object({
     text: z.string().min(1),
+    selector: inputTextSelectorSchema
+      .optional()
+      .describe(
+        "Focus this field before typing, collapsing the mandatory focus-then-type pair into " +
+          "one call. Without it, text goes to whatever is currently focused.",
+      ),
     mode: z
       .enum(["a11y", "eventLast", "eventAll", "eventOnly"])
       .optional()
@@ -586,6 +622,7 @@ export const inputTextSchema = addDeviceTargetingToSchema(
       .describe("IME action after input"),
     dismissKeyboard: z.boolean().optional().describe("Android: dismiss keyboard after input"),
     platform: platformSchema,
+    ...responseShapeControlFields,
   }),
 );
 
@@ -1249,6 +1286,7 @@ export function registerInteractionTools() {
       dismissKeyboard,
       mode,
       signal,
+      args.selector,
     );
     return createJSONToolResponse({
       message: `Input text`,

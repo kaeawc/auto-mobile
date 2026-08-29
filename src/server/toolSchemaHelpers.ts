@@ -5,6 +5,30 @@ export const platformSchema = z.enum(["android", "ios"]);
 
 export const DEVICE_LABEL_DESCRIPTION = "Device label";
 
+/**
+ * Response-shape control for tools that embed a post-action observation (issue
+ * #5872). Spread into an action tool's `z.object` shape to give it the same
+ * projection control `observe` already has: the embedded observation defaults to
+ * the compact skeleton, and these two fields opt back into the raw hierarchy.
+ * The compact form always lands under `skeleton`, the raw form under
+ * `viewHierarchy`, regardless of which tool produced it.
+ */
+export const responseShapeControlFields = {
+  raw: z
+    .boolean()
+    .optional()
+    .describe("Return the raw view hierarchy instead of the compact skeleton"),
+  project: z
+    .enum(["full", "skeleton"])
+    .optional()
+    .describe(
+      "Observation projection. 'skeleton' (default) returns a flat, actionable-only list " +
+        "(id/label/bounds/affordances) under `skeleton` in place of `viewHierarchy`; 'full' " +
+        "returns the raw view hierarchy under `viewHierarchy`. Each skeleton id/label is " +
+        "directly usable as a tapOn selector; re-request with raw/project:'full' to disambiguate.",
+    ),
+} as const;
+
 export const appIdFieldAliases = [
   "packageId",
   "package",

@@ -36,12 +36,23 @@ export interface SystemTrayArgs {
   platform: Platform;
 }
 
+/** Selector variants that focus an input field before typing (issue #5872). */
+export interface InputTextSelector {
+  elementId?: string;
+  testTag?: string;
+  text?: string;
+  textAny?: string[];
+}
+
 export interface InputTextArgs {
   text: string;
+  selector?: InputTextSelector;
   mode?: "a11y" | "eventLast" | "eventAll" | "eventOnly";
   imeAction?: ImeAction;
   dismissKeyboard?: boolean;
   platform: Platform;
+  raw?: boolean;
+  project?: "full" | "skeleton";
 }
 
 export interface WakeAndUnlockArgs {
@@ -84,6 +95,8 @@ export interface TapOnArgs {
     text: string;
     occurrence?: number;
   };
+  raw?: boolean;
+  project?: "full" | "skeleton";
 }
 
 export interface TapAnyArgs {

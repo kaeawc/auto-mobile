@@ -97,15 +97,29 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     mkdirSync(this.cacheDir, { recursive: true });
   }
 
+  /**
+   * True when `generation` was supplied and no longer matches the device's
+   * current cache generation — i.e. the cache was invalidated for the device
+   * since `generation` was captured (issue #5884). Undefined `generation` is
+   * an unconditional write and is never stale.
+   */
+  private isStaleWrite(deviceId: string, generation: number | undefined): boolean {
+    if (generation === undefined || generation === this.currentGeneration(deviceId)) {
+      return false;
+    }
+    // Dropping the write keeps the just-cleared cache from being repopulated
+    // with a now-stale hierarchy.
+    logger.debug(
+      `[OBSERVE_CACHE] Dropping stale observe result for device ${deviceId} ` +
+        `(captured generation ${generation}, current ${this.currentGeneration(deviceId)})`,
+    );
+    return true;
+  }
+
   async put(deviceId: string, result: ObserveResult, generation?: number): Promise<void> {
-    if (generation !== undefined && generation !== this.currentGeneration(deviceId)) {
-      // The cache was invalidated for this device while the observation that
-      // produced `result` was in flight (issue #5884). Dropping the write keeps
-      // the just-cleared cache from being repopulated with a now-stale hierarchy.
-      logger.debug(
-        `[OBSERVE_CACHE] Dropping stale observe result for device ${deviceId} ` +
-          `(captured generation ${generation}, current ${this.currentGeneration(deviceId)})`,
-      );
+    // The cache was invalidated for this device while the observation that
+    // produced `result` was in flight (issue #5884).
+    if (this.isStaleWrite(deviceId, generation)) {
       return;
     }
     const timestamp = this.timer.now();
@@ -115,6 +129,13 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
         `[OBSERVE_CACHE] Caching observe result for device ${deviceId} with timestamp ${timestamp}`,
       );
       await this.pendingDiskCleanup;
+      // Re-check after the await: a clear() can advance the generation during
+      // that microtask hop, and its disk-deletion snapshot was taken before our
+      // file exists — so a write past this point would survive the very
+      // invalidation it raced, re-opening the #5884 hole in a narrower window.
+      if (this.isStaleWrite(deviceId, generation)) {
+        return;
+      }
       this.cache.set(cacheKey, { timestamp, deviceId, observeResult: result });
       await this.saveObserveResultToDisk(cacheKey, result);
       logger.debug(

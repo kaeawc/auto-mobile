@@ -165,6 +165,20 @@ describe("FileSystemObserveCacheStore", function () {
     expect(readdirSync(cacheDir).filter((f) => f.endsWith(".json")).length).toBe(0);
   });
 
+  test("put is rejected when clear() interleaves mid-write (in-flight put, not just pre-put)", async function () {
+    const capturedGen = store.currentGeneration("device-1");
+    // Start the put but do not await it: its body runs synchronously up to the
+    // internal `await this.pendingDiskCleanup`, then yields with the generation
+    // still current. A clear() landing in that hop must still fence the write.
+    const putPromise = store.put("device-1", makeResult("stale-mid-write"), capturedGen);
+    store.clear("device-1");
+    await putPromise;
+
+    expect(store.getRecentInMemoryForDevice("device-1")).toBeUndefined();
+    expect(await store.getMostRecent("device-1")).toBeUndefined();
+    expect(readdirSync(cacheDir).filter((f) => f.endsWith(".json")).length).toBe(0);
+  });
+
   test("put with a stale generation from clear-all is rejected", async function () {
     const capturedGen = store.currentGeneration("device-1");
     store.clear();

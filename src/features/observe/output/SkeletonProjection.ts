@@ -2,11 +2,7 @@ import type { Element } from "../../../models/Element";
 import { isTruthy } from "../../../models/Element";
 import { hasAccessibilityAction } from "../../../utils/elementProperties";
 import type { Affordance, ObserveResult, SkeletonElement } from "../../../models/ObserveResult";
-import {
-  ElementProvenance,
-  getElementProvenance,
-  isStrictAncestor,
-} from "./elementProvenance";
+import { ElementProvenance, getElementProvenance, isStrictAncestor } from "./elementProvenance";
 
 /**
  * Interactable Skeleton Projection (issue #4388).
@@ -375,10 +371,7 @@ function smallestClickableAncestor(
  * `best`. With provenance, the deeper tree ancestor wins (greater `enter`);
  * otherwise the smaller-area geometric container.
  */
-function isTighterContainer(
-  candidate: SkeletonAccumulator,
-  best: SkeletonAccumulator,
-): boolean {
+function isTighterContainer(candidate: SkeletonAccumulator, best: SkeletonAccumulator): boolean {
   if (candidate.provenance && best.provenance) {
     return candidate.provenance.enter > best.provenance.enter;
   }

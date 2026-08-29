@@ -495,9 +495,7 @@ describe("toSkeleton — acceptance criteria", () => {
         1,
       );
 
-      const skeleton = toSkeleton(
-        makeElements({ clickable: [underlying], text: [overlayText] }),
-      );
+      const skeleton = toSkeleton(makeElements({ clickable: [underlying], text: [overlayText] }));
 
       // The underlying action keeps its own (absent) label — not relabelled from
       // the unrelated overlay text in another window.
@@ -518,9 +516,7 @@ describe("toSkeleton — acceptance criteria", () => {
         1,
       );
 
-      const skeleton = toSkeleton(
-        makeElements({ clickable: [underlying], text: [overlayText] }),
-      );
+      const skeleton = toSkeleton(makeElements({ clickable: [underlying], text: [overlayText] }));
 
       // The overlay text survives as its own affordance-less row — the
       // clickable-ancestor suppression no longer crosses the window boundary.

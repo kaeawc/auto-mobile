@@ -124,9 +124,7 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   const verified = observedAppId === appId ? true : undefined;
 
   return {
-    message: verified
-      ? `Launched app ${appId} (foreground verified)`
-      : `Launched app ${appId}`,
+    message: verified ? `Launched app ${appId} (foreground verified)` : `Launched app ${appId}`,
     verified,
     observedAppId,
     observation: result.observation,

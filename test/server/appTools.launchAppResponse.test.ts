@@ -4,9 +4,7 @@ import { ActionableError, type LaunchAppResult, type ObserveResult } from "../..
 
 const observationForApp = (appId: string | undefined): ObserveResult =>
   ({
-    activeWindow: appId
-      ? { appId, activityName: "MainActivity", layoutSeqSum: 1 }
-      : undefined,
+    activeWindow: appId ? { appId, activityName: "MainActivity", layoutSeqSum: 1 } : undefined,
   }) as ObserveResult;
 
 describe("buildLaunchAppResponse", () => {

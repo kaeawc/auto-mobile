@@ -24,7 +24,10 @@ describe("buildTapOnResultMessage", () => {
   });
 
   test("reports an ambiguous selector via the match count", () => {
-    const message = buildTapOnResultMessage(selected({ text: "Internet", totalMatches: 3 }), undefined);
+    const message = buildTapOnResultMessage(
+      selected({ text: "Internet", totalMatches: 3 }),
+      undefined,
+    );
     expect(message).toContain("3 matches");
   });
 
@@ -61,13 +64,19 @@ describe("buildTapOnResultMessage", () => {
   });
 
   test("includes the occurrence when it disambiguates repeated link text", () => {
-    const message = buildTapOnResultMessage(undefined, undefined, { text: "Learn more", occurrence: 2 });
+    const message = buildTapOnResultMessage(undefined, undefined, {
+      text: "Learn more",
+      occurrence: 2,
+    });
     expect(message).toContain('activated link "Learn more" [occurrence 2]');
   });
 
   test("different activated links yield different messages", () => {
     const terms = buildTapOnResultMessage(undefined, undefined, { text: "Terms", occurrence: 0 });
-    const privacy = buildTapOnResultMessage(undefined, undefined, { text: "Privacy", occurrence: 0 });
+    const privacy = buildTapOnResultMessage(undefined, undefined, {
+      text: "Privacy",
+      occurrence: 0,
+    });
     expect(terms).not.toBe(privacy);
   });
 

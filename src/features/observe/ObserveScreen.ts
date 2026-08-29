@@ -420,7 +420,11 @@ export class RealObserveScreen implements ObserveScreen {
           !hierarchyPlatformValid ||
           result.viewHierarchy?.hierarchy === undefined ||
           result.viewHierarchy?.hierarchy?.error !== undefined,
-        windowIdentityMismatch: await this.resolveWindowIdentityMismatch(result, foregroundIdentity),
+        windowIdentityMismatch: await this.resolveWindowIdentityMismatch(
+          result,
+          foregroundIdentity,
+          signal,
+        ),
       });
 
       // Attach the windowed performance snapshot when opted in (independent of --debug-perf).
@@ -783,10 +787,18 @@ export class RealObserveScreen implements ObserveScreen {
    * not a stale capture. Excluding it keeps first-class shade workflows (the
    * `systemTray` tool) from misfiring while still catching the app-vs-app case
    * the issue reported.
+   *
+   * The parallel sample is taken before hierarchy capture, so during an A→B app
+   * transition it can lag the (valid, newer) captured window and read a spurious
+   * mismatch. A detected mismatch is therefore confirmed against a second read
+   * taken now — after capture: freshness is retracted only when the device is
+   * *stably* on a different app (both samples agree, and still differ from the
+   * observed window). The extra dumpsys runs only on the rare mismatch path.
    */
   private async resolveWindowIdentityMismatch(
     result: ObserveResult,
     foregroundIdentity: Promise<string | undefined>,
+    signal?: AbortSignal,
   ): Promise<{ observed: string; foreground: string } | undefined> {
     const foreground = await foregroundIdentity;
     const observed = result.activeWindow?.appId;
@@ -797,6 +809,11 @@ export class RealObserveScreen implements ObserveScreen {
       SYSTEM_UI_WINDOW_PACKAGES.has(observed) ||
       SYSTEM_UI_WINDOW_PACKAGES.has(foreground)
     ) {
+      return undefined;
+    }
+    // Confirm the mismatch is steady-state, not a transient transition (see above).
+    const confirmed = await this.deviceStateCollector.collectForegroundIdentity(signal);
+    if (!confirmed || confirmed !== foreground || confirmed === observed) {
       return undefined;
     }
     return { observed, foreground };

@@ -172,6 +172,50 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.verified).toBe(true);
   });
 
+  test("a transient app transition is not flagged: the confirming read settles onto the observed app", async () => {
+    // The parallel foreground sample lags the newer captured hierarchy during an
+    // A→B transition: sample1 = the old app, observed hierarchy = the new app.
+    // The confirming read (taken after capture) sees the device settled on the
+    // new app, so freshness must NOT be retracted.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy(calendarHierarchy(now)); // observed = calendar
+
+    // First getForegroundApp read lags (still reports settings); the confirming
+    // read reports calendar, matching the observed window.
+    const sequence = [
+      { packageName: "com.android.settings", userId: 0 },
+      { packageName: "com.google.android.calendar", userId: 0 },
+    ];
+    class SequencedForegroundAdb extends FakeAdbExecutor {
+      async getForegroundApp(): Promise<{ packageName: string; userId: number } | null> {
+        return sequence.shift() ?? { packageName: "com.google.android.calendar", userId: 0 };
+      }
+    }
+    const fakeAdb = new SequencedForegroundAdb();
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.verified).toBe(true);
+  });
+
   test("no ground-truth foreground app leaves freshness unchanged (no false alarm)", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();

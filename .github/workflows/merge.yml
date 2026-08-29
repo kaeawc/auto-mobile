@@ -381,9 +381,13 @@ jobs:
 
       - wait: install-bats
 
-      # Cross-file parallel (`--jobs`), within-file serial. See scripts/ci/run-bats.sh.
+      # The parallel BATS runner intermittently exits 1 after reporting every
+      # test as passed on hosted Ubuntu runners. Match the stable PR-CI mode;
+      # the 10-minute job budget has ample headroom for the serial pass.
       - name: "Run BATS Tests"
         shell: bash
+        env:
+          AUTOMOBILE_BATS_SERIAL_ONLY: "true"
         run: scripts/ci/run-bats.sh
 
   # Always exercise the real WHIP publisher contract post-merge on main:

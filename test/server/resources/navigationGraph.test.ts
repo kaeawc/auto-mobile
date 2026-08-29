@@ -636,8 +636,16 @@ describe("MCP Navigation Graph Resource", () => {
 
       const content = result.contents[0];
       expect(content.mimeType).toBe("application/json");
-      // Parseable JSON envelope — the read completed instead of throwing.
-      expect(() => JSON.parse(content.text!)).not.toThrow();
+      // Deliberate contract: a malformed `%` appId degrades to a normal graph
+      // envelope (its fields present, no `error`), NOT an uncaught URIError and
+      // NOT a bespoke malformed-input rejection. This mirrors #5686, which treats
+      // a `%`-bearing id as an ordinary (here, unknown) app id rather than
+      // rejecting it — decoding is best-effort, so an unresolvable id degrades the
+      // same way any unknown id does. Asserting the shape (not just "some JSON
+      // parses") pins that intended degradation.
+      const body = JSON.parse(content.text!);
+      expect(body.error).toBeUndefined();
+      expect(Array.isArray(body.nodes)).toBe(true);
     });
   });
 });

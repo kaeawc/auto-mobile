@@ -4633,6 +4633,9 @@
               "resourceId": {
                 "type": "string"
               },
+              "testTag": {
+                "type": "string"
+              },
               "contentDesc": {
                 "type": "string"
               },
@@ -9159,6 +9162,9 @@
                       "resourceId": {
                         "type": "string"
                       },
+                      "testTag": {
+                        "type": "string"
+                      },
                       "contentDesc": {
                         "type": "string"
                       },
@@ -10048,6 +10054,9 @@
             "resourceId": {
               "type": "string"
             },
+            "testTag": {
+              "type": "string"
+            },
             "contentDesc": {
               "type": "string"
             },
@@ -10157,6 +10166,9 @@
                 "type": "string"
               },
               "resourceId": {
+                "type": "string"
+              },
+              "testTag": {
                 "type": "string"
               },
               "contentDesc": {

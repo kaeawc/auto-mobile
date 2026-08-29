@@ -70,6 +70,20 @@ describe("buildTapOnResultMessage", () => {
     expect(first).not.toBe(third);
   });
 
+  // A testTag-selected Compose node may expose only a test tag (no text, no id);
+  // the message must name it so tapping message_row_42 vs another tag is not
+  // byte-identical.
+  test("names the test tag when it is the only stable identity", () => {
+    const message = buildTapOnResultMessage(selected({ testTag: "message_row_42" }), undefined);
+    expect(message).toBe("Tapped on element (matched testTag=message_row_42; 1 match)");
+  });
+
+  test("two uniquely-tagged nodes stay distinguishable via their test tag", () => {
+    const a = buildTapOnResultMessage(selected({ testTag: "message_row_42" }), undefined);
+    const b = buildTapOnResultMessage(selected({ testTag: "message_row_7" }), undefined);
+    expect(a).not.toBe(b);
+  });
+
   test("omits the index for a precise single match", () => {
     const message = buildTapOnResultMessage(selected({ text: "Internet" }), undefined);
     expect(message).toContain("1 match");

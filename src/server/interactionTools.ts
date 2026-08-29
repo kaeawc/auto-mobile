@@ -793,6 +793,9 @@ export function buildTapOnResultMessage(
     if (selectedElement.resourceId) {
       identity.push(`id=${selectedElement.resourceId}`);
     }
+    if (selectedElement.testTag) {
+      identity.push(`testTag=${selectedElement.testTag}`);
+    }
     if (selectedElement.text) {
       identity.push(`text=${JSON.stringify(selectedElement.text)}`);
     }

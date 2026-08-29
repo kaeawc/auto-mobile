@@ -13,6 +13,8 @@ export interface TapOnSelectedElementBounds extends ElementBounds {
 export interface TapOnSelectedElement {
   text: string;
   resourceId: string;
+  /** Compose test tag, when the node exposes one (may be the only stable identity). */
+  testTag?: string;
   bounds: TapOnSelectedElementBounds;
   indexInMatches: number;
   totalMatches: number;

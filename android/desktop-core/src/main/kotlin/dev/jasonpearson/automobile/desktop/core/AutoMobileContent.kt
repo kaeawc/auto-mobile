@@ -249,12 +249,22 @@ internal const val LIVE_FIRST_FRAME_TIMEOUT_MS = 15_000L
  * torn down and rebuilt. This rechecks Screen Recording after the user returns from System
  * Settings. Off (the default) preserves the original clear-and-stop behavior for the IDE-plugin/
  * `AutoMobileContent` path, which blends in screenshot updates instead.
+ *
+ * [streamingEnabled] gates the live subscription without tearing the composition down
+ * (issue #5219): the desktop workspace passes window focus here, so an unfocused/minimized window
+ * disconnects every pane's source — the daemon can then drop the device-side encode once no
+ * subscriber remains — and a refocus reconnects the same source. Disconnect (not
+ * [VideoStreamSource.dispose]) is used so the source is reusable on refocus; dispose stays reserved
+ * for composition teardown. All connect-driving loops below (the Unavailable retry and the progress
+ * watchdog) are gated on this flag so a paused pane cannot silently reconnect itself. Default
+ * `true` leaves the IDE-plugin/`AutoMobileContent` path always-on and unchanged.
  */
 @Composable
 internal fun rememberLiveVideoFrame(
   source: VideoStreamSource?,
   deviceId: String?,
   autoReconnect: Boolean = false,
+  streamingEnabled: Boolean = true,
   reconnectInitialMs: Long = LIVE_RECONNECT_INITIAL_MS,
   nowMs: () -> Long = MONOTONIC_NOW_MS,
   // Null disables the Streaming-stall reconnect; iOS (idle-frame-dropping) callers pass null.
@@ -265,12 +275,24 @@ internal fun rememberLiveVideoFrame(
 ): LiveVideoFrame? {
   var liveFrame by remember(source, deviceId) { mutableStateOf<LiveVideoFrame?>(null) }
 
+  // Dispose the source when the composition leaves. Keyed on source/deviceId only — NOT on
+  // streamingEnabled — so a focus toggle never disposes: dispose is terminal (the source cannot
+  // reconnect), whereas a pause must resume on the same source.
   DisposableEffect(source, deviceId) {
-    if (source != null && deviceId != null) source.connect(deviceId)
     onDispose {
       liveFrame = null
       source?.dispose()
     }
+  }
+
+  // Connect while focused, disconnect while not. Re-running on streamingEnabled flips the pane
+  // between a live subscription and none; connect() no-ops while a reader is already active, so a
+  // redundant enable cannot double-subscribe.
+  DisposableEffect(source, deviceId, streamingEnabled) {
+    if (source != null && deviceId != null) {
+      if (streamingEnabled) source.connect(deviceId) else source.disconnect()
+    }
+    onDispose {}
   }
 
   LaunchedEffect(source) {
@@ -281,8 +303,9 @@ internal fun rememberLiveVideoFrame(
     }
   }
 
-  LaunchedEffect(source, deviceId, autoReconnect) {
-    if (source == null) return@LaunchedEffect
+  LaunchedEffect(source, deviceId, autoReconnect, streamingEnabled) {
+    // A paused pane (window unfocused) owns no subscription, so it must not retry a reconnect.
+    if (source == null || !streamingEnabled) return@LaunchedEffect
     // collectLatest (not collect) is load-bearing for the retry: when the socket is absent,
     // connect() re-assigns the SAME Unavailable value, which MutableStateFlow suppresses — so a
     // plain collector would receive no further event and retry only once. Under collectLatest the
@@ -321,11 +344,21 @@ internal fun rememberLiveVideoFrame(
   // keeps rendering across it. Idle static screens are handled correctly: on iOS stallReconnectMs
   // is null so an idle `Streaming` stream is left alone, and the first-frame deadline only applies
   // BEFORE the first frame, where a static screen is irrelevant.
-  LaunchedEffect(source, deviceId, autoReconnect) {
-    if (source == null || deviceId == null || !autoReconnect) return@LaunchedEffect
+  LaunchedEffect(source, deviceId, autoReconnect, streamingEnabled) {
+    // Gate on streamingEnabled too: while paused the source sits Idle after disconnect, and the
+    // Connecting/Idle branch below would otherwise treat that as a never-first-frame wedge and
+    // reconnect — silently defeating the pause.
+    if (source == null || deviceId == null || !autoReconnect || !streamingEnabled)
+      return@LaunchedEffect
     if (stallReconnectMs == null && firstFrameTimeoutMs == null) return@LaunchedEffect
     var noProgressSinceMs = nowMs()
-    var lastSeenSequence = -1L
+    // Seed from the frame already on screen so a RETAINED frame is not mistaken for fresh progress.
+    // On a streamingEnabled resume this watchdog restarts while liveFrame still holds the pre-pause
+    // frame; keyed at -1 the first tick would adopt that frame's ancient receivedAtMs as the
+    // baseline and, for a pause longer than stallReconnectMs, reconnect immediately (issue #5219).
+    // frameSequence is a monotonic per-source counter, so the next real frame always outranks the
+    // retained one and still registers as progress.
+    var lastSeenSequence = liveFrame?.sequence ?: -1L
     fun reconnect(reason: String) {
       LOG.info("Live mirror for $deviceId reconnecting: $reason")
       noProgressSinceMs = nowMs()

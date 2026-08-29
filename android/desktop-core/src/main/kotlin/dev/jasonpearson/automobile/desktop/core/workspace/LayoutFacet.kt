@@ -48,6 +48,10 @@ fun LayoutFacet(
   backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
   socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
   sessionUuidProvider: () -> String? = { null },
+  // Window-focus gate (#5219): the desktop host passes `false` when its window is unfocused or
+  // minimized, pausing the inspector's live mirror the same way the stream pane pauses. Default
+  // `true` keeps other embeddings always-streaming.
+  streamingEnabled: Boolean = true,
   videoSourceFactory: (deviceId: String) -> VideoStreamSource = {
     VideoStreamClient(
       quality = VideoStreamQuality.High,
@@ -69,6 +73,7 @@ fun LayoutFacet(
       videoSource,
       column.deviceId,
       autoReconnect = true,
+      streamingEnabled = streamingEnabled,
       // Streaming-stall reconnect only for idle-heartbeat sources (Android); the iOS capture drops
       // idle buffers, so a static inspected screen legitimately makes no frame progress.
       stallReconnectMs = if (column.platform == Platform.Android) LIVE_STALL_RECONNECT_MS else null,

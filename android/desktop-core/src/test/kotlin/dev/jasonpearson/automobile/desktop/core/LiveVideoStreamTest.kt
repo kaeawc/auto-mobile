@@ -237,4 +237,57 @@ class LiveVideoStreamTest {
     waitForIdle()
     assertNull(observedFrame)
   }
+
+  @Test
+  fun `resuming after a long pause does not reconnect off the retained frame`() = runComposeUiTest {
+    // #5219 regression: a streamingEnabled resume restarts the stall watchdog while liveFrame still
+    // holds the pre-pause frame. It must not adopt that stale frame's ancient receivedAtMs as the
+    // progress baseline — otherwise a pause longer than stallReconnectMs makes the first tick judge
+    // the freshly-resumed stream stalled and reconnect immediately. The logical clock (nowMs) is
+    // frozen at the resume instant so the assertion is deterministic: with the fix the watchdog
+    // sees
+    // zero elapsed no-progress time and never reconnects.
+    val clock = java.util.concurrent.atomic.AtomicLong(0L)
+    val nowMs = { clock.get() }
+    val source = FakeVideoStreamSource(nowMs = nowMs)
+    val streaming = mutableStateOf(true)
+    setContent {
+      rememberLiveVideoFrame(
+        source,
+        "emulator-5554",
+        autoReconnect = true,
+        streamingEnabled = streaming.value,
+        reconnectInitialMs = 10,
+        nowMs = nowMs,
+        stallReconnectMs = 100,
+        stallCheckIntervalMs = 20,
+      )
+    }
+    waitUntil { source.connectedDeviceId == "emulator-5554" }
+    source.emitFrame(width = 1, height = 1) // retained frame, receivedAtMs = 0
+    waitUntil { source.state.value is VideoStreamState.Streaming }
+
+    runOnUiThread { streaming.value = false } // window unfocused → pause/disconnect
+    waitUntil { source.connectedDeviceId == null }
+    clock.set(10_000) // 10s elapse while unfocused, far exceeding stallReconnectMs
+
+    runOnUiThread { streaming.value = true } // refocus → a single reconnect
+    waitUntil { source.connectedDeviceId == "emulator-5554" }
+    val connectsAtResume = source.connectCalls
+
+    // Freeze auto-advance and step the test clock deterministically through a bounded run of the
+    // watchdog's stallCheck ticks (stallCheckIntervalMs = 20, so 500 ms = 25 ticks, well past the
+    // 100 ms stallReconnectMs window). No fresh frame arrives: with the stale baseline the watchdog
+    // would reconnect within the first tick, but with the fix the frozen nowMs yields zero
+    // no-progress time forever, so connectCalls stays put. Advancing the clock ourselves keeps the
+    // passing path off the wall clock (the old waitUntil timeout burned a full second per run).
+    mainClock.autoAdvance = false
+    mainClock.advanceTimeBy(500L)
+    waitForIdle()
+    assertEquals(
+      connectsAtResume,
+      source.connectCalls,
+      "watchdog must not reconnect off the retained pre-pause frame",
+    )
+  }
 }

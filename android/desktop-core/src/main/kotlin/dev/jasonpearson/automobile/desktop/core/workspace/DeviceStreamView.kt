@@ -89,6 +89,11 @@ fun DeviceStreamView(
   // an auto-adjust toggle) whose choice persists here across sessions. Null keeps today's fixed
   // per-mode preset with no overlay, so existing embeddings are unchanged.
   settings: SettingsProvider? = null,
+  // Window-focus gate (#5219): the desktop host passes `false` when its window is unfocused or
+  // minimized, which disconnects this pane's live subscription (so the daemon can drop the
+  // device-side encode) and reconnects on refocus. Default `true` keeps every other embedding
+  // always-streaming and unchanged.
+  streamingEnabled: Boolean = true,
   // Hoisted so a host or test can pass a different quality/rate or a fake source entirely. The
   // quality is passed in (rather than baked in) so the pane can re-subscribe when the selector or
   // auto-adjust changes it.
@@ -157,6 +162,7 @@ fun DeviceStreamView(
       source,
       column.deviceId,
       autoReconnect = true,
+      streamingEnabled = streamingEnabled,
       // The Streaming-stall reconnect is only valid for idle-heartbeat sources (Android). The iOS
       // capture drops idle buffers, so a healthy static screen makes no frame progress and must
       // NOT be reconnected; the first-frame deadline still catches a never-first-frame wedge.

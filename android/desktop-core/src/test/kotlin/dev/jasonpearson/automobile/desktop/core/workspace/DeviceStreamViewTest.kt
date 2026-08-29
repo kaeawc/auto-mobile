@@ -44,6 +44,44 @@ class DeviceStreamViewTest {
   }
 
   @Test
+  fun `disconnects when the window loses focus and reconnects on refocus`() = runComposeUiTest {
+    // #5219: an unfocused/minimized desktop window pauses the pane's live stream so the daemon can
+    // drop the device-side encode; refocus resumes it on the same source.
+    val source = FakeVideoStreamSource()
+    val focused = mutableStateOf(true)
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          col(),
+          sourceFactory = { _, _ -> source },
+          streamingEnabled = focused.value,
+        )
+      }
+    }
+    waitUntil { source.connectedDeviceId == "emulator-5554" }
+
+    runOnUiThread { focused.value = false }
+    waitUntil { source.connectedDeviceId == null }
+
+    runOnUiThread { focused.value = true }
+    waitUntil { source.connectedDeviceId == "emulator-5554" }
+  }
+
+  @Test
+  fun `never connects while the window starts unfocused`() = runComposeUiTest {
+    // Mounting a pane while the window is already unfocused must not open a subscription at all.
+    val source = FakeVideoStreamSource()
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(col(), sourceFactory = { _, _ -> source }, streamingEnabled = false)
+      }
+    }
+    waitForIdle()
+    assertNull(source.connectedDeviceId)
+    assertEquals(0, source.connectCalls)
+  }
+
+  @Test
   fun `draws the newest decoded frame as the live mirror`() = runComposeUiTest {
     val source = FakeVideoStreamSource()
     setContent { MaterialTheme { DeviceStreamView(col(), sourceFactory = { _, _ -> source }) } }

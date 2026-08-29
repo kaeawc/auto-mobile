@@ -12,7 +12,9 @@ export const PROCESS_LAUNCHERS = new Set([
 ]);
 const CHILD_PROCESS_MODULES = new Set(["child_process", "node:child_process"]);
 const INJECTED_LAUNCHERS = new Set(["spawn", "spawnSync"]);
-const DYNAMIC_BOUNDARY = "\u0000";
+export const DYNAMIC_BOUNDARY = "\u0000";
+export const STRING_ANALYSIS_OVERFLOW = "\u0003";
+const MAX_STRING_ALTERNATIVES = 256;
 
 export interface ExecutionBoundaryAst {
   readonly calls: readonly ts.CallExpression[];
@@ -21,6 +23,7 @@ export interface ExecutionBoundaryAst {
   isExecutionSeam(call: ts.CallExpression): boolean;
   isRunExecSeam(call: ts.CallExpression): boolean;
   strings(node: ts.Expression | undefined): string[];
+  stringAlternatives(node: ts.Expression | undefined): string[];
   arrayAlternatives(node: ts.Expression | undefined): ts.Expression[][] | undefined;
   arrayElements(node: ts.Expression | undefined): ts.Expression[] | undefined;
   objectPropertyValues(node: ts.Expression | undefined, propertyName: string): ts.Expression[];
@@ -48,6 +51,15 @@ function propertyNameOf(name: ts.PropertyName): string | undefined {
   return ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)
     ? name.text
     : undefined;
+}
+
+function bindingIdentifiers(name: ts.BindingName): ts.Identifier[] {
+  if (ts.isIdentifier(name)) {
+    return [name];
+  }
+  return name.elements.flatMap((element) =>
+    ts.isBindingElement(element) ? bindingIdentifiers(element.name) : [],
+  );
 }
 
 function unwrapTransparentExpression(expression: ts.Expression): ts.Expression {
@@ -79,13 +91,131 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     ts.ScriptKind.TS,
   );
   const initializers = new Map<string, ts.Expression[]>();
+  const scopedValues: Array<{
+    kind: "assignment" | "declaration";
+    name: string;
+    value: ts.Expression;
+    scope: ts.Node;
+    position: number;
+  }> = [];
+  type DeclarationBinding = { name: string; scope: ts.Node; position: number };
+  const declarations: DeclarationBinding[] = [];
+  const functionBindings: Array<{
+    name: string;
+    node: ts.FunctionLikeDeclaration;
+    scope: ts.Node;
+    position: number;
+    receiverDeclaration?: DeclarationBinding;
+  }> = [];
+  type InvocationExpression = ts.CallExpression | ts.NewExpression;
   const calls: ts.CallExpression[] = [];
+  const invocations: InvocationExpression[] = [];
   const launcherAliases = new Set(PROCESS_LAUNCHERS);
   const executionSeamAliases = new Set(["executeCommand", "runExecSeam", "execute"]);
   const runExecSeamAliases = new Set(["runExecSeam"]);
   const childProcessNamespaces = new Set<string>();
-  const bind = (name: string, value: ts.Expression): void =>
+  const functionName = (node: ts.FunctionLikeDeclaration): string | undefined => {
+    if (
+      ts.isConstructorDeclaration(node) &&
+      ts.isClassDeclaration(node.parent) &&
+      node.parent.name
+    ) {
+      return node.parent.name.text;
+    }
+    if (ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
+      return node.parent.name.text;
+    }
+    if (ts.isPropertyAssignment(node.parent)) {
+      const assignedName = propertyNameOf(node.parent.name);
+      if (assignedName) {
+        return assignedName;
+      }
+    }
+    if (node.name && ts.isIdentifier(node.name)) {
+      return node.name.text;
+    }
+    return undefined;
+  };
+  const lexicalScope = (node: ts.Node): ts.Node => {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (
+        ts.isSourceFile(current) ||
+        ts.isBlock(current) ||
+        ts.isModuleBlock(current) ||
+        ts.isCaseBlock(current) ||
+        ts.isForStatement(current) ||
+        ts.isForInStatement(current) ||
+        ts.isForOfStatement(current)
+      ) {
+        return current;
+      }
+      current = current.parent;
+    }
+    return sourceFile;
+  };
+  const functionScope = (node: ts.Node): ts.Node => {
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (ts.isFunctionLike(current)) {
+        return current;
+      }
+      if (ts.isModuleBlock(current)) {
+        return current;
+      }
+      if (ts.isSourceFile(current)) {
+        return current;
+      }
+      current = current.parent;
+    }
+    return sourceFile;
+  };
+  const variableDeclarationScope = (node: ts.VariableDeclaration): ts.Node =>
+    ts.isVariableDeclarationList(node.parent) &&
+    (node.parent.flags & ts.NodeFlags.BlockScoped) !== 0
+      ? lexicalScope(node)
+      : functionScope(node);
+  const scopeChainCache = new Map<ts.Node, ts.Node[]>();
+  const scopeChain = (node: ts.Node): ts.Node[] => {
+    const cached = scopeChainCache.get(node);
+    if (cached) {
+      return cached;
+    }
+    const scopes: ts.Node[] = [];
+    let current: ts.Node | undefined = node.parent;
+    while (current) {
+      if (
+        ts.isSourceFile(current) ||
+        ts.isBlock(current) ||
+        ts.isModuleBlock(current) ||
+        ts.isCaseBlock(current) ||
+        ts.isFunctionLike(current) ||
+        ts.isForStatement(current) ||
+        ts.isForInStatement(current) ||
+        ts.isForOfStatement(current)
+      ) {
+        scopes.push(current);
+      }
+      current = current.parent;
+    }
+    scopeChainCache.set(node, scopes);
+    return scopes;
+  };
+  const bind = (
+    name: string,
+    value: ts.Expression,
+    owner: ts.Node,
+    kind: "assignment" | "declaration",
+  ): void => {
     initializers.set(name, [...(initializers.get(name) ?? []), value]);
+    scopedValues.push({
+      name,
+      value,
+      kind,
+      scope: lexicalScope(owner),
+      position: owner.getStart(sourceFile),
+    });
+  };
   const collect = (node: ts.Node): void => {
     if (
       ts.isImportDeclaration(node) &&
@@ -115,8 +245,64 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       childProcessNamespaces.add(node.name.text);
     }
     if (ts.isVariableDeclaration(node)) {
-      if (ts.isIdentifier(node.name) && node.initializer) {
-        bind(node.name.text, node.initializer);
+      const scope = variableDeclarationScope(node);
+      const variableDeclarations = bindingIdentifiers(node.name).map((identifier) => ({
+        name: identifier.text,
+        scope,
+        position: node.getStart(sourceFile),
+      }));
+      declarations.push(...variableDeclarations);
+      const receiverDeclaration = ts.isIdentifier(node.name)
+        ? variableDeclarations.find((declaration) => declaration.name === node.name.text)
+        : undefined;
+      if (ts.isIdentifier(node.name) && node.initializer && ts.isFunctionLike(node.initializer)) {
+        functionBindings.push({
+          name: node.name.text,
+          node: node.initializer,
+          scope,
+          position: node.getStart(sourceFile),
+        });
+      }
+      if (
+        ts.isIdentifier(node.name) &&
+        node.initializer &&
+        ts.isObjectLiteralExpression(node.initializer)
+      ) {
+        for (const property of node.initializer.properties) {
+          const method = ts.isMethodDeclaration(property)
+            ? property
+            : ts.isPropertyAssignment(property) && ts.isFunctionLike(property.initializer)
+              ? property.initializer
+              : undefined;
+          const methodName =
+            ts.isMethodDeclaration(property) || ts.isPropertyAssignment(property)
+              ? propertyNameOf(property.name)
+              : undefined;
+          if (method && methodName) {
+            functionBindings.push({
+              name: methodName,
+              node: method,
+              scope,
+              position: node.getStart(sourceFile),
+              receiverDeclaration,
+            });
+          }
+        }
+      }
+      if (ts.isIdentifier(node.name)) {
+        if (node.initializer) {
+          initializers.set(node.name.text, [
+            ...(initializers.get(node.name.text) ?? []),
+            node.initializer,
+          ]);
+          scopedValues.push({
+            name: node.name.text,
+            value: node.initializer,
+            kind: "declaration",
+            scope,
+            position: node.getStart(sourceFile),
+          });
+        }
       }
       if (ts.isObjectBindingPattern(node.name)) {
         const initializer = node.initializer;
@@ -159,19 +345,358 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
         childProcessNamespaces.add(node.name.text);
       }
     }
+    if (ts.isFunctionDeclaration(node) && node.name) {
+      functionBindings.push({
+        name: node.name.text,
+        node,
+        scope: lexicalScope(node),
+        position: node.getStart(sourceFile),
+      });
+    }
+    if (ts.isClassDeclaration(node) && node.name) {
+      const scope = lexicalScope(node);
+      const receiverDeclaration: DeclarationBinding = {
+        name: node.name.text,
+        scope,
+        position: node.getStart(sourceFile),
+      };
+      declarations.push(receiverDeclaration);
+      for (const member of node.members) {
+        if (ts.isConstructorDeclaration(member)) {
+          functionBindings.push({
+            name: node.name.text,
+            node: member,
+            scope,
+            position: member.getStart(sourceFile),
+          });
+        }
+        if (
+          ts.isMethodDeclaration(member) &&
+          member.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword)
+        ) {
+          const methodName = propertyNameOf(member.name);
+          if (methodName) {
+            functionBindings.push({
+              name: methodName,
+              node: member,
+              scope,
+              position: member.getStart(sourceFile),
+              receiverDeclaration,
+            });
+          }
+        }
+      }
+    }
+    if (ts.isParameter(node)) {
+      const scope = functionScope(node);
+      for (const identifier of bindingIdentifiers(node.name)) {
+        declarations.push({ name: identifier.text, scope, position: node.getStart(sourceFile) });
+      }
+    }
+    if (ts.isCatchClause(node) && node.variableDeclaration) {
+      for (const identifier of bindingIdentifiers(node.variableDeclaration.name)) {
+        declarations.push({
+          name: identifier.text,
+          scope: node.block,
+          position: node.variableDeclaration.getStart(sourceFile),
+        });
+      }
+    }
     if (
       ts.isBinaryExpression(node) &&
       node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
       ts.isIdentifier(node.left)
     ) {
-      bind(node.left.text, node.right);
+      bind(node.left.text, node.right, node, "assignment");
+      if (ts.isFunctionLike(node.right)) {
+        functionBindings.push({
+          name: node.left.text,
+          node: node.right,
+          scope: lexicalScope(node),
+          position: node.getStart(sourceFile),
+        });
+      }
     }
     if (ts.isCallExpression(node)) {
       calls.push(node);
+      invocations.push(node);
+    } else if (ts.isNewExpression(node)) {
+      invocations.push(node);
     }
     ts.forEachChild(node, collect);
   };
   collect(sourceFile);
+
+  const receiverDeclarationCache = new Map<ts.Identifier, DeclarationBinding | null>();
+  const resolveReceiverDeclaration = (
+    receiver: ts.Identifier,
+    callScopes: readonly ts.Node[],
+  ): DeclarationBinding | undefined => {
+    const cached = receiverDeclarationCache.get(receiver);
+    if (cached !== undefined) {
+      return cached ?? undefined;
+    }
+    const usePosition = receiver.getStart(sourceFile);
+    for (const scope of callScopes) {
+      let nearest: DeclarationBinding | undefined;
+      for (const declaration of declarations) {
+        if (
+          declaration.name === receiver.text &&
+          declaration.scope === scope &&
+          declaration.position <= usePosition &&
+          (!nearest || declaration.position > nearest.position)
+        ) {
+          nearest = declaration;
+        }
+      }
+      if (nearest) {
+        receiverDeclarationCache.set(receiver, nearest);
+        return nearest;
+      }
+    }
+    receiverDeclarationCache.set(receiver, null);
+    return undefined;
+  };
+  const identifierResolvesToFunction = (
+    name: string,
+    target: ts.FunctionLikeDeclaration,
+    callScopes: readonly ts.Node[],
+    beforePosition: number,
+    seen = new Set<string>(),
+  ): boolean => {
+    if (seen.has(name)) {
+      return false;
+    }
+    const nextSeen = new Set([...seen, name]);
+    const definitions: Array<
+      | { kind: "function"; node: ts.FunctionLikeDeclaration; scope: ts.Node; position: number }
+      | { kind: "value"; value: ts.Expression; scope: ts.Node; position: number }
+    > = [
+      ...functionBindings
+        .filter(
+          (binding) =>
+            binding.name === name &&
+            binding.receiverDeclaration === undefined &&
+            callScopes.includes(binding.scope) &&
+            (ts.isFunctionDeclaration(binding.node) || binding.position < beforePosition),
+        )
+        .map((binding) => ({
+          kind: "function" as const,
+          node: binding.node,
+          scope: binding.scope,
+          position:
+            ts.isFunctionDeclaration(binding.node) && binding.position >= beforePosition
+              ? -1
+              : binding.position,
+        })),
+      ...scopedValues
+        .filter(
+          (binding) =>
+            binding.name === name &&
+            callScopes.includes(binding.scope) &&
+            binding.position < beforePosition,
+        )
+        .map((binding) => ({
+          kind: "value" as const,
+          value: binding.value,
+          scope: binding.scope,
+          position: binding.position,
+        })),
+    ].sort((left, right) => {
+      const scopeDelta = callScopes.indexOf(left.scope) - callScopes.indexOf(right.scope);
+      if (scopeDelta !== 0) {
+        return scopeDelta;
+      }
+      const positionDelta = right.position - left.position;
+      if (positionDelta !== 0) {
+        return positionDelta;
+      }
+      return left.kind === "function" ? -1 : 1;
+    });
+    const definition = definitions[0];
+    if (!definition) {
+      return false;
+    }
+    if (definition.kind === "function") {
+      return definition.node === target;
+    }
+    const value = unwrapTransparentExpression(definition.value);
+    if (value === target) {
+      return true;
+    }
+    return ts.isIdentifier(value)
+      ? identifierResolvesToFunction(value.text, target, callScopes, definition.position, nextSeen)
+      : false;
+  };
+
+  const callResolutionCache = new Map<
+    InvocationExpression,
+    Map<ts.FunctionLikeDeclaration, boolean>
+  >();
+
+  const callResolvesToFunction = (
+    call: InvocationExpression,
+    target: ts.FunctionLikeDeclaration,
+  ): boolean => {
+    const cached = callResolutionCache.get(call)?.get(target);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const finish = (result: boolean): boolean => {
+      const resolutions = callResolutionCache.get(call) ?? new Map();
+      resolutions.set(target, result);
+      callResolutionCache.set(call, resolutions);
+      return result;
+    };
+    if (target.asteriskToken) {
+      return finish(false);
+    }
+    if (unwrapTransparentExpression(call.expression) === target) {
+      return finish(true);
+    }
+    const callee = unwrapTransparentExpression(call.expression);
+    const receiver =
+      (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) &&
+      ts.isIdentifier(callee.expression)
+        ? callee.expression
+        : undefined;
+    if (!ts.isIdentifier(callee) && receiver === undefined) {
+      return finish(false);
+    }
+    const callScopes = scopeChain(call);
+    if (receiver === undefined && ts.isIdentifier(callee)) {
+      return finish(
+        identifierResolvesToFunction(callee.text, target, callScopes, call.getStart(sourceFile)),
+      );
+    }
+    const name = functionName(target);
+    if (!name) {
+      return finish(false);
+    }
+    if (receiver !== undefined && propertyName(callee) !== name) {
+      return finish(false);
+    }
+    const receiverDeclaration = receiver
+      ? resolveReceiverDeclaration(receiver, callScopes)
+      : undefined;
+    const candidates = functionBindings
+      .filter(
+        (binding) =>
+          binding.name === name &&
+          (receiver === undefined
+            ? binding.receiverDeclaration === undefined
+            : binding.receiverDeclaration === receiverDeclaration) &&
+          callScopes.includes(binding.scope) &&
+          (ts.isFunctionDeclaration(binding.node) || binding.position < call.getStart(sourceFile)),
+      )
+      .sort((left, right) => {
+        const scopeDelta = callScopes.indexOf(left.scope) - callScopes.indexOf(right.scope);
+        return scopeDelta !== 0 ? scopeDelta : right.position - left.position;
+      });
+    return finish(candidates[0]?.node === target);
+  };
+
+  const callExecutionCache = new Map<InvocationExpression, Map<number, boolean>>();
+
+  const statementDefinitelyAwaits = (statement: ts.Statement): boolean => {
+    if (ts.isExpressionStatement(statement)) {
+      return ts.isAwaitExpression(unwrapTransparentExpression(statement.expression));
+    }
+    if (ts.isVariableStatement(statement)) {
+      return statement.declarationList.declarations.some(
+        (declaration) =>
+          declaration.initializer !== undefined &&
+          ts.isAwaitExpression(unwrapTransparentExpression(declaration.initializer)),
+      );
+    }
+    return false;
+  };
+
+  const assignmentRequiresCompletedAsyncCall = (
+    assignment: ts.Expression,
+    owner: ts.FunctionLikeDeclaration,
+  ): boolean => {
+    if (!owner.body || !ts.isBlock(owner.body)) {
+      return false;
+    }
+    let containingStatement: ts.Statement | undefined;
+    let current: ts.Node | undefined = assignment;
+    while (current && current.parent !== owner.body) {
+      current = current.parent;
+    }
+    if (current && ts.isStatement(current)) {
+      containingStatement = current;
+    }
+    if (!containingStatement) {
+      return false;
+    }
+    for (const statement of owner.body.statements) {
+      if (statement === containingStatement) {
+        return false;
+      }
+      // Only a direct, unconditional top-level await is enough evidence that an
+      // unawaited invocation has suspended. Conditional/nested awaits stay
+      // conservative so the boundary check cannot silently miss a launcher.
+      if (statementDefinitelyAwaits(statement)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const invocationIsAwaited = (invocation: InvocationExpression): boolean => {
+    let current: ts.Node = invocation;
+    while (
+      ts.isParenthesizedExpression(current.parent) ||
+      ts.isAsExpression(current.parent) ||
+      ts.isTypeAssertionExpression(current.parent) ||
+      ts.isNonNullExpression(current.parent) ||
+      ts.isSatisfiesExpression(current.parent)
+    ) {
+      current = current.parent;
+    }
+    return ts.isAwaitExpression(current.parent);
+  };
+
+  const callCanExecuteBefore = (
+    call: InvocationExpression,
+    beforePosition: number,
+    seenFunctions = new Set<ts.FunctionLikeDeclaration>(),
+  ): boolean => {
+    const cached =
+      seenFunctions.size === 0 ? callExecutionCache.get(call)?.get(beforePosition) : undefined;
+    if (cached !== undefined) {
+      return cached;
+    }
+    let current: ts.Node | undefined = call.parent;
+    while (current && !ts.isFunctionLike(current)) {
+      current = current.parent;
+    }
+    if (!current || !ts.isFunctionLike(current)) {
+      if (seenFunctions.size === 0) {
+        const positions = callExecutionCache.get(call) ?? new Map();
+        positions.set(beforePosition, true);
+        callExecutionCache.set(call, positions);
+      }
+      return true;
+    }
+    if (seenFunctions.has(current)) {
+      return false;
+    }
+    const nextSeen = new Set([...seenFunctions, current]);
+    const executable = invocations.some(
+      (invocation) =>
+        invocation.getStart(sourceFile) < beforePosition &&
+        callResolvesToFunction(invocation, current) &&
+        callCanExecuteBefore(invocation, beforePosition, nextSeen),
+    );
+    if (seenFunctions.size === 0) {
+      const positions = callExecutionCache.get(call) ?? new Map();
+      positions.set(beforePosition, executable);
+      callExecutionCache.set(call, positions);
+    }
+    return executable;
+  };
 
   const isPromisifiedLauncher = (node: ts.Expression): boolean =>
     ts.isCallExpression(node) &&
@@ -198,9 +723,107 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       return true;
     }
     if (ts.isIdentifier(node) && !seen.has(node.text)) {
-      return (initializers.get(node.text) ?? []).some((value) =>
-        isRegExpReference(value, new Set([...seen, node.text])),
-      );
+      const scopes = scopeChain(node);
+      const usePosition = node.getStart(sourceFile);
+      let binding: (typeof scopedValues)[number] | undefined;
+      for (const scope of scopes) {
+        const candidates = scopedValues.flatMap((candidate) => {
+          let candidateScope = candidate.scope;
+          if (candidate.kind === "assignment") {
+            const assignmentScopes = scopeChain(candidate.value);
+            const declaration = assignmentScopes
+              .map((assignmentScope) =>
+                declarations.find(
+                  (item) => item.name === candidate.name && item.scope === assignmentScope,
+                ),
+              )
+              .find((item) => item !== undefined);
+            candidateScope = declaration?.scope ?? candidateScope;
+          }
+          const useFunctions: ts.FunctionLikeDeclaration[] = [];
+          let current: ts.Node | undefined = node.parent;
+          while (current && current !== candidateScope) {
+            if (ts.isFunctionLike(current)) {
+              useFunctions.push(current);
+            }
+            current = current.parent;
+          }
+          const useFunction = useFunctions.at(-1);
+          const useFunctionName = useFunction ? functionName(useFunction) : undefined;
+          const useInvocationPositions = useFunctionName
+            ? invocations
+                .filter(
+                  (call) =>
+                    callResolvesToFunction(call, useFunction!) &&
+                    callCanExecuteBefore(call, Number.POSITIVE_INFINITY),
+                )
+                .map((call) => call.getStart(sourceFile))
+            : [];
+          const useExecutionPosition =
+            useInvocationPositions.length > 0 ? Math.max(...useInvocationPositions) : usePosition;
+
+          const candidateFunctions: ts.FunctionLikeDeclaration[] = [];
+          current = candidate.value.parent;
+          while (current && current !== candidateScope) {
+            if (ts.isFunctionLike(current)) {
+              candidateFunctions.push(current);
+            }
+            current = current.parent;
+          }
+          const candidateFunction = candidateFunctions.at(-1);
+          const candidateFunctionName = candidateFunction
+            ? functionName(candidateFunction)
+            : undefined;
+          const candidateInvocationPositions = candidateFunctionName
+            ? invocations
+                .filter(
+                  (call) =>
+                    callResolvesToFunction(call, candidateFunction!) &&
+                    callCanExecuteBefore(call, useExecutionPosition) &&
+                    (!assignmentRequiresCompletedAsyncCall(candidate.value, candidateFunction!) ||
+                      invocationIsAwaited(call)) &&
+                    (call.getStart(sourceFile) < useExecutionPosition ||
+                      (candidateFunction === useFunction &&
+                        useInvocationPositions.includes(call.getStart(sourceFile)))),
+                )
+                .map((call) => call.getStart(sourceFile))
+            : invocations
+                .filter(
+                  (call) =>
+                    unwrapTransparentExpression(call.expression) === candidateFunction &&
+                    call.getStart(sourceFile) < useExecutionPosition,
+                )
+                .map((call) => call.getStart(sourceFile));
+          if (candidateFunction && candidateInvocationPositions.length === 0) {
+            return [];
+          }
+          const effectivePosition =
+            candidateInvocationPositions.length > 0
+              ? Math.max(...candidateInvocationPositions)
+              : candidate.position;
+          const earlierInSameInvocation =
+            candidateFunction === useFunction &&
+            candidate.position < usePosition &&
+            candidateInvocationPositions.some((position) =>
+              useInvocationPositions.includes(position),
+            );
+          return candidate.name === node.text &&
+            candidateScope === scope &&
+            (effectivePosition < useExecutionPosition || earlierInSameInvocation)
+            ? [{ candidate, effectivePosition, earlierInSameInvocation }]
+            : [];
+        });
+        binding = candidates.sort(
+          (left, right) =>
+            right.effectivePosition - left.effectivePosition ||
+            Number(right.earlierInSameInvocation) - Number(left.earlierInSameInvocation) ||
+            right.candidate.position - left.candidate.position,
+        )[0]?.candidate;
+        if (binding) {
+          break;
+        }
+      }
+      return binding ? isRegExpReference(binding.value, new Set([...seen, node.text])) : false;
     }
     return false;
   };
@@ -255,6 +878,9 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       node.tag.expression.text === "String" &&
       node.tag.name.text === "raw"
     ) {
+      if (ts.isNoSubstitutionTemplateLiteral(node.template)) {
+        return [node.template.rawText ?? node.template.text];
+      }
       return strings(node.template, seen);
     }
     if (ts.isTemplateExpression(node)) {
@@ -321,6 +947,118 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     return [];
   };
 
+  const stringAlternativeCache = new Map<string, string[]>();
+  const stringAlternatives = (
+    node: ts.Expression | undefined,
+    seen = new Set<string>(),
+  ): string[] => {
+    const boundedUnion = (...groups: readonly string[][]): string[] => {
+      const values = new Set<string>();
+      for (const group of groups) {
+        for (const value of group) {
+          if (value === STRING_ANALYSIS_OVERFLOW) {
+            return [STRING_ANALYSIS_OVERFLOW];
+          }
+          values.add(value);
+          if (values.size > MAX_STRING_ALTERNATIVES) {
+            return [STRING_ANALYSIS_OVERFLOW];
+          }
+        }
+      }
+      return [...values];
+    };
+    if (!node) {
+      return [];
+    }
+    node = unwrapTransparentExpression(node);
+    if (ts.isStringLiteralLike(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      return [node.text];
+    }
+    if (
+      ts.isTaggedTemplateExpression(node) &&
+      ts.isPropertyAccessExpression(node.tag) &&
+      ts.isIdentifier(node.tag.expression) &&
+      node.tag.expression.text === "String" &&
+      node.tag.name.text === "raw"
+    ) {
+      if (ts.isNoSubstitutionTemplateLiteral(node.template)) {
+        return [node.template.rawText ?? node.template.text];
+      }
+      return stringAlternatives(node.template, seen);
+    }
+    if (ts.isConditionalExpression(node)) {
+      return boundedUnion(
+        stringAlternatives(node.whenTrue, seen),
+        stringAlternatives(node.whenFalse, seen),
+      );
+    }
+    if (
+      ts.isBinaryExpression(node) &&
+      [
+        ts.SyntaxKind.QuestionQuestionToken,
+        ts.SyntaxKind.BarBarToken,
+        ts.SyntaxKind.AmpersandAmpersandToken,
+      ].includes(node.operatorToken.kind)
+    ) {
+      return boundedUnion(
+        stringAlternatives(node.left, seen),
+        stringAlternatives(node.right, seen),
+      );
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      const left = stringAlternatives(node.left, seen);
+      const right = stringAlternatives(node.right, seen);
+      const leftValues = left.length > 0 ? left : [DYNAMIC_BOUNDARY];
+      const rightValues = right.length > 0 ? right : [DYNAMIC_BOUNDARY];
+      if (
+        leftValues.includes(STRING_ANALYSIS_OVERFLOW) ||
+        rightValues.includes(STRING_ANALYSIS_OVERFLOW)
+      ) {
+        return [STRING_ANALYSIS_OVERFLOW];
+      }
+      if (leftValues.length * rightValues.length > MAX_STRING_ALTERNATIVES) {
+        return [STRING_ANALYSIS_OVERFLOW];
+      }
+      return leftValues.flatMap((prefix) => rightValues.map((suffix) => prefix + suffix));
+    }
+    if (ts.isTemplateExpression(node)) {
+      let alternatives = [node.head.text];
+      for (const span of node.templateSpans) {
+        const interpolation = stringAlternatives(span.expression, seen);
+        const values = interpolation.length > 0 ? interpolation : [DYNAMIC_BOUNDARY];
+        if (values.includes(STRING_ANALYSIS_OVERFLOW)) {
+          return [STRING_ANALYSIS_OVERFLOW];
+        }
+        if (alternatives.length * values.length > MAX_STRING_ALTERNATIVES) {
+          return [STRING_ANALYSIS_OVERFLOW];
+        }
+        alternatives = alternatives.flatMap((prefix) =>
+          values.map((value) => prefix + value + span.literal.text),
+        );
+      }
+      return alternatives;
+    }
+    if (ts.isIdentifier(node)) {
+      if (seen.has(node.text)) {
+        return [];
+      }
+      const cacheKey = `${node.text}\u0000${[...seen].sort().join("\u0000")}`;
+      const cached = stringAlternativeCache.get(cacheKey);
+      if (cached) {
+        return cached;
+      }
+      const alternatives = boundedUnion(
+        ...(initializers.get(node.text) ?? []).map((value) =>
+          stringAlternatives(value, new Set([...seen, node.text])),
+        ),
+      );
+      stringAlternativeCache.set(cacheKey, alternatives);
+      return alternatives;
+    }
+    return [];
+  };
+
+  const arrayAlternativeCache = new Map<string, ts.Expression[][] | undefined>();
   const arrayAlternatives = (
     node: ts.Expression | undefined,
     seen = new Set<string>(),
@@ -354,12 +1092,18 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
       return alternatives;
     }
     if (ts.isIdentifier(node) && !seen.has(node.text)) {
+      const cacheKey = `${node.text}\u0000${[...seen].sort().join("\u0000")}`;
+      if (arrayAlternativeCache.has(cacheKey)) {
+        return arrayAlternativeCache.get(cacheKey);
+      }
       const next = new Set([...seen, node.text]);
       const values = initializers.get(node.text) ?? [];
       const arrays = values
         .map((value) => arrayAlternatives(value, next))
         .filter((value): value is ts.Expression[][] => value !== undefined);
-      return arrays.length > 0 ? arrays.flat() : undefined;
+      const alternatives = arrays.length > 0 ? arrays.flat() : undefined;
+      arrayAlternativeCache.set(cacheKey, alternatives);
+      return alternatives;
     }
     return undefined;
   };
@@ -453,6 +1197,7 @@ export function executionBoundaryAst(source: string): ExecutionBoundaryAst {
     isExecutionSeam: (call) => isExecutionSeamReference(call.expression),
     isRunExecSeam: (call) => isRunExecSeamReference(call.expression),
     strings,
+    stringAlternatives,
     arrayAlternatives,
     arrayElements,
     objectPropertyValues,

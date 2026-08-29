@@ -100,24 +100,53 @@ function formatIssue(issue: ZodIssue): string {
   return `${path} ${issue.message}`;
 }
 
+// Walk `rawInput` along `path`; true only when every segment resolves through an
+// object and the terminal value is not `undefined`. A value the caller actually
+// SUPPLIED that is wrong (e.g. a number where a string is required) is a genuine
+// mistake we must surface even when only the input's *viable* union arms flag it;
+// a field the caller OMITTED is judged by branch coverage instead, so inner-union
+// discriminators the caller never provided stay suppressed (#5862).
+function isProvidedInput(rawInput: unknown, path: ReadonlyArray<PropertyKey>): boolean {
+  let current = rawInput;
+  for (const segment of path) {
+    if (current === null || typeof current !== "object") {
+      return false;
+    }
+    current = (current as Record<PropertyKey, unknown>)[segment];
+    if (current === undefined) {
+      return false;
+    }
+  }
+  return current !== undefined;
+}
+
 // Lead with the actionable message rather than a union-branch dump (#5854).
-// A union-derived issue is genuine only if its path fails in EVERY branch of its
-// union (a shared constraint the caller must fix regardless of intended branch);
-// an issue in only some branches is branch-discrimination noise. Non-union issues
+// A union-derived issue on a field the caller OMITTED is genuine only if its path
+// fails in EVERY branch of its union (a shared constraint the caller must fix
+// regardless of intended branch); an issue in only some branches is
+// branch-discrimination noise. A field the caller PROVIDED is genuine when every
+// arm that could apply to it flags it — arms that rejected a strict ancestor of
+// the path as `never` are inapplicable (they forbid the whole subtree and never
+// evaluate the field), so they are excluded from the denominator instead of
+// counting the field as failing in "only some" arms (#5862). Non-union issues
 // (top-level siblings) are always kept. Returns the full list unchanged when no
 // union expanded, or when suppression would leave nothing — that fallback is
 // never worse than the raw dump this replaces.
 function selectGenuineIssues(
   flattenedIssues: FlattenedIssue[],
   sawUnion: boolean,
+  rawInput: unknown,
 ): FlattenedIssue[] {
   if (!sawUnion) {
     return flattenedIssues;
   }
 
   // Per (union, path): which branches reported any issue there. A path covered by
-  // all `branchCount` branches is a shared constraint.
+  // all `branchCount` branches is a shared constraint. Alongside, per union, the
+  // paths each branch rejected as `never` — used to discount inapplicable arms
+  // from a provided field's viable-arm denominator.
   const branchCoverage = new Map<string, Set<number>>();
+  const neverPathsByUnion = new Map<number, Array<{ branchIndex: number; path: string }>>();
   for (const entry of flattenedIssues) {
     if (!entry.union) {
       continue;
@@ -129,7 +158,41 @@ function selectGenuineIssues(
       branchCoverage.set(key, branches);
     }
     branches.add(entry.union.branchIndex);
+
+    if (isNeverArtifact(entry.issue)) {
+      const nevers = neverPathsByUnion.get(entry.union.unionId) ?? [];
+      nevers.push({
+        branchIndex: entry.union.branchIndex,
+        path: entry.issue.path.map(String).join("."),
+      });
+      neverPathsByUnion.set(entry.union.unionId, nevers);
+    }
   }
+
+  // Arms viable for `path`: `branchCount` minus the arms that rejected a STRICT
+  // ancestor of `path` as `never` (those arms forbid the subtree, so they never
+  // evaluate the field and must not count against its coverage).
+  const viableBranchCount = (union: UnionContext, path: ReadonlyArray<PropertyKey>): number => {
+    const nevers = neverPathsByUnion.get(union.unionId);
+    if (!nevers || nevers.length === 0) {
+      return union.branchCount;
+    }
+    const segs = path.map(String);
+    const strictAncestors = new Set<string>();
+    for (let i = 1; i < segs.length; i++) {
+      strictAncestors.add(segs.slice(0, i).join("."));
+    }
+    if (strictAncestors.size === 0) {
+      return union.branchCount;
+    }
+    const excluded = new Set<number>();
+    for (const never of nevers) {
+      if (strictAncestors.has(never.path)) {
+        excluded.add(never.branchIndex);
+      }
+    }
+    return union.branchCount - excluded.size;
+  };
 
   const isGenuine = (entry: FlattenedIssue): boolean => {
     if (!entry.union) {
@@ -139,7 +202,11 @@ function selectGenuineIssues(
       return false;
     }
     const key = coverageKey(entry.union.unionId, entry.issue.path);
-    return (branchCoverage.get(key)?.size ?? 0) === entry.union.branchCount;
+    const coverage = branchCoverage.get(key)?.size ?? 0;
+    if (isProvidedInput(rawInput, entry.issue.path)) {
+      return coverage === viableBranchCount(entry.union, entry.issue.path);
+    }
+    return coverage === entry.union.branchCount;
   };
 
   const primary = flattenedIssues.filter(isGenuine);
@@ -148,13 +215,18 @@ function selectGenuineIssues(
 
 // Exported for direct unit testing of the container-hint branch (issue #4181,
 // rank 7). The hint is only appended for tapOn/swipeOn container issues.
-export function formatToolParamError(toolName: string, error: unknown): string {
+// `rawInput` is the object handed to `schema.parse` (undefined when a caller has
+// no access to it — the message is then computed from branch coverage alone,
+// identical to pre-#5862 behavior). Threading it lets a provided-value error on a
+// nested field survive even when an inapplicable union arm rejects its parent as
+// `never` (#5862).
+export function formatToolParamError(toolName: string, error: unknown, rawInput?: unknown): string {
   if (!(error instanceof ZodError)) {
     return String(error);
   }
 
   const { issues: flattenedIssues, sawUnion } = flattenZodIssues(error.issues);
-  const selectedIssues = selectGenuineIssues(flattenedIssues, sawUnion);
+  const selectedIssues = selectGenuineIssues(flattenedIssues, sawUnion, rawInput);
 
   // Dedupe formatted messages: union expansion repeats the same real issue once
   // per branch that carries the field.

@@ -258,3 +258,70 @@ describe("formatToolParamError observe union noise (#5854)", () => {
     expect(message).not.toContain("activeWindow");
   });
 });
+
+// Issue #5862 (follow-up to #5854): a genuine PROVIDED-value error on a nested
+// field that is valid in the input's *viable* union arms was dropped when another
+// (inapplicable) arm rejected the field's parent as `never`. Threading the raw
+// input into `formatToolParamError` lets it tell "the caller supplied this value"
+// (genuine — judge by coverage across viable arms only) from "the caller omitted
+// this field" (branch-discrimination noise — keep the across-all-branches test).
+describe("formatToolParamError viable-arm provided value (#5862)", () => {
+  test("a provided-value error surfaces despite a never-parent inapplicable arm", () => {
+    // `waitForSchema` is a 3-arm union. `activeWindow.activityName` is a real
+    // wrong-type error in the textAny and element arms, but the DSL arm declares
+    // `activeWindow` as `z.never()`, so it never evaluates `activityName`. The
+    // across-all-branches test counted the inapplicable DSL arm and suppressed it.
+    const input = { timeoutMs: 1e999, activeWindow: { activityName: 123 } };
+    const result = waitForSchema.safeParse(input as unknown as object);
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("observe", result.error, input);
+    expect(message).toContain("activeWindow.activityName expected string, received number");
+    // Criterion 2: the finite-number error still leads.
+    expect(message.startsWith("timeoutMs must be a finite number")).toBe(true);
+    // Inner-union discriminators the caller never supplied stay suppressed: the
+    // caller passed activityName, not appId/packageName/bundleId, so their
+    // "received undefined" fragments must not leak back in.
+    expect(message).not.toContain("appId");
+    expect(message).not.toContain("received undefined");
+    expect(message).not.toContain("expected never");
+  });
+
+  test("criterion 2: a lone non-finite waitFor field still leads exactly, with rawInput", () => {
+    const input = { timeoutMs: 1e999 };
+    const result = waitForSchema.safeParse(input as unknown as object);
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("observe", result.error, input);
+    expect(message).toBe("timeoutMs must be a finite number");
+  });
+
+  test("criterion 2: threading rawInput keeps genuine enum + universally-missing errors", () => {
+    const schema = z.union([
+      z.object({ id: z.string(), key: z.string(), name: z.string() }),
+      z.object({ id: z.string(), key: z.string(), fileName: z.string() }),
+    ]);
+    // `id` is provided but wrong-typed (genuine); `key` is missing from both
+    // branches (universally required — genuine); both must survive.
+    const input = { id: 42, name: "n" };
+    const result = schema.safeParse(input as unknown as object);
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("setKeyValue", result.error, input);
+    expect(message).toContain("id expected string, received number");
+    expect(message).toContain("key expected string, received undefined");
+  });
+
+  test("criterion 2: a provided discriminator wrong only in the non-viable arm is not surfaced", () => {
+    // `shared` is bad in both arms (genuine); `mode` is provided but is a valid
+    // discriminator that only branch 0 constrains — its error there is arm-local
+    // noise, so coverage-across-viable-arms must still suppress it.
+    const schema = z.union([
+      z.object({ mode: z.enum(["x", "y"]), shared: z.number() }),
+      z.object({ shared: z.number() }),
+    ]);
+    const input = { shared: 1e999, mode: "z" };
+    const result = schema.safeParse(input as unknown as object);
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("observe", result.error, input);
+    expect(message).toBe("shared must be a finite number");
+    expect(message).not.toContain("mode");
+  });
+});

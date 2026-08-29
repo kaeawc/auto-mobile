@@ -685,6 +685,37 @@ class DevicePickerViewModelTest {
     }
   }
 
+  @Test
+  fun `a refresh that sees the started device before boot returns keeps the serialization guard`() =
+    testScope.runTest {
+      val client =
+        ScriptableResourceClient(bootedJson = SINGLE_BOOTED_PIXEL8, imagesJson = THREE_IMAGES)
+      val boot =
+        FakeDeviceBootController().apply {
+          autoComplete = false // hold the boot open (boot() has not returned)
+          result = Result.success("emulator-5556")
+        }
+      val v = DevicePickerViewModel(client, boot, testScope, UnconfinedTestDispatcher())
+      v.onAction(DevicePickerAction.BootDevice("Pixel_6_API_33")) // boot in flight (held)
+      assertEquals(setOf("Pixel_6_API_33"), content(v).bootingIds)
+
+      // The daemon exposes the started device under its runtime serial BEFORE boot() returns. Its
+      // same-named card hides the Pixel_6_API_33 source image, so a refresh's list shows that
+      // source
+      // neither booted nor shut down.
+      client.bootedJson = TWO_BOOTED_PIXEL8_AND_6
+      v.onAction(DevicePickerAction.Refresh)
+      // The guard must survive on the in-flight boot job even though the source vanished from the
+      // list — otherwise a second startDevice could fire while this boot is still running (#4881).
+      assertEquals(setOf("Pixel_6_API_33"), content(v).bootingIds)
+
+      // A click on a DIFFERENT shut-down card must still be a no-op: boots stay serialized.
+      v.onAction(DevicePickerAction.BootDevice("iphone-15"))
+      assertEquals(listOf("Pixel_6_API_33"), boot.bootRequests.map { it.id })
+
+      boot.complete() // release so runTest can finish
+    }
+
   private companion object {
     const val SINGLE_BOOTED_PIXEL8 =
       """{"totalCount":1,"androidCount":1,"iosCount":0,"virtualCount":1,"physicalCount":0,""" +

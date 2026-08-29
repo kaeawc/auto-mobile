@@ -120,6 +120,14 @@ class DevicePickerViewModel(
   // name heuristic in buildPickerDevices.
   private var bootedImageRuntimeIds: Map<String, String> = emptyMap()
 
+  // Source ids whose boot coroutine is still running (bootController.boot has not returned). The
+  // serialization guard in bootingIds must survive against THIS set, not only the live device list:
+  // once the daemon exposes the started device under its runtime serial but before boot() returns,
+  // a concurrent Refresh's buildPickerDevices hides the source image by name, so it is neither
+  // Shutdown nor Booted in the list and pruneState would otherwise drop the guard and permit a
+  // second startDevice (#4881).
+  private var inFlightBootIds: Set<String> = emptySet()
+
   // Monotonic load/emission generation, claimed at the start of every load()/reloadAfterBoot(). It
   // guards ONLY the stale device-LIST emission: a fetch that resumes after a newer one began does
   // not overwrite the fresher list. It never gates the persistent state above (recorded before the
@@ -276,7 +284,10 @@ class DevicePickerViewModel(
   private fun pruneState(devices: List<PickerDevice>) {
     val shutdownIds = devices.filter { it.state == DeviceState.Shutdown }.map { it.id }.toSet()
     val bootedIds = devices.filter { it.state == DeviceState.Booted }.map { it.id }.toSet()
-    bootingIds = bootingIds intersect shutdownIds
+    // A boot guard survives while its boot coroutine is still in flight even when the live list no
+    // longer shows the source as Shutdown: once the daemon exposes the started runtime device its
+    // same-named card hides the source image, so the guard must not be dropped mid-boot (#4881).
+    bootingIds = bootingIds.filter { it in shutdownIds || it in inFlightBootIds }.toSet()
     bootErrors = bootErrors.filterKeys { it in shutdownIds }
     selectedIds = selectedIds intersect bootedIds
     // Keep only attributions whose runtime device is still booted (drop killed/replaced ids).
@@ -306,17 +317,23 @@ class DevicePickerViewModel(
     if (device.state != DeviceState.Shutdown) return // only shut-down cards boot
     bootingIds = bootingIds + deviceId
     bootErrors = bootErrors - deviceId
+    // Guard against a concurrent Refresh pruning the boot guard while the boot is still running.
+    inFlightBootIds = inFlightBootIds + deviceId
     syncState()
     scope.launch {
-      val result = bootController.boot(device)
-      val runtimeDeviceId = result.getOrNull()
-      if (runtimeDeviceId != null) {
-        reloadAfterBoot(device, runtimeDeviceId)
-      } else {
-        val message = result.exceptionOrNull()?.message ?: "Failed to boot ${device.name}"
-        bootingIds = bootingIds - deviceId
-        bootErrors = bootErrors + (deviceId to message)
-        syncState()
+      try {
+        val result = bootController.boot(device)
+        val runtimeDeviceId = result.getOrNull()
+        if (runtimeDeviceId != null) {
+          reloadAfterBoot(device, runtimeDeviceId)
+        } else {
+          val message = result.exceptionOrNull()?.message ?: "Failed to boot ${device.name}"
+          bootingIds = bootingIds - deviceId
+          bootErrors = bootErrors + (deviceId to message)
+          syncState()
+        }
+      } finally {
+        inFlightBootIds = inFlightBootIds - deviceId
       }
     }
   }

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,6 +7,7 @@ import {
   resolveAutoMobileBaseDir,
   resolveAutoMobileLogsDir,
   getTempDir,
+  getSharedAutoMobileDir,
   ensureSecureLogsDirSync,
   ensureSecureTempDirSync,
   TEMP_SUBDIRS,
@@ -171,6 +172,63 @@ describe("getTempDir", () => {
         process.env.AUTOMOBILE_LOG_DIR = previousLogDir;
       }
     }
+  });
+});
+
+describe("getSharedAutoMobileDir", () => {
+  test("uses the OS-account home instead of an agent-specific HOME", () => {
+    const userInfoSpy = spyOn(os, "userInfo").mockReturnValue({
+      uid: 501,
+      gid: 20,
+      username: "tester",
+      homedir: "/system-home",
+      shell: "/bin/zsh",
+    });
+    try {
+      expect(getSharedAutoMobileDir("ctrlproxy-forwards", undefined, {})).toBe(
+        path.resolve("/system-home", ".auto-mobile", "ctrlproxy-forwards"),
+      );
+    } finally {
+      userInfoSpy.mockRestore();
+    }
+  });
+
+  test("uses the home-directory root independently of agent data-dir overrides", () => {
+    const previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
+    process.env.AUTOMOBILE_DATA_DIR = "/agent-private-data";
+    try {
+      expect(getSharedAutoMobileDir("ctrlproxy-forwards", "/home/tester", {})).toBe(
+        path.resolve("/home/tester", ".auto-mobile", "ctrlproxy-forwards"),
+      );
+    } finally {
+      if (previousDataDir === undefined) {
+        delete process.env.AUTOMOBILE_DATA_DIR;
+      } else {
+        process.env.AUTOMOBILE_DATA_DIR = previousDataDir;
+      }
+    }
+  });
+
+  test("uses an explicit coordination root for a locked-down service account", () => {
+    expect(
+      getSharedAutoMobileDir("ctrlproxy-forwards", "", {
+        AUTOMOBILE_COORDINATION_DIR: "/shared-locks",
+      }),
+    ).toBe(path.join("/shared-locks", "ctrlproxy-forwards"));
+  });
+
+  test("rejects a relative coordination root that could vary by agent worktree", () => {
+    expect(() =>
+      getSharedAutoMobileDir("ctrlproxy-forwards", "/home/tester", {
+        AUTOMOBILE_COORDINATION_DIR: "shared-locks",
+      }),
+    ).toThrow("AUTOMOBILE_COORDINATION_DIR must be an absolute path");
+  });
+
+  test("rejects a missing home directory rather than using agent-local storage", () => {
+    expect(() => getSharedAutoMobileDir("ctrlproxy-forwards", "", {})).toThrow(
+      "Set AUTOMOBILE_COORDINATION_DIR",
+    );
   });
 });
 

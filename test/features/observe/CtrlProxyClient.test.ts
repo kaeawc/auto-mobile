@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { CtrlProxyFocus } from "../../../src/features/observe/android/CtrlProxyFocus";
@@ -36,6 +39,22 @@ describe("AndroidCtrlProxyClient", function () {
   let fakeTimer: FakeTimer;
   let fakeAdbFactory: FakeAdbClientFactory;
   const serverPort: number = 8765;
+
+  class FakeCtrlProxyForwardLease {
+    public acquireAttempts = 0;
+    public releases = 0;
+
+    public constructor(private readonly canAcquire: boolean = true) {}
+
+    public tryAcquire(): boolean {
+      this.acquireAttempts++;
+      return this.canAcquire;
+    }
+
+    public release(): void {
+      this.releases++;
+    }
+  }
 
   beforeEach(async function () {
     // Create fake timer with auto-advance for async event flushing
@@ -172,6 +191,43 @@ describe("AndroidCtrlProxyClient", function () {
     }
   };
 
+  const stubForwardLifecycleCommands = (
+    getForwardListOutput: () => string,
+    shouldFailRemove: () => boolean = () => false,
+    shouldFailList: () => boolean = () => false,
+  ): void => {
+    const executeCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    fakeAdb.executeCommand = async (
+      command: string,
+      timeoutMs?: number,
+      maxBuffer?: number,
+      noRetry?: boolean,
+      signal?: AbortSignal,
+    ) => {
+      if (command === "forward --list") {
+        if (shouldFailList()) {
+          throw new Error("adb forward listing failed");
+        }
+        const stdout = getForwardListOutput();
+        return {
+          stdout,
+          stderr: "",
+          toString: () => stdout,
+          trim: () => stdout.trim(),
+          includes: (searchString: string) => stdout.includes(searchString),
+        };
+      }
+      if (command.startsWith("forward --remove") && shouldFailRemove()) {
+        throw new Error("adb forward removal failed");
+      }
+      return executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+    };
+  };
+
+  const registerTestSingleton = (client: AndroidCtrlProxyClient): void => {
+    (AndroidCtrlProxyClient as any).instances.set(testDevice.deviceId, client);
+  };
+
   test("discards a WebSocket that opens after close() so teardown cannot be undone", async () => {
     // Manual (non-auto-advancing) timer so the in-flight handshake stays pending
     // until we trigger `open` ourselves, and the connection timeout never fires.
@@ -212,6 +268,7 @@ describe("AndroidCtrlProxyClient", function () {
 
   test("aborts a connect whose platform setup completes after close()", async () => {
     const manualTimer = new FakeTimer();
+    const lease = new FakeCtrlProxyForwardLease();
     let releaseForward!: () => void;
     const forwardGate = new Promise<void>((resolve) => {
       releaseForward = resolve;
@@ -243,14 +300,30 @@ describe("AndroidCtrlProxyClient", function () {
       gatedAdb,
       factory,
       manualTimer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      lease,
     );
     try {
       const connectPromise = client.ensureConnected();
       await flushPromises(8); // parked inside setupBeforeConnect; no socket yet
       expect(socket).toBeNull();
 
-      // Shutdown teardown closes the client while port-forward setup is pending.
+      // Shutdown recovery evicts the client before its asynchronous close.
+      client.invalidateForShutdownRecovery();
+      // An ADB command can ignore its abort signal. Its lease must remain held
+      // until the old setup and its late cleanup have stopped touching forwards.
+      expect(lease.releases).toBe(0);
+
+      // Close runs after invalidation in the production shutdown-recovery path.
       await client.close();
+      expect(lease.releases).toBe(0);
 
       // Platform setup now finishes — after close().
       releaseForward();
@@ -260,6 +333,7 @@ describe("AndroidCtrlProxyClient", function () {
       expect(socket).toBeNull();
       expect(client.isConnected()).toBe(false);
       await expect(connectPromise).resolves.toBe(false);
+      expect(lease.releases).toBe(1);
     } finally {
       releaseForward();
       await client.close();
@@ -940,7 +1014,7 @@ describe("AndroidCtrlProxyClient", function () {
       ).setupPortForwarding();
 
       expect(checkedPorts).toEqual([8765, 8765, 8767]);
-      expect(fakeAdb.getExecutedCommands()).toContain("forward --remove tcp:8767");
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:8767");
       expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8767 tcp:8765");
       expect(
         (
@@ -949,6 +1023,286 @@ describe("AndroidCtrlProxyClient", function () {
       ).toBe("ws://127.0.0.1:8767/ws");
     } finally {
       PortManager.setPortAvailabilityCheckerForTesting(null);
+    }
+  });
+
+  test("sweeps a CtrlProxy forward orphaned by a simulated daemon SIGKILL", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:52001 tcp:8765\n`);
+
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    registerTestSingleton(client);
+    try {
+      await (client as any).setupPortForwarding();
+
+      expect(fakeAdb.getExecutedCommands()).toContain("forward --remove tcp:52001");
+    } finally {
+      await client.close();
+      AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
+    }
+  });
+
+  test("retries orphan reconciliation when an ADB removal fails", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    let removalFails = true;
+    stubForwardLifecycleCommands(
+      () => `${testDevice.deviceId} tcp:52002 tcp:8765\n`,
+      () => removalFails,
+    );
+
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    registerTestSingleton(client);
+    try {
+      await expect((client as any).setupPortForwarding()).rejects.toThrow(
+        "Failed to reclaim orphaned CtrlProxy forward",
+      );
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward tcp:8765 tcp:8765");
+
+      removalFails = false;
+      await (client as any).setupPortForwarding();
+
+      expect(fakeAdb.getExecutedCommands()).toContain("forward --remove tcp:52002");
+      expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8765 tcp:8765");
+    } finally {
+      await client.close();
+      AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
+    }
+  });
+
+  test("retries orphan reconciliation when listing forwards fails", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    let listingFails = true;
+    stubForwardLifecycleCommands(
+      () => `${testDevice.deviceId} tcp:52003 tcp:8765\n`,
+      () => false,
+      () => listingFails,
+    );
+
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    registerTestSingleton(client);
+    try {
+      await expect((client as any).setupPortForwarding()).rejects.toThrow(
+        "adb forward listing failed",
+      );
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward tcp:8765 tcp:8765");
+
+      listingFails = false;
+      await (client as any).setupPortForwarding();
+
+      expect(fakeAdb.getExecutedCommands()).toContain("forward --remove tcp:52003");
+      expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8765 tcp:8765");
+    } finally {
+      await client.close();
+      AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
+    }
+  });
+
+  test("reconciles a CtrlProxy forward after close() cannot remove it", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    let removalFails = false;
+    stubForwardLifecycleCommands(
+      () => `${testDevice.deviceId} tcp:8765 tcp:8765\n`,
+      () => removalFails,
+    );
+
+    const original = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    await (original as any).setupPortForwarding();
+
+    fakeAdb.clearHistory();
+    removalFails = true;
+    await original.close();
+    expect((original as any).portForwardingSetup).toBe(true);
+
+    removalFails = false;
+    const replacement = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    try {
+      await (replacement as any).setupPortForwarding();
+
+      expect(fakeAdb.getExecutedCommands()).toContain("forward --remove tcp:8765");
+    } finally {
+      await replacement.close();
+    }
+  });
+
+  test("preserves a registered CtrlProxy client's forward before it connects", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:8765 tcp:8765\n`);
+
+    const connectingClient = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    registerTestSingleton(connectingClient);
+    try {
+      await (connectingClient as any).sweepOrphanedCtrlProxyPortForwards();
+
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:8765");
+    } finally {
+      await connectingClient.close();
+      AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
+    }
+  });
+
+  test("does not touch a forward whose destination is not CtrlProxy", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:52003 tcp:12345\n`);
+
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    registerTestSingleton(client);
+    try {
+      await (client as any).setupPortForwarding();
+
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:52003");
+    } finally {
+      await client.close();
+      AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
+    }
+  });
+
+  test("does not reconcile forwards when another process owns the device lease", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:52004 tcp:8765\n`);
+    const lease = new FakeCtrlProxyForwardLease(false);
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      lease,
+    );
+    try {
+      await expect((client as any).setupPortForwarding()).rejects.toThrow(
+        "Another AutoMobile process owns CtrlProxy forwarding",
+      );
+
+      expect(lease.acquireAttempts).toBe(1);
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:52004");
+    } finally {
+      await client.close();
+    }
+  });
+
+  test("does not reclaim a live file lease from a synchronously evicted same-process client", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    const coordinationDir = mkdtempSync(join(tmpdir(), "auto-mobile-coordination-"));
+    const previousCoordinationDir = process.env.AUTOMOBILE_COORDINATION_DIR;
+    process.env.AUTOMOBILE_COORDINATION_DIR = coordinationDir;
+    const isolatedDevice = { ...testDevice, deviceId: "same-process-file-lease-device" };
+    const factory = new FakeAdbClientFactory(fakeAdb);
+    const original = new (AndroidCtrlProxyClient as any)(
+      isolatedDevice,
+      factory.create(isolatedDevice),
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    (AndroidCtrlProxyClient as any).instances.set(isolatedDevice.deviceId, original);
+    let replacement: AndroidCtrlProxyClient | undefined;
+
+    try {
+      expect((original as any).ctrlProxyForwardLease.tryAcquire()).toBe(true);
+      // Recovery evicts synchronously, but an in-flight setup may still hold this lease.
+      AndroidCtrlProxyClient.removeInstance(isolatedDevice.deviceId);
+
+      replacement = new (AndroidCtrlProxyClient as any)(
+        isolatedDevice,
+        factory.create(isolatedDevice),
+        createSuccessWebSocketFactory(),
+        fakeTimer,
+      );
+      expect((replacement as any).ctrlProxyForwardLease.tryAcquire()).toBe(false);
+    } finally {
+      await replacement?.close();
+      await original.close();
+      AndroidCtrlProxyClient.removeInstance(isolatedDevice.deviceId);
+      if (previousCoordinationDir === undefined) {
+        delete process.env.AUTOMOBILE_COORDINATION_DIR;
+      } else {
+        process.env.AUTOMOBILE_COORDINATION_DIR = previousCoordinationDir;
+      }
+      rmSync(coordinationDir, { recursive: true, force: true });
+    }
+  });
+
+  test("rechecks a forward before removal when its destination changes", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    let listCalls = 0;
+    stubForwardLifecycleCommands(() => {
+      listCalls++;
+      return listCalls === 1
+        ? `${testDevice.deviceId} tcp:52005 tcp:8765\n`
+        : `${testDevice.deviceId} tcp:52005 tcp:12345\n`;
+    });
+
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    registerTestSingleton(client);
+    try {
+      await (client as any).setupPortForwarding();
+
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:52005");
+    } finally {
+      await client.close();
+      AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
     }
   });
 

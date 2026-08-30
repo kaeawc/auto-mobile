@@ -99,6 +99,39 @@ export function getTempDir(subdirectory: string): string {
   return path.join(resolveAutoMobileBaseDir(), subdirectory);
 }
 
+/**
+ * Resolve a secure coordination directory shared by all agents for this user.
+ *
+ * Unlike {@link getTempDir}, this deliberately ignores `AUTOMOBILE_DATA_DIR`
+ * because those overrides isolate an agent's private state. Processes using
+ * the same default ADB server must instead coordinate through one path. A
+ * locked-down service account can configure that path with
+ * `AUTOMOBILE_COORDINATION_DIR` (or `AUTO_MOBILE_COORDINATION_DIR`). Its
+ * default comes from the OS account rather than the ambient `HOME`, which may
+ * be isolated per agent despite a shared ADB server.
+ */
+export function getSharedAutoMobileDir(
+  subdirectory: string,
+  homeDir: string = os.userInfo().homedir,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const override = (env.AUTOMOBILE_COORDINATION_DIR ?? env.AUTO_MOBILE_COORDINATION_DIR)?.trim();
+  if (override && override.length > 0) {
+    if (!path.isAbsolute(override)) {
+      throw new Error(
+        "AUTOMOBILE_COORDINATION_DIR must be an absolute path so all agents share one coordination directory.",
+      );
+    }
+    return path.join(override, subdirectory);
+  }
+  if (homeDir.length === 0) {
+    throw new Error(
+      "Unable to resolve a shared AutoMobile directory without a home directory. Set AUTOMOBILE_COORDINATION_DIR to a writable shared directory.",
+    );
+  }
+  return path.join(path.resolve(homeDir), ".auto-mobile", subdirectory);
+}
+
 function ensureSecureDirectorySync(dir: string): string {
   fs.mkdirSync(dir, { recursive: true, mode: SECURE_DIR_MODE });
   if (fs.lstatSync(dir).isSymbolicLink()) {
@@ -118,6 +151,13 @@ function ensureSecureDirectorySync(dir: string): string {
  */
 export function ensureSecureTempDirSync(subdirectory: string): string {
   return ensureSecureDirectorySync(getTempDir(subdirectory));
+}
+
+/**
+ * Synchronously ensure an agent-invariant coordination directory exists.
+ */
+export function ensureSecureSharedAutoMobileDirSync(subdirectory: string): string {
+  return ensureSecureDirectorySync(getSharedAutoMobileDir(subdirectory));
 }
 
 /**

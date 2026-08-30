@@ -14,6 +14,7 @@
  * - CtrlProxyHighlights: Visual highlight overlays
  */
 
+import { join } from "node:path";
 import WebSocket from "ws";
 import {
   AdbClientFactory,
@@ -117,6 +118,9 @@ import {
 import type { SetTextOptions } from "../DeviceService";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
+import { defaultIdGenerator } from "../../../utils/IdGenerator";
+import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../../../utils/fileLock";
+import { ensureSecureSharedAutoMobileDirSync } from "../../../utils/tempDir";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
@@ -988,6 +992,65 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
 const VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT = 2;
 
 /**
+ * Process-held ownership claim for a device's CtrlProxy ADB forwards. The ADB
+ * server is shared by AutoMobile processes, so its global forward listing alone
+ * cannot identify which process owns a row.
+ */
+interface CtrlProxyForwardLease {
+  tryAcquire(): boolean;
+  release(): void;
+}
+
+class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
+  private lockPath: string | null = null;
+  private readonly ownerToken = defaultIdGenerator.next();
+  private acquired = false;
+
+  public constructor(private readonly deviceId: string) {}
+
+  private resolveLockPath(): string {
+    if (this.lockPath === null) {
+      // base64url makes arbitrary Android serials safe as one path segment.
+      this.lockPath = join(
+        // Agent-specific data directories are intentionally isolated, but a
+        // default ADB server is shared across agents for this OS user.
+        ensureSecureSharedAutoMobileDirSync("ctrlproxy-forwards"),
+        `${Buffer.from(this.deviceId).toString("base64url")}.lock`,
+      );
+    }
+    return this.lockPath;
+  }
+
+  public tryAcquire(): boolean {
+    if (this.acquired) {
+      return true;
+    }
+    // Shutdown recovery can evict a singleton while its setup remains in flight.
+    // Another client in this process must wait for that live lease, not reclaim it.
+    this.acquired = tryAcquireExclusiveLock(this.resolveLockPath(), {
+      ownerToken: this.ownerToken,
+    });
+    return this.acquired;
+  }
+
+  public release(): void {
+    if (!this.acquired) {
+      return;
+    }
+    releaseExclusiveLock(this.resolveLockPath(), process.pid, this.ownerToken);
+    this.acquired = false;
+  }
+}
+
+class NoOpCtrlProxyForwardLease implements CtrlProxyForwardLease {
+  public tryAcquire(): boolean {
+    return true;
+  }
+
+  public release(): void {}
+}
+
+/**
  * Client for interacting with the AutoMobile Accessibility Service via WebSocket.
  * Uses singleton pattern per device to maintain persistent WebSocket connection.
  */
@@ -1022,6 +1085,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Android-specific state
   private portForwardingSetup: boolean = false;
+  private readonly ctrlProxyForwardLease: CtrlProxyForwardLease;
+  private ctrlProxyForwardLeaseReleaseScheduled: boolean = false;
   private inFlightConnection: Promise<boolean> | null = null;
   private cleanupHeldPort: number | null = null;
   private lastWebSocketTimeout: number = 0;
@@ -1130,6 +1195,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     sdkEventIngestor?: AndroidSdkEventIngestor,
     loggerInstance: Logger = logger,
     certificateFileSystem?: CertificateFileSystem,
+    ctrlProxyForwardLease?: CtrlProxyForwardLease,
   ) {
     super(
       timer ?? defaultTimer,
@@ -1146,6 +1212,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.deviceConnectionLostNotifier =
       deviceConnectionLostNotifier ?? observationStreamDeviceConnectionLostNotifier;
     this.certificateFileSystem = certificateFileSystem;
+    this.ctrlProxyForwardLease =
+      ctrlProxyForwardLease ?? new FileCtrlProxyForwardLease(device.deviceId);
     this.localPort = PortManager.allocate(device.deviceId, {
       reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
     });
@@ -1197,6 +1265,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
     PortManager.holdForCleanup(this.localPort);
     this.cleanupHeldPort = this.localPort;
+    // A replacement must recover even if this invalidated client's asynchronous
+    // ADB cleanup is wedged. Its held port prevents the replacement from sharing
+    // the forward while that cleanup eventually completes.
+    this.releaseCtrlProxyForwardLeaseAfterConnectionSettles();
   }
 
   /**
@@ -1423,6 +1495,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     loggerInstance?: Logger,
     certificateFileSystem?: CertificateFileSystem,
     screenshotBackoffScheduler?: ScreenshotBackoffScheduler,
+    ctrlProxyForwardLease?: CtrlProxyForwardLease,
   ): AndroidCtrlProxyClient {
     const client = new AndroidCtrlProxyClient(
       device,
@@ -1436,6 +1509,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       sdkEventIngestor,
       loggerInstance,
       certificateFileSystem,
+      ctrlProxyForwardLease ?? new NoOpCtrlProxyForwardLease(),
     );
     // Test-only seam: pre-seed the lazily-built scheduler so tests can assert shared floor
     // accounting (noteCaptureStarted) without the live device-data-stream server. Not exposed on
@@ -3041,14 +3115,17 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       await super.close();
 
       if (this.portForwardingSetup) {
-        await this.adb.executeCommand(`forward --remove tcp:${this.localPort}`).catch(() => {});
-        this.portForwardingSetup = false;
+        // Do not claim the forward is gone when adb could not confirm its removal:
+        // the next client's reconciliation pass must still be able to reclaim it.
+        this.portForwardingSetup = !(await this.removeCtrlProxyPortForward(this.localPort));
       }
 
       PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
       await this.finishInvalidatedConnectionCleanup();
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Error during cleanup: ${error}`);
+    } finally {
+      this.releaseCtrlProxyForwardLeaseAfterConnectionSettles();
     }
   }
 
@@ -3083,6 +3160,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     if (this.closed) {
       return;
     }
+    if (!this.ctrlProxyForwardLease.tryAcquire()) {
+      throw new Error(
+        `Another AutoMobile process owns CtrlProxy forwarding for ${this.device.deviceId}`,
+      );
+    }
     // Verify port forwarding is still active even if we think it's set up
     // Port forwarding can be lost if ADB server restarts or emulator restarts
     if (this.portForwardingSetup) {
@@ -3096,12 +3178,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     try {
+      await this.sweepOrphanedCtrlProxyPortForwards(signal);
+
       const previousLocalPort = this.localPort;
-      await perf.track("clearPortForward", () =>
-        this.adb
-          .execute(["forward", "--remove", `tcp:${this.localPort}`], { signal })
-          .catch(() => {}),
+      const clearedCurrentPort = await perf.track(
+        "clearPortForward",
+        async () => await this.removeCtrlProxyPortForward(this.localPort, signal),
       );
+      if (!clearedCurrentPort) {
+        throw new Error(`Failed to remove existing CtrlProxy forward on tcp:${this.localPort}`);
+      }
       if (this.closed) {
         return;
       }
@@ -3112,11 +3198,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       );
 
       if (this.localPort !== previousLocalPort) {
-        await perf.track("clearReallocatedPortForward", () =>
-          this.adb
-            .execute(["forward", "--remove", `tcp:${this.localPort}`], { signal })
-            .catch(() => {}),
+        const clearedReallocatedPort = await perf.track(
+          "clearReallocatedPortForward",
+          async () => await this.removeCtrlProxyPortForward(this.localPort, signal),
         );
+        if (!clearedReallocatedPort) {
+          throw new Error(`Failed to remove existing CtrlProxy forward on tcp:${this.localPort}`);
+        }
       }
 
       await perf.track("setupPortForward", () =>
@@ -3126,7 +3214,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       );
 
       if (this.closed) {
-        await this.adb.execute(["forward", "--remove", `tcp:${this.localPort}`]).catch(() => {});
+        await this.removeCtrlProxyPortForward(this.localPort);
         return;
       }
 
@@ -3138,6 +3226,105 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  /**
+   * Remove stale local forwards for this device that target CtrlProxy's fixed
+   * device port. A daemon crash drops the in-memory singleton registry but
+   * leaves ADB's forwards alive; the next client setup is their recovery path.
+   *
+   * A newly-created singleton is registered before it can start connecting, so
+   * its allocated port is treated as live even before port forwarding completes.
+   */
+  private async sweepOrphanedCtrlProxyPortForwards(signal?: AbortSignal): Promise<void> {
+    let stdout: string;
+    try {
+      const result = await this.adb.execute(["forward", "--list"], { signal });
+      stdout = result.stdout;
+    } catch (error) {
+      logger.warn(
+        `[CTRL_PROXY] Failed to list forwards while reconciling device ${this.device.deviceId}: ${error}`,
+        error,
+      );
+      throw error;
+    }
+
+    const livePorts = new Set(
+      Array.from(AndroidCtrlProxyClient.instances.values())
+        .filter((client) => client.device.deviceId === this.device.deviceId && !client.closed)
+        .map((client) => client.localPort),
+    );
+    const orphanedPorts = new Set<number>();
+    for (const line of stdout.split(/\r?\n/)) {
+      const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
+      if (
+        extra.length !== 0 ||
+        serial !== this.device.deviceId ||
+        remote !== `tcp:${PortManager.DEVICE_PORT}`
+      ) {
+        continue;
+      }
+      const port = this.localPortFromForward(local);
+      if (port !== null && !livePorts.has(port)) {
+        orphanedPorts.add(port);
+      }
+    }
+
+    for (const port of orphanedPorts) {
+      logger.info(
+        `[CTRL_PROXY] Reclaiming orphaned CtrlProxy forward on ${this.device.deviceId} tcp:${port}`,
+      );
+      if (!(await this.removeCtrlProxyPortForward(port, signal))) {
+        throw new Error(
+          `Failed to reclaim orphaned CtrlProxy forward on ${this.device.deviceId} tcp:${port}`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Remove a forward only when it still maps this device and host port to the
+   * CtrlProxy device port. Re-listing closes the race with a different service
+   * reusing the host port after the orphan sweep discovered it.
+   *
+   * @returns `true` when no matching forward remains; `false` when adb failed
+   * to establish that state.
+   */
+  private async removeCtrlProxyPortForward(port: number, signal?: AbortSignal): Promise<boolean> {
+    try {
+      const result = await this.adb.execute(["forward", "--list"], { signal });
+      const expectedLocal = `tcp:${port}`;
+      const expectedRemote = `tcp:${PortManager.DEVICE_PORT}`;
+      const matchingForward = result.stdout.split(/\r?\n/).some((line) => {
+        const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
+        return (
+          extra.length === 0 &&
+          serial === this.device.deviceId &&
+          local === expectedLocal &&
+          remote === expectedRemote
+        );
+      });
+      if (!matchingForward) {
+        return true;
+      }
+
+      await this.adb.execute(["forward", "--remove", expectedLocal], { signal });
+      return true;
+    } catch (error) {
+      logger.warn(
+        `[CTRL_PROXY] Failed to remove CtrlProxy forward on ${this.device.deviceId} tcp:${port}: ${error}`,
+        error,
+      );
+      return false;
+    }
+  }
+
+  private localPortFromForward(value: string | undefined): number | null {
+    if (value === undefined || !value.startsWith("tcp:")) {
+      return null;
+    }
+    const port = Number.parseInt(value.slice("tcp:".length), 10);
+    return Number.isInteger(port) && port > 0 ? port : null;
+  }
+
   private async finishInvalidatedConnectionCleanup(): Promise<void> {
     if (this.inFlightConnection !== null || this.cleanupHeldPort === null) {
       return;
@@ -3146,6 +3333,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.cleanupHeldPort = null;
     PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
     PortManager.releaseCleanupHold(heldPort);
+  }
+
+  /**
+   * ADB commands may ignore cancellation. Keep the cross-process ownership
+   * lease until an in-flight connection (including its forward setup) settles,
+   * so its late cleanup cannot remove a replacement process's forward.
+   */
+  private releaseCtrlProxyForwardLeaseAfterConnectionSettles(): void {
+    if (this.ctrlProxyForwardLeaseReleaseScheduled) {
+      return;
+    }
+    this.ctrlProxyForwardLeaseReleaseScheduled = true;
+
+    const releaseLease = (): void => this.ctrlProxyForwardLease.release();
+    const inFlightConnection = this.inFlightConnection;
+    if (inFlightConnection === null) {
+      releaseLease();
+      return;
+    }
+    void inFlightConnection.then(releaseLease, releaseLease);
   }
 
   /**

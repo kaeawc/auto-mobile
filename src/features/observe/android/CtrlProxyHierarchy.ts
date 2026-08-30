@@ -145,7 +145,7 @@ export class CtrlProxyHierarchy {
     signal?: AbortSignal,
   ): Promise<AccessibilityHierarchyResponse> {
     const startTime = this.context.timer.now();
-    const cachedHierarchy = this.context.getCachedHierarchy();
+    let cachedHierarchy = this.context.getCachedHierarchy();
 
     logger.debug(
       `[CTRL_PROXY] getLatestHierarchy: cache=${cachedHierarchy ? "exists" : "null"}, waitForFresh=${waitForFresh}, skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp}`,
@@ -162,6 +162,14 @@ export class CtrlProxyHierarchy {
           hierarchy: null,
           fresh: false,
         };
+      }
+
+      if (cachedHierarchy && !(await this.isCachedPackageRunning(cachedHierarchy))) {
+        logger.warn(
+          `[CTRL_PROXY] Invalidating cached hierarchy for non-running package ${cachedHierarchy.hierarchy.packageName}`,
+        );
+        this.invalidateCache();
+        cachedHierarchy = null;
       }
 
       // If we have cached data and not waiting for fresh, return it immediately
@@ -310,6 +318,30 @@ export class CtrlProxyHierarchy {
         hierarchy: null,
         fresh: false,
       };
+    }
+  }
+
+  /**
+   * A cached hierarchy whose package no longer has a process cannot be
+   * recovered by waiting for a WebSocket push. Drop it before any cache-hit or
+   * stale-fallback path so the next request resolves the device window again.
+   */
+  private async isCachedPackageRunning(cachedHierarchy: CachedHierarchy): Promise<boolean> {
+    const packageName = cachedHierarchy.hierarchy.packageName;
+    if (!packageName || !/^[A-Za-z0-9._]+$/.test(packageName)) {
+      return true;
+    }
+
+    try {
+      const result = await this.context.adb.executeCommand(`shell pidof ${packageName} || true`);
+      return result.stdout.trim().length > 0;
+    } catch (error) {
+      // Liveness is best-effort; an ADB error must not destroy otherwise usable
+      // cache state when process presence could not be determined.
+      logger.debug(
+        `[CTRL_PROXY] Could not verify cached package ${packageName} is running: ${error}`,
+      );
+      return true;
     }
   }
 

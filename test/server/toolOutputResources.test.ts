@@ -155,6 +155,8 @@ describe("tool-output artifact resource (#5882)", () => {
     expect(content.mimeType).toBe("application/json");
     const parsed = JSON.parse(content.text!) as { error: string };
     expect(parsed.error).toContain("not available");
+    expect(parsed.error).not.toContain(ARTIFACT_DIR);
+    expect(parsed.error).not.toContain("ENOENT");
     expect(fileSystem.reads).toEqual([path.join(ARTIFACT_DIR, filename)]);
   });
 

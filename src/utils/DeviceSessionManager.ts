@@ -383,18 +383,19 @@ export class DeviceSessionManager implements DeviceSessionManager {
   /**
    * Detect the platform of connected devices
    */
-  public async detectConnectedPlatforms(): Promise<BootedDevice[]> {
+  public async detectConnectedPlatforms(signal?: AbortSignal): Promise<BootedDevice[]> {
     const devices: BootedDevice[] = [];
     const perf = createGlobalPerformanceTracker();
 
     try {
       // Check for Android devices via ADB
       perf.startOperation("androidDeviceScan");
-      const androidDevices = await this.adb.getBootedAndroidDevices();
+      const androidDevices = await this.adb.getBootedAndroidDevices({ signal });
       perf.endOperation("androidDeviceScan");
       devices.push(...androidDevices);
     } catch (error) {
       perf.endOperation("androidDeviceScan");
+      signal?.throwIfAborted();
       logger.warn(`Failed to detect Android devices: ${error}`);
     }
 
@@ -402,12 +403,13 @@ export class DeviceSessionManager implements DeviceSessionManager {
       // Check for iOS devices/simulators via xcrun simctl
       if (this.simctl) {
         perf.startOperation("iosSimulatorScan");
-        const iosDevices = await this.simctl.getBootedSimulators();
+        const iosDevices = await this.simctl.getBootedSimulators(undefined, signal);
         perf.endOperation("iosSimulatorScan");
         devices.push(...iosDevices);
       }
     } catch (error) {
       perf.endOperation("iosSimulatorScan");
+      signal?.throwIfAborted();
       logger.warn(`Failed to detect iOS devices: ${error}`);
     }
 

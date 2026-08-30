@@ -56,6 +56,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
   private deviceTimestampSource: DeviceTimestampSource = "device-ms";
   private spawnCalls: string[][] = [];
   private spawnOptions: Array<AdbSpawnOptions | undefined> = [];
+  private spawnedProcesses: FakeAdbProcess[] = [];
   private spawnBehaviors: SpawnBehavior[] = [];
 
   /**
@@ -138,12 +139,14 @@ export class FakeAdbClient implements FakeAdbClientContract {
   async spawn(args: string[], options?: AdbSpawnOptions): Promise<AdbProcess> {
     this.spawnCalls.push([...args]);
     this.spawnOptions.push(options);
-    const proc = new FakeAdbProcess();
     const joined = args.join(" ");
     const behavior = this.spawnBehaviors.find((b) => joined.includes(b.match));
     if (behavior?.outcome.kind === "reject") {
       throw behavior.outcome.error;
-    } else if (behavior?.outcome.kind === "error") {
+    }
+    const proc = new FakeAdbProcess();
+    this.spawnedProcesses.push(proc);
+    if (behavior?.outcome.kind === "error") {
       proc.scheduleError(behavior.outcome.error);
     } else {
       proc.scheduleExit(behavior?.outcome.kind === "exit" ? behavior.outcome.code : 0);
@@ -175,6 +178,10 @@ export class FakeAdbClient implements FakeAdbClientContract {
 
   getSpawnOptions(): Array<AdbSpawnOptions | undefined> {
     return [...this.spawnOptions];
+  }
+
+  getSpawnedProcesses(): FakeAdbProcess[] {
+    return [...this.spawnedProcesses];
   }
 
   /** True if any spawned command's argv contained `match`. */
@@ -364,6 +371,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     this.foregroundAppError = null;
     this.hangingCommandPatterns = [];
     this.spawnCalls = [];
+    this.spawnedProcesses = [];
     this.spawnBehaviors = [];
     this.deviceTimestampMs = null;
   }

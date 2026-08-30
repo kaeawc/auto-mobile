@@ -595,12 +595,22 @@ export class AdbClient implements AdbExecutor {
       startTime,
       args.join(" "),
     );
-    const child = this.spawnFn(adbPath, fullArgs, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = this.spawnFn(adbPath, fullArgs, {
+      stdio: ["ignore", "pipe", "pipe"],
+      signal: options.abortSignalScope === "startup" ? undefined : signal,
+    });
     this.activeProcesses.add(child);
 
     let timeoutId: NodeJS.Timeout | undefined;
     let cleaned = false;
     let settleStart: ((error?: Error) => void) | undefined;
+    const removeStartupCancellation = () => {
+      signal?.removeEventListener("abort", onAbort);
+      if (timeoutId) {
+        this.timer.clearTimeout(timeoutId);
+        timeoutId = undefined;
+      }
+    };
     const cleanup = () => {
       if (cleaned) {
         return;
@@ -609,10 +619,7 @@ export class AdbClient implements AdbExecutor {
       this.activeProcesses.delete(child);
       child.off("exit", onExit);
       child.off("error", onError);
-      signal?.removeEventListener("abort", onAbort);
-      if (timeoutId) {
-        this.timer.clearTimeout(timeoutId);
-      }
+      removeStartupCancellation();
     };
     const onExit = () => cleanup();
     const onError = (error: Error) => {
@@ -638,6 +645,9 @@ export class AdbClient implements AdbExecutor {
       const onSpawn = () => {
         child.off("error", onInitialError);
         settleStart = undefined;
+        if (options.abortSignalScope === "startup") {
+          removeStartupCancellation();
+        }
         resolve();
       };
       const onInitialError = (error: Error) => {

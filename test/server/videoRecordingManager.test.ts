@@ -1,4 +1,13 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import os from "node:os";
 import path from "node:path";
 import { promises as fsPromises } from "node:fs";
@@ -15,6 +24,7 @@ import {
   recordVideoRecordingHighlightAdded,
   resetVideoRecordingManagerDependencies,
   resolveVideoRetentionPolicy,
+  rollbackVideoRecordingStart,
   runRetentionSweep,
   setVideoRecordingManagerDependencies,
   startVideoRecording,
@@ -24,12 +34,18 @@ import {
 } from "../../src/server/videoRecordingManager";
 import type { VideoRecordingRecord } from "../../src/db/videoRecordingRepository";
 import { defaultTimer } from "../../src/utils/SystemTimer";
+import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import {
+  buildVideoArchiveItemUri,
+  VIDEO_RESOURCE_URIS,
+} from "../../src/server/videoRecordingResourceUris";
 
 describe("videoRecordingManager", () => {
   let fakeTimer: FakeTimer;
   let fakeBackend: FakeVideoCaptureBackend;
   let fakeHighlightClient: FakeHighlightClient;
   let fakeRepository: FakeVideoRecordingRepository;
+  let service: VideoRecorderService;
   let archiveRoot: string;
   let testDevice: BootedDevice;
   const iosDevice: BootedDevice = {
@@ -51,7 +67,7 @@ describe("videoRecordingManager", () => {
     await fsPromises.rm(archiveRoot, { recursive: true, force: true });
     await fsPromises.mkdir(archiveRoot, { recursive: true });
 
-    const service = new VideoRecorderService({
+    service = new VideoRecorderService({
       backend: fakeBackend,
       archiveRoot,
       now: () => new Date(fakeTimer.now()),
@@ -181,53 +197,52 @@ describe("videoRecordingManager", () => {
     expect(record?.durationMs).toBe(1000);
   });
 
-  test("cancellation after backend startup force-stops and interrupts the capture", async () => {
-    const controller = new AbortController();
-    const originalInsert = fakeRepository.insertRecording.bind(fakeRepository);
-    let insertedRecordingId: string | undefined;
-    fakeRepository.insertRecording = async (record) => {
-      insertedRecordingId = record.recordingId;
-      controller.abort(new Error("request cancelled"));
-      await originalInsert(record);
-    };
+  test("in-memory ownership blocks a second start when durable status is stale", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+    await interruptVideoRecording(active.recordingId);
 
-    await expect(
-      startVideoRecording({
-        device: testDevice,
-        maxDurationSeconds: 3,
-        abortSignal: controller.signal,
-      }),
-    ).rejects.toThrow("request cancelled");
+    await expect(startVideoRecording({ device: testDevice })).rejects.toThrow(
+      "already active for device",
+    );
 
-    expect(fakeBackend.forceStopCalls).toHaveLength(1);
-    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
-    expect(insertedRecordingId).toBeDefined();
-    expect((await fakeRepository.getRecording(insertedRecordingId!))?.status).toBe("interrupted");
+    await service.forceStopRecording(active.recordingId);
   });
 
-  test("keeps a recording discoverable when cancellation force-stop fails", async () => {
-    const controller = new AbortController();
-    const originalInsert = fakeRepository.insertRecording.bind(fakeRepository);
-    let insertedRecordingId: string | undefined;
-    fakeBackend.forceStop = async () => {
-      throw new Error("force stop failed");
-    };
-    fakeRepository.insertRecording = async (record) => {
-      insertedRecordingId = record.recordingId;
-      controller.abort(new Error("request cancelled"));
-      await originalInsert(record);
-    };
+  test("reconciles an ownerless active row through canonical interruption", async () => {
+    const recordingDir = path.join(archiveRoot, "stale-recording");
+    const filePath = path.join(recordingDir, "capture.mp4");
+    await fsPromises.mkdir(recordingDir, { recursive: true });
+    await fsPromises.writeFile(filePath, "1234567");
+    const startedAt = new Date(fakeTimer.now()).toISOString();
+    await fakeRepository.insertRecording({
+      recordingId: "stale-recording",
+      deviceId: testDevice.deviceId,
+      platform: testDevice.platform,
+      filePath,
+      fileName: "capture.mp4",
+      format: "mp4",
+      sizeBytes: 0,
+      status: "recording",
+      createdAt: startedAt,
+      startedAt,
+      lastAccessedAt: startedAt,
+      config: {
+        qualityPreset: "low",
+        targetBitrateKbps: 1000,
+        maxThroughputMbps: 5,
+        fps: 15,
+        maxArchiveSizeMb: 100,
+        format: "mp4",
+      },
+    });
 
-    await expect(
-      startVideoRecording({
-        device: testDevice,
-        maxDurationSeconds: 3,
-        abortSignal: controller.signal,
-      }),
-    ).rejects.toThrow("request cancelled");
+    await startVideoRecording({ device: testDevice });
 
-    expect(insertedRecordingId).toBeDefined();
-    expect((await fakeRepository.getRecording(insertedRecordingId!))?.status).toBe("recording");
+    expect(await fakeRepository.getRecording("stale-recording")).toMatchObject({
+      status: "interrupted",
+      sizeBytes: 7,
+      endedAt: new Date(fakeTimer.now()).toISOString(),
+    });
   });
 
   test("rejects recording starts once shutdown begins", async () => {
@@ -259,6 +274,279 @@ describe("videoRecordingManager", () => {
 
     await expect(Promise.all([firstDrain, secondDrain])).resolves.toEqual([undefined, undefined]);
     await expect(startResult).resolves.toThrow("start aborted");
+  });
+
+  test("reserves a device before asynchronous admission checks", async () => {
+    let resolveStart: (() => void) | undefined;
+    let markBackendStarted: (() => void) | undefined;
+    const backendStarted = new Promise<void>((resolve) => {
+      markBackendStarted = resolve;
+    });
+    fakeBackend.start = async (config) => {
+      fakeBackend.startCalls.push(config);
+      markBackendStarted?.();
+      await new Promise<void>((resolve) => {
+        resolveStart = resolve;
+      });
+      const handle = {
+        recordingId: config.recordingId,
+        outputPath: config.outputPath,
+        startedAt: config.startedAt,
+      };
+      fakeBackend.startResults.push(handle);
+      return handle;
+    };
+
+    const first = startVideoRecording({ device: testDevice });
+    await backendStarted;
+    const second = startVideoRecording({ device: testDevice });
+
+    await expect(second).rejects.toThrow("start already in progress");
+    expect(fakeBackend.startCalls).toHaveLength(1);
+    resolveStart?.();
+    await first;
+  });
+
+  test("force-stops backend success and removes ownership when persistence fails", async () => {
+    fakeRepository.insertRecording = async () => {
+      throw new Error("database unavailable");
+    };
+
+    await expect(startVideoRecording({ device: testDevice })).rejects.toThrow(
+      "database unavailable",
+    );
+
+    expect(fakeBackend.forceStopCalls).toEqual([fakeBackend.startResults[0]]);
+    expect(service.listActiveRecordingIds()).toEqual([]);
+    expect(await fakeRepository.listRecordings()).toEqual([]);
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    expect(await fsPromises.readdir(archiveRoot)).toEqual([]);
+  });
+
+  test("releases provisional ownership when rollback artifact deletion fails", async () => {
+    const cleanupError = new Error("artifact cleanup failed");
+    const cleanupFailingService = new VideoRecorderService({
+      backend: fakeBackend,
+      archiveRoot,
+      now: () => new Date(fakeTimer.now()),
+      fileSystem: {
+        rm: async () => {
+          throw cleanupError;
+        },
+      },
+    });
+    fakeRepository.insertRecording = async () => {
+      throw new Error("database unavailable");
+    };
+    await setVideoRecordingManagerDependencies({
+      videoRecorderService: cleanupFailingService,
+      recordingRepository: fakeRepository,
+      configRepository: new FakeVideoRecordingConfigRepository(),
+      highlightClient: fakeHighlightClient,
+      timer: fakeTimer,
+      now: () => new Date(fakeTimer.now()),
+    });
+
+    await expect(startVideoRecording({ device: testDevice })).rejects.toThrow(cleanupError.message);
+
+    expect(cleanupFailingService.listActiveRecordingIds()).toHaveLength(0);
+  });
+
+  test("disarms timers and exposes a stopped recording when rollback artifact cleanup fails", async () => {
+    const cleanupError = new Error("artifact cleanup failed");
+    const cleanupFailingService = new VideoRecorderService({
+      backend: fakeBackend,
+      archiveRoot,
+      now: () => new Date(fakeTimer.now()),
+      fileSystem: {
+        rm: async () => {
+          throw cleanupError;
+        },
+      },
+    });
+    await setVideoRecordingManagerDependencies({
+      videoRecorderService: cleanupFailingService,
+      recordingRepository: fakeRepository,
+      configRepository: new FakeVideoRecordingConfigRepository(),
+      highlightClient: fakeHighlightClient,
+      timer: fakeTimer,
+      now: () => new Date(fakeTimer.now()),
+    });
+    const active = await startVideoRecording({
+      device: testDevice,
+      maxDurationSeconds: 3,
+    });
+
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+    await expect(rollbackVideoRecordingStart(active.recordingId)).rejects.toThrow(cleanupError);
+
+    expect(cleanupFailingService.listActiveRecordingIds()).toEqual([]);
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    expect(await fakeRepository.getRecording(active.recordingId)).toMatchObject({
+      status: "interrupted",
+    });
+  });
+
+  test("retains durable metadata and ownership when backend discard fails", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+    const pendingTimers = fakeTimer.getPendingTimeoutCount();
+    fakeBackend.forceStop = async () => {
+      throw new Error("device temp cleanup failed");
+    };
+
+    await expect(rollbackVideoRecordingStart(active.recordingId)).rejects.toThrow(
+      "device temp cleanup failed",
+    );
+
+    expect(await fakeRepository.getRecording(active.recordingId)).not.toBeNull();
+    expect(service.listActiveRecordingIds()).toEqual([active.recordingId]);
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(pendingTimers);
+  });
+
+  test("notifies video resources after rollback removes the durable row", async () => {
+    const updates = spyOn(ResourceRegistry, "notifyResourcesUpdated").mockResolvedValue(undefined);
+    const active = await startVideoRecording({ device: testDevice });
+
+    try {
+      await rollbackVideoRecordingStart(active.recordingId);
+
+      expect(updates).toHaveBeenCalledTimes(2);
+      expect(updates).toHaveBeenLastCalledWith([
+        VIDEO_RESOURCE_URIS.LATEST,
+        VIDEO_RESOURCE_URIS.ARCHIVE,
+        buildVideoArchiveItemUri(active.recordingId),
+      ]);
+    } finally {
+      updates.mockRestore();
+    }
+  });
+
+  test("stops an in-memory owner before a failing repository read", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+    const originalGet = fakeRepository.getRecording.bind(fakeRepository);
+    fakeRepository.getRecording = async () => {
+      throw new Error("database read failed");
+    };
+
+    await expect(rollbackVideoRecordingStart(active.recordingId)).rejects.toThrow(
+      "database read failed",
+    );
+
+    expect(fakeBackend.forceStopCalls).toEqual([fakeBackend.startResults[0]]);
+    expect(service.listActiveRecordingIds()).toEqual([]);
+
+    fakeRepository.getRecording = originalGet;
+    await expect(startVideoRecording({ device: testDevice })).resolves.toBeDefined();
+    expect((await originalGet(active.recordingId))?.status).toBe("interrupted");
+  });
+
+  test("delete failure leaves an interrupted row that does not block retry", async () => {
+    const active = await startVideoRecording({ device: testDevice });
+    const highlightShape = {
+      type: "box",
+      bounds: { x: 5, y: 15, width: 50, height: 60 },
+    } as const;
+    fakeTimer.advanceTime(500);
+    await recordVideoRecordingHighlightAdded(testDevice, {
+      shape: highlightShape,
+    });
+    fakeTimer.advanceTime(500);
+    const originalDelete = fakeRepository.deleteRecording.bind(fakeRepository);
+    fakeRepository.deleteRecording = async () => {
+      throw new Error("database delete failed");
+    };
+
+    await expect(rollbackVideoRecordingStart(active.recordingId)).rejects.toThrow(
+      "database delete failed",
+    );
+
+    expect(await fakeRepository.getRecording(active.recordingId)).toMatchObject({
+      status: "interrupted",
+      highlights: [
+        {
+          shape: highlightShape,
+          timeline: { appearedAtSeconds: 0.5, disappearedAtSeconds: 1 },
+        },
+      ],
+    });
+    expect(service.listActiveRecordingIds()).toEqual([]);
+
+    fakeRepository.deleteRecording = originalDelete;
+    await expect(startVideoRecording({ device: testDevice })).resolves.toBeDefined();
+  });
+
+  test("rollback removes artifacts for an already completed segment", async () => {
+    const recordingDir = path.join(archiveRoot, "completed-segment");
+    const filePath = path.join(recordingDir, "segment.mp4");
+    await fsPromises.mkdir(recordingDir, { recursive: true });
+    await fsPromises.writeFile(filePath, "segment");
+    await fakeRepository.insertRecording({
+      recordingId: "completed-segment",
+      deviceId: testDevice.deviceId,
+      platform: testDevice.platform,
+      filePath,
+      fileName: "segment.mp4",
+      format: "mp4",
+      sizeBytes: 7,
+      status: "completed",
+      createdAt: new Date(fakeTimer.now()).toISOString(),
+      startedAt: new Date(fakeTimer.now()).toISOString(),
+      lastAccessedAt: new Date(fakeTimer.now()).toISOString(),
+      config: {
+        qualityPreset: "low",
+        targetBitrateKbps: 1000,
+        maxThroughputMbps: 5,
+        fps: 15,
+        maxArchiveSizeMb: 100,
+        format: "mp4",
+      },
+    });
+
+    await rollbackVideoRecordingStart("completed-segment");
+
+    expect(await fakeRepository.getRecording("completed-segment")).toBeNull();
+    await expect(fsPromises.access(recordingDir)).rejects.toThrow();
+  });
+
+  test("rolls back the durable row when post-start scheduling fails", async () => {
+    fakeTimer.setTimeout = () => {
+      throw new Error("timer scheduling failed");
+    };
+
+    await expect(
+      startVideoRecording({
+        device: testDevice,
+        maxDurationSeconds: 10,
+      }),
+    ).rejects.toThrow("timer scheduling failed");
+
+    expect(fakeBackend.forceStopCalls).toEqual([fakeBackend.startResults[0]]);
+    expect(await fakeRepository.listRecordings()).toEqual([]);
+    expect(service.listActiveRecordingIds()).toEqual([]);
+  });
+
+  test("shares initialization work and retries after initialization failure", async () => {
+    const originalList = fakeRepository.listRecordings.bind(fakeRepository);
+    let initializationCalls = 0;
+    let failInitialization = true;
+    fakeRepository.listRecordings = async (query = {}) => {
+      if (query.status === "recording") {
+        initializationCalls++;
+        if (failInitialization) {
+          throw new Error("initialization failed");
+        }
+      }
+      return originalList(query);
+    };
+
+    const first = listVideoRecordings();
+    const concurrent = listVideoRecordings();
+    await expect(Promise.all([first, concurrent])).rejects.toThrow("initialization failed");
+    expect(initializationCalls).toBe(1);
+
+    failInitialization = false;
+    await expect(listVideoRecordings()).resolves.toEqual([]);
+    expect(initializationCalls).toBe(2);
   });
 
   test("records highlight timelines for scheduled highlights", async () => {

@@ -171,7 +171,7 @@ export interface SimCtl {
    * Get the list of booted simulator UDIDs
    * @returns Promise with an array of booted devices
    */
-  getBootedSimulators(timeoutMs?: number): Promise<BootedDevice[]>;
+  getBootedSimulators(timeoutMs?: number, signal?: AbortSignal): Promise<BootedDevice[]>;
 
   /**
    * Get device information by UDID
@@ -803,10 +803,10 @@ export class SimCtlClient implements SimCtl {
    * Get the list of all simulators and devices
    * @returns Promise with simulator list data
    */
-  private async listSimulators(timeoutMs?: number): Promise<SimulatorList> {
+  private async listSimulators(timeoutMs?: number, signal?: AbortSignal): Promise<SimulatorList> {
     const perf = createGlobalPerformanceTracker();
     perf.startOperation("simctlListDevices");
-    const result = await this.executeCommandArgs(["list", "devices", "--json"], timeoutMs);
+    const result = await this.executeCommandArgs(["list", "devices", "--json"], timeoutMs, signal);
     perf.endOperation("simctlListDevices");
 
     try {
@@ -1511,10 +1511,11 @@ export class SimCtlClient implements SimCtl {
    * Get the list of booted simulator UDIDs
    * @returns Promise with an array of booted device UDIDs
    */
-  async getBootedSimulators(timeoutMs?: number): Promise<BootedDevice[]> {
+  async getBootedSimulators(timeoutMs?: number, signal?: AbortSignal): Promise<BootedDevice[]> {
     try {
-      return await this.getBootedSimulatorsChecked(timeoutMs);
+      return await this.getBootedSimulatorsChecked(timeoutMs, signal);
     } catch (error) {
+      signal?.throwIfAborted();
       logger.debug(`Failed to get booted iOS devices: ${error}`);
       return [];
     }
@@ -1525,8 +1526,11 @@ export class SimCtlClient implements SimCtl {
    * swallowing them into an empty list. Callers that must distinguish "no
    * simulators are booted" from "simctl discovery failed" should use this.
    */
-  async getBootedSimulatorsChecked(timeoutMs?: number): Promise<BootedDevice[]> {
-    const simulatorList = await this.listSimulators(timeoutMs);
+  async getBootedSimulatorsChecked(
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<BootedDevice[]> {
+    const simulatorList = await this.listSimulators(timeoutMs, signal);
     logger.debug(`Found simulator list: ${simulatorList}`);
     const observedAt = this.observationSequence.next();
     const bootedDevices: BootedDevice[] = [];

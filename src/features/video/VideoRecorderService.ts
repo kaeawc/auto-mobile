@@ -16,6 +16,7 @@ import {
   defaultSecurePermissions,
   type SecurePermissions,
 } from "../../utils/filesystem/securePermissions";
+import { combineAbortSignals } from "../../utils/AbortContext";
 
 /**
  * Keep only the declared {@link VideoRecordingConfig} fields. A backend that
@@ -115,10 +116,14 @@ export interface VideoRecorderServiceDependencies {
   idGenerator?: IdGenerator | (() => string);
   now?: () => Date;
   securePermissions?: SecurePermissions;
+  fileSystem?: Pick<typeof fsPromises, "rm">;
 }
 
 interface ActiveRecordingState extends ActiveVideoRecording {
-  handle: RecordingHandle;
+  deviceId?: string;
+  handle?: RecordingHandle;
+  startPromise: Promise<RecordingHandle>;
+  startAbortController: AbortController;
   forceStopRequested: boolean;
 }
 
@@ -178,6 +183,7 @@ export class VideoRecorderService {
   private idGenerator: IdGenerator;
   private now: () => Date;
   private securePermissions: SecurePermissions;
+  private fileSystem: Pick<typeof fsPromises, "rm">;
   private activeRecordings = new Map<string, ActiveRecordingState>();
   private stoppingRecordings = new Map<string, Promise<VideoRecordingMetadata>>();
   private forceStoppingRecordings = new Map<string, Promise<void>>();
@@ -190,6 +196,7 @@ export class VideoRecorderService {
     this.idGenerator = normalizeIdGenerator(dependencies.idGenerator);
     this.now = dependencies.now ?? (() => new Date());
     this.securePermissions = dependencies.securePermissions ?? defaultSecurePermissions;
+    this.fileSystem = dependencies.fileSystem ?? fsPromises;
   }
 
   async startRecording(options: StartVideoRecordingOptions = {}): Promise<ActiveVideoRecording> {
@@ -210,78 +217,61 @@ export class VideoRecorderService {
 
     const fileName = buildRecordingFileName(nameSlug, startedAt, config.format);
     const outputPath = path.join(recordingDir, fileName);
-
-    let handle: RecordingHandle;
-    try {
-      handle = await this.backend.start({
-        recordingId,
-        outputDirectory: recordingDir,
-        outputPath,
-        fileName,
-        startedAt,
-        device: options.device,
-        maxDurationSeconds: options.maxDurationSeconds,
-        abortSignal: options.abortSignal,
-        ...config,
-      });
-    } catch (error) {
-      if (error instanceof VideoCaptureStartCleanupError) {
-        const retainedOutputPath = error.handle.outputPath || outputPath;
-        this.activeRecordings.set(recordingId, {
-          recordingId,
-          outputPath: retainedOutputPath,
-          fileName: path.basename(retainedOutputPath),
-          startedAt: error.handle.startedAt || startedAt,
-          config,
-          outputName: options.outputName,
-          handle: error.handle,
-          forceStopRequested: false,
-        });
-        try {
-          await this.forceStopRecording(recordingId);
-          await fsPromises.rm(recordingDir, { recursive: true, force: true });
-        } catch (cleanupError) {
-          this.log.warn(
-            `[VideoRecorderService] Failed to force-stop aborted recording ${recordingId}: ${String(cleanupError)}`,
-          );
-        }
-      } else {
-        try {
-          await fsPromises.rm(recordingDir, { recursive: true, force: true });
-        } catch (cleanupError) {
-          this.log.warn(
-            `[VideoRecorderService] Failed to remove aborted recording directory ${recordingDir}: ${String(cleanupError)}`,
-          );
-        }
-      }
-      throw error;
-    }
-
-    const resolvedOutputPath = handle.outputPath || outputPath;
-    const resolvedFileName = path.basename(resolvedOutputPath);
-    const effectiveConfig = toPublicRecordingConfig(handle.effectiveConfig ?? config);
+    const startAbortController = new AbortController();
+    const captureConfig: VideoCaptureConfig = {
+      recordingId,
+      outputDirectory: recordingDir,
+      outputPath,
+      fileName,
+      startedAt,
+      device: options.device,
+      maxDurationSeconds: options.maxDurationSeconds,
+      abortSignal: combineAbortSignals(options.abortSignal, startAbortController.signal),
+      ...config,
+    };
+    // Defer backend invocation by one microtask so provisional ownership is
+    // visible before any synchronous startup work can run.
+    const startPromise = Promise.resolve().then(
+      async () => await this.backend.start(captureConfig),
+    );
 
     const active: ActiveRecordingState = {
       recordingId,
-      outputPath: resolvedOutputPath,
-      fileName: resolvedFileName,
-      startedAt: handle.startedAt || startedAt,
-      config: effectiveConfig,
+      outputPath,
+      fileName,
+      startedAt,
+      config,
       outputName: options.outputName,
-      handle,
+      deviceId: options.device?.deviceId,
+      startPromise,
+      startAbortController,
       forceStopRequested: false,
     };
 
     this.activeRecordings.set(recordingId, active);
 
-    return {
-      recordingId,
-      outputPath: active.outputPath,
-      fileName: active.fileName,
-      startedAt: active.startedAt,
-      config: active.config,
-      outputName: active.outputName,
-    };
+    try {
+      const handle = await startPromise;
+      active.handle = handle;
+      active.outputPath = handle.outputPath || outputPath;
+      active.fileName = path.basename(active.outputPath);
+      active.startedAt = handle.startedAt || startedAt;
+      active.config = toPublicRecordingConfig(handle.effectiveConfig ?? config);
+      if (active.forceStopRequested || this.activeRecordings.get(recordingId) !== active) {
+        throw new Error(`Recording ${recordingId} was force-stopped while it was starting.`);
+      }
+
+      return {
+        recordingId,
+        outputPath: active.outputPath,
+        fileName: active.fileName,
+        startedAt: active.startedAt,
+        config: active.config,
+        outputName: active.outputName,
+      };
+    } catch (error) {
+      return await this.handleStartFailure(error, active);
+    }
   }
 
   /**
@@ -291,6 +281,12 @@ export class VideoRecorderService {
    */
   listActiveRecordingIds(): string[] {
     return Array.from(this.activeRecordings.keys());
+  }
+
+  hasActiveRecordingForDevice(deviceId: string): boolean {
+    return Array.from(this.activeRecordings.values()).some(
+      (recording) => recording.deviceId === deviceId,
+    );
   }
 
   async stopRecording(recordingId: string): Promise<VideoRecordingMetadata> {
@@ -314,7 +310,8 @@ export class VideoRecorderService {
 
   private async stopActiveRecording(active: ActiveRecordingState): Promise<VideoRecordingMetadata> {
     const recordingId = active.recordingId;
-    const stopResult = await this.backend.stop(active.handle);
+    const handle = active.handle ?? (await active.startPromise);
+    const stopResult = await this.backend.stop(handle);
     if (this.activeRecordings.get(recordingId) !== active || active.forceStopRequested) {
       throw new Error(`Recording ${recordingId} was force-stopped while it was stopping.`);
     }
@@ -353,23 +350,39 @@ export class VideoRecorderService {
   }
 
   async forceStopRecording(recordingId: string): Promise<void> {
+    await this.forceStopOrDiscardRecording(recordingId, false);
+  }
+
+  async discardRecording(recordingId: string): Promise<void> {
+    await this.forceStopOrDiscardRecording(recordingId, true);
+  }
+
+  private async forceStopOrDiscardRecording(
+    recordingId: string,
+    discardArtifacts: boolean,
+  ): Promise<void> {
+    const activeOutputPath = this.activeRecordings.get(recordingId)?.outputPath;
     const forceStopping = this.forceStoppingRecordings.get(recordingId);
     if (forceStopping) {
-      return forceStopping;
+      await forceStopping;
+      if (discardArtifacts) {
+        await this.removeRecordingArtifacts(recordingId, activeOutputPath);
+      }
+      return;
     }
     const active = this.activeRecordings.get(recordingId);
     if (!active) {
       throw new Error(`No active recording found for id ${recordingId}`);
     }
     const backendForceStop = this.backend.forceStop;
-    if (!backendForceStop) {
+    if (!backendForceStop && active.handle) {
       throw new Error("Video capture backend does not support force stopping recordings.");
     }
 
     // Set this before awaiting the backend: the graceful stop may resolve while
     // a device-side force-stop command is still in flight.
     active.forceStopRequested = true;
-    const forceStop = this.forceStopActiveRecording(active, backendForceStop);
+    const forceStop = this.forceStopActiveRecording(active, backendForceStop, discardArtifacts);
     this.forceStoppingRecordings.set(recordingId, forceStop);
     try {
       await forceStop;
@@ -380,17 +393,103 @@ export class VideoRecorderService {
 
   private async forceStopActiveRecording(
     active: ActiveRecordingState,
-    backendForceStop: NonNullable<VideoCaptureBackend["forceStop"]>,
+    backendForceStop: VideoCaptureBackend["forceStop"],
+    discardArtifacts: boolean,
   ): Promise<void> {
+    active.startAbortController.abort();
+    const handle = await this.resolveForceStopHandle(active, discardArtifacts);
+    if (!handle) {
+      return;
+    }
+
+    if (!backendForceStop) {
+      active.forceStopRequested = false;
+      throw new Error("Video capture backend does not support force stopping recordings.");
+    }
+
     try {
-      await backendForceStop.call(this.backend, active.handle);
+      await backendForceStop.call(this.backend, handle);
       this.activeRecordings.delete(active.recordingId);
+      if (discardArtifacts) {
+        await this.removeRecordingArtifacts(active.recordingId, active.outputPath);
+      }
     } catch (error) {
       if (this.activeRecordings.get(active.recordingId) === active) {
         active.forceStopRequested = false;
       }
       throw error;
     }
+  }
+
+  private retainStartCleanupHandle(
+    error: unknown,
+    active: ActiveRecordingState,
+  ): error is VideoCaptureStartCleanupError {
+    if (!(error instanceof VideoCaptureStartCleanupError)) {
+      return false;
+    }
+    active.handle = error.handle;
+    return true;
+  }
+
+  private async handleStartFailure(error: unknown, active: ActiveRecordingState): Promise<never> {
+    if (this.retainStartCleanupHandle(error, active)) {
+      try {
+        await this.forceStopOrDiscardRecording(active.recordingId, true);
+      } catch (cleanupError) {
+        this.log.warn(
+          `[VideoRecorderService] Failed to retry cleanup for ${active.recordingId}: ${String(cleanupError)}`,
+          cleanupError,
+        );
+      }
+      throw error;
+    }
+    if (this.activeRecordings.get(active.recordingId) === active && !active.forceStopRequested) {
+      this.activeRecordings.delete(active.recordingId);
+    }
+    try {
+      await this.removeRecordingArtifacts(active.recordingId, active.outputPath);
+    } catch (cleanupError) {
+      this.log.warn(
+        `[VideoRecorderService] Failed to remove aborted recording directory for ${active.recordingId}: ${String(cleanupError)}`,
+      );
+    }
+    throw error;
+  }
+
+  private async resolveForceStopHandle(
+    active: ActiveRecordingState,
+    discardArtifacts: boolean,
+  ): Promise<RecordingHandle | undefined> {
+    try {
+      return active.handle ?? (await active.startPromise);
+    } catch (error) {
+      if (this.retainStartCleanupHandle(error, active)) {
+        return error.handle;
+      }
+      // A starting backend that honors cancellation owns no live capture after
+      // rejecting, so dropping provisional ownership completes the force stop.
+      this.log.debug(
+        `[VideoRecorderService] Starting recording ${active.recordingId} ended during force stop: ${error}`,
+      );
+      this.activeRecordings.delete(active.recordingId);
+      if (discardArtifacts) {
+        await this.removeRecordingArtifacts(active.recordingId, active.outputPath);
+      }
+      return undefined;
+    }
+  }
+
+  private async removeRecordingArtifacts(recordingId: string, outputPath?: string): Promise<void> {
+    const active = this.activeRecordings.get(recordingId);
+    const resolvedOutputPath = outputPath ?? active?.outputPath;
+    if (!resolvedOutputPath) {
+      return;
+    }
+    await this.fileSystem.rm(path.dirname(resolvedOutputPath), {
+      recursive: true,
+      force: true,
+    });
   }
 
   private getRecordingDir(name: string): string {

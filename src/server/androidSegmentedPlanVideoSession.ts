@@ -8,13 +8,13 @@ import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import {
-  forceStopVideoRecording as defaultForceStopVideoRecording,
-  interruptVideoRecording as defaultInterruptVideoRecording,
+  rollbackVideoRecordingStart as defaultRollbackVideoRecordingStart,
   startVideoRecording as defaultStartVideoRecording,
   stopVideoRecording as defaultStopVideoRecording,
 } from "./videoRecordingManager";
 import type { ActiveVideoRecording } from "../features/video";
 import type { VideoRecordingConfigInput, VideoRecordingMetadata } from "../models";
+import { combineAbortSignals } from "../utils/AbortContext";
 
 export interface AndroidSegmentedPlanVideoSessionOptions {
   device: BootedDevice;
@@ -31,6 +31,8 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   maxDurationSeconds?: number;
   /** Quality/config overrides forwarded to every segment's recording. */
   configOverrides?: VideoRecordingConfigInput;
+  /** Daemon session that owns every segment in this recording session. */
+  ownerSessionUuid?: string;
   /** Cancellation for the caller-owned initial segment startup only. */
   startupAbortSignal?: AbortSignal;
   /**
@@ -47,7 +49,7 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   stopVideoRecording?: (
     recordingId?: string,
   ) => Promise<{ metadata: VideoRecordingMetadata; evictedRecordingIds: string[] }>;
-  forceStopVideoRecording?: (recordingId: string) => Promise<void>;
+  rollbackVideoRecordingStart?: (recordingId: string) => Promise<void>;
 }
 
 /**
@@ -73,6 +75,8 @@ export class AndroidSegmentedPlanVideoSession {
 
   private readonly configOverrides: VideoRecordingConfigInput | undefined;
 
+  private readonly ownerSessionUuid: string | undefined;
+
   private readonly startupAbortSignal: AbortSignal | undefined;
 
   private activeRecordingId: string | undefined;
@@ -94,6 +98,14 @@ export class AndroidSegmentedPlanVideoSession {
   /** Tracks the most recent in-flight rotation so {@link stop} can await it. */
   private pendingRotation: Promise<void> = Promise.resolve();
 
+  /** Cancels a replacement segment start while an abort is draining its rotation. */
+  private rotationAbortController: AbortController | undefined;
+
+  /** Cancels a rotation queued after {@link abort} begins. */
+  private readonly sessionAbortController = new AbortController();
+
+  private stopPromise: Promise<{ filePaths: string[]; recordingIds: string[] }> | undefined;
+
   private segmentIndex = 0;
 
   private segmentStartedAtMs = 0;
@@ -101,6 +113,12 @@ export class AndroidSegmentedPlanVideoSession {
   private readonly completedFilePaths: string[] = [];
 
   private readonly completedRecordingIds: string[] = [];
+
+  /** IDs whose stop failed during rotation and still need rollback on abort. */
+  private readonly pendingRollbackRecordingIds: string[] = [];
+
+  /** Errors from failed segment stops, retained for a failed finalization report. */
+  private readonly pendingRollbackErrors: unknown[] = [];
 
   private readonly startVideoRecordingFn: (
     request: Parameters<typeof defaultStartVideoRecording>[0],
@@ -110,7 +128,7 @@ export class AndroidSegmentedPlanVideoSession {
     recordingId?: string,
   ) => Promise<{ metadata: VideoRecordingMetadata; evictedRecordingIds: string[] }>;
 
-  private readonly forceStopVideoRecordingFn: (recordingId: string) => Promise<void>;
+  private readonly rollbackVideoRecordingStartFn: (recordingId: string) => Promise<void>;
 
   constructor(options: AndroidSegmentedPlanVideoSessionOptions) {
     this.device = options.device;
@@ -120,16 +138,13 @@ export class AndroidSegmentedPlanVideoSession {
       options.segmentRotateAfterMs ?? ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
     this.maxDurationSeconds = options.maxDurationSeconds;
     this.configOverrides = options.configOverrides;
+    this.ownerSessionUuid = options.ownerSessionUuid;
     this.startupAbortSignal = options.startupAbortSignal;
     this.onFinalized = options.onFinalized;
     this.startVideoRecordingFn = options.startVideoRecording ?? defaultStartVideoRecording;
     this.stopVideoRecordingFn = options.stopVideoRecording ?? defaultStopVideoRecording;
-    this.forceStopVideoRecordingFn =
-      options.forceStopVideoRecording ??
-      (async (recordingId) => {
-        await defaultForceStopVideoRecording(recordingId);
-        await defaultInterruptVideoRecording(recordingId);
-      });
+    this.rollbackVideoRecordingStartFn =
+      options.rollbackVideoRecordingStart ?? defaultRollbackVideoRecordingStart;
   }
 
   /** Device this session is recording, so callers can match sessions by device. */
@@ -173,34 +188,21 @@ export class AndroidSegmentedPlanVideoSession {
       this.startupAbortSignal?.throwIfAborted();
     } catch (error) {
       this.timerDriven = false;
-      await this.rollbackStartedSegment();
+      if (this.activeRecordingId) {
+        try {
+          await this.abort();
+        } catch (abortError) {
+          throw new AggregateError(
+            [error, abortError],
+            `${errorMessage(error)}; segmented rollback failed: ${errorMessage(abortError)}`,
+          );
+        }
+      }
       throw error;
     }
     this.scheduleRotation();
     this.scheduleMaxDurationStop();
     return first;
-  }
-
-  private async rollbackStartedSegment(): Promise<void> {
-    const recordingId = this.activeRecordingId;
-    this.activeRecordingId = undefined;
-    if (!recordingId) {
-      return;
-    }
-    try {
-      await this.stopVideoRecordingFn(recordingId);
-    } catch (stopError) {
-      logger.warn(
-        `[SegmentedPlanVideo] Failed to stop cancelled segment ${recordingId}: ${errorMessage(stopError)}`,
-      );
-      try {
-        await this.forceStopVideoRecordingFn(recordingId);
-      } catch (forceStopError) {
-        logger.warn(
-          `[SegmentedPlanVideo] Failed to force-stop cancelled segment ${recordingId}: ${errorMessage(forceStopError)}`,
-        );
-      }
-    }
   }
 
   private scheduleRotation(): void {
@@ -239,7 +241,61 @@ export class AndroidSegmentedPlanVideoSession {
    * waits for any in-flight rotation, then finalizes and returns every segment.
    */
   async stop(): Promise<{ filePaths: string[]; recordingIds: string[] }> {
+    if (this.stopPromise) {
+      return this.stopPromise;
+    }
+    const stopPromise = this.stopInternal();
+    this.stopPromise = stopPromise.catch((error: unknown) => {
+      this.stopPromise = undefined;
+      throw error;
+    });
+    return this.stopPromise;
+  }
+
+  private async stopInternal(): Promise<{ filePaths: string[]; recordingIds: string[] }> {
     this.timerDriven = false;
+    this.clearTimers();
+    await this.pendingRotation;
+    const result = await this.finalize();
+    this.notifyFinalized();
+    return result;
+  }
+
+  /**
+   * Cancel without publishing completed segments or a manifest. Every segment
+   * owned by this session is force-stopped and removed from durable metadata.
+   */
+  async abort(): Promise<void> {
+    this.timerDriven = false;
+    this.clearTimers();
+    this.sessionAbortController.abort();
+    this.rotationAbortController?.abort();
+    await this.pendingRotation;
+    const recordingIds = Array.from(
+      new Set([
+        ...this.completedRecordingIds,
+        ...this.pendingRollbackRecordingIds,
+        ...(this.activeRecordingId ? [this.activeRecordingId] : []),
+      ]),
+    ).toReversed();
+    const results = await Promise.allSettled(
+      recordingIds.map((recordingId) => this.rollbackVideoRecordingStartFn(recordingId)),
+    );
+    const failures = results
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason);
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "Failed to roll back every segmented recording");
+    }
+    this.activeRecordingId = undefined;
+    this.completedRecordingIds.splice(0);
+    this.completedFilePaths.splice(0);
+    this.pendingRollbackRecordingIds.splice(0);
+    this.pendingRollbackErrors.splice(0);
+    this.notifyFinalized();
+  }
+
+  private clearTimers(): void {
     if (this.rotationTimerHandle !== undefined) {
       this.timer.clearTimeout(this.rotationTimerHandle);
       this.rotationTimerHandle = undefined;
@@ -248,10 +304,6 @@ export class AndroidSegmentedPlanVideoSession {
       this.timer.clearTimeout(this.maxDurationTimerHandle);
       this.maxDurationTimerHandle = undefined;
     }
-    await this.pendingRotation;
-    const result = await this.finalize();
-    this.notifyFinalized();
-    return result;
   }
 
   /** Fires {@link onFinalized} at most once, so callers can drop the session from any registry. */
@@ -276,7 +328,9 @@ export class AndroidSegmentedPlanVideoSession {
       return;
     }
 
-    await this.rotateToNextSegment();
+    const rotation = this.rotateToNextSegment();
+    this.pendingRotation = rotation;
+    await rotation;
   };
 
   private segmentOutputName(): string {
@@ -290,7 +344,8 @@ export class AndroidSegmentedPlanVideoSession {
       outputName: this.segmentOutputName(),
       maxDurationSeconds: ANDROID_SCREENRECORD_MAX_SECONDS,
       configOverrides: this.configOverrides,
-      abortSignal,
+      ownerSessionUuid: this.ownerSessionUuid,
+      abortSignal: abortSignal ?? this.sessionAbortController.signal,
     });
     this.activeRecordingId = recording.recordingId;
     this.segmentStartedAtMs = this.timer.now();
@@ -307,6 +362,8 @@ export class AndroidSegmentedPlanVideoSession {
     }
 
     const previousId = this.activeRecordingId;
+    const rotationAbortController = new AbortController();
+    this.rotationAbortController = rotationAbortController;
     try {
       const stopped = await this.stopVideoRecordingFn(previousId);
       this.completedRecordingIds.push(previousId);
@@ -318,16 +375,27 @@ export class AndroidSegmentedPlanVideoSession {
       logger.warn(
         `[SegmentedPlanVideo] Failed to stop segment ${previousId}: ${errorMessage(error)}`,
       );
+      this.pendingRollbackRecordingIds.push(previousId);
+      this.pendingRollbackErrors.push(error);
+      this.timerDriven = false;
+      this.clearTimers();
+      return;
     } finally {
       this.activeRecordingId = undefined;
     }
 
     try {
-      await this.startSegment();
+      await this.startSegment(
+        combineAbortSignals(rotationAbortController.signal, this.sessionAbortController.signal),
+      );
     } catch (error) {
       logger.warn(
         `[SegmentedPlanVideo] Failed to start next segment after ${previousId}: ${errorMessage(error)}`,
       );
+    } finally {
+      if (this.rotationAbortController === rotationAbortController) {
+        this.rotationAbortController = undefined;
+      }
     }
   }
 
@@ -341,6 +409,7 @@ export class AndroidSegmentedPlanVideoSession {
         const stopped = await this.stopVideoRecordingFn(id);
         this.completedRecordingIds.push(id);
         this.completedFilePaths.push(stopped.metadata.filePath);
+        this.activeRecordingId = undefined;
         logger.info(
           `[SegmentedPlanVideo] Final stop recordingId=${id} path=${stopped.metadata.filePath}`,
         );
@@ -348,9 +417,16 @@ export class AndroidSegmentedPlanVideoSession {
         logger.warn(
           `[SegmentedPlanVideo] Failed to finalize segment ${id}: ${errorMessage(error)}`,
         );
-      } finally {
-        this.activeRecordingId = undefined;
+        this.pendingRollbackRecordingIds.push(id);
+        throw error;
       }
+    }
+
+    if (this.pendingRollbackErrors.length > 0) {
+      throw new AggregateError(
+        this.pendingRollbackErrors,
+        "Failed to finalize every segmented recording",
+      );
     }
 
     return {

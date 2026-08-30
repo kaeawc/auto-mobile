@@ -266,6 +266,43 @@ describe("AdbClient.getBootedAndroidDevices", () => {
     expect(child.killCalls).toEqual(["SIGTERM"]);
   });
 
+  test("does not terminate a child after startup-scoped cancellation", async () => {
+    const child = Object.assign(new EventEmitter(), {
+      stdin: null,
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      killCalls: [] as string[],
+      kill(signal?: string) {
+        this.killCalls.push(signal ?? "SIGTERM");
+        return true;
+      },
+    });
+    let receivedSignal: AbortSignal | undefined;
+    const adb = new AdbClient(
+      { name: "Pixel 8", platform: "android", deviceId: "emulator-5554" },
+      async (): Promise<ExecResult> => createExecResult(""),
+      ((_file: string, _args: string[], options?: { signal?: AbortSignal }) => {
+        receivedSignal = options?.signal;
+        return child;
+      }) as never,
+    );
+    const controller = new AbortController();
+
+    const pending = adb.spawn(["shell", "screenrecord", "/sdcard/recording.mp4"], {
+      signal: controller.signal,
+      abortSignalScope: "startup",
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    child.emit("spawn");
+    await pending;
+
+    controller.abort();
+
+    expect(receivedSignal).toBeUndefined();
+    expect(child.killCalls).toEqual([]);
+  });
+
   test("does not spawn when cancellation arrives during executable resolution", async () => {
     let resolveBase: ((value: { adbPath: string; baseArgs: string[] }) => void) | undefined;
     let spawnCalls = 0;

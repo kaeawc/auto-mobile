@@ -16,6 +16,7 @@ import { AppPermissions } from "../features/action/AppPermissions";
 import { ResetKeychain } from "../features/action/ResetKeychain";
 import {
   createJSONToolResponse,
+  createStructuredToolResponse,
   DefaultToolResponseFormatter,
   ToolResponseFormatter,
 } from "../utils/toolUtils";
@@ -539,7 +540,7 @@ export function registerAppTools() {
             result.confirmed ? " (OS crash confirmed)" : " (confirmation unavailable)"
           }`
         : (result.error ?? `Failed to crash app ${args.appId}`);
-      return createJSONToolResponse({ message, ...result });
+      return createStructuredToolResponse({ message, ...result });
     } catch (error) {
       if (isDeviceLostError(error) || error instanceof ActionableError) {
         throw error;

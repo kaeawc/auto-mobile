@@ -4,6 +4,7 @@ import {
   CrashApp,
   type CrashAppDependencies,
   findAndroidCrashEvidence,
+  findIosSimulatorCrashEvidence,
 } from "../../../src/features/action/CrashApp";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -68,7 +69,6 @@ class FakeSimulatorCommands {
 }
 
 const dependencies = (overrides: Partial<CrashAppDependencies> = {}): CrashAppDependencies => ({
-  resolveAndroidUserId: async () => 0,
   cacheInvalidator: { invalidate: () => {} },
   ...overrides,
 });
@@ -89,6 +89,21 @@ describe("CrashApp (Android)", () => {
     );
   });
 
+  test("rejects Android crash evidence older than the induction time", () => {
+    const output = [
+      "1700000000.000 E AndroidRuntime: FATAL EXCEPTION: main",
+      "1700000000.001 E AndroidRuntime: Process: com.example.app, PID: 222",
+      "1700000000.002 E AndroidRuntime: CrashedByAdbException: shell-induced crash",
+    ].join("\n");
+
+    expect(findAndroidCrashEvidence(output, "com.example.app", 222, 1_700_000_001_000)).toBe(
+      undefined,
+    );
+    expect(
+      findAndroidCrashEvidence(output, "com.example.app", 222, 1_700_000_000_000),
+    ).toBeDefined();
+  });
+
   test("induces and confirms an ActivityManager crash for the selected package", async () => {
     const adb = new FakeAdbClient();
     const timer = new FakeTimer();
@@ -98,7 +113,7 @@ describe("CrashApp (Android)", () => {
       "*APP* UID u10a123 ProcessRecord{def 4881:com.example.other/u10a123}",
     ]);
     adb.setCommandResult(
-      "shell logcat -b crash -d -v threadtime --pid=3220 -t 200",
+      "shell logcat -b crash -d -v epoch -t 200",
       [
         "E AndroidRuntime: FATAL EXCEPTION: main",
         "E AndroidRuntime: Process: com.example.app, PID: 3220",
@@ -111,7 +126,6 @@ describe("CrashApp (Android)", () => {
       dependencies({
         adb,
         timer,
-        resolveAndroidUserId: async () => 10,
         cacheInvalidator: { invalidate: () => invalidations++ },
       }),
     );
@@ -136,6 +150,83 @@ describe("CrashApp (Android)", () => {
     expect(adb.wasCommandExecuted("shell am crash --user 10 'com.example.app'")).toBe(true);
     expect(adb.wasCommandExecuted("force-stop")).toBe(false);
     expect(invalidations).toBe(1);
+  });
+
+  test("uses the foreground instance when a package runs under multiple users", async () => {
+    const adb = new FakeAdbClient();
+    adb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
+    adb.setCommandResultSequence("shell dumpsys activity processes", [
+      [
+        "*APP* UID u0a123 ProcessRecord{aaa 111:com.example.app/u0a123}",
+        "*APP* UID u10a123 ProcessRecord{bbb 222:com.example.app/u10a123}",
+      ].join("\n"),
+      "*APP* UID u10a123 ProcessRecord{bbb 222:com.example.app/u10a123}",
+    ]);
+    adb.setCommandResult(
+      "shell logcat -b crash -d -v epoch -t 200",
+      [
+        "E AndroidRuntime: FATAL EXCEPTION: main",
+        "E AndroidRuntime: Process: com.example.app, PID: 111",
+        "E AndroidRuntime: CrashedByAdbException: shell-induced crash",
+      ].join("\n"),
+    );
+
+    const result = await new CrashApp(androidDevice, dependencies({ adb })).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({ success: true, userId: 0, processId: 111 });
+    expect(adb.wasCommandExecuted("shell am crash --user 0 'com.example.app'")).toBe(true);
+  });
+
+  test("rejects ambiguous multi-user instances instead of guessing a profile", async () => {
+    const adb = new FakeAdbClient();
+    adb.setForegroundApp({ packageName: "com.example.other", userId: 10 });
+    adb.setCommandResult(
+      "shell dumpsys activity processes",
+      [
+        "*APP* UID u0a123 ProcessRecord{aaa 111:com.example.app/u0a123}",
+        "*APP* UID u10a123 ProcessRecord{bbb 222:com.example.app/u10a123}",
+      ].join("\n"),
+    );
+
+    const result = await new CrashApp(androidDevice, dependencies({ adb })).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      supported: true,
+      wasRunning: true,
+      confirmed: false,
+    });
+    expect(result.error).toContain("multiple Android users");
+    expect(adb.wasCommandExecuted("shell am crash")).toBe(false);
+  });
+
+  test("reports the package-owned secondary process that actually crashed", async () => {
+    const adb = new FakeAdbClient();
+    adb.setCommandResultSequence("shell dumpsys activity processes", [
+      [
+        "*APP* UID u0a123 ProcessRecord{aaa 111:com.example.app/u0a123}",
+        "*APP* UID u0a123 ProcessRecord{bbb 222:com.example.app:worker/u0a123}",
+      ].join("\n"),
+      "*APP* UID u0a123 ProcessRecord{aaa 111:com.example.app/u0a123}",
+    ]);
+    adb.setCommandResult(
+      "shell logcat -b crash -d -v epoch -t 200",
+      [
+        "E AndroidRuntime: FATAL EXCEPTION: main",
+        "E AndroidRuntime: Process: com.example.app:worker, PID: 222",
+        "E AndroidRuntime: CrashedByAdbException: shell-induced crash",
+      ].join("\n"),
+    );
+
+    const result = await new CrashApp(androidDevice, dependencies({ adb })).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({ success: true, processId: 222, confirmed: true });
   });
 
   test("returns a typed not-running result without inducing a crash", async () => {
@@ -184,7 +275,11 @@ describe("CrashApp (Android)", () => {
       "shell am crash --user 0 'com.example.app'",
       new Error("Unknown command: crash"),
     );
-    const action = new CrashApp(androidDevice, dependencies({ adb }));
+    let invalidations = 0;
+    const action = new CrashApp(
+      androidDevice,
+      dependencies({ adb, cacheInvalidator: { invalidate: () => invalidations++ } }),
+    );
 
     const result = await action.execute("com.example.app");
 
@@ -196,9 +291,35 @@ describe("CrashApp (Android)", () => {
     });
     expect(result.error).toContain("Unknown command: crash");
     expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+    expect(invalidations).toBe(1);
   });
 
-  test("reports accepted but unconfirmed when crash-specific evidence does not arrive", async () => {
+  test("treats an exit-zero ActivityManager permission refusal as failure", async () => {
+    const adb = new FakeAdbClient();
+    adb.setCommandResult(
+      "shell dumpsys activity processes",
+      "*APP* UID u10a123 ProcessRecord{abc 3220:com.example.app/u10a123}",
+    );
+    adb.setCommandResult(
+      "shell am crash --user 10 'com.example.app'",
+      "Shell does not have permission to crash packages for user 10",
+    );
+
+    const result = await new CrashApp(androidDevice, dependencies({ adb })).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      supported: true,
+      processId: 3220,
+      userId: 10,
+      confirmed: false,
+    });
+    expect(result.error).toContain("does not have permission");
+  });
+
+  test("reports failure when crash-specific evidence does not arrive", async () => {
     const adb = new FakeAdbClient();
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
@@ -206,23 +327,37 @@ describe("CrashApp (Android)", () => {
       "*APP* UID u0a123 ProcessRecord{abc 3220:com.example.app/u0a123}",
       "",
     ]);
-    adb.setCommandResult("shell logcat -b crash -d -v threadtime --pid=3220 -t 200", "");
+    adb.setCommandResult("shell logcat -b crash -d -v epoch -t 200", "");
     const action = new CrashApp(androidDevice, dependencies({ adb, timer }));
 
     const result = await action.execute("com.example.app");
 
     expect(result).toMatchObject({
-      success: true,
+      success: false,
       supported: true,
       wasRunning: true,
       confirmed: false,
       processId: 3220,
     });
+    expect(result.error).toContain("no fresh OS crash evidence");
     expect(result.evidence).toBeUndefined();
   });
 });
 
 describe("CrashApp (iOS)", () => {
+  test("rejects unified-log crash evidence older than the induction time", () => {
+    const output =
+      "2023-11-14 22:13:20.100+0000 launchd_sim: " +
+      "UIKitApplication:com.example.app[bbbb][rb-legacy] [27955]: exited due to SIGABRT";
+
+    expect(
+      findIosSimulatorCrashEvidence(output, "com.example.app", 27955, 1_700_000_001_000),
+    ).toBeUndefined();
+    expect(
+      findIosSimulatorCrashEvidence(output, "com.example.app", 27955, 1_700_000_000_000),
+    ).toBeDefined();
+  });
+
   test("signals and confirms the exact simulator app process", async () => {
     const processList = [
       "PID\tStatus\tLabel",
@@ -231,10 +366,10 @@ describe("CrashApp (iOS)", () => {
     ].join("\n");
     const commands = new FakeSimulatorCommands(
       [processList, "PID\tStatus\tLabel\n"],
-      "launchd_sim: UIKitApplication:com.example.app[bbbb][rb-legacy] [27955]: exited due to SIGABRT",
+      "2023-11-14 22:13:20.100 launchd_sim: UIKitApplication:com.example.app[bbbb][rb-legacy] [27955]: exited due to SIGABRT",
     );
     const timer = new FakeTimer();
-    timer.advanceTime(5678);
+    timer.advanceTime(1_700_000_000_000);
     const action = new CrashApp(iosSimulator, dependencies({ simctl: commands, timer }));
 
     const result = await action.execute("com.example.app");
@@ -246,7 +381,7 @@ describe("CrashApp (iOS)", () => {
       appId: "com.example.app",
       processId: 27955,
       mechanism: "ios_simulator_sigabrt",
-      timestamp: 5678,
+      timestamp: 1_700_000_000_000,
       wasRunning: true,
       confirmed: true,
       evidence: {
@@ -256,11 +391,41 @@ describe("CrashApp (iOS)", () => {
     expect(commands.calls).toContainEqual([
       "spawn",
       iosSimulator.deviceId,
-      "/bin/kill",
-      "-ABRT",
-      "27955",
+      "launchctl",
+      "kill",
+      "SIGABRT",
+      "user/501/UIKitApplication:com.example.app[bbbb][rb-legacy]",
     ]);
     expect(commands.calls.flat()).not.toContain("terminate");
+  });
+
+  test("invalidates cached hierarchy when abort happens after signal dispatch", async () => {
+    const controller = new AbortController();
+    let invalidations = 0;
+    const simctl = {
+      executeCommandArgs: async (
+        args: string[],
+        _timeoutMs?: number,
+        signal?: AbortSignal,
+      ): Promise<ExecResult> => {
+        if (args.at(-2) === "launchctl" && args.at(-1) === "list") {
+          return execResult("27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]");
+        }
+        controller.abort();
+        signal?.throwIfAborted();
+        return execResult();
+      },
+    };
+    const action = new CrashApp(
+      iosSimulator,
+      dependencies({
+        simctl,
+        cacheInvalidator: { invalidate: () => invalidations++ },
+      }),
+    );
+
+    await expect(action.execute("com.example.app", controller.signal)).rejects.toThrow();
+    expect(invalidations).toBe(1);
   });
 
   test("returns a typed not-running result without signaling another bundle", async () => {
@@ -284,8 +449,15 @@ describe("CrashApp (iOS)", () => {
     const commands = new FakeSimulatorCommands([
       "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]",
     ]);
-    commands.setError("/bin/kill", new Error("Operation not permitted"));
-    const action = new CrashApp(iosSimulator, dependencies({ simctl: commands }));
+    commands.setError("launchctl kill", new Error("Operation not permitted"));
+    let invalidations = 0;
+    const action = new CrashApp(
+      iosSimulator,
+      dependencies({
+        simctl: commands,
+        cacheInvalidator: { invalidate: () => invalidations++ },
+      }),
+    );
 
     const result = await action.execute("com.example.app");
 
@@ -298,9 +470,10 @@ describe("CrashApp (iOS)", () => {
       error: "Operation not permitted",
     });
     expect(commands.calls.flat()).not.toContain("terminate");
+    expect(invalidations).toBe(1);
   });
 
-  test("reports accepted but unconfirmed when unified-log evidence is unavailable", async () => {
+  test("reports failure when unified-log evidence is unavailable", async () => {
     const commands = new FakeSimulatorCommands([
       "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]",
       "",
@@ -312,12 +485,13 @@ describe("CrashApp (iOS)", () => {
     const result = await action.execute("com.example.app");
 
     expect(result).toMatchObject({
-      success: true,
+      success: false,
       supported: true,
       wasRunning: true,
       processId: 27955,
       confirmed: false,
     });
+    expect(result.error).toContain("no fresh OS crash evidence");
     expect(result.evidence).toBeUndefined();
   });
 
@@ -333,9 +507,9 @@ describe("CrashApp (iOS)", () => {
       platform: "ios",
       appId: "com.example.app",
       mechanism: "unsupported",
-      wasRunning: false,
       confirmed: false,
     });
+    expect(result.wasRunning).toBeUndefined();
     expect(result.error).toContain("physical iOS");
     expect(commands.calls).toEqual([]);
   });

@@ -11,9 +11,8 @@ export interface CrashAppEvidence {
 /**
  * Stable result of an intentional application-crash request.
  *
- * `success` means the crash-induction command was accepted. `confirmed` is
- * stricter: it requires OS crash evidence for the target process, not merely
- * that the process disappeared.
+ * `success` and `confirmed` require fresh OS crash evidence for the target
+ * process, not merely command dispatch or process disappearance.
  */
 export interface CrashAppResult extends BaseActionResult {
   supported: boolean;

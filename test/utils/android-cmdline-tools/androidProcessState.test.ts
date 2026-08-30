@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   findAndroidPackageProcessId,
+  findAndroidPackageProcesses,
   isAndroidPackageRunning,
 } from "../../../src/utils/android-cmdline-tools/androidProcessState";
 
@@ -35,5 +36,21 @@ describe("androidProcessState", () => {
     const output = "*APP* UID u0a123 ProcessRecord{aaa 444:com.example.app:worker/u0a123}";
 
     expect(findAndroidPackageProcessId(output, "com.example.app", 0)).toBe(444);
+  });
+
+  test("lists package-owned process identities across Android users", () => {
+    const output = [
+      "*APP* UID u0a123 ProcessRecord{aaa 111:com.example.app/u0a123}",
+      "*APP* UID u0a123 ProcessRecord{bbb 222:com.example.app:worker/u0a123}",
+      "*APP* UID u10a123 ProcessRecord{ccc 333:com.example.app/u10a123}",
+      "*APP* UID u10i42 ProcessRecord{ddd 444:com.example.app:isolated/u10i42}",
+    ].join("\n");
+
+    expect(findAndroidPackageProcesses(output, "com.example.app")).toEqual([
+      { pid: 111, processName: "com.example.app", userId: 0 },
+      { pid: 222, processName: "com.example.app:worker", userId: 0 },
+      { pid: 333, processName: "com.example.app", userId: 10 },
+      { pid: 444, processName: "com.example.app:isolated", userId: 10 },
+    ]);
   });
 });

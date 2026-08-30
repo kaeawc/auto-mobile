@@ -71,10 +71,10 @@ the exact arguments supported by your connection.
     <code>platform</code>, <code>appId</code>, <code>mechanism</code>,
     <code>timestamp</code>, and <code>confirmed</code>. It reports
     <code>wasRunning</code> whenever preflight established process state;
-    successful induction also reports <code>processId</code> when available and may
-    include immediate OS diagnostic evidence. <code>success: true</code> means the
-    induction command was accepted; <code>confirmed: true</code> additionally
-    requires target-specific crash evidence, not merely process disappearance.
+    confirmed crashes also report <code>processId</code> when available and include
+    immediate OS diagnostic evidence. <code>success: true</code> and
+    <code>confirmed: true</code> require fresh, target-specific crash evidence, not
+    merely command dispatch or process disappearance.
 
 ??? example "Copy a fixture into an app container"
 

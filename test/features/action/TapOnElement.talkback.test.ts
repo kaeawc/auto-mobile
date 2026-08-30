@@ -1006,7 +1006,6 @@ describe("TapOnElement screen-reader navigation result", () => {
     spyOn(command as any, "executeAndroidTapWithCoordinates").mockResolvedValue(undefined);
     spyOn((command as any).selectionStateTracker, "prepare").mockResolvedValue(null);
     spyOn((command as any).selectionStateTracker, "finalize").mockResolvedValue([]);
-    spyOn(command as any, "deriveTapEffectAfterPostTapObservation").mockResolvedValue(undefined);
     return command;
   };
 

@@ -1,6 +1,7 @@
 import Ajv2020 from "ajv/dist/2020";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
+  crashAppResultSchema,
   registerAppTools,
   resetCrashAppToolDependencies,
   resetListAppsToolDependencies,
@@ -202,7 +203,6 @@ describe("crashApp tool", () => {
           appId: "com.example.app",
           mechanism: "unsupported",
           timestamp: 1234,
-          wasRunning: false,
           confirmed: false,
           error: "Physical iOS devices are unsupported",
         }),
@@ -215,6 +215,8 @@ describe("crashApp tool", () => {
     });
     const payload = JSON.parse(response.content[0].text);
 
+    expect(response.structuredContent).toEqual(payload);
+    expect(crashAppResultSchema.safeParse(response.structuredContent).success).toBe(true);
     expect(payload).toMatchObject({
       message: "Physical iOS devices are unsupported",
       success: false,
@@ -246,6 +248,8 @@ describe("crashApp tool", () => {
     });
     const payload = JSON.parse(response.content[0].text);
 
+    expect(response.structuredContent).toEqual(payload);
+    expect(crashAppResultSchema.safeParse(response.structuredContent).success).toBe(true);
     expect(payload.message).toContain("ios_simulator_sigabrt");
     expect(payload.message).toContain("OS crash confirmed");
     expect(payload.confirmed).toBe(true);

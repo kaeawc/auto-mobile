@@ -120,7 +120,7 @@ import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 import { defaultIdGenerator } from "../../../utils/IdGenerator";
 import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../../../utils/fileLock";
-import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../../utils/tempDir";
+import { ensureSecureSharedAutoMobileDirSync } from "../../../utils/tempDir";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
@@ -1009,9 +1009,9 @@ class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
   public constructor(deviceId: string) {
     // base64url makes arbitrary Android serials safe as one path segment.
     this.lockPath = join(
-      // Do not derive this from os.tmpdir(): package runners may give each
-      // process an isolated TMPDIR while they still share one ADB server.
-      ensureSecureTempDirSync(join(TEMP_SUBDIRS.STATE, "ctrlproxy-forwards")),
+      // Agent-specific data directories are intentionally isolated, but a
+      // default ADB server is shared across agents for this OS user.
+      ensureSecureSharedAutoMobileDirSync("ctrlproxy-forwards"),
       `${Buffer.from(deviceId).toString("base64url")}.lock`,
     );
   }
@@ -1262,7 +1262,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // A replacement must recover even if this invalidated client's asynchronous
     // ADB cleanup is wedged. Its held port prevents the replacement from sharing
     // the forward while that cleanup eventually completes.
-    this.ctrlProxyForwardLease.release();
+    this.releaseCtrlProxyForwardLeaseAfterConnectionSettles();
   }
 
   /**
@@ -3238,7 +3238,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         `[CTRL_PROXY] Failed to list forwards while reconciling device ${this.device.deviceId}: ${error}`,
         error,
       );
-      return;
+      throw error;
     }
 
     const livePorts = new Set(

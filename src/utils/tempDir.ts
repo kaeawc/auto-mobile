@@ -99,6 +99,23 @@ export function getTempDir(subdirectory: string): string {
   return path.join(resolveAutoMobileBaseDir(), subdirectory);
 }
 
+/**
+ * Resolve a secure coordination directory shared by all agents for this user.
+ *
+ * Unlike {@link getTempDir}, this deliberately ignores `AUTOMOBILE_DATA_DIR`
+ * because those overrides isolate an agent's private state. Processes using
+ * the same default ADB server must instead coordinate through one path.
+ */
+export function getSharedAutoMobileDir(
+  subdirectory: string,
+  homeDir: string = os.homedir(),
+): string {
+  if (homeDir.length === 0) {
+    throw new Error("Unable to resolve a shared AutoMobile directory without a home directory");
+  }
+  return path.join(path.resolve(homeDir), ".auto-mobile", subdirectory);
+}
+
 function ensureSecureDirectorySync(dir: string): string {
   fs.mkdirSync(dir, { recursive: true, mode: SECURE_DIR_MODE });
   if (fs.lstatSync(dir).isSymbolicLink()) {
@@ -118,6 +135,13 @@ function ensureSecureDirectorySync(dir: string): string {
  */
 export function ensureSecureTempDirSync(subdirectory: string): string {
   return ensureSecureDirectorySync(getTempDir(subdirectory));
+}
+
+/**
+ * Synchronously ensure an agent-invariant coordination directory exists.
+ */
+export function ensureSecureSharedAutoMobileDirSync(subdirectory: string): string {
+  return ensureSecureDirectorySync(getSharedAutoMobileDir(subdirectory));
 }
 
 /**

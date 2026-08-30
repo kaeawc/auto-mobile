@@ -7,6 +7,7 @@ import {
   resolveAutoMobileBaseDir,
   resolveAutoMobileLogsDir,
   getTempDir,
+  getSharedAutoMobileDir,
   ensureSecureLogsDirSync,
   ensureSecureTempDirSync,
   TEMP_SUBDIRS,
@@ -171,6 +172,20 @@ describe("getTempDir", () => {
         process.env.AUTOMOBILE_LOG_DIR = previousLogDir;
       }
     }
+  });
+});
+
+describe("getSharedAutoMobileDir", () => {
+  test("uses the home-directory root independently of agent data-dir overrides", () => {
+    expect(getSharedAutoMobileDir("ctrlproxy-forwards", "/home/tester")).toBe(
+      path.join("/home/tester", ".auto-mobile", "ctrlproxy-forwards"),
+    );
+  });
+
+  test("rejects a missing home directory rather than using agent-local storage", () => {
+    expect(() => getSharedAutoMobileDir("ctrlproxy-forwards", "")).toThrow(
+      "Unable to resolve a shared AutoMobile directory",
+    );
   });
 });
 

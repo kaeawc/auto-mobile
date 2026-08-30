@@ -191,6 +191,7 @@ describe("AndroidCtrlProxyClient", function () {
   const stubForwardLifecycleCommands = (
     getForwardListOutput: () => string,
     shouldFailRemove: () => boolean = () => false,
+    shouldFailList: () => boolean = () => false,
   ): void => {
     const executeCommand = fakeAdb.executeCommand.bind(fakeAdb);
     fakeAdb.executeCommand = async (
@@ -201,6 +202,9 @@ describe("AndroidCtrlProxyClient", function () {
       signal?: AbortSignal,
     ) => {
       if (command === "forward --list") {
+        if (shouldFailList()) {
+          throw new Error("adb forward listing failed");
+        }
         const stdout = getForwardListOutput();
         return {
           stdout,
@@ -308,10 +312,14 @@ describe("AndroidCtrlProxyClient", function () {
       await flushPromises(8); // parked inside setupBeforeConnect; no socket yet
       expect(socket).toBeNull();
 
-      // Shutdown teardown closes the client while port-forward setup is pending.
-      await client.close();
+      // Shutdown recovery evicts the client before its asynchronous close.
+      client.invalidateForShutdownRecovery();
       // An ADB command can ignore its abort signal. Its lease must remain held
       // until the old setup and its late cleanup have stopped touching forwards.
+      expect(lease.releases).toBe(0);
+
+      // Close runs after invalidation in the production shutdown-recovery path.
+      await client.close();
       expect(lease.releases).toBe(0);
 
       // Platform setup now finishes — after close().
@@ -1065,6 +1073,41 @@ describe("AndroidCtrlProxyClient", function () {
       await (client as any).setupPortForwarding();
 
       expect(fakeAdb.getExecutedCommands()).toContain("forward --remove tcp:52002");
+      expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8765 tcp:8765");
+    } finally {
+      await client.close();
+      AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
+    }
+  });
+
+  test("retries orphan reconciliation when listing forwards fails", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    let listingFails = true;
+    stubForwardLifecycleCommands(
+      () => `${testDevice.deviceId} tcp:52003 tcp:8765\n`,
+      () => false,
+      () => listingFails,
+    );
+
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    registerTestSingleton(client);
+    try {
+      await expect((client as any).setupPortForwarding()).rejects.toThrow(
+        "adb forward listing failed",
+      );
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward tcp:8765 tcp:8765");
+
+      listingFails = false;
+      await (client as any).setupPortForwarding();
+
+      expect(fakeAdb.getExecutedCommands()).toContain("forward --remove tcp:52003");
       expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8765 tcp:8765");
     } finally {
       await client.close();

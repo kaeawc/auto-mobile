@@ -14,6 +14,8 @@
  * - CtrlProxyHighlights: Visual highlight overlays
  */
 
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import WebSocket from "ws";
 import {
   AdbClientFactory,
@@ -117,6 +119,8 @@ import {
 import type { SetTextOptions } from "../DeviceService";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
+import { defaultIdGenerator } from "../../../utils/IdGenerator";
+import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../../../utils/fileLock";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
@@ -988,6 +992,58 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
 const VERIFY_READY_IDENTICAL_RUNNER_ERROR_LIMIT = 2;
 
 /**
+ * Process-held ownership claim for a device's CtrlProxy ADB forwards. The ADB
+ * server is shared by AutoMobile processes, so its global forward listing alone
+ * cannot identify which process owns a row.
+ */
+interface CtrlProxyForwardLease {
+  tryAcquire(): boolean;
+  release(): void;
+}
+
+const CTRL_PROXY_FORWARD_LEASE_DIRECTORY = join(tmpdir(), "auto-mobile-ctrlproxy-forwards");
+
+class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
+  private readonly lockPath: string;
+  private readonly ownerToken = defaultIdGenerator.next();
+  private acquired = false;
+
+  public constructor(deviceId: string) {
+    // base64url makes arbitrary Android serials safe as one path segment.
+    this.lockPath = join(
+      CTRL_PROXY_FORWARD_LEASE_DIRECTORY,
+      `${Buffer.from(deviceId).toString("base64url")}.lock`,
+    );
+  }
+
+  public tryAcquire(): boolean {
+    if (this.acquired) {
+      return true;
+    }
+    this.acquired = tryAcquireExclusiveLock(this.lockPath, {
+      ownerToken: this.ownerToken,
+    });
+    return this.acquired;
+  }
+
+  public release(): void {
+    if (!this.acquired) {
+      return;
+    }
+    releaseExclusiveLock(this.lockPath, process.pid, this.ownerToken);
+    this.acquired = false;
+  }
+}
+
+class NoOpCtrlProxyForwardLease implements CtrlProxyForwardLease {
+  public tryAcquire(): boolean {
+    return true;
+  }
+
+  public release(): void {}
+}
+
+/**
  * Client for interacting with the AutoMobile Accessibility Service via WebSocket.
  * Uses singleton pattern per device to maintain persistent WebSocket connection.
  */
@@ -1022,6 +1078,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   // Android-specific state
   private portForwardingSetup: boolean = false;
+  private readonly ctrlProxyForwardLease: CtrlProxyForwardLease;
   private inFlightConnection: Promise<boolean> | null = null;
   private cleanupHeldPort: number | null = null;
   private lastWebSocketTimeout: number = 0;
@@ -1130,6 +1187,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     sdkEventIngestor?: AndroidSdkEventIngestor,
     loggerInstance: Logger = logger,
     certificateFileSystem?: CertificateFileSystem,
+    ctrlProxyForwardLease?: CtrlProxyForwardLease,
   ) {
     super(
       timer ?? defaultTimer,
@@ -1146,6 +1204,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.deviceConnectionLostNotifier =
       deviceConnectionLostNotifier ?? observationStreamDeviceConnectionLostNotifier;
     this.certificateFileSystem = certificateFileSystem;
+    this.ctrlProxyForwardLease =
+      ctrlProxyForwardLease ?? new FileCtrlProxyForwardLease(device.deviceId);
     this.localPort = PortManager.allocate(device.deviceId, {
       reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS,
     });
@@ -1197,6 +1257,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
     PortManager.holdForCleanup(this.localPort);
     this.cleanupHeldPort = this.localPort;
+    // A replacement must recover even if this invalidated client's asynchronous
+    // ADB cleanup is wedged. Its held port prevents the replacement from sharing
+    // the forward while that cleanup eventually completes.
+    this.ctrlProxyForwardLease.release();
   }
 
   /**
@@ -1423,6 +1487,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     loggerInstance?: Logger,
     certificateFileSystem?: CertificateFileSystem,
     screenshotBackoffScheduler?: ScreenshotBackoffScheduler,
+    ctrlProxyForwardLease?: CtrlProxyForwardLease,
   ): AndroidCtrlProxyClient {
     const client = new AndroidCtrlProxyClient(
       device,
@@ -1436,6 +1501,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       sdkEventIngestor,
       loggerInstance,
       certificateFileSystem,
+      ctrlProxyForwardLease ?? new NoOpCtrlProxyForwardLease(),
     );
     // Test-only seam: pre-seed the lazily-built scheduler so tests can assert shared floor
     // accounting (noteCaptureStarted) without the live device-data-stream server. Not exposed on
@@ -3050,6 +3116,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       await this.finishInvalidatedConnectionCleanup();
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Error during cleanup: ${error}`);
+    } finally {
+      this.ctrlProxyForwardLease.release();
     }
   }
 
@@ -3083,6 +3151,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   ): Promise<void> {
     if (this.closed) {
       return;
+    }
+    if (!this.ctrlProxyForwardLease.tryAcquire()) {
+      throw new Error(
+        `Another AutoMobile process owns CtrlProxy forwarding for ${this.device.deviceId}`,
+      );
     }
     // Verify port forwarding is still active even if we think it's set up
     // Port forwarding can be lost if ADB server restarts or emulator restarts

@@ -316,9 +316,9 @@ async function throwIfVideoStartAborted(
     return;
   }
 
-  for (const recording of recordings.toReversed()) {
-    await rollbackAbortedVideoStart(recording);
-  }
+  // A stalled teardown must not leave the other fanout captures running until
+  // their individual safety timers fire.
+  await Promise.allSettled(recordings.toReversed().map(rollbackAbortedVideoStart));
   signal.throwIfAborted();
 }
 

@@ -207,6 +207,74 @@ describe("videoRecording tool segmentation branch", () => {
     expect(await fakeRepository.listRecordings()).toEqual([]);
   });
 
+  test("request abort starts every fanout rollback while another rollback is stalled", async () => {
+    const secondDevice: BootedDevice = {
+      deviceId: "test-device-2",
+      platform: "android",
+      name: "Test Device 2",
+    };
+    const thirdDevice: BootedDevice = {
+      deviceId: "test-device-3",
+      platform: "android",
+      name: "Test Device 3",
+    };
+    fakeDeviceSessionManager.setConnectedDevices([androidDevice, secondDevice, thirdDevice]);
+    const controller = new AbortController();
+    let markThirdStart: (() => void) | undefined;
+    const thirdStart = new Promise<void>((resolve) => {
+      markThirdStart = resolve;
+    });
+    let releaseSecondRollback!: () => void;
+    const secondRollback = new Promise<void>((resolve) => {
+      releaseSecondRollback = resolve;
+    });
+    const rollbackCalls: string[] = [];
+    setSegmentedSessionRecordingDependencies({
+      startVideoRecording: async (request) => {
+        if (request.device.deviceId !== thirdDevice.deviceId) {
+          return makeSegmentRecording(request.device.deviceId, request.outputName);
+        }
+        markThirdStart?.();
+        await new Promise<void>((resolve) => {
+          request.abortSignal?.addEventListener("abort", resolve, { once: true });
+        });
+        request.abortSignal?.throwIfAborted();
+        throw new Error("unreachable");
+      },
+      stopVideoRecording: async (recordingId) => ({
+        metadata: makeSegmentMetadata(recordingId ?? "missing"),
+        evictedRecordingIds: [],
+      }),
+      rollbackVideoRecordingStart: async (recordingId) => {
+        rollbackCalls.push(recordingId);
+        if (recordingId === secondDevice.deviceId) {
+          await secondRollback;
+        }
+      },
+    });
+
+    const starting = handler()(
+      androidDevice,
+      { action: "start", platform: "android", maxDuration: 181 },
+      undefined,
+      controller.signal,
+    );
+    await thirdStart;
+    controller.abort(new Error("fanout cancelled"));
+
+    for (let attempt = 0; attempt < 20 && rollbackCalls.length < 2; attempt++) {
+      await new Promise<void>(setImmediate);
+    }
+    const rollbackCallsBeforeRelease = [...rollbackCalls];
+    releaseSecondRollback();
+
+    await expect(starting).rejects.toThrow("fanout cancelled");
+    expect(rollbackCallsBeforeRelease.toSorted()).toEqual(
+      [androidDevice.deviceId, secondDevice.deviceId].toSorted(),
+    );
+    expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("retains auto-finalized segments until an all-device start commits", async () => {
     const secondDevice: BootedDevice = {
       deviceId: "test-device-2",

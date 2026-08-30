@@ -100,6 +100,10 @@ function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
   return Math.max(1, interval);
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 /**
  * Raised before connecting when the running daemon and MCP client package
  * versions differ but the proxy cannot safely reconcile them immediately.
@@ -123,7 +127,7 @@ export class DaemonVersionMismatchError extends DaemonUnavailableError {
     // provide build identity retain the published-version fallback.
     const installableVersion = releaseVersion(params.clientVersion);
     const restartCommand = params.clientBuild?.entryScript
-      ? `${params.clientBuild.entryScript} --daemon restart`
+      ? `${shellQuote(process.execPath)} ${shellQuote(params.clientBuild.entryScript)} --daemon restart`
       : installableVersion.length > 0 && installableVersion !== "unknown"
         ? `bunx @kaeawc/auto-mobile@${installableVersion} --daemon restart`
         : "the same installed auto-mobile package";

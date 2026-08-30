@@ -180,8 +180,16 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       buildIdentity: { entryScript: "/current/checkout/dist/index.js", buildId: "client-build" },
     });
     try {
-      await expect(proxy.listTools()).rejects.toThrow(
-        /daemon build daemon-build.*stale\/checkout.*client build client-build.*current\/checkout.*current\/checkout\/dist\/index\.js --daemon restart/,
+      let errorMessage = "";
+      try {
+        await proxy.listTools();
+      } catch (error) {
+        errorMessage = String(error);
+      }
+      expect(errorMessage).toContain("daemon build daemon-build (/stale/checkout/dist/index.js)");
+      expect(errorMessage).toContain("client build client-build (/current/checkout/dist/index.js)");
+      expect(errorMessage).toContain(
+        `'${process.execPath}' '/current/checkout/dist/index.js' --daemon restart`,
       );
       expect(tracked.restartCalled).toBe(false);
     } finally {

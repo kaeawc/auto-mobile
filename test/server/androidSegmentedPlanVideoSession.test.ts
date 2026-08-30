@@ -276,6 +276,33 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test("rolls back a segment whose auto-finalization stop failed", async () => {
+    const timer = new FakeTimer();
+    const rolledBack: string[] = [];
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "vid",
+      timer,
+      segmentRotateAfterMs: 1000,
+      maxDurationSeconds: 0.5,
+      startVideoRecording: async () => makeActiveRecording("id-vid", "/tmp/id-vid.mp4"),
+      stopVideoRecording: async () => {
+        throw new Error("final stop failed");
+      },
+      rollbackVideoRecordingStart: async (recordingId) => {
+        rolledBack.push(recordingId);
+      },
+    });
+
+    await session.start();
+    timer.advanceTime(500);
+    await flush();
+    await session.abort();
+
+    expect(rolledBack).toEqual(["id-vid"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("aborts a replacement segment start before waiting for rotation", async () => {
     const timer = new FakeTimer();
     const rolledBack: string[] = [];

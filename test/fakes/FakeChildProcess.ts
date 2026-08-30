@@ -50,6 +50,9 @@ export class FakeChildProcess
         callback();
       },
     });
+    // Deterministic fake pid: a fake must not reach for real randomness. A
+    // process-wide counter gives every instance a distinct, reproducible pid.
+    this.pid = FakeChildProcess.nextPid++;
   }
 
   private static nextPid = 1000;
@@ -109,9 +112,6 @@ export class FakeChildProcess
         return;
       }
 
-      // Deterministic fake pid: a fake must not reach for real randomness. A
-      // process-wide counter gives every spawned process a reproducible pid.
-      this.pid = FakeChildProcess.nextPid++;
       this.emit("spawn");
 
       // Write any configured stdout/stderr data

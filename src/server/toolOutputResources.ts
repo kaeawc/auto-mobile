@@ -125,7 +125,7 @@ export function registerToolOutputResources(): void {
     "Tool Output Artifact",
     "In-band fetch for a tool-output artifact that spilled to a host file. The " +
       "`resourceUri` in an artifact's metadata points here so a client can read the " +
-      "full raw JSON (e.g. an `observe {\"raw\": true}` hierarchy) over the protocol.",
+      'full raw JSON (e.g. an `observe {"raw": true}` hierarchy) over the protocol.',
     "application/json",
     getToolOutputArtifact,
   );

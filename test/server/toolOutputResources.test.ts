@@ -74,8 +74,9 @@ describe("tool-output artifact resource (#5882)", () => {
   test("companion URI round-trips with the file basename", () => {
     const filename = "1-observe-id.json";
     expect(buildToolOutputResourceUri(filename)).toBe(`automobile:tool-output/${filename}`);
-    const match = (registerToolOutputResources(),
-    ResourceRegistry.matchTemplate(buildToolOutputResourceUri(filename)));
+    const match =
+      (registerToolOutputResources(),
+      ResourceRegistry.matchTemplate(buildToolOutputResourceUri(filename)));
     expect(match?.params.artifactId).toBe(filename);
   });
 
@@ -106,7 +107,7 @@ describe("tool-output artifact resource (#5882)", () => {
     // A shared/misconfigured --tool-outputs-dir must not let a client read an
     // arbitrary guessable file just because it ends in .json (issue #5882 review).
     const fileSystem = new FakeResourceFileSystem();
-    fileSystem.files.set(path.join(ARTIFACT_DIR, "credentials.json"), "{\"secret\":true}");
+    fileSystem.files.set(path.join(ARTIFACT_DIR, "credentials.json"), '{"secret":true}');
     installFake(fileSystem);
 
     const content = await readArtifact("credentials.json");

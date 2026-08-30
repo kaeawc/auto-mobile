@@ -156,6 +156,13 @@ class ObservationStreamClient(
     )
   override val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
 
+  // Lifecycle acknowledgements are replayed briefly so a newly-composed storage dashboard does
+  // not miss the registration result sent immediately after its DisposableEffect requests it.
+  private val _storageSubscriptionResponses =
+    MutableSharedFlow<StorageSubscriptionResponse>(replay = 1)
+  override val storageSubscriptionResponses: SharedFlow<StorageSubscriptionResponse> =
+    _storageSubscriptionResponses.asSharedFlow()
+
   // Flow for device-level stream events such as control connection loss.
   private val _deviceEvents = MutableSharedFlow<DeviceStreamEvent>(replay = 1)
   override val deviceEvents: SharedFlow<DeviceStreamEvent> = _deviceEvents.asSharedFlow()
@@ -173,14 +180,12 @@ class ObservationStreamClient(
   private var requestedScreenshotIntervalMs: Long? = null
   private var requestedHierarchyIntervalMs: Long? = null
 
-  // Per-file storage subscriptions requested by consumers (the storage facet subscribes each loaded
-  // key/value file so external writes emit storage_update frames). Remembered so they are
-  // re-applied
-  // automatically on every (re)subscribe -- a reconnect would otherwise leave the device-side
-  // content
-  // observers unregistered, silently killing live updates (issue #4709). Guarded by
-  // [ownershipLock].
-  private val storageSubscriptions = LinkedHashSet<StorageSubscriptionKey>()
+  // Per-file storage subscription intent and confirmation are deliberately distinct. A command
+  // can be in flight while the UI removes a file, so "asked for" does not mean the observer exists
+  // on the runner. Every collection is guarded by [ownershipLock].
+  private val desiredStorageSubscriptions = LinkedHashSet<StorageSubscriptionKey>()
+  private val confirmedStorageSubscriptions = LinkedHashSet<StorageSubscriptionKey>()
+  private val pendingStorageSubscriptions = LinkedHashMap<String, PendingStorageSubscription>()
 
   /**
    * Connect to the observation stream socket and subscribe to updates. Any cadence configured via
@@ -217,6 +222,10 @@ class ObservationStreamClient(
         previousTransport = transport
         transport = newTransport
         generation = ++connectionGeneration
+        // A transport change makes previous acknowledgements unknowable. Retain desired intent,
+        // but do not let a late response from the old socket confirm it on this connection.
+        confirmedStorageSubscriptions.clear()
+        pendingStorageSubscriptions.clear()
       }
       closeQuietly(previousTransport)
 
@@ -262,6 +271,12 @@ class ObservationStreamClient(
     }
 
     releaseActiveTransport()
+    synchronized(ownershipLock) {
+      // The daemon may have acted just before this transport died, but its acknowledgement can no
+      // longer be trusted. Forget it rather than allowing a stale response to drive reconciliation.
+      confirmedStorageSubscriptions.clear()
+      pendingStorageSubscriptions.clear()
+    }
     subscriptionId = null
     pendingCadenceUpdate = false
     _connectionState.update { ConnectionState.Disconnected() }
@@ -445,6 +460,10 @@ class ObservationStreamClient(
       }
     if (stillOwner) {
       closeQuietly(activeTransport)
+      synchronized(ownershipLock) {
+        confirmedStorageSubscriptions.clear()
+        pendingStorageSubscriptions.clear()
+      }
       _connectionState.update { ConnectionState.Disconnected("Stream ended") }
       log.info("Observation stream disconnected")
     }
@@ -461,6 +480,10 @@ class ObservationStreamClient(
     when (response.type) {
       "subscription_response" -> {
         log.info("Subscription response: success=${response.success}")
+        val responseId = response.id
+        if (responseId != null && handleStorageSubscriptionResponse(responseId, response.success == true, response.error)) {
+          return
+        }
         if (response.success != true) {
           log.warn("Subscription failed: ${response.error}")
         } else if (response.subscriptionId != null) {
@@ -599,6 +622,10 @@ class ObservationStreamClient(
       }
       "error" -> {
         log.warn("Observation stream error: ${response.error}")
+        val responseId = response.id
+        if (responseId != null && handleStorageSubscriptionResponse(responseId, false, response.error)) {
+          return
+        }
         emitDeviceEvent(response)
       }
       else -> {
@@ -696,50 +723,110 @@ class ObservationStreamClient(
   override fun subscribeStorage(packageName: String, fileName: String) {
     val key = StorageSubscriptionKey(packageName, fileName)
     synchronized(ownershipLock) {
-      // Deduplicate: the facet may re-request the same file across recompositions, and the device
-      // registers one observer per (package, file) regardless.
-      if (!storageSubscriptions.add(key)) return
+      if (!desiredStorageSubscriptions.add(key)) return
     }
-    // Only meaningful once subscribed to a device stream; otherwise it is remembered above and
-    // re-applied by [reapplyStorageSubscriptions] on the next (re)subscribe.
-    if (_connectionState.value.isConnected) {
-      sendStorageSubscription("subscribe_storage", key)
-    }
+    driveStorageSubscription(key)
   }
 
   override fun unsubscribeStorage(packageName: String, fileName: String) {
     val key = StorageSubscriptionKey(packageName, fileName)
     synchronized(ownershipLock) {
-      if (!storageSubscriptions.remove(key)) return
+      if (!desiredStorageSubscriptions.remove(key)) return
     }
-    if (_connectionState.value.isConnected) {
-      sendStorageSubscription("unsubscribe_storage", key)
-    }
-  }
-
-  private fun sendStorageSubscription(command: String, key: StorageSubscriptionKey) {
-    sendRequest(
-      StreamRequest(
-        id = UUID.randomUUID().toString(),
-        command = command,
-        deviceId = subscribedDeviceId,
-        deviceSessionUuid = subscribedDeviceSessionUuid,
-        packageName = key.packageName,
-        fileName = key.fileName,
-      )
-    )
+    // If subscribe is pending, this does nothing until its acknowledgement arrives. The response
+    // handler then issues a compensating unsubscribe instead of leaking the newly-confirmed
+    // observer after the pane/file has gone away.
+    driveStorageSubscription(key)
   }
 
   /**
-   * Re-send every remembered storage subscription so a reconnect re-registers the device-side
-   * content observers. Mirrors how the cadence is re-applied on (re)subscribe. Called after the
-   * subscribe command lands, when [subscribedDeviceId] is already set.
+   * Send the one transition needed to make a file's confirmed observer state match its desired
+   * state. A single pending command per file preserves order (subscribe→unsubscribe and
+   * unsubscribe→subscribe) without guessing whether the daemon has completed the older command.
+   */
+  private fun driveStorageSubscription(key: StorageSubscriptionKey) {
+    if (!_connectionState.value.isConnected) return
+
+    val request =
+      synchronized(ownershipLock) {
+        if (pendingStorageSubscriptions.values.any { it.key == key }) return
+
+        val desired = key in desiredStorageSubscriptions
+        val confirmed = key in confirmedStorageSubscriptions
+        val subscribe =
+          when {
+            desired && !confirmed -> true
+            !desired && confirmed -> false
+            else -> return
+          }
+        val id = UUID.randomUUID().toString()
+        PendingStorageSubscription(id, key, subscribe).also { pendingStorageSubscriptions[id] = it }
+      }
+
+    val sent =
+      sendRequest(
+        StreamRequest(
+          id = request.requestId,
+          command = if (request.subscribe) "subscribe_storage" else "unsubscribe_storage",
+          deviceId = subscribedDeviceId,
+          deviceSessionUuid = subscribedDeviceSessionUuid,
+          packageName = key.packageName,
+          fileName = key.fileName,
+        )
+      )
+    if (!sent) {
+      synchronized(ownershipLock) {
+        pendingStorageSubscriptions.remove(request.requestId)
+      }
+    }
+  }
+
+  /**
+   * Drive every desired storage subscription after a stream subscription becomes active.
    */
   private fun reapplyStorageSubscriptions() {
-    val keys = synchronized(ownershipLock) { storageSubscriptions.toList() }
+    val keys = synchronized(ownershipLock) { desiredStorageSubscriptions.toList() }
     for (key in keys) {
-      sendStorageSubscription("subscribe_storage", key)
+      driveStorageSubscription(key)
     }
+  }
+
+  /**
+   * Record a matched storage lifecycle acknowledgement and emit its correlated result. Returns
+   * false for ordinary stream subscription responses and for stale replies from a released socket.
+   */
+  private suspend fun handleStorageSubscriptionResponse(
+    requestId: String,
+    success: Boolean,
+    error: String?,
+  ): Boolean {
+    val pending =
+      synchronized(ownershipLock) {
+        pendingStorageSubscriptions.remove(requestId)
+      } ?: return false
+
+    synchronized(ownershipLock) {
+      if (success) {
+        if (pending.subscribe) {
+          confirmedStorageSubscriptions.add(pending.key)
+        } else {
+          confirmedStorageSubscriptions.remove(pending.key)
+        }
+      }
+    }
+    _storageSubscriptionResponses.emit(
+      StorageSubscriptionResponse(
+        requestId = requestId,
+        key = pending.key,
+        subscribe = pending.subscribe,
+        success = success,
+        error = error,
+      )
+    )
+    // Desired state can have changed while this command was in flight. Issue exactly the next
+    // transition only after this acknowledgement establishes what the daemon actually completed.
+    driveStorageSubscription(pending.key)
+    return true
   }
 
   /**
@@ -778,6 +865,13 @@ data class StreamRequest(
  * file).
  */
 data class StorageSubscriptionKey(val packageName: String, val fileName: String)
+
+/** A storage lifecycle command awaiting a response with [requestId]. */
+private data class PendingStorageSubscription(
+  val requestId: String,
+  val key: StorageSubscriptionKey,
+  val subscribe: Boolean,
+)
 
 @Serializable
 data class StreamResponse(

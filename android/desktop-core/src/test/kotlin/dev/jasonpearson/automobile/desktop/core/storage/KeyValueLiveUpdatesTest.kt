@@ -280,4 +280,23 @@ class KeyValueLiveUpdatesTest {
 
     assertEquals(1.5f, result.single().entries.first { it.key == "fontScale" }.value)
   }
+
+  @Test
+  fun `post-subscription snapshot closes the gap and preserves a later live update`() {
+    // The original snapshot A was "light". The app writes "dark" before the observer is registered
+    // at B, then "system" while the post-ack snapshot is in flight. Replaying C over the
+    // reconciliation result must leave the newest value visible.
+    val original = listOf(file("prefs.xml", "theme" to "light"))
+    val postSubscriptionSnapshot = listOf(file("prefs.xml", "theme" to "dark"))
+    val updateDuringReconciliation = update(key = "theme", value = "system")
+
+    val result =
+      original.reconcileStorageFileSnapshot(
+        postSubscriptionSnapshot,
+        "prefs.xml",
+        listOf(updateDuringReconciliation),
+      )
+
+    assertEquals("system", result.single().entries.single().value)
+  }
 }

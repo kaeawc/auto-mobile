@@ -16,6 +16,7 @@ interface ObservationStream {
   val navigationUpdates: SharedFlow<NavigationGraphStreamUpdate>
   val performanceUpdates: SharedFlow<PerformanceStreamUpdate>
   val storageUpdates: SharedFlow<StorageStreamUpdate>
+  val storageSubscriptionResponses: SharedFlow<StorageSubscriptionResponse>
   val deviceEvents: SharedFlow<DeviceStreamEvent>
   val connectionState: StateFlow<ConnectionState>
 
@@ -51,3 +52,18 @@ interface ObservationStream {
   /** Release the content observer previously registered via [subscribeStorage]. */
   fun unsubscribeStorage(packageName: String, fileName: String)
 }
+
+/**
+ * Acknowledgement for a storage observer lifecycle command.
+ *
+ * [requestId] correlates this result to the wire command. A successful subscribe means the daemon
+ * has registered the observer, so consumers may safely reconcile a snapshot taken before it was
+ * active; a failed or stale acknowledgement must not be treated as confirmation.
+ */
+data class StorageSubscriptionResponse(
+  val requestId: String,
+  val key: StorageSubscriptionKey,
+  val subscribe: Boolean,
+  val success: Boolean,
+  val error: String? = null,
+)

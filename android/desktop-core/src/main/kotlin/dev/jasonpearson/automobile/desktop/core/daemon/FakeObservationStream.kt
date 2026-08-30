@@ -40,6 +40,9 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
     _performanceUpdates.asSharedFlow()
   private val _storageUpdates = flow<StorageStreamUpdate>()
   override val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
+  private val _storageSubscriptionResponses = flow<StorageSubscriptionResponse>()
+  override val storageSubscriptionResponses: SharedFlow<StorageSubscriptionResponse> =
+    _storageSubscriptionResponses.asSharedFlow()
   private val _deviceEvents = flow<DeviceStreamEvent>()
   override val deviceEvents: SharedFlow<DeviceStreamEvent> = _deviceEvents.asSharedFlow()
 
@@ -160,6 +163,9 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
     _performanceUpdates.tryEmit(update)
 
   fun emitStorage(update: StorageStreamUpdate): Boolean = _storageUpdates.tryEmit(update)
+
+  fun emitStorageSubscriptionResponse(response: StorageSubscriptionResponse): Boolean =
+    _storageSubscriptionResponses.tryEmit(response)
 
   fun emitHierarchy(update: HierarchyStreamUpdate): Boolean = _hierarchyUpdates.tryEmit(update)
 

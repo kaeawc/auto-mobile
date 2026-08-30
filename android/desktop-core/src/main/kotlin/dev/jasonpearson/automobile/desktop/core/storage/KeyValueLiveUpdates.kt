@@ -141,6 +141,29 @@ internal fun List<KeyValueFile>.applyKeyValueEditIfGenerationUnchanged(
   }
 
 /**
+ * Replaces one displayed file with a post-subscription snapshot, then replays every live mutation
+ * received while that snapshot was in flight. The replay makes the acknowledgement-to-snapshot
+ * bridge safe for a write C that arrives during reconciliation: the snapshot closes the earlier
+ * A→B registration gap without overwriting C.
+ */
+internal fun List<KeyValueFile>.reconcileStorageFileSnapshot(
+  snapshot: List<KeyValueFile>,
+  fileName: String,
+  updatesSinceSnapshotStarted: List<StorageStreamUpdate>,
+): List<KeyValueFile> {
+  val snapshotFile = snapshot.firstOrNull { it.name == fileName }
+  val withSnapshot =
+    if (snapshotFile == null) {
+      filterNot { it.name == fileName }
+    } else {
+      map { file -> if (file.name == fileName) snapshotFile else file }
+    }
+  return updatesSinceSnapshotStarted.fold(withSnapshot) { files, update ->
+    files.applyStorageUpdate(update)
+  }
+}
+
+/**
  * The highlight identities a live update should light up: the single changed key, or every key in a
  * cleared file.
  */

@@ -226,6 +226,9 @@ class ObservationStreamStorageTest {
   fun `unsubscribeStorage sends unsubscribe_storage and stops re-applying on reconnect`() {
     withConnectedClient { client, factory ->
       client.subscribeStorage("com.example", "prefs.xml")
+      val subscribe =
+        factory.opened.single().sentRequests().single { it.command == "subscribe_storage" }
+      client.handleMessage("""{"id":"${subscribe.id}","type":"subscription_response","success":true}""")
       client.unsubscribeStorage("com.example", "prefs.xml")
 
       val first = factory.opened[0].sentRequests()
@@ -241,6 +244,87 @@ class ObservationStreamStorageTest {
         second.none { it.command == "subscribe_storage" && it.fileName == "prefs.xml" },
         second.toString(),
       )
+    }
+  }
+
+  @Test
+  fun `storage acknowledgement is correlated to its request id`() {
+    withConnectedClient { client, factory ->
+      client.storageSubscriptionResponses.test {
+        client.subscribeStorage("com.example", "prefs.xml")
+        val request =
+          factory.opened.single().sentRequests().single { it.command == "subscribe_storage" }
+
+        client.handleMessage(
+          """{"id":"${request.id}","type":"subscription_response","success":true}"""
+        )
+
+        assertEquals(
+          StorageSubscriptionResponse(
+            requestId = request.id,
+            key = StorageSubscriptionKey("com.example", "prefs.xml"),
+            subscribe = true,
+            success = true,
+          ),
+          awaitItem(),
+        )
+      }
+    }
+  }
+
+  @Test
+  fun `unsubscribe waits for an in-flight subscribe acknowledgement`() {
+    withConnectedClient { client, factory ->
+      client.subscribeStorage("com.example", "prefs.xml")
+      val transport = factory.opened.single()
+      val subscribe = transport.sentRequests().single { it.command == "subscribe_storage" }
+
+      // The observer may not exist yet, so do not send an unsubscribe that can race it.
+      client.unsubscribeStorage("com.example", "prefs.xml")
+      assertEquals(1, transport.sentRequests().count { it.command.endsWith("storage") })
+
+      client.handleMessage("""{"id":"${subscribe.id}","type":"subscription_response","success":true}""")
+
+      val unsubscribe = transport.sentRequests().single { it.command == "unsubscribe_storage" }
+      client.handleMessage("""{"id":"${unsubscribe.id}","type":"subscription_response","success":true}""")
+      assertEquals(2, transport.sentRequests().count { it.command.endsWith("storage") })
+    }
+  }
+
+  @Test
+  fun `a failed storage subscribe is reported without confirmation`() {
+    withConnectedClient { client, factory ->
+      client.storageSubscriptionResponses.test {
+        client.subscribeStorage("com.example", "prefs.xml")
+        val request =
+          factory.opened.single().sentRequests().single { it.command == "subscribe_storage" }
+
+        client.handleMessage(
+          """{"id":"${request.id}","type":"error","success":false,"error":"runner unavailable"}"""
+        )
+
+        val response = awaitItem()
+        assertEquals(false, response.success)
+        assertEquals("runner unavailable", response.error)
+        assertEquals(request.id, response.requestId)
+      }
+    }
+  }
+
+  @Test
+  fun `a late storage acknowledgement after disconnect is ignored`() {
+    withConnectedClient { client, factory ->
+      client.subscribeStorage("com.example", "prefs.xml")
+      val request =
+        factory.opened.single().sentRequests().single { it.command == "subscribe_storage" }
+      client.disconnect()
+
+      client.storageSubscriptionResponses.test {
+        client.handleMessage(
+          """{"id":"${request.id}","type":"subscription_response","success":true}"""
+        )
+        expectNoEvents()
+      }
     }
   }
 

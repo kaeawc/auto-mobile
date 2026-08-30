@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
+import dev.jasonpearson.automobile.desktop.core.daemon.StorageStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.datasource.StorageDataSource
@@ -72,7 +73,20 @@ fun StorageDashboard(
   var highlightExpiries by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
   // Incremented for every live update per key. An optimistic save snapshots its key's generation
   // before suspending, so an A -> B -> A update sequence cannot be mistaken for "unchanged".
-  var storageUpdateGenerations by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
+  var storageUpdateGenerations by
+    remember(deviceId, packageName) { mutableStateOf<Map<String, Long>>(emptyMap()) }
+  // Each post-subscription snapshot records its starting generation, then replays entries added
+  // here while the read is in flight. This closes the snapshot→observer gap without losing an
+  // external write that arrives during reconciliation.
+  var storageFileUpdateGenerations by
+    remember(deviceId, packageName) { mutableStateOf<Map<String, Long>>(emptyMap()) }
+  var storageReconciliationStartGenerations by
+    remember(deviceId, packageName) { mutableStateOf<Map<String, Long>>(emptyMap()) }
+  var storageUpdateHistory by
+    remember(deviceId, packageName) {
+      mutableStateOf<Map<String, List<Pair<Long, StorageStreamUpdate>>>>(emptyMap())
+    }
+  val handledStorageSubscriptionRequestIds = remember(deviceId, packageName) { mutableSetOf<String>() }
   val recentlyChangedKeys = highlightExpiries.keys
 
   LaunchedEffect(observationStreamClient, deviceId, packageName) {
@@ -85,8 +99,19 @@ fun StorageDashboard(
       }
       if (packageName != null && update.packageName != packageName) return@collect
 
+      val filePresent = keyValueFiles.any { it.name == update.fileName }
       val newlyHighlighted = update.highlightKeys(keyValueFiles)
       keyValueFiles = keyValueFiles.applyStorageUpdate(update)
+      if (filePresent) {
+        val nextGeneration = (storageFileUpdateGenerations[update.fileName] ?: 0L) + 1L
+        storageFileUpdateGenerations = storageFileUpdateGenerations + (update.fileName to nextGeneration)
+        if (storageReconciliationStartGenerations.containsKey(update.fileName)) {
+          storageUpdateHistory =
+            storageUpdateHistory +
+              (update.fileName to
+                (storageUpdateHistory[update.fileName].orEmpty() + (nextGeneration to update)))
+        }
+      }
       storageUpdateGenerations =
         newlyHighlighted.fold(storageUpdateGenerations) { generations, changedKey ->
           generations + (changedKey to ((generations[changedKey] ?: 0L) + 1L))
@@ -116,6 +141,60 @@ fun StorageDashboard(
     onDispose {
       if (stream != null && pkg != null) {
         subscribedFileNames.forEach { stream.unsubscribeStorage(pkg, it) }
+      }
+    }
+  }
+
+  // A storage observer starts only after the daemon acknowledges this specific request. Refresh
+  // its file after that acknowledgement to recover writes between the initial snapshot A and
+  // registration B. Entries delivered as live updates while this refresh is awaiting are replayed
+  // over the result, so a later C cannot be clobbered by an earlier snapshot.
+  LaunchedEffect(observationStreamClient, dataSource, packageName) {
+    val stream = observationStreamClient ?: return@LaunchedEffect
+    stream.storageSubscriptionResponses.collect { response ->
+      if (!response.subscribe || response.key.packageName != packageName) return@collect
+      if (!response.success) {
+        if (!handledStorageSubscriptionRequestIds.add(response.requestId)) return@collect
+        LOG.warn(
+          "StorageDashboard: failed to enable live updates for ${response.key.fileName}: ${response.error}"
+        )
+        return@collect
+      }
+      val source = dataSource ?: return@collect
+      val fileName = response.key.fileName
+      if (keyValueFiles.none { it.name == fileName }) return@collect
+      if (!handledStorageSubscriptionRequestIds.add(response.requestId)) return@collect
+      val snapshotStartGeneration = storageFileUpdateGenerations[fileName] ?: 0L
+      storageReconciliationStartGenerations =
+        storageReconciliationStartGenerations + (fileName to snapshotStartGeneration)
+      try {
+        when (val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+          source.getKeyValueFiles()
+        }) {
+          is Result.Success -> {
+            val updatesSinceSnapshotStarted =
+              storageUpdateHistory[fileName]
+                .orEmpty()
+                .filter { (generation, _) -> generation > snapshotStartGeneration }
+                .map { (_, update) -> update }
+            keyValueFiles =
+              keyValueFiles.reconcileStorageFileSnapshot(
+                result.data,
+                fileName,
+                updatesSinceSnapshotStarted,
+              )
+          }
+          is Result.Error ->
+            LOG.warn(
+              "StorageDashboard: failed to reconcile ${response.key.fileName}: ${result.message}"
+            )
+          Result.Loading -> LOG.warn("StorageDashboard: reconciliation remained loading")
+        }
+      } catch (e: Exception) {
+        LOG.warn("StorageDashboard: reconciliation failed for $fileName: ${e.message}")
+      } finally {
+        storageReconciliationStartGenerations = storageReconciliationStartGenerations - fileName
+        storageUpdateHistory = storageUpdateHistory - fileName
       }
     }
   }

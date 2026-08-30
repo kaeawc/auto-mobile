@@ -2368,6 +2368,86 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(socket.getWrittenMessages<{ type: string }>()[0].type).toBe("subscription_response");
     });
 
+    it("waits to acknowledge storage subscription until the device registration completes", async () => {
+      let completeRegistration: (() => void) | undefined;
+      server.setOnStorageSubscriptionRequested(
+        () =>
+          new Promise<void>((resolve) => {
+            completeRegistration = resolve;
+          }),
+      );
+      const socket = new FakeSocket();
+
+      const request = server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "storage-await",
+          command: "subscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(socket.getWrittenMessages()).toEqual([]);
+      expect(completeRegistration).toBeDefined();
+      completeRegistration!();
+      await request;
+      expect(socket.getWrittenMessages<{ id?: string; success?: boolean }>()).toEqual([
+        expect.objectContaining({ id: "storage-await", success: true }),
+      ]);
+    });
+
+    it("serializes lifecycle commands for one storage file", async () => {
+      const calls: StorageSubReq[] = [];
+      let releaseSubscribe: (() => void) | undefined;
+      server.setOnStorageSubscriptionRequested(
+        (request) =>
+          new Promise<void>((resolve) => {
+            calls.push(request);
+            if (request.subscribe) {
+              releaseSubscribe = resolve;
+            } else {
+              resolve();
+            }
+          }),
+      );
+      const socket = new FakeSocket();
+
+      const subscribe = server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "storage-subscribe",
+          command: "subscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+      await Promise.resolve();
+      const unsubscribe = server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "storage-unsubscribe",
+          command: "unsubscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+      await Promise.resolve();
+
+      expect(calls).toEqual([expect.objectContaining({ fileName: "prefs.xml", subscribe: true })]);
+      releaseSubscribe?.();
+      await Promise.all([subscribe, unsubscribe]);
+      expect(calls).toEqual([
+        expect.objectContaining({ fileName: "prefs.xml", subscribe: true }),
+        expect.objectContaining({ fileName: "prefs.xml", subscribe: false }),
+      ]);
+    });
+
     it("resolves a deviceSessionUuid to its serial before invoking the callback", async () => {
       server.sessionResolver.bind("emulator-5556", "session-emulator-5556");
       const calls: StorageSubReq[] = [];

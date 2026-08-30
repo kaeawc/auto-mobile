@@ -358,6 +358,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   private onObservationRequested: OnObservationRequestedCallback | null = null;
   private onNavigationGraphRequested: OnNavigationGraphRequestedCallback | null = null;
   private onStorageSubscriptionRequested: OnStorageSubscriptionRequestedCallback | null = null;
+  /** Serializes lifecycle operations for one device-side storage observer. */
+  private readonly storageOperations = new Map<string, Promise<void>>();
   private observationRequestTimeoutMs = DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS;
 
   // Previous hierarchy per device, used to compute the per-frame diff annotation
@@ -905,9 +907,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     }
 
     // Handle per-file storage (un)subscription: register/release a device-side content observer so
-    // external writes to a key/value store emit storage_update frames (issue #4709). Best-effort and
-    // fire-and-forget — the ack returns immediately; the callback logs and continues on failure so a
-    // flaky device subscription never tears down the stream.
+    // external writes to a key/value store emit storage_update frames. The acknowledgement follows
+    // the device-side result, so the desktop can safely reconcile its snapshot after registration.
     if (request.command === "subscribe_storage" || request.command === "unsubscribe_storage") {
       const subscribe = request.command === "subscribe_storage";
       const { packageName, fileName } = request;
@@ -960,16 +961,38 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       }
 
       if (this.onStorageSubscriptionRequested) {
-        void this.onStorageSubscriptionRequested({
-          deviceId: storageDeviceId,
-          packageName,
-          fileName,
-          subscribe,
-        }).catch((error) => {
+        const key = `${storageDeviceSessionUuid ?? storageDeviceId ?? "all"}:${packageName}:${fileName}`;
+        const previous = this.storageOperations.get(key) ?? Promise.resolve();
+        const operation = previous
+          .catch(() => undefined)
+          .then(() =>
+            this.onStorageSubscriptionRequested!({
+              deviceId: storageDeviceId,
+              packageName,
+              fileName,
+              subscribe,
+            }),
+          );
+        this.storageOperations.set(key, operation);
+        try {
+          await operation;
+        } catch (error) {
           logger.warn(
             `[DeviceDataStream] Error handling ${request.command} for ${packageName}/${fileName}: ${errorMessage(error)}`,
           );
-        });
+          const errorResponse: SubscriptionResponse = {
+            id: request.id,
+            type: "error",
+            success: false,
+            error: errorMessage(error),
+          };
+          this.sendJson(socket, errorResponse);
+          return;
+        } finally {
+          if (this.storageOperations.get(key) === operation) {
+            this.storageOperations.delete(key);
+          }
+        }
       }
 
       const response: SubscriptionResponse = {

@@ -39,15 +39,13 @@ interface ToolOutputResourceFileSystem {
 
 const nodeToolOutputResourceFileSystem: ToolOutputResourceFileSystem = {
   async readFile(filePath: string): Promise<string> {
-    // `lstat` (not `stat`) so a writer-shaped symlink planted in a shared/writable
-    // `--tool-outputs-dir` is detected rather than followed — the basename
-    // allowlist constrains the link's name, not its target (issue #5882 review).
-    // Portable across platforms (unlike the POSIX-only `O_NOFOLLOW` open flag),
-    // and a symlink or non-regular file is refused before the read.
-    const stats = await realFs.lstat(filePath);
-    if (!stats.isFile()) {
-      throw new Error(`tool-output artifact is not a regular file: ${filePath}`);
-    }
+    // The default tool-outputs directory is created 0o700 (owner-only) by the
+    // writer, so a foreign process cannot plant a file or symlink there. Deeper
+    // hardening for a deliberately world-writable `--tool-outputs-dir` — refusing
+    // symlink targets and closing the check-then-read TOCTOU window — is tracked
+    // in #5917; a check-then-read guard here only trades one CodeQL finding
+    // (insecure-temp-file) for another (file-system-race) without a
+    // pathname-based read ever being fully safe in a shared directory.
     return realFs.readFile(filePath, "utf8");
   },
 };

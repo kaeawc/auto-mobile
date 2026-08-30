@@ -321,10 +321,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
     const tempDir = await fs.mkdtemp(path.join(cacheDir, "auto-mobile-prefetch-"));
     const apkPath = path.join(tempDir, "control-proxy.apk");
-    const activeMarkerPath = path.join(tempDir, ".active");
 
     try {
-      await fs.writeFile(activeMarkerPath, String(process.pid));
       // Download the APK (URL honors AUTOMOBILE_VERSION + AUTOMOBILE_ASSET_BASE_URL)
       logger.info("[CTRL_PROXY] Prefetch: downloading APK", { url: apkUrl, destination: apkPath });
       const downloader =
@@ -548,8 +546,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * directories. Successful prefetched APKs are published outside their staging
    * directory into the reusable cache. A process that is SIGKILLed or crashes
    * can still leave its staging dir behind, so this reclaims those artifacts
-   * without touching the published cache asset (#4334). Active staging dirs
-   * carry an `.active` marker and are never reaped.
+   * without touching the published cache asset (#4334).
    */
   public static async sweepStalePrefetchDirsOnStartup(
     tempRoot: string = os.tmpdir(),
@@ -616,9 +613,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       if (now - stats.mtimeMs < AndroidCtrlProxyManager.STALE_PREFETCH_MAX_AGE_MS) {
         return "not_stale";
       }
-      if (await AndroidCtrlProxyManager.isActivePrefetchDir(dir)) {
-        return "not_stale";
-      }
       await fs.rm(dir, { recursive: true, force: true });
       return "reclaimed";
     } catch (error) {
@@ -626,34 +620,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // or it may vanish mid-sweep. Skip it and keep going.
       logger.debug(`[CTRL_PROXY] Failed to inspect stale prefetch dir ${dir}: ${error}`);
       return "not_stale";
-    }
-  }
-
-  private static async isActivePrefetchDir(dir: string): Promise<boolean> {
-    try {
-      const ownerPid = Number.parseInt(await fs.readFile(path.join(dir, ".active"), "utf8"), 10);
-      if (!Number.isSafeInteger(ownerPid) || ownerPid <= 0) {
-        return false;
-      }
-      try {
-        process.kill(ownerPid, 0);
-        return true;
-      } catch (error) {
-        if (error instanceof Error && "code" in error && error.code === "EPERM") {
-          return true;
-        }
-        // An exited owner leaves a stale marker that must not prevent cleanup.
-        logger.debug(
-          `[CTRL_PROXY] Active prefetch owner is no longer running for ${dir}: ${errorMessage(error)}`,
-        );
-        return false;
-      }
-    } catch (error) {
-      // A missing marker is expected for completed and previously orphaned staging dirs.
-      logger.debug(
-        `[CTRL_PROXY] No active marker in prefetch directory ${dir}: ${errorMessage(error)}`,
-      );
-      return false;
     }
   }
 

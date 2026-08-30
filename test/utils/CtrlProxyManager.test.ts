@@ -875,7 +875,6 @@ describe("CtrlProxyManager", function () {
         await AndroidCtrlProxyManager.cleanupPrefetchedApk();
         const staleStagingDir = path.join(prefetchCacheDir, "auto-mobile-prefetch-orphan");
         await fs.mkdir(staleStagingDir);
-        await fs.writeFile(path.join(staleStagingDir, ".active"), "999999999");
         const staleTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
         await fs.utimes(staleStagingDir, staleTime, staleTime);
         const secondPath = await AndroidCtrlProxyManager.prefetchApk();
@@ -2772,28 +2771,6 @@ describe("CtrlProxyManager", function () {
       await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
 
       expect(await exists(fresh)).toBe(true);
-    });
-
-    test("preserves an old active prefetch directory", async function () {
-      const active = await makeAgedDir("auto-mobile-prefetch-active01", 2 * HOUR_MS);
-      await fs.writeFile(path.join(active, ".active"), String(process.pid));
-      const when = new Date(NOW_MS - 2 * HOUR_MS);
-      await fs.utimes(active, when, when);
-
-      await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
-
-      expect(await exists(active)).toBe(true);
-    });
-
-    test("removes an old prefetch directory whose owner is gone", async function () {
-      const orphan = await makeAgedDir("auto-mobile-prefetch-orphan01", 2 * HOUR_MS);
-      await fs.writeFile(path.join(orphan, ".active"), "999999999");
-      const when = new Date(NOW_MS - 2 * HOUR_MS);
-      await fs.utimes(orphan, when, when);
-
-      await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
-
-      expect(await exists(orphan)).toBe(false);
     });
 
     test("preserves sibling caches and the installed package even when old", async function () {

@@ -368,7 +368,7 @@ export class RealObserveScreen implements ObserveScreen {
         this.platformValidator,
       );
 
-      await this.reconcileActiveWindowAttribution(result, foregroundIdentity);
+      await this.reconcileActiveWindowAttribution(result, foregroundIdentity, signal);
 
       // Uncapped here; the output boundary (sanitizeObserveResult / the observe
       // served path in finalizeToolResponse) caps AFTER any scope narrowing so an
@@ -810,14 +810,27 @@ export class RealObserveScreen implements ObserveScreen {
    * they are safer than the stale activity name for `activeWindow` consumers
    * such as `waitFor` (issue #5972). System UI is intentionally excluded: a
    * system panel can validly be the accessible window while another app remains
-   * the resumed activity beneath it.
+   * the resumed activity beneath it. A pre-capture sample that disagrees with
+   * the hierarchy is confirmed after capture before it can reject the correction.
    */
   private async reconcileActiveWindowAttribution(
     result: ObserveResult,
     foregroundIdentity: Promise<string | undefined>,
+    signal?: AbortSignal,
   ): Promise<void> {
-    const foreground = await foregroundIdentity;
     const observed = result.viewHierarchy?.packageName;
+    let foreground = await foregroundIdentity;
+    if (
+      foreground !== undefined &&
+      observed !== undefined &&
+      foreground !== observed &&
+      !SYSTEM_UI_WINDOW_PACKAGES.has(observed)
+    ) {
+      const confirmed = await this.deviceStateCollector.collectForegroundIdentity(signal);
+      if (confirmed === observed) {
+        foreground = confirmed;
+      }
+    }
     const activeWindow = result.activeWindow;
     const hasConfirmedReplacement =
       foreground !== undefined &&
@@ -825,7 +838,7 @@ export class RealObserveScreen implements ObserveScreen {
       activeWindow !== undefined &&
       activeWindow.appId !== foreground &&
       !SYSTEM_UI_WINDOW_PACKAGES.has(observed);
-    if (!hasConfirmedReplacement) {
+    if (!hasConfirmedReplacement || foreground === undefined) {
       return;
     }
 

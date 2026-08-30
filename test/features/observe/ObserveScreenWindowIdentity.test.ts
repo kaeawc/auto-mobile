@@ -354,10 +354,14 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy(calendarHierarchy(now)); // observed = calendar
+    viewHierarchy.configureHierarchy({
+      ...calendarHierarchy(now),
+      // CtrlProxy has not yet updated the active window from Settings.
+      foregroundActivity: "com.android.settings/.Settings",
+    }); // observed = calendar
 
     // First getForegroundApp read lags (still reports settings); the confirming
-    // read reports calendar, matching the observed window.
+    // read reports calendar, matching the observed hierarchy.
     const sequence = [
       { packageName: "com.android.settings", userId: 0 },
       { packageName: "com.google.android.calendar", userId: 0 },
@@ -384,6 +388,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
+    expect(result.activeWindow?.appId).toBe("com.google.android.calendar");
     expect(result.freshness?.isFresh).toBe(true);
     expect(result.freshness?.verified).toBe(true);
   });

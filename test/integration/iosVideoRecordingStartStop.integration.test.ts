@@ -39,6 +39,12 @@ interface FfprobeStream {
   width?: number;
   height?: number;
   duration?: string;
+  nb_read_frames?: string;
+}
+
+interface FfprobeResult {
+  streams?: FfprobeStream[];
+  format?: { duration?: string };
 }
 
 function parseToolResult(response: ToolTextResponse): RecordingToolResult {
@@ -91,24 +97,34 @@ async function assertCommandAvailable(command: string, args: string[]): Promise<
   }
 }
 
-async function assertPlayableMp4(filePath: string): Promise<FfprobeStream> {
+async function assertPlayableMp4(
+  filePath: string,
+): Promise<{ stream: FfprobeStream; duration: number; frames: number }> {
   const { stdout } = await execFileAsync("ffprobe", [
     "-v",
     "error",
+    "-count_frames",
     "-select_streams",
     "v:0",
     "-show_entries",
-    "stream=codec_type,codec_name,width,height,duration",
+    "stream=codec_type,codec_name,width,height,duration,nb_read_frames:format=duration",
     "-of",
     "json",
     filePath,
   ]);
-  const parsed = JSON.parse(stdout) as { streams?: FfprobeStream[] };
+  const parsed = JSON.parse(stdout) as FfprobeResult;
   const stream = parsed.streams?.find((candidate) => candidate.codec_type === "video");
   if (!stream) {
     throw new Error(`ffprobe did not find a video stream in ${filePath}: ${stdout}`);
   }
-  return stream;
+  const duration = Number.parseFloat(parsed.format?.duration ?? "NaN");
+  const frames = Number.parseInt(stream.nb_read_frames ?? "0", 10);
+  if (!Number.isFinite(duration) || duration <= 0 || frames <= 1) {
+    throw new Error(
+      `ffprobe expected a multi-frame recording with positive duration: ${JSON.stringify(parsed)}`,
+    );
+  }
+  return { stream, duration, frames };
 }
 
 describeIntegration("iOS videoRecording start-stop integration", () => {
@@ -180,8 +196,10 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
           0,
         );
 
-        const videoStream = await assertPlayableMp4(mp4Path!);
-        expect(videoStream.codec_type).toBe("video");
+        const video = await assertPlayableMp4(mp4Path!);
+        expect(video.stream.codec_type).toBe("video");
+        expect(video.duration).toBeGreaterThan(0);
+        expect(video.frames).toBeGreaterThan(1);
       } catch (error) {
         let cleanupError: string | undefined;
         if (recordingId && !stopped) {

@@ -1,4 +1,5 @@
 import { errorMessage } from "../utils/describeUnknownError";
+import { shellQuote } from "../utils/shellQuote";
 import {
   DaemonClient,
   DaemonUnavailableError,
@@ -99,10 +100,6 @@ function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
     throw new Error("heartbeat interval must be a positive finite number");
   }
   return Math.max(1, interval);
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 /**

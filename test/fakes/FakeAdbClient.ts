@@ -56,6 +56,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
   private deviceTimestampSource: DeviceTimestampSource = "device-ms";
   private spawnCalls: string[][] = [];
   private spawnOptions: Array<AdbSpawnOptions | undefined> = [];
+  private spawnedProcesses: FakeAdbProcess[] = [];
   private spawnBehaviors: SpawnBehavior[] = [];
 
   /**
@@ -139,6 +140,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     this.spawnCalls.push([...args]);
     this.spawnOptions.push(options);
     const proc = new FakeAdbProcess();
+    this.spawnedProcesses.push(proc);
     const joined = args.join(" ");
     const behavior = this.spawnBehaviors.find((b) => joined.includes(b.match));
     if (behavior?.outcome.kind === "reject") {
@@ -175,6 +177,10 @@ export class FakeAdbClient implements FakeAdbClientContract {
 
   getSpawnOptions(): Array<AdbSpawnOptions | undefined> {
     return [...this.spawnOptions];
+  }
+
+  getSpawnedProcesses(): FakeAdbProcess[] {
+    return [...this.spawnedProcesses];
   }
 
   /** True if any spawned command's argv contained `match`. */

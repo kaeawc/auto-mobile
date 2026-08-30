@@ -24,6 +24,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../observe/android";
+import { isAndroidPackageRunning } from "../../utils/android-cmdline-tools/androidProcessState";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -742,11 +743,13 @@ export class LaunchApp extends BaseVisualChange {
 
     // Check if app is running
     const isRunning = await perf.track("checkRunning", async () => {
-      const isRunningCmd = `shell dumpsys activity processes | grep -E "${packageName}/u${targetUserId}a" | wc -l`;
+      const isRunningCmd = "shell dumpsys activity processes";
       logger.info(`[LaunchApp] Checking if app is running: ${isRunningCmd}`);
       const isRunningOutput = await this.adb.executeCommand(isRunningCmd);
-      const result = parseInt(isRunningOutput.trim(), 10) > 0;
-      logger.info(`[LaunchApp] App running: ${result} (output: "${isRunningOutput.trim()}")`);
+      const result = isAndroidPackageRunning(isRunningOutput.stdout, packageName, targetUserId);
+      logger.info(
+        `[LaunchApp] App running: ${result} (output: "${isRunningOutput.stdout.trim()}")`,
+      );
       return result;
     });
     this.assertLaunchNotAborted(signal);

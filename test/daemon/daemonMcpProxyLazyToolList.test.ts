@@ -5,6 +5,7 @@ import { DAEMON_VERSION } from "../../src/daemon/constants";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import { FakeTimer } from "../fakes/FakeTimer";
 import type { ListChangedKind } from "../../src/server/listChangedBroadcast";
 
 // A FakeDaemonManager reporting a running daemon whose version matches this
@@ -230,6 +231,80 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
       ]);
     } finally {
       await proxy.close();
+    }
+  });
+
+  test("retries a transient background resource connection failure", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeClient = new FakeDaemonClient({
+      daemonMethodResults: new Map<string, any>([
+        ["resources/list", { resources: [{ uri: "automobile:live", name: "live" }] }],
+      ]),
+    });
+    fakeClient.shouldFailConnect = true;
+    let connectAttempts = 0;
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => {
+        connectAttempts += 1;
+        if (connectAttempts === 3) {
+          fakeClient.shouldFailConnect = false;
+        }
+        return fakeClient;
+      },
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer: fakeTimer,
+    });
+    const kinds: ListChangedKind[] = [];
+    proxy.onListChanged((kind) => kinds.push(kind));
+
+    try {
+      await proxy.listAdvertisedResources();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(connectAttempts).toBe(1);
+      expect(fakeTimer.getPendingTimeouts()).toEqual([250]);
+
+      await fakeTimer.advanceTimeAsync(250);
+      expect(connectAttempts).toBe(2);
+      expect(fakeTimer.getPendingTimeouts()).toEqual([1_000]);
+
+      await fakeTimer.advanceTimeAsync(1_000);
+      expect(connectAttempts).toBe(3);
+      expect(proxy.isConnected()).toBe(true);
+      expect(kinds).toContain("resources");
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
+  test("cancels pending background resource retries when closed", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeClient = new FakeDaemonClient();
+    fakeClient.shouldFailConnect = true;
+    let connectAttempts = 0;
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => {
+        connectAttempts += 1;
+        return fakeClient;
+      },
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      timer: fakeTimer,
+    });
+
+    try {
+      await proxy.listAdvertisedResources();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(fakeTimer.getPendingTimeouts()).toEqual([250]);
+
+      await proxy.close();
+      await fakeTimer.advanceTimeAsync(10_000);
+      expect(connectAttempts).toBe(1);
+    } finally {
+      isAvailableSpy.mockRestore();
     }
   });
 });

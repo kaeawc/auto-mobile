@@ -12,6 +12,8 @@ import java.nio.channels.ServerSocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -283,6 +285,37 @@ class VideoStreamClientTest {
   }
 
   @Test
+  fun `a disconnect during decoder startup does not subscribe`() = runBlocking {
+    val server = relay(payload = sampleH264())
+    val decoderStarted = CountDownLatch(1)
+    val releaseDecoder = CountDownLatch(1)
+    val decoderFinished = CountDownLatch(1)
+    val client =
+      VideoStreamClient(
+        socketPathValue = server.socketPath.toString(),
+        decoderFactory = {
+          decoderStarted.countDown()
+          try {
+            check(releaseDecoder.await(5, TimeUnit.SECONDS))
+            throw H264DecodeException("startup cancelled")
+          } finally {
+            decoderFinished.countDown()
+          }
+        },
+      )
+
+    client.connect("emulator-5554")
+    assertTrue(decoderStarted.await(5, TimeUnit.SECONDS))
+
+    client.disconnect()
+    releaseDecoder.countDown()
+
+    assertTrue(decoderFinished.await(5, TimeUnit.SECONDS))
+    assertEquals(false, server.receivedRequest())
+    client.dispose()
+  }
+
+  @Test
   fun `an orderly relay close reports the stream as unavailable`() = runBlocking {
     val server = relay()
     val client = VideoStreamClient(socketPathValue = server.socketPath.toString())
@@ -462,6 +495,8 @@ class VideoStreamClientTest {
       }
       throw AssertionError("Client did not send a subscribe request")
     }
+
+    fun receivedRequest(): Boolean = captured != null
 
     override fun close() {
       thread.interrupt()

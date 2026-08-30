@@ -190,6 +190,7 @@ class VideoStreamClient(
 
   private var channel: SocketChannel? = null
   private var readerJob: Job? = null
+  private val sessionLock = Any()
 
   // Session identity so a superseded reader's teardown can't clobber a newer session's state. A
   // rapid disconnect()+connect() (the stall / first-frame watchdog) installs the replacement reader
@@ -222,10 +223,12 @@ class VideoStreamClient(
   override fun disconnect() {
     // Invalidate the current session first so the cancelled reader's terminal state write is
     // dropped rather than racing an Unavailable over a subsequent Idle/Connecting.
-    activeSessionId = sessionIds.incrementAndGet()
-    readerJob?.cancel()
-    readerJob = null
-    closeChannel()
+    synchronized(sessionLock) {
+      activeSessionId = sessionIds.incrementAndGet()
+      readerJob?.cancel()
+      readerJob = null
+      closeChannel()
+    }
     _state.value = VideoStreamState.Idle
   }
 
@@ -253,30 +256,41 @@ class VideoStreamClient(
         return
       }
 
+    if (!isCurrent()) {
+      decoder.close()
+      return
+    }
+
     try {
       SocketChannel.open(UnixDomainSocketAddress.of(socketPathValue)).use { socket ->
-        if (isCurrent()) channel = socket
+        synchronized(sessionLock) {
+          if (!isCurrent()) return
+          channel = socket
+        }
         val input = Channels.newInputStream(socket)
         val writer =
           BufferedWriter(
             OutputStreamWriter(Channels.newOutputStream(socket), StandardCharsets.UTF_8)
           )
 
-        writer.write(
-          json.encodeToString(
-            serializer<VideoStreamRequest>(),
-            VideoStreamRequest(
-              id = UUID.randomUUID().toString(),
-              sessionUuid = sessionUuidProvider(),
-              deviceId = deviceId,
-              quality = quality?.wire,
-              fps = fps,
-              bitrateKbps = bitrateKbps,
-            ),
+        synchronized(sessionLock) {
+          if (!isCurrent()) return
+          writer.write(
+            json.encodeToString(
+              serializer<VideoStreamRequest>(),
+              VideoStreamRequest(
+                id = UUID.randomUUID().toString(),
+                sessionUuid = sessionUuidProvider(),
+                deviceId = deviceId,
+                quality = quality?.wire,
+                fps = fps,
+                bitrateKbps = bitrateKbps,
+              ),
+            )
           )
-        )
-        writer.newLine()
-        writer.flush()
+          writer.newLine()
+          writer.flush()
+        }
 
         val ackLine = readAckLine(input)
         val ack = json.decodeFromString(serializer<VideoStreamResponse>(), ackLine)

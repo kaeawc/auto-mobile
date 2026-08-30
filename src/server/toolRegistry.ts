@@ -18,6 +18,7 @@ import { createToolExecutionContext } from "./ToolExecutionContext";
 import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
 import { ToolCallRepository } from "../db/toolCallRepository";
 import { getDeviceLabelMap, releaseDeviceLabelSessions } from "./deviceLabelMapping";
+import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import { isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
 import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
@@ -491,6 +492,31 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       }
       if (platform === "either" && context.devicePlatform) {
         platform = context.devicePlatform;
+      }
+    } else if (shouldResolveDevice && sessionUuid) {
+      // Direct mode (--no-proxy): DaemonState is not initialized, so the
+      // session-based branch above never runs. Recover the acquired device and
+      // its platform from the direct-session registry (#5893) so a sessionUuid
+      // is sufficient on its own — without this, a client that omits `platform`
+      // (now optional) with both platforms connected falls through to
+      // ensureDeviceReady("either", undefined) and hits an ambiguity error.
+      const directSession = resolveDirectSessionDevice(sessionUuid);
+      if (!directSession) {
+        logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);
+      } else if (!providedDeviceId) {
+        providedDeviceId = directSession.device.deviceId;
+        logger.info(
+          `[ToolRegistry] Resolved device from direct session ${sessionUuid}: ${providedDeviceId}`,
+        );
+        // Adopt the session's platform only when we also adopted its device. An
+        // explicitly-provided deviceId names the target unambiguously, so leave
+        // platform as "either" and let ensureDeviceReady infer it from the id —
+        // narrowing to the session's platform here would send an explicit
+        // cross-platform deviceId to the wrong platform's search and fail
+        // (mirrors the #5870 deviceId-resolves-platform rule).
+        if (platform === "either") {
+          platform = directSession.device.platform;
+        }
       }
     } else if (sessionUuid) {
       logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);

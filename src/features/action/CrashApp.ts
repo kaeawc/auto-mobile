@@ -166,13 +166,7 @@ export class CrashApp {
         error: `${appId} is running under multiple Android users; foreground identity is ambiguous`,
       };
     }
-    const dispatch = await this.prepareAndroidDispatch(
-      appId,
-      userId,
-      packageProcesses,
-      base,
-      signal,
-    );
+    const dispatch = await this.prepareAndroidDispatch(appId, userId, base, signal);
     if ("success" in dispatch) {
       return dispatch;
     }
@@ -265,29 +259,9 @@ export class CrashApp {
   private async prepareAndroidDispatch(
     appId: string,
     userId: number,
-    preflightProcesses: AndroidPackageProcess[],
     base: AndroidCrashResultBase,
     signal?: AbortSignal,
   ): Promise<AndroidDispatchPreparation | CrashAppResult> {
-    const inductionTime = await this.adb.getDeviceTimestampMsWithSource(
-      PREFLIGHT_COMMAND_TIMEOUT_MS,
-      signal,
-    );
-    if (inductionTime.source === "host") {
-      const userProcesses = preflightProcesses.filter((process) => process.userId === userId);
-      const preflightProcess =
-        userProcesses.find((process) => process.processName === appId) ?? userProcesses[0];
-      return {
-        ...base,
-        success: false,
-        supported: true,
-        wasRunning: true,
-        processId: preflightProcess?.pid,
-        userId,
-        error: "Unable to establish Android device time for fresh crash evidence",
-      };
-    }
-
     const dispatchProcessesOutput = await this.adb.executeCommand(
       PROCESS_STATE_COMMAND,
       PREFLIGHT_COMMAND_TIMEOUT_MS,
@@ -307,6 +281,23 @@ export class CrashApp {
         wasRunning: false,
         userId,
         error: `${appId} stopped before the crash command could be dispatched`,
+      };
+    }
+    const inductionTime = await this.adb.getDeviceTimestampMsWithSource(
+      PREFLIGHT_COMMAND_TIMEOUT_MS,
+      signal,
+    );
+    if (inductionTime.source === "host") {
+      const preflightProcess =
+        targetedProcesses.find((process) => process.processName === appId) ?? targetedProcesses[0];
+      return {
+        ...base,
+        success: false,
+        supported: true,
+        wasRunning: true,
+        processId: preflightProcess.pid,
+        userId,
+        error: "Unable to establish Android device time for fresh crash evidence",
       };
     }
     return {

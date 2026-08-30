@@ -245,8 +245,11 @@ function stripPerformanceAudit(out: ObserveResult): void {
   }
 
   if (audit.violations !== undefined) {
-    const { diagnostics: _diagnostics, ...auditWithoutDiagnostics } = audit;
-    out.performanceAudit = auditWithoutDiagnostics as NonNullable<ObserveResult["performanceAudit"]>;
+    const auditWithoutDiagnostics = { ...audit };
+    delete auditWithoutDiagnostics.diagnostics;
+    out.performanceAudit = auditWithoutDiagnostics as NonNullable<
+      ObserveResult["performanceAudit"]
+    >;
   }
 }
 

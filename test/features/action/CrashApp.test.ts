@@ -37,6 +37,7 @@ const execResult = (stdout = "", stderr = ""): ExecResult => ({
 
 class FakeSimulatorCommands {
   readonly calls: string[][] = [];
+  readonly timeouts: Array<number | undefined> = [];
   private launchctlResults: string[];
   private readonly logOutput: string;
   private readonly errors = new Map<string, Error>();
@@ -50,8 +51,9 @@ class FakeSimulatorCommands {
     this.errors.set(match, error);
   }
 
-  async executeCommandArgs(args: string[]): Promise<ExecResult> {
+  async executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult> {
     this.calls.push([...args]);
+    this.timeouts.push(timeoutMs);
     const command = args.join(" ");
     for (const [match, error] of this.errors) {
       if (command.includes(match)) {
@@ -149,6 +151,7 @@ describe("CrashApp (Android)", () => {
     });
     expect(adb.wasCommandExecuted("shell am crash --user 10 'com.example.app'")).toBe(true);
     expect(adb.wasCommandExecuted("force-stop")).toBe(false);
+    expect(adb.getCommandCalls().every((call) => (call.timeoutMs ?? 0) > 0)).toBe(true);
     expect(invalidations).toBe(1);
   });
 
@@ -397,6 +400,7 @@ describe("CrashApp (iOS)", () => {
       "user/501/UIKitApplication:com.example.app[bbbb][rb-legacy]",
     ]);
     expect(commands.calls.flat()).not.toContain("terminate");
+    expect(commands.timeouts.every((timeoutMs) => (timeoutMs ?? 0) > 0)).toBe(true);
   });
 
   test("invalidates cached hierarchy when abort happens after signal dispatch", async () => {

@@ -21,8 +21,11 @@ import {
 } from "./TerminateApp";
 
 const PROCESS_STATE_COMMAND = "shell dumpsys activity processes";
-const CONFIRMATION_ATTEMPTS = 12;
+const CONFIRMATION_ATTEMPTS = 10;
 const CONFIRMATION_POLL_MS = 250;
+const PREFLIGHT_COMMAND_TIMEOUT_MS = 5_000;
+const CRASH_COMMAND_TIMEOUT_MS = 15_000;
+const CONFIRMATION_COMMAND_TIMEOUT_MS = 2_000;
 
 const ANDROID_CRASH_LOG_COMMAND = "shell logcat -b crash -d -v epoch -t 200";
 
@@ -123,7 +126,7 @@ export class CrashApp {
 
     const initialProcesses = await this.adb.executeCommand(
       PROCESS_STATE_COMMAND,
-      undefined,
+      PREFLIGHT_COMMAND_TIMEOUT_MS,
       undefined,
       true,
       signal,
@@ -152,12 +155,15 @@ export class CrashApp {
     const targetedProcesses = packageProcesses.filter((process) => process.userId === userId);
     const preferredProcess =
       targetedProcesses.find((process) => process.processName === appId) ?? targetedProcesses[0];
-    const inductionTime = await this.adb.getDeviceTimestampMsWithSource();
+    const inductionTime = await this.adb.getDeviceTimestampMsWithSource(
+      PREFLIGHT_COMMAND_TIMEOUT_MS,
+      signal,
+    );
     let commandResult: ExecResult;
     try {
       commandResult = await this.adb.executeCommand(
         `shell am crash --user ${userId} ${shellQuote(appId)}`,
-        undefined,
+        CRASH_COMMAND_TIMEOUT_MS,
         undefined,
         true,
         signal,
@@ -231,7 +237,7 @@ export class CrashApp {
       return userIds.values().next().value ?? null;
     }
 
-    const foreground = await this.adb.getForegroundApp(signal);
+    const foreground = await this.adb.getForegroundApp(signal, PREFLIGHT_COMMAND_TIMEOUT_MS);
     return foreground?.packageName === appId && userIds.has(foreground.userId)
       ? foreground.userId
       : null;
@@ -286,7 +292,7 @@ export class CrashApp {
           "SIGABRT",
           `user/501/${appProcess.serviceLabel}`,
         ],
-        undefined,
+        CRASH_COMMAND_TIMEOUT_MS,
         signal,
       );
     } catch (error) {
@@ -373,7 +379,15 @@ export class CrashApp {
     signal?: AbortSignal,
   ): Promise<string | undefined> {
     try {
-      return (await this.adb.executeCommand(command, undefined, undefined, true, signal)).stdout;
+      return (
+        await this.adb.executeCommand(
+          command,
+          CONFIRMATION_COMMAND_TIMEOUT_MS,
+          undefined,
+          true,
+          signal,
+        )
+      ).stdout;
     } catch (error) {
       signal?.throwIfAborted();
       logger.warn(`[CrashApp] Android confirmation command failed: ${command}`, error);
@@ -415,7 +429,7 @@ export class CrashApp {
     return (
       await this.simctl.executeCommandArgs(
         ["spawn", this.device.deviceId, "launchctl", "list"],
-        undefined,
+        PREFLIGHT_COMMAND_TIMEOUT_MS,
         signal,
       )
     ).stdout;
@@ -449,7 +463,7 @@ export class CrashApp {
             "--predicate",
             'eventMessage CONTAINS[c] "SIGABRT"',
           ],
-          undefined,
+          CONFIRMATION_COMMAND_TIMEOUT_MS,
           signal,
         )
       ).stdout;

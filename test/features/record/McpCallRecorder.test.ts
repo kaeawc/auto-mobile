@@ -73,6 +73,19 @@ describe("McpCallRecorder", () => {
       expect(recorder.stepCount).toBe(7);
     });
 
+    test("records crashApp with only reproducible plan parameters", () => {
+      const recorder = new McpCallRecorder();
+      recorder.start();
+
+      recorder.record("crashApp", {
+        appId: "com.test",
+        platform: "android",
+        deviceId: "emulator-5554",
+      });
+
+      expect(recorder.stop()).toEqual([{ tool: "crashApp", params: { appId: "com.test" } }]);
+    });
+
     test("records clearText and dragAndDrop as plan steps", () => {
       const recorder = new McpCallRecorder();
       recorder.start();

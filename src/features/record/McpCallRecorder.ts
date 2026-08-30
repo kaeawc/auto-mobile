@@ -10,6 +10,7 @@ export const PLAN_RELEVANT_TOOLS = new Set([
   // App lifecycle
   "launchApp",
   "terminateApp",
+  "crashApp",
   // Observation
   "observe",
   // Interaction

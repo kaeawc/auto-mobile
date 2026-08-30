@@ -2270,4 +2270,133 @@ describe("DeviceDataStreamSocketServer", () => {
       });
     });
   });
+
+  describe("subscribe_storage / unsubscribe_storage", () => {
+    interface StorageSubReq {
+      deviceId: string | null;
+      packageName: string;
+      fileName: string;
+      subscribe: boolean;
+    }
+
+    it("invokes the callback with the raw deviceId and acknowledges a subscribe", async () => {
+      const calls: StorageSubReq[] = [];
+      server.setOnStorageSubscriptionRequested(async (req) => {
+        calls.push(req);
+      });
+
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "s-1",
+          command: "subscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+
+      expect(calls).toEqual([
+        {
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+          subscribe: true,
+        },
+      ]);
+      const msgs = socket.getWrittenMessages<{ id?: string; type: string; success?: boolean }>();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].type).toBe("subscription_response");
+      expect(msgs[0].id).toBe("s-1");
+      expect(msgs[0].success).toBe(true);
+    });
+
+    it("passes subscribe:false for an unsubscribe", async () => {
+      const calls: StorageSubReq[] = [];
+      server.setOnStorageSubscriptionRequested(async (req) => {
+        calls.push(req);
+      });
+
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "s-2",
+          command: "unsubscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+
+      expect(calls[0].subscribe).toBe(false);
+      expect(socket.getWrittenMessages<{ type: string }>()[0].type).toBe("subscription_response");
+    });
+
+    it("resolves a deviceSessionUuid to its serial before invoking the callback", async () => {
+      server.sessionResolver.bind("emulator-5556", "session-emulator-5556");
+      const calls: StorageSubReq[] = [];
+      server.setOnStorageSubscriptionRequested(async (req) => {
+        calls.push(req);
+      });
+
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "s-3",
+          command: "subscribe_storage",
+          deviceSessionUuid: "session-emulator-5556",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+
+      expect(calls[0].deviceId).toBe("emulator-5556");
+    });
+
+    it("rejects a request missing packageName or fileName without invoking the callback", async () => {
+      let invoked = false;
+      server.setOnStorageSubscriptionRequested(async () => {
+        invoked = true;
+      });
+
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "s-4",
+          command: "subscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+        }),
+      );
+
+      expect(invoked).toBe(false);
+      const msgs = socket.getWrittenMessages<{ type: string; success?: boolean; error?: string }>();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].type).toBe("error");
+      expect(msgs[0].success).toBe(false);
+    });
+
+    it("acknowledges success even when no callback is configured (fire-and-forget)", async () => {
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "s-5",
+          command: "subscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+
+      const msgs = socket.getWrittenMessages<{ type: string; success?: boolean }>();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].type).toBe("subscription_response");
+      expect(msgs[0].success).toBe(true);
+    });
+  });
 });

@@ -119,6 +119,33 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
     lastObservationDeviceId = deviceId
   }
 
+  /** Storage files currently subscribed (by [subscribeStorage], minus [unsubscribeStorage]). */
+  val storageSubscriptions: Set<StorageSubscriptionKey>
+    get() = _storageSubscriptions.toSet()
+
+  private val _storageSubscriptions = LinkedHashSet<StorageSubscriptionKey>()
+
+  /**
+   * All storage subscribe/unsubscribe calls in order, for asserting lifecycle (subscribe→release).
+   */
+  val storageSubscriptionCalls: List<Pair<String, StorageSubscriptionKey>>
+    get() = _storageSubscriptionCalls.toList()
+
+  private val _storageSubscriptionCalls = mutableListOf<Pair<String, StorageSubscriptionKey>>()
+
+  override fun subscribeStorage(packageName: String, fileName: String) {
+    val key = StorageSubscriptionKey(packageName, fileName)
+    // Mirror the real client's dedup: a repeated subscribe for the same file is a no-op.
+    if (!_storageSubscriptions.add(key)) return
+    _storageSubscriptionCalls.add("subscribe_storage" to key)
+  }
+
+  override fun unsubscribeStorage(packageName: String, fileName: String) {
+    val key = StorageSubscriptionKey(packageName, fileName)
+    if (!_storageSubscriptions.remove(key)) return
+    _storageSubscriptionCalls.add("unsubscribe_storage" to key)
+  }
+
   // -- Test helpers: push updates onto the flows --
   fun emitScreenshot(update: ScreenshotStreamUpdate): Boolean = _screenshotUpdates.tryEmit(update)
 

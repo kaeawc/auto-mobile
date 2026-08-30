@@ -39,4 +39,15 @@ interface ObservationStream {
 
   /** Request a one-off observation for [deviceId] (or the subscribed device when null). */
   fun requestObservation(deviceId: String? = null)
+
+  /**
+   * Register a device-side content observer for [packageName]/[fileName] so external writes to that
+   * key/value store emit `storage_update` frames on [storageUpdates]. Idempotent per (package,
+   * file) and remembered so it is re-applied automatically across reconnects. No-op until
+   * connected.
+   */
+  fun subscribeStorage(packageName: String, fileName: String)
+
+  /** Release the content observer previously registered via [subscribeStorage]. */
+  fun unsubscribeStorage(packageName: String, fileName: String)
 }

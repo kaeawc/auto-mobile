@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -86,6 +87,28 @@ fun StorageDashboard(
       if (newlyHighlighted.isNotEmpty()) {
         val expiresAt = System.currentTimeMillis() + HIGHLIGHT_DURATION_MS
         highlightExpiries = highlightExpiries + newlyHighlighted.associateWith { expiresAt }
+      }
+    }
+  }
+
+  // Register a device-side content observer for each loaded key/value file so *external* writes
+  // emit
+  // storage_update frames -- connecting the observation stream alone never triggers the per-file
+  // subscription the daemon needs (issue #4709 review). Keyed on the file *names* rather than the
+  // whole list so an entry-only change (an optimistic edit or a folded live update, which rebuild
+  // the
+  // list with the same paths) does not churn subscriptions; releases every subscription when the
+  // facet leaves composition or the device/app changes. The stream dedups repeat subscribes.
+  val subscribedFileNames = keyValueFiles.map { it.name }.distinct()
+  DisposableEffect(observationStreamClient, deviceId, packageName, subscribedFileNames) {
+    val stream = observationStreamClient
+    val pkg = packageName
+    if (stream != null && pkg != null) {
+      subscribedFileNames.forEach { stream.subscribeStorage(pkg, it) }
+    }
+    onDispose {
+      if (stream != null && pkg != null) {
+        subscribedFileNames.forEach { stream.unsubscribeStorage(pkg, it) }
       }
     }
   }

@@ -172,6 +172,15 @@ class ObservationStreamClient(
   private var requestedScreenshotIntervalMs: Long? = null
   private var requestedHierarchyIntervalMs: Long? = null
 
+  // Per-file storage subscriptions requested by consumers (the storage facet subscribes each loaded
+  // key/value file so external writes emit storage_update frames). Remembered so they are
+  // re-applied
+  // automatically on every (re)subscribe -- a reconnect would otherwise leave the device-side
+  // content
+  // observers unregistered, silently killing live updates (issue #4709). Guarded by
+  // [ownershipLock].
+  private val storageSubscriptions = LinkedHashSet<StorageSubscriptionKey>()
+
   /**
    * Connect to the observation stream socket and subscribe to updates. Any cadence configured via
    * [setCadence] is sent on the subscribe request and re-applied automatically on reconnect.
@@ -315,6 +324,8 @@ class ObservationStreamClient(
         }
       }
       log.info("Subscribed to observation stream (device: ${deviceId ?: "all"})")
+      // Re-register any remembered per-file storage observers so live updates survive a reconnect.
+      reapplyStorageSubscriptions()
     }
   }
 
@@ -677,6 +688,54 @@ class ObservationStreamClient(
     sendRequest(request)
   }
 
+  override fun subscribeStorage(packageName: String, fileName: String) {
+    val key = StorageSubscriptionKey(packageName, fileName)
+    synchronized(ownershipLock) {
+      // Deduplicate: the facet may re-request the same file across recompositions, and the device
+      // registers one observer per (package, file) regardless.
+      if (!storageSubscriptions.add(key)) return
+    }
+    // Only meaningful once subscribed to a device stream; otherwise it is remembered above and
+    // re-applied by [reapplyStorageSubscriptions] on the next (re)subscribe.
+    if (_connectionState.value.isConnected) {
+      sendStorageSubscription("subscribe_storage", key)
+    }
+  }
+
+  override fun unsubscribeStorage(packageName: String, fileName: String) {
+    val key = StorageSubscriptionKey(packageName, fileName)
+    synchronized(ownershipLock) {
+      if (!storageSubscriptions.remove(key)) return
+    }
+    if (_connectionState.value.isConnected) {
+      sendStorageSubscription("unsubscribe_storage", key)
+    }
+  }
+
+  private fun sendStorageSubscription(command: String, key: StorageSubscriptionKey) {
+    sendRequest(
+      StreamRequest(
+        id = UUID.randomUUID().toString(),
+        command = command,
+        deviceId = subscribedDeviceId,
+        packageName = key.packageName,
+        fileName = key.fileName,
+      )
+    )
+  }
+
+  /**
+   * Re-send every remembered storage subscription so a reconnect re-registers the device-side
+   * content observers. Mirrors how the cadence is re-applied on (re)subscribe. Called after the
+   * subscribe command lands, when [subscribedDeviceId] is already set.
+   */
+  private fun reapplyStorageSubscriptions() {
+    val keys = synchronized(ownershipLock) { storageSubscriptions.toList() }
+    for (key in keys) {
+      sendStorageSubscription("subscribe_storage", key)
+    }
+  }
+
   /**
    * Extract packageName from the hierarchy data. The data structure is: { "hierarchy": {...},
    * "packageName": "com.example.app", ... }
@@ -703,7 +762,15 @@ data class StreamRequest(
   val appId: String? = null,
   val screenshotIntervalMs: Long? = null,
   val hierarchyIntervalMs: Long? = null,
+  val packageName: String? = null,
+  val fileName: String? = null,
 )
+
+/**
+ * Identity of a per-file storage subscription: one device-side content observer per (package,
+ * file).
+ */
+data class StorageSubscriptionKey(val packageName: String, val fileName: String)
 
 @Serializable
 data class StreamResponse(

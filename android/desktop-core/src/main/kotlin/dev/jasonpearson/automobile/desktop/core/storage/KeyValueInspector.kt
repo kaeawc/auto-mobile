@@ -70,8 +70,14 @@ fun KeyValueInspector(
   val colors = SharedTheme.globalColors
   val scope = rememberCoroutineScope()
 
-  // State
-  var selectedFile by remember(keyValueFiles) { mutableStateOf(keyValueFiles.firstOrNull()) }
+  // State. Selection is tracked by stable identity (the file's path) rather than by the
+  // KeyValueFile instance so that a list rebuild -- from an optimistic edit fold or a live
+  // storage_update frame -- does not reset the inspector to the first file and hide the value the
+  // user just edited (#4709 review). Falls back to the first file when the remembered path is
+  // absent: the initial load (no selection yet) or when the selected file disappears from the list.
+  var selectedPath by remember { mutableStateOf<String?>(null) }
+  val selectedFile =
+    keyValueFiles.firstOrNull { it.path == selectedPath } ?: keyValueFiles.firstOrNull()
   var searchQuery by remember { mutableStateOf("") }
   var selectedEntry by remember { mutableStateOf<KeyValueEntry?>(null) }
   var editingEntry by remember { mutableStateOf<KeyValueEntry?>(null) }
@@ -116,7 +122,7 @@ fun KeyValueInspector(
           Row(
             modifier =
               Modifier.fillMaxWidth()
-                .clickable { selectedFile = file }
+                .clickable { selectedPath = file.path }
                 .pointerHoverIcon(PointerIcon.Hand)
                 .background(
                   if (isSelected) colors.text.normal.copy(alpha = 0.08f) else Color.Transparent
@@ -451,13 +457,13 @@ fun KeyValueInspector(
           horizontalArrangement = Arrangement.SpaceBetween,
         ) {
           Text(
-            selectedFile!!.path,
+            selectedFile.path,
             fontSize = 10.sp,
             color = colors.text.normal.copy(alpha = 0.4f),
             fontFamily = FontFamily.Monospace,
           )
           Text(
-            "${filteredEntries.size} of ${selectedFile!!.entries.size} entries",
+            "${filteredEntries.size} of ${selectedFile.entries.size} entries",
             fontSize = 10.sp,
             color = colors.text.normal.copy(alpha = 0.5f),
           )

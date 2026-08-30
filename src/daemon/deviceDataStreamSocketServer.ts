@@ -291,6 +291,19 @@ export type OnNavigationGraphRequestedCallback = (
   appId?: string | null,
 ) => Promise<NavigationGraphStreamData | null>;
 
+/**
+ * Callback invoked when a client asks to (un)subscribe a device-side content observer for one
+ * key/value store, so external writes to it emit `storage_update` frames. `deviceId` is the
+ * resolved device the request targets (null when the client did not scope it). Best-effort: the
+ * daemon logs and continues on failure rather than tearing down the stream (issue #4709).
+ */
+export type OnStorageSubscriptionRequestedCallback = (request: {
+  deviceId: string | null;
+  packageName: string;
+  fileName: string;
+  subscribe: boolean;
+}) => Promise<void>;
+
 // iOS observe (ViewHierarchy.getiOSViewHierarchy -> getLatestHierarchy) can
 // legitimately wait up to 15s for a fresh hierarchy. Keep this wrapper timeout
 // above that so slow-but-valid iOS captures are not reported as stream errors
@@ -344,6 +357,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   private onHierarchyCadenceChanged: OnHierarchyCadenceChangedCallback | null = null;
   private onObservationRequested: OnObservationRequestedCallback | null = null;
   private onNavigationGraphRequested: OnNavigationGraphRequestedCallback | null = null;
+  private onStorageSubscriptionRequested: OnStorageSubscriptionRequestedCallback | null = null;
   private observationRequestTimeoutMs = DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS;
 
   // Previous hierarchy per device, used to compute the per-frame diff annotation
@@ -420,6 +434,14 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    */
   setOnNavigationGraphRequested(callback: OnNavigationGraphRequestedCallback): void {
     this.onNavigationGraphRequested = callback;
+  }
+
+  /**
+   * Set a callback to handle per-file storage (un)subscription requests, so the daemon can register
+   * the device-side content observer that produces `storage_update` frames.
+   */
+  setOnStorageSubscriptionRequested(callback: OnStorageSubscriptionRequestedCallback): void {
+    this.onStorageSubscriptionRequested = callback;
   }
 
   /**
@@ -812,6 +834,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       screenshotIntervalMs?: unknown;
       hierarchyIntervalMs?: unknown;
       subscriptionId?: string;
+      packageName?: string;
+      fileName?: string;
     }>(line);
 
     if (!request) {
@@ -877,6 +901,50 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         };
         this.sendJson(socket, errorResponse);
       }
+      return;
+    }
+
+    // Handle per-file storage (un)subscription: register/release a device-side content observer so
+    // external writes to a key/value store emit storage_update frames (issue #4709). Best-effort and
+    // fire-and-forget — the ack returns immediately; the callback logs and continues on failure so a
+    // flaky device subscription never tears down the stream.
+    if (request.command === "subscribe_storage" || request.command === "unsubscribe_storage") {
+      const subscribe = request.command === "subscribe_storage";
+      const { packageName, fileName } = request;
+      if (!packageName || !fileName) {
+        const errorResponse: SubscriptionResponse = {
+          id: request.id,
+          type: "error",
+          success: false,
+          error: `${request.command} requires packageName and fileName`,
+        };
+        this.sendJson(socket, errorResponse);
+        return;
+      }
+
+      if (this.onStorageSubscriptionRequested) {
+        // Resolve the target device from the pane's session/serial, mirroring request_observation.
+        const deviceId = request.deviceSessionUuid
+          ? this.deviceSessionResolver.resolveDeviceId(request.deviceSessionUuid)
+          : (request.deviceId ?? null);
+        void this.onStorageSubscriptionRequested({
+          deviceId,
+          packageName,
+          fileName,
+          subscribe,
+        }).catch((error) => {
+          logger.warn(
+            `[DeviceDataStream] Error handling ${request.command} for ${packageName}/${fileName}: ${errorMessage(error)}`,
+          );
+        });
+      }
+
+      const response: SubscriptionResponse = {
+        id: request.id,
+        type: "subscription_response",
+        success: true,
+      };
+      this.sendJson(socket, response);
       return;
     }
 

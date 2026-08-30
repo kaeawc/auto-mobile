@@ -9,7 +9,11 @@ import {
   TerminateAppResult,
 } from "../../models";
 import { ActionableError } from "../../models";
-import { TerminateApp } from "./TerminateApp";
+import {
+  DefaultDeviceWindowCacheInvalidator,
+  DeviceWindowCacheInvalidator,
+  TerminateApp,
+} from "./TerminateApp";
 import { ClearAppData } from "./ClearAppData";
 import { logger } from "../../utils/logger";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
@@ -25,7 +29,6 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { isAndroidPackageRunning } from "../../utils/android-cmdline-tools/androidProcessState";
-import { RealObserveScreen } from "../observe/ObserveScreen";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -76,6 +79,7 @@ interface LaunchAppDependencies {
   clearAppDataFactory?: (device: BootedDevice, simctl: SimCtlClient) => IosClearAppDataRunner;
   createAndroidClearAppData?: (device: BootedDevice) => AndroidClearAppDataAction;
   createAndroidColdBoot?: (device: BootedDevice) => AndroidColdBootAction;
+  cacheInvalidator?: DeviceWindowCacheInvalidator;
 }
 
 export class LaunchApp extends BaseVisualChange {
@@ -90,6 +94,7 @@ export class LaunchApp extends BaseVisualChange {
   ) => IosClearAppDataRunner;
   private createAndroidClearAppData: (device: BootedDevice) => AndroidClearAppDataAction;
   private createAndroidColdBoot: (device: BootedDevice) => AndroidColdBootAction;
+  private cacheInvalidator: DeviceWindowCacheInvalidator;
   /**
    * Create an LaunchApp instance
    * @param device - Optional device
@@ -126,6 +131,8 @@ export class LaunchApp extends BaseVisualChange {
     this.createAndroidColdBoot = this.resolveAndroidColdBootFactory(
       dependencies.createAndroidColdBoot,
     );
+    this.cacheInvalidator =
+      dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
   }
 
   private resolveAndroidClearAppDataFactory(
@@ -1029,10 +1036,7 @@ export class LaunchApp extends BaseVisualChange {
     expectedPackageName: string,
     staleObservation: ObserveResult,
   ): LaunchAppResult {
-    if (this.device.platform === "android") {
-      AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
-    }
-    RealObserveScreen.clearCache(this.device.deviceId);
+    this.cacheInvalidator.invalidate(this.device);
     const reportedPackages = this.describeLaunchObservationPackages(staleObservation);
     logger.warn(
       `[LaunchApp] Omitting stale launch observation for ${expectedPackageName}; ` +

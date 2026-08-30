@@ -607,18 +607,30 @@ describe("LaunchApp", () => {
   test("fails without embedding a stale Android observation when the launched app never appears", async () => {
     fakeTimer.enableAutoAdvance();
     const previousPackageName = "com.example.previous";
+    const invalidated: BootedDevice[] = [];
+    const staleLaunchApp = new LaunchApp(device, fakeAdb as any, null, fakeTimer, {
+      cacheInvalidator: {
+        invalidate: (invalidatedDevice) => {
+          invalidated.push(invalidatedDevice);
+        },
+      },
+    });
+    (staleLaunchApp as any).awaitIdle = fakeAwaitIdle;
+    (staleLaunchApp as any).observeScreen = fakeObserveScreen;
+    (staleLaunchApp as any).window = fakeWindow;
 
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
     fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(() => createObserveResult(previousPackageName));
 
-    const result = await launchApp.execute(packageName, false, false);
+    const result = await staleLaunchApp.execute(packageName, false, false);
 
     expect(result.success).toBe(false);
     expect(result.error).toContain(
       `Timed out waiting for launch observation to show ${packageName}`,
     );
     expect(result.observation).toBeUndefined();
+    expect(invalidated).toEqual([device]);
   });
 
   // Deterministic launch payload shape (issue #5872 AC2): when the observation is

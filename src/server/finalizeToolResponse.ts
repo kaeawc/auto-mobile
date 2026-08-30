@@ -460,6 +460,7 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
             toScreen: observationScreenIdentity(sanitized),
           };
         } else {
+          observationOut = sanitized;
           observationDiff = {
             mode: "full",
             reason: "screen_changed",

@@ -415,7 +415,10 @@ describe("finalizeToolResponse", () => {
       metrics: { gfxinfoRaw: "HUGE RAW DUMP", cpuStatsRaw: "CPU RAW", p99: 16 },
       diagnostics: `summary line\n${GFXINFO_DUMP_MARKER}\nmegabytes of raw frame data`,
     };
-    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe" });
+    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), {
+      name: "observe",
+      args: { project: "full" },
+    });
 
     const audit = (finalized.structuredContent as any).performanceAudit;
     expect(audit.metrics.gfxinfoRaw).toBeNull();

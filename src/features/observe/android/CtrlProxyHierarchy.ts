@@ -27,6 +27,7 @@ import { generateSecureId } from "./types";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 import { applyStableViewIdRewrites, assignStableViewIds } from "./StableNodeIdentity";
 import { maxObservationAgeMs } from "../observationFreshness";
+import { isAndroidPackageRunning } from "../../../utils/android-cmdline-tools/androidProcessState";
 
 /** Cooldown after a WebSocket timeout before retrying fresh-data waits.
  *  Keep short: a long cooldown (e.g. 5s) turns a single slow response into
@@ -347,13 +348,13 @@ export class CtrlProxyHierarchy {
 
     try {
       const result = await this.context.adb.executeCommand(
-        `shell pidof ${packageName} || true`,
+        "shell dumpsys activity processes || true",
         timeoutMs,
         undefined,
         true,
         signal,
       );
-      return result.stdout.trim().length > 0;
+      return isAndroidPackageRunning(result.stdout, packageName, cachedHierarchy.hierarchy.userId);
     } catch (error) {
       if (signal?.aborted) {
         throw error;

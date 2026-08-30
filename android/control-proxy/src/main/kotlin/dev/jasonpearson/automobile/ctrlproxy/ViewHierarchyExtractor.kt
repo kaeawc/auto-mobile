@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.graphics.Rect
 import android.os.Build
+import android.os.UserHandle
 import android.text.Spanned
 import android.text.style.ClickableSpan
 import android.util.Log
@@ -125,6 +126,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
       ViewHierarchy(
         packageName = rootNode.packageName?.toString(),
+        userId = UserHandle.myUserId(),
         hierarchy = unifiedHierarchy?.let { WireNodeCodec.materialize(it) },
         intentChooserDetected = intentChooserDetected,
         notificationPermissionDetected = notificationPermissionDetected,
@@ -436,6 +438,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
     return ViewHierarchy(
       packageName = mainPackageName,
+      userId = UserHandle.myUserId(),
       hierarchy = unifiedHierarchy?.let { WireNodeCodec.materialize(it) },
       windows = windowInfos.takeIf { it.isNotEmpty() },
       intentChooserDetected = intentChooserDetected,

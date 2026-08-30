@@ -29,6 +29,8 @@ interface Harness {
   timer: FakeTimer;
   setCached: (h: CachedHierarchy | null) => void;
   setPackageRunning: (running: boolean) => void;
+  setProcessUserId: (userId: number) => void;
+  setProcessNameSuffix: (suffix: string) => void;
   setProbeGate: (gate: Promise<void>) => void;
   waitForProbeStart: () => Promise<void>;
   restore: () => void;
@@ -38,6 +40,8 @@ function createHarness(): Harness {
   const timer = new FakeTimer();
   let cached: CachedHierarchy | null = null;
   let packageRunning = true;
+  let processUserId = 0;
+  let processNameSuffix = "";
   let probeGate: Promise<void> = Promise.resolve();
   let resolveProbeStart!: () => void;
   const probeStarted = new Promise<void>((resolve) => {
@@ -53,7 +57,7 @@ function createHarness(): Harness {
     device: { deviceId: "emulator-5554", platform: "android" } as never,
     adb: {
       executeCommand: async (
-        _command: string,
+        command: string,
         _timeoutMs?: number,
         _options?: unknown,
         _synchronous?: boolean,
@@ -64,7 +68,14 @@ function createHarness(): Harness {
         if (signal?.aborted) {
           throw signal.reason;
         }
-        return { stdout: packageRunning ? "1234\n" : "" };
+        const packageName =
+          command.match(/shell dumpsys activity processes/) && cached?.hierarchy.packageName;
+        return {
+          stdout:
+            packageRunning && packageName
+              ? `1234:${packageName}${processNameSuffix}/u${processUserId}a123\n`
+              : "",
+        };
       },
     } as never,
     getCachedHierarchy: () => cached,
@@ -99,6 +110,12 @@ function createHarness(): Harness {
     },
     setPackageRunning: (running) => {
       packageRunning = running;
+    },
+    setProcessUserId: (userId) => {
+      processUserId = userId;
+    },
+    setProcessNameSuffix: (suffix) => {
+      processNameSuffix = suffix;
     },
     setProbeGate: (gate) => {
       probeGate = gate;
@@ -190,6 +207,52 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     expect(result).not.toBeNull();
     expect(result!.packageName).toBe("com.current.app");
     syncSpy.mockRestore();
+  });
+
+  test("invalidates a work-profile cache when the package runs only for another user", async () => {
+    h = createHarness();
+    h.setCached({
+      hierarchy: {
+        updatedAt: h.timer.now(),
+        packageName: "com.work.app",
+        userId: 10,
+      } as AccessibilityHierarchy,
+      receivedAt: h.timer.now(),
+      fresh: false,
+    });
+    h.setProcessUserId(0);
+
+    const syncSpy = spyOn(h.hierarchy, "requestHierarchySync").mockResolvedValue({
+      hierarchy: {
+        updatedAt: h.timer.now(),
+        packageName: "com.current.app",
+      } as AccessibilityHierarchy,
+    });
+
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+
+    expect(syncSpy).toHaveBeenCalledTimes(1);
+    expect(result!.packageName).toBe("com.current.app");
+    syncSpy.mockRestore();
+  });
+
+  test("retains a cache when its owning user's named process is running", async () => {
+    h = createHarness();
+    h.setCached({
+      hierarchy: {
+        updatedAt: h.timer.now(),
+        packageName: "com.work.app",
+        userId: 10,
+      } as AccessibilityHierarchy,
+      receivedAt: h.timer.now(),
+      fresh: true,
+    });
+    h.setProcessUserId(10);
+    h.setProcessNameSuffix(":ui");
+
+    const result = await h.hierarchy.getLatestHierarchy();
+
+    expect(result.hierarchy?.packageName).toBe("com.work.app");
   });
 
   test("preserves a replacement cache entry received during the liveness probe", async () => {

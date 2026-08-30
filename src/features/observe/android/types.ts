@@ -101,6 +101,8 @@ export interface AccessibilityNodeSelector {
 export interface AccessibilityHierarchy {
   updatedAt: number;
   packageName: string;
+  /** Android user that owns the accessibility service that captured this hierarchy. */
+  userId?: number;
   hierarchy: AccessibilityNode;
   windows?: ViewHierarchyWindowInfo[];
   contentHiddenRegions?: ContentHiddenRegion[];

@@ -13,6 +13,8 @@ data class ViewHierarchy
 constructor(
   val updatedAt: Long = System.currentTimeMillis(),
   val packageName: String? = null,
+  /** Android user that owns the accessibility service that captured this hierarchy. */
+  val userId: Int? = null,
   val hierarchy: UIElementInfo? = null,
   val windowInfo: WindowInfo? = null,
   val windows: List<WindowInfo>? = null,

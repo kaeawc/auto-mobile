@@ -245,8 +245,9 @@ function stripPerformanceAudit(out: ObserveResult): void {
   }
 
   if (audit.violations !== undefined) {
-    const auditWithoutDiagnostics = { ...audit };
-    delete auditWithoutDiagnostics.diagnostics;
+    const auditWithoutDiagnostics = Object.fromEntries(
+      Object.entries(audit).filter(([key]) => key !== "diagnostics"),
+    );
     out.performanceAudit = auditWithoutDiagnostics as NonNullable<
       ObserveResult["performanceAudit"]
     >;

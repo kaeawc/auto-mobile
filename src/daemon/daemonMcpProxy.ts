@@ -100,6 +100,10 @@ function heartbeatIntervalMs(config: DaemonMcpProxyConfig): number {
   return Math.max(1, interval);
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 /**
  * Raised before connecting when the running daemon and MCP client package
  * versions differ but the proxy cannot safely reconcile them immediately.
@@ -116,22 +120,31 @@ export class DaemonVersionMismatchError extends DaemonUnavailableError {
     reason: VersionMismatchReason;
     detail: string;
     retryAfterMs?: number;
+    clientBuild?: BuildIdentity;
+    daemonBuild?: BuildIdentity;
   }) {
-    // The git-SHA build metadata on dev builds is not an installable npm tag,
-    // so the bunx hint must point at the plain published version.
+    // Use the client's own entrypoint when available. Direct callers that do not
+    // provide build identity retain the published-version fallback.
     const installableVersion = releaseVersion(params.clientVersion);
-    const restartCommand =
-      installableVersion.length > 0 && installableVersion !== "unknown"
+    const restartCommand = params.clientBuild?.entryScript
+      ? `${shellQuote(process.execPath)} ${shellQuote(params.clientBuild.entryScript)} --daemon restart`
+      : installableVersion.length > 0 && installableVersion !== "unknown"
         ? `bunx @kaeawc/auto-mobile@${installableVersion} --daemon restart`
         : "the same installed auto-mobile package";
     const retryGuidance =
       params.retryAfterMs !== undefined
-        ? ` Retry after ${params.retryAfterMs}ms or restart the daemon with: ${restartCommand}`
-        : ` Restart the daemon with: ${restartCommand}`;
-    super(
-      `AutoMobile daemon version mismatch: daemon=${params.daemonVersion}, client=${params.clientVersion} ` +
-        `(${params.detail}).${retryGuidance}`,
-    );
+        ? ` Retry after ${params.retryAfterMs}ms or restart the daemon from this client's build: ${restartCommand}`
+        : ` Restart the daemon from this client's build: ${restartCommand}`;
+    const sameRelease =
+      releaseVersion(params.daemonVersion) === releaseVersion(params.clientVersion) &&
+      params.daemonVersion !== params.clientVersion;
+    const mismatchMessage =
+      sameRelease && params.clientBuild && params.daemonBuild
+        ? `AutoMobile daemon build mismatch: daemon build ${describeBuildIdentity(params.daemonBuild)} != ` +
+          `client build ${describeBuildIdentity(params.clientBuild)} (${params.detail}).${retryGuidance}`
+        : `AutoMobile daemon version mismatch: daemon=${params.daemonVersion}, client=${params.clientVersion} ` +
+          `(${params.detail}).${retryGuidance}`;
+    super(mismatchMessage);
     this.name = "DaemonVersionMismatchError";
     this.clientVersion = params.clientVersion;
     this.daemonVersion = params.daemonVersion;
@@ -1043,6 +1056,8 @@ export class DaemonMcpProxy {
         runningVersion,
         "autoStartDisabled",
         "auto-start is disabled",
+        undefined,
+        buildIdentityFromStatus(status),
       );
     }
 
@@ -1057,6 +1072,8 @@ export class DaemonMcpProxy {
           runningVersion,
           "nonNumeric",
           "version comparison is not numeric",
+          undefined,
+          buildIdentityFromStatus(status),
         );
       }
 
@@ -1065,6 +1082,8 @@ export class DaemonMcpProxy {
           runningVersion,
           "daemonNewer",
           "the running daemon is newer than this client",
+          undefined,
+          buildIdentityFromStatus(status),
         );
       }
     }
@@ -1088,6 +1107,7 @@ export class DaemonMcpProxy {
           "cooldown",
           "restart is in cooldown",
           DAEMON_VERSION_RESTART_COOLDOWN_MS - daemonAgeMs,
+          buildIdentityFromStatus(status),
         );
       }
     }
@@ -1116,6 +1136,8 @@ export class DaemonMcpProxy {
         restartedVersion,
         "restartMismatch",
         "daemon restart completed but version still differs",
+        undefined,
+        buildIdentityFromStatus(restartedStatus),
       );
     }
   }
@@ -1125,6 +1147,7 @@ export class DaemonMcpProxy {
     reason: VersionMismatchReason,
     detail: string,
     retryAfterMs?: number,
+    daemonBuild?: BuildIdentity,
   ): DaemonVersionMismatchError {
     const daemonVersion = runningVersion.length > 0 ? runningVersion : "unknown";
     const clientVersion = this.clientVersion.trim();
@@ -1134,6 +1157,8 @@ export class DaemonMcpProxy {
       reason,
       detail,
       retryAfterMs,
+      clientBuild: this.buildIdentity,
+      daemonBuild,
     });
   }
 

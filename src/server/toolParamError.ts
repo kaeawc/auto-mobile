@@ -75,8 +75,33 @@ function coverageKey(unionId: number, path: ReadonlyArray<PropertyKey>): string 
   return `${unionId}#${path.map(String).join(".")}`;
 }
 
-function formatIssue(issue: ZodIssue): string {
+function formatSelectorIssue(issue: ZodIssue, toolName: string, path: string): string | undefined {
+  if (issue.code !== "unrecognized_keys" || toolName !== "tapOn" || path !== "selector") {
+    return undefined;
+  }
+  return `${path} ${issue.message} Accepted: elementId, testTag, text, accessibilityLink, textAny (content-desc is matched by "text")`;
+}
+
+function formatMissingPlatformIssue(
+  issue: ZodIssue,
+  path: string,
+  rawInput: unknown,
+): string | undefined {
+  if (issue.code !== "invalid_value" || path !== "platform") {
+    return undefined;
+  }
+  return rawInput !== undefined && !isProvidedInput(rawInput, issue.path)
+    ? `${path} is required`
+    : undefined;
+}
+
+function formatIssue(issue: ZodIssue, toolName: string, rawInput: unknown): string {
   const path = issue.path.length ? issue.path.join(".") : "parameters";
+  const actionableIssue =
+    formatSelectorIssue(issue, toolName, path) ?? formatMissingPlatformIssue(issue, path, rawInput);
+  if (actionableIssue) {
+    return actionableIssue;
+  }
   if (issue.code === "invalid_type") {
     // zod v4 rejects non-finite numbers (Infinity/-Infinity/NaN) at the base
     // `z.number()` check, so no `.finite()` refinement can carry a custom
@@ -233,7 +258,7 @@ export function formatToolParamError(toolName: string, error: unknown, rawInput?
   const seen = new Set<string>();
   const issues: string[] = [];
   for (const { issue } of selectedIssues) {
-    const formatted = formatIssue(issue);
+    const formatted = formatIssue(issue, toolName, rawInput);
     if (!seen.has(formatted)) {
       seen.add(formatted);
       issues.push(formatted);

@@ -61,6 +61,34 @@ describe("formatToolParamError container hint", () => {
   });
 });
 
+describe("formatToolParamError actionable validation hints", () => {
+  test("explains selector keys when a closed selector receives an unknown key", () => {
+    const result = tapOnSchema.safeParse({
+      platform: "android",
+      selector: { contentDesc: "Add alarm" },
+    });
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("tapOn", result.error, {
+      platform: "android",
+      selector: { contentDesc: "Add alarm" },
+    });
+    expect(message).toContain('Unrecognized key: "contentDesc"');
+    expect(message).toContain(
+      'Accepted: elementId, testTag, text, accessibilityLink, textAny (content-desc is matched by "text")',
+    );
+  });
+
+  test("calls an omitted required platform required instead of an invalid option", () => {
+    const result = observeSchema.safeParse({ deviceId: "emulator-5554" });
+    expect(result.success).toBe(false);
+    const message = formatToolParamError("observe", result.error, {
+      deviceId: "emulator-5554",
+    });
+    expect(message).toContain("platform is required");
+    expect(message).not.toContain("Invalid option");
+  });
+});
+
 // Issue #5769: zod v4 rejects non-finite numbers (Infinity/-Infinity/NaN) at the
 // base `z.number()` check, so its default `invalid_type` text renders as the
 // self-contradictory "<param> expected number, received number" — which reads

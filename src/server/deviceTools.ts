@@ -3798,15 +3798,36 @@ export function registerDeviceTools() {
     // switch to resources. The resource pointers (which also cover not-yet-booted
     // images and richer per-device detail) survive as a `note`.
     const platform: SomePlatform = args.platform ?? "either";
+    const requestedPlatforms: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const deviceManager = getDeviceToolsDependencies().deviceManagerFactory();
     let booted: BootedDevice[] = [];
+    // #5893 item 4: `getBootedDevices` collapses a failed per-platform probe to
+    // `[]`, so a transient tooling failure is indistinguishable from a genuinely
+    // empty inventory. Use the detailed contract, which reports which platforms
+    // completed, and surface an incomplete/error marker so the two are distinct.
+    let succeededPlatforms = new Set<Platform>(requestedPlatforms);
+    let discoveryErrors: BootedDeviceDiscovery["discoveryErrors"];
     try {
-      booted = await deviceManager.getBootedDevices(platform);
+      const discovery = await deviceManager.getBootedDevicesDetailed(platform);
+      booted = discovery.devices;
+      succeededPlatforms = discovery.succeededPlatforms;
+      discoveryErrors = discovery.discoveryErrors;
     } catch (error) {
       // Discovery is best-effort — a partial/failed probe still returns the
-      // resource guidance rather than failing the whole call.
+      // resource guidance rather than failing the whole call. A thrown error
+      // means no platform completed.
       logger.warn(`listDevices booted-device discovery failed: ${errorMessage(error)}`, error);
+      succeededPlatforms = new Set<Platform>();
     }
+
+    const failedPlatforms = requestedPlatforms.filter((p) => !succeededPlatforms.has(p));
+    const discovery = {
+      complete: failedPlatforms.length === 0,
+      failedPlatforms,
+      ...(discoveryErrors && Object.keys(discoveryErrors).length > 0
+        ? { errors: discoveryErrors }
+        : {}),
+    };
 
     const devices = booted.map((device) => ({
       deviceId: device.deviceId,
@@ -3821,6 +3842,7 @@ export function registerDeviceTools() {
       message: `Found ${devices.length} booted device${devices.length === 1 ? "" : "s"}${platformFilter}`,
       devices,
       count: devices.length,
+      discovery,
       note: {
         message:
           "Acquire a booted device with getAndroid { deviceId } or getApple { deviceId }. " +

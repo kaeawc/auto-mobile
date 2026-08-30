@@ -27,6 +27,8 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
   private verificationAttempts: Map<string, number> = new Map();
   private deviceVerificationCalls: Map<string, Platform> = new Map();
   private lastOptions: DeviceReadyOptions | undefined;
+  private lastEnsureDeviceReadyPlatform: SomePlatform | undefined;
+  private lastEnsureDeviceReadyDeviceId: string | undefined;
 
   /**
    * Configure the list of connected devices
@@ -124,6 +126,23 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
   }
 
   /**
+   * The platform passed to the most recent ensureDeviceReady call. Lets a test
+   * prove ToolRegistry narrowed "either" to a concrete platform before
+   * resolving (e.g. direct-mode sessionUuid resolution, #5893).
+   */
+  getLastEnsureDeviceReadyPlatform(): SomePlatform | undefined {
+    return this.lastEnsureDeviceReadyPlatform;
+  }
+
+  /**
+   * The deviceId passed to the most recent ensureDeviceReady call, or undefined
+   * when none was provided.
+   */
+  getLastEnsureDeviceReadyDeviceId(): string | undefined {
+    return this.lastEnsureDeviceReadyDeviceId;
+  }
+
+  /**
    * Check if ensureDeviceReady was called at least once
    * @returns true if ensureDeviceReady was called
    */
@@ -190,6 +209,8 @@ export class FakeDeviceSessionManager implements DeviceSessionManager {
   ): Promise<BootedDevice> {
     this.ensureDeviceReadyCalls++;
     this.lastOptions = options;
+    this.lastEnsureDeviceReadyPlatform = platform;
+    this.lastEnsureDeviceReadyDeviceId = providedDeviceId;
 
     if (this.simulateDisconnection) {
       throw new ActionableError("Device disconnected during verification");

@@ -88,6 +88,7 @@ describe("listDevices tool (#5870)", () => {
 
   beforeEach(() => {
     fakeDeviceUtils.clearHistory();
+    fakeDeviceUtils.failedPlatforms.clear();
     fakeDeviceUtils.setBootedDevices("android", [android]);
     fakeDeviceUtils.setBootedDevices("ios", [ios]);
   });
@@ -129,6 +130,50 @@ describe("listDevices tool (#5870)", () => {
     const noteText = JSON.stringify(payload.note);
     expect(noteText).toContain("automobile:devices/booted");
     expect(noteText).toContain("automobile:devices/images");
+  });
+
+  test("marks discovery complete when every requested platform succeeds", async () => {
+    const payload = await callListDevices();
+
+    // #5893 item 4: a full sweep is explicitly complete, so an empty inventory
+    // is distinguishable from a failed scan.
+    expect(payload.discovery).toBeDefined();
+    expect(payload.discovery.complete).toBe(true);
+    expect(payload.discovery.failedPlatforms ?? []).toEqual([]);
+  });
+
+  test("surfaces an incomplete marker when a platform's discovery fails (#5893)", async () => {
+    // iOS discovery is unavailable this sweep; Android still succeeds.
+    fakeDeviceUtils.failedPlatforms.add("ios");
+
+    const payload = await callListDevices();
+
+    // Only the reachable platform's device is returned...
+    expect(payload.count).toBe(1);
+    expect(payload.devices).toEqual([
+      expect.objectContaining({ platform: "android", deviceId: "emulator-5554" }),
+    ]);
+
+    // ...but the response makes the failed scan distinguishable from empty.
+    expect(payload.discovery).toBeDefined();
+    expect(payload.discovery.complete).toBe(false);
+    expect(payload.discovery.failedPlatforms).toEqual(["ios"]);
+    expect(JSON.stringify(payload.discovery.errors)).toContain("iOS");
+    // The detailed contract is what gets consulted now.
+    expect(
+      fakeDeviceUtils.getExecutedOperations().some((op) => op.startsWith("getBootedDevices")),
+    ).toBe(true);
+  });
+
+  test("distinguishes a genuinely empty inventory from a failed scan", async () => {
+    fakeDeviceUtils.setBootedDevices("android", []);
+    fakeDeviceUtils.setBootedDevices("ios", []);
+
+    const payload = await callListDevices();
+
+    expect(payload.count).toBe(0);
+    expect(payload.discovery.complete).toBe(true);
+    expect(payload.discovery.failedPlatforms ?? []).toEqual([]);
   });
 
   test("filters by platform when provided", async () => {

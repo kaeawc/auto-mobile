@@ -230,6 +230,7 @@ describe("XcodebuildClient streaming runner", () => {
     const timer = new FakeTimer();
     const child = new FakeChildProcess(timer);
     child.setSpawnError("posix_spawn: executable missing");
+    expect(child.pid).toBeUndefined();
     const client = new XcodebuildClient(
       async () => createExecResult("Xcode 26.5", ""),
       timer,

@@ -65,6 +65,8 @@ import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
 import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
 import { createTapStrategy } from "./strategies/createTapStrategy";
 import { LongPressMetadataDetector, type LongPressMetadata } from "./LongPressMetadataDetector";
+import { RealWaitForCondition } from "../observe/WaitForCondition";
+import type { WaitForCondition } from "../observe/interfaces/WaitForCondition";
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 
@@ -83,6 +85,7 @@ interface TapOnElementDependencies {
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
   iosVoiceOverDetector?: IosVoiceOverDetector;
   featureFlags?: FeatureFlagService;
+  waitForCondition?: WaitForCondition;
   /**
    * Override the platform-specific {@link TapStrategy}. Tests use this
    * to inject a fake; production code leaves it unset so the constructor
@@ -104,6 +107,8 @@ interface TapOnElementDependencies {
  */
 const POST_TAP_SETTLE_MS = 300;
 const POST_TAP_REFRESH_TIMEOUT_MS = 1500;
+const POST_TAP_EFFECT_TIMEOUT_MS = 2500;
+const POST_TAP_EFFECT_POLL_MS = 150;
 
 /** Brief debounce between the original tap and the retry tap when a ghost tap
  *  was detected. Just enough to let any inflight gesture queue drain. */
@@ -130,6 +135,7 @@ export class TapOnElement extends BaseVisualChange {
   private iosVoiceOverDetector: IosVoiceOverDetector;
   private strategy: TapStrategy;
   private longPressMetadataDetector: LongPressMetadataDetector;
+  private readonly waitForCondition: WaitForCondition;
   private static readonly SEARCH_UNTIL_DEFAULT_MS = 1500;
   private static readonly SEARCH_UNTIL_MIN_MS = 100;
   private static readonly SEARCH_UNTIL_MAX_MS = 12000;
@@ -199,6 +205,8 @@ export class TapOnElement extends BaseVisualChange {
     options: TapOnElementDependencies = {},
   ) {
     super(device, adb, options.timer);
+    this.waitForCondition =
+      options.waitForCondition ?? new RealWaitForCondition(this.observeScreen, this.timer);
     this.finder = new DefaultElementFinder();
     this.geometry = new DefaultElementGeometry();
     this.elementParser = new DefaultElementParser();
@@ -511,7 +519,7 @@ export class TapOnElement extends BaseVisualChange {
       previous.layoutSeqSum !== current.layoutSeqSum;
     return {
       screenChanged: changed,
-      basis: changed ? "activeWindow+layoutSeqSum changed" : "activeWindow+layoutSeqSum unchanged",
+      basis: changed ? "activeWindow changed" : "activeWindow unchanged",
     };
   }
 
@@ -556,6 +564,36 @@ export class TapOnElement extends BaseVisualChange {
         basis: "insufficient observation data",
       }
     );
+  }
+
+  private async deriveTapEffectAfterPostTapObservation(
+    previousObservation: ObserveResult | null,
+    currentObservation: ObserveResult,
+    signal?: AbortSignal,
+  ): Promise<TapOnElementResult["effect"]> {
+    const immediateEffect = this.deriveTapEffect(previousObservation, currentObservation);
+    if (
+      this.device.platform !== "android" ||
+      !previousObservation ||
+      immediateEffect?.screenChanged === true
+    ) {
+      return immediateEffect;
+    }
+
+    // A stable source tree can arrive before Android begins the activity
+    // transition. Wait for an actual post-tap difference instead of treating
+    // that transient stability as proof that the tap had no effect.
+    const effectObservation = await this.waitForCondition.execute(
+      (observation) => ({
+        matched: this.deriveTapEffect(previousObservation, observation)?.screenChanged === true,
+      }),
+      {
+        timeoutMs: POST_TAP_EFFECT_TIMEOUT_MS,
+        pollMs: POST_TAP_EFFECT_POLL_MS,
+        signal,
+      },
+    );
+    return this.deriveTapEffect(previousObservation, effectObservation.observation);
   }
 
   private isElementTapTargetOffScreen(
@@ -1692,7 +1730,11 @@ export class TapOnElement extends BaseVisualChange {
       );
 
       if (result.success && result.observation && result.element) {
-        result.effect = this.deriveTapEffect(previousObserveResult, result.observation);
+        result.effect = await this.deriveTapEffectAfterPostTapObservation(
+          previousObserveResult,
+          result.observation,
+          signal,
+        );
         const selectedElements = await this.selectionStateTracker.finalize({
           action: options.action,
           selectionState: selectionCapture,

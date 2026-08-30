@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import type {
+  ConditionPredicate,
+  WaitForCondition,
+} from "../../../src/features/observe/interfaces/WaitForCondition";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -25,17 +29,20 @@ function makeObservation(overrides: Partial<ObserveResult>): ObserveResult {
   };
 }
 
-function createTapOnElement(): { tap: TapOnElement; timer: FakeTimer } {
+function createTapOnElement(
+  platform: "android" | "ios" = "android",
+  waitForCondition?: WaitForCondition,
+): { tap: TapOnElement; timer: FakeTimer } {
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const tap = new TapOnElement(
     {
       name: "test-device",
-      platform: "android",
+      platform,
       deviceId: "emulator-5554",
     } as any,
     new FakeAdbClient() as any,
-    { timer },
+    { timer, waitForCondition },
   );
   return { tap, timer };
 }
@@ -194,7 +201,7 @@ describe("deriveTapEffect", () => {
 
     expect((tap as any).deriveTapEffect(previous, current)).toEqual({
       screenChanged: false,
-      basis: "activeWindow+layoutSeqSum unchanged",
+      basis: "activeWindow unchanged",
     });
   });
 
@@ -205,6 +212,123 @@ describe("deriveTapEffect", () => {
       screenChanged: false,
       basis: "insufficient observation data",
     });
+  });
+
+  test("waits for a changed Android observation before deriving the effect", async () => {
+    const stale = makeObservation({
+      activeWindow: {
+        appId: "com.android.settings",
+        activityName: ".SettingsHomepageActivity",
+        layoutSeqSum: 0,
+      },
+    });
+    const destination = makeObservation({
+      activeWindow: {
+        appId: "com.android.settings",
+        activityName: ".SubSettings",
+        layoutSeqSum: 0,
+      },
+    });
+    let waitCalls = 0;
+    const waitForCondition: WaitForCondition = {
+      execute: async (predicate: ConditionPredicate) => {
+        waitCalls++;
+        expect(predicate(destination).matched).toBe(true);
+        return {
+          matched: true,
+          candidates: [],
+          observation: destination,
+          polls: 3,
+          waitMs: 300,
+          timedOut: false,
+        };
+      },
+    };
+    const { tap } = createTapOnElement("android", waitForCondition);
+
+    const effect = await (tap as any).deriveTapEffectAfterPostTapObservation(stale, stale);
+
+    expect(waitCalls).toBe(1);
+    expect(effect).toEqual({
+      screenChanged: true,
+      basis: "activeWindow changed",
+    });
+  });
+
+  test("does not wait when the initial Android observation shows a change", async () => {
+    const stale = makeObservation({
+      activeWindow: {
+        appId: "com.android.settings",
+        activityName: ".SettingsHomepageActivity",
+        layoutSeqSum: 0,
+      },
+    });
+    const destination = makeObservation({
+      activeWindow: {
+        appId: "com.android.settings",
+        activityName: ".SubSettings",
+        layoutSeqSum: 0,
+      },
+    });
+    let waitCalls = 0;
+    const waitForCondition: WaitForCondition = {
+      execute: async () => {
+        waitCalls++;
+        return {
+          matched: true,
+          candidates: [],
+          observation: destination,
+          polls: 1,
+          waitMs: 0,
+          timedOut: false,
+        };
+      },
+    };
+    const { tap } = createTapOnElement("android", waitForCondition);
+
+    const effect = await (tap as any).deriveTapEffectAfterPostTapObservation(stale, destination);
+
+    expect(effect).toEqual({
+      screenChanged: true,
+      basis: "activeWindow changed",
+    });
+    expect(waitCalls).toBe(0);
+  });
+
+  test("does not add a post-tap wait for iOS effects", async () => {
+    const observation = makeObservation({
+      activeWindow: {
+        appId: "com.apple.Preferences",
+        activityName: ".Root",
+        layoutSeqSum: 0,
+      },
+    });
+    let waitCalls = 0;
+    const waitForCondition: WaitForCondition = {
+      execute: async () => {
+        waitCalls++;
+        return {
+          matched: true,
+          candidates: [],
+          observation,
+          polls: 2,
+          waitMs: 150,
+          timedOut: false,
+        };
+      },
+    };
+    const { tap } = createTapOnElement("ios", waitForCondition);
+
+    const effect = await (tap as any).deriveTapEffectAfterPostTapObservation(
+      observation,
+      observation,
+    );
+
+    expect(effect).toEqual({
+      screenChanged: false,
+      basis: "activeWindow unchanged",
+    });
+    expect(waitCalls).toBe(0);
   });
 });
 

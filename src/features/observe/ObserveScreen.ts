@@ -90,6 +90,11 @@ function boundCachedLayoutWarnings(result: ObserveResult | undefined): ObserveRe
  */
 const SYSTEM_UI_WINDOW_PACKAGES = new Set<string>(["com.android.systemui"]);
 
+interface PostCaptureForegroundIdentity {
+  sampled: boolean;
+  identity: string | undefined;
+}
+
 function isAccessibilityViewClass(foregroundActivity: string): boolean {
   const activityName = foregroundActivity.split("/")[1] ?? "";
   return (
@@ -368,7 +373,7 @@ export class RealObserveScreen implements ObserveScreen {
         this.platformValidator,
       );
 
-      await this.reconcileActiveWindowAttribution(result, foregroundIdentity, signal);
+      const postCaptureForeground = await this.reconcileActiveWindowAttribution(result, signal);
 
       // Uncapped here; the output boundary (sanitizeObserveResult / the observe
       // served path in finalizeToolResponse) caps AFTER any scope narrowing so an
@@ -441,6 +446,7 @@ export class RealObserveScreen implements ObserveScreen {
         windowIdentityMismatch: await this.resolveWindowIdentityMismatch(
           result,
           foregroundIdentity,
+          postCaptureForeground,
           signal,
         ),
       });
@@ -810,39 +816,29 @@ export class RealObserveScreen implements ObserveScreen {
    * they are safer than the stale activity name for `activeWindow` consumers
    * such as `waitFor` (issue #5972). System UI is intentionally excluded: a
    * system panel can validly be the accessible window while another app remains
-   * the resumed activity beneath it. A pre-capture sample that disagrees with
-   * the hierarchy is confirmed after capture before it can reject the correction.
+   * the resumed activity beneath it. The post-capture sample is returned so
+   * freshness diagnostics can reuse the same ground-truth check.
    */
   private async reconcileActiveWindowAttribution(
     result: ObserveResult,
-    foregroundIdentity: Promise<string | undefined>,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<PostCaptureForegroundIdentity> {
     const observed = result.viewHierarchy?.packageName;
-    let foreground = await foregroundIdentity;
-    if (
-      foreground !== undefined &&
-      observed !== undefined &&
-      foreground !== observed &&
-      !SYSTEM_UI_WINDOW_PACKAGES.has(observed)
-    ) {
-      const confirmed = await this.deviceStateCollector.collectForegroundIdentity(signal);
-      if (confirmed === observed) {
-        foreground = confirmed;
-      }
-    }
     const activeWindow = result.activeWindow;
-    const hasConfirmedReplacement =
-      foreground !== undefined &&
-      observed === foreground &&
-      activeWindow !== undefined &&
-      activeWindow.appId !== foreground &&
-      !SYSTEM_UI_WINDOW_PACKAGES.has(observed);
-    if (!hasConfirmedReplacement || foreground === undefined) {
-      return;
+    if (
+      observed === undefined ||
+      activeWindow === undefined ||
+      activeWindow.appId === observed ||
+      SYSTEM_UI_WINDOW_PACKAGES.has(observed)
+    ) {
+      return { sampled: false, identity: undefined };
     }
 
-    result.activeWindow = { ...activeWindow, appId: foreground, activityName: "" };
+    const confirmed = await this.deviceStateCollector.collectForegroundIdentity(signal);
+    if (confirmed === observed) {
+      result.activeWindow = { ...activeWindow, appId: observed, activityName: "" };
+    }
+    return { sampled: true, identity: confirmed };
   }
 
   /**
@@ -881,18 +877,22 @@ export class RealObserveScreen implements ObserveScreen {
   private async resolveWindowIdentityMismatch(
     result: ObserveResult,
     foregroundIdentity: Promise<string | undefined>,
+    postCaptureForeground: PostCaptureForegroundIdentity,
     signal?: AbortSignal,
   ): Promise<{ observed: string; foreground: string } | undefined> {
     const foreground = await foregroundIdentity;
     const observed = result.viewHierarchy?.packageName ?? result.activeWindow?.appId;
-    if (!foreground || !observed || observed === foreground) {
+    if (!foreground || !observed) {
       return undefined;
     }
     if (SYSTEM_UI_WINDOW_PACKAGES.has(observed) || SYSTEM_UI_WINDOW_PACKAGES.has(foreground)) {
       return undefined;
     }
-    // Confirm the mismatch is steady-state, not a transient transition (see above).
-    const confirmed = await this.deviceStateCollector.collectForegroundIdentity(signal);
+    const confirmed = postCaptureForeground.sampled
+      ? postCaptureForeground.identity
+      : foreground === observed
+        ? undefined
+        : await this.deviceStateCollector.collectForegroundIdentity(signal);
     if (!confirmed || confirmed !== foreground || confirmed === observed) {
       return undefined;
     }

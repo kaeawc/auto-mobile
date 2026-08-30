@@ -393,6 +393,50 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.verified).toBe(true);
   });
 
+  test("does not overwrite a newer active window with a stale hierarchy", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      ...calendarHierarchy(now),
+      foregroundActivity: "com.android.settings/.Settings",
+    });
+
+    // The initial parallel sample agrees with the stale Calendar hierarchy,
+    // while the post-capture sample confirms the newer Settings window.
+    const sequence = [
+      { packageName: "com.google.android.calendar", userId: 0 },
+      { packageName: "com.android.settings", userId: 0 },
+    ];
+    class SequencedForegroundAdb extends FakeAdbExecutor {
+      async getForegroundApp(): Promise<{ packageName: string; userId: number } | null> {
+        return sequence.shift() ?? { packageName: "com.android.settings", userId: 0 };
+      }
+    }
+    const fakeAdb = new SequencedForegroundAdb();
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBe("com.android.settings");
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.verified).toBe(true);
+  });
+
   test("an active IME is not flagged: the check uses the captured hierarchy's package", async () => {
     // With a soft keyboard active, the a11y foregroundActivity (→ activeWindow.appId)
     // can be the IME root's package while the captured hierarchy is the underlying

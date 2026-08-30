@@ -303,6 +303,29 @@ describe("TerminateApp (Android)", () => {
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(true);
   });
 
+  test("terminates an installed app running under a numeric system UID", async () => {
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);
+    fakeAdb.setCommandResult(
+      "shell pm list packages --user 0 -f com.android.settings | grep -c com.android.settings",
+      "1",
+    );
+    fakeAdb.setCommandResult(
+      "shell dumpsys activity processes",
+      "*APP* UID 1000 ProcessRecord{3dc154f 30779:com.android.settings/1000}",
+    );
+    fakeAdb.setCommandResult("shell am force-stop --user 0 com.android.settings", "");
+
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
+    const result = await terminateApp.execute("com.android.settings", { skipObservation: true });
+
+    expect(result.wasRunning).toBe(true);
+    expect(result.wasForeground).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("shell am force-stop --user 0 com.android.settings")).toBe(
+      true,
+    );
+  });
+
   test("invalidates the cached window record after a successful force-stop (issue #5867)", async () => {
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
     fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 0x4000, running: true }]);

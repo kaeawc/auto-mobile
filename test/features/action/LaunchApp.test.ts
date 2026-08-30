@@ -82,10 +82,10 @@ describe("LaunchApp", () => {
   test("returns observation when app is already in foreground", async () => {
     const controller = new AbortController();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
-    fakeAdb.setCommandResponse(
-      `shell dumpsys activity processes | grep -E "${packageName}/u0a" | wc -l`,
-      { stdout: "1\n", stderr: "" },
-    );
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "123:com.example.app/u0a123\n",
+      stderr: "",
+    });
 
     const result = await launchApp.execute(
       packageName,
@@ -107,6 +107,35 @@ describe("LaunchApp", () => {
         .every((options) => options.signal === controller.signal),
     ).toBe(true);
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
+  });
+
+  test("recognizes a running app whose process uses a numeric system UID", async () => {
+    const controller = new AbortController();
+    const settingsPackageName = "com.android.settings";
+    fakeAdb.setCommandResponse("shell pm list packages --user 0", {
+      stdout: `package:${settingsPackageName}\n`,
+      stderr: "",
+    });
+    fakeAdb.setCommandResponse("shell pm list packages -s --user 0", { stdout: "", stderr: "" });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "*APP* UID 1000 ProcessRecord{3dc154f 30779:com.android.settings/1000}",
+      stderr: "",
+    });
+    fakeAdb.setForegroundApp({ packageName: settingsPackageName, userId: 0 });
+
+    const result = await launchApp.execute(
+      settingsPackageName,
+      false,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      controller.signal,
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.error).toBe("App is already in foreground");
+    expect(fakeAdb.wasCommandExecuted("shell dumpsys activity processes")).toBe(true);
   });
 
   test("stops launch when device loss cancels the operation during preflight", async () => {
@@ -338,13 +367,10 @@ describe("LaunchApp", () => {
       stdout: "Starting: Intent { act=android.intent.action.MAIN }",
       stderr: "",
     });
-    fakeAdb.setCommandResponse(
-      `shell dumpsys activity processes | grep -E "${settingsPackageName}/u0a" | wc -l`,
-      {
-        stdout: "0\n",
-        stderr: "",
-      },
-    );
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "",
+      stderr: "",
+    });
     fakeAdb.setForegroundApp({ packageName: settingsPackageName, userId: 0 });
     fakeObserveScreen.setObserveResult(createObserveResult(settingsPackageName));
 
@@ -367,10 +393,10 @@ describe("LaunchApp", () => {
   test("clears Android app data through the injected action before relaunch", async () => {
     fakeTimer.enableAutoAdvance();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
-    fakeAdb.setCommandResponse(
-      `shell dumpsys activity processes | grep -E "${packageName}/u0a" | wc -l`,
-      { stdout: "1\n", stderr: "" },
-    );
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "123:com.example.app/u0a123\n",
+      stderr: "",
+    });
 
     const clearCalls: Array<{
       device: BootedDevice;
@@ -416,10 +442,7 @@ describe("LaunchApp", () => {
   test("clears Android app data through the injected action before relaunch when not running", async () => {
     fakeTimer.enableAutoAdvance();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
-    fakeAdb.setCommandResponse(
-      `shell dumpsys activity processes | grep -E "${packageName}/u0a" | wc -l`,
-      { stdout: "0\n", stderr: "" },
-    );
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
 
     const clearCalls: Array<{
       device: BootedDevice;
@@ -449,10 +472,10 @@ describe("LaunchApp", () => {
   test("cold boots Android through the injected action before relaunch", async () => {
     fakeTimer.enableAutoAdvance();
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
-    fakeAdb.setCommandResponse(
-      `shell dumpsys activity processes | grep -E "${packageName}/u0a" | wc -l`,
-      { stdout: "1\n", stderr: "" },
-    );
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: "123:com.example.app/u0a123\n",
+      stderr: "",
+    });
 
     const clearCalls: string[] = [];
     const coldBootCalls: Array<{ device: BootedDevice; packageName: string; options: unknown }> =
@@ -499,10 +522,7 @@ describe("LaunchApp", () => {
 
   test("waits for foreground before returning observation", async () => {
     fakeAdb.setForegroundApp(null);
-    fakeAdb.setCommandResponse(
-      `shell dumpsys activity processes | grep -E "${packageName}/u0a" | wc -l`,
-      { stdout: "0\n", stderr: "" },
-    );
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
 
     const resultPromise = launchApp.execute(packageName, false, false);
 
@@ -532,10 +552,7 @@ describe("LaunchApp", () => {
     ];
 
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
-    fakeAdb.setCommandResponse(
-      `shell dumpsys activity processes | grep -E "${packageName}/u0a" | wc -l`,
-      { stdout: "0\n", stderr: "" },
-    );
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(
       () => observations.shift() ?? createObserveResult(packageName),
     );
@@ -566,10 +583,7 @@ describe("LaunchApp", () => {
     const permissionControllerPackageName = "com.google.android.permissioncontroller";
 
     fakeAdb.setForegroundApp({ packageName: permissionControllerPackageName, userId: 0 });
-    fakeAdb.setCommandResponse(
-      `shell dumpsys activity processes | grep -E "${packageName}/u0a" | wc -l`,
-      { stdout: "0\n", stderr: "" },
-    );
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult({
       ...createObserveResult(permissionControllerPackageName),
       activeWindow: {
@@ -595,10 +609,7 @@ describe("LaunchApp", () => {
     const previousPackageName = "com.example.previous";
 
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
-    fakeAdb.setCommandResponse(
-      `shell dumpsys activity processes | grep -E "${packageName}/u0a" | wc -l`,
-      { stdout: "0\n", stderr: "" },
-    );
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(() => createObserveResult(previousPackageName));
 
     const result = await launchApp.execute(packageName, false, false);
@@ -618,10 +629,7 @@ describe("LaunchApp", () => {
     const previousPackageName = "com.example.previous";
 
     fakeAdb.setForegroundApp({ packageName, userId: 0 });
-    fakeAdb.setCommandResponse(
-      `shell dumpsys activity processes | grep -E "${packageName}/u0a" | wc -l`,
-      { stdout: "0\n", stderr: "" },
-    );
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
     fakeObserveScreen.setObserveResult(() => createObserveResult(previousPackageName));
 
     const result = await launchApp.execute(packageName, false, false);

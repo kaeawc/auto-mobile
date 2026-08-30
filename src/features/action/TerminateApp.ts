@@ -15,6 +15,7 @@ import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { getIosInstalledAppBundleId } from "../../utils/ios-cmdline-tools/iosInstalledApp";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { RealObserveScreen } from "../observe/ObserveScreen";
+import { isAndroidPackageRunning } from "../../utils/android-cmdline-tools/androidProcessState";
 
 /**
  * Invalidates the host-side cached window/hierarchy record for a device after
@@ -166,7 +167,7 @@ export class TerminateApp extends BaseVisualChange {
             undefined,
             true,
           );
-          return result.stdout.includes(`${packageName}/u${targetUserId}a`);
+          return isAndroidPackageRunning(result.stdout, packageName, targetUserId);
         } catch (error) {
           logger.warn(`[TerminateApp] Running-state check failed for user ${targetUserId}`, error);
           throw new ActionableError(

@@ -888,15 +888,31 @@ export class RealObserveScreen implements ObserveScreen {
     if (SYSTEM_UI_WINDOW_PACKAGES.has(observed) || SYSTEM_UI_WINDOW_PACKAGES.has(foreground)) {
       return undefined;
     }
-    const confirmed = postCaptureForeground.sampled
-      ? postCaptureForeground.identity
-      : foreground === observed
-        ? undefined
-        : await this.deviceStateCollector.collectForegroundIdentity(signal);
+    const confirmed = await this.resolvePostCaptureForegroundIdentity(
+      foreground,
+      observed,
+      postCaptureForeground,
+      signal,
+    );
     if (!confirmed || confirmed !== foreground || confirmed === observed) {
       return undefined;
     }
     return { observed, foreground };
+  }
+
+  private async resolvePostCaptureForegroundIdentity(
+    foreground: string,
+    observed: string,
+    postCaptureForeground: PostCaptureForegroundIdentity,
+    signal?: AbortSignal,
+  ): Promise<string | undefined> {
+    if (postCaptureForeground.sampled) {
+      return postCaptureForeground.identity;
+    }
+    if (foreground === observed) {
+      return undefined;
+    }
+    return this.deviceStateCollector.collectForegroundIdentity(signal);
   }
 
   private resolveObservationTimestampMs(result: ObserveResult): number | undefined {

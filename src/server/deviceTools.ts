@@ -10,6 +10,7 @@ import {
   MultiPlatformDeviceManager,
   PlatformDeviceManager,
 } from "../utils/deviceUtils";
+import { type DiscoverySource, sourcesForPlatform } from "../utils/discoverySource";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, Platform, SomePlatform } from "../models";
 import type {
@@ -3806,24 +3807,39 @@ export function registerDeviceTools() {
     // empty inventory. Use the detailed contract, which reports which platforms
     // completed, and surface an incomplete/error marker so the two are distinct.
     let succeededPlatforms = new Set<Platform>(requestedPlatforms);
+    // #5918: iOS is discovered by two independent sources (simctl + devicectl).
+    // `succeededPlatforms.ios` tracks only the simulator source, so a devicectl
+    // failure leaves the platform "succeeded" while physical-iOS discovery is
+    // actually incomplete. Derive completeness from the finer per-source set,
+    // falling back to the platform aggregate for producers that predate #5683
+    // (which return no `succeededSources`).
+    let succeededSources: Set<DiscoverySource> | undefined;
     let discoveryErrors: BootedDeviceDiscovery["discoveryErrors"];
     try {
       const discovery = await deviceManager.getBootedDevicesDetailed(platform);
       booted = discovery.devices;
       succeededPlatforms = discovery.succeededPlatforms;
+      succeededSources = discovery.succeededSources;
       discoveryErrors = discovery.discoveryErrors;
     } catch (error) {
       // Discovery is best-effort — a partial/failed probe still returns the
       // resource guidance rather than failing the whole call. A thrown error
-      // means no platform completed.
+      // means no platform (and thus no source) completed.
       logger.warn(`listDevices booted-device discovery failed: ${errorMessage(error)}`, error);
       succeededPlatforms = new Set<Platform>();
+      succeededSources = new Set<DiscoverySource>();
     }
 
     const failedPlatforms = requestedPlatforms.filter((p) => !succeededPlatforms.has(p));
+    const failedSources = succeededSources
+      ? requestedPlatforms
+          .flatMap((p) => sourcesForPlatform(p))
+          .filter((source) => !succeededSources!.has(source))
+      : undefined;
     const discovery = {
-      complete: failedPlatforms.length === 0,
+      complete: failedSources ? failedSources.length === 0 : failedPlatforms.length === 0,
       failedPlatforms,
+      ...(failedSources && failedSources.length > 0 ? { failedSources } : {}),
       ...(discoveryErrors && Object.keys(discoveryErrors).length > 0
         ? { errors: discoveryErrors }
         : {}),

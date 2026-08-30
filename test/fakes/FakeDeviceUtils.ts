@@ -6,6 +6,11 @@ import {
   DeviceImageDiscovery,
   PlatformDeviceManager,
 } from "../../src/utils/deviceUtils";
+import {
+  type DiscoverySource,
+  discoverySourceFor,
+  sourcesForPlatform,
+} from "../../src/utils/discoverySource";
 
 /**
  * Fake implementation of PlatformDeviceManager for testing
@@ -169,24 +174,60 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
    */
   failedPlatforms: Set<Platform> = new Set();
 
+  /**
+   * Individual discovery sources to report as failed, one level finer than
+   * `failedPlatforms` (#5683). Failing `ios-physical` alone models the macOS
+   * case where simctl completed but devicectl did not: the iOS platform still
+   * aggregates as succeeded (it tracks the simulator source) while the physical
+   * source is absent from `succeededSources`.
+   */
+  failedSources: Set<DiscoverySource> = new Set();
+
+  /**
+   * Omit `succeededSources` from the result to model a producer that predates
+   * per-source reporting, exercising the consumer's platform-aggregate fallback.
+   */
+  omitSucceededSources: boolean = false;
+
   async getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery> {
     const requested: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
     const devices: BootedDevice[] = [];
     const succeededPlatforms = new Set<Platform>();
+    const succeededSources = new Set<DiscoverySource>();
     const discoveryErrors: BootedDeviceDiscovery["discoveryErrors"] = {};
     for (const p of requested) {
-      if (this.failedPlatforms.has(p)) {
+      // Delegate to getBootedDevices so operation tracking stays consistent,
+      // then assemble per source: iOS's two sources fail independently, so a
+      // failed simctl must not drop the physical devices devicectl still
+      // returns (and vice versa), matching FakeDeviceManager and production.
+      const platformDevices = await this.getBootedDevices(p);
+      for (const source of sourcesForPlatform(p)) {
+        if (this.failedPlatforms.has(p) || this.failedSources.has(source)) {
+          continue;
+        }
+        succeededSources.add(source);
+        devices.push(
+          ...platformDevices.filter((device) => discoverySourceFor(p, device.deviceId) === source),
+        );
+      }
+      // The platform aggregate mirrors production: iOS tracks the simulator
+      // source, so a devicectl-only failure keeps the platform succeeded.
+      const platformSource: DiscoverySource = p === "android" ? "android" : "ios-simulator";
+      if (this.failedPlatforms.has(p) || this.failedSources.has(platformSource)) {
         discoveryErrors[p] = {
           code: "unavailable",
           message: `${p === "ios" ? "iOS" : "Android"} booted-device discovery is unavailable.`,
         };
         continue;
       }
-      // Delegate to getBootedDevices so operation tracking stays consistent.
-      devices.push(...(await this.getBootedDevices(p)));
       succeededPlatforms.add(p);
     }
-    return { devices, succeededPlatforms, discoveryErrors };
+    return {
+      devices,
+      succeededPlatforms,
+      discoveryErrors,
+      ...(this.omitSucceededSources ? {} : { succeededSources }),
+    };
   }
 
   async getDeviceImagesDetailed(platform: SomePlatform): Promise<DeviceImageDiscovery> {

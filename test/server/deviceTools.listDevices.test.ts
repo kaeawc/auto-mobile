@@ -89,6 +89,8 @@ describe("listDevices tool (#5870)", () => {
   beforeEach(() => {
     fakeDeviceUtils.clearHistory();
     fakeDeviceUtils.failedPlatforms.clear();
+    fakeDeviceUtils.failedSources.clear();
+    fakeDeviceUtils.omitSucceededSources = false;
     fakeDeviceUtils.setBootedDevices("android", [android]);
     fakeDeviceUtils.setBootedDevices("ios", [ios]);
   });
@@ -163,6 +165,82 @@ describe("listDevices tool (#5870)", () => {
     expect(
       fakeDeviceUtils.getExecutedOperations().some((op) => op.startsWith("getBootedDevices")),
     ).toBe(true);
+  });
+
+  test("marks discovery incomplete when only physical-iOS (devicectl) discovery fails (#5918)", async () => {
+    // macOS mixed outcome: simctl completed but devicectl did not. The iOS
+    // platform still aggregates as succeeded (it tracks the simulator source),
+    // so a platform-level marker would wrongly report `complete: true`.
+    fakeDeviceUtils.failedSources.add("ios-physical");
+
+    const payload = await callListDevices();
+
+    // Source-level completeness catches the incomplete physical source...
+    expect(payload.discovery.complete).toBe(false);
+    // ...and surfaces exactly which source failed, not the whole platform.
+    expect(payload.discovery.failedSources).toEqual(["ios-physical"]);
+    // The simulator source completed, so the platform aggregate is unaffected.
+    expect(payload.discovery.failedPlatforms).toEqual([]);
+  });
+
+  test("returns physical devices when only simulator (simctl) discovery fails (#5918)", async () => {
+    // Reciprocal mixed outcome: simctl is down but devicectl still reports a
+    // connected iPhone. The physical device must survive even though the iOS
+    // platform aggregate (which tracks the simulator source) reports failed.
+    const iphone: BootedDevice = {
+      platform: "ios",
+      name: "Jason's iPhone",
+      deviceId: "00008120-001A2D3E4F5B6A2E",
+      iosVersion: "18.0",
+    };
+    fakeDeviceUtils.setBootedDevices("ios", [ios, iphone]);
+    fakeDeviceUtils.failedSources.add("ios-simulator");
+
+    const payload = await callListDevices();
+
+    // The physical device is still returned; the simulator's is not.
+    expect(payload.devices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ platform: "android", deviceId: "emulator-5554" }),
+        expect.objectContaining({ platform: "ios", deviceId: "00008120-001A2D3E4F5B6A2E" }),
+      ]),
+    );
+    expect(payload.devices.some((d: { deviceId: string }) => d.deviceId === ios.deviceId)).toBe(
+      false,
+    );
+
+    // Completeness reflects the incomplete simulator source.
+    expect(payload.discovery.complete).toBe(false);
+    expect(payload.discovery.failedSources).toEqual(["ios-simulator"]);
+    // The platform aggregate tracks the simulator source, so it reports failed.
+    expect(payload.discovery.failedPlatforms).toEqual(["ios"]);
+  });
+
+  test("reports every source when a whole iOS platform fails (#5918)", async () => {
+    fakeDeviceUtils.failedPlatforms.add("ios");
+
+    const payload = await callListDevices();
+
+    expect(payload.discovery.complete).toBe(false);
+    expect(payload.discovery.failedPlatforms).toEqual(["ios"]);
+    expect(payload.discovery.failedSources).toEqual(
+      expect.arrayContaining(["ios-simulator", "ios-physical"]),
+    );
+    expect(payload.discovery.failedSources).toHaveLength(2);
+  });
+
+  test("omits failedSources and falls back to platforms for pre-#5683 producers (#5918)", async () => {
+    // A producer that predates per-source reporting returns no `succeededSources`.
+    fakeDeviceUtils.omitSucceededSources = true;
+    fakeDeviceUtils.failedPlatforms.add("ios");
+
+    const payload = await callListDevices();
+
+    // Completeness still resolves through the platform aggregate.
+    expect(payload.discovery.complete).toBe(false);
+    expect(payload.discovery.failedPlatforms).toEqual(["ios"]);
+    // No source detail is fabricated when the producer did not report it.
+    expect(payload.discovery.failedSources).toBeUndefined();
   });
 
   test("distinguishes a genuinely empty inventory from a failed scan", async () => {

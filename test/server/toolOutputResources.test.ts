@@ -149,7 +149,7 @@ describe("tool-output artifact resource (#5882)", () => {
     fs.mkdirSync(artifactDir);
     fs.symlinkSync(secretPath, path.join(artifactDir, linkName));
 
-    // Only the directory is injected; the real node readFile (with O_NOFOLLOW) runs.
+    // Only the directory is injected; the real node readFile (lstat guard) runs.
     setToolOutputResourceDependencies({ resolveDirectory: () => artifactDir });
 
     const content = await readArtifact(linkName);

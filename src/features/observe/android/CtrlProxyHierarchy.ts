@@ -164,7 +164,11 @@ export class CtrlProxyHierarchy {
         };
       }
 
-      if (cachedHierarchy && !(await this.isCachedPackageRunning(cachedHierarchy))) {
+      const livenessTimeoutMs = Math.max(0, timeout - (this.context.timer.now() - startTime));
+      if (
+        cachedHierarchy &&
+        !(await this.isCachedPackageRunning(cachedHierarchy, livenessTimeoutMs, signal))
+      ) {
         logger.warn(
           `[CTRL_PROXY] Invalidating cached hierarchy for non-running package ${cachedHierarchy.hierarchy.packageName}`,
         );
@@ -326,14 +330,24 @@ export class CtrlProxyHierarchy {
    * recovered by waiting for a WebSocket push. Drop it before any cache-hit or
    * stale-fallback path so the next request resolves the device window again.
    */
-  private async isCachedPackageRunning(cachedHierarchy: CachedHierarchy): Promise<boolean> {
+  private async isCachedPackageRunning(
+    cachedHierarchy: CachedHierarchy,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     const packageName = cachedHierarchy.hierarchy.packageName;
     if (!packageName || !/^[A-Za-z0-9._]+$/.test(packageName)) {
       return true;
     }
 
     try {
-      const result = await this.context.adb.executeCommand(`shell pidof ${packageName} || true`);
+      const result = await this.context.adb.executeCommand(
+        `shell pidof ${packageName} || true`,
+        timeoutMs,
+        undefined,
+        true,
+        signal,
+      );
       return result.stdout.trim().length > 0;
     } catch (error) {
       // Liveness is best-effort; an ADB error must not destroy otherwise usable

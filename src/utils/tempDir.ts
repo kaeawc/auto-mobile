@@ -106,11 +106,13 @@ export function getTempDir(subdirectory: string): string {
  * because those overrides isolate an agent's private state. Processes using
  * the same default ADB server must instead coordinate through one path. A
  * locked-down service account can configure that path with
- * `AUTOMOBILE_COORDINATION_DIR` (or `AUTO_MOBILE_COORDINATION_DIR`).
+ * `AUTOMOBILE_COORDINATION_DIR` (or `AUTO_MOBILE_COORDINATION_DIR`). Its
+ * default comes from the OS account rather than the ambient `HOME`, which may
+ * be isolated per agent despite a shared ADB server.
  */
 export function getSharedAutoMobileDir(
   subdirectory: string,
-  homeDir: string = os.homedir(),
+  homeDir: string = os.userInfo().homedir,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   const override = (env.AUTOMOBILE_COORDINATION_DIR ?? env.AUTO_MOBILE_COORDINATION_DIR)?.trim();

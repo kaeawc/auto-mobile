@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -176,11 +176,28 @@ describe("getTempDir", () => {
 });
 
 describe("getSharedAutoMobileDir", () => {
+  test("uses the OS-account home instead of an agent-specific HOME", () => {
+    const userInfoSpy = spyOn(os, "userInfo").mockReturnValue({
+      uid: 501,
+      gid: 20,
+      username: "tester",
+      homedir: "/system-home",
+      shell: "/bin/zsh",
+    });
+    try {
+      expect(getSharedAutoMobileDir("ctrlproxy-forwards", undefined, {})).toBe(
+        path.resolve("/system-home", ".auto-mobile", "ctrlproxy-forwards"),
+      );
+    } finally {
+      userInfoSpy.mockRestore();
+    }
+  });
+
   test("uses the home-directory root independently of agent data-dir overrides", () => {
     const previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
     process.env.AUTOMOBILE_DATA_DIR = "/agent-private-data";
     try {
-      expect(getSharedAutoMobileDir("ctrlproxy-forwards", "/home/tester")).toBe(
+      expect(getSharedAutoMobileDir("ctrlproxy-forwards", "/home/tester", {})).toBe(
         path.resolve("/home/tester", ".auto-mobile", "ctrlproxy-forwards"),
       );
     } finally {
@@ -209,7 +226,7 @@ describe("getSharedAutoMobileDir", () => {
   });
 
   test("rejects a missing home directory rather than using agent-local storage", () => {
-    expect(() => getSharedAutoMobileDir("ctrlproxy-forwards", "")).toThrow(
+    expect(() => getSharedAutoMobileDir("ctrlproxy-forwards", "", {})).toThrow(
       "Set AUTOMOBILE_COORDINATION_DIR",
     );
   });

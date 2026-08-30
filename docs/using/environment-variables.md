@@ -7,12 +7,13 @@ state directory, logs, tool set, or device behavior.
 
 <div class="environment-variable-table" markdown>
 
-| Variable                | Use                                                                                                                                         | Default               |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
-| `AUTOMOBILE_DATA_DIR`   | Base directory for observe, accessibility, navigation, CtrlProxy-build, screen-streaming, WebRTC, tool-output, and daemon-failure artifacts | `~/.auto-mobile`      |
-| `AUTOMOBILE_LOG_DIR`    | Directory for daemon and client logs                                                                                                        | `~/.auto-mobile/logs` |
-| `AUTOMOBILE_LOG_FORMAT` | `text` or newline-delimited `json`                                                                                                          | `text`                |
-| `AUTOMOBILE_LOG_SINK`   | `file`, `stderr`, or `both`                                                                                                                 | `file`                |
+| Variable                      | Use                                                                                                                                         | Default                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| `AUTOMOBILE_DATA_DIR`         | Base directory for observe, accessibility, navigation, CtrlProxy-build, screen-streaming, WebRTC, tool-output, and daemon-failure artifacts | `~/.auto-mobile`               |
+| `AUTOMOBILE_LOG_DIR`          | Directory for daemon and client logs                                                                                                        | `~/.auto-mobile/logs`          |
+| `AUTOMOBILE_LOG_FORMAT`       | `text` or newline-delimited `json`                                                                                                          | `text`                         |
+| `AUTOMOBILE_LOG_SINK`         | `file`, `stderr`, or `both`                                                                                                                 | `file`                         |
+| `AUTOMOBILE_COORDINATION_DIR` | Absolute, shared directory for cross-process CtrlProxy forwarding leases                                                                    | OS account home `.auto-mobile` |
 
 </div>
 
@@ -28,6 +29,12 @@ Some persistent stores still use fixed paths under `~/.auto-mobile`, including
 device snapshots, video archives, and downloaded libwebp tools. Set their
 feature-specific options where available; `AUTOMOBILE_DATA_DIR` does not
 currently relocate them.
+
+Set `AUTOMOBILE_COORDINATION_DIR` when the OS account home is read-only or when
+AutoMobile agents that share an ADB server need an explicit shared lease root.
+All cooperating agents must use the same absolute path. The legacy
+`AUTO_MOBILE_COORDINATION_DIR` alias is accepted when the preferred name is
+unset.
 
 ## Database
 

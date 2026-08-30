@@ -1159,6 +1159,7 @@ describe("AndroidCtrlProxyClient", function () {
   test("preserves a registered CtrlProxy client's forward before it connects", async function () {
     await accessibilityServiceClient.close();
     AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
     stubForwardLifecycleCommands(() => `${testDevice.deviceId} tcp:8765 tcp:8765\n`);
 
     const connectingClient = AndroidCtrlProxyClient.createForTesting(
@@ -1242,7 +1243,13 @@ describe("AndroidCtrlProxyClient", function () {
     process.env.AUTOMOBILE_COORDINATION_DIR = coordinationDir;
     const isolatedDevice = { ...testDevice, deviceId: "same-process-file-lease-device" };
     const factory = new FakeAdbClientFactory(fakeAdb);
-    const original = AndroidCtrlProxyClient.getInstance(isolatedDevice, factory);
+    const original = new (AndroidCtrlProxyClient as any)(
+      isolatedDevice,
+      factory.create(isolatedDevice),
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    (AndroidCtrlProxyClient as any).instances.set(isolatedDevice.deviceId, original);
     let replacement: AndroidCtrlProxyClient | undefined;
 
     try {
@@ -1250,7 +1257,12 @@ describe("AndroidCtrlProxyClient", function () {
       // Recovery evicts synchronously, but an in-flight setup may still hold this lease.
       AndroidCtrlProxyClient.removeInstance(isolatedDevice.deviceId);
 
-      replacement = AndroidCtrlProxyClient.getInstance(isolatedDevice, factory);
+      replacement = new (AndroidCtrlProxyClient as any)(
+        isolatedDevice,
+        factory.create(isolatedDevice),
+        createSuccessWebSocketFactory(),
+        fakeTimer,
+      );
       expect((replacement as any).ctrlProxyForwardLease.tryAcquire()).toBe(false);
     } finally {
       await replacement?.close();

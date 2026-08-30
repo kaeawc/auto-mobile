@@ -1002,18 +1002,23 @@ interface CtrlProxyForwardLease {
 }
 
 class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
-  private readonly lockPath: string;
+  private lockPath: string | null = null;
   private readonly ownerToken = defaultIdGenerator.next();
   private acquired = false;
 
-  public constructor(deviceId: string) {
-    // base64url makes arbitrary Android serials safe as one path segment.
-    this.lockPath = join(
-      // Agent-specific data directories are intentionally isolated, but a
-      // default ADB server is shared across agents for this OS user.
-      ensureSecureSharedAutoMobileDirSync("ctrlproxy-forwards"),
-      `${Buffer.from(deviceId).toString("base64url")}.lock`,
-    );
+  public constructor(private readonly deviceId: string) {}
+
+  private resolveLockPath(): string {
+    if (this.lockPath === null) {
+      // base64url makes arbitrary Android serials safe as one path segment.
+      this.lockPath = join(
+        // Agent-specific data directories are intentionally isolated, but a
+        // default ADB server is shared across agents for this OS user.
+        ensureSecureSharedAutoMobileDirSync("ctrlproxy-forwards"),
+        `${Buffer.from(this.deviceId).toString("base64url")}.lock`,
+      );
+    }
+    return this.lockPath;
   }
 
   public tryAcquire(): boolean {
@@ -1022,7 +1027,7 @@ class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     }
     // Shutdown recovery can evict a singleton while its setup remains in flight.
     // Another client in this process must wait for that live lease, not reclaim it.
-    this.acquired = tryAcquireExclusiveLock(this.lockPath, {
+    this.acquired = tryAcquireExclusiveLock(this.resolveLockPath(), {
       ownerToken: this.ownerToken,
     });
     return this.acquired;
@@ -1032,7 +1037,7 @@ class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     if (!this.acquired) {
       return;
     }
-    releaseExclusiveLock(this.lockPath, process.pid, this.ownerToken);
+    releaseExclusiveLock(this.resolveLockPath(), process.pid, this.ownerToken);
     this.acquired = false;
   }
 }

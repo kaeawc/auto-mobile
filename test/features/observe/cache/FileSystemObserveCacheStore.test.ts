@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "path";
 import os from "os";
-import { mkdirSync, rmSync, readdirSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync, readdirSync, existsSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { writeFileAsync } from "../../../../src/utils/io";
 import {
   FileSystemObserveCacheStore,
   OBSERVE_RESULT_CACHE_TTL_MS,
@@ -197,6 +198,85 @@ describe("FileSystemObserveCacheStore", function () {
   test("getMostRecent returns undefined when nothing cached", async function () {
     const result = await store.getMostRecent("device-1");
     expect(result).toBeUndefined();
+  });
+
+  // --- Generation-stamped disk files (#5892) -------------------------------
+
+  test("put stamps the write generation into the disk filename", async function () {
+    await store.put("device-1", makeResult("g0"), store.currentGeneration("device-1"));
+    const files = readdirSync(cacheDir).filter((f) => f.endsWith(".json"));
+    expect(files.length).toBe(1);
+    expect(files[0]).toMatch(/_g0\.json$/);
+  });
+
+  test("put stamps the current generation even for an unconditional write", async function () {
+    store.clear("device-1"); // generation -> 1
+    await store.put("device-1", makeResult("no-gen")); // unconditional
+    const files = readdirSync(cacheDir).filter((f) => f.endsWith(".json"));
+    expect(files.length).toBe(1);
+    expect(files[0]).toMatch(/_g1\.json$/);
+  });
+
+  test("getMostRecent skips a disk file stamped with a stale generation and does not warm memory (Residual 2)", async function () {
+    // Advance the device generation so a g0-stamped file is provably stale.
+    store.clear("device-1"); // currentGeneration("device-1") === 1
+    // A stale file slipped onto disk (e.g. a clear() that landed mid disk-write,
+    // per Residual 1) stamped with the pre-clear generation 0.
+    const staleName = `observe_device-1_${timer.now()}_g0.json`;
+    writeFileSync(path.join(cacheDir, staleName), JSON.stringify(makeResult("stale-hierarchy")));
+
+    expect(await store.getMostRecent("device-1")).toBeUndefined();
+    expect(store.getRecentInMemoryForDevice("device-1")).toBeUndefined();
+  });
+
+  test("getMostRecent serves a disk file stamped with the current generation", async function () {
+    store.clear("device-1"); // generation -> 1
+    const currentName = `observe_device-1_${timer.now()}_g1.json`;
+    writeFileSync(path.join(cacheDir, currentName), JSON.stringify(makeResult("current")));
+
+    const restored = await store.getMostRecent("device-1");
+    expect(restored?.updatedAt).toBe("current");
+  });
+
+  test("getMostRecent still serves a legacy disk file with no generation stamp (cross-restart back-compat)", async function () {
+    store.clear("device-1"); // generation -> 1
+    // Pre-#5892 filename format (or a file from another process instance): no
+    // generation stamp. We cannot prove it stale, so it must still be served.
+    const legacyName = `observe_device-1_${timer.now()}.json`;
+    writeFileSync(path.join(cacheDir, legacyName), JSON.stringify(makeResult("legacy")));
+
+    const restored = await store.getMostRecent("device-1");
+    expect(restored?.updatedAt).toBe("legacy");
+  });
+
+  test("a clear() landing during the disk write cleans up the stale file (Residual 1)", async function () {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let writes = 0;
+    const gatedWriter = async (filePath: string, data: string): Promise<void> => {
+      writes += 1;
+      await gate;
+      await writeFileAsync(filePath, data);
+    };
+    const gatedStore = new FileSystemObserveCacheStore(timer, cacheDir, gatedWriter);
+
+    const gen = gatedStore.currentGeneration("device-1");
+    const putPromise = gatedStore.put("device-1", makeResult("mid-write"), gen);
+
+    // Let put() progress until it parks at the gated write.
+    while (writes === 0) {
+      await Promise.resolve();
+    }
+
+    // A concurrent terminate invalidates the device while the write is in flight.
+    gatedStore.clear("device-1");
+    release();
+    await putPromise;
+
+    expect(readdirSync(cacheDir).filter((f) => f.endsWith(".json")).length).toBe(0);
+    expect(gatedStore.getRecentInMemoryForDevice("device-1")).toBeUndefined();
   });
 
   test("clear() followed immediately by put() does not delete the fresh file", async function () {

@@ -60,6 +60,13 @@ export function normalizeCachedObserveResult(parsed: unknown): ObserveResult {
 export const OBSERVE_RESULT_CACHE_TTL_MS = 5 * 60 * 1000;
 
 /**
+ * Narrow write seam so tests can drive the post-disk-write race deterministically
+ * (a `clear()` landing while `writeFileAsync` is in flight). Defaults to the real
+ * async file write.
+ */
+export type ObserveCacheFileWriter = (filePath: string, data: string) => Promise<void>;
+
+/**
  * File-system backed implementation of {@link ObserveResultCacheStore}.
  *
  * Behaviour parity with the previous `RealObserveScreen` static cache:
@@ -72,6 +79,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
   private readonly cache: Map<string, ObserveResultCacheEntry> = new Map();
   private readonly cacheDir: string;
   private readonly timer: Timer;
+  private readonly writeFile: ObserveCacheFileWriter;
   private pendingDiskCleanup: Promise<void> = Promise.resolve();
 
   /**
@@ -87,9 +95,14 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     return this.globalGeneration + (this.deviceGeneration.get(deviceId) ?? 0);
   }
 
-  constructor(timer: Timer = defaultTimer, cacheDir?: string) {
+  constructor(
+    timer: Timer = defaultTimer,
+    cacheDir?: string,
+    writeFile: ObserveCacheFileWriter = writeFileAsync,
+  ) {
     this.timer = timer;
     this.cacheDir = cacheDir ?? getTempDir(TEMP_SUBDIRS.OBSERVE_RESULTS);
+    this.writeFile = writeFile;
     this.ensureCacheDirExists();
   }
 
@@ -136,8 +149,23 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       if (this.isStaleWrite(deviceId, generation)) {
         return;
       }
+      // Stamp the file with the generation it is written under so both the
+      // post-write re-check below and checkDisk can prove a file stale after a
+      // later clear() (issue #5892). A supplied `generation` equals the current
+      // one here (isStaleWrite passed); an unconditional write stamps current.
+      const stampGeneration = this.currentGeneration(deviceId);
+      const filename = this.diskFilename(cacheKey, stampGeneration);
       this.cache.set(cacheKey, { timestamp, deviceId, observeResult: result });
-      await this.saveObserveResultToDisk(cacheKey, result);
+      await this.saveObserveResultToDisk(filename, result);
+      // Residual 1: a clear() can land during the disk write above, and its
+      // deletion snapshot predates our file — so it survives on disk. Re-check
+      // and clean up ourselves rather than leaving a stale file for checkDisk to
+      // skip until TTL. Unconditional writes (no generation) are never stale.
+      if (this.isStaleWrite(deviceId, generation)) {
+        this.cache.delete(cacheKey);
+        await this.deleteDiskFile(filename);
+        return;
+      }
       logger.debug(
         `[OBSERVE_CACHE] Successfully cached observe result, in-memory cache size: ${this.cache.size}`,
       );
@@ -267,9 +295,23 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       }
 
       const now = this.timer.now();
+      const currentGeneration = this.currentGeneration(deviceId);
       let mostRecentFile: { path: string; mtime: number } | undefined;
 
       for (const file of jsonFiles) {
+        // Residual 2: never re-warm memory from a file whose stamped generation
+        // is older than the device's current generation — a clear() has advanced
+        // past it (issue #5892). Unstamped files can't be proven stale; serve
+        // them (back-compat, backstopped by the freshness check).
+        const fileGeneration = this.parseGenerationFromFilename(file);
+        if (fileGeneration !== undefined && fileGeneration < currentGeneration) {
+          logger.debug(
+            `[OBSERVE_CACHE] Skipping stale-generation disk file: ${file} ` +
+              `(file generation ${fileGeneration} < current ${currentGeneration})`,
+          );
+          continue;
+        }
+
         const filePath = path.join(this.cacheDir, file);
         const stats = await statAsync(filePath);
         const age = now - stats.mtime.getTime();
@@ -311,17 +353,44 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     }
   }
 
+  /**
+   * Disk filename for a cache entry, stamped with the generation it is written
+   * under: `observe_<sanitizedDeviceId>_<timestamp>_g<generation>.json`. The
+   * `_g<generation>` suffix lets {@link checkDisk} and the post-write re-check
+   * prove a file stale after a later `clear()` (issue #5892).
+   */
+  private diskFilename(cacheKey: string, generation: number): string {
+    return `observe_${cacheKey.replace(/:/g, "_")}_g${generation}.json`;
+  }
+
+  /**
+   * Parse the `_g<generation>` stamp from a cache filename. Returns undefined for
+   * a legacy (pre-#5892) or cross-instance file with no stamp — such a file
+   * cannot be proven stale and is served, backstopped by the freshness check.
+   */
+  private parseGenerationFromFilename(filename: string): number | undefined {
+    const match = /_g(\d+)\.json$/.exec(filename);
+    return match ? Number(match[1]) : undefined;
+  }
+
   private async saveObserveResultToDisk(
-    cacheKey: string,
+    filename: string,
     observeResult: ObserveResult,
   ): Promise<void> {
     try {
-      const filename = `observe_${cacheKey.replace(/:/g, "_")}.json`;
       const filePath = path.join(this.cacheDir, filename);
-      await writeFileAsync(filePath, JSON.stringify(observeResult, null, 2));
+      await this.writeFile(filePath, JSON.stringify(observeResult, null, 2));
       logger.debug(`[OBSERVE_CACHE] Saved observe result to disk: ${filename}`);
     } catch (error) {
       logger.warn(`[OBSERVE_CACHE] Failed to save observe result to disk: ${error}`);
+    }
+  }
+
+  private async deleteDiskFile(filename: string): Promise<void> {
+    try {
+      await unlinkAsync(path.join(this.cacheDir, filename));
+    } catch (error) {
+      logger.warn(`[OBSERVE_CACHE] Failed to delete stale cache file ${filename}: ${error}`);
     }
   }
 

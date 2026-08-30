@@ -39,6 +39,20 @@ interface AndroidCrashMatch {
   processId: number;
 }
 
+interface AndroidCrashResultBase {
+  platform: "android";
+  appId: string;
+  mechanism: "android_am_crash";
+  timestamp: number;
+  confirmed: boolean;
+}
+
+interface AndroidDispatchPreparation {
+  notBeforeTimestampMs: number;
+  preferredProcess: AndroidPackageProcess;
+  targetedProcesses: AndroidPackageProcess[];
+}
+
 export interface SimulatorCrashCommandRunner {
   executeCommandArgs(args: string[], timeoutMs?: number, signal?: AbortSignal): Promise<ExecResult>;
 }
@@ -152,48 +166,17 @@ export class CrashApp {
         error: `${appId} is running under multiple Android users; foreground identity is ambiguous`,
       };
     }
-    const inductionTime = await this.adb.getDeviceTimestampMsWithSource(
-      PREFLIGHT_COMMAND_TIMEOUT_MS,
-      signal,
-    );
-    if (inductionTime.source === "host") {
-      const preflightProcesses = packageProcesses.filter((process) => process.userId === userId);
-      const preflightProcess =
-        preflightProcesses.find((process) => process.processName === appId) ??
-        preflightProcesses[0];
-      return {
-        ...base,
-        success: false,
-        supported: true,
-        wasRunning: true,
-        processId: preflightProcess?.pid,
-        userId,
-        error: "Unable to establish Android device time for fresh crash evidence",
-      };
-    }
-    const dispatchProcessesOutput = await this.adb.executeCommand(
-      PROCESS_STATE_COMMAND,
-      PREFLIGHT_COMMAND_TIMEOUT_MS,
-      undefined,
-      true,
-      signal,
-    );
-    const targetedProcesses = findAndroidPackageProcesses(
-      dispatchProcessesOutput.stdout,
+    const dispatch = await this.prepareAndroidDispatch(
       appId,
-    ).filter((process) => process.userId === userId);
-    if (targetedProcesses.length === 0) {
-      return {
-        ...base,
-        success: false,
-        supported: true,
-        wasRunning: false,
-        userId,
-        error: `${appId} stopped before the crash command could be dispatched`,
-      };
+      userId,
+      packageProcesses,
+      base,
+      signal,
+    );
+    if ("success" in dispatch) {
+      return dispatch;
     }
-    const preferredProcess =
-      targetedProcesses.find((process) => process.processName === appId) ?? targetedProcesses[0];
+    const { notBeforeTimestampMs, preferredProcess, targetedProcesses } = dispatch;
     let commandResult: ExecResult;
     try {
       commandResult = await this.adb.executeCommand(
@@ -236,7 +219,7 @@ export class CrashApp {
     const crashMatch = await this.confirmAndroidCrash(
       appId,
       targetedProcesses,
-      inductionTime.timestampMs,
+      notBeforeTimestampMs,
       signal,
     );
     if (!crashMatch) {
@@ -276,6 +259,61 @@ export class CrashApp {
     return foreground?.packageName === appId && userIds.has(foreground.userId)
       ? foreground.userId
       : null;
+  }
+
+  private async prepareAndroidDispatch(
+    appId: string,
+    userId: number,
+    preflightProcesses: AndroidPackageProcess[],
+    base: AndroidCrashResultBase,
+    signal?: AbortSignal,
+  ): Promise<AndroidDispatchPreparation | CrashAppResult> {
+    const inductionTime = await this.adb.getDeviceTimestampMsWithSource(
+      PREFLIGHT_COMMAND_TIMEOUT_MS,
+      signal,
+    );
+    if (inductionTime.source === "host") {
+      const userProcesses = preflightProcesses.filter((process) => process.userId === userId);
+      const preflightProcess =
+        userProcesses.find((process) => process.processName === appId) ?? userProcesses[0];
+      return {
+        ...base,
+        success: false,
+        supported: true,
+        wasRunning: true,
+        processId: preflightProcess?.pid,
+        userId,
+        error: "Unable to establish Android device time for fresh crash evidence",
+      };
+    }
+
+    const dispatchProcessesOutput = await this.adb.executeCommand(
+      PROCESS_STATE_COMMAND,
+      PREFLIGHT_COMMAND_TIMEOUT_MS,
+      undefined,
+      true,
+      signal,
+    );
+    const targetedProcesses = findAndroidPackageProcesses(
+      dispatchProcessesOutput.stdout,
+      appId,
+    ).filter((process) => process.userId === userId);
+    if (targetedProcesses.length === 0) {
+      return {
+        ...base,
+        success: false,
+        supported: true,
+        wasRunning: false,
+        userId,
+        error: `${appId} stopped before the crash command could be dispatched`,
+      };
+    }
+    return {
+      notBeforeTimestampMs: inductionTime.timestampMs,
+      preferredProcess:
+        targetedProcesses.find((process) => process.processName === appId) ?? targetedProcesses[0],
+      targetedProcesses,
+    };
   }
 
   private async executeIos(

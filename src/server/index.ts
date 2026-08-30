@@ -70,6 +70,7 @@ import { getMcpServerVersion } from "../utils/mcpVersion";
 
 // Import resource registration functions
 import { registerObservationResources } from "./observationResources";
+import { registerToolOutputResources } from "./toolOutputResources";
 import { registerObserveAppResource } from "./observeAppResource";
 import { registerBootedDeviceResources } from "./bootedDeviceResources";
 import { registerDeviceImageResources } from "./deviceImageResources";
@@ -269,6 +270,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   // Register all resources
   startupBenchmark.startPhase("resourceRegistration");
   registerObservationResources();
+  registerToolOutputResources();
   registerObserveAppResource();
   registerBootedDeviceResources();
   registerDeviceImageResources();

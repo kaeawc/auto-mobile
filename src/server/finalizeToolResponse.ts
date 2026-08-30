@@ -40,6 +40,12 @@ export interface ObservationArtifactMetadata {
     payload: ObservationArtifactPayload;
     bytes: number;
     tool: string;
+    /**
+     * In-protocol companion to `path` (issue #5882). An `automobile:tool-output/…`
+     * resource URI a client can read to fetch the spilled JSON in-band, so a
+     * host filesystem path is never the only way to reach the raw payload.
+     */
+    resourceUri: string;
   };
 }
 

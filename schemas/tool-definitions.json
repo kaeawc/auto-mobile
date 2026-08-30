@@ -10275,6 +10275,28 @@
           "required": ["mode", "reason"],
           "additionalProperties": {}
         },
+        "effect": {
+          "type": "object",
+          "properties": {
+            "screenChanged": {
+              "type": "boolean"
+            },
+            "basis": {
+              "type": "string",
+              "enum": [
+                "screenIdentity changed",
+                "screenIdentity unchanged",
+                "activeWindow+layoutSeqSum changed",
+                "activeWindow+layoutSeqSum unchanged",
+                "viewHierarchy changed",
+                "viewHierarchy unchanged",
+                "insufficient observation data"
+              ]
+            }
+          },
+          "required": ["screenChanged", "basis"],
+          "additionalProperties": {}
+        },
         "selectedElement": {
           "type": "object",
           "properties": {

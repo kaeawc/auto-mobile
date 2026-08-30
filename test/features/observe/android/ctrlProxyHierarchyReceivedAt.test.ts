@@ -28,12 +28,29 @@ interface Harness {
   hierarchy: CtrlProxyHierarchy;
   timer: FakeTimer;
   setCached: (h: CachedHierarchy | null) => void;
+  setPackageRunning: (running: boolean) => void;
+  setProcessUserId: (userId: number) => void;
+  setProcessNameSuffix: (suffix: string) => void;
+  setProbeError: (error: Error | undefined) => void;
+  getProbeCommand: () => string | undefined;
+  setProbeGate: (gate: Promise<void>) => void;
+  waitForProbeStart: () => Promise<void>;
   restore: () => void;
 }
 
 function createHarness(): Harness {
   const timer = new FakeTimer();
   let cached: CachedHierarchy | null = null;
+  let packageRunning = true;
+  let processUserId = 0;
+  let processNameSuffix = "";
+  let probeError: Error | undefined;
+  let probeCommand: string | undefined;
+  let probeGate: Promise<void> = Promise.resolve();
+  let resolveProbeStart!: () => void;
+  const probeStarted = new Promise<void>((resolve) => {
+    resolveProbeStart = resolve;
+  });
 
   const context: HierarchyDelegateContext = {
     getWebSocket: () => null,
@@ -42,7 +59,33 @@ function createHarness(): Harness {
     ensureConnected: async () => true,
     cancelScreenshotBackoff: () => {},
     device: { deviceId: "emulator-5554", platform: "android" } as never,
-    adb: {} as never,
+    adb: {
+      executeCommand: async (
+        command: string,
+        _timeoutMs?: number,
+        _options?: unknown,
+        _synchronous?: boolean,
+        signal?: AbortSignal,
+      ) => {
+        probeCommand = command;
+        resolveProbeStart();
+        await probeGate;
+        if (signal?.aborted) {
+          throw signal.reason;
+        }
+        if (probeError) {
+          throw probeError;
+        }
+        const packageName =
+          command.match(/shell dumpsys activity processes/) && cached?.hierarchy.packageName;
+        return {
+          stdout:
+            packageRunning && packageName
+              ? `1234:${packageName}${processNameSuffix}/u${processUserId}a123\n`
+              : "",
+        };
+      },
+    } as never,
     getCachedHierarchy: () => cached,
     setCachedHierarchy: (h) => {
       cached = h;
@@ -60,7 +103,11 @@ function createHarness(): Harness {
   // converted result so we can assert only the receipt-time metadata on it.
   const convertSpy = spyOn(hierarchy, "convertToViewHierarchyResult").mockImplementation(
     (h: AccessibilityHierarchy) =>
-      ({ hierarchy: { node: { $: {} } }, updatedAt: h.updatedAt }) as ViewHierarchyResult,
+      ({
+        hierarchy: { node: { $: {} } },
+        packageName: h.packageName,
+        updatedAt: h.updatedAt,
+      }) as ViewHierarchyResult,
   );
 
   return {
@@ -69,6 +116,23 @@ function createHarness(): Harness {
     setCached: (h) => {
       cached = h;
     },
+    setPackageRunning: (running) => {
+      packageRunning = running;
+    },
+    setProcessUserId: (userId) => {
+      processUserId = userId;
+    },
+    setProcessNameSuffix: (suffix) => {
+      processNameSuffix = suffix;
+    },
+    setProbeError: (error) => {
+      probeError = error;
+    },
+    getProbeCommand: () => probeCommand,
+    setProbeGate: (gate) => {
+      probeGate = gate;
+    },
+    waitForProbeStart: () => probeStarted,
     restore: () => {
       managerSpy.mockRestore();
       convertSpy.mockRestore();
@@ -128,5 +192,200 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
 
     expect(result).not.toBeNull();
     expect(result!.receivedAt).toBe(receivedAt);
+  });
+
+  test("invalidates cached hierarchy when its package is no longer running", async () => {
+    h = createHarness();
+    h.setCached({
+      hierarchy: {
+        updatedAt: h.timer.now(),
+        packageName: "com.stale.app",
+      } as AccessibilityHierarchy,
+      receivedAt: h.timer.now(),
+      fresh: false,
+    });
+    h.setPackageRunning(false);
+
+    const syncSpy = spyOn(h.hierarchy, "requestHierarchySync").mockResolvedValue({
+      hierarchy: {
+        updatedAt: h.timer.now(),
+        packageName: "com.current.app",
+      } as AccessibilityHierarchy,
+    });
+
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+
+    expect(syncSpy).toHaveBeenCalledTimes(1);
+    expect(result).not.toBeNull();
+    expect(result!.packageName).toBe("com.current.app");
+    syncSpy.mockRestore();
+  });
+
+  test("retains cached hierarchy when the liveness probe fails", async () => {
+    h = createHarness();
+    h.setCached({
+      hierarchy: {
+        updatedAt: h.timer.now(),
+        packageName: "com.test.app",
+      } as AccessibilityHierarchy,
+      receivedAt: h.timer.now(),
+      fresh: true,
+    });
+    h.setProbeError(new Error("dumpsys unavailable"));
+
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+
+    expect(result!.packageName).toBe("com.test.app");
+    expect(h.getProbeCommand()).toBe("shell dumpsys activity processes");
+  });
+
+  test("invalidates a work-profile cache when the package runs only for another user", async () => {
+    h = createHarness();
+    h.setCached({
+      hierarchy: {
+        updatedAt: h.timer.now(),
+        packageName: "com.work.app",
+        userId: 10,
+      } as AccessibilityHierarchy,
+      receivedAt: h.timer.now(),
+      fresh: false,
+    });
+    h.setProcessUserId(0);
+
+    const syncSpy = spyOn(h.hierarchy, "requestHierarchySync").mockResolvedValue({
+      hierarchy: {
+        updatedAt: h.timer.now(),
+        packageName: "com.current.app",
+      } as AccessibilityHierarchy,
+    });
+
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+
+    expect(syncSpy).toHaveBeenCalledTimes(1);
+    expect(result!.packageName).toBe("com.current.app");
+    syncSpy.mockRestore();
+  });
+
+  test("retains a cache when its owning user's named process is running", async () => {
+    h = createHarness();
+    h.setCached({
+      hierarchy: {
+        updatedAt: h.timer.now(),
+        packageName: "com.work.app",
+        userId: 10,
+      } as AccessibilityHierarchy,
+      receivedAt: h.timer.now(),
+      fresh: true,
+    });
+    h.setProcessUserId(10);
+    h.setProcessNameSuffix(":ui");
+
+    const result = await h.hierarchy.getLatestHierarchy();
+
+    expect(result.hierarchy?.packageName).toBe("com.work.app");
+  });
+
+  test("preserves a replacement cache entry received during the liveness probe", async () => {
+    h = createHarness();
+    h.setCached({
+      hierarchy: { packageName: "com.stale.app" } as AccessibilityHierarchy,
+      receivedAt: h.timer.now(),
+      fresh: false,
+    });
+    h.setPackageRunning(false);
+
+    let releaseProbe!: () => void;
+    h.setProbeGate(new Promise<void>((resolve) => (releaseProbe = resolve)));
+    const latestPromise = h.hierarchy.getLatestHierarchy(false, 100);
+    await h.waitForProbeStart();
+
+    h.setCached({
+      hierarchy: { packageName: "com.current.app" } as AccessibilityHierarchy,
+      receivedAt: h.timer.now(),
+      fresh: true,
+    });
+    releaseProbe();
+
+    const result = await latestPromise;
+
+    expect(result.hierarchy?.packageName).toBe("com.current.app");
+    expect(result.fresh).toBe(true);
+  });
+
+  test("uses the remaining request budget for the fresh hierarchy wait", async () => {
+    h = createHarness();
+    h.timer.advanceTime(1000);
+    h.setCached({
+      hierarchy: { packageName: "com.test.app" } as AccessibilityHierarchy,
+      receivedAt: h.timer.now() - 1,
+      fresh: false,
+    });
+
+    let releaseProbe!: () => void;
+    h.setProbeGate(new Promise<void>((resolve) => (releaseProbe = resolve)));
+    let freshWaitTimeout: number | null = null;
+    Reflect.set(h.hierarchy, "waitForFreshData", (timeout: number) => {
+      freshWaitTimeout = timeout;
+      return Promise.resolve(null);
+    });
+    const latestPromise = h.hierarchy.getLatestHierarchy(true, 1000);
+    await h.waitForProbeStart();
+
+    h.timer.advanceTime(900);
+    releaseProbe();
+
+    const result = await latestPromise;
+    expect(freshWaitTimeout).toBe(100);
+    expect(result.fresh).toBe(false);
+  });
+
+  test("re-evaluates cache freshness after the liveness probe", async () => {
+    h = createHarness();
+    h.timer.advanceTime(1000);
+    h.setCached({
+      hierarchy: { packageName: "com.test.app" } as AccessibilityHierarchy,
+      receivedAt: h.timer.now() - 900,
+      fresh: true,
+    });
+
+    let releaseProbe!: () => void;
+    h.setProbeGate(new Promise<void>((resolve) => (releaseProbe = resolve)));
+    const latestPromise = h.hierarchy.getLatestHierarchy(false, 1000);
+    await h.waitForProbeStart();
+
+    h.timer.advanceTime(200);
+    releaseProbe();
+
+    const result = await latestPromise;
+    expect(result.fresh).toBe(false);
+  });
+
+  test("does not return cached data when the liveness probe is aborted", async () => {
+    h = createHarness();
+    h.setCached({
+      hierarchy: { packageName: "com.test.app" } as AccessibilityHierarchy,
+      receivedAt: h.timer.now(),
+      fresh: true,
+    });
+
+    let releaseProbe!: () => void;
+    h.setProbeGate(new Promise<void>((resolve) => (releaseProbe = resolve)));
+    const controller = new AbortController();
+    const latestPromise = h.hierarchy.getLatestHierarchy(
+      false,
+      1000,
+      undefined,
+      false,
+      0,
+      controller.signal,
+    );
+    await h.waitForProbeStart();
+
+    controller.abort();
+    releaseProbe();
+
+    const result = await latestPromise;
+    expect(result.hierarchy).toBeNull();
+    expect(result.fresh).toBe(false);
   });
 });

@@ -27,6 +27,7 @@ import { generateSecureId } from "./types";
 import { ctrlProxyRequests, serializeCtrlProxyRequest } from "./ctrlProxyProtocol";
 import { applyStableViewIdRewrites, assignStableViewIds } from "./StableNodeIdentity";
 import { maxObservationAgeMs } from "../observationFreshness";
+import { isAndroidPackageRunning } from "../../../utils/android-cmdline-tools/androidProcessState";
 
 /** Cooldown after a WebSocket timeout before retrying fresh-data waits.
  *  Keep short: a long cooldown (e.g. 5s) turns a single slow response into
@@ -145,7 +146,7 @@ export class CtrlProxyHierarchy {
     signal?: AbortSignal,
   ): Promise<AccessibilityHierarchyResponse> {
     const startTime = this.context.timer.now();
-    const cachedHierarchy = this.context.getCachedHierarchy();
+    let cachedHierarchy = this.context.getCachedHierarchy();
 
     logger.debug(
       `[CTRL_PROXY] getLatestHierarchy: cache=${cachedHierarchy ? "exists" : "null"}, waitForFresh=${waitForFresh}, skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp}`,
@@ -164,9 +165,25 @@ export class CtrlProxyHierarchy {
         };
       }
 
+      const livenessTimeoutMs = Math.max(0, timeout - (this.context.timer.now() - startTime));
+      const cachedPackageRunning =
+        cachedHierarchy &&
+        (await this.isCachedPackageRunning(cachedHierarchy, livenessTimeoutMs, signal));
+      throwIfAborted(signal);
+      const currentCachedHierarchy = this.context.getCachedHierarchy();
+      if (currentCachedHierarchy !== cachedHierarchy) {
+        cachedHierarchy = currentCachedHierarchy;
+      } else if (cachedHierarchy && !cachedPackageRunning) {
+        logger.warn(
+          `[CTRL_PROXY] Invalidating cached hierarchy for non-running package ${cachedHierarchy.hierarchy.packageName}`,
+        );
+        this.invalidateCache();
+        cachedHierarchy = null;
+      }
+
       // If we have cached data and not waiting for fresh, return it immediately
       if (cachedHierarchy && !waitForFresh) {
-        const cacheAge = startTime - cachedHierarchy.receivedAt;
+        const cacheAge = this.context.timer.now() - cachedHierarchy.receivedAt;
         const updatedAt = cachedHierarchy.hierarchy.updatedAt;
 
         // If minTimestamp is set, check if cached data is too old
@@ -231,12 +248,13 @@ export class CtrlProxyHierarchy {
         throwIfAborted(signal);
         const waitMinTimestamp = minTimestamp > 0 ? minTimestamp : startTime;
         const useDeviceTimestamp = minTimestamp > 0;
+        const remainingWaitMs = Math.max(0, timeout - (this.context.timer.now() - startTime));
         logger.debug(
-          `[CTRL_PROXY] Waiting up to ${timeout}ms for fresh hierarchy data (must be newer than ${waitMinTimestamp})`,
+          `[CTRL_PROXY] Waiting up to ${remainingWaitMs}ms for fresh hierarchy data (must be newer than ${waitMinTimestamp})`,
         );
 
         const freshData = await perf.track("waitForFresh", () =>
-          this.waitForFreshData(timeout, waitMinTimestamp, useDeviceTimestamp, signal),
+          this.waitForFreshData(remainingWaitMs, waitMinTimestamp, useDeviceTimestamp, signal),
         );
         const duration = this.context.timer.now() - startTime;
 
@@ -310,6 +328,43 @@ export class CtrlProxyHierarchy {
         hierarchy: null,
         fresh: false,
       };
+    }
+  }
+
+  /**
+   * A cached hierarchy whose package no longer has a process cannot be
+   * recovered by waiting for a WebSocket push. Drop it before any cache-hit or
+   * stale-fallback path so the next request resolves the device window again.
+   */
+  private async isCachedPackageRunning(
+    cachedHierarchy: CachedHierarchy,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const packageName = cachedHierarchy.hierarchy.packageName;
+    if (!packageName || !/^[A-Za-z0-9._]+$/.test(packageName)) {
+      return true;
+    }
+
+    try {
+      const result = await this.context.adb.executeCommand(
+        "shell dumpsys activity processes",
+        timeoutMs,
+        undefined,
+        true,
+        signal,
+      );
+      return isAndroidPackageRunning(result.stdout, packageName, cachedHierarchy.hierarchy.userId);
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      // Liveness is best-effort; an ADB error must not destroy otherwise usable
+      // cache state when process presence could not be determined.
+      logger.debug(
+        `[CTRL_PROXY] Could not verify cached package ${packageName} is running: ${error}`,
+      );
+      return true;
     }
   }
 

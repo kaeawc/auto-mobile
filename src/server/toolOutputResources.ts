@@ -107,12 +107,11 @@ function toolOutputError(uri: string, error: string): ResourceContent {
   };
 }
 
-function notAvailable(uri: string, artifactId: string, detail?: string): ResourceContent {
-  const suffix = detail ? ` (${detail})` : "";
+function notAvailable(uri: string, artifactId: string): ResourceContent {
   return toolOutputError(
     uri,
     `Tool-output artifact "${artifactId}" is not available. It may have expired or been ` +
-      `pruned, or it was not issued by this server. Re-run the tool to regenerate it.${suffix}`,
+      `pruned, or it was not issued by this server. Re-run the tool to regenerate it.`,
   );
 }
 
@@ -142,7 +141,7 @@ async function getToolOutputArtifact(params: Record<string, string>): Promise<Re
   } catch (error) {
     const reason = errorMessage(error);
     logger.warn(`[ToolOutputResources] Failed to read artifact ${artifactId}: ${reason}`);
-    return notAvailable(uri, artifactId, reason);
+    return notAvailable(uri, artifactId);
   }
 }
 

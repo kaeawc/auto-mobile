@@ -9,7 +9,11 @@ import {
   TerminateAppResult,
 } from "../../models";
 import { ActionableError } from "../../models";
-import { TerminateApp } from "./TerminateApp";
+import {
+  DefaultDeviceWindowCacheInvalidator,
+  DeviceWindowCacheInvalidator,
+  TerminateApp,
+} from "./TerminateApp";
 import { ClearAppData } from "./ClearAppData";
 import { logger } from "../../utils/logger";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
@@ -75,6 +79,7 @@ interface LaunchAppDependencies {
   clearAppDataFactory?: (device: BootedDevice, simctl: SimCtlClient) => IosClearAppDataRunner;
   createAndroidClearAppData?: (device: BootedDevice) => AndroidClearAppDataAction;
   createAndroidColdBoot?: (device: BootedDevice) => AndroidColdBootAction;
+  cacheInvalidator?: DeviceWindowCacheInvalidator;
 }
 
 export class LaunchApp extends BaseVisualChange {
@@ -89,6 +94,7 @@ export class LaunchApp extends BaseVisualChange {
   ) => IosClearAppDataRunner;
   private createAndroidClearAppData: (device: BootedDevice) => AndroidClearAppDataAction;
   private createAndroidColdBoot: (device: BootedDevice) => AndroidColdBootAction;
+  private cacheInvalidator: DeviceWindowCacheInvalidator;
   /**
    * Create an LaunchApp instance
    * @param device - Optional device
@@ -125,6 +131,8 @@ export class LaunchApp extends BaseVisualChange {
     this.createAndroidColdBoot = this.resolveAndroidColdBootFactory(
       dependencies.createAndroidColdBoot,
     );
+    this.cacheInvalidator =
+      dependencies.cacheInvalidator ?? new DefaultDeviceWindowCacheInvalidator();
   }
 
   private resolveAndroidClearAppDataFactory(
@@ -1028,6 +1036,7 @@ export class LaunchApp extends BaseVisualChange {
     expectedPackageName: string,
     staleObservation: ObserveResult,
   ): LaunchAppResult {
+    this.cacheInvalidator.invalidate(this.device);
     const reportedPackages = this.describeLaunchObservationPackages(staleObservation);
     logger.warn(
       `[LaunchApp] Omitting stale launch observation for ${expectedPackageName}; ` +

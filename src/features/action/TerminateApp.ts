@@ -29,14 +29,16 @@ export interface DeviceWindowCacheInvalidator {
 }
 
 /**
- * Default invalidator: drops the Android CtrlProxy hierarchy cache (an existing
- * instance only — never bootstraps a connection just to clear it) and the
- * observe-result cache for the device, so the next observe re-syncs fresh.
+ * Default invalidator: drops the existing platform CtrlProxy hierarchy cache
+ * (never bootstraps a connection just to clear it) and the observe-result cache
+ * for the device, so the next observe re-syncs fresh.
  */
 export class DefaultDeviceWindowCacheInvalidator implements DeviceWindowCacheInvalidator {
   invalidate(device: BootedDevice): void {
     if (device.platform === "android") {
       AndroidCtrlProxyClient.getExistingInstance(device.deviceId)?.invalidateCache();
+    } else {
+      IOSCtrlProxyClient.getExistingInstance(device.deviceId)?.clearCache();
     }
     RealObserveScreen.clearCache(device.deviceId);
   }

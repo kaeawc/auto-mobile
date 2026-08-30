@@ -1,5 +1,8 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
-import { TerminateApp } from "../../../src/features/action/TerminateApp";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
+import {
+  DefaultDeviceWindowCacheInvalidator,
+  TerminateApp,
+} from "../../../src/features/action/TerminateApp";
 import type { BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -10,6 +13,7 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { setDebugPerfEnabled } from "../../../src/utils/PerformanceTracker";
 import type { TimingData, TimingEntry } from "../../../src/utils/PerformanceTracker";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 
 describe("TerminateApp (iOS)", () => {
   // Simulator UDIDs are 8-4-4-4-12 UUIDs; isIosSimulatorUdid keys the simctl vs
@@ -27,6 +31,20 @@ describe("TerminateApp (iOS)", () => {
     fakeSimctl = new FakeSimctl();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
+  });
+
+  test("clears an existing iOS CtrlProxy hierarchy cache", () => {
+    const clearCache = spyOn({ clearCache: () => {} }, "clearCache");
+    const existingClientSpy = spyOn(IOSCtrlProxyClient, "getExistingInstance").mockReturnValue({
+      clearCache,
+    } as unknown as IOSCtrlProxyClient);
+
+    try {
+      new DefaultDeviceWindowCacheInvalidator().invalidate(iosDevice);
+      expect(clearCache).toHaveBeenCalledTimes(1);
+    } finally {
+      existingClientSpy.mockRestore();
+    }
   });
 
   test("terminates installed app via simctl", async () => {

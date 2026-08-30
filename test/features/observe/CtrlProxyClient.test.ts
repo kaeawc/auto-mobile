@@ -45,6 +45,23 @@ describe("AndroidCtrlProxyClient", function () {
     // Create fake ADB instance
     fakeAdb = new FakeAdbExecutor();
     fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    // Cached hierarchy liveness checks use process records; default cached test
+    // fixtures represent a still-running app unless a test explicitly overrides it.
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", {
+      stdout: [
+        "1234:com.example.app/u0a123",
+        "1235:com.example/u0a123",
+        "1236:com.example.sdk/u0a123",
+        "1237:com.example.noneofthesdk/u0a123",
+        "1238:com.example.nosdk/u0a123",
+        "1239:com.example.new/u0a123",
+        "1240:com.example.remove/u0a123",
+        "1241:com.example.all/u0a123",
+        "1242:com.google.android.deskclock/u0a123",
+        "1243:com.test.app/u0a123",
+      ].join("\n"),
+      stderr: "",
+    });
     fakeAdb.setScreenState(true);
 
     // Create test device

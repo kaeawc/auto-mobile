@@ -235,7 +235,7 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
     expect((internal.structuredContent as any).observation.viewHierarchy).toBeDefined();
   });
 
-  test("action policy: ToolRegistry forwards submit IME args so they emit full on uncertain identity", async () => {
+  test("action policy: ToolRegistry forwards submit IME args for uncertain-identity fallbacks", async () => {
     serverConfig.setActionsDiffObserveEnabled(true);
     serverConfig.setActionsNoObserveEnabled(false);
     await setupAutolockedSession();
@@ -252,7 +252,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       imeAction: "search",
     });
     expect((inputSearch.structuredContent as any).observation.isDiff).toBeUndefined();
-    expect((inputSearch.structuredContent as any).observation.viewHierarchy).toBeDefined();
+    expect((inputSearch.structuredContent as any).observation.skeleton).toBeDefined();
+    expect((inputSearch.structuredContent as any).observation.viewHierarchy).toBeUndefined();
     expect((inputSearch.structuredContent as any).observationDiff).toMatchObject({
       mode: "full",
       reason: "screen_changed",
@@ -270,7 +271,8 @@ describe("ToolRegistry internal no-diff guard (#3053)", () => {
       }),
     );
     expect((imeGo.structuredContent as any).observation.isDiff).toBeUndefined();
-    expect((imeGo.structuredContent as any).observation.viewHierarchy).toBeDefined();
+    expect((imeGo.structuredContent as any).observation.skeleton).toBeDefined();
+    expect((imeGo.structuredContent as any).observation.viewHierarchy).toBeUndefined();
     expect((imeGo.structuredContent as any).observationDiff).toMatchObject({
       mode: "full",
       reason: "screen_changed",

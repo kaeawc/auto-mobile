@@ -1618,9 +1618,7 @@ export class DaemonManager implements DaemonManagerLike {
     const probeDeadline = keepWaiting
       ? Math.min(
           deadline,
-          maxProbeDurationMs === undefined
-            ? deadline
-            : this.timer.now() + maxProbeDurationMs,
+          maxProbeDurationMs === undefined ? deadline : this.timer.now() + maxProbeDurationMs,
         )
       : Math.min(deadline, this.timer.now() + ABANDONED_WAIT_CONFIRM_TIMEOUT_MS);
     const watchdog = keepWaiting

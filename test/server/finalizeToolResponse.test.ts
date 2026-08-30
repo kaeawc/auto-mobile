@@ -415,7 +415,10 @@ describe("finalizeToolResponse", () => {
       metrics: { gfxinfoRaw: "HUGE RAW DUMP", cpuStatsRaw: "CPU RAW", p99: 16 },
       diagnostics: `summary line\n${GFXINFO_DUMP_MARKER}\nmegabytes of raw frame data`,
     };
-    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), { name: "observe" });
+    const finalized = finalizeToolResponse(createStructuredToolResponse(obs), {
+      name: "observe",
+      args: { project: "full" },
+    });
 
     const audit = (finalized.structuredContent as any).performanceAudit;
     expect(audit.metrics.gfxinfoRaw).toBeNull();
@@ -1026,6 +1029,30 @@ describe("finalizeToolResponse", () => {
       const metadata = expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
       expect(metadata.fromScreen.activeWindow.appId).toBe("com.example");
       expect(metadata.toScreen.activeWindow.appId).toBe("com.other");
+    });
+
+    test("preserves default skeleton projection when the screen changed", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const otherScreen = {
+        ...sameScreenObserve(),
+        activeWindow: { appId: "com.other", activityName: ".Other", layoutSeqSum: 2 },
+      } as ObserveResult;
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: otherScreen }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+      const observation = (finalized.structuredContent as any).observation;
+
+      expect(observation.isDiff).toBeUndefined();
+      expect(observation.skeleton).toBeDefined();
+      expect(observation.viewHierarchy).toBeUndefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
     });
 
     test("falls back to full when an iOS screen identity changes under the same app", () => {

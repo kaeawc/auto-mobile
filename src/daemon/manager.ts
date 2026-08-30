@@ -388,6 +388,13 @@ const ABANDONED_WAIT_CONFIRM_TIMEOUT_MS = 1000;
 const LIVENESS_WATCHDOG_INTERVAL_MS = 100;
 
 /**
+ * Maximum duration of one socket probe while waiting on another startup-lock
+ * holder. A stale socket owned by an unrelated daemon must not pin the entire
+ * readiness budget (issue #5928).
+ */
+const LOCK_HOLDER_PROBE_TIMEOUT_MS = 1000;
+
+/**
  * A snapshot of the daemon startup lock's current holder, as read from the lock
  * file. `token` carries the holder's per-instance owner token (issue #5904) so a
  * replacement holder is distinguishable from the prior one even under PID reuse.
@@ -410,6 +417,7 @@ export interface DaemonManagerLike {
     timeout: number,
     signal?: AbortSignal,
     shouldContinueWaiting?: () => boolean,
+    maxProbeDurationMs?: number,
   ): Promise<boolean>;
   /**
    * Whether the daemon startup lock is held by a still-live process — used as the
@@ -667,8 +675,11 @@ export class DaemonManager implements DaemonManagerLike {
       // Capture diagnostics while the current holder still holds the lock, so they
       // survive into the failure message if the holder later releases on failure.
       holderLogPath = (await this.getLockHolderStartupLogPath()) ?? holderLogPath;
-      const ready = await this.waitForReady(remaining, undefined, () =>
-        this.isStartupLockHeldByLiveProcess(),
+      const ready = await this.waitForReady(
+        remaining,
+        undefined,
+        () => this.isStillWaitingOnStartupLockHolder(waitedOnHolder),
+        LOCK_HOLDER_PROBE_TIMEOUT_MS,
       );
       if (ready) {
         stderrLog("Daemon started by another process");
@@ -1085,6 +1096,9 @@ export class DaemonManager implements DaemonManagerLike {
     if (a.token !== undefined && b.token !== undefined) {
       return a.token === b.token;
     }
+    if (a.token !== b.token) {
+      return false;
+    }
     return a.livePid !== undefined && a.livePid === b.livePid;
   }
 
@@ -1104,6 +1118,16 @@ export class DaemonManager implements DaemonManagerLike {
    */
   isStartupLockHeldByLiveProcess(): boolean {
     return this.readStartupLockHolder().present;
+  }
+
+  private isStillWaitingOnStartupLockHolder(waitedOnHolder: StartupLockHolder): boolean {
+    const current = this.readStartupLockHolder();
+    return (
+      current.present &&
+      (current.livePid === undefined ||
+        waitedOnHolder.livePid === undefined ||
+        this.isSameStartupLockHolder(current, waitedOnHolder))
+    );
   }
 
   /**
@@ -1129,8 +1153,11 @@ export class DaemonManager implements DaemonManagerLike {
     let waitedOnHolder = this.readStartupLockHolder();
 
     while (this.remainingTime(deadline) > 0) {
-      const ready = await this.waitForReady(this.remainingTime(deadline), undefined, () =>
-        this.isStartupLockHeldByLiveProcess(),
+      const ready = await this.waitForReady(
+        this.remainingTime(deadline),
+        undefined,
+        () => this.isStillWaitingOnStartupLockHolder(waitedOnHolder),
+        LOCK_HOLDER_PROBE_TIMEOUT_MS,
       );
       if (ready) {
         return true;
@@ -1492,6 +1519,7 @@ export class DaemonManager implements DaemonManagerLike {
     // synchronous through to the poll sleep (a caller that inspects pending timers
     // right after invocation relies on that); a predicate is consulted each poll.
     shouldContinueWaiting: () => boolean = () => true,
+    maxProbeDurationMs?: number,
   ): Promise<boolean> {
     const startTime = this.timer.now();
     const deadline = startTime + timeout;
@@ -1518,6 +1546,7 @@ export class DaemonManager implements DaemonManagerLike {
           deadline,
           signal,
           shouldContinueWaiting,
+          maxProbeDurationMs,
         );
         if (outcome === "ready") {
           stderrLog(
@@ -1584,15 +1613,25 @@ export class DaemonManager implements DaemonManagerLike {
     deadline: number,
     signal: AbortSignal | undefined,
     shouldContinueWaiting: () => boolean,
+    maxProbeDurationMs: number | undefined,
   ): Promise<"ready" | "aborted" | "unready"> {
     const probeDeadline = keepWaiting
-      ? deadline
+      ? Math.min(
+          deadline,
+          maxProbeDurationMs === undefined
+            ? deadline
+            : this.timer.now() + maxProbeDurationMs,
+        )
       : Math.min(deadline, this.timer.now() + ABANDONED_WAIT_CONFIRM_TIMEOUT_MS);
     const watchdog = keepWaiting
       ? this.startLivenessWatchdog(signal, shouldContinueWaiting)
       : undefined;
     try {
-      return await this.probeObservedSocket(probeDeadline, watchdog?.signal ?? signal, keepWaiting);
+      return await this.probeObservedSocket(
+        probeDeadline,
+        watchdog?.signal ?? signal,
+        keepWaiting && maxProbeDurationMs === undefined,
+      );
     } finally {
       watchdog?.dispose();
     }

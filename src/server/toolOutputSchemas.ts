@@ -218,6 +218,21 @@ const screenReaderNavigationSchema = z
   })
   .passthrough();
 
+const tapEffectSchema = z
+  .object({
+    screenChanged: z.boolean(),
+    basis: z.enum([
+      "screenIdentity changed",
+      "screenIdentity unchanged",
+      "activeWindow+layoutSeqSum changed",
+      "activeWindow+layoutSeqSum unchanged",
+      "viewHierarchy changed",
+      "viewHierarchy unchanged",
+      "insufficient observation data",
+    ]),
+  })
+  .passthrough();
+
 export const tapOnResultSchema = z
   .object({
     success: z.boolean(),
@@ -226,6 +241,7 @@ export const tapOnResultSchema = z
     element: elementSchema.optional(),
     observation: z.union([observationSummarySchema, toolOutputArtifactMetadataSchema]).optional(),
     observationDiff: observationDiffMetadataSchema.optional(),
+    effect: tapEffectSchema.optional(),
     selectedElement: selectedElementSchema.optional(),
     activatedSubtext: z
       .object({

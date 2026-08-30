@@ -480,6 +480,36 @@ describe("DaemonManager readiness", () => {
     expect(waits).toBe(2);
   });
 
+  test("re-arbitrates when a legacy holder gains an owner token (#5928)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    writeFileSync(lockPath, String(process.pid));
+    let waits = 0;
+
+    class TestDaemonManager extends DaemonManager {
+      override async waitForReady(): Promise<boolean> {
+        waits++;
+        if (waits === 1) {
+          writeFileSync(lockPath, `${process.pid}\ntoken-b`);
+        }
+        return false;
+      }
+    }
+
+    const manager = new TestDaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+    );
+
+    await expect(manager.waitForLockHolderReadiness(30_000)).resolves.toBe(false);
+    expect(waits).toBe(2);
+  });
+
   test("waitForLockHolderReadiness confirms a daemon that published its socket before releasing the lock (#5904)", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
@@ -551,6 +581,53 @@ describe("DaemonManager readiness", () => {
     // No replacement, so exactly one wait: the loop must not spin on an unchanging
     // live holder.
     expect(waits).toBe(1);
+  });
+
+  test("aborts a stalled probe when the lock holder identity changes (#5928)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    writeFileSync(lockPath, `${process.pid}\ntoken-a`);
+    writeFileSync(socketPath, "socket placeholder");
+
+    const clients: ProbeClient[] = [];
+    const manager = new DaemonManager(
+      () => {
+        const client = new ProbeClient(false);
+        client.connect = async (_timeoutMs?: number, signal?: AbortSignal) => {
+          client.connectCallCount++;
+          if (signal !== undefined) {
+            client.connectionSignals.push(signal);
+          }
+          await new Promise<void>((_resolve, reject) => {
+            if (signal?.aborted) {
+              reject(new Error("probe aborted"));
+              return;
+            }
+            signal?.addEventListener("abort", () => reject(new Error("probe aborted")), {
+              once: true,
+            });
+          });
+        };
+        clients.push(client);
+        return client;
+      },
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+    );
+
+    // Change the holder after the initial poll-boundary check, while the socket
+    // probe is stalled. The identity-aware watchdog must interrupt that probe.
+    fakeTimer.setTimeout(() => {
+      writeFileSync(lockPath, `${process.pid}\ntoken-b`);
+    }, 100);
+
+    await expect(manager.waitForLockHolderReadiness(250)).resolves.toBe(false);
+    expect(clients.length).toBeGreaterThanOrEqual(2);
+    expect(clients[0]?.connectionSignals[0]?.aborted).toBe(true);
   });
 
   test("reports elapsed readiness timing when no daemon socket appears", async () => {

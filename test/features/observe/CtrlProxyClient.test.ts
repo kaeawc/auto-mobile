@@ -1038,6 +1038,40 @@ describe("AndroidCtrlProxyClient", function () {
     }
   });
 
+  test("retries orphan reconciliation when an ADB removal fails", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    fakeAdb.clearHistory();
+    let removalFails = true;
+    stubForwardLifecycleCommands(
+      () => `${testDevice.deviceId} tcp:52002 tcp:8765\n`,
+      () => removalFails,
+    );
+
+    const client = AndroidCtrlProxyClient.createForTesting(
+      testDevice,
+      fakeAdb,
+      createSuccessWebSocketFactory(),
+      fakeTimer,
+    );
+    registerTestSingleton(client);
+    try {
+      await expect((client as any).setupPortForwarding()).rejects.toThrow(
+        "Failed to reclaim orphaned CtrlProxy forward",
+      );
+      expect(fakeAdb.getExecutedCommands()).not.toContain("forward tcp:8765 tcp:8765");
+
+      removalFails = false;
+      await (client as any).setupPortForwarding();
+
+      expect(fakeAdb.getExecutedCommands()).toContain("forward --remove tcp:52002");
+      expect(fakeAdb.getExecutedCommands()).toContain("forward tcp:8765 tcp:8765");
+    } finally {
+      await client.close();
+      AndroidCtrlProxyClient.removeInstance(testDevice.deviceId);
+    }
+  });
+
   test("reconciles a CtrlProxy forward after close() cannot remove it", async function () {
     await accessibilityServiceClient.close();
     AndroidCtrlProxyClient.resetInstances();

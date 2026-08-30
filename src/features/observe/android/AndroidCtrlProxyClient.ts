@@ -3266,7 +3266,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       logger.info(
         `[CTRL_PROXY] Reclaiming orphaned CtrlProxy forward on ${this.device.deviceId} tcp:${port}`,
       );
-      await this.removeCtrlProxyPortForward(port, signal);
+      if (!(await this.removeCtrlProxyPortForward(port, signal))) {
+        throw new Error(
+          `Failed to reclaim orphaned CtrlProxy forward on ${this.device.deviceId} tcp:${port}`,
+        );
+      }
     }
   }
 

@@ -1,6 +1,6 @@
 import { describe, test } from "bun:test";
 import fc from "fast-check";
-import { nonFiniteReplacer, reviveNonFiniteNumbers } from "../../src/utils/nonFiniteJson";
+import { decodeNonFinite, encodeNonFinite } from "../../src/utils/nonFiniteJson";
 
 // Property-based companion to nonFiniteJson.test.ts. The module promises that a
 // non-finite tool-call argument (Infinity/-Infinity/NaN) survives every JSON hop
@@ -70,15 +70,16 @@ const payload = fc.letrec<{ tree: unknown }>((rec) => ({
   ),
 })).tree;
 
-// Encode with the replacer, then model the daemon socket hop plus the loopback
-// StreamableHTTP hop as `hops` further *plain* JSON round-trips (the sentinels are
-// ordinary objects by then, so no replacer is involved), then revive.
+// Encode with the production helper, then model the daemon socket hop plus the
+// loopback StreamableHTTP hop as `hops` further *plain* JSON round-trips (the
+// sentinels are ordinary objects by then), then decode.
 function throughWire(value: unknown, hops: number): unknown {
-  let carrier = JSON.stringify(value, nonFiniteReplacer);
+  const { value: encoded } = encodeNonFinite(value);
+  let carrier = JSON.stringify(encoded);
   for (let i = 0; i < hops; i++) {
     carrier = JSON.stringify(JSON.parse(carrier));
   }
-  return reviveNonFiniteNumbers(JSON.parse(carrier));
+  return decodeNonFinite(JSON.parse(carrier));
 }
 
 describe("nonFiniteJson (property-based)", () => {
@@ -96,9 +97,7 @@ describe("nonFiniteJson (property-based)", () => {
     // must be a structural no-op: the common case is every tool request that
     // carries no non-finite argument.
     fc.assert(
-      fc.property(fc.jsonValue(), (value) =>
-        deepEqualJsonish(reviveNonFiniteNumbers(value), value),
-      ),
+      fc.property(fc.jsonValue(), (value) => deepEqualJsonish(decodeNonFinite(value), value)),
       RUN_OPTIONS,
     );
   });
@@ -106,9 +105,10 @@ describe("nonFiniteJson (property-based)", () => {
   test("revive is idempotent — a second pass changes nothing", () => {
     fc.assert(
       fc.property(payload, (value) => {
-        const wire = JSON.parse(JSON.stringify(value, nonFiniteReplacer));
-        const once = reviveNonFiniteNumbers(wire);
-        const twice = reviveNonFiniteNumbers(once);
+        const { value: encoded } = encodeNonFinite(value);
+        const wire = JSON.parse(JSON.stringify(encoded));
+        const once = decodeNonFinite(wire);
+        const twice = decodeNonFinite(once);
         return deepEqualJsonish(once, twice);
       }),
       RUN_OPTIONS,

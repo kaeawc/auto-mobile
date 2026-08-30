@@ -185,6 +185,12 @@ const toolOutputArtifactDetailsSchema = z
     payload: z.string(),
     bytes: z.number().int().nonnegative(),
     tool: z.string(),
+    // In-band companion to `path` (issue #5882). Optional so historical/inline
+    // payloads without it still validate; the writer always populates it.
+    resourceUri: z
+      .string()
+      .optional()
+      .describe("automobile: resource URI to fetch this artifact's JSON in-band"),
   })
   .passthrough();
 

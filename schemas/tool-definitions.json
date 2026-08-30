@@ -6677,6 +6677,10 @@
             },
             "tool": {
               "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
             }
           },
           "required": ["path", "format", "payload", "bytes", "tool"],
@@ -10064,6 +10068,10 @@
                       "maximum": 9007199254740991
                     },
                     "tool": {
+                      "type": "string"
+                    },
+                    "resourceUri": {
+                      "description": "automobile: resource URI to fetch this artifact's JSON in-band",
                       "type": "string"
                     }
                   },

@@ -7,6 +7,7 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { stringifyToolResponse } from "../utils/toolUtils";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { logger } from "../utils/logger";
+import { buildToolOutputResourceUri } from "./toolOutputResources";
 import type {
   ObservationArtifactMetadata,
   ObservationArtifactWriter,
@@ -112,6 +113,9 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
           payload: input.payload,
           bytes: Buffer.byteLength(content, "utf8"),
           tool: input.tool,
+          // Companion in-protocol fetch for the host `path` (issue #5882): a
+          // remote MCP client reads the raw JSON via this `automobile:` resource.
+          resourceUri: buildToolOutputResourceUri(filename),
         },
       };
     } catch (error) {

@@ -85,9 +85,13 @@ describe("JsonToolOutputArtifactWriter", () => {
         payload: "ObserveResult",
         bytes: Buffer.byteLength(fileSystem.writes[0].content, "utf8"),
         tool: "tapOn",
+        resourceUri: "automobile:tool-output/1234-tapOn-id_1.json",
       },
     });
     expect(second.artifact.path).toBe(secondPath);
+    // The companion resource URI carries only the file basename so a client can
+    // fetch the spilled JSON in-band (issue #5882), never the host path.
+    expect(second.artifact.resourceUri).toBe("automobile:tool-output/1234-tapOn-id_2.json");
     expect(fileSystem.listCalls).toEqual([]);
     expect(fileSystem.deleteCalls).toEqual([]);
   });

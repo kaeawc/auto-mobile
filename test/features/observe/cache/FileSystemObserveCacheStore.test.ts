@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import path from "path";
 import os from "os";
-import { mkdirSync, rmSync, readdirSync, existsSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, readdirSync, existsSync, writeFileSync, utimesSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { writeFileAsync } from "../../../../src/utils/io";
 import {
@@ -198,6 +198,30 @@ describe("FileSystemObserveCacheStore", function () {
   test("getMostRecent returns undefined when nothing cached", async function () {
     const result = await store.getMostRecent("device-1");
     expect(result).toBeUndefined();
+  });
+
+  test("getMostRecent reaps expired disk files while scanning", async function () {
+    const expiredFiles = [
+      `observe_device-1_${timer.now()}_g0.json`,
+      `observe_device-1_${timer.now()}_g1.json`,
+    ];
+    const expiredAt = timer.now() - OBSERVE_RESULT_CACHE_TTL_MS - 1;
+    for (const file of expiredFiles) {
+      const filePath = path.join(cacheDir, file);
+      writeFileSync(filePath, JSON.stringify(makeResult("expired")));
+      utimesSync(filePath, new Date(expiredAt), new Date(expiredAt));
+    }
+
+    const currentFile = `observe_device-1_${timer.now()}_g0-current.json`;
+    const currentPath = path.join(cacheDir, currentFile);
+    writeFileSync(currentPath, JSON.stringify(makeResult("current")));
+    utimesSync(currentPath, new Date(timer.now()), new Date(timer.now()));
+
+    const restored = await store.getMostRecent("device-1");
+
+    expect(restored?.updatedAt).toBe("current");
+    expect(expiredFiles.every((file) => !existsSync(path.join(cacheDir, file)))).toBe(true);
+    expect(existsSync(currentPath)).toBe(true);
   });
 
   // --- Generation-stamped disk files (#5892) -------------------------------

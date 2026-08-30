@@ -296,9 +296,22 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
 
       const now = this.timer.now();
       const currentGeneration = this.currentGeneration(deviceId);
+      const expiredFiles: string[] = [];
       let mostRecentFile: { path: string; mtime: number } | undefined;
 
       for (const file of jsonFiles) {
+        const filePath = path.join(this.cacheDir, file);
+        const stats = await statAsync(filePath);
+        const age = now - stats.mtime.getTime();
+
+        if (age >= OBSERVE_RESULT_CACHE_TTL_MS) {
+          expiredFiles.push(file);
+          logger.debug(
+            `[OBSERVE_CACHE] Disk cache file expired: ${file} (age: ${age}ms > TTL: ${OBSERVE_RESULT_CACHE_TTL_MS}ms)`,
+          );
+          continue;
+        }
+
         // Residual 2: never re-warm memory from a file whose stamped generation
         // is older than the device's current generation — a clear() has advanced
         // past it (issue #5892). Unstamped files can't be proven stale; serve
@@ -312,20 +325,12 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
           continue;
         }
 
-        const filePath = path.join(this.cacheDir, file);
-        const stats = await statAsync(filePath);
-        const age = now - stats.mtime.getTime();
-
-        if (age < OBSERVE_RESULT_CACHE_TTL_MS) {
-          if (!mostRecentFile || stats.mtime.getTime() > mostRecentFile.mtime) {
-            mostRecentFile = { path: filePath, mtime: stats.mtime.getTime() };
-          }
-        } else {
-          logger.debug(
-            `[OBSERVE_CACHE] Disk cache file expired: ${file} (age: ${age}ms > TTL: ${OBSERVE_RESULT_CACHE_TTL_MS}ms)`,
-          );
+        if (!mostRecentFile || stats.mtime.getTime() > mostRecentFile.mtime) {
+          mostRecentFile = { path: filePath, mtime: stats.mtime.getTime() };
         }
       }
+
+      await Promise.all(expiredFiles.map((file) => this.deleteDiskFile(file)));
 
       if (!mostRecentFile) {
         logger.debug("[OBSERVE_CACHE] No valid files in disk cache");

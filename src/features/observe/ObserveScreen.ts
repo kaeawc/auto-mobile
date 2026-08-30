@@ -90,6 +90,15 @@ function boundCachedLayoutWarnings(result: ObserveResult | undefined): ObserveRe
  */
 const SYSTEM_UI_WINDOW_PACKAGES = new Set<string>(["com.android.systemui"]);
 
+function isAccessibilityViewClass(foregroundActivity: string): boolean {
+  const activityName = foregroundActivity.split("/")[1] ?? "";
+  return (
+    activityName.startsWith("android.widget.") ||
+    activityName.startsWith("android.view.") ||
+    activityName.endsWith("DecorView")
+  );
+}
+
 export class RealObserveScreen implements ObserveScreen {
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -607,7 +616,10 @@ export class RealObserveScreen implements ObserveScreen {
           if (hierarchy.insets) {
             result.insets = hierarchy.insets;
           }
-          if (hierarchy.foregroundActivity) {
+          if (
+            hierarchy.foregroundActivity &&
+            !isAccessibilityViewClass(hierarchy.foregroundActivity)
+          ) {
             const parts = hierarchy.foregroundActivity.split("/");
             const packageName = parts[0];
             const activityName = parts[1]?.startsWith(".")
@@ -667,20 +679,21 @@ export class RealObserveScreen implements ObserveScreen {
           await Promise.all(tasks);
         }
 
-        // Populate activeWindow from view hierarchy packageName if not already set.
+        // CtrlProxy is installed lazily. Preserve active-window attribution for
+        // that bootstrap interval only; once CtrlProxy supplied an app/activity
+        // or hierarchy package, never make the legacy Window query.
+        if (!result.activeWindow) {
+          await this.deviceStateCollector.collectActiveWindow(result);
+        }
+
+        // Preserve package attribution when the accessibility service did not
+        // provide a usable activity and the legacy window query also failed.
         if (result.viewHierarchy?.packageName && !result.activeWindow) {
           result.activeWindow = {
             appId: result.viewHierarchy.packageName,
             activityName: "",
             layoutSeqSum: 0,
           };
-        }
-
-        // CtrlProxy is installed lazily. Preserve active-window attribution for
-        // that bootstrap interval only; once CtrlProxy supplied an app/activity
-        // or hierarchy package, never make the legacy Window query.
-        if (!result.activeWindow) {
-          await this.deviceStateCollector.collectActiveWindow(result);
         }
 
         if (result.notificationPermissionDetected && result.activeWindow) {

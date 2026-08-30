@@ -2787,6 +2787,12 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       val pkg = rootPackage
       val className = windowClass
       if (pkg != null && className != null) {
+        if (isFrameworkViewClass(className)) {
+          // Accessibility reports the root View class for many app windows,
+          // which is not the resumed Activity and must not shadow the ADB
+          // fallback on the host.
+          return null
+        }
         // Use short class name format if it starts with the package
         val shortName =
           if (className.startsWith(pkg)) {
@@ -2805,6 +2811,11 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
       null
     }
   }
+
+  private fun isFrameworkViewClass(className: String): Boolean =
+    className.startsWith("android.widget.") ||
+      className.startsWith("android.view.") ||
+      className.endsWith("DecorView")
 
   /** Get display density in DPI. */
   private fun getDensity(): Int {

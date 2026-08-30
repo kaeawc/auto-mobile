@@ -59,6 +59,64 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     resetObserveCacheStore();
   });
 
+  test("falls back when accessibility foreground metadata is a View class", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      packageName: "com.example.app",
+      foregroundActivity: "com.example.app/android.widget.FrameLayout",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
+    const fallbackWindow = {
+      getActive: async () => ({
+        appId: "com.example.app",
+        activityName: "com.example.app.MainActivity",
+        layoutSeqSum: 0,
+      }),
+      getActiveHash: async () => "hash",
+      getCachedActiveWindow: async () => null,
+      setCachedActiveWindow: async () => undefined,
+      clearCache: async () => undefined,
+    };
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        window: fallbackWindow,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow).toEqual({
+      appId: "com.example.app",
+      activityName: "com.example.app.MainActivity",
+      layoutSeqSum: 0,
+    });
+  });
+
   test("retracts freshness when the observed window is not the top resumed activity", async () => {
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();

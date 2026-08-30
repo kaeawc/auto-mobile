@@ -235,8 +235,9 @@ export function tryAcquireExclusiveLock(
  * process could delete a lock now held by a *different* incarnation that recycled
  * the same PID and wrote a different token (issue #3006, follow-up 1). A lock file
  * with NO token line (a pre-token incarnation) is treated as ours on a PID match,
- * preserving the legacy PID-only behavior. The daemon caller passes no token and
- * stays PID-only, as before.
+ * preserving the legacy PID-only behavior. The daemon caller now passes its
+ * per-instance startup-lock owner token too (issue #5904), so its release is
+ * incarnation-aware rather than PID-only.
  */
 export function releaseExclusiveLock(
   lockFilePath: string,

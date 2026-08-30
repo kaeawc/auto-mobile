@@ -1311,9 +1311,13 @@ export class DaemonMcpProxy {
     // (early-owner record present, socket unreachable, no live holder finishing the
     // start) is then reported now instead of at the client's deadline, while the
     // concurrent-cold-start case keeps the budget it needs.
-    const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS, undefined, () =>
-      this.daemonManager.isStartupLockHeldByLiveProcess(),
-    );
+    // Re-arbitrate across replacement holders under one deadline, exactly like the
+    // double-lock-contention loop in DaemonManager.start (issue #5904): if the live
+    // holder A crashes and a replacement B reclaims the lock to finish the start, a
+    // single liveness-gated waitForReady would give up on A and throw even though B
+    // is now bringing the daemon up. waitForLockHolderReadiness keeps the full budget
+    // per live holder and only reports failure once no live holder remains.
+    const ready = await this.daemonManager.waitForLockHolderReadiness(DAEMON_STARTUP_TIMEOUT_MS);
     if (!ready) {
       throw new DaemonUnavailableError(
         `Daemon reported running but its socket did not become reachable, and no live ` +

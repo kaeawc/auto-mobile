@@ -51,4 +51,14 @@ export class FakeDaemonManager implements DaemonManagerLike {
   isStartupLockHeldByLiveProcess(): boolean {
     return this.startupLockHeldByLiveProcess;
   }
+
+  /**
+   * Default fake: delegate to `waitForReady` with the live-holder predicate, so
+   * subclasses that model readiness by overriding `waitForReady` keep driving this
+   * path and the timeout / predicate they observe are unchanged (issue #5904).
+   * Override for tests that need to model replacement re-arbitration directly.
+   */
+  async waitForLockHolderReadiness(timeoutMs: number): Promise<boolean> {
+    return this.waitForReady(timeoutMs, undefined, () => this.isStartupLockHeldByLiveProcess());
+  }
 }

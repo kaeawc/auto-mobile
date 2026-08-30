@@ -665,6 +665,51 @@ describe("DaemonMcpProxy", () => {
           await proxy.close();
         }
       });
+
+      test("path 1 re-arbitrates onto a replacement holder that publishes the socket (#5904)", async () => {
+        // Model the double-lock-contention edge: the holder the proxy first waits on
+        // never publishes, but a replacement holder reclaims the lock and finishes the
+        // start. Path 1 must wait that replacement out (via waitForLockHolderReadiness)
+        // rather than throwing the moment the first holder is gone.
+        class ReArbitratingManager extends StartingDaemonManager {
+          lockHolderReadinessCalls = 0;
+          override async waitForLockHolderReadiness(_timeoutMs: number): Promise<boolean> {
+            this.lockHolderReadinessCalls++;
+            // The replacement publishes the socket; readiness succeeds.
+            this.socketPublished = true;
+            return true;
+          }
+        }
+
+        const fakeManager = new ReArbitratingManager();
+        fakeManager.statusResult = {
+          running: true,
+          pid: 1234,
+          port: 3000,
+          socketPath: "/tmp/test.sock",
+          version: DAEMON_VERSION,
+        };
+        const client = new SocketGatedClient(fakeManager);
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
+
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => client,
+          daemonManager: fakeManager,
+          autoStartDaemon: true,
+        });
+
+        try {
+          await proxy.listTools();
+
+          // The re-arbitration entry point was used, and the client connected once the
+          // replacement published the socket.
+          expect(fakeManager.lockHolderReadinessCalls).toBe(1);
+          expect(client.connectCallCount).toBe(1);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
     });
 
     describe("version-mismatch handling", () => {

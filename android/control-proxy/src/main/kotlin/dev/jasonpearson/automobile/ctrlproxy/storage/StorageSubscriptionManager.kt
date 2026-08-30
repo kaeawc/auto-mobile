@@ -602,50 +602,65 @@ class StorageSubscriptionManager(private val context: Context) {
     packageObservers.clear()
   }
 
+  // Create-or-merge and remove-if-unused run through ConcurrentHashMap.compute so the
+  // whole check-then-act is atomic per package. Two files of one package subscribing
+  // concurrently on Dispatchers.IO would otherwise both observe no entry, register
+  // separate ContentObservers, and overwrite the map with single-file state — leaking
+  // the losing observer and dropping changes for its file (Codex #4709 review). compute
+  // holds the per-bin lock for the key, so the second caller sees the first's state and
+  // only merges its file name; it also serializes register against a concurrent
+  // remove-if-unused for the same package.
   private fun registerPackageObserver(packageName: String, fileName: String) {
-    val existingState = packageObservers[packageName]
-    if (existingState != null) {
-      existingState.subscriptions.add(fileName)
-      return
-    }
-
-    val authority = packageName + AUTHORITY_SUFFIX
-    val changesUri = Uri.parse("content://$authority/$CHANGES_PATH")
-
-    val observer =
-      object : ContentObserver(handler) {
-        override fun onChange(selfChange: Boolean) {
-          super.onChange(selfChange)
-          Log.d(TAG, "ContentObserver notified for $packageName")
-          fetchChangesForPackage(packageName)
-        }
+    packageObservers.compute(packageName) { _, existing ->
+      if (existing != null) {
+        existing.subscriptions.add(fileName)
+        return@compute existing
       }
 
-    try {
-      context.contentResolver.registerContentObserver(changesUri, false, observer)
-      packageObservers[packageName] =
+      val authority = packageName + AUTHORITY_SUFFIX
+      val changesUri = Uri.parse("content://$authority/$CHANGES_PATH")
+
+      val observer =
+        object : ContentObserver(handler) {
+          override fun onChange(selfChange: Boolean) {
+            super.onChange(selfChange)
+            Log.d(TAG, "ContentObserver notified for $packageName")
+            fetchChangesForPackage(packageName)
+          }
+        }
+
+      try {
+        context.contentResolver.registerContentObserver(changesUri, false, observer)
+        Log.d(TAG, "Registered ContentObserver for $packageName")
         PackageObserverState(
           observer,
           ConcurrentHashMap.newKeySet<String>().apply { add(fileName) },
         )
-      Log.d(TAG, "Registered ContentObserver for $packageName")
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to register ContentObserver for $packageName", e)
+      } catch (e: Exception) {
+        Log.e(TAG, "Failed to register ContentObserver for $packageName", e)
+        // Leave the package unmapped, as before, so a later subscribe can retry.
+        null
+      }
     }
   }
 
   private fun unregisterPackageObserverIfUnused(packageName: String, fileName: String) {
-    val state = packageObservers[packageName] ?: return
-    state.subscriptions.remove(fileName)
+    packageObservers.compute(packageName) { _, state ->
+      if (state == null) return@compute null
+      state.subscriptions.remove(fileName)
 
-    if (state.subscriptions.isEmpty()) {
-      try {
-        context.contentResolver.unregisterContentObserver(state.observer)
-        Log.d(TAG, "Unregistered ContentObserver for $packageName")
-      } catch (e: Exception) {
-        Log.w(TAG, "Error unregistering ContentObserver", e)
+      if (state.subscriptions.isEmpty()) {
+        try {
+          context.contentResolver.unregisterContentObserver(state.observer)
+          Log.d(TAG, "Unregistered ContentObserver for $packageName")
+        } catch (e: Exception) {
+          Log.w(TAG, "Error unregistering ContentObserver", e)
+        }
+        // Returning null removes the mapping.
+        null
+      } else {
+        state
       }
-      packageObservers.remove(packageName)
     }
   }
 

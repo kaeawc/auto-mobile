@@ -440,4 +440,57 @@ class StorageSubscriptionManagerTest {
     // Every subscribe (unique id) was matched by an unsubscribe.
     assertTrue(manager.getActiveSubscriptions().isEmpty())
   }
+
+  @Test
+  fun `concurrent first subscribe registers exactly one observer per package`() {
+    val bundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"subscribed":true}""")
+      }
+    every { contentResolver.call(any<Uri>(), any(), any(), any()) } returns bundle
+
+    val observers =
+      java.util.concurrent.ConcurrentHashMap.newKeySet<android.database.ContentObserver>()
+    every { contentResolver.registerContentObserver(any(), any(), any()) } answers
+      {
+        observers += thirdArg<android.database.ContentObserver>()
+      }
+
+    val threadCount = 12
+    val barrier = java.util.concurrent.CyclicBarrier(threadCount)
+    val errors = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+    val latch = java.util.concurrent.CountDownLatch(threadCount)
+
+    // All threads race to first-subscribe DISTINCT files of the SAME package, aligned
+    // on a barrier to maximize contention on the initial packageObservers entry. The
+    // package observer must be created exactly once and every file merged into it; a
+    // non-atomic check-then-put lets two callers both see no entry, register separate
+    // observers, and overwrite the map with single-file state — leaking the losing
+    // observer and dropping its file (Codex #4709 review). The atomic compute fix keeps
+    // exactly one observer for the package.
+    for (t in 0 until threadCount) {
+      Thread {
+        try {
+          barrier.await()
+          manager.subscribe("com.example.app", "file-$t")
+        } catch (e: Throwable) {
+          errors.add(e)
+        } finally {
+          latch.countDown()
+        }
+      }
+        .start()
+    }
+
+    assertTrue(
+      "concurrent subscribe timed out",
+      latch.await(30, java.util.concurrent.TimeUnit.SECONDS),
+    )
+    assertTrue("concurrent subscribe threw: ${errors.firstOrNull()}", errors.isEmpty())
+    // Exactly one ContentObserver for the single package — no leaked duplicates.
+    assertEquals(1, observers.size)
+    // Every distinct file's subscription is live and merged under that one observer.
+    assertEquals(threadCount, manager.getActiveSubscriptions().size)
+  }
 }

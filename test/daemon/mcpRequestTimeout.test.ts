@@ -399,11 +399,13 @@ describe("resolveMcpRequestTimeoutMs", () => {
   // Constant relationships (not resolve() calls): the observe/openLink default
   // floors must exceed the standard request timeout, or a cold start would abort
   // (issues #2834 / #2723).
-  test("default observe and openLink floors exceed the standard request timeout", () => {
+  test("default observe, openLink, and crashApp floors exceed the standard timeout", () => {
     expect(DEFAULT_OBSERVE_MCP_TIMEOUT_MS).toBe(90_000);
     expect(DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS).toBe(90_000);
+    expect(MIN_CRASH_APP_MCP_TIMEOUT_MS).toBe(90_000);
     expect(DEFAULT_OBSERVE_MCP_TIMEOUT_MS).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
     expect(DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+    expect(MIN_CRASH_APP_MCP_TIMEOUT_MS).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
   });
 
   test("videoRecording preserves the compatibility floor", () => {

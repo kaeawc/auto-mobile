@@ -156,6 +156,21 @@ export class CrashApp {
       PREFLIGHT_COMMAND_TIMEOUT_MS,
       signal,
     );
+    if (inductionTime.source === "host") {
+      const preflightProcesses = packageProcesses.filter((process) => process.userId === userId);
+      const preflightProcess =
+        preflightProcesses.find((process) => process.processName === appId) ??
+        preflightProcesses[0];
+      return {
+        ...base,
+        success: false,
+        supported: true,
+        wasRunning: true,
+        processId: preflightProcess?.pid,
+        userId,
+        error: "Unable to establish Android device time for fresh crash evidence",
+      };
+    }
     const dispatchProcessesOutput = await this.adb.executeCommand(
       PROCESS_STATE_COMMAND,
       PREFLIGHT_COMMAND_TIMEOUT_MS,
@@ -289,8 +304,8 @@ export class CrashApp {
     }
 
     const initialProcesses = await this.listIosSimulatorProcesses(signal);
-    const appProcess = findIosSimulatorAppProcess(initialProcesses, appId);
-    if (!appProcess) {
+    const preflightProcess = findIosSimulatorAppProcess(initialProcesses, appId);
+    if (!preflightProcess) {
       return {
         ...base,
         success: false,
@@ -302,6 +317,18 @@ export class CrashApp {
     }
 
     const inductionTimestampMs = this.timer.now();
+    const dispatchProcesses = await this.listIosSimulatorProcesses(signal);
+    const appProcess = findIosSimulatorAppProcess(dispatchProcesses, appId);
+    if (!appProcess) {
+      return {
+        ...base,
+        success: false,
+        supported: true,
+        mechanism: "ios_simulator_sigabrt",
+        wasRunning: false,
+        error: `${appId} stopped before the crash signal could be dispatched`,
+      };
+    }
     try {
       await this.simctl.executeCommandArgs(
         [

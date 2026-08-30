@@ -305,6 +305,30 @@ describe("CrashApp (Android)", () => {
     expect(adb.wasCommandExecuted("shell")).toBe(false);
   });
 
+  test("does not compare host fallback time against device-authored crash logs", async () => {
+    const adb = new FakeAdbClient();
+    adb.setDeviceTimestampSource("host");
+    adb.setCommandResult(
+      "shell dumpsys activity processes",
+      "*APP* UID u0a123 ProcessRecord{abc 3220:com.example.app/u0a123}",
+    );
+
+    const result = await new CrashApp(androidDevice, dependencies({ adb })).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      supported: true,
+      wasRunning: true,
+      processId: 3220,
+      userId: 0,
+      confirmed: false,
+    });
+    expect(result.error).toContain("Android device time");
+    expect(adb.wasCommandExecuted("shell am crash")).toBe(false);
+  });
+
   test("reports unsupported when ActivityManager has no crash command and never force-stops", async () => {
     const adb = new FakeAdbClient();
     adb.setCommandResult(
@@ -406,7 +430,7 @@ describe("CrashApp (iOS)", () => {
       "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]",
     ].join("\n");
     const commands = new FakeSimulatorCommands(
-      [processList, "PID\tStatus\tLabel\n"],
+      [processList, processList, "PID\tStatus\tLabel\n"],
       "2023-11-14 22:13:20.100 launchd_sim: UIKitApplication:com.example.app[bbbb][rb-legacy] [27955]: exited due to SIGABRT",
     );
     const timer = new FakeTimer();
@@ -439,6 +463,32 @@ describe("CrashApp (iOS)", () => {
     ]);
     expect(commands.calls.flat()).not.toContain("terminate");
     expect(commands.timeouts.every((timeoutMs) => (timeoutMs ?? 0) > 0)).toBe(true);
+  });
+
+  test("refreshes a relaunched simulator PID immediately before signaling", async () => {
+    const before = "111\t0\tUIKitApplication:com.example.app[aaaa][rb-legacy]";
+    const atDispatch = "222\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]";
+    const commands = new FakeSimulatorCommands(
+      [before, atDispatch, ""],
+      "2023-11-14 22:13:20.100 launchd_sim: UIKitApplication:com.example.app[bbbb][rb-legacy] [222]: exited due to SIGABRT",
+    );
+    const timer = new FakeTimer();
+    timer.advanceTime(1_700_000_000_000);
+
+    const result = await new CrashApp(
+      iosSimulator,
+      dependencies({ simctl: commands, timer }),
+    ).execute("com.example.app");
+
+    expect(result).toMatchObject({ success: true, processId: 222, confirmed: true });
+    expect(commands.calls).toContainEqual([
+      "spawn",
+      iosSimulator.deviceId,
+      "launchctl",
+      "kill",
+      "SIGABRT",
+      "user/501/UIKitApplication:com.example.app[bbbb][rb-legacy]",
+    ]);
   });
 
   test("invalidates cached hierarchy when abort happens after signal dispatch", async () => {
@@ -490,6 +540,7 @@ describe("CrashApp (iOS)", () => {
   test("preserves known running metadata when SIGABRT is rejected", async () => {
     const commands = new FakeSimulatorCommands([
       "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]",
+      "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]",
     ]);
     commands.setError("launchctl kill", new Error("Operation not permitted"));
     let invalidations = 0;
@@ -517,6 +568,7 @@ describe("CrashApp (iOS)", () => {
 
   test("reports failure when unified-log evidence is unavailable", async () => {
     const commands = new FakeSimulatorCommands([
+      "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]",
       "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]",
       "",
     ]);

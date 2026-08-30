@@ -55,7 +55,7 @@ export const MIN_LAUNCH_APP_MCP_TIMEOUT_MS = 90_000;
  * A transport timeout after induction falsely reports failure and makes retrying
  * unsafe because the original crash may already have completed.
  */
-export const MIN_CRASH_APP_MCP_TIMEOUT_MS = 60_000;
+export const MIN_CRASH_APP_MCP_TIMEOUT_MS = 90_000;
 
 /**
  * Compatibility floor while video recording startup moves to a strict,

@@ -133,6 +133,7 @@ describe("sanitizeObserveResult", () => {
 
     test("perf-audit strip truncates diagnostics to the summary above the GFXINFO DUMP marker", () => {
       const { observe } = loadAndroidHomeObserve();
+      delete observe.performanceAudit!.violations;
       const original = observe.performanceAudit!.diagnostics!;
       expect(original).toContain(GFXINFO_DUMP_MARKER);
       const expectedSummary = original.slice(0, original.indexOf(GFXINFO_DUMP_MARKER)).trimEnd();
@@ -162,6 +163,18 @@ describe("sanitizeObserveResult", () => {
       expect(m.threadCount).toBe(om.threadCount);
       expect(m.touchLatencyMs).toBe(om.touchLatencyMs);
       expect(m.anrDetected).toBe(om.anrDetected);
+      expect(out.performanceAudit!.violations).toEqual(observe.performanceAudit!.violations);
+    });
+
+    test("perf-audit strip drops redundant diagnostics when violations are present", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.performanceAudit!.diagnostics = "Summary restates violations";
+      observe.performanceAudit!.violations = [...(observe.performanceAudit!.violations ?? [])];
+
+      const out = sanitizeObserveResult(observe, DROP_NONE);
+
+      expect(out.performanceAudit).toBeDefined();
+      expect(out.performanceAudit).not.toHaveProperty("diagnostics");
       expect(out.performanceAudit!.violations).toEqual(observe.performanceAudit!.violations);
     });
 
@@ -917,6 +930,18 @@ describe("sanitizeObserveResult", () => {
       expect(out.elements).toBeUndefined();
     });
 
+    test("project 'skeleton' omits advisory layout and performance blocks", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.layoutWarnings = { scope: "full", warnings: [] };
+      expect(observe.layoutWarnings).toBeDefined();
+      expect(observe.performanceAudit).toBeDefined();
+
+      const out = sanitizeObserveResult(observe, { dropElements: false, project: "skeleton" });
+
+      expect(out.layoutWarnings).toBeUndefined();
+      expect(out.performanceAudit).toBeUndefined();
+    });
+
     test("skeleton entries carry tuple bounds regardless of the compact flag", () => {
       const { observe } = loadAndroidHomeObserve();
       const out = sanitizeObserveResult(observe, { dropElements: false, project: "skeleton" });
@@ -969,6 +994,29 @@ describe("sanitizeObserveResult", () => {
       expect(card).toBeDefined();
       expect(card?.label).toBe("Basic long press card");
       expect(card?.sublabel).toContain("Long press me");
+    });
+  });
+
+  describe("back-stack reduction", () => {
+    test("drops task placeholders with no activities while preserving populated tasks", () => {
+      const { observe } = loadAndroidHomeObserve();
+      observe.backStack = {
+        depth: 1,
+        activities: [],
+        tasks: [
+          { id: 1, numActivities: 0 },
+          { id: 2, numActivities: 2, packageName: "com.example.app" },
+          { id: 3 },
+        ],
+      };
+
+      const out = sanitizeObserveResult(observe, DROP_NONE);
+
+      expect(out.backStack?.tasks).toEqual([
+        { id: 2, numActivities: 2, packageName: "com.example.app" },
+        { id: 3 },
+      ]);
+      expect(observe.backStack.tasks).toHaveLength(3);
     });
   });
 
@@ -1213,6 +1261,7 @@ describe("sanitizeObserveResult", () => {
   describe("GFXINFO diagnostics-marker boundaries (A6)", () => {
     function strippedDiagnostics(diagnostics: string): string {
       const { observe } = loadAndroidHomeObserve();
+      delete observe.performanceAudit!.violations;
       observe.performanceAudit!.diagnostics = diagnostics;
       return sanitizeObserveResult(observe, DROP_NONE).performanceAudit!.diagnostics!;
     }

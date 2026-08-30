@@ -120,6 +120,7 @@ export function sanitizeObserveResult(
 
   stripPerformanceAudit(out);
   reduceTopLevelDebugPerfTelemetry(out);
+  reduceAdvisoryOutput(out, cfg.project);
 
   if (cfg.trimNodes !== false) {
     const roots = toNodeArray(out.viewHierarchy?.hierarchy?.node);
@@ -242,6 +243,30 @@ function stripPerformanceAudit(out: ObserveResult): void {
     if (markerIndex !== -1) {
       audit.diagnostics = audit.diagnostics.slice(0, markerIndex).trimEnd();
     }
+  }
+
+  if (audit.violations !== undefined) {
+    const { diagnostics: _diagnostics, ...auditWithoutDiagnostics } = audit;
+    out.performanceAudit = auditWithoutDiagnostics as NonNullable<ObserveResult["performanceAudit"]>;
+  }
+}
+
+/**
+ * Remove advisory data from the actionable skeleton projection. These fields
+ * remain available through the full projection, while the skeleton keeps the
+ * response focused on UI-driving information.
+ */
+function reduceAdvisoryOutput(
+  out: ObserveResult,
+  project?: SanitizeObserveConfig["project"],
+): void {
+  if (project === "skeleton") {
+    delete out.layoutWarnings;
+    delete out.performanceAudit;
+  }
+
+  if (out.backStack?.tasks) {
+    out.backStack.tasks = out.backStack.tasks.filter((task) => task.numActivities !== 0);
   }
 }
 

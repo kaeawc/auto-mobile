@@ -5,6 +5,7 @@ import { promises as fsPromises } from "node:fs";
 import { pathExists } from "../../../src/utils/filesystem/DefaultFileSystem";
 import {
   VideoRecorderService,
+  VideoCaptureStartCleanupError,
   parseVideoRecordingConfig,
   DEFAULT_VIDEO_RECORDING_CONFIG,
 } from "../../../src/features/video/VideoRecorderService";
@@ -138,6 +139,24 @@ describe("VideoRecorderService", () => {
     await expect(service.stopRecording(recording.recordingId)).rejects.toThrow(
       "No active recording found",
     );
+  });
+
+  test("retains a failed-start cleanup handle for a force-stop retry", async () => {
+    const retainedHandle = {
+      recordingId: "rec-1",
+      outputPath: path.join(archiveRoot, "rec-1", "capture.mp4"),
+      startedAt: "2024-01-15T10:30:00.000Z",
+    };
+    backend.start = async () => {
+      throw new VideoCaptureStartCleanupError("startup cleanup timed out", retainedHandle);
+    };
+
+    await expect(service.startRecording()).rejects.toThrow("startup cleanup timed out");
+
+    expect(service.listActiveRecordingIds()).toEqual(["rec-1"]);
+    await service.forceStopRecording("rec-1");
+    expect(backend.forceStopCalls).toEqual([retainedHandle]);
+    expect(service.listActiveRecordingIds()).toEqual([]);
   });
 
   test("allows a later graceful stop after a force-stop failure", async () => {

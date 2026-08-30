@@ -3041,8 +3041,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       await super.close();
 
       if (this.portForwardingSetup) {
-        await this.adb.executeCommand(`forward --remove tcp:${this.localPort}`).catch(() => {});
-        this.portForwardingSetup = false;
+        // Do not claim the forward is gone when adb could not confirm its removal:
+        // the next client's reconciliation pass must still be able to reclaim it.
+        this.portForwardingSetup = !(await this.removeCtrlProxyPortForward(this.localPort));
       }
 
       PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
@@ -3096,12 +3097,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
 
     try {
+      await this.sweepOrphanedCtrlProxyPortForwards(signal);
+
       const previousLocalPort = this.localPort;
-      await perf.track("clearPortForward", () =>
-        this.adb
-          .execute(["forward", "--remove", `tcp:${this.localPort}`], { signal })
-          .catch(() => {}),
+      const clearedCurrentPort = await perf.track(
+        "clearPortForward",
+        async () => await this.removeCtrlProxyPortForward(this.localPort, signal),
       );
+      if (!clearedCurrentPort) {
+        throw new Error(`Failed to remove existing CtrlProxy forward on tcp:${this.localPort}`);
+      }
       if (this.closed) {
         return;
       }
@@ -3112,11 +3117,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       );
 
       if (this.localPort !== previousLocalPort) {
-        await perf.track("clearReallocatedPortForward", () =>
-          this.adb
-            .execute(["forward", "--remove", `tcp:${this.localPort}`], { signal })
-            .catch(() => {}),
+        const clearedReallocatedPort = await perf.track(
+          "clearReallocatedPortForward",
+          async () => await this.removeCtrlProxyPortForward(this.localPort, signal),
         );
+        if (!clearedReallocatedPort) {
+          throw new Error(`Failed to remove existing CtrlProxy forward on tcp:${this.localPort}`);
+        }
       }
 
       await perf.track("setupPortForward", () =>
@@ -3126,7 +3133,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       );
 
       if (this.closed) {
-        await this.adb.execute(["forward", "--remove", `tcp:${this.localPort}`]).catch(() => {});
+        await this.removeCtrlProxyPortForward(this.localPort);
         return;
       }
 
@@ -3136,6 +3143,101 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       logger.warn(`[CTRL_PROXY] Failed to setup port forwarding: ${error}`);
       throw error;
     }
+  }
+
+  /**
+   * Remove stale local forwards for this device that target CtrlProxy's fixed
+   * device port. A daemon crash drops the in-memory singleton registry but
+   * leaves ADB's forwards alive; the next client setup is their recovery path.
+   *
+   * A newly-created singleton is registered before it can start connecting, so
+   * its allocated port is treated as live even before port forwarding completes.
+   */
+  private async sweepOrphanedCtrlProxyPortForwards(signal?: AbortSignal): Promise<void> {
+    let stdout: string;
+    try {
+      const result = await this.adb.execute(["forward", "--list"], { signal });
+      stdout = result.stdout;
+    } catch (error) {
+      logger.warn(
+        `[CTRL_PROXY] Failed to list forwards while reconciling device ${this.device.deviceId}: ${error}`,
+        error,
+      );
+      return;
+    }
+
+    const livePorts = new Set(
+      Array.from(AndroidCtrlProxyClient.instances.values())
+        .filter((client) => client.device.deviceId === this.device.deviceId && !client.closed)
+        .map((client) => client.localPort),
+    );
+    const orphanedPorts = new Set<number>();
+    for (const line of stdout.split(/\r?\n/)) {
+      const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
+      if (
+        extra.length !== 0 ||
+        serial !== this.device.deviceId ||
+        remote !== `tcp:${PortManager.DEVICE_PORT}`
+      ) {
+        continue;
+      }
+      const port = this.localPortFromForward(local);
+      if (port !== null && !livePorts.has(port)) {
+        orphanedPorts.add(port);
+      }
+    }
+
+    for (const port of orphanedPorts) {
+      logger.info(
+        `[CTRL_PROXY] Reclaiming orphaned CtrlProxy forward on ${this.device.deviceId} tcp:${port}`,
+      );
+      await this.removeCtrlProxyPortForward(port, signal);
+    }
+  }
+
+  /**
+   * Remove a forward only when it still maps this device and host port to the
+   * CtrlProxy device port. Re-listing closes the race with a different service
+   * reusing the host port after the orphan sweep discovered it.
+   *
+   * @returns `true` when no matching forward remains; `false` when adb failed
+   * to establish that state.
+   */
+  private async removeCtrlProxyPortForward(port: number, signal?: AbortSignal): Promise<boolean> {
+    try {
+      const result = await this.adb.execute(["forward", "--list"], { signal });
+      const expectedLocal = `tcp:${port}`;
+      const expectedRemote = `tcp:${PortManager.DEVICE_PORT}`;
+      const matchingForward = result.stdout.split(/\r?\n/).some((line) => {
+        const [serial, local, remote, ...extra] = line.trim().split(/\s+/);
+        return (
+          extra.length === 0 &&
+          serial === this.device.deviceId &&
+          local === expectedLocal &&
+          remote === expectedRemote
+        );
+      });
+      if (!matchingForward) {
+        return true;
+      }
+
+      await this.adb.execute(["forward", "--remove", expectedLocal], { signal });
+      return true;
+    } catch (error) {
+      logger.warn(
+        `[CTRL_PROXY] Failed to remove CtrlProxy forward on ${this.device.deviceId} tcp:${port}: ${error}`,
+        error,
+      );
+      return false;
+    }
+  }
+
+  private localPortFromForward(value: string | undefined): number | null {
+    if (value === undefined || !value.startsWith("tcp:")) {
+      return null;
+    }
+    const port = Number.parseInt(value.slice("tcp:".length), 10);
+    return Number.isInteger(port) && port > 0 ? port : null;
   }
 
   private async finishInvalidatedConnectionCleanup(): Promise<void> {

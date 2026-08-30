@@ -61,6 +61,17 @@ function isFreshSessionScreenshotUri(uri: string, sessionUuid: string): boolean 
   return uri === `automobile:device-session/${sessionUuid}/screenshot`;
 }
 
+// A tool-output artifact read (`automobile:tool-output/<id>`) is a plain host
+// file read routed through the session-independent resource registry — no device
+// access and no session data. So unlike the fresh-screenshot exemption it is not
+// scoped to any session, and it must stay retrievable after a terminal release
+// (e.g. executePlan auto-releases its bound session, then emits an artifact
+// resourceUri that would otherwise be fenced). Kept in lockstep with the
+// `automobile:tool-output/` prefix in src/server/toolOutputResources.ts.
+function isToolOutputResourceUri(uri: string): boolean {
+  return uri.startsWith("automobile:tool-output/");
+}
+
 // The session UUID embedded in a fresh-session-screenshot resource URI
 // (`automobile:device-session/<uuid>/screenshot`), or undefined for any other
 // URI. Kept in lockstep with {@link isFreshSessionScreenshotUri}.
@@ -2260,15 +2271,23 @@ export class DaemonMcpProxy {
    */
   async readResource(uri: string): Promise<any> {
     const terminalSessionUuid = this.terminalBoundSession?.sessionUuid;
+    // A tool-output artifact read is session-independent, so it survives a
+    // terminal release without any session params at all (issue #5917). The
+    // fresh-screenshot exemption, by contrast, must still target the released
+    // session it belongs to.
+    const isToolOutput = isToolOutputResourceUri(uri);
     const allowReleasedSession =
-      terminalSessionUuid !== undefined && isFreshSessionScreenshotUri(uri, terminalSessionUuid);
-    const forwardedParams = allowReleasedSession
-      ? {
-          sessionUuid: terminalSessionUuid,
-          [DAEMON_BOUND_SESSION_PARAM]: terminalSessionUuid,
-          [DAEMON_RELEASED_SESSION_PARAM]: terminalSessionUuid,
-        }
-      : (this.freshScreenshotOwnerForwardParams(uri) ?? this.withBoundSessionUuid({}));
+      isToolOutput ||
+      (terminalSessionUuid !== undefined && isFreshSessionScreenshotUri(uri, terminalSessionUuid));
+    const forwardedParams = isToolOutput
+      ? {}
+      : allowReleasedSession
+        ? {
+            sessionUuid: terminalSessionUuid,
+            [DAEMON_BOUND_SESSION_PARAM]: terminalSessionUuid,
+            [DAEMON_RELEASED_SESSION_PARAM]: terminalSessionUuid,
+          }
+        : (this.freshScreenshotOwnerForwardParams(uri) ?? this.withBoundSessionUuid({}));
     return await this.withRecoverableReconnect(
       () => this.client!.readResource(uri, forwardedParams),
       this.sessionUuidFromArgs(forwardedParams),

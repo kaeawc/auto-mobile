@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import path from "node:path";
+import { mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
+import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
 import {
   TOOL_OUTPUT_RESOURCE_URI_TEMPLATE,
   buildToolOutputResourceUri,
@@ -31,11 +34,18 @@ class FakeResourceFileSystem {
   }
 }
 
-function installFake(fileSystem: FakeResourceFileSystem): void {
-  setToolOutputResourceDependencies({
-    fileSystem,
-    resolveDirectory: () => ARTIFACT_DIR,
-  });
+/**
+ * Install a fake filesystem plus a provenance ledger seeded so the given
+ * basenames resolve to `ARTIFACT_DIR/<basename>` — i.e. as if the writer had
+ * issued them. The resource reads the path FROM the ledger, so a read is only
+ * reachable for a recorded artifact.
+ */
+function installFake(fileSystem: FakeResourceFileSystem, issuedBasenames: string[] = []): void {
+  const ledger = new ToolOutputArtifactLedger();
+  for (const name of issuedBasenames) {
+    ledger.record(path.join(ARTIFACT_DIR, name));
+  }
+  setToolOutputResourceDependencies({ fileSystem, ledger });
 }
 
 async function readArtifact(artifactId: string) {
@@ -61,7 +71,7 @@ describe("tool-output artifact resource (#5882)", () => {
     const filename = "1788020656886-observe-abc123.json";
     const raw = JSON.stringify({ viewHierarchy: { hierarchy: { node: { text: "Settings" } } } });
     fileSystem.files.set(path.join(ARTIFACT_DIR, filename), raw);
-    installFake(fileSystem);
+    installFake(fileSystem, [filename]);
 
     const content = await readArtifact(filename);
 
@@ -116,33 +126,62 @@ describe("tool-output artifact resource (#5882)", () => {
     expect(fileSystem.reads).toEqual([]);
   });
 
-  test("reads artifacts when the configured directory ends in a separator", async () => {
-    // resolvePathFromDaemonLaunchWorkingDirectory preserves a trailing slash on an
-    // absolute --tool-outputs-dir; the read must still resolve (issue #5882 review).
+  test("rejects a writer-shaped id the writer never issued (provenance, #5917)", async () => {
+    // Shape-valid AND sitting in the tool-outputs dir, but not in the ledger:
+    // a hostile process could plant `<ts>-observe-<id>.json` in a world-writable
+    // --tool-outputs-dir. Provenance tracking refuses it without a read.
     const fileSystem = new FakeResourceFileSystem();
-    const trailingSlashDir = `${ARTIFACT_DIR}/`;
-    const filename = "1788020656886-observe-abc123.json";
-    const raw = JSON.stringify({ ok: true });
-    fileSystem.files.set(path.join(trailingSlashDir, filename), raw);
-    setToolOutputResourceDependencies({
-      fileSystem,
-      resolveDirectory: () => trailingSlashDir,
-    });
+    const planted = "1788020656886-observe-planted.json";
+    fileSystem.files.set(path.join(ARTIFACT_DIR, planted), '{"secret":true}');
+    installFake(fileSystem, []); // ledger empty — nothing issued
 
-    const content = await readArtifact(filename);
+    const content = await readArtifact(planted);
 
-    expect(content.text).toBe(raw);
-    expect(fileSystem.reads).toEqual([path.join(trailingSlashDir, filename)]);
+    const parsed = JSON.parse(content.text!) as { error: string };
+    expect(parsed.error).toContain("not available");
+    expect(fileSystem.reads).toEqual([]);
   });
 
-  test("returns a structured error when the artifact is missing or pruned", async () => {
+  test("returns a structured error when the artifact is issued but missing or pruned", async () => {
     const fileSystem = new FakeResourceFileSystem();
-    installFake(fileSystem);
+    const filename = "1788020656886-observe-gone.json";
+    // Issued by the writer, but the file is gone (pruned/expired): reaches the
+    // read, which fails, and surfaces the graceful error.
+    installFake(fileSystem, [filename]);
 
-    const content = await readArtifact("1788020656886-observe-gone.json");
+    const content = await readArtifact(filename);
 
     expect(content.mimeType).toBe("application/json");
     const parsed = JSON.parse(content.text!) as { error: string };
     expect(parsed.error).toContain("not available");
+    expect(fileSystem.reads).toEqual([path.join(ARTIFACT_DIR, filename)]);
+  });
+
+  test("refuses to follow a symlink to a file outside the issued set (#5917)", async () => {
+    // In a deliberately world-writable --tool-outputs-dir a foreign process could
+    // plant a writer-shaped symlink pointing at an arbitrary file. The node read
+    // opens with O_NOFOLLOW, so the symlink target is never served.
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-mobile-symlink-"));
+    const secretPath = path.join(dir, "secret.txt");
+    const filename = "1788020656886-observe-evil.json";
+    const linkPath = path.join(dir, filename);
+    try {
+      writeFileSync(secretPath, "top secret");
+      symlinkSync(secretPath, linkPath);
+
+      // Real node filesystem (not the fake), but a ledger that has "issued" the
+      // symlink path — provenance alone must not defeat symlink refusal.
+      const ledger = new ToolOutputArtifactLedger();
+      ledger.record(linkPath);
+      setToolOutputResourceDependencies({ ledger });
+
+      const content = await readArtifact(filename);
+
+      const parsed = JSON.parse(content.text!) as { error: string };
+      expect(parsed.error).toContain("not available");
+      expect(content.text).not.toContain("top secret");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

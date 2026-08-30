@@ -9,6 +9,7 @@ import { stringifyToolResponse } from "../../src/utils/toolUtils";
 import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
+import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
 
 class FakeArtifactFileSystem implements ToolOutputArtifactFileSystem {
   ensureCalls: string[] = [];
@@ -94,6 +95,69 @@ describe("JsonToolOutputArtifactWriter", () => {
     expect(second.artifact.resourceUri).toBe("automobile:tool-output/1234-tapOn-id_2.json");
     expect(fileSystem.listCalls).toEqual([]);
     expect(fileSystem.deleteCalls).toEqual([]);
+  });
+
+  test("records every issued artifact in the provenance ledger (#5917)", () => {
+    const fileSystem = new FakeArtifactFileSystem();
+    const ledger = new ToolOutputArtifactLedger();
+    const timer = new FakeTimer();
+    timer.setCurrentTime(1234);
+    const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
+    const writer = new JsonToolOutputArtifactWriter({
+      outputDirectory,
+      fileSystem,
+      idGenerator: new FakeIdGenerator(["id-1", "id-2"]),
+      timer,
+      ledger,
+    });
+
+    const first = writer.writeJsonArtifact({
+      tool: "observe",
+      payload: "ObserveResult",
+      data: { updatedAt: 1 },
+    });
+    writer.writeJsonArtifact({
+      tool: "observe",
+      payload: "ObserveResult",
+      data: { updatedAt: 2 },
+    });
+
+    // Only the exact files the writer created are resolvable; a shape-valid
+    // sibling it never wrote is not.
+    expect(ledger.resolve("1234-observe-id-1.json")).toBe(first.artifact.path);
+    expect(ledger.resolve("1234-observe-id-2.json")).toBe(
+      path.join(outputDirectory, "1234-observe-id-2.json"),
+    );
+    expect(ledger.resolve("1234-observe-unwritten.json")).toBeUndefined();
+  });
+
+  test("forgets pruned artifacts from the provenance ledger (#5917)", () => {
+    const fileSystem = new FakeArtifactFileSystem();
+    const ledger = new ToolOutputArtifactLedger();
+    const outputDirectory = path.resolve("/tmp/auto-mobile artifacts");
+    const stalePath = path.join(outputDirectory, "old-observe.json");
+    ledger.record(stalePath);
+    fileSystem.entries = [
+      { path: stalePath, name: "old-observe.json", isFile: true, mtimeMs: 1_000 },
+    ];
+    const timer = new FakeTimer();
+    timer.setCurrentTime(10_000);
+    const writer = new JsonToolOutputArtifactWriter({
+      outputDirectory,
+      fileSystem,
+      idGenerator: new FakeIdGenerator(["id"]),
+      timer,
+      ledger,
+      retention: { maxAgeMs: 1_000, maxFiles: 500, overflowMinAgeMs: 500 },
+    });
+
+    expect(ledger.resolve("old-observe.json")).toBe(stalePath);
+
+    writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: { updatedAt: 1 } });
+
+    expect(fileSystem.deleteCalls).toEqual([stalePath]);
+    // A pruned file is no longer resolvable through the ledger.
+    expect(ledger.resolve("old-observe.json")).toBeUndefined();
   });
 
   test("prunes stale JSON artifacts when retention is configured", () => {

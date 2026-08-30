@@ -1,11 +1,12 @@
-import path from "node:path";
 import * as realFs from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { ResourceRegistry, type ResourceContent } from "./resourceRegistry";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
-import { serverConfig } from "../utils/ServerConfig";
-import { getDefaultToolOutputsDir } from "../utils/toolOutputArtifacts";
-import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
+import {
+  toolOutputArtifactLedger,
+  type ToolOutputArtifactLedger,
+} from "./toolOutputArtifactLedger";
 
 /**
  * In-band fetch for tool-output artifacts (issue #5882). Large observe/action
@@ -24,12 +25,10 @@ const TOOL_OUTPUT_RESOURCE_URI_PREFIX = "automobile:tool-output/";
  * Artifact filenames are `${timestamp}-${tool}-${id}.json`, where the tool/id
  * segments are already restricted to `[A-Za-z0-9._-]` by `safeFilenameSegment`
  * in the writer. Match the writer's full shape — a leading numeric timestamp,
- * then at least one `-`-joined segment, then `.json` — so a crafted `artifactId`
- * can never escape the tool-outputs directory (no separators, no `..`) AND an
- * arbitrary sibling file in a shared/misconfigured `--tool-outputs-dir` (e.g.
- * `credentials.json`) is not served just because it ends in `.json` (issue #5882
- * review). This narrows the readable namespace to the writer's own emissions; it
- * is not full per-artifact provenance tracking (deferred — see #5917).
+ * then at least one `-`-joined segment, then `.json` — as a cheap first gate that
+ * rejects a crafted `artifactId` (no separators, no `..`) with a clear message.
+ * Provenance (the issued-artifact ledger below) is the actual authorization: a
+ * shape-valid id that the writer never issued is still refused (issue #5917).
  */
 const SAFE_ARTIFACT_ID = /^\d+-[A-Za-z0-9._-]+\.json$/;
 
@@ -37,47 +36,49 @@ interface ToolOutputResourceFileSystem {
   readFile(filePath: string): Promise<string>;
 }
 
+// O_NOFOLLOW is POSIX-only; on platforms without it (Windows) the flag is
+// absent, so fall back to a plain read-only open there.
+const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
+
 const nodeToolOutputResourceFileSystem: ToolOutputResourceFileSystem = {
   async readFile(filePath: string): Promise<string> {
-    // The default tool-outputs directory is created 0o700 (owner-only) by the
-    // writer, so a foreign process cannot plant a file or symlink there. Deeper
-    // hardening for a deliberately world-writable `--tool-outputs-dir` — refusing
-    // symlink targets and closing the check-then-read TOCTOU window — is tracked
-    // in #5917; a check-then-read guard here only trades one CodeQL finding
-    // (insecure-temp-file) for another (file-system-race) without a
-    // pathname-based read ever being fully safe in a shared directory.
-    return realFs.readFile(filePath, "utf8");
+    // `filePath` comes from the provenance ledger — a value the writer itself
+    // constructed, never the client-supplied id — so a shared/misconfigured
+    // `--tool-outputs-dir` cannot steer this read to an arbitrary sibling.
+    // Opening with O_NOFOLLOW additionally refuses a planted symlink, and reading
+    // through the single returned handle (fstat + read on the same fd) closes the
+    // check-then-read TOCTOU window (issue #5917).
+    const handle = await realFs.open(filePath, fsConstants.O_RDONLY | O_NOFOLLOW);
+    try {
+      const stats = await handle.stat();
+      if (!stats.isFile()) {
+        throw new Error(`tool-output artifact is not a regular file: ${filePath}`);
+      }
+      return await handle.readFile("utf8");
+    } finally {
+      await handle.close();
+    }
   },
 };
 
 let toolOutputResourceFileSystem: ToolOutputResourceFileSystem = nodeToolOutputResourceFileSystem;
-let resolveToolOutputsDir: () => string = defaultResolveToolOutputsDir;
+let issuedArtifactLedger: Pick<ToolOutputArtifactLedger, "resolve"> = toolOutputArtifactLedger;
 
 export function setToolOutputResourceDependencies(deps: {
   fileSystem?: ToolOutputResourceFileSystem;
-  resolveDirectory?: () => string;
+  ledger?: Pick<ToolOutputArtifactLedger, "resolve">;
 }): void {
   if (deps.fileSystem) {
     toolOutputResourceFileSystem = deps.fileSystem;
   }
-  if (deps.resolveDirectory) {
-    resolveToolOutputsDir = deps.resolveDirectory;
+  if (deps.ledger) {
+    issuedArtifactLedger = deps.ledger;
   }
 }
 
 export function resetToolOutputResourceDependencies(): void {
   toolOutputResourceFileSystem = nodeToolOutputResourceFileSystem;
-  resolveToolOutputsDir = defaultResolveToolOutputsDir;
-}
-
-/**
- * Resolve the tool-outputs directory the way the writer does: the configured
- * directory when set, else the default temp subdir, then normalized against the
- * daemon launch cwd (idempotent for the already-absolute default).
- */
-function defaultResolveToolOutputsDir(): string {
-  const configured = serverConfig.getToolOutputsDir();
-  return resolvePathFromDaemonLaunchWorkingDirectory(configured ?? getDefaultToolOutputsDir());
+  issuedArtifactLedger = toolOutputArtifactLedger;
 }
 
 /** Build the companion resource URI for an artifact file basename. */
@@ -93,6 +94,15 @@ function toolOutputError(uri: string, error: string): ResourceContent {
   };
 }
 
+function notAvailable(uri: string, artifactId: string, detail?: string): ResourceContent {
+  const suffix = detail ? ` (${detail})` : "";
+  return toolOutputError(
+    uri,
+    `Tool-output artifact "${artifactId}" is not available. It may have expired or been ` +
+      `pruned, or it was not issued by this server. Re-run the tool to regenerate it.${suffix}`,
+  );
+}
+
 async function getToolOutputArtifact(params: Record<string, string>): Promise<ResourceContent> {
   const artifactId = params.artifactId ?? "";
   const uri = buildToolOutputResourceUri(artifactId);
@@ -104,25 +114,22 @@ async function getToolOutputArtifact(params: Record<string, string>): Promise<Re
     );
   }
 
-  // `SAFE_ARTIFACT_ID` is a strict allowlist with no path separators, so the join
-  // can never escape `directory` — no dirname re-check is needed. (An earlier
-  // `path.dirname(filePath) !== directory` guard rejected every read when
-  // `--tool-outputs-dir` ended in a separator, since `path.dirname` normalizes
-  // the trailing slash away while the configured directory keeps it — issue #5882
-  // review.)
-  const directory = resolveToolOutputsDir();
-  const filePath = path.join(directory, artifactId);
+  // Provenance gate: only serve files the writer actually issued, and read the
+  // path the writer recorded rather than one re-derived from the client id. A
+  // shape-valid sibling planted in a shared `--tool-outputs-dir` has no ledger
+  // entry, so it is refused before any filesystem access (issue #5917).
+  const issuedPath = issuedArtifactLedger.resolve(artifactId);
+  if (issuedPath === undefined) {
+    return notAvailable(uri, artifactId);
+  }
 
   try {
-    const text = await toolOutputResourceFileSystem.readFile(filePath);
+    const text = await toolOutputResourceFileSystem.readFile(issuedPath);
     return { uri, mimeType: "application/json", text };
   } catch (error) {
     const reason = errorMessage(error);
     logger.warn(`[ToolOutputResources] Failed to read artifact ${artifactId}: ${reason}`);
-    return toolOutputError(
-      uri,
-      `Tool-output artifact "${artifactId}" is not available. It may have expired or been pruned. Re-run the tool to regenerate it. (${reason})`,
-    );
+    return notAvailable(uri, artifactId, reason);
   }
 }
 

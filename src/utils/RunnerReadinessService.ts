@@ -1,5 +1,5 @@
 import { errorMessage } from "./describeUnknownError";
-import type { BootedDevice } from "../models";
+import type { BootedDevice, DeviceLockState } from "../models";
 import { ActionableError } from "../models";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -7,10 +7,12 @@ import { AndroidCtrlProxyManager } from "./CtrlProxyManager";
 import { IOSCtrlProxyManager } from "./IOSCtrlProxyManager";
 import { checkIosCtrlProxyOverride } from "./iosCtrlProxyOverride";
 import { redactAndroidCommandOutput } from "./android-cmdline-tools/redactAndroidCommandOutput";
+import { defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import { defaultTimer, type Timer } from "./SystemTimer";
 import type { PerformanceTracker } from "./PerformanceTracker";
 import type { ProxySetupResult } from "./interfaces/ProxyManager";
 import { runWithAbortSignal } from "./AbortContext";
+import { logger } from "./logger";
 import {
   centerOfBounds,
   findSystemUiAnrDialog,
@@ -22,6 +24,7 @@ const READINESS_RETRY_DELAY_MS = 250;
 const READINESS_PROBE_TIMEOUT_MS = 2_000;
 const MAX_DIAGNOSTIC_LENGTH = 4_000;
 const ABORT_SETTLEMENT_GRACE_MS = 1_000;
+const RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS = 2_000;
 const SYSTEM_UI_ANR_RECOVERY_POLL_MS = 1_000;
 const SYSTEM_UI_ANR_RECOVERY_HEALTHY_POLLS = 2;
 const SYSTEM_UI_ANR_RECOVERY_TIMEOUT_MS = 5_000;
@@ -109,6 +112,11 @@ export interface ReadinessClient {
   ): Promise<{ success: boolean; error?: string }>;
 }
 
+export interface AndroidRunnerConnectDiagnostic {
+  deviceLock: DeviceLockState | null;
+  primaryUserStartState?: string;
+}
+
 interface SystemUiAnrReadinessClient {
   getAccessibilityHierarchy: NonNullable<ReadinessClient["getAccessibilityHierarchy"]>;
   requestTapCoordinates: NonNullable<ReadinessClient["requestTapCoordinates"]>;
@@ -122,6 +130,10 @@ export interface RunnerReadinessDependencies {
   getIosClient(device: BootedDevice, port: number): ReadinessClient;
   checkIosOverride(): Promise<{ present: boolean; usable: boolean; reason?: string }>;
   awaitIosStartupMaintenance(): Promise<void>;
+  getAndroidRunnerConnectDiagnostic?(
+    device: BootedDevice,
+    signal: AbortSignal,
+  ): Promise<AndroidRunnerConnectDiagnostic>;
 }
 
 export interface RunnerReadinessRequest {
@@ -754,12 +766,64 @@ export class RunnerReadinessService {
         await this.dependencies.timer.sleep(Math.min(READINESS_RETRY_DELAY_MS, remaining));
       }
     }
+    const diagnostic = await this.runnerConnectFailureDiagnostic(context, phase);
     this.fail(
       context,
       phase,
       attempts,
-      "runner did not become responsive before the readiness deadline",
+      `runner did not become responsive before the readiness deadline${diagnostic}`,
     );
+  }
+
+  private async runnerConnectFailureDiagnostic(
+    context: ReadinessAttemptContext,
+    phase: RunnerReadinessPhase,
+  ): Promise<string> {
+    const getDiagnostic = this.dependencies.getAndroidRunnerConnectDiagnostic;
+    if (context.device.platform !== "android" || phase !== "runner-connect" || !getDiagnostic) {
+      return "";
+    }
+
+    const controller = new AbortController();
+    const signal = context.signal
+      ? AbortSignal.any([context.signal, controller.signal])
+      : controller.signal;
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    try {
+      const diagnosticPromise = getDiagnostic(context.device, signal);
+      // The timeout returns first if an ADB diagnostic command hangs. Its
+      // rejection after abort is intentionally observed below.
+      void diagnosticPromise.catch(() => {});
+      const diagnostic = await Promise.race([
+        diagnosticPromise,
+        new Promise<undefined>((resolve) => {
+          timeoutHandle = this.dependencies.timer.setTimeout(() => {
+            controller.abort(new Error("runner-connect diagnostic timed out"));
+            resolve(undefined);
+          }, RUNNER_CONNECT_DIAGNOSTIC_TIMEOUT_MS);
+        }),
+      ]);
+      if (!diagnostic) {
+        return "";
+      }
+      const details = [
+        diagnostic.primaryUserStartState
+          ? `primaryUserStartState=${diagnostic.primaryUserStartState}`
+          : undefined,
+        diagnostic.deviceLock
+          ? `deviceLock=${diagnostic.deviceLock.locked ? "locked" : "unlocked"}`
+          : undefined,
+      ].filter((detail): detail is string => Boolean(detail));
+      return details.length > 0 ? `; ${details.join(" ")}` : "";
+    } catch (error) {
+      // This supplemental probe must not hide the original runner-connect timeout.
+      logger.debug(`Failed to collect Android runner-connect diagnostic: ${errorMessage(error)}`);
+      return "";
+    } finally {
+      if (timeoutHandle) {
+        this.dependencies.timer.clearTimeout(timeoutHandle);
+      }
+    }
   }
 
   private async runPhase<T>(
@@ -901,5 +965,14 @@ export function createDefaultRunnerReadinessService(
     getIosClient: (device, port) => IOSCtrlProxyClient.getInstance(device, port),
     checkIosOverride: checkIosCtrlProxyOverride,
     awaitIosStartupMaintenance: () => IOSCtrlProxyManager.awaitStartupOrphanRunnerReap(),
+    getAndroidRunnerConnectDiagnostic: async (device, signal) => {
+      const adb = defaultAdbClientFactory.create(device);
+      const [deviceLock, users] = await Promise.all([
+        adb.getDeviceLock(signal),
+        adb.listUsers(signal),
+      ]);
+      const primaryUser = users.find((user) => user.profileType === "primary" || user.userId === 0);
+      return { deviceLock, primaryUserStartState: primaryUser?.startState };
+    },
   });
 }

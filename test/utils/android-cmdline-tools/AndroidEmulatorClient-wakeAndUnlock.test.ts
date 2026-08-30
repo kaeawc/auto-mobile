@@ -99,6 +99,36 @@ describe("AndroidEmulatorClient wakeAndUnlock", () => {
     expect(fakeAdb.wasCommandExecuted("wm dismiss-keyguard")).toBe(false);
   });
 
+  test("waits for direct boot to finish unlocking the primary user", async () => {
+    fakeAdb.setDeviceLock(UNLOCKED);
+    fakeAdb.setUsersSequence([
+      [
+        {
+          userId: 0,
+          name: "Owner",
+          flags: 0x4c13,
+          profileType: "primary",
+          running: true,
+          startState: "RUNNING_LOCKED",
+        },
+      ],
+      [
+        {
+          userId: 0,
+          name: "Owner",
+          flags: 0x4c13,
+          profileType: "primary",
+          running: true,
+          startState: "RUNNING_UNLOCKED",
+        },
+      ],
+    ]);
+
+    await runWakeAndUnlock();
+
+    expect(fakeTimer.now()).toBe(250);
+  });
+
   test("a failed wake keyevent aborts before wm dismiss-keyguard (single-try)", async () => {
     // REWRITE-1: the previous test asserted only that the boot wrapper swallows
     // the error ("does not throw"), which passes for any behavior. The load-

@@ -176,6 +176,10 @@ function createService(
     getIosClient?: (device: BootedDevice, port: number) => FakeReadinessClient;
     autoAdvance?: boolean;
     awaitIosStartupMaintenance?: () => Promise<void>;
+    getAndroidRunnerConnectDiagnostic?: () => Promise<{
+      deviceLock: { locked: boolean; keyguardShowing: boolean; secure?: boolean } | null;
+      primaryUserStartState?: string;
+    }>;
   } = {},
 ) {
   const timer = options.timer ?? new FakeTimer();
@@ -200,6 +204,7 @@ function createService(
       getIosClient: options.getIosClient ?? (() => iosClient),
       checkIosOverride: async () => ({ present: false, usable: true }),
       awaitIosStartupMaintenance: options.awaitIosStartupMaintenance ?? (async () => {}),
+      getAndroidRunnerConnectDiagnostic: options.getAndroidRunnerConnectDiagnostic,
     }),
   };
 }
@@ -1042,5 +1047,27 @@ describe("RunnerReadinessService", () => {
     ).rejects.toThrow(
       /platform=android.*requested=\[platform=android name=Pixel_9_Pro\].*resolved=\[Pixel_9_Pro \(emulator-5554\)\].*phase=runner-connect.*attempts=[1-9].*remainingBudgetMs=0/,
     );
+  });
+
+  test("diagnoses a locked primary user when runner connection times out", async () => {
+    const client = new FakeReadinessClient();
+    client.connected = false;
+    client.connectionResults = [];
+    const { service } = createService({
+      androidClient: client,
+      getAndroidRunnerConnectDiagnostic: async () => ({
+        deviceLock: { locked: true, keyguardShowing: true, secure: true },
+        primaryUserStartState: "RUNNING_LOCKED",
+      }),
+    });
+
+    await expect(
+      service.ensureReady({
+        device: androidDevice(),
+        requestedIdentity: "platform=android deviceId=emulator-5554",
+        totalDeadlineMs: 1_000,
+        readinessTimeoutMs: 1_000,
+      }),
+    ).rejects.toThrow(/phase=runner-connect.*RUNNING_LOCKED/);
   });
 });

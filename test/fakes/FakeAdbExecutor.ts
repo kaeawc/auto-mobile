@@ -34,6 +34,7 @@ export class FakeAdbExecutor implements AdbExecutor {
   private devices: BootedDevice[] = [];
   private deviceStates: AdbDeviceState[] = [];
   private users: AndroidUser[] = [{ userId: 0, name: "Owner", flags: 13, running: true }];
+  private usersSequence: AndroidUser[][] | null = null;
   private foregroundApp: { packageName: string; userId: number } | null = null;
   private deviceTimestampMs: number | null = null;
   private androidApiLevel: number | null = null;
@@ -130,6 +131,11 @@ export class FakeAdbExecutor implements AdbExecutor {
    */
   setUsers(users: AndroidUser[]): void {
     this.users = users;
+  }
+
+  /** Configure ordered user snapshots; the final snapshot repeats once exhausted. */
+  setUsersSequence(users: AndroidUser[][]): void {
+    this.usersSequence = users.map((snapshot) => [...snapshot]);
   }
 
   /**
@@ -333,6 +339,9 @@ export class FakeAdbExecutor implements AdbExecutor {
   }
 
   async listUsers(): Promise<AndroidUser[]> {
+    if (this.usersSequence && this.usersSequence.length > 0) {
+      return this.usersSequence.length > 1 ? this.usersSequence.shift()! : this.usersSequence[0];
+    }
     return this.users;
   }
 

@@ -37,6 +37,8 @@ const MIN_EMULATOR_CONSOLE_PORT = 5554;
 const MAX_EMULATOR_CONSOLE_PORT = 5682;
 const EMULATOR_CONSOLE_PORT_STEP = 2;
 const MAX_READINESS_DIAGNOSTIC_CHARS = 512;
+const PRIMARY_USER_UNLOCK_WAIT_MS = 5_000;
+const PRIMARY_USER_UNLOCK_POLL_INTERVAL_MS = 250;
 
 type LaunchFailureCategory =
   | "display_initialization_failed"
@@ -3157,7 +3159,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           deviceId: foundDeviceId,
         } as BootedDevice;
         perf.startOperation("wakeAndUnlock");
-        await this.wakeAndUnlock(bootedDevice);
+        await this.wakeAndUnlock(bootedDevice, signal);
         perf.endOperation("wakeAndUnlock");
         return bootedDevice;
       }
@@ -3182,7 +3184,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         deviceId: foundDeviceId,
       } as BootedDevice;
       perf.startOperation("wakeAndUnlock");
-      await this.wakeAndUnlock(bootedDevice);
+      await this.wakeAndUnlock(bootedDevice, signal);
       perf.endOperation("wakeAndUnlock");
       return bootedDevice;
     }
@@ -3210,13 +3212,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * device is still ready and the user can unlock it with the tool (#4360).
    * @param device - The booted device to wake and unlock
    */
-  private async wakeAndUnlock(device: BootedDevice): Promise<void> {
+  private async wakeAndUnlock(device: BootedDevice, signal?: AbortSignal): Promise<void> {
     try {
       const wakeAndUnlock = new WakeAndUnlock(device, this.adbFactory, {
         timer: this.timer,
         credentialStore: new DeviceLockStore(),
       });
       const result = await wakeAndUnlock.execute();
+      await this.waitForPrimaryUserUnlock(device, signal);
       if (!result.unlocked && result.secure) {
         logger.info(
           `[WakeAndUnlock] Device ${device.deviceId} is secure-locked and no PIN is remembered; ` +
@@ -3228,9 +3231,42 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         );
       }
     } catch (error) {
+      this.throwIfReadinessAborted(signal);
       // Log but don't fail - the device is still ready, just might need manual interaction.
       // A secure lock with no remembered PIN throws ActionableError here; that is expected.
       logger.warn(`[WakeAndUnlock] Failed to wake/unlock device ${device.deviceId}: ${error}`);
+    }
+  }
+
+  private async waitForPrimaryUserUnlock(
+    device: BootedDevice,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const adb = this.adbFactory.create(device);
+    let elapsedMs = 0;
+    try {
+      while (elapsedMs < PRIMARY_USER_UNLOCK_WAIT_MS) {
+        this.throwIfReadinessAborted(signal);
+        const users = await adb.listUsers(signal);
+        const primaryUser = users.find(
+          (user) => user.profileType === "primary" || user.userId === 0,
+        );
+        if (primaryUser?.startState !== "RUNNING_LOCKED") {
+          return;
+        }
+        await this.timer.sleep(PRIMARY_USER_UNLOCK_POLL_INTERVAL_MS);
+        elapsedMs += PRIMARY_USER_UNLOCK_POLL_INTERVAL_MS;
+      }
+      logger.warn(
+        `[WakeAndUnlock] Primary user on ${device.deviceId} is still RUNNING_LOCKED after ` +
+          `${PRIMARY_USER_UNLOCK_WAIT_MS}ms; CtrlProxy cannot bind until the device unlocks.`,
+      );
+    } catch (error) {
+      // User-state inspection is supplementary; preserve the completed unlock result if unavailable.
+      this.throwIfReadinessAborted(signal);
+      logger.debug(
+        `[WakeAndUnlock] Could not confirm primary-user unlock state for ${device.deviceId}: ${error}`,
+      );
     }
   }
 

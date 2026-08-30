@@ -6,6 +6,7 @@ import {
   resolveFfmpegBinary,
   type FfmpegProcess,
 } from "../../../src/utils/media/FfmpegClient";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 class FakeFfmpegProcess extends EventEmitter implements FfmpegProcess {
   readonly stdin = new PassThrough();
@@ -26,6 +27,7 @@ class FakeFfmpegProcess extends EventEmitter implements FfmpegProcess {
     this.exitCode = code;
     this.signalCode = signal;
     this.emit("exit", code, signal);
+    this.emit("close");
   }
 }
 
@@ -94,6 +96,44 @@ describe("FfmpegClient", () => {
       version: "7.1",
       encoders: ["h264_videotoolbox"],
     });
+  });
+
+  test("shares one timeout budget across both prerequisite probe commands", async () => {
+    const timer = new FakeTimer();
+    const versionProcess = new FakeFfmpegProcess();
+    const encodersProcess = new FakeFfmpegProcess();
+    encodersProcess.kill = (signal?: NodeJS.Signals | number): boolean => {
+      encodersProcess.killSignals.push(signal);
+      encodersProcess.killed = true;
+      queueMicrotask(() => encodersProcess.exit(0, signal as NodeJS.Signals));
+      return true;
+    };
+    const processes = [versionProcess, encodersProcess];
+    const client = new DefaultFfmpegClient({
+      timer,
+      spawn: () => {
+        const process = processes.shift();
+        if (!process) {
+          throw new Error("unexpected spawn");
+        }
+        return process;
+      },
+    });
+
+    const probing = client.probe({ timeoutMs: 100 });
+    timer.setTimeout(() => {
+      versionProcess.stdout.write("ffmpeg version 7.1\n");
+      versionProcess.exit();
+    }, 80);
+    timer.advanceTime(80);
+    for (let attempt = 0; attempt < 20 && processes.length > 0; attempt++) {
+      await Promise.resolve();
+    }
+
+    expect(timer.getPendingTimeouts()).toContain(20);
+    timer.advanceTime(20);
+    await expect(probing).rejects.toThrow("FFmpeg encoder probe failed");
+    expect(encodersProcess.killSignals).toEqual(["SIGKILL"]);
   });
 
   test("reports non-zero exits with the command context and stderr", async () => {

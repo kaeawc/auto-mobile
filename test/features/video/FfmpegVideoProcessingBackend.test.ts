@@ -168,7 +168,10 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       signalCode: null,
       kill: () => {
         (child as unknown as { killed: boolean }).killed = true;
-        queueMicrotask(() => child.emit("exit", 0, "SIGINT"));
+        queueMicrotask(() => {
+          child.emit("exit", 0, "SIGINT");
+          child.emit("close");
+        });
         return true;
       },
     });
@@ -339,7 +342,10 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       kill: (signal?: NodeJS.Signals | number) => {
         signals.push(signal);
         (child as unknown as { killed: boolean }).killed = true;
-        queueMicrotask(() => child.emit("exit", null, signal));
+        queueMicrotask(() => {
+          child.emit("exit", null, signal);
+          child.emit("close");
+        });
         return true;
       },
     });
@@ -375,6 +381,94 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     expect(stderr.listenerCount("data")).toBe(0);
     expect(child.listenerCount("exit")).toBe(0);
     expect(child.listenerCount("error")).toBe(0);
+  });
+
+  test("bounds and aborts a hanging FFmpeg prerequisite within the iOS startup budget", async () => {
+    const timer = new FakeTimer();
+    let probeSignal: AbortSignal | undefined;
+    const ffmpegClient = {
+      binaryPath: "ffmpeg",
+      probe: async (request?: { signal?: AbortSignal }) => {
+        probeSignal = request?.signal;
+        return await new Promise<never>((_resolve, reject) => {
+          const abort = () => reject(probeSignal?.reason ?? new Error("probe aborted"));
+          if (probeSignal?.aborted) {
+            abort();
+            return;
+          }
+          probeSignal?.addEventListener("abort", abort, { once: true });
+        });
+      },
+    };
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      undefined,
+      ffmpegClient as any,
+      undefined,
+      undefined,
+      timer,
+    );
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-probe-udid" };
+
+    const starting = backend.start(mockConfig);
+    for (let attempt = 0; attempt < 20 && probeSignal === undefined; attempt++) {
+      await Promise.resolve();
+    }
+    expect(timer.getPendingTimeouts()).toEqual([5000]);
+
+    timer.advanceTime(5000);
+    await expect(starting).rejects.toThrow("FFmpeg is not available");
+    expect(probeSignal?.aborted).toBe(true);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("bounds and aborts a hanging simctl prerequisite within the iOS startup budget", async () => {
+    const timer = new FakeTimer();
+    let availabilitySignal: AbortSignal | undefined;
+    let captureStarts = 0;
+    const simctl = {
+      isAvailable: async (options?: { signal?: AbortSignal }) => {
+        availabilitySignal = options?.signal;
+        return await new Promise<never>((_resolve, reject) => {
+          const abort = () =>
+            reject(availabilitySignal?.reason ?? new Error("availability aborted"));
+          if (availabilitySignal?.aborted) {
+            abort();
+            return;
+          }
+          availabilitySignal?.addEventListener("abort", abort, { once: true });
+        });
+      },
+      startCommandArgs: async () => {
+        captureStarts++;
+        return makeCaptureChild(true);
+      },
+    } as unknown as SimCtl;
+    const ffmpegClient = {
+      binaryPath: "ffmpeg",
+      probe: async () => ({ version: "7.1", encoders: [] }),
+    };
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      () => simctl,
+      ffmpegClient as any,
+      undefined,
+      undefined,
+      timer,
+    );
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-simctl-udid" };
+
+    const starting = backend.start(mockConfig);
+    for (let attempt = 0; attempt < 20 && availabilitySignal === undefined; attempt++) {
+      await Promise.resolve();
+    }
+    expect(timer.getPendingTimeouts()).toEqual([5000]);
+
+    timer.advanceTime(5000);
+    await expect(starting).rejects.toThrow("Timed out checking simctl availability");
+    expect(availabilitySignal?.aborted).toBe(true);
+    expect(captureStarts).toBe(0);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
   test("shares one successful FFmpeg capability probe across availability and encoder checks", async function () {

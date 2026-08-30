@@ -60,10 +60,16 @@ export interface TrackedChildProcess extends StoppableProcess {
   off(event: "error", listener: (error: Error) => void): unknown;
 }
 
+interface CloseAwareProcess {
+  once(event: "close", listener: () => void): unknown;
+  off(event: "close", listener: () => void): unknown;
+}
+
 export function createExitTracker(
   process: TrackedChildProcess,
   stderr: string[],
 ): { exitState: ProcessExitState; exitPromise: Promise<void> } {
+  const closeAwareProcess = process as TrackedChildProcess & CloseAwareProcess;
   const exitState: ProcessExitState = {};
   let resolvePromise: () => void = () => undefined;
   let rejectPromise: (error: Error) => void = () => undefined;
@@ -73,14 +79,21 @@ export function createExitTracker(
     rejectPromise = reject;
   });
 
-  const cleanup = () => {
+  const cleanupProcessListeners = () => {
     process.off("error", onError);
     process.off("exit", onExit);
+  };
+  const cleanup = () => {
+    cleanupProcessListeners();
+    closeAwareProcess.off("close", onClose);
     process.stderr?.off("data", onStderr);
   };
   const onError = (error: Error) => {
     exitState.endedAt = new Date().toISOString();
-    cleanup();
+    cleanupProcessListeners();
+    if (!process.stderr) {
+      cleanup();
+    }
     rejectPromise(error instanceof Error ? error : new Error(String(error)));
   };
 
@@ -88,9 +101,16 @@ export function createExitTracker(
     exitState.exitCode = code;
     exitState.signal = signal;
     exitState.endedAt = new Date().toISOString();
-    cleanup();
+    cleanupProcessListeners();
+    if (!process.stderr) {
+      cleanup();
+    }
     resolvePromise();
   };
+
+  // Node emits child `exit` before stdio necessarily drains, then `close` after
+  // the streams are closed. Keep collecting diagnostics through that gap.
+  const onClose = () => cleanup();
 
   const onStderr = (chunk: Buffer | string) => {
     stderr.push(chunk.toString());
@@ -98,6 +118,7 @@ export function createExitTracker(
 
   process.once("error", onError);
   process.once("exit", onExit);
+  closeAwareProcess.once("close", onClose);
   process.stderr?.on("data", onStderr);
 
   if (process.exitCode !== null && process.exitCode !== undefined) {

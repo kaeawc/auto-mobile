@@ -23,6 +23,7 @@ export interface FfmpegStartRequest {
 
 export interface FfmpegRunRequest extends FfmpegStartRequest {
   readonly timeoutMs?: number;
+  readonly forceKillTimeoutMs?: number;
   readonly signal?: AbortSignal;
 }
 
@@ -47,6 +48,8 @@ export interface FfmpegPipeRequest {
 
 export interface FfmpegProbeRequest {
   readonly requiredEncoders?: string[];
+  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
 }
 
 export interface FfmpegProbeResult {
@@ -141,6 +144,7 @@ export class DefaultFfmpegClient implements FfmpegClient {
     try {
       await waitForExit(started.process, started.tracker.exitPromise, {
         timeoutMs: request.timeoutMs,
+        forceKillTimeoutMs: request.forceKillTimeoutMs,
         timer: this.timer,
         signal: null,
       });
@@ -163,16 +167,24 @@ export class DefaultFfmpegClient implements FfmpegClient {
   }
 
   async probe(request: FfmpegProbeRequest = {}): Promise<FfmpegProbeResult> {
-    const versionResult = await this.run({ args: ["-version"], context: "FFmpeg version probe" });
+    const deadlineMs =
+      request.timeoutMs === undefined ? undefined : this.timer.now() + request.timeoutMs;
+    const runProbe = async (args: string[], context: string): Promise<FfmpegCommandResult> =>
+      await this.run({
+        args,
+        context,
+        timeoutMs:
+          deadlineMs === undefined ? undefined : Math.max(0, deadlineMs - this.timer.now()),
+        forceKillTimeoutMs: deadlineMs === undefined ? undefined : 0,
+        signal: request.signal,
+      });
+    const versionResult = await runProbe(["-version"], "FFmpeg version probe");
     const version = /ffmpeg version (\S+)/.exec(versionResult.stdout)?.[1];
     if (!version) {
       throw new ActionableError("FFmpeg version probe returned invalid version output.");
     }
 
-    const encodersResult = await this.run({
-      args: ["-hide_banner", "-encoders"],
-      context: "FFmpeg encoder probe",
-    });
+    const encodersResult = await runProbe(["-hide_banner", "-encoders"], "FFmpeg encoder probe");
     const encoders = encodersResult.stdout
       .split("\n")
       .filter((line) => line.trim().startsWith("V"))

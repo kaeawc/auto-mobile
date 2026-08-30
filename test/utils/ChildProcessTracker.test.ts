@@ -234,6 +234,31 @@ describe("ChildProcessTracker", () => {
       expect(stderr).toEqual(["boom ", "second"]);
     });
 
+    test("keeps collecting stderr after exit until the child close event", async () => {
+      const process = new EventEmitter() as TrackedChildProcess;
+      process.exitCode = null;
+      process.signalCode = null;
+      process.killed = false;
+      const stderrEmitter = new EventEmitter();
+      process.stderr = stderrEmitter as unknown as TrackedChildProcess["stderr"];
+      process.kill = () => true;
+
+      const stderr: string[] = [];
+      const { exitPromise } = createExitTracker(process, stderr);
+
+      process.emit("exit", 1, null);
+      await exitPromise;
+      stderrEmitter.emit("data", "late diagnostic");
+
+      expect(stderr).toEqual(["late diagnostic"]);
+      expect(stderrEmitter.listenerCount("data")).toBe(1);
+
+      process.emit("close");
+      stderrEmitter.emit("data", "discarded after close");
+      expect(stderr).toEqual(["late diagnostic"]);
+      expect(stderrEmitter.listenerCount("data")).toBe(0);
+    });
+
     test("attributes the terminating signal when the process has already exited", async () => {
       const process = new EventEmitter() as TrackedChildProcess;
       process.exitCode = 137;

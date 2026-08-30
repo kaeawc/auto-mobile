@@ -213,6 +213,40 @@ async function waitWithinDeadline<T>(
   }
 }
 
+async function runWithinDeadline<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  deadlineMs: number,
+  timer: Timer,
+  callerSignal: AbortSignal | undefined,
+  timeoutMessage: string,
+): Promise<T> {
+  callerSignal?.throwIfAborted();
+  const deadlineController = new AbortController();
+  const signal = callerSignal
+    ? AbortSignal.any([callerSignal, deadlineController.signal])
+    : deadlineController.signal;
+  const timeoutError = new Error(timeoutMessage);
+  const remainingMs = Math.max(0, deadlineMs - timer.now());
+  let rejectOnAbort: ((reason?: unknown) => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    rejectOnAbort = reject;
+  });
+  const onAbort = () => rejectOnAbort?.(signal.reason ?? timeoutError);
+  signal.addEventListener("abort", onAbort, { once: true });
+  if (signal.aborted) {
+    onAbort();
+  }
+  const operationPromise = operation(signal);
+  const timeoutId = timer.setTimeout(() => deadlineController.abort(timeoutError), remainingMs);
+
+  try {
+    return await Promise.race([operationPromise, aborted]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+    timer.clearTimeout(timeoutId);
+  }
+}
+
 function hasStderrMessage(
   tracker: Pick<ProcessTracker, "stderr">,
   messages: string | string[],
@@ -363,7 +397,7 @@ function throwAndroidRecordingStartFailure(
 
 export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   private hwAccelCache: Map<string, HardwareAccelInfo> = new Map();
-  private ffmpegProbePromise: Promise<FfmpegProbeResult> | undefined;
+  private ffmpegProbeResult: FfmpegProbeResult | undefined;
   // Overridable in tests so the retry path can be exercised without real waits.
   private readonly iosRecordingStartTimeoutMs: number = IOS_RECORDING_START_TIMEOUT_MS;
   private readonly iosRecordingStartMaxAttempts: number = IOS_RECORDING_START_MAX_ATTEMPTS;
@@ -389,7 +423,10 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     }
     const iosStartDeadlineMs =
       device.platform === "ios" ? this.timer.now() + this.iosRecordingStartTimeoutMs : undefined;
-    await this.ensureFfmpegAvailable();
+    await this.ensureFfmpegAvailable(
+      iosStartDeadlineMs,
+      device.platform === "ios" ? config.abortSignal : undefined,
+    );
 
     if (device.platform === "android") {
       return this.startAndroid(device, config);
@@ -581,7 +618,18 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       );
     }
     const simctl = this.simctlFactory(device);
-    const available = await simctl.isAvailable();
+    const available = await runWithinDeadline(
+      async (signal) =>
+        await simctl.isAvailable({
+          timeoutMs: Math.max(0, startDeadlineMs - this.timer.now()),
+          signal,
+        }),
+      startDeadlineMs,
+      this.timer,
+      config.abortSignal,
+      `Timed out checking simctl availability within ${this.iosRecordingStartTimeoutMs}ms`,
+    );
+    throwIfRecordingStartAborted(config.abortSignal, "iOS");
     if (this.timer.now() >= startDeadlineMs) {
       throw new ActionableError(
         `Failed to start iOS recording within ${this.iosRecordingStartTimeoutMs}ms.`,
@@ -998,10 +1046,14 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     return (await this.probeFfmpeg()).encoders;
   }
 
-  private async ensureFfmpegAvailable(): Promise<void> {
+  private async ensureFfmpegAvailable(
+    deadlineMs?: number,
+    abortSignal?: AbortSignal,
+  ): Promise<void> {
     try {
-      await this.checkFfmpegVersion();
+      await this.checkFfmpegVersion(deadlineMs, abortSignal);
     } catch (error) {
+      throwIfRecordingStartAborted(abortSignal, "iOS");
       throw new ActionableError(
         `FFmpeg is not available. Please install FFmpeg to use video recording.\n` +
           `  macOS: brew install ffmpeg\n` +
@@ -1011,17 +1063,35 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     }
   }
 
-  private async checkFfmpegVersion(): Promise<void> {
-    const { version } = await this.probeFfmpeg();
+  private async checkFfmpegVersion(deadlineMs?: number, abortSignal?: AbortSignal): Promise<void> {
+    const { version } = await this.probeFfmpeg(deadlineMs, abortSignal);
     logger.debug(`[FfmpegVideo] Found FFmpeg ${version}`);
   }
 
-  private async probeFfmpeg(): Promise<FfmpegProbeResult> {
-    this.ffmpegProbePromise ??= this.ffmpegClient.probe().catch((error) => {
-      this.ffmpegProbePromise = undefined;
-      throw error;
-    });
-    return await this.ffmpegProbePromise;
+  private async probeFfmpeg(
+    deadlineMs?: number,
+    abortSignal?: AbortSignal,
+  ): Promise<FfmpegProbeResult> {
+    if (this.ffmpegProbeResult) {
+      return this.ffmpegProbeResult;
+    }
+    const probe =
+      deadlineMs === undefined
+        ? this.ffmpegClient.probe()
+        : runWithinDeadline(
+            async (signal) =>
+              await this.ffmpegClient.probe({
+                timeoutMs: Math.max(0, deadlineMs - this.timer.now()),
+                signal,
+              }),
+            deadlineMs,
+            this.timer,
+            abortSignal,
+            `Timed out checking FFmpeg availability within ${this.iosRecordingStartTimeoutMs}ms`,
+          );
+    const result = await probe;
+    this.ffmpegProbeResult = result;
+    return result;
   }
 
   private async assertFfmpegOutputReady(

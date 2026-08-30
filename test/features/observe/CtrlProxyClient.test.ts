@@ -45,6 +45,9 @@ describe("AndroidCtrlProxyClient", function () {
     // Create fake ADB instance
     fakeAdb = new FakeAdbExecutor();
     fakeAdb.setCommandResponse("forward", { stdout: `${serverPort}`, stderr: "" });
+    // Cached hierarchy liveness checks use pidof; default cached test fixtures
+    // represent a still-running app unless a test explicitly overrides it.
+    fakeAdb.setCommandResponse("shell pidof ", { stdout: "1234\n", stderr: "" });
     fakeAdb.setScreenState(true);
 
     // Create test device

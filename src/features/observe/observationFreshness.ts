@@ -189,7 +189,7 @@ export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
       ageMs,
       verified: false,
       isFresh: false,
-      warning: `Observed hierarchy is from ${windowIdentityMismatch.observed}, but the device's current top resumed activity is ${windowIdentityMismatch.foreground}. This is a stale wrong-window capture; it was not verified against the foreground app. The runner is serving a stale window; call pressButton { button: "home" } (or relaunch the target app) and observe again.`,
+      warning: `Observed hierarchy is from ${windowIdentityMismatch.observed}, but the device's current top resumed activity is ${windowIdentityMismatch.foreground}. This is a stale wrong-window capture; it was not verified against the foreground app. The runner is serving a stale window; call pressButton { platform: "android", button: "home" } (or relaunch the target app) and observe again.`,
     };
   }
 

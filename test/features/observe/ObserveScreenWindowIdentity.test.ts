@@ -91,7 +91,9 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.isFresh).toBe(false);
     expect(result.freshness?.warning).toContain("com.google.android.calendar");
     expect(result.freshness?.warning).toContain("com.android.settings");
-    expect(result.freshness?.warning).toContain('pressButton { button: "home" }');
+    expect(result.freshness?.warning).toContain(
+      'pressButton { platform: "android", button: "home" }',
+    );
     expect(result.freshness?.warning).toContain("relaunch the target app");
   });
 

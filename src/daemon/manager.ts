@@ -604,12 +604,23 @@ export class DaemonManager implements DaemonManagerLike {
     let holderLogPath: string | null = null;
     let waitedOnPid = this.readStartupLockHolder().livePid;
 
+    // ONE arbitration deadline across every holder, replacements included. Each
+    // wait gets only the remaining time, so a chain of holders (A replaced by B
+    // near A's deadline) cannot reset the budget and push the failure past the
+    // client's ~30s `tools/list` deadline — which would hide the very error this
+    // change exists to deliver (issue #5878).
+    const arbitrationDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
+
     for (let attempt = 1; attempt <= MAX_PEER_STARTUP_WAITS; attempt++) {
+      const remaining = this.remainingTime(arbitrationDeadline);
+      if (remaining === 0) {
+        break;
+      }
       stderrLog("Another process is starting the daemon, waiting...");
       // Capture diagnostics while the current holder still holds the lock, so they
       // survive into the failure message if the holder later releases on failure.
       holderLogPath = (await this.getLockHolderStartupLogPath()) ?? holderLogPath;
-      const ready = await this.waitForReady(DAEMON_STARTUP_TIMEOUT_MS, undefined, () =>
+      const ready = await this.waitForReady(remaining, undefined, () =>
         this.isStartupLockHeldByLiveProcess(),
       );
       if (ready) {

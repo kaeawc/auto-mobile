@@ -1416,6 +1416,94 @@ describe("Daemon manager process detection", () => {
     }
   });
 
+  test("a replacement lock holder shares one arbitration deadline, not a fresh budget each (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-replacement-deadline-"));
+    const lockPath = join(dir, "daemon.lock");
+    const pidA = 60001;
+    const pidB = 60002;
+    // Holder A initially owns the lock; part-way through A's wait it dies and B
+    // reclaims the lock. Both are "alive" by liveness — the handoff is the lock
+    // file's PID changing.
+    writeFileSync(lockPath, formatLockContent(pidA));
+    const fakeTimer = new FakeTimer();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [],
+      isProcessRunning: (pid: number) => pid === pidA || pid === pidB,
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        throw new Error("should not spawn during the replacement-holder handoff");
+      },
+    };
+
+    class HandoffDaemonManager extends DaemonManager {
+      readonly grantedTimeouts: number[] = [];
+      override acquireLock(): boolean {
+        return false;
+      }
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+      override async waitForReady(timeout: number): Promise<boolean> {
+        this.grantedTimeouts.push(timeout);
+        // First wait: A runs part-way then dies and B reclaims the lock. Later
+        // waits consume whatever budget they were granted.
+        const consumed = this.grantedTimeouts.length === 1 ? 20_000 : timeout;
+        fakeTimer.advanceTime(consumed);
+        if (this.grantedTimeouts.length === 1) {
+          writeFileSync(lockPath, formatLockContent(pidB));
+        }
+        return false;
+      }
+    }
+
+    try {
+      const manager = new HandoffDaemonManager(
+        () => ({
+          async connect() {
+            throw new Error("connection refused");
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        lockPath,
+        join(dir, "daemon.pid"),
+        join(dir, "daemon.sock"),
+        processFinder,
+        processSpawner,
+      );
+
+      const startedAt = fakeTimer.now();
+      await manager.start().then(
+        () => {
+          throw new Error("expected start to reject");
+        },
+        (rejection: unknown) => rejection as Error,
+      );
+      const elapsed = fakeTimer.now() - startedAt;
+
+      // The replacement (B) is granted only the REMAINING time, not a fresh full
+      // budget — so the total stays within one DAEMON_STARTUP_TIMEOUT_MS and the
+      // failure is delivered before the client's ~30s deadline (#5878). A per-holder
+      // reset would grant [30000, 30000] and take ~60s.
+      expect(manager.grantedTimeouts[0]).toBe(DAEMON_STARTUP_TIMEOUT_MS);
+      expect(manager.grantedTimeouts[1]).toBeLessThan(DAEMON_STARTUP_TIMEOUT_MS);
+      expect(elapsed).toBeLessThanOrEqual(DAEMON_STARTUP_TIMEOUT_MS);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("explicit restart force-stops an unreachable daemon without the default namespace PID record", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();

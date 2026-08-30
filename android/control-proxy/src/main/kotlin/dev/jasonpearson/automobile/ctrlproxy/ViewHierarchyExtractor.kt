@@ -2,7 +2,6 @@ package dev.jasonpearson.automobile.ctrlproxy
 
 import android.graphics.Rect
 import android.os.Build
-import android.os.UserHandle
 import android.text.Spanned
 import android.text.style.ClickableSpan
 import android.util.Log
@@ -34,6 +33,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     private const val CONTENT_HIDDEN_REASON_COMPOSE_INTEROP = "compose-interop-no-hide-descendants"
     private const val MIN_HIDDEN_REGION_SCREEN_AREA = 0.25
     private const val MAX_VISIBLE_CHILD_COVERAGE = 0.25
+    // Android encodes the user ID in the upper portion of every process UID.
+    // UserHandle's corresponding helpers are hidden APIs, unavailable to apps.
+    private const val ANDROID_USER_ID_RANGE = 100_000
 
     // androidx AccessibilityNodeInfoCompat stashes the state description in the node's extras
     // bundle under this key on API < 30, where the direct getter is unavailable. Compose relies
@@ -126,7 +128,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
       ViewHierarchy(
         packageName = rootNode.packageName?.toString(),
-        userId = UserHandle.getUserId(android.os.Process.myUid()),
+        userId = android.os.Process.myUid() / ANDROID_USER_ID_RANGE,
         hierarchy = unifiedHierarchy?.let { WireNodeCodec.materialize(it) },
         intentChooserDetected = intentChooserDetected,
         notificationPermissionDetected = notificationPermissionDetected,
@@ -438,7 +440,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
     return ViewHierarchy(
       packageName = mainPackageName,
-      userId = UserHandle.getUserId(android.os.Process.myUid()),
+      userId = android.os.Process.myUid() / ANDROID_USER_ID_RANGE,
       hierarchy = unifiedHierarchy?.let { WireNodeCodec.materialize(it) },
       windows = windowInfos.takeIf { it.isNotEmpty() },
       intentChooserDetected = intentChooserDetected,

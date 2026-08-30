@@ -162,12 +162,13 @@ class ObservationStreamStorageTest {
   }
 
   @Test
-  fun `subscribe_storage command serializes the package and file`() {
+  fun `subscribe_storage command serializes the epoch, package, and file`() {
     val request =
       StreamRequest(
         id = "s-1",
         command = "subscribe_storage",
         deviceId = "emulator-5554",
+        deviceSessionUuid = "epoch-a",
         packageName = "com.example",
         fileName = "prefs.xml",
       )
@@ -175,6 +176,7 @@ class ObservationStreamStorageTest {
     val encoded = wireJson.encodeToString(StreamRequest.serializer(), request)
 
     assertTrue(encoded.contains("\"command\":\"subscribe_storage\""), encoded)
+    assertTrue(encoded.contains("\"deviceSessionUuid\":\"epoch-a\""), encoded)
     assertTrue(encoded.contains("\"packageName\":\"com.example\""), encoded)
     assertTrue(encoded.contains("\"fileName\":\"prefs.xml\""), encoded)
   }
@@ -206,19 +208,17 @@ class ObservationStreamStorageTest {
   }
 
   @Test
-  fun `remembered storage subscriptions are re-applied on reconnect`() {
+  fun `remembered storage subscriptions are re-applied with the epoch on reconnect`() {
     withConnectedClient { client, factory ->
       client.subscribeStorage("com.example", "prefs.xml")
       client.disconnect()
-      client.connect("emulator-5554")
+      client.connect("emulator-5554", "epoch-a")
 
       // A reconnect must re-register the device-side observer, or live updates die silently
       // (#4709).
       val second = factory.opened[1].sentRequests()
-      assertTrue(
-        second.any { it.command == "subscribe_storage" && it.fileName == "prefs.xml" },
-        second.toString(),
-      )
+      val replay = second.single { it.command == "subscribe_storage" && it.fileName == "prefs.xml" }
+      assertEquals("epoch-a", replay.deviceSessionUuid)
     }
   }
 

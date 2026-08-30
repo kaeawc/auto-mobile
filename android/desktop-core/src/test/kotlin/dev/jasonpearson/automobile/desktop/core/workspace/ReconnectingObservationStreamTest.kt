@@ -75,6 +75,7 @@ class ReconnectingObservationStreamTest {
     setContent {
       rememberReconnectingObservationStream(
         deviceId = "dev-1",
+        deviceSessionUuid = "epoch-a",
         streamFactory = { fake },
         backoffDelay = backoff.seam,
         socketAvailable = { true },
@@ -94,6 +95,7 @@ class ReconnectingObservationStreamTest {
     waitForIdle()
     // Reconnected on the same instance.
     assertEquals(2, fake.connectCallCount)
+    assertEquals("epoch-a", fake.lastConnectedDeviceSessionUuid)
   }
 
   @Test

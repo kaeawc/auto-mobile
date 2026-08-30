@@ -123,4 +123,6 @@ data class DeviceColumn(
   val orientation: Orientation = Orientation.Portrait,
   /** Whether this is a simulator/emulator rather than a physical device. */
   val isVirtual: Boolean = true,
+  /** Daemon-minted identity for this live device epoch; nullable for older resource payloads. */
+  val deviceSessionUuid: String? = null,
 )

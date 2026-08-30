@@ -122,7 +122,7 @@ class StorageFacetTest {
   // storage_update frames flow in, mirroring how PerformanceFacet drives its metrics.
 
   @Test
-  fun `connects a device-scoped stream while the dashboard is shown and disposes it on removal`() =
+  fun `connects a UUID-scoped stream while the dashboard is shown and disposes it on removal`() =
     runComposeUiTest {
       val fake = FakeObservationStream()
       val visible = mutableStateOf(true)
@@ -132,7 +132,12 @@ class StorageFacetTest {
             if (visible.value) {
               StorageFacet(
                 column =
-                  DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+                  DeviceColumn(
+                    deviceId = "dev-1",
+                    name = "Pixel",
+                    platform = Platform.Android,
+                    deviceSessionUuid = "epoch-a",
+                  ),
                 loadInstalledApps = { resolvedApps() },
                 observationStreamFactory = { fake },
               )
@@ -143,12 +148,34 @@ class StorageFacetTest {
       waitForIdle()
       // Connected exactly once, to this pane's device.
       assertEquals("dev-1", fake.lastConnectedDeviceId)
+      assertEquals("epoch-a", fake.lastConnectedDeviceSessionUuid)
       assertEquals(1, fake.connectCallCount)
 
       // Leaving composition disposes the stream (dispose → disconnect).
       runOnIdle { visible.value = false }
       waitForIdle()
       assertTrue("expected the stream to be disposed on removal", fake.disconnectCallCount >= 1)
+    }
+
+  @Test
+  fun `does not open a live storage stream when the daemon resource lacks an epoch UUID`() =
+    runComposeUiTest {
+      val fake = FakeObservationStream()
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides fakeGraph()) {
+          MaterialTheme {
+            StorageFacet(
+              column =
+                DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+              loadInstalledApps = { resolvedApps() },
+              observationStreamFactory = { fake },
+            )
+          }
+        }
+      }
+
+      waitForIdle()
+      assertEquals(0, fake.connectCallCount)
     }
 
   @Test
@@ -160,7 +187,12 @@ class StorageFacetTest {
         MaterialTheme {
           StorageFacet(
             column =
-              DeviceColumn(deviceId = deviceId.value, name = "Pixel", platform = Platform.Android),
+              DeviceColumn(
+                deviceId = deviceId.value,
+                name = "Pixel",
+                platform = Platform.Android,
+                deviceSessionUuid = "epoch-a",
+              ),
             loadInstalledApps = { resolvedApps() },
             observationStreamFactory = { fake },
           )
@@ -188,7 +220,13 @@ class StorageFacetTest {
       CompositionLocalProvider(LocalAutoMobileGraph provides fakeGraph()) {
         MaterialTheme {
           StorageFacet(
-            column = DeviceColumn(deviceId = "dev-1", name = "Pixel", platform = Platform.Android),
+            column =
+              DeviceColumn(
+                deviceId = "dev-1",
+                name = "Pixel",
+                platform = Platform.Android,
+                deviceSessionUuid = "epoch-a",
+              ),
             loadInstalledApps = { resolvedApps() },
             observationStreamFactory = { fake },
             backoffDelay = { backoff.await() },

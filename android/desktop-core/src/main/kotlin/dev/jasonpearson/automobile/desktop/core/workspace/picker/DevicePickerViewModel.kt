@@ -458,6 +458,7 @@ class DevicePickerViewModel(
       platform = device.platform,
       locked = device.locked,
       isVirtual = device.isVirtual,
+      deviceSessionUuid = device.deviceSessionUuid,
     )
 
   private fun clearFilter(dimension: FilterDimension) {

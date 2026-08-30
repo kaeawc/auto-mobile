@@ -117,6 +117,8 @@ fun StorageFacet(
       val stream =
         rememberReconnectingObservationStream(
           deviceId = column.deviceId,
+          deviceSessionUuid = column.deviceSessionUuid,
+          requireDeviceSessionUuid = true,
           streamFactory = { observationStreamFactory(column.deviceId) },
           backoffDelay = backoffDelay,
           socketAvailable = socketAvailable,

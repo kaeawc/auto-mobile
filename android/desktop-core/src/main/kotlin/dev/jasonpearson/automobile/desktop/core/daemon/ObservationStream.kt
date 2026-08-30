@@ -19,8 +19,8 @@ interface ObservationStream {
   val deviceEvents: SharedFlow<DeviceStreamEvent>
   val connectionState: StateFlow<ConnectionState>
 
-  /** Subscribe to the stream, optionally filtered server-side to [deviceId]. */
-  fun connect(deviceId: String? = null)
+  /** Subscribe to the stream, optionally scoped to a daemon device epoch and [deviceId]. */
+  fun connect(deviceId: String? = null, deviceSessionUuid: String? = null)
 
   /** Unsubscribe and close the connection; the instance may be reconnected. */
   fun disconnect()

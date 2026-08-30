@@ -93,6 +93,8 @@ interface BootedDeviceInfo {
   name: string;
   platform: Platform;
   deviceId: string;
+  /** Live daemon-minted epoch key; absent when the daemon has no registry record. */
+  deviceSessionUuid?: string;
   identity: DeviceIdentity;
   source: "local" | "remote";
   isVirtual: boolean;
@@ -293,6 +295,7 @@ function toBootedDeviceInfo(
   device: BootedDevice,
   poolInfo?: PoolDeviceInfo,
   sessionInfo?: DeviceSessionInfo,
+  deviceSessionUuid?: string | null,
 ): BootedDeviceInfo {
   const isVirtual = isVirtualDevice(device);
   const runtime = device.iosVersion ?? device.osVersion;
@@ -309,6 +312,9 @@ function toBootedDeviceInfo(
     capabilities: { automation: null },
   };
 
+  if (deviceSessionUuid) {
+    info.deviceSessionUuid = deviceSessionUuid;
+  }
   if (runtime) {
     info.runtime = runtime;
   }
@@ -482,6 +488,7 @@ async function discoverBootedDevicesForPlatform(
   platform: Platform,
   devicePool: DevicePool | null,
   sessionInfoByDeviceId: Map<string, DeviceSessionInfo> | null,
+  resolveDeviceSessionUuid: (deviceId: string) => string | null,
 ): Promise<PlatformDiscoveryResult> {
   try {
     const discovery =
@@ -493,6 +500,7 @@ async function discoverBootedDevicesForPlatform(
           device,
           getPoolDeviceInfo(devicePool, device.deviceId),
           sessionInfoByDeviceId?.get(device.deviceId),
+          resolveDeviceSessionUuid(device.deviceId),
         ),
       ),
       succeededPlatforms: discovery.succeededPlatforms,
@@ -527,17 +535,23 @@ interface DaemonDeviceContext {
   devicePool: DevicePool | null;
   poolStatus?: PoolStatusSummary;
   sessionInfoByDeviceId: Map<string, DeviceSessionInfo> | null;
+  resolveDeviceSessionUuid: (deviceId: string) => string | null;
 }
 
 function readDaemonDeviceContext(): DaemonDeviceContext {
   const daemonState = DaemonState.getInstance();
   if (!daemonState.isInitialized()) {
-    return { devicePool: null, sessionInfoByDeviceId: null };
+    return {
+      devicePool: null,
+      sessionInfoByDeviceId: null,
+      resolveDeviceSessionUuid: () => null,
+    };
   }
 
   let devicePool: DevicePool | null = null;
   let poolStatus: PoolStatusSummary | undefined;
   let sessionInfoByDeviceId: Map<string, DeviceSessionInfo> | null = null;
+  let resolveDeviceSessionUuid: (deviceId: string) => string | null = () => null;
   try {
     devicePool = daemonState.getDevicePool();
     poolStatus = {
@@ -561,7 +575,15 @@ function readDaemonDeviceContext(): DaemonDeviceContext {
     logger.warn(`[BootedDeviceResources] Failed to read session manager state: ${error}`);
   }
 
-  return { devicePool, poolStatus, sessionInfoByDeviceId };
+  try {
+    const registry = daemonState.getDeviceSessionRegistry();
+    resolveDeviceSessionUuid = (deviceId) =>
+      registry.getByDeviceId(deviceId)?.deviceSessionUuid ?? null;
+  } catch (error) {
+    logger.warn(`[BootedDeviceResources] Failed to read device session registry: ${error}`);
+  }
+
+  return { devicePool, poolStatus, sessionInfoByDeviceId, resolveDeviceSessionUuid };
 }
 
 async function enrichDeviceServiceStatuses(devices: BootedDeviceInfo[]): Promise<void> {
@@ -673,6 +695,7 @@ async function getBootedDevicesForPlatforms(
       platform,
       daemonContext.devicePool,
       daemonContext.sessionInfoByDeviceId,
+      daemonContext.resolveDeviceSessionUuid,
     );
     devices.push(...discovery.devices);
     platformObservations[platform] = discovery.observation;

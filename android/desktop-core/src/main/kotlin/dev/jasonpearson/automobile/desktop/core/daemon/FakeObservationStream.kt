@@ -55,6 +55,9 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
   var lastConnectedDeviceId: String? = null
     private set
 
+  var lastConnectedDeviceSessionUuid: String? = null
+    private set
+
   var navigationRequestCount = 0
     private set
 
@@ -67,9 +70,10 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
   var lastObservationDeviceId: String? = null
     private set
 
-  override fun connect(deviceId: String?) {
+  override fun connect(deviceId: String?, deviceSessionUuid: String?) {
     connectCallCount++
     lastConnectedDeviceId = deviceId
+    lastConnectedDeviceSessionUuid = deviceSessionUuid
     if (failConnect) {
       _connectionState.value = ConnectionState.Disconnected("Socket not found")
       return

@@ -167,6 +167,7 @@ class ObservationStreamClient(
   // Requested observation cadence, remembered so it is re-applied on every (re)subscribe (so the
   // cadence survives reconnects). Managed via setCadence(); null means "use the daemon's default".
   private var subscribedDeviceId: String? = null
+  private var subscribedDeviceSessionUuid: String? = null
   private var subscriptionId: String? = null
   private var pendingCadenceUpdate = false
   private var requestedScreenshotIntervalMs: Long? = null
@@ -187,7 +188,7 @@ class ObservationStreamClient(
    *
    * @param deviceId Optional device ID to subscribe to. If null, subscribes to all devices.
    */
-  override fun connect(deviceId: String?) {
+  override fun connect(deviceId: String?, deviceSessionUuid: String?) {
     if (_connectionState.value.isConnected) {
       log.info("Already connected to observation stream")
       return
@@ -224,9 +225,10 @@ class ObservationStreamClient(
 
       // Send subscribe request (carries any cadence configured via setCadence)
       subscribedDeviceId = deviceId
+      subscribedDeviceSessionUuid = deviceSessionUuid
       subscriptionId = null
       pendingCadenceUpdate = false
-      subscribe(deviceId)
+      subscribe(deviceId, deviceSessionUuid)
 
       // Start reading messages for this generation
       scope.launch {
@@ -305,12 +307,13 @@ class ObservationStreamClient(
     scope.coroutineContext[Job]?.cancel()
   }
 
-  private fun subscribe(deviceId: String?) {
+  private fun subscribe(deviceId: String?, deviceSessionUuid: String?) {
     val request =
       StreamRequest(
         id = UUID.randomUUID().toString(),
         command = "subscribe",
         deviceId = deviceId,
+        deviceSessionUuid = deviceSessionUuid,
         screenshotIntervalMs = requestedScreenshotIntervalMs,
         hierarchyIntervalMs = requestedHierarchyIntervalMs,
       )
@@ -363,6 +366,7 @@ class ObservationStreamClient(
         command = "update_cadence",
         subscriptionId = currentSubscriptionId,
         deviceId = subscribedDeviceId,
+        deviceSessionUuid = subscribedDeviceSessionUuid,
         screenshotIntervalMs = requestedScreenshotIntervalMs,
         hierarchyIntervalMs = requestedHierarchyIntervalMs,
       )
@@ -675,6 +679,7 @@ class ObservationStreamClient(
         id = UUID.randomUUID().toString(),
         command = "request_observation",
         deviceId = deviceId,
+        deviceSessionUuid = subscribedDeviceSessionUuid,
       )
     sendRequest(request)
   }
@@ -718,6 +723,7 @@ class ObservationStreamClient(
         id = UUID.randomUUID().toString(),
         command = command,
         deviceId = subscribedDeviceId,
+        deviceSessionUuid = subscribedDeviceSessionUuid,
         packageName = key.packageName,
         fileName = key.fileName,
       )
@@ -759,6 +765,7 @@ data class StreamRequest(
   val command: String,
   val subscriptionId: String? = null,
   val deviceId: String? = null,
+  val deviceSessionUuid: String? = null,
   val appId: String? = null,
   val screenshotIntervalMs: Long? = null,
   val hierarchyIntervalMs: Long? = null,

@@ -627,22 +627,19 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
       const window = this.provider.getWindow(device);
 
-      let activeWindow = await window.getActive();
+      const activeWindow = await window.getActive(true);
       if (!activeWindow || !activeWindow.appId || !activeWindow.activityName) {
-        activeWindow = await window.getActive(true);
-        if (!activeWindow || !activeWindow.appId || !activeWindow.activityName) {
-          logger.warn(`[DeviceSessionManager] Android device ${deviceId} is not fully ready`);
-          if (activeWindow) {
-            logger.warn(
-              `[DeviceSessionManager] activeWindow.appId: ${activeWindow.appId} | activeWindow.activityName: ${activeWindow.activityName}`,
-            );
-          } else {
-            logger.warn(`[DeviceSessionManager] activeWindow: ${activeWindow}`);
-          }
-          throw new ActionableError(
-            `Cannot get active window information from Android device ${deviceId}. The device may not be fully booted or is in an unusual state.`,
+        logger.warn(`[DeviceSessionManager] Android device ${deviceId} is not fully ready`);
+        if (activeWindow) {
+          logger.warn(
+            `[DeviceSessionManager] activeWindow.appId: ${activeWindow.appId} | activeWindow.activityName: ${activeWindow.activityName}`,
           );
+        } else {
+          logger.warn(`[DeviceSessionManager] activeWindow: ${activeWindow}`);
         }
+        throw new ActionableError(
+          `Cannot get active window information from Android device ${deviceId}. The device may not be fully booted or is in an unusual state.`,
+        );
       }
     } catch (error) {
       const errorMsg = errorMessage(error);

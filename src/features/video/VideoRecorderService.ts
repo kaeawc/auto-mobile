@@ -237,6 +237,14 @@ export class VideoRecorderService {
           handle: error.handle,
           forceStopRequested: false,
         });
+      } else {
+        try {
+          await fsPromises.rm(recordingDir, { recursive: true, force: true });
+        } catch (cleanupError) {
+          this.log.warn(
+            `[VideoRecorderService] Failed to remove aborted recording directory ${recordingDir}: ${String(cleanupError)}`,
+          );
+        }
       }
       throw error;
     }

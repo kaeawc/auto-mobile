@@ -47,7 +47,7 @@ interface StoppedSegmentedSession {
 
 type SegmentedSessionRecordingDependencies = Pick<
   AndroidSegmentedPlanVideoSessionOptions,
-  "startVideoRecording" | "stopVideoRecording"
+  "startVideoRecording" | "stopVideoRecording" | "forceStopVideoRecording"
 >;
 
 /**

@@ -296,6 +296,7 @@ describe("videoRecording tool segmentation branch", () => {
       resolveStart = resolve;
     });
     let receivedSignal: AbortSignal | undefined;
+    const forceStopped: string[] = [];
     setSegmentedSessionRecordingDependencies({
       startVideoRecording: async (request) => {
         receivedSignal = request.abortSignal;
@@ -304,10 +305,10 @@ describe("videoRecording tool segmentation branch", () => {
       stopVideoRecording: async (recordingId) => {
         const id = recordingId ?? "segment-0";
         segmentStops.push(id);
-        return {
-          metadata: makeSegmentMetadata(id),
-          evictedRecordingIds: [],
-        };
+        throw new Error(`graceful stop failed for ${id}`);
+      },
+      forceStopVideoRecording: async (recordingId) => {
+        forceStopped.push(recordingId);
       },
     });
 
@@ -331,6 +332,7 @@ describe("videoRecording tool segmentation branch", () => {
     await expect(starting).rejects.toThrow("request cancelled");
     expect(receivedSignal).toBe(controller.signal);
     expect(segmentStops).toEqual(["cancelled"]);
+    expect(forceStopped).toEqual(["cancelled"]);
     expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
   });
 

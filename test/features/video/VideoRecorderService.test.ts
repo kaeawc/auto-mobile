@@ -299,6 +299,17 @@ describe("VideoRecorderService", () => {
       expect(await pathExists(dir)).toBe(true);
     });
 
+    test("removes partial output when startup rejects without a cleanup handle", async () => {
+      backend.start = async (config) => {
+        await fsPromises.writeFile(config.outputPath, "partial video");
+        throw new Error("capture startup aborted");
+      };
+
+      await expect(service.startRecording()).rejects.toThrow("capture startup aborted");
+
+      expect(await pathExists(path.join(archiveRoot, "rec-1"))).toBe(false);
+    });
+
     test("passes outputName through", async () => {
       const result = await service.startRecording({ outputName: "my-video" });
       expect(result.outputName).toBe("my-video");

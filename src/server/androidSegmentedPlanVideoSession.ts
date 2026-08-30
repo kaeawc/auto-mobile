@@ -8,6 +8,8 @@ import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import {
+  forceStopVideoRecording as defaultForceStopVideoRecording,
+  interruptVideoRecording as defaultInterruptVideoRecording,
   startVideoRecording as defaultStartVideoRecording,
   stopVideoRecording as defaultStopVideoRecording,
 } from "./videoRecordingManager";
@@ -45,6 +47,7 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   stopVideoRecording?: (
     recordingId?: string,
   ) => Promise<{ metadata: VideoRecordingMetadata; evictedRecordingIds: string[] }>;
+  forceStopVideoRecording?: (recordingId: string) => Promise<void>;
 }
 
 /**
@@ -107,6 +110,8 @@ export class AndroidSegmentedPlanVideoSession {
     recordingId?: string,
   ) => Promise<{ metadata: VideoRecordingMetadata; evictedRecordingIds: string[] }>;
 
+  private readonly forceStopVideoRecordingFn: (recordingId: string) => Promise<void>;
+
   constructor(options: AndroidSegmentedPlanVideoSessionOptions) {
     this.device = options.device;
     this.outputNamePrefix = options.outputNamePrefix;
@@ -119,6 +124,12 @@ export class AndroidSegmentedPlanVideoSession {
     this.onFinalized = options.onFinalized;
     this.startVideoRecordingFn = options.startVideoRecording ?? defaultStartVideoRecording;
     this.stopVideoRecordingFn = options.stopVideoRecording ?? defaultStopVideoRecording;
+    this.forceStopVideoRecordingFn =
+      options.forceStopVideoRecording ??
+      (async (recordingId) => {
+        await defaultForceStopVideoRecording(recordingId);
+        await defaultInterruptVideoRecording(recordingId);
+      });
   }
 
   /** Device this session is recording, so callers can match sessions by device. */
@@ -162,14 +173,34 @@ export class AndroidSegmentedPlanVideoSession {
       this.startupAbortSignal?.throwIfAborted();
     } catch (error) {
       this.timerDriven = false;
-      if (this.activeRecordingId) {
-        await this.stop();
-      }
+      await this.rollbackStartedSegment();
       throw error;
     }
     this.scheduleRotation();
     this.scheduleMaxDurationStop();
     return first;
+  }
+
+  private async rollbackStartedSegment(): Promise<void> {
+    const recordingId = this.activeRecordingId;
+    this.activeRecordingId = undefined;
+    if (!recordingId) {
+      return;
+    }
+    try {
+      await this.stopVideoRecordingFn(recordingId);
+    } catch (stopError) {
+      logger.warn(
+        `[SegmentedPlanVideo] Failed to stop cancelled segment ${recordingId}: ${errorMessage(stopError)}`,
+      );
+      try {
+        await this.forceStopVideoRecordingFn(recordingId);
+      } catch (forceStopError) {
+        logger.warn(
+          `[SegmentedPlanVideo] Failed to force-stop cancelled segment ${recordingId}: ${errorMessage(forceStopError)}`,
+        );
+      }
+    }
   }
 
   private scheduleRotation(): void {

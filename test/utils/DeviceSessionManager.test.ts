@@ -211,6 +211,24 @@ describe("DeviceSessionManager", () => {
     expect(fakeWindow.wasMethodCalled("getActive")).toBe(true);
   });
 
+  test("booted Android readiness bypasses stale active-window cache", async () => {
+    fakeWindow.configureCachedActiveWindow({
+      appId: "com.example.previous",
+      activityName: "PreviousActivity",
+      layoutSeqSum: 0,
+    });
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
+
+    await expect(
+      manager.verifyAndroidDevice(device.deviceId, { readiness: "booted" }),
+    ).resolves.toBeUndefined();
+
+    expect(fakeWindow.getGetActiveForceRefreshes()).toEqual([true]);
+  });
+
   test("booted Android readiness rejects a device whose UI has not finished booting", async () => {
     const notReadyWindow = new FakeWindow();
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {

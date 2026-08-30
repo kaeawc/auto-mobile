@@ -20,6 +20,7 @@ import {
 import { serverConfig } from "../utils/ServerConfig";
 import { logger } from "../utils/logger";
 import { redactHomeDir } from "../utils/redactPath";
+import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { createTimestampedId } from "../utils/IdGenerator";
 import { combineAbortSignals } from "../utils/AbortContext";
@@ -868,45 +869,66 @@ export async function startVideoRecording(
       abortSignal: start.abortSignal,
     });
 
-    await recordingRepository.insertRecording({
-      recordingId: active.recordingId,
-      deviceId: request.device.deviceId,
-      platform: request.device.platform,
-      status: "recording",
-      outputName: active.outputName,
-      fileName: active.fileName,
-      filePath: active.outputPath,
-      format: active.config.format,
-      sizeBytes: 0,
-      durationMs: undefined,
-      codec: undefined,
-      createdAt: active.startedAt,
-      startedAt: active.startedAt,
-      endedAt: undefined,
-      lastAccessedAt: active.startedAt,
-      config: active.config,
-      ownerSessionUuid: request.ownerSessionUuid,
-    });
+    try {
+      start.abortSignal?.throwIfAborted();
+      await recordingRepository.insertRecording({
+        recordingId: active.recordingId,
+        deviceId: request.device.deviceId,
+        platform: request.device.platform,
+        status: "recording",
+        outputName: active.outputName,
+        fileName: active.fileName,
+        filePath: active.outputPath,
+        format: active.config.format,
+        sizeBytes: 0,
+        durationMs: undefined,
+        codec: undefined,
+        createdAt: active.startedAt,
+        startedAt: active.startedAt,
+        endedAt: undefined,
+        lastAccessedAt: active.startedAt,
+        config: active.config,
+        ownerSessionUuid: request.ownerSessionUuid,
+      });
 
-    const highlightSession = createHighlightSession(
-      active.recordingId,
-      request.device,
-      active.startedAt,
-      timer,
-    );
-    highlightSessions.set(active.recordingId, highlightSession);
-    highlightSessionsByDeviceId.set(request.device.deviceId, active.recordingId);
+      const highlightSession = createHighlightSession(
+        active.recordingId,
+        request.device,
+        active.startedAt,
+        timer,
+      );
+      highlightSessions.set(active.recordingId, highlightSession);
+      highlightSessionsByDeviceId.set(request.device.deviceId, active.recordingId);
 
-    if (highlightInputs.length > 0) {
-      await scheduleRecordingHighlights(highlightSession, request.device, highlightInputs, deps);
+      if (highlightInputs.length > 0) {
+        await scheduleRecordingHighlights(highlightSession, request.device, highlightInputs, deps);
+      }
+
+      await scheduleAutoStop(active.recordingId, maxDurationSeconds);
+
+      const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
+      scheduleInProgressSizeCap(active.recordingId, active.outputPath, capBytes, deps);
+      start.abortSignal?.throwIfAborted();
+      return active;
+    } catch (error) {
+      try {
+        await videoRecorderService.forceStopRecording(active.recordingId);
+      } catch (cleanupError) {
+        logger.warn(
+          `[VideoRecording] Failed to force-stop cancelled recording ${active.recordingId}: ${errorMessage(cleanupError)}`,
+          cleanupError,
+        );
+      }
+      try {
+        await interruptVideoRecording(active.recordingId);
+      } catch (cleanupError) {
+        logger.warn(
+          `[VideoRecording] Failed to mark cancelled recording ${active.recordingId} interrupted: ${errorMessage(cleanupError)}`,
+          cleanupError,
+        );
+      }
+      throw error;
     }
-
-    await scheduleAutoStop(active.recordingId, maxDurationSeconds);
-
-    const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
-    scheduleInProgressSizeCap(active.recordingId, active.outputPath, capBytes, deps);
-
-    return active;
   } finally {
     start.complete();
   }

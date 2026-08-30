@@ -1624,7 +1624,11 @@ export class DaemonManager implements DaemonManagerLike {
       ? this.startLivenessWatchdog(signal, shouldContinueWaiting)
       : undefined;
     try {
-      return await this.probeObservedSocket(probeDeadline, watchdog?.signal ?? signal, keepWaiting);
+      return await this.probeObservedSocket(
+        probeDeadline,
+        watchdog?.signal ?? signal,
+        keepWaiting && maxProbeDurationMs === undefined,
+      );
     } finally {
       watchdog?.dispose();
     }

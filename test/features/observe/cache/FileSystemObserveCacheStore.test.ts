@@ -224,6 +224,20 @@ describe("FileSystemObserveCacheStore", function () {
     expect(existsSync(currentPath)).toBe(true);
   });
 
+  test("put reaps expired disk files even when memory has a fresh result", async function () {
+    await store.put("device-1", makeResult("old"));
+    const oldFile = readdirSync(cacheDir).find((file) => file.endsWith(".json"));
+    expect(oldFile).toBeDefined();
+    const expiredAt = timer.now() - OBSERVE_RESULT_CACHE_TTL_MS - 1;
+    utimesSync(path.join(cacheDir, oldFile!), new Date(expiredAt), new Date(expiredAt));
+
+    timer.advanceTime(1);
+    await store.put("device-1", makeResult("fresh"));
+
+    expect(store.getRecentInMemoryForDevice("device-1")?.updatedAt).toBe("fresh");
+    expect(existsSync(path.join(cacheDir, oldFile!))).toBe(false);
+  });
+
   // --- Generation-stamped disk files (#5892) -------------------------------
 
   test("put stamps the write generation into the disk filename", async function () {

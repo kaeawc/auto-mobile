@@ -157,6 +157,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       const filename = this.diskFilename(cacheKey, stampGeneration);
       this.cache.set(cacheKey, { timestamp, deviceId, observeResult: result });
       await this.saveObserveResultToDisk(filename, result);
+      await this.reapExpiredDiskFiles(deviceId);
       // Residual 1: a clear() can land during the disk write above, and its
       // deletion snapshot predates our file — so it survives on disk. Re-check
       // and clean up ourselves rather than leaving a stale file for checkDisk to
@@ -396,6 +397,29 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       await unlinkAsync(path.join(this.cacheDir, filename));
     } catch (error) {
       logger.warn(`[OBSERVE_CACHE] Failed to delete stale cache file ${filename}: ${error}`);
+    }
+  }
+
+  private async reapExpiredDiskFiles(deviceId: string): Promise<void> {
+    try {
+      const devicePrefix = `observe_${this.sanitizeDeviceId(deviceId)}_`;
+      const files = await readdirAsync(this.cacheDir);
+      const now = this.timer.now();
+      const expiredFiles: string[] = [];
+
+      for (const file of files) {
+        if (!file.endsWith(".json") || !file.startsWith(devicePrefix)) {
+          continue;
+        }
+        const stats = await statAsync(path.join(this.cacheDir, file));
+        if (now - stats.mtime.getTime() >= OBSERVE_RESULT_CACHE_TTL_MS) {
+          expiredFiles.push(file);
+        }
+      }
+
+      await Promise.all(expiredFiles.map((file) => this.deleteDiskFile(file)));
+    } catch (error) {
+      logger.warn(`[OBSERVE_CACHE] Failed to reap expired disk files: ${error}`);
     }
   }
 

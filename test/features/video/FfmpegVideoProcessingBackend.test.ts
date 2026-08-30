@@ -223,9 +223,16 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
   test("kills an iOS recorder that is still waiting for its start handshake when shutdown aborts", async function () {
     const child = makeCaptureChild(false);
     const controller = new AbortController();
+    let markStartRequested: (() => void) | undefined;
+    const startRequested = new Promise<void>((resolve) => {
+      markStartRequested = resolve;
+    });
     const simctl = {
       isAvailable: async () => true,
-      startCommandArgs: async () => child,
+      startCommandArgs: async () => {
+        markStartRequested?.();
+        return child;
+      },
     } as unknown as SimCtl;
     backend = new FfmpegVideoProcessingBackend(undefined, () => simctl);
     (backend as any).ensureFfmpegAvailable = async () => {};
@@ -233,7 +240,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     mockConfig.abortSignal = controller.signal;
 
     const starting = backend.start(mockConfig);
-    await Promise.resolve();
+    await startRequested;
     controller.abort();
 
     await expect(starting).rejects.toThrow("cancelled during shutdown");
@@ -296,6 +303,82 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     expect(error!.message).toContain("simulator state");
     expect(error!.message).toContain("Shutdown");
     expect(starts).toBe(2); // exhausted the bounded retry budget
+  });
+
+  test("fails and reaps a slow iOS start within the five-second total budget", async function () {
+    const timer = new FakeTimer();
+    const stderr = new PassThrough();
+    const signals: Array<NodeJS.Signals | number | undefined> = [];
+    const child = new EventEmitter() as ChildProcess;
+    Object.assign(child, {
+      stderr,
+      stdout: null,
+      stdin: null,
+      killed: false,
+      exitCode: null,
+      signalCode: null,
+      pid: 123,
+      kill: (signal?: NodeJS.Signals | number) => {
+        signals.push(signal);
+        (child as unknown as { killed: boolean }).killed = true;
+        queueMicrotask(() => child.emit("exit", null, signal));
+        return true;
+      },
+    });
+    const simctl = {
+      isAvailable: async () => true,
+      startCommandArgs: async () => child,
+      executeCommandArgs: async () => diagnosticsExecResult("Booted"),
+    } as unknown as SimCtl;
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      () => simctl,
+      undefined,
+      undefined,
+      undefined,
+      timer,
+    );
+    (backend as any).ensureFfmpegAvailable = async () => {};
+    (backend as any).iosRecordingStartMaxAttempts = 1;
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-slow-udid" };
+
+    const starting = backend.start(mockConfig);
+    for (let i = 0; i < 20 && !timer.getPendingTimeouts().includes(4500); i++) {
+      await Promise.resolve();
+    }
+    expect(timer.getPendingTimeouts()).toEqual([4500]);
+
+    timer.advanceTime(4500);
+    await expect(starting).rejects.toThrow("Failed to start iOS recording");
+
+    expect(timer.now()).toBeLessThanOrEqual(5000);
+    expect(signals).toEqual(["SIGKILL"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+    expect(stderr.listenerCount("data")).toBe(0);
+    expect(child.listenerCount("exit")).toBe(0);
+    expect(child.listenerCount("error")).toBe(0);
+  });
+
+  test("shares one successful FFmpeg capability probe across availability and encoder checks", async function () {
+    let probeCalls = 0;
+    const ffmpegClient = {
+      binaryPath: "ffmpeg",
+      async probe() {
+        probeCalls++;
+        return { version: "7.1", encoders: ["h264_videotoolbox"] };
+      },
+    };
+    const scoped = new FfmpegVideoProcessingBackend(
+      undefined,
+      undefined,
+      ffmpegClient as any,
+      () => "darwin",
+    );
+
+    await (scoped as any).ensureFfmpegAvailable();
+    await (scoped as any).detectHardwareAccel();
+
+    expect(probeCalls).toBe(1);
   });
 
   describe("Hardware Acceleration Detection", function () {
@@ -579,6 +662,40 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       await expect(waitForStderrMessage(tracker, "Recording started", 1)).rejects.toThrow(
         /Timed out waiting for Recording started/,
       );
+    });
+
+    test("fails immediately when the tracked process exited before listeners attach", async function () {
+      const timer = new FakeTimer();
+      const tracker = createProcessTracker();
+      tracker.exitState.endedAt = new Date().toISOString();
+      tracker.process.exitCode = 1;
+
+      await expect(
+        waitForStderrMessage(tracker, "Recording started", 5000, { timer }),
+      ).rejects.toThrow("Process exited before Recording started");
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+
+    test("abort removes handshake listeners and its timeout", async function () {
+      const timer = new FakeTimer();
+      const tracker = createProcessTracker();
+      const controller = new AbortController();
+      const stderr = tracker.process.stderr as unknown as EventEmitter;
+      const waiting = waitForStderrMessage(tracker, "Recording started", 5000, {
+        timer,
+        signal: controller.signal,
+      });
+
+      expect(timer.getPendingTimeoutCount()).toBe(1);
+      expect(stderr.listenerCount("data")).toBe(1);
+      controller.abort(new Error("cancelled"));
+
+      await expect(waiting).rejects.toThrow("cancelled");
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(stderr.listenerCount("data")).toBe(0);
+      const processEmitter = tracker.process as unknown as EventEmitter;
+      expect(processEmitter.listenerCount("exit")).toBe(0);
+      expect(processEmitter.listenerCount("error")).toBe(0);
     });
 
     test("should include command, stderr, and missing output path for opaque post-processing failures", function () {

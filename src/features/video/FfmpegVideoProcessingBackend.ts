@@ -14,6 +14,7 @@ import { defaultRecordingCodecProbe, type RecordingCodecProbe } from "./recordin
 import {
   DefaultFfmpegClient,
   type FfmpegClient,
+  type FfmpegProbeResult,
   type FfmpegProcess,
 } from "../../utils/media/FfmpegClient";
 import {
@@ -52,7 +53,8 @@ export const IOS_RECORDING_FILE_READY_TIMEOUT_MS = 15000;
 const IOS_RECORDING_FILE_READY_INITIAL_BACKOFF_MS = 100;
 const IOS_RECORDING_FILE_READY_MAX_BACKOFF_MS = 1000;
 const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
-const IOS_RECORDING_START_TIMEOUT_MS = 30000;
+export const IOS_RECORDING_START_TIMEOUT_MS = 5000;
+const IOS_RECORDING_START_CLEANUP_TIMEOUT_MS = 500;
 // A cold or loaded simulator can silently miss the very first `recordVideo`
 // start handshake (#4076): simctl produces no "Recording started" and no error,
 // and the single attempt times out. Retry the start a bounded number of times
@@ -191,6 +193,26 @@ function stderrMessages(messages: string | string[]): string[] {
   return Array.isArray(messages) ? messages : [messages];
 }
 
+async function waitWithinDeadline<T>(
+  operation: Promise<T>,
+  deadlineMs: number,
+  timer: Timer,
+  timeoutMessage: string,
+): Promise<T> {
+  const remainingMs = Math.max(0, deadlineMs - timer.now());
+  let timeoutId: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = timer.setTimeout(() => reject(new Error(timeoutMessage)), remainingMs);
+  });
+  try {
+    return await Promise.race([operation, timeout]);
+  } finally {
+    if (timeoutId) {
+      timer.clearTimeout(timeoutId);
+    }
+  }
+}
+
 function hasStderrMessage(
   tracker: Pick<ProcessTracker, "stderr">,
   messages: string | string[],
@@ -201,6 +223,11 @@ function hasStderrMessage(
 
 export function containsIosRecordingStartMessage(stderr: string): boolean {
   return IOS_RECORDING_START_MESSAGES.some((message) => stderr.includes(message));
+}
+
+export interface WaitForStderrMessageOptions {
+  timer?: Timer;
+  signal?: AbortSignal;
 }
 
 /**
@@ -238,13 +265,23 @@ export async function waitForStderrMessage(
   tracker: ProcessTracker,
   messages: string | string[],
   timeoutMs: number,
+  options: WaitForStderrMessageOptions = {},
 ): Promise<void> {
   const expected = stderrMessages(messages);
   const expectedDescription = expected.join(" or ");
+  const timer = options.timer ?? defaultTimer;
 
   if (hasStderrMessage(tracker, expected)) {
     return;
   }
+  if (
+    tracker.exitState.endedAt !== undefined ||
+    (tracker.process.exitCode !== null && tracker.process.exitCode !== undefined) ||
+    (tracker.process.signalCode !== null && tracker.process.signalCode !== undefined)
+  ) {
+    throw new Error(`Process exited before ${expectedDescription}`);
+  }
+  options.signal?.throwIfAborted();
   const stderrStream = tracker.process.stderr;
   if (!stderrStream) {
     throw new Error(`Cannot wait for ${expectedDescription}: process stderr is not captured`);
@@ -257,8 +294,9 @@ export async function waitForStderrMessage(
       stderrStream.off("data", onData);
       tracker.process.off("exit", onExit);
       tracker.process.off("error", onError);
+      options.signal?.removeEventListener("abort", onAbort);
       if (timeoutId) {
-        clearTimeout(timeoutId);
+        timer.clearTimeout(timeoutId);
       }
     };
     const complete = (callback: () => void) => {
@@ -280,12 +318,16 @@ export async function waitForStderrMessage(
     const onError = (error: Error) => {
       complete(() => reject(error));
     };
+    const onAbort = () => {
+      complete(() => reject(options.signal?.reason ?? new Error("Recording start was cancelled.")));
+    };
 
     stderrStream.on("data", onData);
     tracker.process.once("exit", onExit);
     tracker.process.once("error", onError);
+    options.signal?.addEventListener("abort", onAbort, { once: true });
     onData();
-    timeoutId = defaultTimer.setTimeout(() => {
+    timeoutId = timer.setTimeout(() => {
       if (hasStderrMessage(tracker, expected)) {
         complete(resolve);
         return;
@@ -293,34 +335,6 @@ export async function waitForStderrMessage(
       complete(() => reject(new Error(`Timed out waiting for ${expectedDescription}`)));
     }, timeoutMs);
   });
-}
-
-async function waitForStderrMessageOrAbort(
-  tracker: ProcessTracker,
-  messages: string | string[],
-  timeoutMs: number,
-  abortSignal: AbortSignal | undefined,
-): Promise<void> {
-  if (!abortSignal) {
-    await waitForStderrMessage(tracker, messages, timeoutMs);
-    return;
-  }
-  if (abortSignal.aborted) {
-    throw new Error("Recording start was cancelled during shutdown.");
-  }
-
-  let rejectAbort: (() => void) | undefined;
-  const aborted = new Promise<never>((_resolve, reject) => {
-    rejectAbort = () => reject(new Error("Recording start was cancelled during shutdown."));
-    abortSignal.addEventListener("abort", rejectAbort, { once: true });
-  });
-  try {
-    await Promise.race([waitForStderrMessage(tracker, messages, timeoutMs), aborted]);
-  } finally {
-    if (rejectAbort) {
-      abortSignal.removeEventListener("abort", rejectAbort);
-    }
-  }
 }
 
 function forceStopStartingProcess(process: StoppableProcess | undefined): void {
@@ -349,6 +363,7 @@ function throwAndroidRecordingStartFailure(
 
 export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   private hwAccelCache: Map<string, HardwareAccelInfo> = new Map();
+  private ffmpegProbePromise: Promise<FfmpegProbeResult> | undefined;
   // Overridable in tests so the retry path can be exercised without real waits.
   private readonly iosRecordingStartTimeoutMs: number = IOS_RECORDING_START_TIMEOUT_MS;
   private readonly iosRecordingStartMaxAttempts: number = IOS_RECORDING_START_MAX_ATTEMPTS;
@@ -364,22 +379,24 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     // Injectable so the codec label can be asserted from synthetic files without
     // producing real recordings (#4965).
     private readonly codecProbe: RecordingCodecProbe = defaultRecordingCodecProbe,
+    private readonly timer: Timer = defaultTimer,
   ) {}
 
   async start(config: VideoCaptureConfig): Promise<RecordingHandle> {
-    await this.ensureFfmpegAvailable();
-
     const device = config.device;
     if (!device) {
       throw new ActionableError("Device is required to start video recording.");
     }
+    const iosStartDeadlineMs =
+      device.platform === "ios" ? this.timer.now() + this.iosRecordingStartTimeoutMs : undefined;
+    await this.ensureFfmpegAvailable();
 
     if (device.platform === "android") {
       return this.startAndroid(device, config);
     }
 
     if (device.platform === "ios") {
-      return this.startIos(device, config);
+      return this.startIos(device, config, iosStartDeadlineMs!);
     }
 
     throw new ActionableError(`Unsupported platform for video recording: ${device.platform}`);
@@ -442,11 +459,23 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       throw new Error("Missing backend handle for FFmpeg video recording.");
     }
 
-    const trackers = [backendHandle.ffmpegTracker, backendHandle.captureTracker];
-    for (const tracker of trackers) {
-      if (tracker && tracker.process.exitCode === null && !tracker.process.killed) {
-        tracker.process.kill("SIGKILL");
-      }
+    const trackers = [backendHandle.ffmpegTracker, backendHandle.captureTracker].filter(
+      (tracker): tracker is ProcessTracker => tracker !== undefined,
+    );
+    const results = await Promise.allSettled(
+      trackers.map(async (tracker) => {
+        await waitForExit(tracker.process, tracker.exitPromise, {
+          timeoutMs: 0,
+          forceKillTimeoutMs: PROCESS_EXIT_TIMEOUT_MS,
+          signal: "SIGKILL",
+        });
+      }),
+    );
+    const failure = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    if (failure) {
+      throw failure.reason;
     }
   }
 
@@ -543,9 +572,21 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   private async startIos(
     device: BootedDevice,
     config: VideoCaptureConfig,
+    startDeadlineMs: number,
   ): Promise<RecordingHandle> {
+    throwIfRecordingStartAborted(config.abortSignal, "iOS");
+    if (this.timer.now() >= startDeadlineMs) {
+      throw new ActionableError(
+        `Failed to start iOS recording within ${this.iosRecordingStartTimeoutMs}ms.`,
+      );
+    }
     const simctl = this.simctlFactory(device);
     const available = await simctl.isAvailable();
+    if (this.timer.now() >= startDeadlineMs) {
+      throw new ActionableError(
+        `Failed to start iOS recording within ${this.iosRecordingStartTimeoutMs}ms.`,
+      );
+    }
     if (!available) {
       throw new ActionableError("simctl is not available. Install Xcode command line tools.");
     }
@@ -558,26 +599,38 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     const attemptFailures: string[] = [];
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      throwIfRecordingStartAborted(config.abortSignal, "iOS");
+      const remainingBeforeSpawn = startDeadlineMs - this.timer.now();
+      if (remainingBeforeSpawn <= 0) {
+        break;
+      }
       const captureProcess = await simctl.startCommandArgs(args, {
         stdio: ["ignore", "ignore", "pipe"],
       });
-
-      try {
-        await waitForSpawn(captureProcess);
-      } catch (error) {
-        // A spawn failure is a simctl/environment problem, not a cold-simulator
-        // miss — retrying won't help, so fail fast.
-        throw new ActionableError(`Failed to start iOS recording: ${error}`);
-      }
-
       const captureTracker = trackProcess(captureProcess);
+      let spawned = false;
 
       try {
-        await waitForStderrMessageOrAbort(
+        await waitWithinDeadline(
+          waitForSpawn(captureProcess),
+          startDeadlineMs,
+          this.timer,
+          `Timed out waiting for simctl to spawn within ${this.iosRecordingStartTimeoutMs}ms`,
+        );
+        spawned = true;
+        const attemptsRemaining = maxAttempts - attempt + 1;
+        const remainingMs = Math.max(0, startDeadlineMs - this.timer.now());
+        const reservedCleanupMs =
+          Math.min(IOS_RECORDING_START_CLEANUP_TIMEOUT_MS, remainingMs) * attemptsRemaining;
+        const handshakeTimeoutMs = Math.max(
+          0,
+          Math.floor((remainingMs - reservedCleanupMs) / attemptsRemaining),
+        );
+        await waitForStderrMessage(
           captureTracker,
           IOS_RECORDING_START_MESSAGES,
-          this.iosRecordingStartTimeoutMs,
-          config.abortSignal,
+          handshakeTimeoutMs,
+          { signal: config.abortSignal, timer: this.timer },
         );
 
         const backendHandle: FfmpegBackendHandle = {
@@ -595,29 +648,18 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
           backendHandle,
         };
       } catch (error) {
-        if (config.abortSignal?.aborted) {
-          await waitForExit(captureTracker.process, captureTracker.exitPromise, {
-            timeoutMs: 1_500,
-            signal: "SIGKILL",
-          });
-          throw new ActionableError("iOS recording start was cancelled during shutdown.");
-        }
-        // The handshake timed out. Tear down this attempt's process, snapshot the
-        // simulator so a genuine wedge is diagnosable, then retry if budget remains.
-        let stopError: unknown;
-        try {
-          await waitForExit(captureTracker.process, captureTracker.exitPromise);
-        } catch (cleanupError) {
-          stopError = cleanupError;
-        }
-
-        const cleanupSuffix = stopError ? `; cleanup failed: ${stopError}` : "";
-        const diagnostics = await this.captureSimulatorDiagnostics(simctl, device);
         attemptFailures.push(
-          `attempt ${attempt}/${maxAttempts}: ${error}${cleanupSuffix}; ${diagnostics}`,
-        );
-        logger.warn(
-          `[FfmpegVideo] iOS recording start attempt ${attempt}/${maxAttempts} failed: ${error} (${diagnostics})`,
+          await this.describeFailedIosStartAttempt({
+            attempt,
+            captureTracker,
+            config,
+            device,
+            error,
+            maxAttempts,
+            simctl,
+            spawned,
+            startDeadlineMs,
+          }),
         );
 
         if (attempt >= maxAttempts) {
@@ -633,8 +675,73 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       }
     }
 
-    // Loop always returns or throws above; this satisfies the type checker.
-    throw new ActionableError("Failed to start iOS recording: exhausted start attempts.");
+    throw new ActionableError(
+      `Failed to start iOS recording within ${this.iosRecordingStartTimeoutMs}ms` +
+        (attemptFailures.length > 0 ? `: ${attemptFailures.join(" | ")}` : "."),
+    );
+  }
+
+  private async describeFailedIosStartAttempt(input: {
+    attempt: number;
+    captureTracker: ProcessTracker;
+    config: VideoCaptureConfig;
+    device: BootedDevice;
+    error: unknown;
+    maxAttempts: number;
+    simctl: SimCtl;
+    spawned: boolean;
+    startDeadlineMs: number;
+  }): Promise<string> {
+    const stopError = await this.cleanupFailedIosStart(input.captureTracker, input.startDeadlineMs);
+    if (input.config.abortSignal?.aborted) {
+      throw new ActionableError("iOS recording start was cancelled during shutdown.");
+    }
+    if (!input.spawned) {
+      throw new ActionableError(`Failed to start iOS recording: ${input.error}`);
+    }
+
+    const diagnostics = await this.diagnoseFailedIosStart(
+      input.simctl,
+      input.device,
+      input.startDeadlineMs,
+    );
+    logger.warn(
+      `[FfmpegVideo] iOS recording start attempt ${input.attempt}/${input.maxAttempts} failed: ${input.error} (${diagnostics})`,
+    );
+    const cleanupSuffix = stopError ? `; cleanup failed: ${stopError}` : "";
+    return `attempt ${input.attempt}/${input.maxAttempts}: ${input.error}${cleanupSuffix}; ${diagnostics}`;
+  }
+
+  private async cleanupFailedIosStart(
+    captureTracker: ProcessTracker,
+    startDeadlineMs: number,
+  ): Promise<unknown | undefined> {
+    const cleanupTimeoutMs = Math.max(
+      0,
+      Math.min(IOS_RECORDING_START_CLEANUP_TIMEOUT_MS, startDeadlineMs - this.timer.now()),
+    );
+    try {
+      await waitForExit(captureTracker.process, captureTracker.exitPromise, {
+        timeoutMs: cleanupTimeoutMs,
+        forceKillTimeoutMs: 0,
+        timer: this.timer,
+        signal: "SIGKILL",
+      });
+      return undefined;
+    } catch (error) {
+      return error;
+    }
+  }
+
+  private async diagnoseFailedIosStart(
+    simctl: SimCtl,
+    device: BootedDevice,
+    startDeadlineMs: number,
+  ): Promise<string> {
+    const diagnosticBudgetMs = Math.max(0, Math.min(250, startDeadlineMs - this.timer.now()));
+    return diagnosticBudgetMs > 0
+      ? await this.captureSimulatorDiagnostics(simctl, device, diagnosticBudgetMs)
+      : "simulator state unavailable: startup budget exhausted";
   }
 
   /**
@@ -642,11 +749,15 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
    * start-timeout failure. Never throws: a diagnostics failure must not mask the
    * original recording error.
    */
-  private async captureSimulatorDiagnostics(simctl: SimCtl, device: BootedDevice): Promise<string> {
+  private async captureSimulatorDiagnostics(
+    simctl: SimCtl,
+    device: BootedDevice,
+    timeoutMs: number,
+  ): Promise<string> {
     try {
       const result = await simctl.executeCommandArgs(
         ["list", "devices", device.deviceId],
-        IOS_RECORDING_DIAGNOSTIC_TIMEOUT_MS,
+        Math.min(IOS_RECORDING_DIAGNOSTIC_TIMEOUT_MS, timeoutMs),
       );
       const text = (result.stdout || result.stderr || "").replace(/\s+/g, " ").trim();
       return text ? `simulator state: ${text.slice(0, 500)}` : "simulator state: (empty)";
@@ -884,7 +995,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   }
 
   private async listEncoders(): Promise<string[]> {
-    return (await this.ffmpegClient.probe()).encoders;
+    return (await this.probeFfmpeg()).encoders;
   }
 
   private async ensureFfmpegAvailable(): Promise<void> {
@@ -901,8 +1012,16 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
   }
 
   private async checkFfmpegVersion(): Promise<void> {
-    const { version } = await this.ffmpegClient.probe();
+    const { version } = await this.probeFfmpeg();
     logger.debug(`[FfmpegVideo] Found FFmpeg ${version}`);
+  }
+
+  private async probeFfmpeg(): Promise<FfmpegProbeResult> {
+    this.ffmpegProbePromise ??= this.ffmpegClient.probe().catch((error) => {
+      this.ffmpegProbePromise = undefined;
+      throw error;
+    });
+    return await this.ffmpegProbePromise;
   }
 
   private async assertFfmpegOutputReady(

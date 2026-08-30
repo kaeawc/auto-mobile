@@ -18,6 +18,7 @@ import {
 import {
   IOS_MAX_DURATION_SECONDS,
   listActiveVideoRecordings,
+  rollbackVideoRecordingStart,
   startVideoRecording,
   stopVideoRecording,
 } from "./videoRecordingManager";
@@ -47,7 +48,7 @@ interface StoppedSegmentedSession {
 
 type SegmentedSessionRecordingDependencies = Pick<
   AndroidSegmentedPlanVideoSessionOptions,
-  "startVideoRecording" | "stopVideoRecording" | "forceStopVideoRecording"
+  "rollbackVideoRecordingStart" | "startVideoRecording" | "stopVideoRecording"
 >;
 
 /**
@@ -112,6 +113,10 @@ const segmentedSessions = (() => {
       }));
       const manifestPath = await writeSegmentManifest(handle, segments);
       return { sessionId: handle, segments, manifestPath };
+    },
+    async abortAndRemove(handle: string, session: AndroidSegmentedPlanVideoSession): Promise<void> {
+      await session.abort();
+      byHandle.delete(handle);
     },
     /** Test seam: inject the Timer used by segmented sessions. */
     setTimer(timer: Timer | undefined): void {
@@ -178,7 +183,7 @@ export async function stopSegmentedVideoRecordingsForDevice(
  * a test's timeout on a loaded macOS CI runner (issue #3943).
  */
 interface ConnectedDeviceDetector {
-  detectConnectedPlatforms(): Promise<BootedDevice[]>;
+  detectConnectedPlatforms(signal?: AbortSignal): Promise<BootedDevice[]>;
 }
 
 let deviceDetectorForTesting: ConnectedDeviceDetector | undefined;
@@ -282,13 +287,14 @@ function shouldTargetAllDevices(args: VideoRecordingArgs): boolean {
 async function resolveTargetDevices(
   device: BootedDevice,
   args: VideoRecordingArgs,
+  signal?: AbortSignal,
 ): Promise<BootedDevice[]> {
   if (!shouldTargetAllDevices(args)) {
     return [device];
   }
 
   const detector = deviceDetectorForTesting ?? DeviceSessionManager.getInstance();
-  const devices = await detector.detectConnectedPlatforms();
+  const devices = await detector.detectConnectedPlatforms(signal);
   const matching = devices.filter((candidate) => candidate.platform === device.platform);
 
   if (matching.length === 0) {
@@ -300,6 +306,41 @@ async function resolveTargetDevices(
     unique.set(candidate.deviceId, candidate);
   }
   return Array.from(unique.values());
+}
+
+async function throwIfVideoStartAborted(
+  recordings: Array<Record<string, unknown>>,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  for (const recording of recordings.toReversed()) {
+    await rollbackAbortedVideoStart(recording);
+  }
+  signal.throwIfAborted();
+}
+
+async function rollbackAbortedVideoStart(recording: Record<string, unknown>): Promise<void> {
+  const recordingId = typeof recording.recordingId === "string" ? recording.recordingId : "";
+  if (!recordingId) {
+    return;
+  }
+  try {
+    const segmentedSession =
+      recording.segmented === true ? segmentedSessions.get(recordingId) : undefined;
+    if (segmentedSession) {
+      await segmentedSessions.abortAndRemove(recordingId, segmentedSession);
+      return;
+    }
+    await rollbackVideoRecordingStart(recordingId);
+  } catch (error) {
+    logger.warn(
+      `[VideoRecording] Failed to roll back aborted recording ${recordingId}: ${errorMessage(error)}`,
+      error,
+    );
+  }
 }
 
 function selectLatestRecording(records: VideoRecordingRecord[]): VideoRecordingRecord {
@@ -393,14 +434,16 @@ export function registerVideoRecordingTools(): void {
   ) => {
     signal?.throwIfAborted();
     if (args.action === "start") {
-      const targetDevices = await resolveTargetDevices(device, args);
+      const targetDevices = await resolveTargetDevices(device, args, signal);
       signal?.throwIfAborted();
       const maxDurationSeconds = args.maxDuration ?? DEFAULT_MAX_DURATION_SECONDS;
       const recordings: Array<Record<string, unknown>> = [];
       const failures: Array<Record<string, unknown>> = [];
+      const finalizedBeforeFanoutCommit = new Set<AndroidSegmentedPlanVideoSession>();
+      let fanoutCommitted = !shouldTargetAllDevices(args);
 
       for (const target of targetDevices) {
-        signal?.throwIfAborted();
+        await throwIfVideoStartAborted(recordings, signal);
         try {
           // Android `screenrecord` is hard-capped at 180s. For longer Android
           // recordings, transparently produce ordered segments (<outputName>,
@@ -416,9 +459,15 @@ export function registerVideoRecordingTools(): void {
               timer: segmentedSessions.timer,
               maxDurationSeconds,
               startupAbortSignal: signal,
-              // Auto-stop finalizes without going through stopAndRemove, so drop the
-              // tracked entry here to avoid a registry leak on fire-and-forget recordings.
-              onFinalized: () => segmentedSessions.remove(session),
+              // Keep an auto-finalized session reachable until the all-device
+              // request commits: an abort still must roll back every segment.
+              onFinalized: () => {
+                if (fanoutCommitted) {
+                  segmentedSessions.remove(session);
+                  return;
+                }
+                finalizedBeforeFanoutCommit.add(session);
+              },
               ...segmentedSessions.recordingDependencies,
             });
             const active = await session.start();
@@ -466,13 +515,18 @@ export function registerVideoRecordingTools(): void {
             },
           });
         } catch (error) {
-          signal?.throwIfAborted();
+          await throwIfVideoStartAborted(recordings, signal);
           failures.push({
             deviceId: target.deviceId,
             platform: target.platform,
             error: String(error),
           });
         }
+      }
+      await throwIfVideoStartAborted(recordings, signal);
+      fanoutCommitted = true;
+      for (const session of finalizedBeforeFanoutCommit) {
+        segmentedSessions.remove(session);
       }
 
       if (recordings.length === 0) {

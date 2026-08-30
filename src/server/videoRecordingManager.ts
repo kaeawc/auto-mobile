@@ -192,11 +192,12 @@ interface VideoRecordingHighlightSession {
 }
 
 let moduleDependencies: VideoRecordingManagerDependencies | null = null;
-let managerInitialized = false;
+let managerInitializationPromise: Promise<void> | undefined;
 let acceptingVideoRecordingStarts = true;
 let inFlightVideoRecordingStarts = 0;
 let videoRecordingStartDrain: { promise: Promise<void>; resolve: () => void } | null = null;
 const inFlightVideoRecordingStartControllers = new Set<AbortController>();
+const startingVideoRecordingDevices = new Set<string>();
 
 const autoStopTimers = new Map<string, { timer: Timer; handle: NodeJS.Timeout }>();
 const highlightSessions = new Map<string, VideoRecordingHighlightSession>();
@@ -223,11 +224,22 @@ async function createRecorderService(): Promise<VideoRecorderService> {
 async function initializeVideoRecordingState(
   deps: VideoRecordingManagerDependencies,
 ): Promise<void> {
-  if (managerInitialized) {
-    return;
+  if (!managerInitializationPromise) {
+    const initialization = performVideoRecordingStateInitialization(deps);
+    const trackedInitialization = initialization.catch((error) => {
+      if (managerInitializationPromise === trackedInitialization) {
+        managerInitializationPromise = undefined;
+      }
+      throw error;
+    });
+    managerInitializationPromise = trackedInitialization;
   }
-  managerInitialized = true;
+  await managerInitializationPromise;
+}
 
+async function performVideoRecordingStateInitialization(
+  deps: VideoRecordingManagerDependencies,
+): Promise<void> {
   ensureRetentionSweep(deps);
 
   const active = await deps.recordingRepository.listRecordings({ status: "recording" });
@@ -325,10 +337,14 @@ function resetVideoRecordingManagerState(): void {
   inFlightVideoRecordingStartControllers.clear();
   videoRecordingStartDrain?.resolve();
   videoRecordingStartDrain = null;
-  managerInitialized = false;
+  startingVideoRecordingDevices.clear();
+  managerInitializationPromise = undefined;
 }
 
-function beginVideoRecordingStart(requestSignal?: AbortSignal): {
+function beginVideoRecordingStart(
+  deviceId: string,
+  requestSignal?: AbortSignal,
+): {
   abortSignal: AbortSignal;
   complete(): void;
 } {
@@ -336,6 +352,10 @@ function beginVideoRecordingStart(requestSignal?: AbortSignal): {
   if (!acceptingVideoRecordingStarts) {
     throw new ActionableError("Video recording is unavailable while the daemon shuts down.");
   }
+  if (startingVideoRecordingDevices.has(deviceId)) {
+    throw new ActionableError(`Video recording start already in progress for device ${deviceId}.`);
+  }
+  startingVideoRecordingDevices.add(deviceId);
   inFlightVideoRecordingStarts++;
   const controller = new AbortController();
   inFlightVideoRecordingStartControllers.add(controller);
@@ -343,6 +363,7 @@ function beginVideoRecordingStart(requestSignal?: AbortSignal): {
   return {
     abortSignal,
     complete: () => {
+      startingVideoRecordingDevices.delete(deviceId);
       inFlightVideoRecordingStarts--;
       inFlightVideoRecordingStartControllers.delete(controller);
       if (inFlightVideoRecordingStarts === 0) {
@@ -836,17 +857,31 @@ export async function updateVideoRecordingConfig(
 export async function startVideoRecording(
   request: StartVideoRecordingRequest,
 ): Promise<ActiveVideoRecording> {
-  const start = beginVideoRecordingStart(request.abortSignal);
+  const start = beginVideoRecordingStart(request.device.deviceId, request.abortSignal);
+  let active: ActiveVideoRecording | undefined;
   try {
     const deps = await getVideoRecordingDependencies();
+    start.abortSignal.throwIfAborted();
     const { videoRecorderService, recordingRepository, timer } = deps;
+    if (videoRecorderService.hasActiveRecordingForDevice(request.device.deviceId)) {
+      throw new ActionableError(
+        `Video recording already active for device ${request.device.deviceId}.`,
+      );
+    }
     const existing = await recordingRepository.listRecordings({
       status: "recording",
       deviceId: request.device.deviceId,
     });
-    if (existing.length > 0) {
+    start.abortSignal.throwIfAborted();
+    const activeRecordingIds = new Set(videoRecorderService.listActiveRecordingIds());
+    if (existing.some((recording) => activeRecordingIds.has(recording.recordingId))) {
       throw new ActionableError(
         `Video recording already active for device ${request.device.deviceId}.`,
+      );
+    }
+    if (existing.length > 0) {
+      await Promise.all(
+        existing.map((recording) => interruptVideoRecording(recording.recordingId)),
       );
     }
     const overrides = request.configOverrides ?? {};
@@ -861,84 +896,100 @@ export async function startVideoRecording(
       normalizeHighlightTiming(highlight);
     }
 
-    const active = await videoRecorderService.startRecording({
+    active = await videoRecorderService.startRecording({
       outputName: request.outputName,
       config: configInput,
       device: request.device,
       maxDurationSeconds,
       abortSignal: start.abortSignal,
     });
+    start.abortSignal.throwIfAborted();
 
-    try {
-      start.abortSignal?.throwIfAborted();
-      await recordingRepository.insertRecording({
-        recordingId: active.recordingId,
-        deviceId: request.device.deviceId,
-        platform: request.device.platform,
-        status: "recording",
-        outputName: active.outputName,
-        fileName: active.fileName,
-        filePath: active.outputPath,
-        format: active.config.format,
-        sizeBytes: 0,
-        durationMs: undefined,
-        codec: undefined,
-        createdAt: active.startedAt,
-        startedAt: active.startedAt,
-        endedAt: undefined,
-        lastAccessedAt: active.startedAt,
-        config: active.config,
-        ownerSessionUuid: request.ownerSessionUuid,
-      });
+    await recordingRepository.insertRecording({
+      recordingId: active.recordingId,
+      deviceId: request.device.deviceId,
+      platform: request.device.platform,
+      status: "recording",
+      outputName: active.outputName,
+      fileName: active.fileName,
+      filePath: active.outputPath,
+      format: active.config.format,
+      sizeBytes: 0,
+      durationMs: undefined,
+      codec: undefined,
+      createdAt: active.startedAt,
+      startedAt: active.startedAt,
+      endedAt: undefined,
+      lastAccessedAt: active.startedAt,
+      config: active.config,
+      ownerSessionUuid: request.ownerSessionUuid,
+    });
+    start.abortSignal.throwIfAborted();
 
-      const highlightSession = createHighlightSession(
-        active.recordingId,
-        request.device,
-        active.startedAt,
-        timer,
-      );
-      highlightSessions.set(active.recordingId, highlightSession);
-      highlightSessionsByDeviceId.set(request.device.deviceId, active.recordingId);
+    const highlightSession = createHighlightSession(
+      active.recordingId,
+      request.device,
+      active.startedAt,
+      timer,
+    );
+    highlightSessions.set(active.recordingId, highlightSession);
+    highlightSessionsByDeviceId.set(request.device.deviceId, active.recordingId);
 
-      if (highlightInputs.length > 0) {
-        await scheduleRecordingHighlights(highlightSession, request.device, highlightInputs, deps);
-      }
-
-      await scheduleAutoStop(active.recordingId, maxDurationSeconds);
-
-      const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
-      scheduleInProgressSizeCap(active.recordingId, active.outputPath, capBytes, deps);
-      start.abortSignal?.throwIfAborted();
-      return active;
-    } catch (error) {
-      await cleanUpCancelledVideoRecording(active.recordingId, videoRecorderService);
-      throw error;
+    if (highlightInputs.length > 0) {
+      await scheduleRecordingHighlights(highlightSession, request.device, highlightInputs, deps);
     }
+
+    await scheduleAutoStop(active.recordingId, maxDurationSeconds);
+
+    const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
+    scheduleInProgressSizeCap(active.recordingId, active.outputPath, capBytes, deps);
+    start.abortSignal.throwIfAborted();
+    return active;
+  } catch (error) {
+    if (active) {
+      try {
+        await rollbackVideoRecordingStart(active.recordingId);
+      } catch (rollbackError) {
+        logger.warn(
+          `[VideoRecording] Failed to roll back recording ${active.recordingId}: ${rollbackError}`,
+          rollbackError,
+        );
+        throw new AggregateError(
+          [error, rollbackError],
+          `${errorMessage(error)}; recording rollback failed: ${errorMessage(rollbackError)}`,
+        );
+      }
+    }
+    throw error;
   } finally {
     start.complete();
   }
 }
 
-async function cleanUpCancelledVideoRecording(
-  recordingId: string,
-  videoRecorderService: VideoRecorderService,
-): Promise<void> {
-  try {
-    await videoRecorderService.forceStopRecording(recordingId);
-  } catch (cleanupError) {
-    logger.warn(
-      `[VideoRecording] Failed to force-stop cancelled recording ${recordingId}: ${errorMessage(cleanupError)}`,
-      cleanupError,
-    );
-    return;
+export async function rollbackVideoRecordingStart(recordingId: string): Promise<void> {
+  const { videoRecorderService, recordingRepository } = await getVideoRecordingDependencies();
+
+  const serviceOwnsRecording = videoRecorderService.listActiveRecordingIds().includes(recordingId);
+  if (serviceOwnsRecording) {
+    await videoRecorderService.discardRecording(recordingId);
   }
-  try {
+
+  // The capture is no longer live once discard succeeds. Keep its safety timers
+  // armed if teardown fails, so a retained owner remains bounded.
+  clearAutoStop(recordingId);
+  clearInProgressSizeCap(recordingId);
+
+  const record = await recordingRepository.getRecording(recordingId);
+  if (record?.status === "recording") {
     await interruptVideoRecording(recordingId);
-  } catch (cleanupError) {
-    logger.warn(
-      `[VideoRecording] Failed to mark cancelled recording ${recordingId} interrupted: ${errorMessage(cleanupError)}`,
-      cleanupError,
-    );
+  }
+  disposeHighlightSession(recordingId);
+  if (!serviceOwnsRecording && record) {
+    await removeVideoRecordingArtifacts(record.filePath);
+  }
+  const deleted = await recordingRepository.deleteRecording(recordingId);
+  if (deleted) {
+    await notifyVideoRecordingResources([recordingId]);
   }
 }
 
@@ -1124,23 +1175,28 @@ async function deleteVideoRecording(recordingId: string): Promise<boolean> {
     throw new Error(`Cannot delete active recording ${recordingId}`);
   }
 
-  const recordingDir = path.dirname(record.filePath);
-  if (await pathExists(recordingDir)) {
-    // NOTE (issue #4762): `rm` unlinks the directory entry but does NOT overwrite
-    // the underlying blocks, so screen-capture bytes (which may contain OTPs,
-    // credentials, or PII) can remain recoverable from the raw device until the
-    // filesystem reuses them. This is documented as a known limitation in
-    // docs/design-docs/mcp/observe/video-recording.md. A future opt-in
-    // "sensitive mode" would overwrite-before-unlink here; it is deliberately a
-    // follow-up (see the doc) rather than an unconditional cost on every delete.
-    await fsPromises.rm(recordingDir, { recursive: true, force: true });
-  }
+  await removeVideoRecordingArtifacts(record.filePath);
 
   const deleted = await recordingRepository.deleteRecording(recordingId);
   if (deleted) {
     await notifyVideoRecordingResources([recordingId]);
   }
   return deleted;
+}
+
+async function removeVideoRecordingArtifacts(filePath: string): Promise<void> {
+  const recordingDir = path.dirname(filePath);
+  if (!(await pathExists(recordingDir))) {
+    return;
+  }
+  // NOTE (issue #4762): `rm` unlinks the directory entry but does NOT overwrite
+  // the underlying blocks, so screen-capture bytes (which may contain OTPs,
+  // credentials, or PII) can remain recoverable from the raw device until the
+  // filesystem reuses them. This is documented as a known limitation in
+  // docs/design-docs/mcp/observe/video-recording.md. A future opt-in
+  // "sensitive mode" would overwrite-before-unlink here; it is deliberately a
+  // follow-up (see the doc) rather than an unconditional cost on every delete.
+  await fsPromises.rm(recordingDir, { recursive: true, force: true });
 }
 
 async function enforceArchiveLimit(maxArchiveSizeMb: number): Promise<VideoArchiveEvictionResult> {

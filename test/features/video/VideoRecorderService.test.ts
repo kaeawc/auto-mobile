@@ -141,19 +141,100 @@ describe("VideoRecorderService", () => {
     );
   });
 
-  test("force-stops a failed-start cleanup handle before rethrowing", async () => {
-    const retainedHandle = {
-      recordingId: "rec-1",
-      outputPath: path.join(archiveRoot, "rec-1", "capture.mp4"),
-      startedAt: "2024-01-15T10:30:00.000Z",
-    };
-    backend.start = async () => {
+  test("discard force-stops a capture and removes its artifact directory", async () => {
+    const recording = await service.startRecording();
+    await fsPromises.writeFile(recording.outputPath, "capture");
+    expect(service.hasActiveRecordingForDevice("test-device")).toBe(false);
+
+    await service.discardRecording(recording.recordingId);
+
+    expect(backend.forceStopCalls).toEqual([backend.startResults[0]]);
+    expect(await pathExists(path.dirname(recording.outputPath))).toBe(false);
+    expect(service.listActiveRecordingIds()).toEqual([]);
+  });
+
+  test("discard releases ownership when artifact deletion fails", async () => {
+    const cleanupError = new Error("artifact cleanup failed");
+    const failingService = new VideoRecorderService({
+      backend,
+      archiveRoot,
+      idGenerator: new CountingIdGenerator("rec"),
+      now: () => new Date("2024-01-15T10:30:00.000Z"),
+      securePermissions,
+      fileSystem: {
+        rm: async () => {
+          throw cleanupError;
+        },
+      },
+    });
+    const recording = await failingService.startRecording({
+      device: { deviceId: "test-device", platform: "android", name: "Android" },
+    });
+
+    await expect(failingService.discardRecording(recording.recordingId)).rejects.toThrow(
+      cleanupError.message,
+    );
+
+    expect(failingService.listActiveRecordingIds()).toEqual([]);
+    expect(failingService.hasActiveRecordingForDevice("test-device")).toBe(false);
+  });
+
+  test("retains a backend cleanup handle after startup rejects", async () => {
+    let retainedHandle: (typeof backend.startResults)[number] | undefined;
+    backend.start = async (config) => {
+      retainedHandle = {
+        recordingId: config.recordingId,
+        outputPath: config.outputPath,
+        startedAt: config.startedAt,
+      };
       throw new VideoCaptureStartCleanupError("startup cleanup timed out", retainedHandle);
     };
 
-    await expect(service.startRecording()).rejects.toThrow("startup cleanup timed out");
+    await expect(
+      service.startRecording({
+        device: { deviceId: "test-device", platform: "android", name: "Android" },
+      }),
+    ).rejects.toThrow("startup cleanup timed out");
 
-    expect(backend.forceStopCalls).toEqual([retainedHandle]);
+    expect(service.listActiveRecordingIds()).toEqual(["rec-1"]);
+    await service.discardRecording("rec-1");
+    expect(backend.forceStopCalls).toEqual([retainedHandle!]);
+    expect(service.listActiveRecordingIds()).toEqual([]);
+  });
+
+  test("exposes and force-stops provisional ownership while backend startup is pending", async () => {
+    let resolveStart: ((handle: (typeof backend.startResults)[number]) => void) | undefined;
+    let startedConfig: Parameters<typeof backend.start>[0] | undefined;
+    let markBackendStarted: (() => void) | undefined;
+    const backendStarted = new Promise<void>((resolve) => {
+      markBackendStarted = resolve;
+    });
+    backend.start = async (config) => {
+      startedConfig = config;
+      markBackendStarted?.();
+      const handle = await new Promise<(typeof backend.startResults)[number]>((resolve) => {
+        resolveStart = resolve;
+      });
+      backend.startResults.push(handle);
+      return handle;
+    };
+
+    const starting = service.startRecording();
+    await backendStarted;
+    expect(service.listActiveRecordingIds()).toEqual(["rec-1"]);
+
+    const forcing = service.forceStopRecording("rec-1");
+    expect(startedConfig?.abortSignal?.aborted).toBe(true);
+    const handle = {
+      recordingId: "rec-1",
+      outputPath: startedConfig!.outputPath,
+      startedAt: startedConfig!.startedAt,
+    };
+    resolveStart?.(handle);
+
+    await expect(starting).rejects.toThrow("force-stopped while it was starting");
+    await forcing;
+    expect(backend.forceStopCalls).toEqual([handle]);
     expect(service.listActiveRecordingIds()).toEqual([]);
   });
 

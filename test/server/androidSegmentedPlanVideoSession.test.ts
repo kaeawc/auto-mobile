@@ -216,6 +216,109 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     expect(start).toHaveBeenCalledTimes(1);
   });
 
+  test("abort rolls back active and completed segments without publishing them", async () => {
+    const timer = new FakeTimer();
+    const { stop } = makeSession(timer);
+    const rolledBack: string[] = [];
+    const abortableSession = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "vid",
+      timer,
+      segmentRotateAfterMs: 1000,
+      startVideoRecording: async (request) =>
+        makeActiveRecording(`id-${request.outputName}`, `/tmp/id-${request.outputName}.mp4`),
+      stopVideoRecording: stop,
+      rollbackVideoRecordingStart: async (recordingId) => {
+        rolledBack.push(recordingId);
+      },
+    });
+
+    await abortableSession.start();
+    timer.advanceTime(1000);
+    await flush();
+    await abortableSession.abort();
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(rolledBack).toEqual(["id-vid-seg1", "id-vid"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("rolls back a segment whose rotation stop failed", async () => {
+    const timer = new FakeTimer();
+    const rolledBack: string[] = [];
+    let startCalls = 0;
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "vid",
+      timer,
+      segmentRotateAfterMs: 1000,
+      startVideoRecording: async (request) => {
+        startCalls += 1;
+        if (startCalls === 1) {
+          return makeActiveRecording("id-vid", "/tmp/id-vid.mp4");
+        }
+        throw new Error(`replacement ${request.outputName} rejected`);
+      },
+      stopVideoRecording: async () => {
+        throw new Error("segment stop failed");
+      },
+      rollbackVideoRecordingStart: async (recordingId) => {
+        rolledBack.push(recordingId);
+      },
+    });
+
+    await session.start();
+    timer.advanceTime(1000);
+    await flush();
+    await session.abort();
+
+    expect(rolledBack).toEqual(["id-vid"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("aborts a replacement segment start before waiting for rotation", async () => {
+    const timer = new FakeTimer();
+    const rolledBack: string[] = [];
+    let startCalls = 0;
+    let rotationSignal: AbortSignal | undefined;
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "vid",
+      timer,
+      segmentRotateAfterMs: 1000,
+      startVideoRecording: async (request) => {
+        startCalls += 1;
+        if (startCalls === 1) {
+          return makeActiveRecording("id-vid", "/tmp/id-vid.mp4");
+        }
+        rotationSignal = request.abortSignal;
+        await new Promise<void>((resolve) => {
+          request.abortSignal?.addEventListener("abort", resolve, { once: true });
+        });
+        request.abortSignal?.throwIfAborted();
+        throw new Error("replacement start unexpectedly continued");
+      },
+      stopVideoRecording: async (recordingId) => ({
+        metadata: makeStopMetadata(recordingId ?? "unknown", "/tmp/id-vid.mp4"),
+        evictedRecordingIds: [],
+      }),
+      rollbackVideoRecordingStart: async (recordingId) => {
+        rolledBack.push(recordingId);
+      },
+    });
+
+    await session.start();
+    timer.advanceTime(1000);
+    await flush();
+    expect(rotationSignal).toBeDefined();
+
+    await session.abort();
+
+    expect(rotationSignal?.aborted).toBe(true);
+    expect(rolledBack).toEqual(["id-vid"]);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("auto-stops at maxDurationSeconds, finalizing every segment recorded so far (review: PR #3847)", async () => {
     // maxDurationSeconds=2.5 does not align with the 1000ms rotation cadence, matching
     // the reported bug: without a session-level bound, rotation reschedules indefinitely

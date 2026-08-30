@@ -162,6 +162,139 @@ describe("videoRecording tool segmentation branch", () => {
 
   const handler = () => ToolRegistry.getTool("videoRecording")!.deviceAwareHandler!;
 
+  test("request abort rolls back every device that already started during fanout", async () => {
+    const secondDevice: BootedDevice = {
+      deviceId: "test-device-2",
+      platform: "android",
+      name: "Test Device 2",
+    };
+    fakeDeviceSessionManager.setConnectedDevices([androidDevice, secondDevice]);
+    const controller = new AbortController();
+    let markSecondStart: (() => void) | undefined;
+    const secondStart = new Promise<void>((resolve) => {
+      markSecondStart = resolve;
+    });
+    fakeBackend.start = async (config) => {
+      fakeBackend.startCalls.push(config);
+      if (fakeBackend.startCalls.length === 2) {
+        markSecondStart?.();
+        await new Promise<void>((resolve) => {
+          config.abortSignal?.addEventListener("abort", resolve, { once: true });
+        });
+        throw new Error("fanout start aborted");
+      }
+      const handle = {
+        recordingId: config.recordingId,
+        outputPath: config.outputPath,
+        startedAt: config.startedAt,
+      };
+      fakeBackend.startResults.push(handle);
+      return handle;
+    };
+
+    const starting = handler()(
+      androidDevice,
+      { action: "start", platform: "android" },
+      undefined,
+      controller.signal,
+    );
+    await secondStart;
+    controller.abort();
+
+    await expect(starting).rejects.toThrow();
+    expect(fakeBackend.startCalls).toHaveLength(2);
+    expect(fakeBackend.forceStopCalls).toEqual([fakeBackend.startResults[0]]);
+    expect(await fakeRepository.listRecordings()).toEqual([]);
+  });
+
+  test("retains auto-finalized segments until an all-device start commits", async () => {
+    const secondDevice: BootedDevice = {
+      deviceId: "test-device-2",
+      platform: "android",
+      name: "Test Device 2",
+    };
+    fakeDeviceSessionManager.setConnectedDevices([androidDevice, secondDevice]);
+    const controller = new AbortController();
+    const rolledBack: string[] = [];
+    let secondStartSignal: AbortSignal | undefined;
+    let markSecondStart: (() => void) | undefined;
+    const secondStart = new Promise<void>((resolve) => {
+      markSecondStart = resolve;
+    });
+    setSegmentedSessionRecordingDependencies({
+      startVideoRecording: async (request) => {
+        if (request.device.deviceId === secondDevice.deviceId) {
+          secondStartSignal = request.abortSignal;
+          markSecondStart?.();
+          await new Promise<void>((resolve) => {
+            request.abortSignal?.addEventListener("abort", resolve, { once: true });
+          });
+          request.abortSignal?.throwIfAborted();
+        }
+        const recordingId = `${request.device.deviceId}-${request.outputName}`;
+        return makeSegmentRecording(recordingId, request.outputName);
+      },
+      stopVideoRecording: async (recordingId) => ({
+        metadata: makeSegmentMetadata(recordingId ?? "missing"),
+        evictedRecordingIds: [],
+      }),
+      rollbackVideoRecordingStart: async (recordingId) => {
+        rolledBack.push(recordingId);
+      },
+    });
+
+    const starting = handler()(
+      androidDevice,
+      { action: "start", platform: "android", maxDuration: 181, outputName: "fanout" },
+      undefined,
+      controller.signal,
+    );
+    await secondStart;
+    segmentTimer.advanceTime(181_000);
+    await drainMicrotasks();
+
+    controller.abort(new Error("fanout cancelled"));
+    await expect(starting).rejects.toThrow("fanout cancelled");
+
+    expect(secondStartSignal?.aborted).toBe(true);
+    expect(rolledBack.some((recordingId) => recordingId.startsWith(androidDevice.deviceId))).toBe(
+      true,
+    );
+  });
+
+  test("request abort cancels all-device discovery before backend startup", async () => {
+    const controller = new AbortController();
+    let receivedSignal: AbortSignal | undefined;
+    let markDiscoveryStarted: (() => void) | undefined;
+    const discoveryStarted = new Promise<void>((resolve) => {
+      markDiscoveryStarted = resolve;
+    });
+    setVideoRecordingDeviceDetectorForTesting({
+      detectConnectedPlatforms: async (signal) => {
+        receivedSignal = signal;
+        markDiscoveryStarted?.();
+        await new Promise<void>((resolve) => {
+          signal?.addEventListener("abort", resolve, { once: true });
+        });
+        signal?.throwIfAborted();
+        return [];
+      },
+    });
+
+    const starting = handler()(
+      androidDevice,
+      { action: "start", platform: "android" },
+      undefined,
+      controller.signal,
+    );
+    await discoveryStarted;
+    controller.abort(new Error("discovery cancelled"));
+
+    await expect(starting).rejects.toThrow("discovery cancelled");
+    expect(receivedSignal).toBe(controller.signal);
+    expect(fakeBackend.startCalls).toEqual([]);
+  });
+
   test("android recording <= 180s stays single (not segmented)", async () => {
     const res = parse(
       await handler()(androidDevice, {
@@ -289,14 +422,13 @@ describe("videoRecording tool segmentation branch", () => {
     );
   });
 
-  test("cancellation reaches initial segmented startup and finalizes a raced successful start", async () => {
+  test("cancellation reaches initial segmented startup and discards a raced successful start", async () => {
     const controller = new AbortController();
     let resolveStart!: (recording: ActiveVideoRecording) => void;
     const startMayComplete = new Promise<ActiveVideoRecording>((resolve) => {
       resolveStart = resolve;
     });
     let receivedSignal: AbortSignal | undefined;
-    const forceStopped: string[] = [];
     setSegmentedSessionRecordingDependencies({
       startVideoRecording: async (request) => {
         receivedSignal = request.abortSignal;
@@ -307,8 +439,8 @@ describe("videoRecording tool segmentation branch", () => {
         segmentStops.push(id);
         throw new Error(`graceful stop failed for ${id}`);
       },
-      forceStopVideoRecording: async (recordingId) => {
-        forceStopped.push(recordingId);
+      rollbackVideoRecordingStart: async (recordingId) => {
+        segmentStops.push(recordingId);
       },
     });
 
@@ -332,7 +464,6 @@ describe("videoRecording tool segmentation branch", () => {
     await expect(starting).rejects.toThrow("request cancelled");
     expect(receivedSignal).toBe(controller.signal);
     expect(segmentStops).toEqual(["cancelled"]);
-    expect(forceStopped).toEqual(["cancelled"]);
     expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
   });
 

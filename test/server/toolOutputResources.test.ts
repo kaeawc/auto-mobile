@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import {
   TOOL_OUTPUT_RESOURCE_URI_TEMPLATE,
@@ -133,6 +135,28 @@ describe("tool-output artifact resource (#5882)", () => {
 
     expect(content.text).toBe(raw);
     expect(fileSystem.reads).toEqual([path.join(trailingSlashDir, filename)]);
+  });
+
+  test("refuses to follow a writer-shaped symlink to a file outside the directory", async () => {
+    // Real filesystem: the node readFile impl must reject a symlink target even
+    // when its name passes the allowlist, so a shared/writable --tool-outputs-dir
+    // can't be used to read arbitrary host files (issue #5882 review).
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "am-tool-output-symlink-"));
+    const secretPath = path.join(tmpDir, "secret-outside.txt");
+    fs.writeFileSync(secretPath, "TOP SECRET");
+    const linkName = "1788020656886-observe-deadbeef.json";
+    const artifactDir = path.join(tmpDir, "artifacts");
+    fs.mkdirSync(artifactDir);
+    fs.symlinkSync(secretPath, path.join(artifactDir, linkName));
+
+    // Only the directory is injected; the real node readFile (with O_NOFOLLOW) runs.
+    setToolOutputResourceDependencies({ resolveDirectory: () => artifactDir });
+
+    const content = await readArtifact(linkName);
+
+    expect(content.text).not.toContain("TOP SECRET");
+    expect(content.text).toContain("not available");
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   test("returns a structured error when the artifact is missing or pruned", async () => {

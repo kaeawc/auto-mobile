@@ -1,5 +1,6 @@
 import path from "node:path";
 import * as realFs from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { ResourceRegistry, type ResourceContent } from "./resourceRegistry";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -39,7 +40,23 @@ interface ToolOutputResourceFileSystem {
 
 const nodeToolOutputResourceFileSystem: ToolOutputResourceFileSystem = {
   async readFile(filePath: string): Promise<string> {
-    return realFs.readFile(filePath, "utf8");
+    // Open with O_NOFOLLOW (where the platform provides it) so a writer-shaped
+    // symlink planted in a shared/writable `--tool-outputs-dir` cannot redirect
+    // the read to an arbitrary host file — the basename allowlist constrains the
+    // link's name, not its target (issue #5882 review). Then confirm the opened
+    // handle is a regular file before reading, closing over the same handle so
+    // there is no TOCTOU gap between the check and the read.
+    const flags = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0);
+    const handle = await realFs.open(filePath, flags);
+    try {
+      const stats = await handle.stat();
+      if (!stats.isFile()) {
+        throw new Error(`tool-output artifact is not a regular file: ${filePath}`);
+      }
+      return await handle.readFile("utf8");
+    } finally {
+      await handle.close();
+    }
   },
 };
 

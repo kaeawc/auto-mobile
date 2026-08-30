@@ -18,10 +18,18 @@ export function findAndroidPackageProcesses(
 ): AndroidPackageProcess[] {
   PROCESS_RECORD_PATTERN.lastIndex = 0;
   const processes: AndroidPackageProcess[] = [];
+  const records = Array.from(processesOutput.matchAll(PROCESS_RECORD_PATTERN));
 
-  for (const match of processesOutput.matchAll(PROCESS_RECORD_PATTERN)) {
+  for (const [index, match] of records.entries()) {
     const processName = match[2];
-    if (processName !== packageName && !processName.startsWith(`${packageName}:`)) {
+    const recordStart = match.index ?? 0;
+    const recordEnd = records[index + 1]?.index ?? processesOutput.length;
+    const record = processesOutput.slice(recordStart, recordEnd);
+    if (
+      processName !== packageName &&
+      !processName.startsWith(`${packageName}:`) &&
+      !processRecordOwnsPackage(record, packageName)
+    ) {
       continue;
     }
 
@@ -35,6 +43,11 @@ export function findAndroidPackageProcesses(
   }
 
   return processes;
+}
+
+function processRecordOwnsPackage(record: string, packageName: string): boolean {
+  const packageList = record.match(/^\s*packageList=\{([^}]*)\}/m)?.[1];
+  return packageList?.split(/[,\s]+/).some((candidate) => candidate === packageName) ?? false;
 }
 
 /**
@@ -74,21 +87,7 @@ export function isAndroidPackageRunning(
   packageName: string,
   userId?: number,
 ): boolean {
-  PROCESS_RECORD_PATTERN.lastIndex = 0;
-
-  for (const match of processesOutput.matchAll(PROCESS_RECORD_PATTERN)) {
-    if (match[2] !== packageName && !match[2].startsWith(`${packageName}:`)) {
-      continue;
-    }
-
-    const uid = match[3];
-    const processUserId = uid.startsWith("u")
-      ? Number(match[4])
-      : Math.floor(Number(uid) / 100_000);
-    if (userId === undefined || processUserId === userId) {
-      return true;
-    }
-  }
-
-  return false;
+  return findAndroidPackageProcesses(processesOutput, packageName).some(
+    (process) => userId === undefined || process.userId === userId,
+  );
 }

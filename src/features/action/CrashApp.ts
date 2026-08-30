@@ -177,6 +177,7 @@ export class CrashApp {
       return dispatch;
     }
     const { notBeforeTimestampMs, preferredProcess, targetedProcesses } = dispatch;
+    const attemptBase = { ...base, timestamp: this.timer.now() };
     let commandResult: ExecResult;
     try {
       commandResult = await this.adb.executeCommand(
@@ -191,7 +192,7 @@ export class CrashApp {
       const message = errorMessage(error);
       logger.warn(`[CrashApp] Android crash command failed for ${appId}: ${message}`, error);
       return {
-        ...base,
+        ...attemptBase,
         success: false,
         supported: !this.isUnsupportedMechanismError(message),
         wasRunning: true,
@@ -206,7 +207,7 @@ export class CrashApp {
     const rejection = findAndroidCrashCommandRejection(commandResult);
     if (rejection) {
       return {
-        ...base,
+        ...attemptBase,
         success: false,
         supported: !this.isUnsupportedMechanismError(rejection),
         wasRunning: true,
@@ -224,7 +225,7 @@ export class CrashApp {
     );
     if (!crashMatch) {
       return {
-        ...base,
+        ...attemptBase,
         success: false,
         supported: true,
         wasRunning: true,
@@ -234,7 +235,7 @@ export class CrashApp {
       };
     }
     return {
-      ...base,
+      ...attemptBase,
       success: true,
       supported: true,
       wasRunning: true,
@@ -354,7 +355,6 @@ export class CrashApp {
       };
     }
 
-    const inductionTimestampMs = this.timer.now();
     const dispatchProcesses = await this.listIosSimulatorProcesses(signal);
     const appProcess = findIosSimulatorAppProcess(dispatchProcesses, appId);
     if (!appProcess) {
@@ -367,6 +367,8 @@ export class CrashApp {
         error: `${appId} stopped before the crash signal could be dispatched`,
       };
     }
+    const inductionTimestampMs = this.timer.now();
+    const attemptBase = { ...base, timestamp: inductionTimestampMs };
     try {
       await this.simctl.executeCommandArgs(
         [
@@ -385,7 +387,7 @@ export class CrashApp {
       const message = errorMessage(error);
       logger.warn(`[CrashApp] iOS Simulator SIGABRT failed for ${appId}: ${message}`, error);
       return {
-        ...base,
+        ...attemptBase,
         success: false,
         supported: !this.isUnsupportedMechanismError(message),
         mechanism: "ios_simulator_sigabrt",
@@ -405,7 +407,7 @@ export class CrashApp {
     );
     if (!evidence) {
       return {
-        ...base,
+        ...attemptBase,
         success: false,
         supported: true,
         mechanism: "ios_simulator_sigabrt",
@@ -415,7 +417,7 @@ export class CrashApp {
       };
     }
     return {
-      ...base,
+      ...attemptBase,
       success: true,
       supported: true,
       mechanism: "ios_simulator_sigabrt",
@@ -440,7 +442,7 @@ export class CrashApp {
         this.tryAndroidCommand(ANDROID_CRASH_LOG_COMMAND, signal),
       ]);
       const crashMatch = logOutput
-        ? findAndroidCrashMatch(logOutput, appId, initialProcessIds, notBeforeTimestampMs)
+        ? findAndroidCrashMatch(logOutput, initialProcesses, notBeforeTimestampMs)
         : undefined;
       const currentProcessIds =
         processOutput === undefined
@@ -601,25 +603,27 @@ export function findAndroidCrashEvidence(
   processId: number,
   notBeforeTimestampMs = 0,
 ): CrashAppEvidence | undefined {
-  return findAndroidCrashMatch(logOutput, appId, [processId], notBeforeTimestampMs)?.evidence;
+  return findAndroidCrashMatch(
+    logOutput,
+    [{ pid: processId, processName: appId, userId: 0 }],
+    notBeforeTimestampMs,
+  )?.evidence;
 }
 
 function findAndroidCrashMatch(
   logOutput: string,
-  appId: string,
-  processIds: number[],
+  processes: AndroidPackageProcess[],
   notBeforeTimestampMs: number,
 ): AndroidCrashMatch | undefined {
   const lines = logOutput.split("\n");
-  const expectedProcessIds = new Set(processIds);
+  const expectedProcesses = new Map(processes.map((process) => [process.pid, process.processName]));
   for (const [identityIndex, identityLine] of lines.entries()) {
-    const identity = identityLine.match(
-      new RegExp(`Process:\\s*${escapeRegExp(appId)}(?::[A-Za-z0-9_.]+)?,\\s*PID:\\s*(\\d+)`),
-    );
-    const processId = Number(identity?.[1]);
+    const identity = identityLine.match(/Process:\s*([A-Za-z0-9_.:]+),\s*PID:\s*(\d+)/);
+    const processName = identity?.[1];
+    const processId = Number(identity?.[2]);
     if (
       !identity ||
-      !expectedProcessIds.has(processId) ||
+      expectedProcesses.get(processId) !== processName ||
       !isLogLineFresh(identityLine, notBeforeTimestampMs)
     ) {
       continue;
@@ -696,8 +700,4 @@ function parseLogTimestampMs(line: string): number | null {
   const timezone = formatted[4] ? `${formatted[4].slice(0, 3)}:${formatted[4].slice(3)}` : "Z";
   const timestampMs = Date.parse(`${formatted[1]}T${formatted[2]}.${fractionMs}${timezone}`);
   return Number.isNaN(timestampMs) ? null : timestampMs;
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

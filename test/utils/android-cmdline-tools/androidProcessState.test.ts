@@ -53,4 +53,19 @@ describe("androidProcessState", () => {
       { pid: 444, processName: "com.example.app:isolated", userId: 10 },
     ]);
   });
+
+  test("finds a package running only in a fully qualified custom process", () => {
+    const output = [
+      "*APP* UID u10a123 ProcessRecord{aaa 777:com.example.shared/u10a123}",
+      "    packageList={com.example.app, com.example.library}",
+      "*APP* UID u0a456 ProcessRecord{bbb 888:com.example.other/u0a456}",
+      "    packageList={com.example.other}",
+    ].join("\n");
+
+    expect(findAndroidPackageProcesses(output, "com.example.app")).toEqual([
+      { pid: 777, processName: "com.example.shared", userId: 10 },
+    ]);
+    expect(isAndroidPackageRunning(output, "com.example.app", 10)).toBe(true);
+    expect(findAndroidPackageProcessId(output, "com.example.app", 10)).toBe(777);
+  });
 });

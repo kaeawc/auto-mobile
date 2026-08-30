@@ -41,10 +41,12 @@ class FakeSimulatorCommands {
   private launchctlResults: string[];
   private readonly logOutput: string;
   private readonly errors = new Map<string, Error>();
+  private readonly onExecute?: () => void;
 
-  constructor(launchctlResults: string[], logOutput = "") {
+  constructor(launchctlResults: string[], logOutput = "", onExecute?: () => void) {
     this.launchctlResults = [...launchctlResults];
     this.logOutput = logOutput;
+    this.onExecute = onExecute;
   }
 
   setError(match: string, error: Error): void {
@@ -52,6 +54,7 @@ class FakeSimulatorCommands {
   }
 
   async executeCommandArgs(args: string[], timeoutMs?: number): Promise<ExecResult> {
+    this.onExecute?.();
     this.calls.push([...args]);
     this.timeouts.push(timeoutMs);
     const command = args.join(" ");
@@ -239,6 +242,39 @@ describe("CrashApp (Android)", () => {
     );
 
     expect(result).toMatchObject({ success: true, processId: 222, confirmed: true });
+  });
+
+  test("crashes an app running only in a fully qualified custom process", async () => {
+    const adb = new FakeAdbClient();
+    const customProcess = [
+      "*APP* UID u0a123 ProcessRecord{aaa 777:com.example.shared/u0a123}",
+      "    packageList={com.example.app}",
+    ].join("\n");
+    adb.setCommandResultSequence("shell dumpsys activity processes", [
+      customProcess,
+      customProcess,
+      "",
+    ]);
+    adb.setCommandResult(
+      "shell logcat -b crash -d -v epoch -t 200",
+      [
+        "E AndroidRuntime: FATAL EXCEPTION: main",
+        "E AndroidRuntime: Process: com.example.shared, PID: 777",
+        "E AndroidRuntime: CrashedByAdbException: shell-induced crash",
+      ].join("\n"),
+    );
+
+    const result = await new CrashApp(androidDevice, dependencies({ adb })).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      processId: 777,
+      userId: 0,
+      confirmed: true,
+    });
+    expect(adb.wasCommandExecuted("shell am crash --user 0 'com.example.app'")).toBe(true);
   });
 
   test("refreshes a relaunched app PID immediately before dispatch", async () => {
@@ -463,6 +499,24 @@ describe("CrashApp (iOS)", () => {
     ]);
     expect(commands.calls.flat()).not.toContain("terminate");
     expect(commands.timeouts.every((timeoutMs) => (timeoutMs ?? 0) > 0)).toBe(true);
+  });
+
+  test("timestamps induction after simulator process preflight", async () => {
+    const process = "27955\t0\tUIKitApplication:com.example.app[bbbb][rb-legacy]";
+    const timer = new FakeTimer();
+    timer.advanceTime(1_000);
+    const commands = new FakeSimulatorCommands(
+      [process, process, ""],
+      "2023-11-14 22:13:20.100 launchd_sim: UIKitApplication:com.example.app[bbbb][rb-legacy] [27955]: exited due to SIGABRT",
+      () => timer.advanceTime(100),
+    );
+
+    const result = await new CrashApp(
+      iosSimulator,
+      dependencies({ simctl: commands, timer }),
+    ).execute("com.example.app");
+
+    expect(result).toMatchObject({ success: true, timestamp: 1_200, confirmed: true });
   });
 
   test("refreshes a relaunched simulator PID immediately before signaling", async () => {

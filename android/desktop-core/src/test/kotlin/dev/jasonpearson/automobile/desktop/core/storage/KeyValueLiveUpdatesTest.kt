@@ -230,60 +230,52 @@ class KeyValueLiveUpdatesTest {
   }
 
   @Test
-  fun `currentValueOf reads the displayed value or null when absent`() {
+  fun `a guarded optimistic edit folds in when the generation is unchanged`() {
     val files = listOf(file("prefs.xml", "theme" to "light"))
-
-    assertEquals("light", files.currentValueOf("prefs.xml", "theme"))
-    assertEquals(null, files.currentValueOf("prefs.xml", "missing"))
-    assertEquals(null, files.currentValueOf("other.xml", "theme"))
-  }
-
-  @Test
-  fun `a guarded optimistic edit folds in when the key is unchanged`() {
-    // No concurrent live frame: the value still matches the pre-save snapshot, so the edit applies.
-    val files = listOf(file("prefs.xml", "theme" to "light"))
-    val preSave = files.currentValueOf("prefs.xml", "theme")
 
     val result =
-      files.applyKeyValueEditIfUnchanged("prefs.xml", "theme", "dark", KeyValueType.String, preSave)
+      files.applyKeyValueEditIfGenerationUnchanged(
+        "prefs.xml",
+        "theme",
+        "dark",
+        KeyValueType.String,
+        expectedGeneration = 4L,
+        currentGeneration = 4L,
+      )
 
     assertEquals("dark", result.single().entries.first { it.key == "theme" }.value)
   }
 
   @Test
-  fun `a guarded optimistic edit is skipped when a live frame changed the key mid-save`() {
-    // Snapshot "light" before the save; a live storage_update frame folds "solarized" while the
-    // save is in flight. The older submitted "dark" must not clobber the newer live value (#4709).
-    val preSave: Any? = "light"
-    val afterLiveFrame = listOf(file("prefs.xml", "theme" to "solarized"))
+  fun `a guarded optimistic edit is skipped after a live A to B to A sequence`() {
+    val afterLiveFrames = listOf(file("prefs.xml", "theme" to "light"))
 
     val result =
-      afterLiveFrame.applyKeyValueEditIfUnchanged(
+      afterLiveFrames.applyKeyValueEditIfGenerationUnchanged(
         "prefs.xml",
         "theme",
         "dark",
         KeyValueType.String,
-        preSave,
+        expectedGeneration = 4L,
+        currentGeneration = 6L,
       )
 
-    assertSame(afterLiveFrame, result, "the newer live frame wins over the stale optimistic value")
-    assertEquals("solarized", result.single().entries.first { it.key == "theme" }.value)
+    assertSame(afterLiveFrames, result, "the newer live frame wins over the stale optimistic value")
+    assertEquals("light", result.single().entries.first { it.key == "theme" }.value)
   }
 
   @Test
-  fun `a guarded optimistic edit applies a new key when none existed at snapshot time`() {
-    // Adding a key: the pre-save snapshot is null (key absent) and it is still absent, so it
-    // applies.
+  fun `a guarded optimistic edit applies a new key when its generation is unchanged`() {
     val files = listOf(file("prefs.xml", "theme" to "light"))
-    val preSave = files.currentValueOf("prefs.xml", "fontScale")
 
     val result =
-      files.applyKeyValueEditIfUnchanged(
+      files.applyKeyValueEditIfGenerationUnchanged(
         "prefs.xml",
         "fontScale",
         "1.5",
         KeyValueType.Float,
-        preSave,
+        expectedGeneration = 0L,
+        currentGeneration = 0L,
       )
 
     assertEquals(1.5f, result.single().entries.first { it.key == "fontScale" }.value)

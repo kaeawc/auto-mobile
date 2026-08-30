@@ -70,6 +70,9 @@ fun StorageDashboard(
   // Live key/value changes pushed by the daemon. Highlight expiry is tracked per key rather than
   // as one shared deadline, so a later change can't cut short an earlier key's highlight.
   var highlightExpiries by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
+  // Incremented for every live update per key. An optimistic save snapshots its key's generation
+  // before suspending, so an A -> B -> A update sequence cannot be mistaken for "unchanged".
+  var storageUpdateGenerations by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
   val recentlyChangedKeys = highlightExpiries.keys
 
   LaunchedEffect(observationStreamClient, deviceId, packageName) {
@@ -84,6 +87,10 @@ fun StorageDashboard(
 
       val newlyHighlighted = update.highlightKeys(keyValueFiles)
       keyValueFiles = keyValueFiles.applyStorageUpdate(update)
+      storageUpdateGenerations =
+        newlyHighlighted.fold(storageUpdateGenerations) { generations, changedKey ->
+          generations + (changedKey to ((generations[changedKey] ?: 0L) + 1L))
+        }
       if (newlyHighlighted.isNotEmpty()) {
         val expiresAt = System.currentTimeMillis() + HIGHLIGHT_DURATION_MS
         highlightExpiries = highlightExpiries + newlyHighlighted.associateWith { expiresAt }
@@ -263,11 +270,11 @@ fun StorageDashboard(
           onSetValue =
             dataSource?.let { ds ->
               { fileName, key, value, type ->
-                // Snapshot the entry's current value *before* the suspending save so a live
-                // storage_update frame that folds a newer value for this key while the save is in
-                // flight is not clobbered by the older, just-submitted optimistic value (#4709
-                // review).
-                val preSaveValue = keyValueFiles.currentValueOf(fileName, key)
+                // Snapshot this key's live-update generation before the suspending save. Value
+                // equality is insufficient: an A -> B -> A live sequence must still win over
+                // the older submitted value when the save completes.
+                val generationKey = highlightKey(fileName, key)
+                val preSaveGeneration = storageUpdateGenerations[generationKey] ?: 0L
                 val result = ds.setKeyValue(fileName, key, value, type)
                 // Optimistic local update: reflect the saved value immediately rather than leaving
                 // it stale until a live storage_update frame arrives (or the facet is reopened).
@@ -276,12 +283,13 @@ fun StorageDashboard(
                 // they just made. Skipped when a concurrent live frame already advanced the key.
                 if (result is Result.Success) {
                   keyValueFiles =
-                    keyValueFiles.applyKeyValueEditIfUnchanged(
+                    keyValueFiles.applyKeyValueEditIfGenerationUnchanged(
                       fileName,
                       key,
                       value,
                       type,
-                      preSaveValue,
+                      preSaveGeneration,
+                      storageUpdateGenerations[generationKey] ?: 0L,
                     )
                 }
                 result

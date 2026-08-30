@@ -121,7 +121,10 @@ internal fun List<KeyValueFile>.applyKeyValueEdit(
  */
 internal fun List<KeyValueFile>.currentValueOf(fileName: String, key: String): Any? = firstOrNull {
   it.name == fileName
-}?.entries?.firstOrNull { it.key == key }?.value
+}
+  ?.entries
+  ?.firstOrNull { it.key == key }
+  ?.value
 
 /**
  * Folds a just-saved optimistic edit in [applyKeyValueEdit], but only when the entry has not

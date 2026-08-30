@@ -30,6 +30,7 @@ interface Harness {
   setCached: (h: CachedHierarchy | null) => void;
   setPackageRunning: (running: boolean) => void;
   setProbeGate: (gate: Promise<void>) => void;
+  waitForProbeStart: () => Promise<void>;
   restore: () => void;
 }
 
@@ -38,6 +39,10 @@ function createHarness(): Harness {
   let cached: CachedHierarchy | null = null;
   let packageRunning = true;
   let probeGate: Promise<void> = Promise.resolve();
+  let resolveProbeStart!: () => void;
+  const probeStarted = new Promise<void>((resolve) => {
+    resolveProbeStart = resolve;
+  });
 
   const context: HierarchyDelegateContext = {
     getWebSocket: () => null,
@@ -47,8 +52,18 @@ function createHarness(): Harness {
     cancelScreenshotBackoff: () => {},
     device: { deviceId: "emulator-5554", platform: "android" } as never,
     adb: {
-      executeCommand: async () => {
+      executeCommand: async (
+        _command: string,
+        _timeoutMs?: number,
+        _options?: unknown,
+        _synchronous?: boolean,
+        signal?: AbortSignal,
+      ) => {
+        resolveProbeStart();
         await probeGate;
+        if (signal?.aborted) {
+          throw signal.reason;
+        }
         return { stdout: packageRunning ? "1234\n" : "" };
       },
     } as never,
@@ -88,6 +103,7 @@ function createHarness(): Harness {
     setProbeGate: (gate) => {
       probeGate = gate;
     },
+    waitForProbeStart: () => probeStarted,
     restore: () => {
       managerSpy.mockRestore();
       convertSpy.mockRestore();
@@ -188,7 +204,7 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     let releaseProbe!: () => void;
     h.setProbeGate(new Promise<void>((resolve) => (releaseProbe = resolve)));
     const latestPromise = h.hierarchy.getLatestHierarchy(false, 100);
-    await Promise.resolve();
+    await h.waitForProbeStart();
 
     h.setCached({
       hierarchy: { packageName: "com.current.app" } as AccessibilityHierarchy,
@@ -201,5 +217,82 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
 
     expect(result.hierarchy?.packageName).toBe("com.current.app");
     expect(result.fresh).toBe(true);
+  });
+
+  test("uses the remaining request budget for the fresh hierarchy wait", async () => {
+    h = createHarness();
+    h.timer.advanceTime(1000);
+    h.setCached({
+      hierarchy: { packageName: "com.test.app" } as AccessibilityHierarchy,
+      receivedAt: h.timer.now() - 1,
+      fresh: false,
+    });
+
+    let releaseProbe!: () => void;
+    h.setProbeGate(new Promise<void>((resolve) => (releaseProbe = resolve)));
+    let freshWaitTimeout: number | null = null;
+    Reflect.set(h.hierarchy, "waitForFreshData", (timeout: number) => {
+      freshWaitTimeout = timeout;
+      return Promise.resolve(null);
+    });
+    const latestPromise = h.hierarchy.getLatestHierarchy(true, 1000);
+    await h.waitForProbeStart();
+
+    h.timer.advanceTime(900);
+    releaseProbe();
+
+    const result = await latestPromise;
+    expect(freshWaitTimeout).toBe(100);
+    expect(result.fresh).toBe(false);
+  });
+
+  test("re-evaluates cache freshness after the liveness probe", async () => {
+    h = createHarness();
+    h.timer.advanceTime(1000);
+    h.setCached({
+      hierarchy: { packageName: "com.test.app" } as AccessibilityHierarchy,
+      receivedAt: h.timer.now() - 900,
+      fresh: true,
+    });
+
+    let releaseProbe!: () => void;
+    h.setProbeGate(new Promise<void>((resolve) => (releaseProbe = resolve)));
+    const latestPromise = h.hierarchy.getLatestHierarchy(false, 1000);
+    await h.waitForProbeStart();
+
+    h.timer.advanceTime(200);
+    releaseProbe();
+
+    const result = await latestPromise;
+    expect(result.fresh).toBe(false);
+  });
+
+  test("does not return cached data when the liveness probe is aborted", async () => {
+    h = createHarness();
+    h.setCached({
+      hierarchy: { packageName: "com.test.app" } as AccessibilityHierarchy,
+      receivedAt: h.timer.now(),
+      fresh: true,
+    });
+
+    let releaseProbe!: () => void;
+    h.setProbeGate(new Promise<void>((resolve) => (releaseProbe = resolve)));
+    const controller = new AbortController();
+    const latestPromise = h.hierarchy.getLatestHierarchy(
+      false,
+      1000,
+      undefined,
+      false,
+      0,
+      controller.signal,
+    );
+    await h.waitForProbeStart();
+
+    controller.abort();
+    releaseProbe();
+
+    const result = await latestPromise;
+    expect(result.hierarchy).toBeNull();
+    expect(result.fresh).toBe(false);
   });
 });

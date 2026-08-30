@@ -168,6 +168,7 @@ export class CtrlProxyHierarchy {
       const cachedPackageRunning =
         cachedHierarchy &&
         (await this.isCachedPackageRunning(cachedHierarchy, livenessTimeoutMs, signal));
+      throwIfAborted(signal);
       const currentCachedHierarchy = this.context.getCachedHierarchy();
       if (currentCachedHierarchy !== cachedHierarchy) {
         cachedHierarchy = currentCachedHierarchy;
@@ -181,7 +182,7 @@ export class CtrlProxyHierarchy {
 
       // If we have cached data and not waiting for fresh, return it immediately
       if (cachedHierarchy && !waitForFresh) {
-        const cacheAge = startTime - cachedHierarchy.receivedAt;
+        const cacheAge = this.context.timer.now() - cachedHierarchy.receivedAt;
         const updatedAt = cachedHierarchy.hierarchy.updatedAt;
 
         // If minTimestamp is set, check if cached data is too old
@@ -246,12 +247,13 @@ export class CtrlProxyHierarchy {
         throwIfAborted(signal);
         const waitMinTimestamp = minTimestamp > 0 ? minTimestamp : startTime;
         const useDeviceTimestamp = minTimestamp > 0;
+        const remainingWaitMs = Math.max(0, timeout - (this.context.timer.now() - startTime));
         logger.debug(
-          `[CTRL_PROXY] Waiting up to ${timeout}ms for fresh hierarchy data (must be newer than ${waitMinTimestamp})`,
+          `[CTRL_PROXY] Waiting up to ${remainingWaitMs}ms for fresh hierarchy data (must be newer than ${waitMinTimestamp})`,
         );
 
         const freshData = await perf.track("waitForFresh", () =>
-          this.waitForFreshData(timeout, waitMinTimestamp, useDeviceTimestamp, signal),
+          this.waitForFreshData(remainingWaitMs, waitMinTimestamp, useDeviceTimestamp, signal),
         );
         const duration = this.context.timer.now() - startTime;
 
@@ -353,6 +355,9 @@ export class CtrlProxyHierarchy {
       );
       return result.stdout.trim().length > 0;
     } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
       // Liveness is best-effort; an ADB error must not destroy otherwise usable
       // cache state when process presence could not be determined.
       logger.debug(

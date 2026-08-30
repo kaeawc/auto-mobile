@@ -1386,6 +1386,7 @@ export class AdbClient implements AdbExecutor {
 
         // Look for the State line in the next few lines
         let running = false;
+        let startState: string | undefined;
         for (let j = i + 1; j < Math.min(i + 10, lines.length); j++) {
           const stateLine = lines[j];
 
@@ -1394,15 +1395,10 @@ export class AdbClient implements AdbExecutor {
             break;
           }
 
-          // Check for State: RUNNING_UNLOCKED or RUNNING_LOCKED
-          if (stateLine.match(/State:\s+(RUNNING_UNLOCKED|RUNNING_LOCKED)/)) {
-            running = true;
-            break;
-          }
-
-          // If we see State: SHUTDOWN, mark as not running
-          if (stateLine.match(/State:\s+SHUTDOWN/)) {
-            running = false;
+          const stateMatch = stateLine.match(/State:\s+(\S+)/);
+          if (stateMatch) {
+            startState = stateMatch[1];
+            running = startState === "RUNNING_UNLOCKED" || startState === "RUNNING_LOCKED";
             break;
           }
         }
@@ -1424,6 +1420,7 @@ export class AdbClient implements AdbExecutor {
           flags,
           profileType: classifyAndroidUser(flags),
           running,
+          ...(startState ? { startState } : {}),
         });
       }
     }

@@ -32,6 +32,12 @@ export interface AndroidUser {
    * Whether the user is currently running
    */
   running: boolean;
+
+  /**
+   * Raw lifecycle state from `dumpsys user` when available, such as
+   * `RUNNING_LOCKED` or `RUNNING_UNLOCKED`.
+   */
+  startState?: string;
 }
 
 export function classifyAndroidUser(flags: number): NonNullable<AndroidUser["profileType"]> {

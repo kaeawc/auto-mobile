@@ -50,7 +50,7 @@ Users:
 
   Owner name: Owner`,
     ],
-    expectedUsers: [owner],
+    expectedUsers: [{ ...owner, startState: "RUNNING_UNLOCKED" }],
     expectedCommandFragments: ["shell dumpsys user"],
   },
   {
@@ -70,7 +70,10 @@ Users:
 
   Owner name: Owner`,
     ],
-    expectedUsers: [owner, workProfile],
+    expectedUsers: [
+      { ...owner, startState: "RUNNING_UNLOCKED" },
+      { ...workProfile, startState: "RUNNING_UNLOCKED" },
+    ],
     expectedCommandFragments: ["shell dumpsys user"],
   },
   {
@@ -86,19 +89,20 @@ Users:
   Owner name: Owner`,
     ],
     expectedUsers: [
-      owner,
+      { ...owner, startState: "RUNNING_UNLOCKED" },
       {
         userId: 10,
         name: "Secondary User",
         flags: 0,
         profileType: "unknown",
         running: false,
+        startState: "SHUTDOWN",
       },
     ],
     expectedCommandFragments: ["shell dumpsys user"],
   },
   {
-    name: "treats a locked user as running",
+    name: "preserves a locked user's start state",
     outcomes: [
       `Users:
   UserInfo{0:null:4c13} serialNo=0 isPrimary=true
@@ -106,7 +110,7 @@ Users:
 
   Owner name: Owner`,
     ],
-    expectedUsers: [owner],
+    expectedUsers: [{ ...owner, startState: "RUNNING_LOCKED" }],
     expectedCommandFragments: ["shell dumpsys user"],
   },
   {
@@ -117,7 +121,14 @@ Users:
     State: RUNNING_UNLOCKED`,
     ],
     expectedUsers: [
-      { userId: 10, name: "User 10", flags: 0x30, profileType: "managed", running: true },
+      {
+        userId: 10,
+        name: "User 10",
+        flags: 0x30,
+        profileType: "managed",
+        running: true,
+        startState: "RUNNING_UNLOCKED",
+      },
     ],
     expectedCommandFragments: ["shell dumpsys user"],
   },

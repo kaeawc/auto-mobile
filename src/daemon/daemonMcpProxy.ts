@@ -56,6 +56,7 @@ export type VersionMismatchReason =
 export type BuildMismatchReason = "autoStartDisabled" | "cooldown" | "restartMismatch";
 
 const DAEMON_MCP_HEARTBEAT_INTERVAL_MS = 2_000;
+const COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const;
 
 function isFreshSessionScreenshotUri(uri: string, sessionUuid: string): boolean {
   return uri === `automobile:device-session/${sessionUuid}/screenshot`;
@@ -723,6 +724,8 @@ export class DaemonMcpProxy {
   // resources (issue #5879 review — a host that enumerates resources on init
   // must not block on a wedged daemon before the first tool call).
   private servedStaticResourceList = false;
+  private backgroundConnectRetry: NodeJS.Timeout | null = null;
+  private backgroundConnectRetryAttempt = 0;
 
   // Cached definitions from daemon
   private cachedTools: ProxiedToolDefinition[] | null = null;
@@ -895,6 +898,7 @@ export class DaemonMcpProxy {
     // close() ran last). Mirrors the closing rechecks above.
     this.throwIfClosing();
     this.connected = true;
+    this.cancelBackgroundConnectRetry();
 
     if (supportsNotifications) {
       try {
@@ -1545,17 +1549,48 @@ export class DaemonMcpProxy {
   // dedupes concurrent/polled calls, so at most one attempt is in flight.
   private serveResourcesColdAndConnectInBackground(): void {
     this.servedStaticResourceList = true;
-    if (this.connecting || this.closing) {
+    if (this.connecting || this.backgroundConnectRetry || this.closing) {
       return;
     }
-    void this.ensureConnected().catch((error) => {
+    void this.ensureBackgroundResourceConnection();
+  }
+
+  private async ensureBackgroundResourceConnection(): Promise<void> {
+    try {
+      await this.ensureConnected();
+    } catch (error) {
       // Best-effort: the cold roster already returned, and the tool surface is
       // visible via tools/list. A wedged/absent daemon must not surface here; the
-      // next actual request still reports the failure to the client.
+      // the next actual request still reports the failure to the client. Retry
+      // transient failures a bounded number of times for resource-only clients.
       logger.debug(
         `[DaemonMcpProxy] background connect after cold resource discovery failed: ${error}`,
       );
-    });
+      this.scheduleBackgroundConnectRetry();
+    }
+  }
+
+  private scheduleBackgroundConnectRetry(): void {
+    if (this.closing || this.connected || this.backgroundConnectRetry) {
+      return;
+    }
+    const delay = COLD_RESOURCE_CONNECT_RETRY_DELAYS_MS[this.backgroundConnectRetryAttempt];
+    if (delay === undefined) {
+      return;
+    }
+    this.backgroundConnectRetryAttempt += 1;
+    this.backgroundConnectRetry = this.timer.setTimeout(() => {
+      this.backgroundConnectRetry = null;
+      void this.ensureBackgroundResourceConnection();
+    }, delay);
+  }
+
+  private cancelBackgroundConnectRetry(): void {
+    if (this.backgroundConnectRetry) {
+      this.timer.clearTimeout(this.backgroundConnectRetry);
+      this.backgroundConnectRetry = null;
+    }
+    this.backgroundConnectRetryAttempt = 0;
   }
 
   /**
@@ -2363,6 +2398,7 @@ export class DaemonMcpProxy {
    */
   async close(): Promise<void> {
     this.closing = true;
+    this.cancelBackgroundConnectRetry();
     this.connectionCloseReject?.(new DaemonUnavailableError("MCP proxy is closing"));
     await this.stopBoundSessionHeartbeat();
     if (this.client) {

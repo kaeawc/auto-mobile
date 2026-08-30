@@ -164,7 +164,11 @@ describe("InputText.execute", () => {
       (inputText as any).targetFocuser = {
         focus: async (selector: unknown) => {
           focusCalls.push(selector);
-          return { success: true };
+          return {
+            success: true,
+            matchedId: "com.test:id/first_name",
+            matchedText: "First name",
+          };
         },
       };
 
@@ -173,6 +177,8 @@ describe("InputText.execute", () => {
       });
 
       expect(result.success).toBe(true);
+      expect(result.matchedId).toBe("com.test:id/first_name");
+      expect(result.matchedText).toBe("First name");
       // The field was focused with the caller's selector before any text landed.
       expect(focusCalls).toEqual([{ text: "First name" }]);
       expect(fakeA11yService.getTextInputHistory()).toEqual([

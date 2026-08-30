@@ -48,7 +48,12 @@ export interface TextInputTargetFocuser {
   focus(
     selector: TextInputTargetSelector,
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string }>;
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    matchedId?: string;
+    matchedText?: string;
+  }>;
 }
 
 type TextInputTargetFocuserFactory = (device: BootedDevice) => TextInputTargetFocuser;
@@ -60,7 +65,12 @@ const defaultTargetFocuserFactory: TextInputTargetFocuserFactory = (device) => (
       undefined,
       signal,
     );
-    return { success: result.success, error: result.error };
+    return {
+      success: result.success,
+      error: result.error,
+      matchedId: result.selectedElement?.resourceId,
+      matchedText: result.selectedElement?.text,
+    };
   },
 });
 
@@ -145,6 +155,7 @@ export class InputText extends BaseVisualChange {
     // Focus before the observedInteraction captures its baseline, so the "before"
     // snapshot already reflects the focused field. A focus failure short-circuits —
     // typing into an unknown field would be worse than reporting the miss.
+    let targetMetadata: Pick<SendTextResult, "matchedId" | "matchedText"> = {};
     if (selector) {
       assertInputNotAborted(signal);
       const focusResult = await this.targetFocuser.focus(selector, signal);
@@ -157,6 +168,10 @@ export class InputText extends BaseVisualChange {
           method: this.device.platform === "android" ? resolvedMode : "a11y",
         };
       }
+      targetMetadata = {
+        matchedId: focusResult.matchedId,
+        matchedText: focusResult.matchedText,
+      };
     }
 
     assertInputNotAborted(signal);
@@ -211,7 +226,7 @@ export class InputText extends BaseVisualChange {
       },
     );
     assertInputNotAborted(signal);
-    return result;
+    return { ...result, ...targetMetadata };
   }
 
   /**

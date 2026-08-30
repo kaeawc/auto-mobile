@@ -368,6 +368,8 @@ export class RealObserveScreen implements ObserveScreen {
         this.platformValidator,
       );
 
+      await this.reconcileActiveWindowAttribution(result, foregroundIdentity);
+
       // Uncapped here; the output boundary (sanitizeObserveResult / the observe
       // served path in finalizeToolResponse) caps AFTER any scope narrowing so an
       // in-scope warning is never lost to a cap taken against the full tree (#5074).
@@ -406,8 +408,6 @@ export class RealObserveScreen implements ObserveScreen {
           logger.warn(`[PredictiveUIState] Failed to generate predictions: ${error}`);
         }
       }
-
-      await this.reconcileActiveWindowAttribution(result, foregroundIdentity);
 
       // Freshness diagnostics.
       //

@@ -262,6 +262,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.google.android.apps.nexuslauncher", userId: 0 });
+    let performanceAuditAppId: string | undefined;
 
     const screen = new RealObserveScreen(
       androidDevice,
@@ -269,7 +270,11 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       {
         viewHierarchy,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
+        performanceAuditor: {
+          run: async (observedResult: ObserveResult) => {
+            performanceAuditAppId = observedResult.activeWindow?.appId;
+          },
+        } as any,
         accessibilityAuditor: { run: async () => undefined } as any,
         accessibilityStateDetector: { run: async () => undefined } as any,
       },
@@ -283,6 +288,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       activityName: "",
       layoutSeqSum: 0,
     });
+    expect(performanceAuditAppId).toBe("com.google.android.apps.nexuslauncher");
     expect(result.freshness?.isFresh).toBe(true);
     expect(result.freshness?.verified).toBe(true);
     expect(result.freshness?.warning).toBeUndefined();

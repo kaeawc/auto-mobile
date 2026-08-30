@@ -5,6 +5,7 @@ import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
   toolOutputArtifactLedger,
+  type ArtifactFileIdentity,
   type ToolOutputArtifactLedger,
 } from "./toolOutputArtifactLedger";
 
@@ -33,7 +34,7 @@ const TOOL_OUTPUT_RESOURCE_URI_PREFIX = "automobile:tool-output/";
 const SAFE_ARTIFACT_ID = /^\d+-[A-Za-z0-9._-]+\.json$/;
 
 interface ToolOutputResourceFileSystem {
-  readFile(filePath: string): Promise<string>;
+  readFile(filePath: string, identity?: ArtifactFileIdentity): Promise<string>;
 }
 
 // O_NOFOLLOW is POSIX-only; on platforms without it (Windows) the flag is
@@ -41,7 +42,7 @@ interface ToolOutputResourceFileSystem {
 const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
 
 const nodeToolOutputResourceFileSystem: ToolOutputResourceFileSystem = {
-  async readFile(filePath: string): Promise<string> {
+  async readFile(filePath: string, identity?: ArtifactFileIdentity): Promise<string> {
     // `filePath` comes from the provenance ledger — a value the writer itself
     // constructed, never the client-supplied id — so a shared/misconfigured
     // `--tool-outputs-dir` cannot steer this read to an arbitrary sibling.
@@ -53,6 +54,12 @@ const nodeToolOutputResourceFileSystem: ToolOutputResourceFileSystem = {
       const stats = await handle.stat();
       if (!stats.isFile()) {
         throw new Error(`tool-output artifact is not a regular file: ${filePath}`);
+      }
+      // Bind to the identity captured at creation: O_NOFOLLOW accepts a *regular
+      // file* swapped over the recorded path, so verify dev/ino on the open fd to
+      // reject a replacement a foreign process planted in a world-writable dir.
+      if (identity && (stats.dev !== identity.dev || stats.ino !== identity.ino)) {
+        throw new Error(`tool-output artifact identity mismatch: ${filePath}`);
       }
       return await handle.readFile("utf8");
     } finally {
@@ -118,13 +125,13 @@ async function getToolOutputArtifact(params: Record<string, string>): Promise<Re
   // path the writer recorded rather than one re-derived from the client id. A
   // shape-valid sibling planted in a shared `--tool-outputs-dir` has no ledger
   // entry, so it is refused before any filesystem access (issue #5917).
-  const issuedPath = issuedArtifactLedger.resolve(artifactId);
-  if (issuedPath === undefined) {
+  const issued = issuedArtifactLedger.resolve(artifactId);
+  if (issued === undefined) {
     return notAvailable(uri, artifactId);
   }
 
   try {
-    const text = await toolOutputResourceFileSystem.readFile(issuedPath);
+    const text = await toolOutputResourceFileSystem.readFile(issued.path, issued.identity);
     return { uri, mimeType: "application/json", text };
   } catch (error) {
     const reason = errorMessage(error);

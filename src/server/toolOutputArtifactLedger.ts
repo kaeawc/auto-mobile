@@ -19,10 +19,31 @@ import path from "node:path";
  * are pruned by retention, and a lost ledger entry (eviction, daemon restart)
  * degrades to the existing "expired or pruned" response — never an unsafe read.
  */
+/** Filesystem identity of an issued artifact, captured at creation. */
+export interface ArtifactFileIdentity {
+  dev: number;
+  ino: number;
+}
+
+/** A file the writer issued: its path plus the identity to verify at read time. */
+export interface IssuedArtifact {
+  /** Absolute path the writer wrote. */
+  path: string;
+  /**
+   * dev/ino captured when the writer exclusively created the file. The read
+   * fstat's the open handle and rejects any mismatch, so a foreign process that
+   * replaces the recorded path with a *different regular file* in a world-writable
+   * `--tool-outputs-dir` cannot get its bytes served — O_NOFOLLOW alone accepts a
+   * regular-file swap; identity binding is what closes it (issue #5917 review).
+   * Undefined only for entries recorded without identity (test seams).
+   */
+  identity?: ArtifactFileIdentity;
+}
+
 export class ToolOutputArtifactLedger {
-  // basename -> absolute path the writer wrote. Insertion order is recency order
-  // (a re-record deletes then re-sets), so eviction drops the least-recent.
-  private readonly issued = new Map<string, string>();
+  // basename -> issued artifact. Insertion order is recency order (a re-record
+  // deletes then re-sets), so eviction drops the least-recent.
+  private readonly issued = new Map<string, IssuedArtifact>();
   private readonly maxEntries: number;
 
   constructor(maxEntries = 1024) {
@@ -30,10 +51,10 @@ export class ToolOutputArtifactLedger {
   }
 
   /** Record an artifact the writer just created, keyed by its basename. */
-  record(absolutePath: string): void {
+  record(absolutePath: string, identity?: ArtifactFileIdentity): void {
     const filename = path.basename(absolutePath);
     this.issued.delete(filename);
-    this.issued.set(filename, absolutePath);
+    this.issued.set(filename, { path: absolutePath, identity });
     while (this.issued.size > this.maxEntries) {
       const oldest = this.issued.keys().next().value;
       if (oldest === undefined) {
@@ -43,8 +64,8 @@ export class ToolOutputArtifactLedger {
     }
   }
 
-  /** The absolute path the writer issued for this basename, or undefined. */
-  resolve(filename: string): string | undefined {
+  /** The artifact the writer issued for this basename, or undefined. */
+  resolve(filename: string): IssuedArtifact | undefined {
     return this.issued.get(filename);
   }
 

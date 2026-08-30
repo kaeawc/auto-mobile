@@ -10,6 +10,7 @@ import { logger } from "../utils/logger";
 import { buildToolOutputResourceUri } from "./toolOutputResources";
 import {
   toolOutputArtifactLedger,
+  type ArtifactFileIdentity,
   type ToolOutputArtifactLedger,
 } from "./toolOutputArtifactLedger";
 import type {
@@ -23,7 +24,9 @@ const SECURE_TOOL_OUTPUT_DIR_MODE = 0o700;
 export interface ToolOutputArtifactFileSystem {
   ensureDirectory(dirPath: string): void;
   assertWritableDirectory(dirPath: string): void;
-  writeFileExclusive(filePath: string, content: string, mode: number): void;
+  // Returns the created file's dev/ino so provenance can bind to filesystem
+  // identity, not just the pathname (issue #5917).
+  writeFileExclusive(filePath: string, content: string, mode: number): ArtifactFileIdentity;
   listFiles(dirPath: string): ToolOutputArtifactDirectoryEntry[];
   deleteFile(filePath: string): void;
 }
@@ -48,8 +51,18 @@ export class NodeToolOutputArtifactFileSystem implements ToolOutputArtifactFileS
     fs.accessSync(dirPath, fsConstants.W_OK);
   }
 
-  writeFileExclusive(filePath: string, content: string, mode: number): void {
-    fs.writeFileSync(filePath, content, { encoding: "utf8", flag: "wx", mode });
+  writeFileExclusive(filePath: string, content: string, mode: number): ArtifactFileIdentity {
+    // Create + open exclusively ("wx" = O_CREAT|O_EXCL), then capture identity by
+    // fstat'ing the very fd we created — race-free, unlike a path stat after the
+    // write, which a foreign process could win in a world-writable dir (#5917).
+    const fd = fs.openSync(filePath, "wx", mode);
+    try {
+      fs.writeFileSync(fd, content, { encoding: "utf8" });
+      const stats = fs.fstatSync(fd);
+      return { dev: stats.dev, ino: stats.ino };
+    } finally {
+      fs.closeSync(fd);
+    }
   }
 
   listFiles(dirPath: string): ToolOutputArtifactDirectoryEntry[] {
@@ -113,10 +126,10 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
       const content = stringifyToolResponse(input.data);
       const filename = `${Math.trunc(this.timer.now())}-${safeFilenameSegment(input.tool)}-${safeFilenameSegment(this.idGenerator.next())}.json`;
       const artifactPath = path.join(this.outputDirectory, filename);
-      this.fileSystem.writeFileExclusive(artifactPath, content, 0o600);
-      // Record provenance so the resource serves only files we actually wrote,
-      // and reads them back by this writer-constructed path (issue #5917).
-      this.ledger.record(artifactPath);
+      const identity = this.fileSystem.writeFileExclusive(artifactPath, content, 0o600);
+      // Record provenance (path + filesystem identity) so the resource serves only
+      // files we actually wrote and rejects a later replacement at that path (#5917).
+      this.ledger.record(artifactPath, identity);
 
       return {
         artifact: {

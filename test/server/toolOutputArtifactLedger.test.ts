@@ -8,17 +8,28 @@ describe("ToolOutputArtifactLedger (#5917)", () => {
     const issued = path.resolve("/tmp/tool-outputs/1234-observe-abc.json");
     ledger.record(issued);
 
-    expect(ledger.resolve("1234-observe-abc.json")).toBe(issued);
+    expect(ledger.resolve("1234-observe-abc.json")?.path).toBe(issued);
     // A never-issued, writer-shaped sibling is not resolvable.
     expect(ledger.resolve("1234-observe-def.json")).toBeUndefined();
     expect(ledger.resolve("credentials.json")).toBeUndefined();
+  });
+
+  test("carries the filesystem identity captured at creation", () => {
+    const ledger = new ToolOutputArtifactLedger();
+    const issued = path.resolve("/tmp/tool-outputs/1234-observe-abc.json");
+    ledger.record(issued, { dev: 42, ino: 99 });
+
+    expect(ledger.resolve("1234-observe-abc.json")).toEqual({
+      path: issued,
+      identity: { dev: 42, ino: 99 },
+    });
   });
 
   test("forget removes an issued entry", () => {
     const ledger = new ToolOutputArtifactLedger();
     const issued = path.resolve("/tmp/tool-outputs/1-observe-x.json");
     ledger.record(issued);
-    expect(ledger.resolve("1-observe-x.json")).toBe(issued);
+    expect(ledger.resolve("1-observe-x.json")?.path).toBe(issued);
 
     ledger.forget(issued);
     expect(ledger.resolve("1-observe-x.json")).toBeUndefined();
@@ -37,8 +48,8 @@ describe("ToolOutputArtifactLedger (#5917)", () => {
     expect(ledger.size).toBe(2);
     // Oldest (a) evicted; newest two retained.
     expect(ledger.resolve("1-observe-a.json")).toBeUndefined();
-    expect(ledger.resolve("2-observe-b.json")).toBe(b);
-    expect(ledger.resolve("3-observe-c.json")).toBe(c);
+    expect(ledger.resolve("2-observe-b.json")?.path).toBe(b);
+    expect(ledger.resolve("3-observe-c.json")?.path).toBe(c);
   });
 
   test("re-recording refreshes recency so it survives eviction", () => {
@@ -52,9 +63,9 @@ describe("ToolOutputArtifactLedger (#5917)", () => {
     ledger.record(a); // refresh a's recency
     ledger.record(c); // should evict b, not a
 
-    expect(ledger.resolve("1-observe-a.json")).toBe(a);
+    expect(ledger.resolve("1-observe-a.json")?.path).toBe(a);
     expect(ledger.resolve("2-observe-b.json")).toBeUndefined();
-    expect(ledger.resolve("3-observe-c.json")).toBe(c);
+    expect(ledger.resolve("3-observe-c.json")?.path).toBe(c);
   });
 
   test("clear drops every entry", () => {

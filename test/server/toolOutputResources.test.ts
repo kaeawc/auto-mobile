@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import path from "node:path";
-import { mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, symlinkSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
@@ -19,7 +19,7 @@ class FakeResourceFileSystem {
   reads: string[] = [];
   readError: Error | undefined;
 
-  async readFile(filePath: string): Promise<string> {
+  async readFile(filePath: string, _identity?: { dev: number; ino: number }): Promise<string> {
     this.reads.push(filePath);
     if (this.readError) {
       throw this.readError;
@@ -189,4 +189,32 @@ describe("tool-output artifact resource (#5882)", () => {
       }
     },
   );
+
+  test("refuses a file whose on-disk identity differs from the recorded one (#5917)", async () => {
+    // Models a regular-file replacement in a world-writable --tool-outputs-dir:
+    // O_NOFOLLOW accepts a regular file at the recorded path, so the read must also
+    // verify the dev/ino captured at creation and reject a swapped file.
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-mobile-identity-"));
+    const filename = "1788020656886-observe-swap.json";
+    const filePath = path.join(dir, filename);
+    try {
+      writeFileSync(filePath, JSON.stringify({ real: true }));
+      const real = statSync(filePath);
+
+      // Correct identity → served.
+      const ok = new ToolOutputArtifactLedger();
+      ok.record(filePath, { dev: real.dev, ino: real.ino });
+      setToolOutputResourceDependencies({ ledger: ok });
+      expect(JSON.parse((await readArtifact(filename)).text!)).toEqual({ real: true });
+
+      // Mismatched identity (as if the file were replaced after recording) → refused.
+      const swapped = new ToolOutputArtifactLedger();
+      swapped.record(filePath, { dev: real.dev, ino: real.ino + 1 });
+      setToolOutputResourceDependencies({ ledger: swapped });
+      const parsed = JSON.parse((await readArtifact(filename)).text!) as { error: string };
+      expect(parsed.error).toContain("not available");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

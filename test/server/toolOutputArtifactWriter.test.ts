@@ -28,11 +28,17 @@ class FakeArtifactFileSystem implements ToolOutputArtifactFileSystem {
     this.assertWritableCalls.push(dirPath);
   }
 
-  writeFileExclusive(filePath: string, content: string, mode: number): void {
+  writeFileExclusive(
+    filePath: string,
+    content: string,
+    mode: number,
+  ): { dev: number; ino: number } {
     if (this.writeError) {
       throw this.writeError;
     }
     this.writes.push({ path: filePath, content, mode });
+    // Synthetic, unique-per-write identity so ledger provenance can be asserted.
+    return { dev: 1, ino: this.writes.length };
   }
 
   listFiles(dirPath: string): ToolOutputArtifactDirectoryEntry[] {
@@ -123,11 +129,16 @@ describe("JsonToolOutputArtifactWriter", () => {
     });
 
     // Only the exact files the writer created are resolvable; a shape-valid
-    // sibling it never wrote is not.
-    expect(ledger.resolve("1234-observe-id-1.json")).toBe(first.artifact.path);
-    expect(ledger.resolve("1234-observe-id-2.json")).toBe(
-      path.join(outputDirectory, "1234-observe-id-2.json"),
-    );
+    // sibling it never wrote is not. Each entry carries the identity the fake
+    // filesystem returned at creation, so the resource can bind reads to it.
+    expect(ledger.resolve("1234-observe-id-1.json")).toEqual({
+      path: first.artifact.path,
+      identity: { dev: 1, ino: 1 },
+    });
+    expect(ledger.resolve("1234-observe-id-2.json")).toEqual({
+      path: path.join(outputDirectory, "1234-observe-id-2.json"),
+      identity: { dev: 1, ino: 2 },
+    });
     expect(ledger.resolve("1234-observe-unwritten.json")).toBeUndefined();
   });
 
@@ -151,7 +162,7 @@ describe("JsonToolOutputArtifactWriter", () => {
       retention: { maxAgeMs: 1_000, maxFiles: 500, overflowMinAgeMs: 500 },
     });
 
-    expect(ledger.resolve("old-observe.json")).toBe(stalePath);
+    expect(ledger.resolve("old-observe.json")?.path).toBe(stalePath);
 
     writer.writeJsonArtifact({ tool: "observe", payload: "ObserveResult", data: { updatedAt: 1 } });
 

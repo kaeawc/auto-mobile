@@ -108,10 +108,11 @@ function toolOutputError(uri: string, error: string): ResourceContent {
 }
 
 function notAvailable(uri: string, artifactId: string): ResourceContent {
+  // Keep filesystem / host-path detail in the warn log only (CWE-209, #5933).
   return toolOutputError(
     uri,
     `Tool-output artifact "${artifactId}" is not available. It may have expired or been ` +
-      `pruned, or it was not issued by this server. Re-run the tool to regenerate it.`,
+      "pruned, or it was not issued by this server. Re-run the tool to regenerate it.",
   );
 }
 

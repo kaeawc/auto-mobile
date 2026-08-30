@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import path from "node:path";
 import { mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -12,6 +12,7 @@ import {
   resetToolOutputResourceDependencies,
   setToolOutputResourceDependencies,
 } from "../../src/server/toolOutputResources";
+import { logger } from "../../src/utils/logger";
 
 const ARTIFACT_DIR = path.resolve("/tmp/auto-mobile-tool-outputs");
 
@@ -59,6 +60,21 @@ async function readArtifact(artifactId: string) {
     return match!.template.handler(match!.params);
   }
   throw new Error("tool-output resource must be a plain template handler");
+}
+
+function genericUnavailableMessage(artifactId: string): string {
+  return (
+    `Tool-output artifact "${artifactId}" is not available. It may have expired or been ` +
+    "pruned, or it was not issued by this server. Re-run the tool to regenerate it."
+  );
+}
+
+function expectGenericUnavailable(text: string, artifactId: string, leaked: string[]): void {
+  const parsed = JSON.parse(text) as { error: string };
+  expect(parsed.error).toBe(genericUnavailableMessage(artifactId));
+  for (const fragment of leaked) {
+    expect(text).not.toContain(fragment);
+  }
 }
 
 describe("tool-output artifact resource (#5882)", () => {
@@ -138,14 +154,14 @@ describe("tool-output artifact resource (#5882)", () => {
 
     const content = await readArtifact(planted);
 
-    const parsed = JSON.parse(content.text!) as { error: string };
-    expect(parsed.error).toContain("not available");
+    expectGenericUnavailable(content.text!, planted, []);
     expect(fileSystem.reads).toEqual([]);
   });
 
   test("returns a structured error when the artifact is issued but missing or pruned", async () => {
     const fileSystem = new FakeResourceFileSystem();
     const filename = "1788020656886-observe-gone.json";
+    const issuedPath = path.join(ARTIFACT_DIR, filename);
     // Issued by the writer, but the file is gone (pruned/expired): reaches the
     // read, which fails, and surfaces the graceful error.
     installFake(fileSystem, [filename]);
@@ -153,11 +169,33 @@ describe("tool-output artifact resource (#5882)", () => {
     const content = await readArtifact(filename);
 
     expect(content.mimeType).toBe("application/json");
-    const parsed = JSON.parse(content.text!) as { error: string };
-    expect(parsed.error).toContain("not available");
-    expect(parsed.error).not.toContain(ARTIFACT_DIR);
-    expect(parsed.error).not.toContain("ENOENT");
-    expect(fileSystem.reads).toEqual([path.join(ARTIFACT_DIR, filename)]);
+    expectGenericUnavailable(content.text!, filename, [issuedPath, "ENOENT"]);
+    expect(fileSystem.reads).toEqual([issuedPath]);
+  });
+
+  test("omits filesystem error detail from the client-facing not-available message (#5933)", async () => {
+    // CWE-209: the read-failure path used to append the Node fs error (absolute
+    // host path, ENOENT, hash-mismatch text) to the MCP client envelope.
+    const fileSystem = new FakeResourceFileSystem();
+    const filename = "1788020656886-observe-gone.json";
+    const hostPath = "/Users/ci/.auto-mobile/tool-outputs/1788020656886-observe-gone.json";
+    fileSystem.readError = Object.assign(new Error(`ENOENT: no such file, open '${hostPath}'`), {
+      code: "ENOENT",
+    });
+    installFake(fileSystem, [filename]);
+
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const content = await readArtifact(filename);
+
+      expectGenericUnavailable(content.text!, filename, [hostPath, "ENOENT"]);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`[ToolOutputResources] Failed to read artifact ${filename}`),
+      );
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining(hostPath));
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   // Unprivileged symlink creation is unavailable on Windows (needs admin/developer
@@ -184,9 +222,7 @@ describe("tool-output artifact resource (#5882)", () => {
 
         const content = await readArtifact(filename);
 
-        const parsed = JSON.parse(content.text!) as { error: string };
-        expect(parsed.error).toContain("not available");
-        expect(content.text).not.toContain("top secret");
+        expectGenericUnavailable(content.text!, filename, [linkPath, "top secret"]);
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
@@ -219,9 +255,7 @@ describe("tool-output artifact resource (#5882)", () => {
       swapped.record(filePath, realHash);
       setToolOutputResourceDependencies({ ledger: swapped });
       const content = await readArtifact(filename);
-      const parsed = JSON.parse(content.text!) as { error: string };
-      expect(parsed.error).toContain("not available");
-      expect(content.text).not.toContain("owned");
+      expectGenericUnavailable(content.text!, filename, [filePath, "owned", "hash mismatch"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -42,6 +42,12 @@ export interface AdbExecuteOptions {
 export interface AdbSpawnOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+  /**
+   * Applies `signal` only until the subprocess emits `spawn`. The caller owns
+   * the child after that point, so later request cancellation cannot terminate
+   * an accepted long-running operation.
+   */
+  abortSignalScope?: "startup";
 }
 
 export type DeviceTimestampSource = "device-ms" | "device-seconds" | "host";

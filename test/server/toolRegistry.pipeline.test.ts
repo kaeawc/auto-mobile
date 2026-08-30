@@ -309,7 +309,13 @@ describe("DefaultAfterToolCallHandler observation artifact config path", () => {
 
     expect(result.durationMs).toBe(5);
     expect(requestedDirectories).toEqual(["/tmp/artifacts"]);
-    expect(requestedRetentions).toEqual([undefined]);
+    expect(requestedRetentions).toEqual([
+      {
+        maxAgeMs: 24 * 60 * 60 * 1000,
+        maxFiles: 500,
+        overflowMinAgeMs: 60 * 60 * 1000,
+      },
+    ]);
     expect(writer.writes).toHaveLength(1);
     expect((writer.writes[0].data as any).viewHierarchy.hierarchy.node["view-id"]).toBeUndefined();
     expect(result.finalizedResponse.structuredContent).toEqual({

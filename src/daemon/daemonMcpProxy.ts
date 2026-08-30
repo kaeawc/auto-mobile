@@ -34,7 +34,6 @@ import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
 import { compareStrictNumericVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
-import { shellQuote } from "../utils/shellQuote";
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { SingleFlightInterval } from "./SingleFlightInterval";
 import type { SessionReleaseSnapshot } from "./sessionManager";

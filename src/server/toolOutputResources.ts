@@ -23,10 +23,15 @@ const TOOL_OUTPUT_RESOURCE_URI_PREFIX = "automobile:tool-output/";
 /**
  * Artifact filenames are `${timestamp}-${tool}-${id}.json`, where the tool/id
  * segments are already restricted to `[A-Za-z0-9._-]` by `safeFilenameSegment`
- * in the writer. Re-validate here so a crafted `artifactId` can never escape the
- * tool-outputs directory (no separators, no `..`, `.json` only).
+ * in the writer. Match the writer's full shape — a leading numeric timestamp,
+ * then at least one `-`-joined segment, then `.json` — so a crafted `artifactId`
+ * can never escape the tool-outputs directory (no separators, no `..`) AND an
+ * arbitrary sibling file in a shared/misconfigured `--tool-outputs-dir` (e.g.
+ * `credentials.json`) is not served just because it ends in `.json` (issue #5882
+ * review). This narrows the readable namespace to the writer's own emissions; it
+ * is not full per-artifact provenance tracking (deferred — see #5917).
  */
-const SAFE_ARTIFACT_ID = /^[A-Za-z0-9._-]+\.json$/;
+const SAFE_ARTIFACT_ID = /^\d+-[A-Za-z0-9._-]+\.json$/;
 
 interface ToolOutputResourceFileSystem {
   readFile(filePath: string): Promise<string>;
@@ -92,13 +97,14 @@ async function getToolOutputArtifact(params: Record<string, string>): Promise<Re
     );
   }
 
+  // `SAFE_ARTIFACT_ID` is a strict allowlist with no path separators, so the join
+  // can never escape `directory` — no dirname re-check is needed. (An earlier
+  // `path.dirname(filePath) !== directory` guard rejected every read when
+  // `--tool-outputs-dir` ended in a separator, since `path.dirname` normalizes
+  // the trailing slash away while the configured directory keeps it — issue #5882
+  // review.)
   const directory = resolveToolOutputsDir();
   const filePath = path.join(directory, artifactId);
-  // Defense in depth: reject any id whose join escaped the directory even though
-  // it passed the basename check (e.g. via an unexpected platform separator).
-  if (path.dirname(filePath) !== directory) {
-    return toolOutputError(uri, `Invalid tool-output artifact id "${artifactId}".`);
-  }
 
   try {
     const text = await toolOutputResourceFileSystem.readFile(filePath);

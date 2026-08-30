@@ -102,6 +102,38 @@ describe("tool-output artifact resource (#5882)", () => {
     expect(fileSystem.reads).toEqual([]);
   });
 
+  test("rejects sibling .json files that don't match the writer's filename shape", async () => {
+    // A shared/misconfigured --tool-outputs-dir must not let a client read an
+    // arbitrary guessable file just because it ends in .json (issue #5882 review).
+    const fileSystem = new FakeResourceFileSystem();
+    fileSystem.files.set(path.join(ARTIFACT_DIR, "credentials.json"), "{\"secret\":true}");
+    installFake(fileSystem);
+
+    const content = await readArtifact("credentials.json");
+
+    expect(content.text).toContain("Invalid tool-output artifact id");
+    expect(fileSystem.reads).toEqual([]);
+  });
+
+  test("reads artifacts when the configured directory ends in a separator", async () => {
+    // resolvePathFromDaemonLaunchWorkingDirectory preserves a trailing slash on an
+    // absolute --tool-outputs-dir; the read must still resolve (issue #5882 review).
+    const fileSystem = new FakeResourceFileSystem();
+    const trailingSlashDir = `${ARTIFACT_DIR}/`;
+    const filename = "1788020656886-observe-abc123.json";
+    const raw = JSON.stringify({ ok: true });
+    fileSystem.files.set(path.join(trailingSlashDir, filename), raw);
+    setToolOutputResourceDependencies({
+      fileSystem,
+      resolveDirectory: () => trailingSlashDir,
+    });
+
+    const content = await readArtifact(filename);
+
+    expect(content.text).toBe(raw);
+    expect(fileSystem.reads).toEqual([path.join(trailingSlashDir, filename)]);
+  });
+
   test("returns a structured error when the artifact is missing or pruned", async () => {
     const fileSystem = new FakeResourceFileSystem();
     installFake(fileSystem);

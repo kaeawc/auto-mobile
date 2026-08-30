@@ -434,6 +434,14 @@ export class VideoRecorderService {
 
   private async handleStartFailure(error: unknown, active: ActiveRecordingState): Promise<never> {
     if (this.retainStartCleanupHandle(error, active)) {
+      try {
+        await this.forceStopOrDiscardRecording(active.recordingId, true);
+      } catch (cleanupError) {
+        this.log.warn(
+          `[VideoRecorderService] Failed to retry cleanup for ${active.recordingId}: ${String(cleanupError)}`,
+          cleanupError,
+        );
+      }
       throw error;
     }
     if (this.activeRecordings.get(active.recordingId) === active && !active.forceStopRequested) {
@@ -464,10 +472,10 @@ export class VideoRecorderService {
       this.log.debug(
         `[VideoRecorderService] Starting recording ${active.recordingId} ended during force stop: ${error}`,
       );
+      this.activeRecordings.delete(active.recordingId);
       if (discardArtifacts) {
         await this.removeRecordingArtifacts(active.recordingId, active.outputPath);
       }
-      this.activeRecordings.delete(active.recordingId);
       return undefined;
     }
   }

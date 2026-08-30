@@ -196,8 +196,6 @@ describe("VideoRecorderService", () => {
       }),
     ).rejects.toThrow("startup cleanup timed out");
 
-    expect(service.listActiveRecordingIds()).toEqual(["rec-1"]);
-    await service.discardRecording("rec-1");
     expect(backend.forceStopCalls).toEqual([retainedHandle!]);
     expect(service.listActiveRecordingIds()).toEqual([]);
   });

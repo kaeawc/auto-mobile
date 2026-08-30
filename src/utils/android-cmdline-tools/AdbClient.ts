@@ -595,7 +595,10 @@ export class AdbClient implements AdbExecutor {
       startTime,
       args.join(" "),
     );
-    const child = this.spawnFn(adbPath, fullArgs, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = this.spawnFn(adbPath, fullArgs, {
+      stdio: ["ignore", "pipe", "pipe"],
+      signal,
+    });
     this.activeProcesses.add(child);
 
     let timeoutId: NodeJS.Timeout | undefined;

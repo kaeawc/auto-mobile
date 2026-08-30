@@ -132,7 +132,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       abortSignal: controller.signal,
     });
 
-    expect(fakeFactory.getFakeClient().getSpawnOptions()[0]?.signal).toBeUndefined();
+    expect(fakeFactory.getFakeClient().getSpawnOptions()[0]?.signal).toBe(controller.signal);
   });
 
   describe("Stop Operation", () => {

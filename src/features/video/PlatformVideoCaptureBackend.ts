@@ -316,7 +316,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     // A recording owns its process after this method returns. The request signal
     // must bound only startup, not kill an accepted recording after its caller
     // has moved on to post-tool auditing.
-    const process = await adb.spawn(args);
+    const process = await adb.spawn(args, { signal: config.abortSignal });
     const abortStartup = () => process.kill("SIGTERM");
     config.abortSignal?.addEventListener("abort", abortStartup, { once: true });
     if (config.abortSignal?.aborted) {

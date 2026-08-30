@@ -348,7 +348,7 @@ export class CtrlProxyHierarchy {
 
     try {
       const result = await this.context.adb.executeCommand(
-        "shell dumpsys activity processes || true",
+        "shell dumpsys activity processes",
         timeoutMs,
         undefined,
         true,

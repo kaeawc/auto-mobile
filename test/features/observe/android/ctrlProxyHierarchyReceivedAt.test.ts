@@ -31,6 +31,7 @@ interface Harness {
   setPackageRunning: (running: boolean) => void;
   setProcessUserId: (userId: number) => void;
   setProcessNameSuffix: (suffix: string) => void;
+  setProbeError: (error: Error | undefined) => void;
   setProbeGate: (gate: Promise<void>) => void;
   waitForProbeStart: () => Promise<void>;
   restore: () => void;
@@ -42,6 +43,7 @@ function createHarness(): Harness {
   let packageRunning = true;
   let processUserId = 0;
   let processNameSuffix = "";
+  let probeError: Error | undefined;
   let probeGate: Promise<void> = Promise.resolve();
   let resolveProbeStart!: () => void;
   const probeStarted = new Promise<void>((resolve) => {
@@ -67,6 +69,9 @@ function createHarness(): Harness {
         await probeGate;
         if (signal?.aborted) {
           throw signal.reason;
+        }
+        if (probeError) {
+          throw probeError;
         }
         const packageName =
           command.match(/shell dumpsys activity processes/) && cached?.hierarchy.packageName;
@@ -116,6 +121,9 @@ function createHarness(): Harness {
     },
     setProcessNameSuffix: (suffix) => {
       processNameSuffix = suffix;
+    },
+    setProbeError: (error) => {
+      probeError = error;
     },
     setProbeGate: (gate) => {
       probeGate = gate;
@@ -207,6 +215,23 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     expect(result).not.toBeNull();
     expect(result!.packageName).toBe("com.current.app");
     syncSpy.mockRestore();
+  });
+
+  test("retains cached hierarchy when the liveness probe fails", async () => {
+    h = createHarness();
+    h.setCached({
+      hierarchy: {
+        updatedAt: h.timer.now(),
+        packageName: "com.test.app",
+      } as AccessibilityHierarchy,
+      receivedAt: h.timer.now(),
+      fresh: true,
+    });
+    h.setProbeError(new Error("dumpsys unavailable"));
+
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+
+    expect(result!.packageName).toBe("com.test.app");
   });
 
   test("invalidates a work-profile cache when the package runs only for another user", async () => {

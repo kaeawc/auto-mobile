@@ -1031,6 +1031,30 @@ describe("finalizeToolResponse", () => {
       expect(metadata.toScreen.activeWindow.appId).toBe("com.other");
     });
 
+    test("preserves default skeleton projection when the screen changed", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const otherScreen = {
+        ...sameScreenObserve(),
+        activeWindow: { appId: "com.other", activityName: ".Other", layoutSeqSum: 2 },
+      } as ObserveResult;
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: otherScreen }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+      );
+      const observation = (finalized.structuredContent as any).observation;
+
+      expect(observation.isDiff).toBeUndefined();
+      expect(observation.skeleton).toBeDefined();
+      expect(observation.viewHierarchy).toBeUndefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
+    });
+
     test("falls back to full when an iOS screen identity changes under the same app", () => {
       const { store } = makeStore();
       const baseline = iosScreenObserve("bundle=com.apple.reminders|nav=Reminders");

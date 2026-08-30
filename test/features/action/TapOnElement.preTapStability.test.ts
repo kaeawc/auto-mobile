@@ -564,5 +564,51 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
       expect(rebuilt.totalMatches).not.toBe(stale.totalMatches);
       expect(rebuilt.bounds.top).not.toBe(stale.bounds.top);
     });
+
+    // Regression for #5897: the `execute()`-level rebuild decision that consumes
+    // the refreshed `stable.selection` is a single production line that no test
+    // exercised — deleting it left every test green. Rather than drive the full
+    // `execute` path (the repo deliberately avoids the `observedInteraction`
+    // harness), the decision is extracted into the pure
+    // `rebuildSelectedElementMetadataAfterStability` seam and pinned here.
+    describe("rebuildSelectedElementMetadataAfterStability seam (#5897)", () => {
+      test("rebuilds from the refreshed selection when it has an element", () => {
+        const { tap } = createTapOnElement();
+        const previous = (tap as any).buildSelectedElementMetadata(STALE_SELECTION);
+
+        const rebuilt = (tap as any).rebuildSelectedElementMetadataAfterStability(
+          previous,
+          FRESH_SELECTION,
+        );
+
+        // The refreshed selection's positional fields win over the stale previous.
+        expect(rebuilt.indexInMatches).toBe(3);
+        expect(rebuilt.totalMatches).toBe(4);
+        expect(rebuilt.bounds.left).toBe(FRESH_BOUNDS.left);
+        expect(rebuilt.bounds.top).toBe(FRESH_BOUNDS.top);
+        expect(rebuilt).not.toBe(previous);
+      });
+
+      test("falls back to the previous metadata when the refreshed selection has no element", () => {
+        const { tap } = createTapOnElement();
+        const previous = (tap as any).buildSelectedElementMetadata(STALE_SELECTION);
+        const emptySelection: ElementSelectionResult = {
+          element: null,
+          indexInMatches: 0,
+          totalMatches: 0,
+          strategy: "first",
+        } as unknown as ElementSelectionResult;
+
+        const rebuilt = (tap as any).rebuildSelectedElementMetadataAfterStability(
+          previous,
+          emptySelection,
+        );
+
+        // No refreshed element to describe: keep the pre-refresh metadata intact.
+        expect(rebuilt).toBe(previous);
+        expect(rebuilt.indexInMatches).toBe(STALE_SELECTION.indexInMatches);
+        expect(rebuilt.totalMatches).toBe(STALE_SELECTION.totalMatches);
+      });
+    });
   });
 });

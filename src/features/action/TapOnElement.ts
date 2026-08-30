@@ -1048,6 +1048,23 @@ export class TapOnElement extends BaseVisualChange {
     };
   }
 
+  /**
+   * Rebuild `selectedElement` metadata after the Android pre-tap-stability path
+   * re-resolved the tap target against a refreshed hierarchy (#5888). Returns the
+   * metadata rebuilt from the refreshed `selection`; when the refreshed selection
+   * carries no element (nothing new to describe), falls back to the pre-refresh
+   * `previous` metadata so the reported node still matches something real.
+   *
+   * This is the seam #5897 pins directly: the decision lived inline in `execute`
+   * as a single line that no test exercised, so a refactor could silently drop it.
+   */
+  private rebuildSelectedElementMetadataAfterStability(
+    previous: TapOnSelectedElement | undefined,
+    selection: ElementSelectionResult,
+  ): TapOnSelectedElement | undefined {
+    return this.buildSelectedElementMetadata(selection) ?? previous;
+  }
+
   private async handleElementNotFound(
     options: TapOnElementOptions,
     observeResult?: ObserveResult,
@@ -1485,8 +1502,11 @@ export class TapOnElement extends BaseVisualChange {
             // Rebuild from the refreshed selection so the reported selectedElement
             // (bounds/indexInMatches/totalMatches) describes the node actually
             // tapped after re-resolution, not the stale pre-refresh match (#5888).
-            selectedElementMetadata =
-              this.buildSelectedElementMetadata(stable.selection) ?? selectedElementMetadata;
+            // The decision lives in a pure seam so it can be unit-tested (#5897).
+            selectedElementMetadata = this.rebuildSelectedElementMetadataAfterStability(
+              selectedElementMetadata,
+              stable.selection,
+            );
           }
 
           this.logClickableParentSelection(usedParent);

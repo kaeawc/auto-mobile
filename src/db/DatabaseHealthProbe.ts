@@ -157,7 +157,7 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
       sqliteBusyTimeoutMs: this.sqliteBusyTimeoutMs,
     });
     worker.on("message", (message: ProbeWorkerMessage) => {
-      if (!this.pendingRequest || message.id !== this.workerRequestId) {
+      if (this.worker !== worker || !this.pendingRequest || message.id !== this.workerRequestId) {
         return;
       }
       const pending = this.pendingRequest;
@@ -174,23 +174,29 @@ export class DefaultDatabaseHealthProbe implements DatabaseHealthProbe {
       pending.reject(error);
     });
     worker.on("error", (error) => {
+      if (this.worker !== worker) {
+        return;
+      }
+      this.worker = null;
       if (!this.pendingRequest) {
         return;
       }
       const pending = this.pendingRequest;
       this.pendingRequest = null;
       this.timer.clearTimeout(pending.timeoutHandle);
-      this.worker = null;
       pending.reject(error);
     });
     worker.on("exit", (code) => {
-      if (code === 0 || !this.pendingRequest) {
+      if (this.worker !== worker || code === 0) {
+        return;
+      }
+      this.worker = null;
+      if (!this.pendingRequest) {
         return;
       }
       const pending = this.pendingRequest;
       this.pendingRequest = null;
       this.timer.clearTimeout(pending.timeoutHandle);
-      this.worker = null;
       pending.reject(new Error(`Database health probe worker exited with code ${code}`));
     });
     this.worker = worker;

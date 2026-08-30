@@ -165,10 +165,13 @@ export class CtrlProxyHierarchy {
       }
 
       const livenessTimeoutMs = Math.max(0, timeout - (this.context.timer.now() - startTime));
-      if (
+      const cachedPackageRunning =
         cachedHierarchy &&
-        !(await this.isCachedPackageRunning(cachedHierarchy, livenessTimeoutMs, signal))
-      ) {
+        (await this.isCachedPackageRunning(cachedHierarchy, livenessTimeoutMs, signal));
+      const currentCachedHierarchy = this.context.getCachedHierarchy();
+      if (currentCachedHierarchy !== cachedHierarchy) {
+        cachedHierarchy = currentCachedHierarchy;
+      } else if (cachedHierarchy && !cachedPackageRunning) {
         logger.warn(
           `[CTRL_PROXY] Invalidating cached hierarchy for non-running package ${cachedHierarchy.hierarchy.packageName}`,
         );

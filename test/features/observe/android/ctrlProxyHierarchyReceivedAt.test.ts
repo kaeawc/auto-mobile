@@ -29,6 +29,7 @@ interface Harness {
   timer: FakeTimer;
   setCached: (h: CachedHierarchy | null) => void;
   setPackageRunning: (running: boolean) => void;
+  setProbeGate: (gate: Promise<void>) => void;
   restore: () => void;
 }
 
@@ -36,6 +37,7 @@ function createHarness(): Harness {
   const timer = new FakeTimer();
   let cached: CachedHierarchy | null = null;
   let packageRunning = true;
+  let probeGate: Promise<void> = Promise.resolve();
 
   const context: HierarchyDelegateContext = {
     getWebSocket: () => null,
@@ -45,9 +47,10 @@ function createHarness(): Harness {
     cancelScreenshotBackoff: () => {},
     device: { deviceId: "emulator-5554", platform: "android" } as never,
     adb: {
-      executeCommand: async () => ({
-        stdout: packageRunning ? "1234\n" : "",
-      }),
+      executeCommand: async () => {
+        await probeGate;
+        return { stdout: packageRunning ? "1234\n" : "" };
+      },
     } as never,
     getCachedHierarchy: () => cached,
     setCachedHierarchy: (h) => {
@@ -81,6 +84,9 @@ function createHarness(): Harness {
     },
     setPackageRunning: (running) => {
       packageRunning = running;
+    },
+    setProbeGate: (gate) => {
+      probeGate = gate;
     },
     restore: () => {
       managerSpy.mockRestore();
@@ -168,5 +174,32 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     expect(result).not.toBeNull();
     expect(result!.packageName).toBe("com.current.app");
     syncSpy.mockRestore();
+  });
+
+  test("preserves a replacement cache entry received during the liveness probe", async () => {
+    h = createHarness();
+    h.setCached({
+      hierarchy: { packageName: "com.stale.app" } as AccessibilityHierarchy,
+      receivedAt: h.timer.now(),
+      fresh: false,
+    });
+    h.setPackageRunning(false);
+
+    let releaseProbe!: () => void;
+    h.setProbeGate(new Promise<void>((resolve) => (releaseProbe = resolve)));
+    const latestPromise = h.hierarchy.getLatestHierarchy(false, 100);
+    await Promise.resolve();
+
+    h.setCached({
+      hierarchy: { packageName: "com.current.app" } as AccessibilityHierarchy,
+      receivedAt: h.timer.now(),
+      fresh: true,
+    });
+    releaseProbe();
+
+    const result = await latestPromise;
+
+    expect(result.hierarchy?.packageName).toBe("com.current.app");
+    expect(result.fresh).toBe(true);
   });
 });

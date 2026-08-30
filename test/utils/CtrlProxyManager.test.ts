@@ -30,8 +30,9 @@ describe("CtrlProxyManager", function () {
   let originalSkipDownloadEnv: string | undefined;
   let originalSkipShaEnv: string | undefined;
   let originalLaunchCwdEnv: string | undefined;
+  let prefetchCacheDir: string;
 
-  beforeEach(function () {
+  beforeEach(async function () {
     originalApkPathEnv = process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     originalSkipChecksumEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
     originalSkipDownloadEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
@@ -58,6 +59,8 @@ describe("CtrlProxyManager", function () {
     AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting({
       hasAndroidPrerequisites: async () => true,
     });
+    prefetchCacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "ctrlproxy-cache-"));
+    AndroidCtrlProxyManager.setPrefetchCacheDirForTesting(prefetchCacheDir);
 
     accessibilityServiceClient = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdbFactory);
     accessibilityServiceClient.clearAvailabilityCache();
@@ -68,6 +71,8 @@ describe("CtrlProxyManager", function () {
     AndroidCtrlProxyManager.setAccessibilityDetectorForTesting(null);
     AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting(null);
     await AndroidCtrlProxyManager.cleanupPrefetchedApk();
+    AndroidCtrlProxyManager.setPrefetchCacheDirForTesting(null);
+    await fs.rm(prefetchCacheDir, { recursive: true, force: true });
     if (originalApkPathEnv === undefined) {
       delete process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     } else {
@@ -843,6 +848,74 @@ describe("CtrlProxyManager", function () {
         expect(retriedPath).not.toBeNull();
       } finally {
         (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
+      }
+    });
+
+    test("reuses a verified persistent cache asset across daemon lifecycles", async function () {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("");
+      const zip = new AdmZip();
+      zip.addFile(
+        "AndroidManifest.xml",
+        Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"),
+      );
+      zip.addFile("classes.dex", crypto.randomBytes(15000));
+      const payload = zip.toBuffer();
+      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
+      let downloadCalls = 0;
+
+      try {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
+          download: async (_url: string, destination: string) => {
+            downloadCalls++;
+            await fs.writeFile(destination, payload);
+          },
+        };
+
+        const firstPath = await AndroidCtrlProxyManager.prefetchApk();
+        await AndroidCtrlProxyManager.cleanupPrefetchedApk();
+        const secondPath = await AndroidCtrlProxyManager.prefetchApk();
+
+        expect(firstPath).not.toBeNull();
+        expect(secondPath).toBe(firstPath);
+        expect(downloadCalls).toBe(1);
+        expect(await fs.stat(firstPath!)).toBeDefined();
+      } finally {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
+      }
+    });
+
+    test("removes the successful prefetch staging directory after publishing the cache", async function () {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("");
+      const zip = new AdmZip();
+      zip.addFile(
+        "AndroidManifest.xml",
+        Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"),
+      );
+      zip.addFile("classes.dex", crypto.randomBytes(15000));
+      const payload = zip.toBuffer();
+      const stageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ctrlproxy-stage-root-"));
+      const stageDir = path.join(stageRoot, "auto-mobile-prefetch-stage");
+      await fs.mkdir(stageDir);
+      const mkdtempSpy = spyOn(fs, "mkdtemp").mockResolvedValue(stageDir);
+      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
+
+      try {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
+          download: async (_url: string, destination: string) => {
+            await fs.writeFile(destination, payload);
+          },
+        };
+
+        await expect(AndroidCtrlProxyManager.prefetchApk()).resolves.not.toBeNull();
+        const statError = await fs.stat(stageDir).then(
+          () => null,
+          (error: NodeJS.ErrnoException) => error,
+        );
+        expect(statError?.code).toBe("ENOENT");
+      } finally {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
+        mkdtempSpy.mockRestore();
+        await fs.rm(stageRoot, { recursive: true, force: true });
       }
     });
 
@@ -2689,6 +2762,28 @@ describe("CtrlProxyManager", function () {
       await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
 
       expect(await exists(fresh)).toBe(true);
+    });
+
+    test("preserves an old active prefetch directory", async function () {
+      const active = await makeAgedDir("auto-mobile-prefetch-active01", 2 * HOUR_MS);
+      await fs.writeFile(path.join(active, ".active"), String(process.pid));
+      const when = new Date(NOW_MS - 2 * HOUR_MS);
+      await fs.utimes(active, when, when);
+
+      await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
+
+      expect(await exists(active)).toBe(true);
+    });
+
+    test("removes an old prefetch directory whose owner is gone", async function () {
+      const orphan = await makeAgedDir("auto-mobile-prefetch-orphan01", 2 * HOUR_MS);
+      await fs.writeFile(path.join(orphan, ".active"), "999999999");
+      const when = new Date(NOW_MS - 2 * HOUR_MS);
+      await fs.utimes(orphan, when, when);
+
+      await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(scratchRoot, sweepTimer);
+
+      expect(await exists(orphan)).toBe(false);
     });
 
     test("preserves sibling caches and the installed package even when old", async function () {

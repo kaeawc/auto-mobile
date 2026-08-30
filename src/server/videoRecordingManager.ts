@@ -971,7 +971,22 @@ export async function rollbackVideoRecordingStart(recordingId: string): Promise<
 
   const serviceOwnsRecording = videoRecorderService.listActiveRecordingIds().includes(recordingId);
   if (serviceOwnsRecording) {
-    await videoRecorderService.discardRecording(recordingId);
+    try {
+      await videoRecorderService.discardRecording(recordingId);
+    } catch (error) {
+      if (videoRecorderService.listActiveRecordingIds().includes(recordingId)) {
+        throw error;
+      }
+      // The backend stopped, but artifact removal failed. Retain its durable
+      // row for recovery while disarming timers that no longer own a capture.
+      clearAutoStop(recordingId);
+      clearInProgressSizeCap(recordingId);
+      const record = await recordingRepository.getRecording(recordingId);
+      if (record?.status === "recording") {
+        await interruptVideoRecording(recordingId);
+      }
+      throw error;
+    }
   }
 
   // The capture is no longer live once discard succeeds. Keep its safety timers

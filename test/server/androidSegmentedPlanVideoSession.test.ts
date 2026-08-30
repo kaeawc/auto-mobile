@@ -303,6 +303,111 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test("retains ownership until a failed final stop is retried or aborted", async () => {
+    const timer = new FakeTimer();
+    const rolledBack: string[] = [];
+    let finalized = 0;
+    let stopAttempts = 0;
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "vid",
+      timer,
+      startVideoRecording: async () => makeActiveRecording("id-vid", "/tmp/id-vid.mp4"),
+      stopVideoRecording: async () => {
+        stopAttempts += 1;
+        if (stopAttempts === 1) {
+          throw new Error("final stop failed");
+        }
+        return {
+          metadata: makeStopMetadata("id-vid", "/tmp/id-vid.mp4"),
+          evictedRecordingIds: [],
+        };
+      },
+      rollbackVideoRecordingStart: async (recordingId) => {
+        rolledBack.push(recordingId);
+      },
+      onFinalized: () => {
+        finalized += 1;
+      },
+    });
+
+    await session.start();
+
+    await expect(session.stop()).rejects.toThrow("final stop failed");
+    expect(finalized).toBe(0);
+
+    await session.abort();
+
+    expect(rolledBack).toEqual(["id-vid"]);
+    expect(finalized).toBe(1);
+    expect(timer.getPendingTimeoutCount()).toBe(0);
+  });
+
+  test("waits for a plan-step rotation to observe cancellation before rollback", async () => {
+    let now = 0;
+    let resolveReplacement!: () => void;
+    let replacementSignal: AbortSignal | undefined;
+    let markReplacementStarted!: () => void;
+    const replacementStarted = new Promise<void>((resolve) => {
+      markReplacementStarted = resolve;
+    });
+    const rolledBack: string[] = [];
+    let startCalls = 0;
+    const timer: Timer = {
+      now: () => now,
+      sleep: defaultTimer.sleep.bind(defaultTimer),
+      setTimeout: defaultTimer.setTimeout.bind(defaultTimer),
+      clearTimeout: defaultTimer.clearTimeout.bind(defaultTimer),
+      setInterval: defaultTimer.setInterval.bind(defaultTimer),
+      clearInterval: defaultTimer.clearInterval.bind(defaultTimer),
+    };
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "vid",
+      timer,
+      segmentRotateAfterMs: 1000,
+      startVideoRecording: async (request) => {
+        startCalls += 1;
+        if (startCalls === 1) {
+          return makeActiveRecording("id-vid", "/tmp/id-vid.mp4");
+        }
+        replacementSignal = request.abortSignal;
+        markReplacementStarted();
+        await new Promise<void>((resolve) => {
+          resolveReplacement = resolve;
+        });
+        request.abortSignal?.throwIfAborted();
+        throw new Error("replacement continued after cancellation");
+      },
+      stopVideoRecording: async () => ({
+        metadata: makeStopMetadata("id-vid", "/tmp/id-vid.mp4"),
+        evictedRecordingIds: [],
+      }),
+      rollbackVideoRecordingStart: async (recordingId) => {
+        rolledBack.push(recordingId);
+      },
+    });
+
+    await session.startFirstSegment();
+    now = 1000;
+    const rotating = session.onBeforePlanStep();
+    await replacementStarted;
+
+    let abortFinished = false;
+    const aborting = session.abort().then(() => {
+      abortFinished = true;
+    });
+    expect(replacementSignal?.aborted).toBe(true);
+    await flush();
+    expect(abortFinished).toBe(false);
+
+    resolveReplacement();
+    await rotating;
+    await aborting;
+
+    expect(rolledBack).toEqual(["id-vid"]);
+  });
+
   test("aborts a replacement segment start before waiting for rotation", async () => {
     const timer = new FakeTimer();
     const rolledBack: string[] = [];

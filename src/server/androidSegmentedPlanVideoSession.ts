@@ -14,6 +14,7 @@ import {
 } from "./videoRecordingManager";
 import type { ActiveVideoRecording } from "../features/video";
 import type { VideoRecordingConfigInput, VideoRecordingMetadata } from "../models";
+import { combineAbortSignals } from "../utils/AbortContext";
 
 export interface AndroidSegmentedPlanVideoSessionOptions {
   device: BootedDevice;
@@ -95,6 +96,9 @@ export class AndroidSegmentedPlanVideoSession {
 
   /** Cancels a replacement segment start while an abort is draining its rotation. */
   private rotationAbortController: AbortController | undefined;
+
+  /** Cancels a rotation queued after {@link abort} begins. */
+  private readonly sessionAbortController = new AbortController();
 
   private segmentIndex = 0;
 
@@ -235,6 +239,7 @@ export class AndroidSegmentedPlanVideoSession {
   async abort(): Promise<void> {
     this.timerDriven = false;
     this.clearTimers();
+    this.sessionAbortController.abort();
     this.rotationAbortController?.abort();
     await this.pendingRotation;
     const recordingIds = Array.from(
@@ -293,7 +298,9 @@ export class AndroidSegmentedPlanVideoSession {
       return;
     }
 
-    await this.rotateToNextSegment();
+    const rotation = this.rotateToNextSegment();
+    this.pendingRotation = rotation;
+    await rotation;
   };
 
   private segmentOutputName(): string {
@@ -307,7 +314,7 @@ export class AndroidSegmentedPlanVideoSession {
       outputName: this.segmentOutputName(),
       maxDurationSeconds: ANDROID_SCREENRECORD_MAX_SECONDS,
       configOverrides: this.configOverrides,
-      abortSignal,
+      abortSignal: abortSignal ?? this.sessionAbortController.signal,
     });
     this.activeRecordingId = recording.recordingId;
     this.segmentStartedAtMs = this.timer.now();
@@ -343,7 +350,9 @@ export class AndroidSegmentedPlanVideoSession {
     }
 
     try {
-      await this.startSegment(rotationAbortController.signal);
+      await this.startSegment(
+        combineAbortSignals(rotationAbortController.signal, this.sessionAbortController.signal),
+      );
     } catch (error) {
       logger.warn(
         `[SegmentedPlanVideo] Failed to start next segment after ${previousId}: ${errorMessage(error)}`,
@@ -365,6 +374,7 @@ export class AndroidSegmentedPlanVideoSession {
         const stopped = await this.stopVideoRecordingFn(id);
         this.completedRecordingIds.push(id);
         this.completedFilePaths.push(stopped.metadata.filePath);
+        this.activeRecordingId = undefined;
         logger.info(
           `[SegmentedPlanVideo] Final stop recordingId=${id} path=${stopped.metadata.filePath}`,
         );
@@ -373,8 +383,7 @@ export class AndroidSegmentedPlanVideoSession {
           `[SegmentedPlanVideo] Failed to finalize segment ${id}: ${errorMessage(error)}`,
         );
         this.pendingRollbackRecordingIds.push(id);
-      } finally {
-        this.activeRecordingId = undefined;
+        throw error;
       }
     }
 

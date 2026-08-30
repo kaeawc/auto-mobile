@@ -352,6 +352,41 @@ describe("videoRecordingManager", () => {
     expect(cleanupFailingService.listActiveRecordingIds()).toHaveLength(0);
   });
 
+  test("disarms timers and exposes a stopped recording when rollback artifact cleanup fails", async () => {
+    const cleanupError = new Error("artifact cleanup failed");
+    const cleanupFailingService = new VideoRecorderService({
+      backend: fakeBackend,
+      archiveRoot,
+      now: () => new Date(fakeTimer.now()),
+      fileSystem: {
+        rm: async () => {
+          throw cleanupError;
+        },
+      },
+    });
+    await setVideoRecordingManagerDependencies({
+      videoRecorderService: cleanupFailingService,
+      recordingRepository: fakeRepository,
+      configRepository: new FakeVideoRecordingConfigRepository(),
+      highlightClient: fakeHighlightClient,
+      timer: fakeTimer,
+      now: () => new Date(fakeTimer.now()),
+    });
+    const active = await startVideoRecording({
+      device: testDevice,
+      maxDurationSeconds: 3,
+    });
+
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+    await expect(rollbackVideoRecordingStart(active.recordingId)).rejects.toThrow(cleanupError);
+
+    expect(cleanupFailingService.listActiveRecordingIds()).toEqual([]);
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    expect(await fakeRepository.getRecording(active.recordingId)).toMatchObject({
+      status: "interrupted",
+    });
+  });
+
   test("retains durable metadata and ownership when backend discard fails", async () => {
     const active = await startVideoRecording({ device: testDevice });
     const pendingTimers = fakeTimer.getPendingTimeoutCount();

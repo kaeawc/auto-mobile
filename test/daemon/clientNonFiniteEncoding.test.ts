@@ -65,6 +65,28 @@ describe("DaemonClient encodes non-finite tool arguments on the wire", () => {
     // A finite sibling is untouched, and nothing became null.
     expect(args.ok).toBe(3);
     expect(JSON.stringify(args)).not.toContain("null");
+    // #5863: because a non-finite was actually encoded, the client stamps the
+    // transport-provenance flag so the handler knows to revive this request.
+    expect(args.__autoMobileNonFiniteEncoded).toBe(true);
+
+    await client.close();
+    await pending;
+  });
+
+  test("a request with only finite arguments carries no provenance flag", async () => {
+    const writes: string[] = [];
+    const client = createConnectedClient(fakeTimer, writes);
+
+    const pending = client.callTool("tapOn", { x: 10, y: 20 }).catch(() => {});
+
+    const frame = firstFrame(writes) as {
+      params: { arguments: Record<string, unknown> };
+    };
+    const args = frame.params.arguments;
+    expect(args.x).toBe(10);
+    expect(args.y).toBe(20);
+    // No non-finite encoded → no flag → the handler skips revival for this request.
+    expect("__autoMobileNonFiniteEncoded" in args).toBe(false);
 
     await client.close();
     await pending;

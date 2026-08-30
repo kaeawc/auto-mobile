@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ListToolsRequestSchema, CallToolRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { ActionableError } from "../models";
 import { formatToolParamError } from "./toolParamError";
-import { reviveNonFiniteNumbers } from "../utils/nonFiniteJson";
+import { reviveNonFiniteArguments } from "../utils/nonFiniteJson";
 import { logger } from "../utils/logger";
 import { defaultTimer } from "../utils/SystemTimer";
 import { executionTracker } from "./executionTracker";
@@ -11,7 +11,10 @@ import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanEx
 import { SessionToolBinding } from "./SessionToolBinding";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { TerminalSessionError } from "../daemon/sessionManager";
-import { INTERNAL_MCP_REQUEST_TIMEOUT_PARAM } from "../daemon/constants";
+import {
+  INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
+  DAEMON_NON_FINITE_ENCODED_PARAM,
+} from "../daemon/constants";
 import {
   deviceLostErrorFromAbortSignal,
   deviceLossOutcomeFromError,
@@ -172,7 +175,8 @@ function stripInternalToolParams(params: unknown): unknown {
   if (
     !(INTERNAL_MCP_SESSION_PARAM in params) &&
     !(INTERNAL_EXECUTION_ID_PARAM in params) &&
-    !(INTERNAL_EXECUTION_START_TIME_PARAM in params)
+    !(INTERNAL_EXECUTION_START_TIME_PARAM in params) &&
+    !(DAEMON_NON_FINITE_ENCODED_PARAM in params)
   ) {
     return params;
   }
@@ -182,6 +186,9 @@ function stripInternalToolParams(params: unknown): unknown {
   delete rest[INTERNAL_EXECUTION_ID_PARAM];
   delete rest[INTERNAL_EXECUTION_START_TIME_PARAM];
   delete rest[INTERNAL_MCP_REQUEST_TIMEOUT_PARAM];
+  // Safety net: revival already strips this transport-provenance flag (#5863), but
+  // guard the tool boundary against any future path that sets it without reviving.
+  delete rest[DAEMON_NON_FINITE_ENCODED_PARAM];
   return rest;
 }
 
@@ -455,8 +462,11 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // survive the socket + loopback-HTTP hops (#5854 §2). Done BEFORE logging and
     // validation so the request trace shows the real Infinity/-Infinity/NaN
     // instead of `null`, and the schema rejects it with "must be a finite number".
+    // Scoped by transport provenance (#5863): revival runs only for requests the
+    // daemon client actually sentinel-encoded (flagged inside `arguments`); direct
+    // in-memory / stdio clients are left untouched. The flag is stripped here.
     if (request.params && request.params.arguments) {
-      request.params.arguments = reviveNonFiniteNumbers(request.params.arguments) as Record<
+      request.params.arguments = reviveNonFiniteArguments(request.params.arguments) as Record<
         string,
         unknown
       >;

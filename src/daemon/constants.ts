@@ -192,6 +192,17 @@ export const DAEMON_BOUND_SESSION_PARAM = "__autoMobileBoundSessionUuid";
 /** Socket RPC field identifying a released session used only for inactive resource reads. */
 export const DAEMON_RELEASED_SESSION_PARAM = "__autoMobileReleasedSessionUuid";
 
+/**
+ * Transport-provenance flag the daemon client sets inside a tool call's
+ * `arguments` when — and only when — it transformed the payload on the wire
+ * (#5863): either sentinel-encoded a non-finite argument, or escaped a real object
+ * that collides with the sentinel shape. Both must be reversed by the receiver, so
+ * the MCP CallTool handler revives only requests carrying this flag; direct
+ * in-memory / stdio clients (whose requests were never encoded) skip the revival
+ * walk entirely. It is stripped before the tool runs (see `stripInternalToolParams`).
+ */
+export const DAEMON_NON_FINITE_ENCODED_PARAM = "__autoMobileNonFiniteEncoded";
+
 /** Loopback-only header for a released session's inactive resource-read capability. */
 export const DAEMON_RELEASED_SESSION_HEADER = "x-auto-mobile-released-session-uuid";
 

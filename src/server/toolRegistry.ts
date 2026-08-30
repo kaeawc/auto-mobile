@@ -501,18 +501,22 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // (now optional) with both platforms connected falls through to
       // ensureDeviceReady("either", undefined) and hits an ambiguity error.
       const directSession = resolveDirectSessionDevice(sessionUuid);
-      if (directSession) {
-        if (!providedDeviceId) {
-          providedDeviceId = directSession.device.deviceId;
-          logger.info(
-            `[ToolRegistry] Resolved device from direct session ${sessionUuid}: ${providedDeviceId}`,
-          );
-        }
+      if (!directSession) {
+        logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);
+      } else if (!providedDeviceId) {
+        providedDeviceId = directSession.device.deviceId;
+        logger.info(
+          `[ToolRegistry] Resolved device from direct session ${sessionUuid}: ${providedDeviceId}`,
+        );
+        // Adopt the session's platform only when we also adopted its device. An
+        // explicitly-provided deviceId names the target unambiguously, so leave
+        // platform as "either" and let ensureDeviceReady infer it from the id —
+        // narrowing to the session's platform here would send an explicit
+        // cross-platform deviceId to the wrong platform's search and fail
+        // (mirrors the #5870 deviceId-resolves-platform rule).
         if (platform === "either") {
           platform = directSession.device.platform;
         }
-      } else {
-        logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);
       }
     } else if (sessionUuid) {
       logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);

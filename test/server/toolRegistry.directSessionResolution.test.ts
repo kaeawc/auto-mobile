@@ -88,7 +88,12 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
     expect(fakeDeviceSessionManager.getLastEnsureDeviceReadyPlatform()).toBe("ios");
   });
 
-  test("does not override an explicitly provided deviceId", async () => {
+  test("does not override an explicitly provided cross-platform deviceId, and leaves platform for the id to resolve", async () => {
+    // Session is Android-bound, but the caller explicitly targets the iOS device
+    // and omits platform. The explicit id must win, and platform must stay
+    // "either" so the production ensureDeviceReady resolves the platform FROM the
+    // id — narrowing to the session's "android" here would search only Android
+    // devices and reject the iOS id (Codex #5906 P2).
     fakeDeviceSessionManager.setConnectedDevices([android, ios]);
     registerDirectSessionDevice("session-abc", android);
     const tool = registerTool();
@@ -97,6 +102,7 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
     expect(response).toEqual({ success: true });
 
     expect(fakeDeviceSessionManager.getLastEnsureDeviceReadyDeviceId()).toBe(ios.deviceId);
+    expect(fakeDeviceSessionManager.getLastEnsureDeviceReadyPlatform()).toBe("either");
   });
 
   test("falls through unchanged when the sessionUuid has no direct-session device", async () => {

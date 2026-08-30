@@ -133,9 +133,11 @@ describe("Simctl", function () {
       };
       simctl = new Simctl(null, mockExecAsync, timer);
 
-      const availability = simctl.isAvailable();
+      const caller = new AbortController();
+      const availability = simctl.isAvailable({ timeoutMs: 123, signal: caller.signal });
       expect(probeSignal?.aborted).toBe(false);
-      timer.advanceTime(10_000);
+      expect(timer.getPendingTimeouts()).toEqual([123]);
+      timer.advanceTime(123);
 
       await expect(availability).resolves.toBe(false);
       expect(probeSignal?.aborted).toBe(true);

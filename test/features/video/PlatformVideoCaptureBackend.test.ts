@@ -107,6 +107,34 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
     ).rejects.toThrow(/FfmpegVideoProcessingBackend/);
   });
 
+  test("passes startup cancellation through Android adb path resolution and spawn", async () => {
+    const fakeFactory = new FakeAdbClientFactory();
+    const backend = new PlatformVideoCaptureBackend(fakeFactory);
+    const controller = new AbortController();
+
+    await backend.start({
+      recordingId: "recording",
+      outputDirectory: tempDir,
+      outputPath: path.join(tempDir, "video.mp4"),
+      fileName: "video.mp4",
+      startedAt: new Date().toISOString(),
+      qualityPreset: "low",
+      targetBitrateKbps: 1000,
+      maxThroughputMbps: 5,
+      fps: 15,
+      maxArchiveSizeMb: 2048,
+      format: "mp4",
+      device: {
+        platform: "android",
+        deviceId: "android-emulator",
+        name: "Android Emulator",
+      },
+      abortSignal: controller.signal,
+    });
+
+    expect(fakeFactory.getFakeClient().getSpawnOptions()[0]?.signal).toBe(controller.signal);
+  });
+
   describe("Stop Operation", () => {
     test("rejects stop when backend handle is missing", async () => {
       const invalidHandle: RecordingHandle = {
@@ -135,6 +163,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
     function buildAndroidStopHandle(
       outputPath: string,
       fakeProcess: FakeChildProcess,
+      exitPromise: Promise<void> = Promise.resolve(),
     ): RecordingHandle {
       const androidHandle = {
         kind: "android" as const,
@@ -145,7 +174,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
           signal: fakeProcess.signalCode,
           endedAt: new Date().toISOString(),
         },
-        exitPromise: Promise.resolve(),
+        exitPromise,
         stderr: [] as string[],
         device: {
           platform: "android",
@@ -185,7 +214,23 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       expect(fakeFactory.getFakeClient().wasCommandExecuted("shell pkill -9 screenrecord")).toBe(
         true,
       );
+      expect(
+        fakeFactory.getFakeClient().wasCommandExecuted("shell rm -f /sdcard/auto-mobile-test.mp4"),
+      ).toBe(true);
       expect(signals).toContain("SIGKILL");
+    });
+
+    test("forceStop surfaces device temp-file cleanup failures", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      fakeFactory
+        .getFakeClient()
+        .setCommandError("shell rm -f /sdcard/auto-mobile-test.mp4", new Error("device offline"));
+      const fakeProcess = new FakeChildProcess();
+      const backend = new PlatformVideoCaptureBackend(fakeFactory);
+
+      await expect(
+        backend.forceStop(buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess)),
+      ).rejects.toThrow("device temp-file cleanup failed: device offline");
     });
 
     test("forceStop kills host adb before a stalled device command can consume shutdown time", async () => {
@@ -208,10 +253,20 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       const fakeFactory = new FakeAdbClientFactory();
       const fakeProcess = new FakeChildProcess();
       fakeProcess.killed = true;
-      const backend = new PlatformVideoCaptureBackend(fakeFactory);
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
       const signals = spyOnKill(fakeProcess);
 
-      await backend.forceStop(buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess));
+      await expect(
+        backend.forceStop(
+          buildAndroidStopHandle(
+            path.join(tempDir, "out.mp4"),
+            fakeProcess,
+            new Promise<void>(() => {}),
+          ),
+        ),
+      ).rejects.toThrow("host adb process cleanup failed");
 
       expect(signals).toContain("SIGKILL");
     });

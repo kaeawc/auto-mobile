@@ -8,8 +8,10 @@ import { logger } from "../../utils/logger";
 import {
   createExitTracker,
   getFileSize,
+  PROCESS_EXIT_TIMEOUT_MS,
   type ProcessExitState,
   type TrackedChildProcess,
+  waitForExit,
 } from "../../utils/ChildProcessTracker";
 import type {
   RecordingHandle,
@@ -228,17 +230,42 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       throw new Error("Missing backend handle for video recording.");
     }
 
-    if (backendHandle.process.exitCode === null) {
-      backendHandle.process.kill("SIGKILL");
-    }
+    const hostReapOutcome = waitForExit(backendHandle.process, backendHandle.exitPromise, {
+      timeoutMs: 0,
+      forceKillTimeoutMs: PROCESS_EXIT_TIMEOUT_MS,
+      signal: "SIGKILL",
+      timer: this.timer,
+    }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
 
     // Do not wait for a potentially wedged device command before killing the
     // directly owned adb process. Shutdown has a short outer deadline.
     const adb = this.adbFactory.create(backendHandle.device);
+    const failures: string[] = [];
     try {
       await adb.executeCommand("shell pkill -9 screenrecord", 8000);
     } catch (error) {
       logger.warn(`[VideoCapture] Device-side force-stop failed: ${error}`);
+      failures.push(`screenrecord force-stop failed: ${errorMessage(error)}`);
+    }
+    try {
+      await adb.execute(["shell", "rm", "-f", backendHandle.deviceTempPath], {
+        timeoutMs: 8000,
+      });
+    } catch (error) {
+      logger.warn(`[VideoCapture] Device temp-file cleanup failed: ${error}`);
+      failures.push(`device temp-file cleanup failed: ${errorMessage(error)}`);
+    }
+    const hostReapError = await hostReapOutcome;
+    if (hostReapError) {
+      failures.push(`host adb process cleanup failed: ${errorMessage(hostReapError)}`);
+    }
+    if (failures.length > 0) {
+      throw new ActionableError(
+        `Failed to fully discard Android recording ${handle.recordingId}: ${failures.join("; ")}`,
+      );
     }
   }
 
@@ -286,7 +313,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       `[VideoCapture] Bitrate: ${bitrateKbps}kbps (${bitrateBps}bps), Time limit: ${timeLimitSeconds}s`,
     );
 
-    const process = await adb.spawn(args);
+    const process = await adb.spawn(args, { signal: config.abortSignal });
 
     const stderr: string[] = [];
     const { exitState, exitPromise } = createExitTracker(process, stderr);

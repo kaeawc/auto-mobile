@@ -67,6 +67,25 @@ describe("ChildProcessTracker", () => {
       expect(exitState.exitCode).toBe(0);
       expect(exitState.signal).toBeNull();
     });
+
+    test("keeps tracking an aborted spawned child until its exit event", async () => {
+      const process = new EventEmitter() as TrackedChildProcess;
+      process.pid = 123;
+      process.exitCode = null;
+      process.signalCode = null;
+      process.killed = true;
+      process.stderr = null;
+      process.kill = () => true;
+
+      const { exitState, exitPromise } = createExitTracker(process, []);
+      const abortError = new Error("The operation was aborted");
+      abortError.name = "AbortError";
+      process.emit("error", abortError);
+      process.emit("exit", null, "SIGTERM");
+
+      await expect(exitPromise).resolves.toBeUndefined();
+      expect(exitState.signal).toBe("SIGTERM");
+    });
   });
 
   describe("waitForExit", () => {
@@ -134,10 +153,11 @@ describe("ChildProcessTracker", () => {
 
       // Regression (#3617): the timer must be cleared despite the reject path...
       expect(timer.getPendingTimeoutCount()).toBe(0);
+      expect(process.signals).toEqual(["SIGINT", "SIGKILL"]);
 
       // ...so advancing past the timeout fires no stray SIGKILL.
       timer.advanceTime(5000);
-      expect(process.signals).toEqual(["SIGINT"]);
+      expect(process.signals).toEqual(["SIGINT", "SIGKILL"]);
     });
   });
 
@@ -181,6 +201,15 @@ describe("ChildProcessTracker", () => {
   });
 
   describe("waitForSpawn", () => {
+    test("resolves when the child already has a pid before listeners attach", async () => {
+      const process = new EventEmitter() as EventEmitter & { pid?: number };
+      process.pid = 123;
+
+      await expect(waitForSpawn(process)).resolves.toBeUndefined();
+      expect(process.listenerCount("spawn")).toBe(0);
+      expect(process.listenerCount("error")).toBe(0);
+    });
+
     test("resolves when the process emits spawn", async () => {
       const process = new EventEmitter();
       const spawnPromise = waitForSpawn(process);
@@ -224,6 +253,31 @@ describe("ChildProcessTracker", () => {
       expect(stderr).toEqual(["boom ", "second"]);
     });
 
+    test("keeps collecting stderr after exit until the child close event", async () => {
+      const process = new EventEmitter() as TrackedChildProcess;
+      process.exitCode = null;
+      process.signalCode = null;
+      process.killed = false;
+      const stderrEmitter = new EventEmitter();
+      process.stderr = stderrEmitter as unknown as TrackedChildProcess["stderr"];
+      process.kill = () => true;
+
+      const stderr: string[] = [];
+      const { exitPromise } = createExitTracker(process, stderr);
+
+      process.emit("exit", 1, null);
+      await exitPromise;
+      stderrEmitter.emit("data", "late diagnostic");
+
+      expect(stderr).toEqual(["late diagnostic"]);
+      expect(stderrEmitter.listenerCount("data")).toBe(1);
+
+      process.emit("close");
+      stderrEmitter.emit("data", "discarded after close");
+      expect(stderr).toEqual(["late diagnostic"]);
+      expect(stderrEmitter.listenerCount("data")).toBe(0);
+    });
+
     test("attributes the terminating signal when the process has already exited", async () => {
       const process = new EventEmitter() as TrackedChildProcess;
       process.exitCode = 137;
@@ -243,17 +297,45 @@ describe("ChildProcessTracker", () => {
   });
 
   describe("waitForExit killed-but-unreaped guard", () => {
-    test("does not re-signal a process that was already killed but not yet reaped", async () => {
+    test("escalates an already-killed process that remains unreaped", async () => {
       const timer = new FakeTimer();
-      const process = new FakeStoppableProcess();
+      const process = new FakeStoppableProcess("SIGKILL");
       process.killed = true;
       process.exitCode = null;
 
-      // A second stop on an already-killed process must await the existing exit,
-      // not send another signal that would truncate the iOS simctl moov atom.
-      await waitForExit(process, Promise.resolve(), { timer });
+      const wait = waitForExit(process, createExitPromise(process), {
+        timeoutMs: 123,
+        timer,
+      });
 
       expect(process.signals).toEqual([]);
+      expect(timer.getPendingTimeouts()).toEqual([123]);
+
+      timer.advanceTime(123);
+      await wait;
+
+      expect(process.signals).toEqual(["SIGKILL"]);
+      expect(timer.getPendingTimeoutCount()).toBe(0);
+    });
+
+    test("bounds the final reap when SIGKILL does not terminate the process", async () => {
+      const timer = new FakeTimer();
+      const process = new FakeStoppableProcess();
+      const wait = waitForExit(process, createExitPromise(process), {
+        timeoutMs: 100,
+        forceKillTimeoutMs: 50,
+        timer,
+      });
+
+      timer.advanceTime(100);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(process.signals).toEqual(["SIGINT", "SIGKILL"]);
+      expect(timer.getPendingTimeouts()).toEqual([50]);
+
+      timer.advanceTime(50);
+      await expect(wait).rejects.toThrow("did not exit");
       expect(timer.getPendingTimeoutCount()).toBe(0);
     });
   });

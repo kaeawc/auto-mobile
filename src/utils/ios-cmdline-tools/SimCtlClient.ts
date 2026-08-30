@@ -113,7 +113,7 @@ export interface SimCtl {
    * Check if simctl is available
    * @returns Promise with boolean indicating availability
    */
-  isAvailable(): Promise<boolean>;
+  isAvailable(options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<boolean>;
 
   /**
    * Check if a simulator is running by name
@@ -741,14 +741,20 @@ export class SimCtlClient implements SimCtl {
    * Check if simctl is available
    * @returns Promise with boolean indicating availability
    */
-  async isAvailable(): Promise<boolean> {
-    return this.isLocalSimctlAvailable();
+  async isAvailable(options?: { timeoutMs?: number; signal?: AbortSignal }): Promise<boolean> {
+    return this.isLocalSimctlAvailable(options);
   }
 
-  private async isLocalSimctlAvailable(): Promise<boolean> {
+  private async isLocalSimctlAvailable(options?: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  }): Promise<boolean> {
     const controller = new AbortController();
     let timeoutId: NodeJS.Timeout | undefined;
-    const probe = this.execAsync("xcrun", ["--find", "simctl"], undefined, controller.signal);
+    const signal = options?.signal
+      ? AbortSignal.any([options.signal, controller.signal])
+      : controller.signal;
+    const probe = this.execAsync("xcrun", ["--find", "simctl"], undefined, signal);
     probe.catch(() => {
       // The race below owns the result; this also handles an abort after it wins.
     });
@@ -756,7 +762,7 @@ export class SimCtlClient implements SimCtl {
       timeoutId = this.timer.setTimeout(() => {
         controller.abort();
         resolve(false);
-      }, SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS);
+      }, options?.timeoutMs ?? SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS);
     });
 
     try {

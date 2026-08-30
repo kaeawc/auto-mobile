@@ -60,6 +60,21 @@ export interface RecordingHandle {
   backendHandle?: unknown;
 }
 
+/**
+ * A backend rejected startup but still owns a process that cleanup could not
+ * reap. Retaining this handle lets shutdown or rollback retry force-stop.
+ */
+export class VideoCaptureStartCleanupError extends Error {
+  constructor(
+    message: string,
+    readonly handle: RecordingHandle,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "VideoCaptureStartCleanupError";
+  }
+}
+
 export interface RecordingResult {
   recordingId: string;
   outputPath: string;
@@ -196,17 +211,35 @@ export class VideoRecorderService {
     const fileName = buildRecordingFileName(nameSlug, startedAt, config.format);
     const outputPath = path.join(recordingDir, fileName);
 
-    const handle = await this.backend.start({
-      recordingId,
-      outputDirectory: recordingDir,
-      outputPath,
-      fileName,
-      startedAt,
-      device: options.device,
-      maxDurationSeconds: options.maxDurationSeconds,
-      abortSignal: options.abortSignal,
-      ...config,
-    });
+    let handle: RecordingHandle;
+    try {
+      handle = await this.backend.start({
+        recordingId,
+        outputDirectory: recordingDir,
+        outputPath,
+        fileName,
+        startedAt,
+        device: options.device,
+        maxDurationSeconds: options.maxDurationSeconds,
+        abortSignal: options.abortSignal,
+        ...config,
+      });
+    } catch (error) {
+      if (error instanceof VideoCaptureStartCleanupError) {
+        const retainedOutputPath = error.handle.outputPath || outputPath;
+        this.activeRecordings.set(recordingId, {
+          recordingId,
+          outputPath: retainedOutputPath,
+          fileName: path.basename(retainedOutputPath),
+          startedAt: error.handle.startedAt || startedAt,
+          config,
+          outputName: options.outputName,
+          handle: error.handle,
+          forceStopRequested: false,
+        });
+      }
+      throw error;
+    }
 
     const resolvedOutputPath = handle.outputPath || outputPath;
     const resolvedFileName = path.basename(resolvedOutputPath);

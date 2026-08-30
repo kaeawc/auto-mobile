@@ -55,6 +55,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
   private deviceTimestampMs: number | null = null;
   private deviceTimestampSource: DeviceTimestampSource = "device-ms";
   private spawnCalls: string[][] = [];
+  private spawnOptions: Array<AdbSpawnOptions | undefined> = [];
   private spawnBehaviors: SpawnBehavior[] = [];
 
   /**
@@ -134,8 +135,9 @@ export class FakeAdbClient implements FakeAdbClientContract {
    * a clean exit code 0). The exit/error event fires after the caller attaches
    * its listeners, matching the real spawn's async lifecycle.
    */
-  async spawn(args: string[], _options?: AdbSpawnOptions): Promise<AdbProcess> {
+  async spawn(args: string[], options?: AdbSpawnOptions): Promise<AdbProcess> {
     this.spawnCalls.push([...args]);
+    this.spawnOptions.push(options);
     const proc = new FakeAdbProcess();
     const joined = args.join(" ");
     const behavior = this.spawnBehaviors.find((b) => joined.includes(b.match));
@@ -169,6 +171,10 @@ export class FakeAdbClient implements FakeAdbClientContract {
   /** All recorded spawn argv arrays, in order. */
   getSpawnCalls(): string[][] {
     return this.spawnCalls.map((call) => [...call]);
+  }
+
+  getSpawnOptions(): Array<AdbSpawnOptions | undefined> {
+    return [...this.spawnOptions];
   }
 
   /** True if any spawned command's argv contained `match`. */

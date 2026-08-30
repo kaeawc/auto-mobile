@@ -1234,10 +1234,26 @@ export class DaemonMcpProxy {
     // the "do not replace a live daemon's socket" contract are preserved. A
     // genuinely wedged daemon that never publishes still fails promptly at the
     // deadline with an actionable error.
-    const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
+    //
+    // This wait is nested inside a `tools/list` request that clients cut off at
+    // ~30s (DAEMON_STARTUP_TIMEOUT_MS); if the error it can throw is produced only
+    // as that deadline expires, the client sees an AutoMobile server with zero
+    // tools and no error text (issue #5878, residual of #5871/#5874). So keep the
+    // full startup budget while a live process is actively bringing the daemon up
+    // — a legitimate concurrent cold start writes its early-owner PID (making
+    // status.running true) seconds before it publishes the socket, and abandoning
+    // it early would reject a start that was about to succeed — but exit the moment
+    // no live startup-lock holder remains. A genuinely wedged or orphaned daemon
+    // (early-owner record present, socket unreachable, no live holder finishing the
+    // start) is then reported now instead of at the client's deadline, while the
+    // concurrent-cold-start case keeps the budget it needs.
+    const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS, undefined, () =>
+      this.daemonManager.isStartupLockHeldByLiveProcess(),
+    );
     if (!ready) {
       throw new DaemonUnavailableError(
-        `Daemon failed to start within ${DAEMON_STARTUP_TIMEOUT_MS}ms`,
+        `Daemon reported running but its socket did not become reachable, and no live ` +
+          `process is completing its startup`,
       );
     }
     logger.info("[DaemonMcpProxy] Daemon reported running; socket became ready");

@@ -21,6 +21,7 @@ export class FakeDaemonManager implements DaemonManagerLike {
   restartOptions: DaemonOptions | undefined;
   waitForReadyResult = true;
   waitForReadyCallCount = 0;
+  startupLockHeldByLiveProcess = false;
 
   async status(): Promise<DaemonStatus> {
     const nextStatus = this.statusResults.shift();
@@ -45,5 +46,9 @@ export class FakeDaemonManager implements DaemonManagerLike {
   async waitForReady(_timeout: number): Promise<boolean> {
     this.waitForReadyCallCount++;
     return this.waitForReadyResult;
+  }
+
+  isStartupLockHeldByLiveProcess(): boolean {
+    return this.startupLockHeldByLiveProcess;
   }
 }

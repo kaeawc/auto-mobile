@@ -16,6 +16,7 @@ import {
   DAEMON_VERSION_RESTART_COOLDOWN_MS,
   DAEMON_BOUND_SESSION_REPLAY_TTL_MS,
   DAEMON_TOOL_SELECTION_PROFILE_PARAM,
+  DAEMON_STARTUP_TIMEOUT_MS,
 } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
 import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
@@ -477,12 +478,20 @@ describe("DaemonMcpProxy", () => {
         socketPublished = false;
         waitForReadyCalls = 0;
         publishOnWaitForReady = true;
+        lastWaitForReadyTimeout: number | undefined;
+        lastShouldContinueWaiting: (() => boolean) | undefined;
 
-        override async waitForReady(_timeout: number): Promise<boolean> {
+        override async waitForReady(
+          timeout: number,
+          _signal?: AbortSignal,
+          shouldContinueWaiting?: () => boolean,
+        ): Promise<boolean> {
           this.waitForReadyCalls++;
+          this.lastWaitForReadyTimeout = timeout;
+          this.lastShouldContinueWaiting = shouldContinueWaiting;
           if (this.publishOnWaitForReady) {
-            // Model the bounded readiness path observing the socket become
-            // connectable once the starting daemon finishes publishing it.
+            // Model the readiness path observing the socket become connectable once
+            // the starting daemon finishes publishing it.
             this.socketPublished = true;
             return true;
           }
@@ -569,11 +578,57 @@ describe("DaemonMcpProxy", () => {
         });
 
         try {
-          await expect(proxy.listTools()).rejects.toThrow(/failed to start within \d+ms/);
+          // The unreachable-running-daemon branch surfaces an actionable error
+          // rather than the client seeing zero tools with no text (issue #5878).
+          await expect(proxy.listTools()).rejects.toThrow(
+            /socket did not become reachable, and no live process is completing its startup/,
+          );
           // The readiness deadline gates the connect: the client is never asked to
           // connect against a socket that was never published.
           expect(fakeManager.waitForReadyCalls).toBeGreaterThanOrEqual(1);
           expect(client.connectCallCount).toBe(0);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("keeps the full startup budget and exits on holder liveness rather than a shorter bound (#5878)", async () => {
+        const fakeManager = new StartingDaemonManager();
+        fakeManager.publishOnWaitForReady = false;
+        fakeManager.startupLockHeldByLiveProcess = true;
+        fakeManager.statusResult = {
+          running: true,
+          pid: 1234,
+          port: 3000,
+          socketPath: "/tmp/test.sock",
+          version: DAEMON_VERSION,
+        };
+        const client = new SocketGatedClient(fakeManager);
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
+
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => client,
+          daemonManager: fakeManager,
+          autoStartDaemon: true,
+        });
+
+        try {
+          await expect(proxy.listTools()).rejects.toThrow(
+            /socket did not become reachable, and no live process is completing its startup/,
+          );
+          // A concurrent cold start writes its early-owner PID (status.running) well
+          // before it publishes the socket, so this wait must keep the FULL startup
+          // budget — not a shorter bound that would reject a start about to succeed —
+          // and instead exit early via the startup-lock liveness predicate (#5878).
+          expect(fakeManager.lastWaitForReadyTimeout).toBe(DAEMON_STARTUP_TIMEOUT_MS);
+          expect(fakeManager.lastShouldContinueWaiting).toBeDefined();
+          // The predicate delegates to the manager's live-holder check: flipping the
+          // manager flips what the predicate reports.
+          fakeManager.startupLockHeldByLiveProcess = true;
+          expect(fakeManager.lastShouldContinueWaiting?.()).toBe(true);
+          fakeManager.startupLockHeldByLiveProcess = false;
+          expect(fakeManager.lastShouldContinueWaiting?.()).toBe(false);
         } finally {
           isAvailableSpy.mockRestore();
           await proxy.close();

@@ -95,6 +95,9 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       async waitForReady() {
         return tracker.waitForReadyResult;
       },
+      isStartupLockHeldByLiveProcess() {
+        return false;
+      },
     };
     return tracker;
   }

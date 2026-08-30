@@ -29,6 +29,7 @@ import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import { DeviceSessionRegistry } from "../../src/daemon/deviceSessionRegistry";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { formatLockContent } from "../../src/utils/fileLock";
 import {
   DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS,
   DAEMON_STARTUP_TIMEOUT_MS,
@@ -980,6 +981,611 @@ describe("Daemon manager process detection", () => {
       expect(elapsed).toBeLessThan(DAEMON_STARTUP_TIMEOUT_MS);
     } finally {
       killSpy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("double lock-contention delivers its failure fast when the startup-lock holder is dead, not at the full startup timeout (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-lock-contention-dead-holder-"));
+    const lockPath = join(dir, "daemon.lock");
+    const holderPid = 55555;
+    // Another process holds the startup lock but its PID is no longer alive — a
+    // crashed cold-start holder. The lock file was never released.
+    writeFileSync(lockPath, formatLockContent(holderPid));
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [],
+      isProcessRunning: (pid: number) => pid !== holderPid,
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        throw new Error("should not spawn on the double-contention path");
+      },
+    };
+
+    // Perpetual lock contention: this process can never acquire the lock, so
+    // start() runs both wait-for-holder paths and then throws the lock-holder
+    // startup failure. Before #5878 each wait consumed the full 30s budget, so the
+    // error arrived at ~60s — long past the client's ~30s tools/list deadline.
+    class ContentionDaemonManager extends DaemonManager {
+      override acquireLock(): boolean {
+        return false;
+      }
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+    }
+
+    try {
+      const manager = new ContentionDaemonManager(
+        () => ({
+          async connect() {
+            throw new Error("connection refused");
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        lockPath,
+        join(dir, "daemon.pid"),
+        join(dir, "daemon.sock"),
+        processFinder,
+        processSpawner,
+      );
+
+      const startedAt = fakeTimer.now();
+      const error = await manager.start().then(
+        () => {
+          throw new Error("expected start to reject");
+        },
+        (rejection: unknown) => rejection as Error,
+      );
+      const elapsed = fakeTimer.now() - startedAt;
+
+      expect(error.message).toContain(
+        "Another process is starting the daemon but it failed to become ready",
+      );
+      // A dead holder is detected on the first poll, so both waits bail out well
+      // under the reachability budget — and nowhere near the full startup timeout
+      // the pre-#5878 code would have burned twice over.
+      expect(elapsed).toBeLessThanOrEqual(DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS);
+      expect(elapsed).toBeLessThan(DAEMON_STARTUP_TIMEOUT_MS);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("keeps waiting the full startup budget while the lock holder is still alive (no premature bound) (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-lock-contention-live-holder-"));
+    const lockPath = join(dir, "daemon.lock");
+    const holderPid = 55556;
+    // The holder is alive and legitimately cold-starting the daemon (multi-simulator
+    // discovery can take longer than the reachability budget), so this process must
+    // NOT abandon the wait early.
+    writeFileSync(lockPath, formatLockContent(holderPid));
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [],
+      isProcessRunning: (pid: number) => pid === holderPid,
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        throw new Error("should not spawn while the holder is alive");
+      },
+    };
+
+    class ContentionDaemonManager extends DaemonManager {
+      override acquireLock(): boolean {
+        return false;
+      }
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+    }
+
+    try {
+      const manager = new ContentionDaemonManager(
+        () => ({
+          async connect() {
+            throw new Error("connection refused");
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        lockPath,
+        join(dir, "daemon.pid"),
+        join(dir, "daemon.sock"),
+        processFinder,
+        processSpawner,
+      );
+
+      const startedAt = fakeTimer.now();
+      await manager.start().then(
+        () => {
+          throw new Error("expected start to reject");
+        },
+        (rejection: unknown) => rejection as Error,
+      );
+      const elapsed = fakeTimer.now() - startedAt;
+
+      // A live holder keeps the FULL DAEMON_STARTUP_TIMEOUT_MS: had #5878 blindly
+      // bounded these waits to the reachability budget instead, elapsed would be a
+      // couple of reachability budgets (~20s) and this assertion would fail — the
+      // guard that a legitimate slow cold start by another process is not abandoned.
+      expect(elapsed).toBeGreaterThanOrEqual(DAEMON_STARTUP_TIMEOUT_MS);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a live holder that publishes its socket between the reachability and startup budgets still succeeds (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-lock-contention-slow-publish-"));
+    const lockPath = join(dir, "daemon.lock");
+    const socketPath = join(dir, "daemon.sock");
+    const holderPid = 55559;
+    // The holder is alive and legitimately cold-starting; its socket only becomes
+    // connectable at ~15s — past the 10s reachability budget a blind bound would
+    // have used, but well within the 30s startup budget. The liveness pivot must
+    // keep waiting and reuse the daemon rather than reject the start (#5878).
+    const publishAtMs = 15_000;
+    writeFileSync(lockPath, formatLockContent(holderPid));
+    writeFileSync(socketPath, "socket placeholder");
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [],
+      isProcessRunning: (pid: number) => pid === holderPid,
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        throw new Error("should not spawn while the holder is alive");
+      },
+    };
+
+    class ContentionDaemonManager extends DaemonManager {
+      override acquireLock(): boolean {
+        return false;
+      }
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+    }
+
+    try {
+      const manager = new ContentionDaemonManager(
+        () => ({
+          async connect() {
+            // The socket is not connectable until the holder finishes publishing it.
+            if (fakeTimer.now() < publishAtMs) {
+              throw new Error("socket not published yet");
+            }
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        lockPath,
+        join(dir, "daemon.pid"),
+        socketPath,
+        processFinder,
+        processSpawner,
+      );
+
+      const startedAt = fakeTimer.now();
+      // Resolves (reuse) rather than rejecting — the slow-but-alive cold start is
+      // not abandoned at the reachability budget.
+      await manager.start();
+      const elapsed = fakeTimer.now() - startedAt;
+
+      expect(elapsed).toBeGreaterThanOrEqual(DAEMON_EXISTING_REACHABILITY_TIMEOUT_MS);
+      expect(elapsed).toBeLessThan(DAEMON_STARTUP_TIMEOUT_MS);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a dead holder plus a stalling stale socket still abandons fast — the probe cannot absorb the full budget (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-lock-contention-stalling-socket-"));
+    const lockPath = join(dir, "daemon.lock");
+    const socketPath = join(dir, "daemon.sock");
+    const holderPid = 55557;
+    // Dead holder, but a stale socket file is present and every connect probe
+    // stalls until aborted — the case Codex flagged, where the per-poll probe was
+    // handed the full remaining budget and ran before the liveness check.
+    writeFileSync(lockPath, formatLockContent(holderPid));
+    writeFileSync(socketPath, "stale socket placeholder");
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [],
+      isProcessRunning: (pid: number) => pid !== holderPid,
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        throw new Error("should not spawn on the stalling-socket contention path");
+      },
+    };
+
+    class ContentionDaemonManager extends DaemonManager {
+      override acquireLock(): boolean {
+        return false;
+      }
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+    }
+
+    try {
+      const manager = new ContentionDaemonManager(
+        () => ({
+          async connect(_timeoutMs?: number, signal?: AbortSignal) {
+            // Never resolves; only the probe's own abort ends it — modelling a
+            // socket that accepts but never completes the handshake.
+            await new Promise<void>((_resolve, reject) => {
+              if (signal?.aborted) {
+                reject(new Error("probe aborted"));
+                return;
+              }
+              signal?.addEventListener("abort", () => reject(new Error("probe aborted")), {
+                once: true,
+              });
+            });
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        lockPath,
+        join(dir, "daemon.pid"),
+        socketPath,
+        processFinder,
+        processSpawner,
+      );
+
+      const startedAt = fakeTimer.now();
+      const error = await manager.start().then(
+        () => {
+          throw new Error("expected start to reject");
+        },
+        (rejection: unknown) => rejection as Error,
+      );
+      const elapsed = fakeTimer.now() - startedAt;
+
+      expect(error.message).toContain(
+        "Another process is starting the daemon but it failed to become ready",
+      );
+      // Each stalling probe is capped to the confirm budget (two contention waits
+      // plus the final confirm), so the failure is delivered in a few seconds —
+      // far under the full startup timeout the uncapped probe would have burned.
+      expect(elapsed).toBeLessThan(DAEMON_STARTUP_TIMEOUT_MS);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the contention path reuses a reachable daemon even when the startup-lock holder is dead (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-contention-reuse-"));
+    const lockPath = join(dir, "daemon.lock");
+    const socketPath = join(dir, "daemon.sock");
+    // Dead holder, but the daemon it started has already published a connectable
+    // socket. start() must reuse it rather than throw the lock-holder failure.
+    writeFileSync(lockPath, formatLockContent(55558));
+    writeFileSync(socketPath, "socket placeholder");
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [],
+      isProcessRunning: () => false,
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        throw new Error("should not spawn when the daemon is already reachable");
+      },
+    };
+
+    class ContentionDaemonManager extends DaemonManager {
+      override acquireLock(): boolean {
+        return false;
+      }
+      override async status(): Promise<any> {
+        return { running: true, pid: 4242 };
+      }
+    }
+
+    try {
+      const manager = new ContentionDaemonManager(
+        () => ({
+          async connect() {}, // reachable
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        lockPath,
+        join(dir, "daemon.pid"),
+        socketPath,
+        processFinder,
+        processSpawner,
+      );
+
+      // Resolves (reuse) rather than throwing the lock-holder startup failure.
+      await manager.start();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a capped confirmation probe does not unlink a live but slow daemon's socket (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-capped-probe-nondestructive-"));
+    const socketPath = join(dir, "daemon.sock");
+    // The daemon reports running and its socket exists, but the connect probe is
+    // slow to be accepted (backlog / first accept after restart). A capped probe
+    // that fails must NOT tear down this healthy socket (issue #5878).
+    writeFileSync(socketPath, "socket placeholder");
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+
+    class RunningDaemonManager extends DaemonManager {
+      override async status(): Promise<any> {
+        return { running: true, pid: 9191 };
+      }
+    }
+
+    try {
+      const manager = new RunningDaemonManager(
+        () => ({
+          async connect() {
+            // Never accepts within the probe budget — models a slow first accept.
+            throw new Error("connection refused");
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        join(dir, "daemon.lock"),
+        join(dir, "daemon.pid"),
+        socketPath,
+      );
+
+      // A liveness predicate that reports the holder gone forces the capped probe.
+      const ready = await manager.waitForReady(5000, undefined, () => false);
+
+      expect(ready).toBe(false);
+      // The healthy daemon's socket must survive the capped probe; unlinking it
+      // here is the regression this guards (a full-budget probe would still clean
+      // a genuinely stale socket).
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a replacement lock holder shares one arbitration deadline, not a fresh budget each (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-replacement-deadline-"));
+    const lockPath = join(dir, "daemon.lock");
+    const pidA = 60001;
+    const pidB = 60002;
+    // Holder A initially owns the lock; part-way through A's wait it dies and B
+    // reclaims the lock. Both are "alive" by liveness — the handoff is the lock
+    // file's PID changing.
+    writeFileSync(lockPath, formatLockContent(pidA));
+    const fakeTimer = new FakeTimer();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [],
+      isProcessRunning: (pid: number) => pid === pidA || pid === pidB,
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        throw new Error("should not spawn during the replacement-holder handoff");
+      },
+    };
+
+    class HandoffDaemonManager extends DaemonManager {
+      readonly grantedTimeouts: number[] = [];
+      override acquireLock(): boolean {
+        return false;
+      }
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+      override async waitForReady(timeout: number): Promise<boolean> {
+        this.grantedTimeouts.push(timeout);
+        // First wait: A runs part-way then dies and B reclaims the lock. Later
+        // waits consume whatever budget they were granted.
+        const consumed = this.grantedTimeouts.length === 1 ? 20_000 : timeout;
+        fakeTimer.advanceTime(consumed);
+        if (this.grantedTimeouts.length === 1) {
+          writeFileSync(lockPath, formatLockContent(pidB));
+        }
+        return false;
+      }
+    }
+
+    try {
+      const manager = new HandoffDaemonManager(
+        () => ({
+          async connect() {
+            throw new Error("connection refused");
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        lockPath,
+        join(dir, "daemon.pid"),
+        join(dir, "daemon.sock"),
+        processFinder,
+        processSpawner,
+      );
+
+      const startedAt = fakeTimer.now();
+      await manager.start().then(
+        () => {
+          throw new Error("expected start to reject");
+        },
+        (rejection: unknown) => rejection as Error,
+      );
+      const elapsed = fakeTimer.now() - startedAt;
+
+      // The replacement (B) is granted only the REMAINING time, not a fresh full
+      // budget — so the total stays within one DAEMON_STARTUP_TIMEOUT_MS and the
+      // failure is delivered before the client's ~30s deadline (#5878). A per-holder
+      // reset would grant [30000, 30000] and take ~60s.
+      expect(manager.grantedTimeouts[0]).toBe(DAEMON_STARTUP_TIMEOUT_MS);
+      expect(manager.grantedTimeouts[1]).toBeLessThan(DAEMON_STARTUP_TIMEOUT_MS);
+      expect(elapsed).toBeLessThanOrEqual(DAEMON_STARTUP_TIMEOUT_MS);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the contention loop is bounded by the arbitration deadline, not a fixed holder count (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-replacement-churn-"));
+    const lockPath = join(dir, "daemon.lock");
+    const livePids = new Set<number>([60001]);
+    writeFileSync(lockPath, formatLockContent(60001));
+    const fakeTimer = new FakeTimer();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [],
+      isProcessRunning: (pid: number) => livePids.has(pid),
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        throw new Error("should not spawn during replacement churn");
+      },
+    };
+
+    // Each wait consumes part of the budget, then the holder is replaced by a new
+    // live contender — more than three handoffs, all within one deadline.
+    class ChurnDaemonManager extends DaemonManager {
+      readonly grantedTimeouts: number[] = [];
+      override acquireLock(): boolean {
+        return false;
+      }
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+      override async waitForReady(timeout: number): Promise<boolean> {
+        this.grantedTimeouts.push(timeout);
+        fakeTimer.advanceTime(Math.min(timeout, 5000));
+        const nextPid = 60001 + this.grantedTimeouts.length;
+        livePids.add(nextPid);
+        writeFileSync(lockPath, formatLockContent(nextPid));
+        return false;
+      }
+    }
+
+    try {
+      const manager = new ChurnDaemonManager(
+        () => ({
+          async connect() {
+            throw new Error("connection refused");
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        lockPath,
+        join(dir, "daemon.pid"),
+        join(dir, "daemon.sock"),
+        processFinder,
+        processSpawner,
+      );
+
+      const startedAt = fakeTimer.now();
+      await manager.start().then(
+        () => {
+          throw new Error("expected start to reject");
+        },
+        (rejection: unknown) => rejection as Error,
+      );
+      const elapsed = fakeTimer.now() - startedAt;
+
+      // The loop waits on more than three successive live replacement holders — an
+      // earlier fixed count cap would have stopped at three and reported failure
+      // with time still on the clock (#5878) — while the shared deadline still
+      // bounds the total.
+      expect(manager.grantedTimeouts.length).toBeGreaterThan(3);
+      expect(elapsed).toBeLessThanOrEqual(DAEMON_STARTUP_TIMEOUT_MS);
+      // Each successive wait is granted only the shrinking remaining time.
+      for (let i = 1; i < manager.grantedTimeouts.length; i++) {
+        expect(manager.grantedTimeouts[i]).toBeLessThan(manager.grantedTimeouts[i - 1]);
+      }
+    } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });

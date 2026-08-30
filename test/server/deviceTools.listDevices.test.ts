@@ -183,6 +183,39 @@ describe("listDevices tool (#5870)", () => {
     expect(payload.discovery.failedPlatforms).toEqual([]);
   });
 
+  test("returns physical devices when only simulator (simctl) discovery fails (#5918)", async () => {
+    // Reciprocal mixed outcome: simctl is down but devicectl still reports a
+    // connected iPhone. The physical device must survive even though the iOS
+    // platform aggregate (which tracks the simulator source) reports failed.
+    const iphone: BootedDevice = {
+      platform: "ios",
+      name: "Jason's iPhone",
+      deviceId: "00008120-001A2D3E4F5B6A2E",
+      iosVersion: "18.0",
+    };
+    fakeDeviceUtils.setBootedDevices("ios", [ios, iphone]);
+    fakeDeviceUtils.failedSources.add("ios-simulator");
+
+    const payload = await callListDevices();
+
+    // The physical device is still returned; the simulator's is not.
+    expect(payload.devices).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ platform: "android", deviceId: "emulator-5554" }),
+        expect.objectContaining({ platform: "ios", deviceId: "00008120-001A2D3E4F5B6A2E" }),
+      ]),
+    );
+    expect(payload.devices.some((d: { deviceId: string }) => d.deviceId === ios.deviceId)).toBe(
+      false,
+    );
+
+    // Completeness reflects the incomplete simulator source.
+    expect(payload.discovery.complete).toBe(false);
+    expect(payload.discovery.failedSources).toEqual(["ios-simulator"]);
+    // The platform aggregate tracks the simulator source, so it reports failed.
+    expect(payload.discovery.failedPlatforms).toEqual(["ios"]);
+  });
+
   test("reports every source when a whole iOS platform fails (#5918)", async () => {
     fakeDeviceUtils.failedPlatforms.add("ios");
 

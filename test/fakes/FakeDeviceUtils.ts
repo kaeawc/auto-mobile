@@ -6,7 +6,11 @@ import {
   DeviceImageDiscovery,
   PlatformDeviceManager,
 } from "../../src/utils/deviceUtils";
-import { type DiscoverySource, sourcesForPlatform } from "../../src/utils/discoverySource";
+import {
+  type DiscoverySource,
+  discoverySourceFor,
+  sourcesForPlatform,
+} from "../../src/utils/discoverySource";
 
 /**
  * Fake implementation of PlatformDeviceManager for testing
@@ -192,10 +196,19 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
     const succeededSources = new Set<DiscoverySource>();
     const discoveryErrors: BootedDeviceDiscovery["discoveryErrors"] = {};
     for (const p of requested) {
+      // Delegate to getBootedDevices so operation tracking stays consistent,
+      // then assemble per source: iOS's two sources fail independently, so a
+      // failed simctl must not drop the physical devices devicectl still
+      // returns (and vice versa), matching FakeDeviceManager and production.
+      const platformDevices = await this.getBootedDevices(p);
       for (const source of sourcesForPlatform(p)) {
-        if (!this.failedPlatforms.has(p) && !this.failedSources.has(source)) {
-          succeededSources.add(source);
+        if (this.failedPlatforms.has(p) || this.failedSources.has(source)) {
+          continue;
         }
+        succeededSources.add(source);
+        devices.push(
+          ...platformDevices.filter((device) => discoverySourceFor(p, device.deviceId) === source),
+        );
       }
       // The platform aggregate mirrors production: iOS tracks the simulator
       // source, so a devicectl-only failure keeps the platform succeeded.
@@ -207,8 +220,6 @@ export class FakeDeviceUtils implements PlatformDeviceManager {
         };
         continue;
       }
-      // Delegate to getBootedDevices so operation tracking stays consistent.
-      devices.push(...(await this.getBootedDevices(p)));
       succeededPlatforms.add(p);
     }
     return {

@@ -95,6 +95,7 @@ export class DaemonClient {
   private buffer: string = "";
   private connected: boolean = false;
   private notificationHandlers: Set<(notification: DaemonNotification) => void> = new Set();
+  private connectionClosedHandlers: Set<() => void> = new Set();
   private recoveryOptions: DaemonClientRecoveryOptions;
   private readonly clientIdentity: { version: string; build: BuildIdentity } | null;
   private readonly idGenerator: IdGenerator;
@@ -338,6 +339,9 @@ export class DaemonClient {
         this.connected = false;
         this.socket = null;
         logger.info("Daemon socket connection closed");
+        for (const handler of this.connectionClosedHandlers) {
+          handler();
+        }
         // A daemon restart/crash closes the socket. Over a Unix domain socket
         // (no TCP RST) a dying daemon delivers EOF -> "close" with no "error"
         // event, so any in-flight request would otherwise hang until its request
@@ -418,6 +422,18 @@ export class DaemonClient {
     this.notificationHandlers.add(handler);
     return () => {
       this.notificationHandlers.delete(handler);
+    };
+  }
+
+  /**
+   * Register a handler for passive socket closure. Unlike request failures,
+   * EOF can arrive while no request is in flight, so callers that cache
+   * connection state must be notified separately.
+   */
+  onConnectionClosed(handler: () => void): () => void {
+    this.connectionClosedHandlers.add(handler);
+    return () => {
+      this.connectionClosedHandlers.delete(handler);
     };
   }
 
@@ -594,6 +610,7 @@ export class DaemonClient {
     }
     this.pendingRequests.clear();
     this.notificationHandlers.clear();
+    this.connectionClosedHandlers.clear();
   }
 }
 
@@ -610,6 +627,7 @@ export interface DaemonClientLike {
    */
   onNotification?(handler: (notification: DaemonNotification) => void): () => void;
   subscribeToNotifications?(): Promise<void>;
+  onConnectionClosed?(handler: () => void): () => void;
 }
 
 export type DaemonClientFactory = () => DaemonClientLike;

@@ -723,6 +723,9 @@ export class DaemonMcpProxy {
   // clientFactory may return a shared/reused client (test fakes do); without it
   // every reconnect would stack another handler on that client.
   private notificationUnsubscribe: (() => void) | null = null;
+  // A daemon can close an idle socket without any request failing. Keep the
+  // proxy's connection state synchronized with that passive transport loss.
+  private connectionClosedUnsubscribe: (() => void) | null = null;
 
   constructor(config: DaemonMcpProxyConfig = {}) {
     this.config = {
@@ -843,6 +846,7 @@ export class DaemonMcpProxy {
         this.handleDaemonNotification(notification),
       );
     }
+    this.subscribeToClientConnectionClosed(client);
     await client.connect();
     if (this.closing) {
       await client.close();
@@ -1420,6 +1424,8 @@ export class DaemonMcpProxy {
     this.client = null;
     this.notificationUnsubscribe?.();
     this.notificationUnsubscribe = null;
+    this.connectionClosedUnsubscribe?.();
+    this.connectionClosedUnsubscribe = null;
     this.invalidateCache();
 
     if (!staleClient) {
@@ -1431,6 +1437,18 @@ export class DaemonMcpProxy {
     } catch (error) {
       logger.warn(`[DaemonMcpProxy] Failed to close stale daemon client: ${error}`);
     }
+  }
+
+  private subscribeToClientConnectionClosed(client: DaemonClientLike): void {
+    if (typeof client.onConnectionClosed !== "function") {
+      return;
+    }
+    this.connectionClosedUnsubscribe?.();
+    this.connectionClosedUnsubscribe = client.onConnectionClosed(() => {
+      if (this.client === client) {
+        void this.resetConnection();
+      }
+    });
   }
 
   /**
@@ -2328,6 +2346,8 @@ export class DaemonMcpProxy {
     }
     this.notificationUnsubscribe?.();
     this.notificationUnsubscribe = null;
+    this.connectionClosedUnsubscribe?.();
+    this.connectionClosedUnsubscribe = null;
     this.connected = false;
     this.clearBoundSessionUuid();
     this.ownedDeviceSessions.clear();

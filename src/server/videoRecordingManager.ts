@@ -22,6 +22,7 @@ import { logger } from "../utils/logger";
 import { redactHomeDir } from "../utils/redactPath";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { createTimestampedId } from "../utils/IdGenerator";
+import { combineAbortSignals } from "../utils/AbortContext";
 import { ResourceRegistry } from "./resourceRegistry";
 import {
   VideoRecordingRepository,
@@ -132,6 +133,7 @@ interface StartVideoRecordingRequest {
    * do not carry a session (the recording stays legacy/unowned).
    */
   ownerSessionUuid?: string;
+  abortSignal?: AbortSignal;
 }
 
 interface StopVideoRecordingResult {
@@ -325,15 +327,20 @@ function resetVideoRecordingManagerState(): void {
   managerInitialized = false;
 }
 
-function beginVideoRecordingStart(): { abortSignal: AbortSignal; complete(): void } {
+function beginVideoRecordingStart(requestSignal?: AbortSignal): {
+  abortSignal: AbortSignal;
+  complete(): void;
+} {
+  requestSignal?.throwIfAborted();
   if (!acceptingVideoRecordingStarts) {
     throw new ActionableError("Video recording is unavailable while the daemon shuts down.");
   }
   inFlightVideoRecordingStarts++;
   const controller = new AbortController();
   inFlightVideoRecordingStartControllers.add(controller);
+  const abortSignal = combineAbortSignals(requestSignal, controller.signal)!;
   return {
-    abortSignal: controller.signal,
+    abortSignal,
     complete: () => {
       inFlightVideoRecordingStarts--;
       inFlightVideoRecordingStartControllers.delete(controller);
@@ -828,7 +835,7 @@ export async function updateVideoRecordingConfig(
 export async function startVideoRecording(
   request: StartVideoRecordingRequest,
 ): Promise<ActiveVideoRecording> {
-  const start = beginVideoRecordingStart();
+  const start = beginVideoRecordingStart(request.abortSignal);
   try {
     const deps = await getVideoRecordingDependencies();
     const { videoRecorderService, recordingRepository, timer } = deps;

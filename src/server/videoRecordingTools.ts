@@ -1,6 +1,6 @@
 import { errorMessage } from "../utils/describeUnknownError";
 import { z } from "zod/v4";
-import { ToolRegistry } from "./toolRegistry";
+import { ToolRegistry, type ProgressCallback } from "./toolRegistry";
 import {
   ActionableError,
   BootedDevice,
@@ -385,14 +385,22 @@ async function stopRecordingById(recordingId: string) {
 }
 
 export function registerVideoRecordingTools(): void {
-  const videoRecordingHandler = async (device: BootedDevice, args: VideoRecordingArgs) => {
+  const videoRecordingHandler = async (
+    device: BootedDevice,
+    args: VideoRecordingArgs,
+    _progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    signal?.throwIfAborted();
     if (args.action === "start") {
       const targetDevices = await resolveTargetDevices(device, args);
+      signal?.throwIfAborted();
       const maxDurationSeconds = args.maxDuration ?? DEFAULT_MAX_DURATION_SECONDS;
       const recordings: Array<Record<string, unknown>> = [];
       const failures: Array<Record<string, unknown>> = [];
 
       for (const target of targetDevices) {
+        signal?.throwIfAborted();
         try {
           // Android `screenrecord` is hard-capped at 180s. For longer Android
           // recordings, transparently produce ordered segments (<outputName>,
@@ -440,6 +448,7 @@ export function registerVideoRecordingTools(): void {
             maxDurationSeconds: args.maxDuration,
             highlights: args.highlights,
             ownerSessionUuid: args.sessionUuid,
+            abortSignal: signal,
           });
 
           recordings.push({
@@ -456,6 +465,7 @@ export function registerVideoRecordingTools(): void {
             },
           });
         } catch (error) {
+          signal?.throwIfAborted();
           failures.push({
             deviceId: target.deviceId,
             platform: target.platform,
@@ -602,7 +612,12 @@ export function registerVideoRecordingTools(): void {
     throw new ActionableError(`Unsupported videoRecording action: ${args.action}`);
   };
 
-  const videoRecordingNonDeviceHandler = async (args: VideoRecordingArgs) => {
+  const videoRecordingNonDeviceHandler = async (
+    args: VideoRecordingArgs,
+    _progress?: ProgressCallback,
+    signal?: AbortSignal,
+  ) => {
+    signal?.throwIfAborted();
     if (args.action === "stop" && args.recordingId) {
       return stopRecordingById(args.recordingId);
     }
@@ -620,6 +635,10 @@ export function registerVideoRecordingTools(): void {
     {
       defaultEnabled: false,
       shouldEnsureDevice: (args) => !(args.action === "stop" && args.recordingId),
+      deviceReadiness: (args) =>
+        args.action === "start" && (!args.highlights || args.highlights.length === 0)
+          ? "booted"
+          : "automationReady",
       nonDeviceHandler: videoRecordingNonDeviceHandler,
     },
   );

@@ -361,6 +361,22 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
     serverConfig.setAppearanceDefaults(originalAppearanceDefaults);
   });
 
+  test("booted readiness does not initialize iOS CtrlProxy collaborators", async () => {
+    const fakeSimctl = new FakeSimCtlClient();
+    fakeSimctl.setDeviceInfo("ios-booted-only", {
+      udid: "ios-booted-only",
+      name: "iPhone 15",
+      state: "Booted",
+      isAvailable: true,
+    });
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any);
+    const manager = DeviceSessionManager.createInstance(provider);
+
+    await expect(
+      manager.verifyIosDevice("ios-booted-only", { readiness: "booted" }),
+    ).resolves.toBeUndefined();
+  });
+
   test("push update fires clearForDevice on the injected ObserveScreenCache", async () => {
     const fakeSimctl = new FakeSimCtlClient();
     fakeSimctl.setDeviceInfo("ios-push-1", {

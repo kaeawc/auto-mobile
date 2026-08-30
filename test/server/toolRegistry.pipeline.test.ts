@@ -203,6 +203,80 @@ describe("ToolRegistry device-aware pipeline", () => {
       (AndroidCtrlProxyClient as any).getInstance = originalGetInstance;
     }
   });
+
+  test("passes argument-selected readiness and the request signal into device resolution", async () => {
+    const registry = new ToolRegistryClass();
+    const controller = new AbortController();
+    const fakeManager = new FakeDeviceSessionManager();
+    fakeManager.setConnectedDevices([device]);
+    (registry as any).deviceSessionManager = fakeManager;
+    (registry as any).toolCallRepository = {
+      async recordToolCall(): Promise<void> {},
+    };
+
+    registry.registerDeviceAware(
+      "readinessProbe",
+      "Readiness probe",
+      z.object({ quick: z.boolean() }),
+      async () => ({ success: true }),
+      {
+        deviceReadiness: (args: { quick: boolean }) => (args.quick ? "booted" : "automationReady"),
+      },
+    );
+
+    const response = await registry
+      .getTool("readinessProbe")!
+      .handler({ platform: "android", quick: true }, undefined, controller.signal);
+
+    expect(response).toEqual({ success: true });
+    expect(fakeManager.getLastOptions()?.readiness).toBe("booted");
+    expect(fakeManager.getLastOptions()?.signal).toBe(controller.signal);
+  });
+
+  test("abort during target resolution prevents the device handler from starting", async () => {
+    const registry = new ToolRegistryClass();
+    const controller = new AbortController();
+    let markResolutionStarted: (() => void) | undefined;
+    const resolutionStarted = new Promise<void>((resolve) => {
+      markResolutionStarted = resolve;
+    });
+    let releaseResolution: (() => void) | undefined;
+    const resolutionGate = new Promise<void>((resolve) => {
+      releaseResolution = resolve;
+    });
+    let handlerCalls = 0;
+
+    const fakeManager = new FakeDeviceSessionManager();
+    fakeManager.setConnectedDevices([device]);
+    fakeManager.ensureDeviceReady = async () => {
+      markResolutionStarted?.();
+      await resolutionGate;
+      return device;
+    };
+    (registry as any).deviceSessionManager = fakeManager;
+    (registry as any).toolCallRepository = {
+      async recordToolCall(): Promise<void> {},
+    };
+    registry.registerDeviceAware(
+      "abortResolutionProbe",
+      "Abort resolution probe",
+      z.object({}),
+      async () => {
+        handlerCalls++;
+        return { success: true };
+      },
+    );
+
+    const call = registry
+      .getTool("abortResolutionProbe")!
+      .handler({ platform: "android" }, undefined, controller.signal);
+    await resolutionStarted;
+    controller.abort();
+    releaseResolution?.();
+
+    await expect(call).rejects.toThrow();
+    expect(handlerCalls).toBe(0);
+  });
 });
 
 describe("DefaultAfterToolCallHandler observation artifact config path", () => {

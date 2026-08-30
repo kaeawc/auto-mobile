@@ -394,9 +394,8 @@ describe("resolveMcpRequestTimeoutMs", () => {
     expect(DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
   });
 
-  test("videoRecording has transport time for bounded iOS startup recovery", () => {
-    expect(MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS).toBe(180_000);
-    expect(MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS).toBeGreaterThan(90_000);
+  test("videoRecording preserves the compatibility floor", () => {
+    expect(MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS).toBe(90_000);
   });
 
   test("keeps transport alive beyond the startDevice tool budget", () => {

@@ -70,15 +70,14 @@ describe("#4124 ffmpeg install hoist", () => {
     expect(videoStep?.run).toContain("video-recording-start-stop-integration.sh");
   });
 
-  test("advanced iOS integrations opt in without widening the default tool surface", () => {
+  test("advanced iOS integrations reuse one stable daemon tool profile", () => {
     const videoStep = stepNamed(steps, "Run videoRecording MP4 integration test");
     const daemonStep = stepNamed(steps, "Ensure AutoMobile daemon ready (Xcode 26.5)");
     const navigationStep = stepNamed(steps, "Run iOS navigation graph Simulator workflow");
+    const enabledTools = "videoRecording,navigateTo,getNavigationGraph,explore";
 
-    expect(videoStep?.env?.AUTOMOBILE_ENABLED_TOOLS).toBe("videoRecording");
-    expect(daemonStep?.env?.AUTOMOBILE_ENABLED_TOOLS).toBe("navigateTo,getNavigationGraph,explore");
-    expect(navigationStep?.env?.AUTOMOBILE_ENABLED_TOOLS).toBe(
-      "navigateTo,getNavigationGraph,explore",
-    );
+    expect(daemonStep?.env?.AUTOMOBILE_ENABLED_TOOLS).toBe(enabledTools);
+    expect(videoStep?.env?.AUTOMOBILE_ENABLED_TOOLS).toBe(enabledTools);
+    expect(navigationStep?.env?.AUTOMOBILE_ENABLED_TOOLS).toBe(enabledTools);
   });
 });

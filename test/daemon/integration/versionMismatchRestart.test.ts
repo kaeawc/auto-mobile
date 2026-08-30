@@ -34,6 +34,8 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
     version?: string;
     startedAt?: number;
     assetVersion?: string;
+    entryScript?: string;
+    buildId?: string;
   }): void {
     const data: PidFileData = {
       pid: process.pid,
@@ -42,6 +44,8 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       startedAt: fields.startedAt ?? 1,
       version: fields.version ?? "",
       assetVersion: fields.assetVersion,
+      entryScript: fields.entryScript,
+      buildId: fields.buildId,
     };
     writeFileSync(pidFilePath, JSON.stringify(data));
   }
@@ -152,6 +156,33 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
     });
     try {
       await proxy.listTools();
+      expect(tracked.restartCalled).toBe(false);
+    } finally {
+      await proxy.close();
+    }
+  });
+
+  test("same-release build mismatch identifies both scripts and the client restart command", async () => {
+    writePidFile({
+      version: "0.0.39+gdaemon",
+      startedAt: fakeTimer.now() - Math.floor(DAEMON_VERSION_RESTART_COOLDOWN_MS / 2),
+      entryScript: "/stale/checkout/dist/index.js",
+      buildId: "daemon-build",
+    });
+    const tracked = makeTracked();
+    const fakeClient = new FakeDaemonClient();
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: tracked,
+      autoStartDaemon: true,
+      timer: fakeTimer,
+      clientVersion: "0.0.39+gclient",
+      buildIdentity: { entryScript: "/current/checkout/dist/index.js", buildId: "client-build" },
+    });
+    try {
+      await expect(proxy.listTools()).rejects.toThrow(
+        /daemon build daemon-build.*stale\/checkout.*client build client-build.*current\/checkout.*current\/checkout\/dist\/index\.js --daemon restart/,
+      );
       expect(tracked.restartCalled).toBe(false);
     } finally {
       await proxy.close();

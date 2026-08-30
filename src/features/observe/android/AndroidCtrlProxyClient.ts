@@ -1020,9 +1020,10 @@ class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     if (this.acquired) {
       return true;
     }
+    // Shutdown recovery can evict a singleton while its setup remains in flight.
+    // Another client in this process must wait for that live lease, not reclaim it.
     this.acquired = tryAcquireExclusiveLock(this.lockPath, {
       ownerToken: this.ownerToken,
-      reclaimOwnPid: true,
     });
     return this.acquired;
   }

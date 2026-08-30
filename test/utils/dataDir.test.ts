@@ -194,13 +194,18 @@ describe("getSharedAutoMobileDir", () => {
 
   test("uses an explicit coordination root for a locked-down service account", () => {
     expect(
-      getSharedAutoMobileDir(
-        "ctrlproxy-forwards",
-        "",
-        { AUTOMOBILE_COORDINATION_DIR: "shared-locks" },
-        "/service",
-      ),
-    ).toBe(path.resolve("/service", "shared-locks", "ctrlproxy-forwards"));
+      getSharedAutoMobileDir("ctrlproxy-forwards", "", {
+        AUTOMOBILE_COORDINATION_DIR: "/shared-locks",
+      }),
+    ).toBe(path.join("/shared-locks", "ctrlproxy-forwards"));
+  });
+
+  test("rejects a relative coordination root that could vary by agent worktree", () => {
+    expect(() =>
+      getSharedAutoMobileDir("ctrlproxy-forwards", "/home/tester", {
+        AUTOMOBILE_COORDINATION_DIR: "shared-locks",
+      }),
+    ).toThrow("AUTOMOBILE_COORDINATION_DIR must be an absolute path");
   });
 
   test("rejects a missing home directory rather than using agent-local storage", () => {

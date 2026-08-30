@@ -112,11 +112,15 @@ export function getSharedAutoMobileDir(
   subdirectory: string,
   homeDir: string = os.homedir(),
   env: NodeJS.ProcessEnv = process.env,
-  daemonLaunchWorkingDirectory: string = resolveDaemonLaunchWorkingDirectory(undefined, env),
 ): string {
   const override = (env.AUTOMOBILE_COORDINATION_DIR ?? env.AUTO_MOBILE_COORDINATION_DIR)?.trim();
   if (override && override.length > 0) {
-    return path.resolve(daemonLaunchWorkingDirectory, override, subdirectory);
+    if (!path.isAbsolute(override)) {
+      throw new Error(
+        "AUTOMOBILE_COORDINATION_DIR must be an absolute path so all agents share one coordination directory.",
+      );
+    }
+    return path.join(override, subdirectory);
   }
   if (homeDir.length === 0) {
     throw new Error(

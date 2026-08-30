@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { getDbWriteBarrier, resetDbWriteBarrier } from "../../../src/db/dbWriteBarrier";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { CtrlProxyFocus } from "../../../src/features/observe/android/CtrlProxyFocus";
@@ -1228,6 +1231,37 @@ describe("AndroidCtrlProxyClient", function () {
       expect(fakeAdb.getExecutedCommands()).not.toContain("forward --remove tcp:52004");
     } finally {
       await client.close();
+    }
+  });
+
+  test("does not reclaim a live file lease from a synchronously evicted same-process client", async function () {
+    await accessibilityServiceClient.close();
+    AndroidCtrlProxyClient.resetInstances();
+    const coordinationDir = mkdtempSync(join(tmpdir(), "auto-mobile-coordination-"));
+    const previousCoordinationDir = process.env.AUTOMOBILE_COORDINATION_DIR;
+    process.env.AUTOMOBILE_COORDINATION_DIR = coordinationDir;
+    const isolatedDevice = { ...testDevice, deviceId: "same-process-file-lease-device" };
+    const factory = new FakeAdbClientFactory(fakeAdb);
+    const original = AndroidCtrlProxyClient.getInstance(isolatedDevice, factory);
+    let replacement: AndroidCtrlProxyClient | undefined;
+
+    try {
+      expect((original as any).ctrlProxyForwardLease.tryAcquire()).toBe(true);
+      // Recovery evicts synchronously, but an in-flight setup may still hold this lease.
+      AndroidCtrlProxyClient.removeInstance(isolatedDevice.deviceId);
+
+      replacement = AndroidCtrlProxyClient.getInstance(isolatedDevice, factory);
+      expect((replacement as any).ctrlProxyForwardLease.tryAcquire()).toBe(false);
+    } finally {
+      await replacement?.close();
+      await original.close();
+      AndroidCtrlProxyClient.removeInstance(isolatedDevice.deviceId);
+      if (previousCoordinationDir === undefined) {
+        delete process.env.AUTOMOBILE_COORDINATION_DIR;
+      } else {
+        process.env.AUTOMOBILE_COORDINATION_DIR = previousCoordinationDir;
+      }
+      rmSync(coordinationDir, { recursive: true, force: true });
     }
   });
 

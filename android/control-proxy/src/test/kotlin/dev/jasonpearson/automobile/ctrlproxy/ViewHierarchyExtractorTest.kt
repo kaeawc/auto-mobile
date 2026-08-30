@@ -932,7 +932,30 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
-  fun `pickPrimaryAppWindowId returns null when no IME is up`() {
+  fun `pickPrimaryAppWindowId prefers focused application over higher-layer system window`() {
+    // Regression for #5971: on API 34, a status bar window can be marked active while the
+    // foreground Settings window is the only focused application window.
+    val windows =
+      listOf(
+        ViewHierarchyExtractor.WindowMeta(
+          id = 10,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 5,
+          hasRoot = true,
+          isFocused = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 11,
+          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+          layer = 6,
+          hasRoot = true,
+        ),
+      )
+    assertEquals(10, extractor.pickPrimaryAppWindowId(windows))
+  }
+
+  @Test
+  fun `pickPrimaryAppWindowId leaves active-window fallback when no app is focused or IME is present`() {
     val windows =
       listOf(
         ViewHierarchyExtractor.WindowMeta(

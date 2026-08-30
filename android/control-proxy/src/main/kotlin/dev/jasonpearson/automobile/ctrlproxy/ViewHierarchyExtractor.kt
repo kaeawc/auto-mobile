@@ -206,8 +206,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     var activeWindowHasNullRoot = false
     var hasApplicationWindow = false
 
-    // When an IME (keyboard) window is visible, Android marks the IME as isActive/isFocused.
-    // Fall back to "topmost TYPE_APPLICATION window with a root" for mainHierarchy selection.
+    // Prefer the focused application window to an active system window. When the IME owns focus,
+    // fall back to the topmost application window with a root.
     val primaryAppWindowId: Int? = pickPrimaryAppWindowId(windows)
 
     // Extract from each window
@@ -291,7 +291,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           intentChooserDetected = detectIntentChooserIndicators(processedElement)
         }
 
-        // When IME is up, the IME reports isActive=true; prefer the app window underneath.
+        // Prefer a focused application window, or the app below an IME that owns focus.
         val isPrimaryWindow =
           if (primaryAppWindowId != null) window.id == primaryAppWindowId else window.isActive
         if (isPrimaryWindow) {
@@ -394,8 +394,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       }
       windowEntries.clear()
       windowEntries.addAll(filteredEntries)
-      // Re-select main hierarchy after occlusion filtering. When IME is up, the IME entry is
-      // the isActive one — use the primary app window id instead.
+      // Re-select the same primary application hierarchy after occlusion filtering.
       mainHierarchy =
         windowEntries
           .firstOrNull {
@@ -677,18 +676,25 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
   }
 
   /**
-   * Selects the window id that hierarchy extraction should treat as the "primary" user-facing
-   * window when an IME is visible. Returns null when no IME with a root is present (callers should
-   * fall back to `window.isActive`).
+   * Selects the window id hierarchy extraction should treat as the "primary" user-facing window.
+   * Prefers a focused application window. When the IME owns focus, falls back to the topmost
+   * application window with a root. Returns null when neither condition applies so callers can
+   * retain the active-window fallback for genuine system UI.
    *
-   * Android marks the IME's [AccessibilityWindowInfo.isActive] as true while the keyboard is
-   * showing, which would otherwise cause `mainHierarchy` selection to pick the keyboard instead of
-   * the app underneath it.
+   * Android can mark a system window active while the foreground application is focused, and marks
+   * the IME active/focused while the keyboard is showing. In either case, relying on
+   * [AccessibilityWindowInfo.isActive] alone can select non-app content.
    */
   private fun pickPrimaryAppWindowId(windows: List<AccessibilityWindowInfo>): Int? =
     pickPrimaryAppWindowId(
       windows.map {
-        WindowMeta(id = it.id, type = it.type, layer = it.layer, hasRoot = it.root != null)
+        WindowMeta(
+          id = it.id,
+          type = it.type,
+          layer = it.layer,
+          hasRoot = it.root != null,
+          isFocused = it.isFocused,
+        )
       }
     )
 
@@ -701,25 +707,33 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     val type: Int,
     val layer: Int,
     val hasRoot: Boolean,
+    val isFocused: Boolean = false,
   )
 
   /** Single-pass variant used by tests and by the production overload. */
   internal fun pickPrimaryAppWindowId(windows: List<WindowMeta>): Int? {
     var hasIme = false
+    var focusedAppId: Int? = null
+    var focusedAppLayer = Int.MIN_VALUE
     var topAppId: Int? = null
     var topAppLayer = Int.MIN_VALUE
     for (w in windows) {
       if (!w.hasRoot) continue
       when (w.type) {
         AccessibilityWindowInfo.TYPE_INPUT_METHOD -> hasIme = true
-        AccessibilityWindowInfo.TYPE_APPLICATION ->
+        AccessibilityWindowInfo.TYPE_APPLICATION -> {
           if (w.layer > topAppLayer) {
             topAppLayer = w.layer
             topAppId = w.id
           }
+          if (w.isFocused && w.layer > focusedAppLayer) {
+            focusedAppLayer = w.layer
+            focusedAppId = w.id
+          }
+        }
       }
     }
-    return if (hasIme) topAppId else null
+    return focusedAppId ?: if (hasIme) topAppId else null
   }
 
   /**

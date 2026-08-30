@@ -851,7 +851,7 @@ describe("CtrlProxyManager", function () {
       }
     });
 
-    test("reuses a verified persistent cache asset across daemon lifecycles", async function () {
+    test("reuses a verified cache asset and reaps stale staging directories across daemon lifecycles", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("");
       const zip = new AdmZip();
       zip.addFile(
@@ -873,12 +873,22 @@ describe("CtrlProxyManager", function () {
 
         const firstPath = await AndroidCtrlProxyManager.prefetchApk();
         await AndroidCtrlProxyManager.cleanupPrefetchedApk();
+        const staleStagingDir = path.join(prefetchCacheDir, "auto-mobile-prefetch-orphan");
+        await fs.mkdir(staleStagingDir);
+        await fs.writeFile(path.join(staleStagingDir, ".active"), "999999999");
+        const staleTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
+        await fs.utimes(staleStagingDir, staleTime, staleTime);
         const secondPath = await AndroidCtrlProxyManager.prefetchApk();
 
         expect(firstPath).not.toBeNull();
         expect(secondPath).toBe(firstPath);
         expect(downloadCalls).toBe(1);
         expect(await fs.stat(firstPath!)).toBeDefined();
+        const staleStatError = await fs.stat(staleStagingDir).then(
+          () => null,
+          (error: NodeJS.ErrnoException) => error,
+        );
+        expect(staleStatError?.code).toBe("ENOENT");
       } finally {
         (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
       }

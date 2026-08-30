@@ -312,13 +312,13 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     );
     const cacheDir = path.dirname(cachePath);
 
+    await fs.mkdir(cacheDir, { recursive: true });
+    await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(cacheDir);
     if (await AndroidCtrlProxyManager.isValidPrefetchCache(cachePath, expectedChecksum)) {
       logger.info("[CTRL_PROXY] Prefetch: reused cached APK", { path: cachePath });
       return cachePath;
     }
 
-    await fs.mkdir(cacheDir, { recursive: true });
-    await AndroidCtrlProxyManager.sweepStalePrefetchDirsOnStartup(cacheDir);
     const tempDir = await fs.mkdtemp(path.join(cacheDir, "auto-mobile-prefetch-"));
     const apkPath = path.join(tempDir, "control-proxy.apk");
     const activeMarkerPath = path.join(tempDir, ".active");

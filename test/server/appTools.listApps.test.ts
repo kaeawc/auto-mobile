@@ -254,6 +254,33 @@ describe("crashApp tool", () => {
     expect(payload.message).toContain("OS crash confirmed");
     expect(payload.confirmed).toBe(true);
   });
+
+  test("invalidates cached app resources when cancellation follows crash dispatch", async () => {
+    const controller = new AbortController();
+    let invalidations = 0;
+    let notifications = 0;
+    setCrashAppToolDependencies({
+      createCrashApp: () => ({
+        execute: async () => {
+          controller.abort();
+          controller.signal.throwIfAborted();
+          throw new Error("unreachable");
+        },
+      }),
+      invalidateAppResourceCache: () => invalidations++,
+      notifyAppResourceUpdated: async () => {
+        notifications++;
+      },
+    });
+    const tool = ToolRegistry.getTool("crashApp");
+
+    await expect(
+      tool!.deviceAwareHandler!(device, { appId: "com.example.app" }, undefined, controller.signal),
+    ).rejects.toThrow();
+
+    expect(invalidations).toBe(1);
+    expect(notifications).toBe(0);
+  });
 });
 
 describe("app permission tools", () => {

@@ -103,6 +103,8 @@ export interface CrashAppExecutor {
 
 export interface CrashAppToolDependencies {
   createCrashApp(device: BootedDevice): CrashAppExecutor;
+  invalidateAppResourceCache(deviceId: string): void;
+  notifyAppResourceUpdated(deviceId: string): Promise<void>;
 }
 
 let crashAppToolDependencies: CrashAppToolDependencies | null = null;
@@ -111,6 +113,8 @@ function getCrashAppToolDependencies(): CrashAppToolDependencies {
   if (!crashAppToolDependencies) {
     crashAppToolDependencies = {
       createCrashApp: (device) => new CrashApp(device),
+      invalidateAppResourceCache: invalidateInstalledAppResourceCache,
+      notifyAppResourceUpdated: notifyInstalledAppResourceUpdated,
     };
   }
   return crashAppToolDependencies;
@@ -120,6 +124,9 @@ export function setCrashAppToolDependencies(deps: Partial<CrashAppToolDependenci
   const currentDeps = getCrashAppToolDependencies();
   crashAppToolDependencies = {
     createCrashApp: deps.createCrashApp ?? currentDeps.createCrashApp,
+    invalidateAppResourceCache:
+      deps.invalidateAppResourceCache ?? currentDeps.invalidateAppResourceCache,
+    notifyAppResourceUpdated: deps.notifyAppResourceUpdated ?? currentDeps.notifyAppResourceUpdated,
   };
 }
 
@@ -528,11 +535,10 @@ export function registerAppTools() {
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
+    const dependencies = getCrashAppToolDependencies();
     try {
       signal?.throwIfAborted();
-      const result = await getCrashAppToolDependencies()
-        .createCrashApp(device)
-        .execute(args.appId, signal);
+      const result = await dependencies.createCrashApp(device).execute(args.appId, signal);
       signal?.throwIfAborted();
 
       const message = result.success
@@ -547,10 +553,10 @@ export function registerAppTools() {
       }
       throw new ActionableError(`Failed to crash app: ${error}`);
     } finally {
+      dependencies.invalidateAppResourceCache(device.deviceId);
       if (!signal?.aborted) {
         try {
-          invalidateInstalledAppResourceCache(device.deviceId);
-          await notifyInstalledAppResourceUpdated(device.deviceId);
+          await dependencies.notifyAppResourceUpdated(device.deviceId);
         } catch (error) {
           logger.warn(`[AppTools] Failed to refresh app resources after crash: ${error}`);
         }

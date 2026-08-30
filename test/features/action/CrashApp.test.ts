@@ -112,6 +112,7 @@ describe("CrashApp (Android)", () => {
     timer.advanceTime(1234);
     adb.setCommandResultSequence("shell dumpsys activity processes", [
       "*APP* UID u10a123 ProcessRecord{abc 3220:com.example.app/u10a123}",
+      "*APP* UID u10a123 ProcessRecord{abc 3220:com.example.app/u10a123}",
       "*APP* UID u10a123 ProcessRecord{def 4881:com.example.other/u10a123}",
     ]);
     adb.setCommandResult(
@@ -159,6 +160,10 @@ describe("CrashApp (Android)", () => {
     const adb = new FakeAdbClient();
     adb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
     adb.setCommandResultSequence("shell dumpsys activity processes", [
+      [
+        "*APP* UID u0a123 ProcessRecord{aaa 111:com.example.app/u0a123}",
+        "*APP* UID u10a123 ProcessRecord{bbb 222:com.example.app/u10a123}",
+      ].join("\n"),
       [
         "*APP* UID u0a123 ProcessRecord{aaa 111:com.example.app/u0a123}",
         "*APP* UID u10a123 ProcessRecord{bbb 222:com.example.app/u10a123}",
@@ -214,6 +219,10 @@ describe("CrashApp (Android)", () => {
         "*APP* UID u0a123 ProcessRecord{aaa 111:com.example.app/u0a123}",
         "*APP* UID u0a123 ProcessRecord{bbb 222:com.example.app:worker/u0a123}",
       ].join("\n"),
+      [
+        "*APP* UID u0a123 ProcessRecord{aaa 111:com.example.app/u0a123}",
+        "*APP* UID u0a123 ProcessRecord{bbb 222:com.example.app:worker/u0a123}",
+      ].join("\n"),
       "*APP* UID u0a123 ProcessRecord{aaa 111:com.example.app/u0a123}",
     ]);
     adb.setCommandResult(
@@ -230,6 +239,34 @@ describe("CrashApp (Android)", () => {
     );
 
     expect(result).toMatchObject({ success: true, processId: 222, confirmed: true });
+  });
+
+  test("refreshes a relaunched app PID immediately before dispatch", async () => {
+    const adb = new FakeAdbClient();
+    adb.setCommandResultSequence("shell dumpsys activity processes", [
+      "*APP* UID u0a123 ProcessRecord{aaa 111:com.example.app/u0a123}",
+      "*APP* UID u0a123 ProcessRecord{bbb 222:com.example.app/u0a123}",
+      "",
+    ]);
+    adb.setCommandResult(
+      "shell logcat -b crash -d -v epoch -t 200",
+      [
+        "E AndroidRuntime: FATAL EXCEPTION: main",
+        "E AndroidRuntime: Process: com.example.app, PID: 222",
+        "E AndroidRuntime: CrashedByAdbException: shell-induced crash",
+      ].join("\n"),
+    );
+
+    const result = await new CrashApp(androidDevice, dependencies({ adb })).execute(
+      "com.example.app",
+    );
+
+    expect(result).toMatchObject({
+      success: true,
+      processId: 222,
+      userId: 0,
+      confirmed: true,
+    });
   });
 
   test("returns a typed not-running result without inducing a crash", async () => {
@@ -327,6 +364,7 @@ describe("CrashApp (Android)", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     adb.setCommandResultSequence("shell dumpsys activity processes", [
+      "*APP* UID u0a123 ProcessRecord{abc 3220:com.example.app/u0a123}",
       "*APP* UID u0a123 ProcessRecord{abc 3220:com.example.app/u0a123}",
       "",
     ]);

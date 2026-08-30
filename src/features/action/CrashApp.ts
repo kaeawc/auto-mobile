@@ -152,13 +152,33 @@ export class CrashApp {
         error: `${appId} is running under multiple Android users; foreground identity is ambiguous`,
       };
     }
-    const targetedProcesses = packageProcesses.filter((process) => process.userId === userId);
-    const preferredProcess =
-      targetedProcesses.find((process) => process.processName === appId) ?? targetedProcesses[0];
     const inductionTime = await this.adb.getDeviceTimestampMsWithSource(
       PREFLIGHT_COMMAND_TIMEOUT_MS,
       signal,
     );
+    const dispatchProcessesOutput = await this.adb.executeCommand(
+      PROCESS_STATE_COMMAND,
+      PREFLIGHT_COMMAND_TIMEOUT_MS,
+      undefined,
+      true,
+      signal,
+    );
+    const targetedProcesses = findAndroidPackageProcesses(
+      dispatchProcessesOutput.stdout,
+      appId,
+    ).filter((process) => process.userId === userId);
+    if (targetedProcesses.length === 0) {
+      return {
+        ...base,
+        success: false,
+        supported: true,
+        wasRunning: false,
+        userId,
+        error: `${appId} stopped before the crash command could be dispatched`,
+      };
+    }
+    const preferredProcess =
+      targetedProcesses.find((process) => process.processName === appId) ?? targetedProcesses[0];
     let commandResult: ExecResult;
     try {
       commandResult = await this.adb.executeCommand(

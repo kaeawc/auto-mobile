@@ -27,7 +27,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbProcess } from "../../fakes/FakeAdbProcess";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { defaultTimer } from "../../../src/utils/SystemTimer";
+import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
 
 function commandVersionAvailable(command: string): boolean {
   const result = spawnSync(command, ["-version"], { stdio: "ignore" });
@@ -156,7 +156,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
 
   // A fake capture process: emits "spawn" then, when asked, the recordVideo start
   // handshake. kill() emits "exit" so waitForExit's SIGINT teardown resolves.
-  function makeCaptureChild(emitHandshake: boolean): ChildProcess {
+  function makeCaptureChild(emitHandshake: boolean, timer: Timer = defaultTimer): ChildProcess {
     const stderr = new PassThrough();
     const child = new EventEmitter() as ChildProcess;
     Object.assign(child, {
@@ -172,7 +172,7 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
         return true;
       },
     });
-    defaultTimer.setTimeout(() => {
+    timer.setTimeout(() => {
       child.emit("spawn");
       if (emitHandshake) {
         stderr.write("Recording started\n");
@@ -194,11 +194,13 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
   test("retries the iOS recording start handshake and succeeds on a later attempt (#4076)", async function () {
     const started: ChildProcess[] = [];
     let diagnosticCalls = 0;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const simctl = {
       isAvailable: async () => true,
       // First attempt never emits the handshake (cold-simulator miss); the retry does.
       startCommandArgs: async () => {
-        const child = makeCaptureChild(started.length >= 1);
+        const child = makeCaptureChild(started.length >= 1, timer);
         started.push(child);
         return child;
       },
@@ -208,7 +210,14 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       },
     } as unknown as SimCtl;
 
-    backend = new FfmpegVideoProcessingBackend(undefined, () => simctl);
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      () => simctl,
+      undefined,
+      undefined,
+      undefined,
+      timer,
+    );
     (backend as any).ensureFfmpegAvailable = async () => {};
     (backend as any).iosRecordingStartTimeoutMs = 25;
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-retry-udid" };
@@ -277,16 +286,25 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
 
   test("fails after exhausting start attempts and reports simulator diagnostics (#4076)", async function () {
     let starts = 0;
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const simctl = {
       isAvailable: async () => true,
       startCommandArgs: async () => {
         starts++;
-        return makeCaptureChild(false); // never emits the handshake
+        return makeCaptureChild(false, timer); // never emits the handshake
       },
       executeCommandArgs: async () => diagnosticsExecResult("iPhone 17 Pro (udid) (Shutdown)"),
     } as unknown as SimCtl;
 
-    backend = new FfmpegVideoProcessingBackend(undefined, () => simctl);
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      () => simctl,
+      undefined,
+      undefined,
+      undefined,
+      timer,
+    );
     (backend as any).ensureFfmpegAvailable = async () => {};
     (backend as any).iosRecordingStartTimeoutMs = 25;
     mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-wedge-udid" };

@@ -18,18 +18,31 @@ describe("ToolRegistry post-timeout result logging", () => {
     ToolRegistry.clearTools();
   });
 
-  function registerProbe(): void {
+  function registerProbe(
+    handler = async (): Promise<{ success: boolean }> => ({ success: true }),
+  ): void {
     ToolRegistry.registerDeviceAware(
       "postTimeoutProbe",
       "Resolves with success regardless of caller state",
       z.object({}),
-      async () => ({ success: true }),
-      { shouldEnsureDevice: () => false, nonDeviceHandler: async () => ({ success: true }) },
+      handler,
+      { shouldEnsureDevice: () => false, nonDeviceHandler: handler },
     );
   }
 
   test("warns (not infos) when the caller's request already timed out", async () => {
-    registerProbe();
+    let resolveHandler: (() => void) | undefined;
+    let markHandlerStarted: (() => void) | undefined;
+    const handlerStarted = new Promise<void>((resolve) => {
+      markHandlerStarted = resolve;
+    });
+    registerProbe(async () => {
+      markHandlerStarted?.();
+      await new Promise<void>((resolve) => {
+        resolveHandler = resolve;
+      });
+      return { success: true };
+    });
     const infoSpy = spyOn(logger, "info").mockImplementation(() => {});
     const warnSpy = spyOn(logger, "warn").mockImplementation(() => {});
 
@@ -37,7 +50,12 @@ describe("ToolRegistry post-timeout result logging", () => {
       const tool = ToolRegistry.getTool("postTimeoutProbe");
       expect(tool).toBeDefined();
 
-      const response = await tool!.handler({}, undefined, AbortSignal.abort());
+      const request = new AbortController();
+      const responsePromise = tool!.handler({}, undefined, request.signal);
+      await handlerStarted;
+      request.abort();
+      resolveHandler?.();
+      const response = await responsePromise;
 
       // The handler still returns its result (work already completed).
       expect(response).toEqual({ success: true });

@@ -236,6 +236,64 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.verified).toBe(true);
   });
 
+  test("reconciles stale CtrlProxy attribution when hierarchy and foreground agree", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      // The recovered hierarchy is the launcher, but CtrlProxy still attributes
+      // its active root to Calendar (issue #5972).
+      packageName: "com.google.android.apps.nexuslauncher",
+      foregroundActivity: "com.google.android.calendar/.AllInOneCalendarActivity",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [{ text: "Gmail", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.google.android.apps.nexuslauncher", userId: 0 });
+    let performanceAuditAppId: string | undefined;
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: {
+          run: async (observedResult: ObserveResult) => {
+            performanceAuditAppId = observedResult.activeWindow?.appId;
+          },
+        } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow).toEqual({
+      appId: "com.google.android.apps.nexuslauncher",
+      activityName: "",
+      layoutSeqSum: 0,
+    });
+    expect(performanceAuditAppId).toBe("com.google.android.apps.nexuslauncher");
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.verified).toBe(true);
+    expect(result.freshness?.warning).toBeUndefined();
+  });
+
   test("an expanded system-UI shade is not flagged as a wrong-window capture", async () => {
     // When the notification shade / quick settings takes accessibility focus,
     // the observed window is com.android.systemui while the resumed activity
@@ -296,10 +354,14 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy(calendarHierarchy(now)); // observed = calendar
+    viewHierarchy.configureHierarchy({
+      ...calendarHierarchy(now),
+      // CtrlProxy has not yet updated the active window from Settings.
+      foregroundActivity: "com.android.settings/.Settings",
+    }); // observed = calendar
 
     // First getForegroundApp read lags (still reports settings); the confirming
-    // read reports calendar, matching the observed window.
+    // read reports calendar, matching the observed hierarchy.
     const sequence = [
       { packageName: "com.android.settings", userId: 0 },
       { packageName: "com.google.android.calendar", userId: 0 },
@@ -326,6 +388,51 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
+    expect(result.activeWindow?.appId).toBe("com.google.android.calendar");
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.verified).toBe(true);
+  });
+
+  test("does not overwrite a newer active window with a stale hierarchy", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      ...calendarHierarchy(now),
+      foregroundActivity: "com.android.settings/.Settings",
+    });
+
+    // The initial parallel sample agrees with the stale Calendar hierarchy,
+    // while the post-capture sample confirms the newer Settings window.
+    const sequence = [
+      { packageName: "com.google.android.calendar", userId: 0 },
+      { packageName: "com.android.settings", userId: 0 },
+    ];
+    class SequencedForegroundAdb extends FakeAdbExecutor {
+      async getForegroundApp(): Promise<{ packageName: string; userId: number } | null> {
+        return sequence.shift() ?? { packageName: "com.android.settings", userId: 0 };
+      }
+    }
+    const fakeAdb = new SequencedForegroundAdb();
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.activeWindow?.appId).toBe("com.android.settings");
     expect(result.freshness?.isFresh).toBe(true);
     expect(result.freshness?.verified).toBe(true);
   });
@@ -377,6 +484,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
 
     expect(result.freshness?.isFresh).toBe(true);
     expect(result.freshness?.verified).toBe(true);
+    expect(result.activeWindow?.appId).toBe("com.google.android.calendar");
   });
 
   test("no ground-truth foreground app leaves freshness unchanged (no false alarm)", async () => {

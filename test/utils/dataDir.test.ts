@@ -177,14 +177,35 @@ describe("getTempDir", () => {
 
 describe("getSharedAutoMobileDir", () => {
   test("uses the home-directory root independently of agent data-dir overrides", () => {
-    expect(getSharedAutoMobileDir("ctrlproxy-forwards", "/home/tester")).toBe(
-      path.resolve("/home/tester", ".auto-mobile", "ctrlproxy-forwards"),
-    );
+    const previousDataDir = process.env.AUTOMOBILE_DATA_DIR;
+    process.env.AUTOMOBILE_DATA_DIR = "/agent-private-data";
+    try {
+      expect(getSharedAutoMobileDir("ctrlproxy-forwards", "/home/tester")).toBe(
+        path.resolve("/home/tester", ".auto-mobile", "ctrlproxy-forwards"),
+      );
+    } finally {
+      if (previousDataDir === undefined) {
+        delete process.env.AUTOMOBILE_DATA_DIR;
+      } else {
+        process.env.AUTOMOBILE_DATA_DIR = previousDataDir;
+      }
+    }
+  });
+
+  test("uses an explicit coordination root for a locked-down service account", () => {
+    expect(
+      getSharedAutoMobileDir(
+        "ctrlproxy-forwards",
+        "",
+        { AUTOMOBILE_COORDINATION_DIR: "shared-locks" },
+        "/service",
+      ),
+    ).toBe(path.resolve("/service", "shared-locks", "ctrlproxy-forwards"));
   });
 
   test("rejects a missing home directory rather than using agent-local storage", () => {
     expect(() => getSharedAutoMobileDir("ctrlproxy-forwards", "")).toThrow(
-      "Unable to resolve a shared AutoMobile directory",
+      "Set AUTOMOBILE_COORDINATION_DIR",
     );
   });
 });

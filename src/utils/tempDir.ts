@@ -104,14 +104,24 @@ export function getTempDir(subdirectory: string): string {
  *
  * Unlike {@link getTempDir}, this deliberately ignores `AUTOMOBILE_DATA_DIR`
  * because those overrides isolate an agent's private state. Processes using
- * the same default ADB server must instead coordinate through one path.
+ * the same default ADB server must instead coordinate through one path. A
+ * locked-down service account can configure that path with
+ * `AUTOMOBILE_COORDINATION_DIR` (or `AUTO_MOBILE_COORDINATION_DIR`).
  */
 export function getSharedAutoMobileDir(
   subdirectory: string,
   homeDir: string = os.homedir(),
+  env: NodeJS.ProcessEnv = process.env,
+  daemonLaunchWorkingDirectory: string = resolveDaemonLaunchWorkingDirectory(undefined, env),
 ): string {
+  const override = (env.AUTOMOBILE_COORDINATION_DIR ?? env.AUTO_MOBILE_COORDINATION_DIR)?.trim();
+  if (override && override.length > 0) {
+    return path.resolve(daemonLaunchWorkingDirectory, override, subdirectory);
+  }
   if (homeDir.length === 0) {
-    throw new Error("Unable to resolve a shared AutoMobile directory without a home directory");
+    throw new Error(
+      "Unable to resolve a shared AutoMobile directory without a home directory. Set AUTOMOBILE_COORDINATION_DIR to a writable shared directory.",
+    );
   }
   return path.join(path.resolve(homeDir), ".auto-mobile", subdirectory);
 }

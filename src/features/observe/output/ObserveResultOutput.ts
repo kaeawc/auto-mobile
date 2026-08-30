@@ -78,8 +78,7 @@ export interface SanitizeObserveConfig {
    */
   compact?: boolean;
   /**
-   * Output projection (issue #4388). Default `"full"` returns the whole view
-   * hierarchy, today's behavior. `"skeleton"` replaces `viewHierarchy` +
+   * Output projection (issue #4388). Default `"skeleton"` replaces `viewHierarchy` +
    * `elements` with the flat, actionable-only `skeleton` (a projection of the
    * already-computed `elements`); its bounds are always the compact tuple form
    * regardless of `compact`. The wiring layer (`finalizeToolResponse`) supplies

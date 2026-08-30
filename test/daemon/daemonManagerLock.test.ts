@@ -195,11 +195,10 @@ describe("DaemonManager file lock", () => {
         /Another process is starting the daemon but it failed to become ready[\s\S]*holder-logs[\s\S]*SIMULATOR-B/,
       );
       // The live holder is waited on once at the full cold-start budget; because it
-      // stays the same live holder (not a replacement) the loop then stops and a
-      // bounded readiness confirm runs before the failure is reported (#5878).
-      expect(timeouts[0]).toBe(30_000);
-      expect(timeouts).toHaveLength(2);
-      expect(timeouts[1]).toBeLessThan(30_000);
+      // stays the same live holder (not a replacement) the loop then stops. The
+      // pre-failure readiness confirm is a direct non-destructive probe, not a
+      // waitForReady call, so only the one budgeted wait is recorded (#5878).
+      expect(timeouts).toEqual([30_000]);
 
       holder.releaseLock();
     });
@@ -243,10 +242,11 @@ describe("DaemonManager file lock", () => {
       await expect(manager.start()).rejects.toThrow(
         /Another process is starting the daemon but it failed to become ready[\s\S]*retry-holder-logs[\s\S]*Retry holder failed/,
       );
-      // Two contention waits plus the bounded readiness confirm before the failure
-      // is reported (#5878); diagnostics are captured before the retry holder
-      // releases, so they survive into the thrown error.
-      expect(waitCount).toBe(3);
+      // The initial holder wait plus one wait on the replacement retry holder; the
+      // pre-failure confirm is a direct probe, not a waitForReady call (#5878).
+      // Diagnostics are captured before the retry holder releases, so they survive
+      // into the thrown error.
+      expect(waitCount).toBe(2);
     });
 
     test("releases lock after successful start", async () => {

@@ -1302,10 +1302,14 @@ describe("Daemon manager process detection", () => {
     }
   });
 
-  test("the retry-holder failure path confirms readiness before throwing, reusing a daemon that just became ready (#5878)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-retry-confirm-"));
+  test("the contention path reuses a reachable daemon even when the startup-lock holder is dead (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-contention-reuse-"));
     const lockPath = join(dir, "daemon.lock");
+    const socketPath = join(dir, "daemon.sock");
+    // Dead holder, but the daemon it started has already published a connectable
+    // socket. start() must reuse it rather than throw the lock-holder failure.
     writeFileSync(lockPath, formatLockContent(55558));
+    writeFileSync(socketPath, "socket placeholder");
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
@@ -1314,41 +1318,23 @@ describe("Daemon manager process detection", () => {
     };
     const processSpawner: DaemonProcessSpawner = {
       spawn: () => {
-        throw new Error("should not spawn on the retry-confirm path");
+        throw new Error("should not spawn when the daemon is already reachable");
       },
     };
 
-    // Both predicate-driven contention waits abandon (holder dead); the FINAL
-    // no-predicate confirm finds the daemon ready — the race window where the
-    // retry holder published its socket and released its lock just as the wait
-    // observed the lock gone. start() must reuse, not throw (Codex P2, #5878).
-    class RetryConfirmDaemonManager extends DaemonManager {
-      confirmCalls = 0;
+    class ContentionDaemonManager extends DaemonManager {
       override acquireLock(): boolean {
         return false;
       }
       override async status(): Promise<any> {
-        return { running: false };
-      }
-      override async waitForReady(
-        _timeout: number,
-        _signal?: AbortSignal,
-        shouldContinueWaiting?: () => boolean,
-      ): Promise<boolean> {
-        if (shouldContinueWaiting) {
-          // The two contention waits abandon on the dead holder.
-          return false;
-        }
-        // The final bounded confirm observes the now-ready daemon.
-        this.confirmCalls++;
-        return true;
+        return { running: true, pid: 4242 };
       }
     }
 
     try {
-      const manager = new RetryConfirmDaemonManager(
+      const manager = new ContentionDaemonManager(
         () => ({
-          async connect() {},
+          async connect() {}, // reachable
           async close() {},
           async callTool() {
             return {};
@@ -1364,14 +1350,67 @@ describe("Daemon manager process detection", () => {
         fakeTimer,
         lockPath,
         join(dir, "daemon.pid"),
-        join(dir, "daemon.sock"),
+        socketPath,
         processFinder,
         processSpawner,
       );
 
       // Resolves (reuse) rather than throwing the lock-holder startup failure.
       await manager.start();
-      expect(manager.confirmCalls).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a capped confirmation probe does not unlink a live but slow daemon's socket (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-capped-probe-nondestructive-"));
+    const socketPath = join(dir, "daemon.sock");
+    // The daemon reports running and its socket exists, but the connect probe is
+    // slow to be accepted (backlog / first accept after restart). A capped probe
+    // that fails must NOT tear down this healthy socket (issue #5878).
+    writeFileSync(socketPath, "socket placeholder");
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+
+    class RunningDaemonManager extends DaemonManager {
+      override async status(): Promise<any> {
+        return { running: true, pid: 9191 };
+      }
+    }
+
+    try {
+      const manager = new RunningDaemonManager(
+        () => ({
+          async connect() {
+            // Never accepts within the probe budget — models a slow first accept.
+            throw new Error("connection refused");
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        join(dir, "daemon.lock"),
+        join(dir, "daemon.pid"),
+        socketPath,
+      );
+
+      // A liveness predicate that reports the holder gone forces the capped probe.
+      const ready = await manager.waitForReady(5000, undefined, () => false);
+
+      expect(ready).toBe(false);
+      // The healthy daemon's socket must survive the capped probe; unlinking it
+      // here is the regression this guards (a full-budget probe would still clean
+      // a genuinely stale socket).
+      expect(existsSync(socketPath)).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

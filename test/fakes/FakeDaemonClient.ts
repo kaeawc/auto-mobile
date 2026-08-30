@@ -42,6 +42,7 @@ export class FakeDaemonClient implements DaemonClientLike {
     params: Record<string, any>,
   ) => void | Promise<void>;
   private readonly notificationHandlers = new Set<(notification: DaemonNotification) => void>();
+  private readonly connectionClosedHandlers = new Set<() => void>();
   subscribeToNotificationsCalls = 0;
   shouldFailConnect = false;
   shouldFailSubscribe = false;
@@ -104,6 +105,20 @@ export class FakeDaemonClient implements DaemonClientLike {
     return () => {
       this.notificationHandlers.delete(handler);
     };
+  }
+
+  onConnectionClosed(handler: () => void): () => void {
+    this.connectionClosedHandlers.add(handler);
+    return () => {
+      this.connectionClosedHandlers.delete(handler);
+    };
+  }
+
+  emitConnectionClosed(): void {
+    this.connected = false;
+    for (const handler of this.connectionClosedHandlers) {
+      handler();
+    }
   }
 
   async subscribeToNotifications(): Promise<void> {

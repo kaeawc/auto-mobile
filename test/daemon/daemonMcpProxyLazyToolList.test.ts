@@ -116,6 +116,38 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     }
   });
 
+  test("serves the static surface after an idle daemon connection closes", async () => {
+    const fakeClient = new FakeDaemonClient({
+      daemonMethodResults: new Map([
+        ["tools/list", { tools: [{ name: "liveOnlyTool", inputSchema: {} }] }],
+      ]),
+    });
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+      staticToolDefinitionsProvider: () => [
+        { name: "staticTool", inputSchema: { type: "object" } },
+      ],
+    });
+
+    try {
+      await proxy.callTool("observe", {});
+      expect(proxy.isConnected()).toBe(true);
+
+      // A passive EOF while idle must invalidate the proxy's stale connected state.
+      fakeClient.emitConnectionClosed();
+      expect(proxy.isConnected()).toBe(false);
+      expect(await proxy.listAdvertisedTools()).toEqual([
+        { name: "staticTool", inputSchema: { type: "object" } },
+      ]);
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
+    }
+  });
+
   test("prompts a tools/list re-fetch once the deferred connection is established (AC5)", async () => {
     const fakeClient = new FakeDaemonClient({
       daemonMethodResults: new Map([["tools/list", { tools: [] }]]),

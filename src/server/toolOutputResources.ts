@@ -1,11 +1,11 @@
 import * as realFs from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
+import { createHash } from "node:crypto";
 import { ResourceRegistry, type ResourceContent } from "./resourceRegistry";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
 import {
   toolOutputArtifactLedger,
-  type ArtifactFileIdentity,
   type ToolOutputArtifactLedger,
 } from "./toolOutputArtifactLedger";
 
@@ -34,7 +34,7 @@ const TOOL_OUTPUT_RESOURCE_URI_PREFIX = "automobile:tool-output/";
 const SAFE_ARTIFACT_ID = /^\d+-[A-Za-z0-9._-]+\.json$/;
 
 interface ToolOutputResourceFileSystem {
-  readFile(filePath: string, identity?: ArtifactFileIdentity): Promise<string>;
+  readFile(filePath: string, sha256?: string): Promise<string>;
 }
 
 // O_NOFOLLOW is POSIX-only; on platforms without it (Windows) the flag is
@@ -42,29 +42,35 @@ interface ToolOutputResourceFileSystem {
 const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
 
 const nodeToolOutputResourceFileSystem: ToolOutputResourceFileSystem = {
-  async readFile(filePath: string, identity?: ArtifactFileIdentity): Promise<string> {
+  async readFile(filePath: string, sha256?: string): Promise<string> {
     // `filePath` comes from the provenance ledger — a value the writer itself
     // constructed, never the client-supplied id — so a shared/misconfigured
     // `--tool-outputs-dir` cannot steer this read to an arbitrary sibling.
-    // Opening with O_NOFOLLOW additionally refuses a planted symlink, and reading
-    // through the single returned handle (fstat + read on the same fd) closes the
-    // check-then-read TOCTOU window (issue #5917).
+    // Opening with O_NOFOLLOW refuses a planted symlink, and reading through the
+    // single returned handle (stat + read on the same fd) closes the check-then
+    // -read TOCTOU window (issue #5917).
     const handle = await realFs.open(filePath, fsConstants.O_RDONLY | O_NOFOLLOW);
+    let text: string;
     try {
       const stats = await handle.stat();
       if (!stats.isFile()) {
         throw new Error(`tool-output artifact is not a regular file: ${filePath}`);
       }
-      // Bind to the identity captured at creation: O_NOFOLLOW accepts a *regular
-      // file* swapped over the recorded path, so verify dev/ino on the open fd to
-      // reject a replacement a foreign process planted in a world-writable dir.
-      if (identity && (stats.dev !== identity.dev || stats.ino !== identity.ino)) {
-        throw new Error(`tool-output artifact identity mismatch: ${filePath}`);
-      }
-      return await handle.readFile("utf8");
+      text = await handle.readFile("utf8");
     } finally {
       await handle.close();
     }
+    // Authorize by the content hash captured at creation: verify the exact bytes
+    // we are about to return, so no replacement at the recorded path — regular-
+    // file swap or inode-reuse alias, both of which a path/dev-ino check misses —
+    // can get its bytes served (issue #5917 review).
+    if (sha256 !== undefined) {
+      const actual = createHash("sha256").update(text, "utf8").digest("hex");
+      if (actual !== sha256) {
+        throw new Error(`tool-output artifact content hash mismatch: ${filePath}`);
+      }
+    }
+    return text;
   },
 };
 
@@ -131,7 +137,7 @@ async function getToolOutputArtifact(params: Record<string, string>): Promise<Re
   }
 
   try {
-    const text = await toolOutputResourceFileSystem.readFile(issued.path, issued.identity);
+    const text = await toolOutputResourceFileSystem.readFile(issued.path, issued.sha256);
     return { uri, mimeType: "application/json", text };
   } catch (error) {
     const reason = errorMessage(error);

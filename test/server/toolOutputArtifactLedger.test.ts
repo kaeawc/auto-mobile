@@ -14,14 +14,14 @@ describe("ToolOutputArtifactLedger (#5917)", () => {
     expect(ledger.resolve("credentials.json")).toBeUndefined();
   });
 
-  test("carries the filesystem identity captured at creation", () => {
+  test("carries the content hash captured at creation", () => {
     const ledger = new ToolOutputArtifactLedger();
     const issued = path.resolve("/tmp/tool-outputs/1234-observe-abc.json");
-    ledger.record(issued, { dev: 42, ino: 99 });
+    ledger.record(issued, "deadbeef");
 
     expect(ledger.resolve("1234-observe-abc.json")).toEqual({
       path: issued,
-      identity: { dev: 42, ino: 99 },
+      sha256: "deadbeef",
     });
   });
 

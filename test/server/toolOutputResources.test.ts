@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import path from "node:path";
-import { mkdtempSync, writeFileSync, symlinkSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
@@ -19,7 +20,7 @@ class FakeResourceFileSystem {
   reads: string[] = [];
   readError: Error | undefined;
 
-  async readFile(filePath: string, _identity?: { dev: number; ino: number }): Promise<string> {
+  async readFile(filePath: string, _sha256?: string): Promise<string> {
     this.reads.push(filePath);
     if (this.readError) {
       throw this.readError;
@@ -190,29 +191,35 @@ describe("tool-output artifact resource (#5882)", () => {
     },
   );
 
-  test("refuses a file whose on-disk identity differs from the recorded one (#5917)", async () => {
-    // Models a regular-file replacement in a world-writable --tool-outputs-dir:
-    // O_NOFOLLOW accepts a regular file at the recorded path, so the read must also
-    // verify the dev/ino captured at creation and reject a swapped file.
-    const dir = mkdtempSync(path.join(tmpdir(), "auto-mobile-identity-"));
+  test("refuses a file whose content hash differs from the recorded one (#5917)", async () => {
+    // Models a replacement in a world-writable --tool-outputs-dir — a regular-file
+    // swap OR an inode-reuse alias, both of which O_NOFOLLOW and a dev/ino check
+    // accept. The read re-hashes the bytes it is about to return and rejects any
+    // divergence from the hash captured at creation.
+    const dir = mkdtempSync(path.join(tmpdir(), "auto-mobile-content-"));
     const filename = "1788020656886-observe-swap.json";
     const filePath = path.join(dir, filename);
     try {
-      writeFileSync(filePath, JSON.stringify({ real: true }));
-      const real = statSync(filePath);
+      const realBytes = JSON.stringify({ real: true });
+      writeFileSync(filePath, realBytes);
+      const realHash = createHash("sha256").update(realBytes, "utf8").digest("hex");
 
-      // Correct identity → served.
+      // Correct hash → served.
       const ok = new ToolOutputArtifactLedger();
-      ok.record(filePath, { dev: real.dev, ino: real.ino });
+      ok.record(filePath, realHash);
       setToolOutputResourceDependencies({ ledger: ok });
       expect(JSON.parse((await readArtifact(filename)).text!)).toEqual({ real: true });
 
-      // Mismatched identity (as if the file were replaced after recording) → refused.
+      // The file on disk now differs from the recorded hash (as if swapped after
+      // recording) → refused, and the attacker bytes are never returned.
+      writeFileSync(filePath, JSON.stringify({ attacker: "owned" }));
       const swapped = new ToolOutputArtifactLedger();
-      swapped.record(filePath, { dev: real.dev, ino: real.ino + 1 });
+      swapped.record(filePath, realHash);
       setToolOutputResourceDependencies({ ledger: swapped });
-      const parsed = JSON.parse((await readArtifact(filename)).text!) as { error: string };
+      const content = await readArtifact(filename);
+      const parsed = JSON.parse(content.text!) as { error: string };
       expect(parsed.error).toContain("not available");
+      expect(content.text).not.toContain("owned");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

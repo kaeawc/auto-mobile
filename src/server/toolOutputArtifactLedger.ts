@@ -19,25 +19,20 @@ import path from "node:path";
  * are pruned by retention, and a lost ledger entry (eviction, daemon restart)
  * degrades to the existing "expired or pruned" response — never an unsafe read.
  */
-/** Filesystem identity of an issued artifact, captured at creation. */
-export interface ArtifactFileIdentity {
-  dev: number;
-  ino: number;
-}
-
-/** A file the writer issued: its path plus the identity to verify at read time. */
+/** A file the writer issued: its path plus the content hash to verify at read time. */
 export interface IssuedArtifact {
   /** Absolute path the writer wrote. */
   path: string;
   /**
-   * dev/ino captured when the writer exclusively created the file. The read
-   * fstat's the open handle and rejects any mismatch, so a foreign process that
-   * replaces the recorded path with a *different regular file* in a world-writable
-   * `--tool-outputs-dir` cannot get its bytes served — O_NOFOLLOW alone accepts a
-   * regular-file swap; identity binding is what closes it (issue #5917 review).
-   * Undefined only for entries recorded without identity (test seams).
+   * SHA-256 (hex) of the exact bytes the writer wrote. The read hashes the bytes
+   * it is about to return and rejects any mismatch, so a foreign process that
+   * replaces the recorded path in a world-writable `--tool-outputs-dir` cannot
+   * get its bytes served — not via a symlink (O_NOFOLLOW), a regular-file swap,
+   * *or* an inode-reuse alias, all of which a path/dev-ino check misses but a
+   * content hash catches (issue #5917 review). Undefined only for entries
+   * recorded without a hash (test seams).
    */
-  identity?: ArtifactFileIdentity;
+  sha256?: string;
 }
 
 export class ToolOutputArtifactLedger {
@@ -51,10 +46,10 @@ export class ToolOutputArtifactLedger {
   }
 
   /** Record an artifact the writer just created, keyed by its basename. */
-  record(absolutePath: string, identity?: ArtifactFileIdentity): void {
+  record(absolutePath: string, sha256?: string): void {
     const filename = path.basename(absolutePath);
     this.issued.delete(filename);
-    this.issued.set(filename, { path: absolutePath, identity });
+    this.issued.set(filename, { path: absolutePath, sha256 });
     while (this.issued.size > this.maxEntries) {
       const oldest = this.issued.keys().next().value;
       if (oldest === undefined) {

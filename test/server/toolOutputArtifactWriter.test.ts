@@ -10,6 +10,7 @@ import { FakeIdGenerator } from "../fakes/FakeIdGenerator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { ToolOutputArtifactLedger } from "../../src/server/toolOutputArtifactLedger";
+import { createHash } from "node:crypto";
 
 class FakeArtifactFileSystem implements ToolOutputArtifactFileSystem {
   ensureCalls: string[] = [];
@@ -28,17 +29,11 @@ class FakeArtifactFileSystem implements ToolOutputArtifactFileSystem {
     this.assertWritableCalls.push(dirPath);
   }
 
-  writeFileExclusive(
-    filePath: string,
-    content: string,
-    mode: number,
-  ): { dev: number; ino: number } {
+  writeFileExclusive(filePath: string, content: string, mode: number): void {
     if (this.writeError) {
       throw this.writeError;
     }
     this.writes.push({ path: filePath, content, mode });
-    // Synthetic, unique-per-write identity so ledger provenance can be asserted.
-    return { dev: 1, ino: this.writes.length };
   }
 
   listFiles(dirPath: string): ToolOutputArtifactDirectoryEntry[] {
@@ -129,16 +124,20 @@ describe("JsonToolOutputArtifactWriter", () => {
     });
 
     // Only the exact files the writer created are resolvable; a shape-valid
-    // sibling it never wrote is not. Each entry carries the identity the fake
-    // filesystem returned at creation, so the resource can bind reads to it.
+    // sibling it never wrote is not. Each entry carries the SHA-256 of the exact
+    // bytes written, so the resource can authorize reads by content.
+    const firstHash = createHash("sha256")
+      .update(stringifyToolResponse({ updatedAt: 1 }), "utf8")
+      .digest("hex");
     expect(ledger.resolve("1234-observe-id-1.json")).toEqual({
       path: first.artifact.path,
-      identity: { dev: 1, ino: 1 },
+      sha256: firstHash,
     });
-    expect(ledger.resolve("1234-observe-id-2.json")).toEqual({
-      path: path.join(outputDirectory, "1234-observe-id-2.json"),
-      identity: { dev: 1, ino: 2 },
-    });
+    expect(ledger.resolve("1234-observe-id-2.json")?.sha256).toBe(
+      createHash("sha256")
+        .update(stringifyToolResponse({ updatedAt: 2 }), "utf8")
+        .digest("hex"),
+    );
     expect(ledger.resolve("1234-observe-unwritten.json")).toBeUndefined();
   });
 

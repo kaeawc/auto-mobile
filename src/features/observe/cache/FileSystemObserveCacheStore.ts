@@ -157,6 +157,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       const filename = this.diskFilename(cacheKey, stampGeneration);
       this.cache.set(cacheKey, { timestamp, deviceId, observeResult: result });
       await this.saveObserveResultToDisk(filename, result);
+      await this.reapExpiredDiskFiles(deviceId);
       // Residual 1: a clear() can land during the disk write above, and its
       // deletion snapshot predates our file — so it survives on disk. Re-check
       // and clean up ourselves rather than leaving a stale file for checkDisk to
@@ -296,9 +297,22 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
 
       const now = this.timer.now();
       const currentGeneration = this.currentGeneration(deviceId);
+      const expiredFiles: string[] = [];
       let mostRecentFile: { path: string; mtime: number } | undefined;
 
       for (const file of jsonFiles) {
+        const filePath = path.join(this.cacheDir, file);
+        const stats = await statAsync(filePath);
+        const age = now - stats.mtime.getTime();
+
+        if (age >= OBSERVE_RESULT_CACHE_TTL_MS) {
+          expiredFiles.push(file);
+          logger.debug(
+            `[OBSERVE_CACHE] Disk cache file expired: ${file} (age: ${age}ms > TTL: ${OBSERVE_RESULT_CACHE_TTL_MS}ms)`,
+          );
+          continue;
+        }
+
         // Residual 2: never re-warm memory from a file whose stamped generation
         // is older than the device's current generation — a clear() has advanced
         // past it (issue #5892). Unstamped files can't be proven stale; serve
@@ -312,20 +326,12 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
           continue;
         }
 
-        const filePath = path.join(this.cacheDir, file);
-        const stats = await statAsync(filePath);
-        const age = now - stats.mtime.getTime();
-
-        if (age < OBSERVE_RESULT_CACHE_TTL_MS) {
-          if (!mostRecentFile || stats.mtime.getTime() > mostRecentFile.mtime) {
-            mostRecentFile = { path: filePath, mtime: stats.mtime.getTime() };
-          }
-        } else {
-          logger.debug(
-            `[OBSERVE_CACHE] Disk cache file expired: ${file} (age: ${age}ms > TTL: ${OBSERVE_RESULT_CACHE_TTL_MS}ms)`,
-          );
+        if (!mostRecentFile || stats.mtime.getTime() > mostRecentFile.mtime) {
+          mostRecentFile = { path: filePath, mtime: stats.mtime.getTime() };
         }
       }
+
+      await Promise.all(expiredFiles.map((file) => this.deleteDiskFile(file)));
 
       if (!mostRecentFile) {
         logger.debug("[OBSERVE_CACHE] No valid files in disk cache");
@@ -391,6 +397,29 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       await unlinkAsync(path.join(this.cacheDir, filename));
     } catch (error) {
       logger.warn(`[OBSERVE_CACHE] Failed to delete stale cache file ${filename}: ${error}`);
+    }
+  }
+
+  private async reapExpiredDiskFiles(deviceId: string): Promise<void> {
+    try {
+      const devicePrefix = `observe_${this.sanitizeDeviceId(deviceId)}_`;
+      const files = await readdirAsync(this.cacheDir);
+      const now = this.timer.now();
+      const expiredFiles: string[] = [];
+
+      for (const file of files) {
+        if (!file.endsWith(".json") || !file.startsWith(devicePrefix)) {
+          continue;
+        }
+        const stats = await statAsync(path.join(this.cacheDir, file));
+        if (now - stats.mtime.getTime() >= OBSERVE_RESULT_CACHE_TTL_MS) {
+          expiredFiles.push(file);
+        }
+      }
+
+      await Promise.all(expiredFiles.map((file) => this.deleteDiskFile(file)));
+    } catch (error) {
+      logger.warn(`[OBSERVE_CACHE] Failed to reap expired disk files: ${error}`);
     }
   }
 

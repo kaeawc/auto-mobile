@@ -178,7 +178,7 @@ describe("getTempDir", () => {
 describe("getSharedAutoMobileDir", () => {
   test("uses the home-directory root independently of agent data-dir overrides", () => {
     expect(getSharedAutoMobileDir("ctrlproxy-forwards", "/home/tester")).toBe(
-      path.join("/home/tester", ".auto-mobile", "ctrlproxy-forwards"),
+      path.resolve("/home/tester", ".auto-mobile", "ctrlproxy-forwards"),
     );
   });
 

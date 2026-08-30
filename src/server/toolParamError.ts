@@ -90,7 +90,9 @@ function formatMissingPlatformIssue(
   if (issue.code !== "invalid_value" || path !== "platform") {
     return undefined;
   }
-  return isProvidedInput(rawInput, issue.path) ? undefined : `${path} is required`;
+  return rawInput !== undefined && !isProvidedInput(rawInput, issue.path)
+    ? `${path} is required`
+    : undefined;
 }
 
 function formatIssue(issue: ZodIssue, toolName: string, rawInput: unknown): string {

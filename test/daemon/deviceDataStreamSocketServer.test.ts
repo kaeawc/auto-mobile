@@ -2356,6 +2356,83 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(calls[0].deviceId).toBe("emulator-5556");
     });
 
+    it("rejects a supplied-but-unresolved deviceSessionUuid without invoking the callback", async () => {
+      // A stale/unknown UUID must NOT fall through to a null (all-device) target: daemon.ts treats
+      // null as every device, so the observer would otherwise be registered/released on every
+      // Android device and still ack success (#4709 review).
+      let invoked = false;
+      server.setOnStorageSubscriptionRequested(async () => {
+        invoked = true;
+      });
+
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "s-unresolved",
+          command: "subscribe_storage",
+          deviceSessionUuid: "session-unknown",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+
+      expect(invoked).toBe(false);
+      const msgs = socket.getWrittenMessages<{ type: string; success?: boolean; error?: string }>();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].type).toBe("error");
+      expect(msgs[0].success).toBe(false);
+      expect(msgs[0].error).toBe(
+        "deviceSessionUuid 'session-unknown' does not identify a live device session",
+      );
+    });
+
+    it("rejects an unresolved deviceSessionUuid on unsubscribe too", async () => {
+      let invoked = false;
+      server.setOnStorageSubscriptionRequested(async () => {
+        invoked = true;
+      });
+
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "s-unresolved-unsub",
+          command: "unsubscribe_storage",
+          deviceSessionUuid: "session-unknown",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+
+      expect(invoked).toBe(false);
+      expect(socket.getWrittenMessages<{ type: string }>()[0].type).toBe("error");
+    });
+
+    it("rejects a malformed (non-string) deviceSessionUuid without invoking the callback", async () => {
+      let invoked = false;
+      server.setOnStorageSubscriptionRequested(async () => {
+        invoked = true;
+      });
+
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "s-malformed",
+          command: "subscribe_storage",
+          deviceSessionUuid: 42,
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+
+      expect(invoked).toBe(false);
+      const msgs = socket.getWrittenMessages<{ type: string; error?: string }>();
+      expect(msgs[0].type).toBe("error");
+      expect(msgs[0].error).toBe("deviceSessionUuid must be a string or null");
+    });
+
     it("rejects a request missing packageName or fileName without invoking the callback", async () => {
       let invoked = false;
       server.setOnStorageSubscriptionRequested(async () => {

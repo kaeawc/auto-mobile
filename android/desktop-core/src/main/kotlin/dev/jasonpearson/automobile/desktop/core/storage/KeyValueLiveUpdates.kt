@@ -117,6 +117,37 @@ internal fun List<KeyValueFile>.applyKeyValueEdit(
   )
 
 /**
+ * The currently displayed value for [key] in [fileName], or null when the file/key is not loaded.
+ */
+internal fun List<KeyValueFile>.currentValueOf(fileName: String, key: String): Any? = firstOrNull {
+  it.name == fileName
+}?.entries?.firstOrNull { it.key == key }?.value
+
+/**
+ * Folds a just-saved optimistic edit in [applyKeyValueEdit], but only when the entry has not
+ * changed under a concurrent live `storage_update` frame that landed while the save was in flight
+ * (#4709 review).
+ *
+ * [expectedCurrentValue] is the entry's value captured *before* the suspending save was awaited
+ * (via [currentValueOf]). If a newer live frame folded a different value for the same key during
+ * the await, the current value no longer matches [expectedCurrentValue]; the older, just-submitted
+ * optimistic value must not clobber it, so the newer live frame wins and the receiver is returned
+ * unchanged. Otherwise the optimistic edit folds in as usual.
+ */
+internal fun List<KeyValueFile>.applyKeyValueEditIfUnchanged(
+  fileName: String,
+  key: String,
+  value: String?,
+  type: KeyValueType,
+  expectedCurrentValue: Any?,
+): List<KeyValueFile> =
+  if (currentValueOf(fileName, key) == expectedCurrentValue) {
+    applyKeyValueEdit(fileName, key, value, type)
+  } else {
+    this
+  }
+
+/**
  * The highlight identities a live update should light up: the single changed key, or every key in a
  * cleared file.
  */

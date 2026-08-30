@@ -714,6 +714,28 @@ export function storageTelemetryInputFromWire(
 }
 
 /**
+ * Normalize a `storage_changed` wire value to the JSON-encoded string that
+ * `StorageChangedEvent.value` and every downstream consumer expect.
+ *
+ * The CtrlProxy runner emits `value` as a raw JSON fragment: a quoted string for
+ * STRING preferences, but a bare JSON number / boolean / array for INT, LONG,
+ * FLOAT, BOOLEAN, and STRING_SET. `JSON.parse` on the wire frame therefore yields
+ * a JS `number`/`boolean`/`array` for those types, not a string. Forwarding that
+ * runtime value unchanged makes the desktop `storage_update` frame fail
+ * kotlinx-serialization decoding (its `StorageEventData.value` is `String?`), so
+ * live updates silently drop for every non-string preference type (#4709 review).
+ * Re-encoding non-strings with `JSON.stringify` restores the string contract:
+ * `42` -> `"42"`, `true` -> `"true"`, `["a","b"]` -> `'["a","b"]'` — each of which
+ * the desktop `parseKeyValue` decodes back to its declared type.
+ */
+export function normalizeStorageWireValue(value: unknown): string | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+/**
  * Discriminated union of all WebSocket messages from the accessibility service.
  * The `type` field is the discriminant.
  */
@@ -4023,7 +4045,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           packageName: message.packageName ?? "",
           fileName: message.fileName ?? "",
           key: message.key ?? null,
-          value: message.value ?? null,
+          // Non-string preference types arrive as bare JSON (number/boolean/array); re-encode
+          // to the JSON string contract so the desktop storage_update frame decodes (#4709 review).
+          value: normalizeStorageWireValue(message.value),
           valueType: message.valueType ?? "STRING",
           timestamp: message.timestamp ?? this.timer.now(),
           sequenceNumber: message.sequenceNumber ?? 0,

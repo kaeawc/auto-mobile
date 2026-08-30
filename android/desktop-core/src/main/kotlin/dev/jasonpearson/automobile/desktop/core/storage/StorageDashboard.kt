@@ -263,14 +263,26 @@ fun StorageDashboard(
           onSetValue =
             dataSource?.let { ds ->
               { fileName, key, value, type ->
+                // Snapshot the entry's current value *before* the suspending save so a live
+                // storage_update frame that folds a newer value for this key while the save is in
+                // flight is not clobbered by the older, just-submitted optimistic value (#4709
+                // review).
+                val preSaveValue = keyValueFiles.currentValueOf(fileName, key)
                 val result = ds.setKeyValue(fileName, key, value, type)
                 // Optimistic local update: reflect the saved value immediately rather than leaving
                 // it stale until a live storage_update frame arrives (or the facet is reopened).
                 // A later frame for the same key folds in idempotently over this (#4709). No
                 // highlight — a highlight signals a change that happened *under* the user, not one
-                // they just made.
+                // they just made. Skipped when a concurrent live frame already advanced the key.
                 if (result is Result.Success) {
-                  keyValueFiles = keyValueFiles.applyKeyValueEdit(fileName, key, value, type)
+                  keyValueFiles =
+                    keyValueFiles.applyKeyValueEditIfUnchanged(
+                      fileName,
+                      key,
+                      value,
+                      type,
+                      preSaveValue,
+                    )
                 }
                 result
               }

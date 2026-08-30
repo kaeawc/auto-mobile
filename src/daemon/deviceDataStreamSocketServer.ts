@@ -922,13 +922,46 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         return;
       }
 
+      let storageDeviceSessionUuid: string | null;
+      try {
+        // JSON parsing does not validate fields at runtime; reject a malformed key
+        // before it can quietly resolve to a null (all-device) target.
+        storageDeviceSessionUuid = this.parseDeviceSessionUuid(request.deviceSessionUuid);
+      } catch (error) {
+        const errorResponse: SubscriptionResponse = {
+          id: request.id,
+          type: "error",
+          success: false,
+          error: errorMessage(error),
+        };
+        this.sendJson(socket, errorResponse);
+        return;
+      }
+
+      // Resolve the target device from the pane's session/serial, mirroring request_observation.
+      // A supplied-but-unresolvable session UUID must NOT fall through to a null (all-device)
+      // target: daemon.ts treats null as every device, so a stale/unknown UUID would otherwise
+      // register or release the content observer on every Android device and still ack success.
+      // Reject it exactly as the `subscribe` path does; a missing UUID stays an intentional
+      // device-scoped-by-serial request.
+      const storageDeviceId =
+        storageDeviceSessionUuid === null
+          ? (request.deviceId ?? null)
+          : this.deviceSessionResolver.resolveDeviceId(storageDeviceSessionUuid);
+      if (storageDeviceSessionUuid !== null && storageDeviceId === null) {
+        const errorResponse: SubscriptionResponse = {
+          id: request.id,
+          type: "error",
+          success: false,
+          error: `deviceSessionUuid '${storageDeviceSessionUuid}' does not identify a live device session`,
+        };
+        this.sendJson(socket, errorResponse);
+        return;
+      }
+
       if (this.onStorageSubscriptionRequested) {
-        // Resolve the target device from the pane's session/serial, mirroring request_observation.
-        const deviceId = request.deviceSessionUuid
-          ? this.deviceSessionResolver.resolveDeviceId(request.deviceSessionUuid)
-          : (request.deviceId ?? null);
         void this.onStorageSubscriptionRequested({
-          deviceId,
+          deviceId: storageDeviceId,
           packageName,
           fileName,
           subscribe,

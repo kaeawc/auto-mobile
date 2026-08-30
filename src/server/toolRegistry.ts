@@ -905,7 +905,7 @@ export class DefaultAfterToolCallHandler implements AfterToolCallHandler {
     const artifactDirectory = configuredArtifactDirectory ?? getDefaultToolOutputsDir();
     const artifactWriter = !internalCall
       ? configuredArtifactDirectory
-        ? this.createArtifactWriter(artifactDirectory, timer)
+        ? this.createArtifactWriter(artifactDirectory, timer, AUTOMATIC_TOOL_OUTPUT_RETENTION)
         : this.createArtifactWriter(artifactDirectory, timer, AUTOMATIC_TOOL_OUTPUT_RETENTION)
       : undefined;
 

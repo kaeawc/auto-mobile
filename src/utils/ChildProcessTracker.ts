@@ -42,6 +42,7 @@ export interface SpawnableProcess {
 }
 
 export interface TrackedChildProcess extends StoppableProcess {
+  pid?: number;
   signalCode: NodeJS.Signals | null;
   stderr: {
     on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
@@ -89,6 +90,12 @@ export function createExitTracker(
     process.stderr?.off("data", onStderr);
   };
   const onError = (error: Error) => {
+    // Node emits AbortError when an already-spawned child's AbortSignal fires,
+    // then emits exit once signal delivery completes. Keep the exit listener
+    // and promise alive so callers can prove the child was actually reaped.
+    if (error.name === "AbortError" && process.pid !== undefined) {
+      return;
+    }
     exitState.endedAt = new Date().toISOString();
     cleanupProcessListeners();
     if (!process.stderr) {

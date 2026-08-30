@@ -20,7 +20,10 @@ import {
   type RecordingFileProbe,
   type StoppableProcess,
 } from "../../../src/features/video/FfmpegVideoProcessingBackend";
-import type { VideoCaptureConfig } from "../../../src/features/video/VideoRecorderService";
+import {
+  VideoCaptureStartCleanupError,
+  type VideoCaptureConfig,
+} from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
 import type { SimCtl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -381,6 +384,56 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
     expect(stderr.listenerCount("data")).toBe(0);
     expect(child.listenerCount("exit")).toBe(0);
     expect(child.listenerCount("error")).toBe(0);
+  });
+
+  test("returns a retriable handle when failed iOS startup cannot reap its child", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const stderr = new PassThrough();
+    const signals: Array<NodeJS.Signals | number | undefined> = [];
+    const child = new EventEmitter() as ChildProcess;
+    Object.assign(child, {
+      stderr,
+      stdout: null,
+      stdin: null,
+      killed: false,
+      exitCode: null,
+      signalCode: null,
+      pid: 123,
+      kill: (signal?: NodeJS.Signals | number) => {
+        signals.push(signal);
+        return true;
+      },
+    });
+    const simctl = {
+      isAvailable: async () => true,
+      startCommandArgs: async () => child,
+      executeCommandArgs: async () => diagnosticsExecResult("Booted"),
+    } as unknown as SimCtl;
+    backend = new FfmpegVideoProcessingBackend(
+      undefined,
+      () => simctl,
+      undefined,
+      undefined,
+      undefined,
+      timer,
+    );
+    (backend as any).ensureFfmpegAvailable = async () => {};
+    (backend as any).iosRecordingStartMaxAttempts = 1;
+    mockConfig.device = { ...mockDevice, platform: "ios", deviceId: "ios-unreaped-udid" };
+
+    let error: unknown;
+    try {
+      await backend.start(mockConfig);
+    } catch (caught) {
+      error = caught;
+    }
+
+    expect(error).toBeInstanceOf(VideoCaptureStartCleanupError);
+    expect((error as VideoCaptureStartCleanupError).handle.recordingId).toBe(
+      mockConfig.recordingId,
+    );
+    expect(signals).toEqual(["SIGKILL", "SIGKILL"]);
   });
 
   test("bounds and aborts a hanging FFmpeg prerequisite within the iOS startup budget", async () => {

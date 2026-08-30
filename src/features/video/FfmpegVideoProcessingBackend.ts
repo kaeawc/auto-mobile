@@ -27,11 +27,12 @@ import {
   type ProcessTracker,
   type StoppableProcess,
 } from "../../utils/ChildProcessTracker";
-import type {
-  RecordingHandle,
-  RecordingResult,
-  VideoCaptureBackend,
-  VideoCaptureConfig,
+import {
+  VideoCaptureStartCleanupError,
+  type RecordingHandle,
+  type RecordingResult,
+  type VideoCaptureBackend,
+  type VideoCaptureConfig,
 } from "./VideoRecorderService";
 
 export { PROCESS_EXIT_TIMEOUT_MS, waitForExit };
@@ -53,7 +54,7 @@ export const IOS_RECORDING_FILE_READY_TIMEOUT_MS = 15000;
 const IOS_RECORDING_FILE_READY_INITIAL_BACKOFF_MS = 100;
 const IOS_RECORDING_FILE_READY_MAX_BACKOFF_MS = 1000;
 const FFMPEG_POST_PROCESS_TIMEOUT_MS = 60000;
-export const IOS_RECORDING_START_TIMEOUT_MS = 5000;
+const IOS_RECORDING_START_TIMEOUT_MS = 5000;
 const IOS_RECORDING_START_CLEANUP_TIMEOUT_MS = 500;
 // A cold or loaded simulator can silently miss the very first `recordVideo`
 // start handshake (#4076): simctl produces no "Recording started" and no error,
@@ -526,8 +527,12 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
 
     logger.info(`[FfmpegVideo] Starting screenrecord: ${screenrecordArgs.join(" ")}`);
 
-    const captureProcess = await adb.spawn(screenrecordArgs);
+    const captureProcess = await adb.spawn(screenrecordArgs, {
+      signal: config.abortSignal,
+    });
+    const captureTracker = trackProcess(captureProcess);
     let ffmpegProcess: FfmpegProcess | undefined;
+    let ffmpegTracker: ProcessTracker | undefined;
     const forceStopStartingProcesses = () => {
       forceStopStartingProcess(captureProcess);
       forceStopStartingProcess(ffmpegProcess);
@@ -568,6 +573,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
         stdio: ["pipe", "pipe", "pipe"],
       });
       ffmpegProcess = startedFfmpeg.process;
+      ffmpegTracker = startedFfmpeg.tracker;
       throwIfRecordingStartAborted(config.abortSignal, "Android");
 
       this.ffmpegClient.pipe({
@@ -580,9 +586,6 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
 
       await waitForSpawn(ffmpegProcess);
       logger.info(`[FfmpegVideo] ffmpeg process spawned`);
-
-      const captureTracker = trackProcess(captureProcess);
-      const ffmpegTracker = trackProcess(ffmpegProcess);
 
       const backendHandle: FfmpegBackendHandle = {
         kind: "ffmpeg",
@@ -600,10 +603,55 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       };
     } catch (error) {
       forceStopStartingProcesses();
+      const cleanupError = await this.cleanupStartingTrackers([
+        captureTracker,
+        ...(ffmpegTracker ? [ffmpegTracker] : []),
+      ]);
+      if (cleanupError) {
+        throw new VideoCaptureStartCleanupError(
+          `Failed to clean up Android recording after startup failed: ${errorMessage(cleanupError)}`,
+          {
+            recordingId: config.recordingId,
+            outputPath: config.outputPath,
+            startedAt: config.startedAt,
+            backendHandle: {
+              kind: "ffmpeg",
+              platform: "android",
+              captureTracker,
+              ffmpegTracker,
+              config,
+            } satisfies FfmpegBackendHandle,
+          },
+          { cause: error },
+        );
+      }
       return throwAndroidRecordingStartFailure(error, config.abortSignal);
     } finally {
       config.abortSignal?.removeEventListener("abort", abortStartingCapture);
     }
+  }
+
+  private async cleanupStartingTrackers(trackers: ProcessTracker[]): Promise<unknown | undefined> {
+    const results = await Promise.allSettled(
+      trackers.map((tracker) =>
+        waitForExit(tracker.process, tracker.exitPromise, {
+          timeoutMs: 0,
+          forceKillTimeoutMs: PROCESS_EXIT_TIMEOUT_MS,
+          signal: "SIGKILL",
+          timer: this.timer,
+        }),
+      ),
+    );
+    const failures = results
+      .map((result, index) => ({ result, tracker: trackers[index] }))
+      .filter(
+        (outcome): outcome is { result: PromiseRejectedResult; tracker: ProcessTracker } =>
+          outcome.result.status === "rejected" && outcome.tracker.process.pid !== undefined,
+      )
+      .map((outcome) => outcome.result.reason);
+    return failures.length > 0
+      ? new AggregateError(failures, "Failed to reap recording startup processes")
+      : undefined;
   }
 
   private async startIos(
@@ -654,6 +702,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       }
       const captureProcess = await simctl.startCommandArgs(args, {
         stdio: ["ignore", "ignore", "pipe"],
+        signal: config.abortSignal,
       });
       const captureTracker = trackProcess(captureProcess);
       let spawned = false;
@@ -696,19 +745,42 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
           backendHandle,
         };
       } catch (error) {
-        attemptFailures.push(
-          await this.describeFailedIosStartAttempt({
-            attempt,
+        const failedAttempt = await this.describeFailedIosStartAttempt({
+          attempt,
+          captureTracker,
+          config,
+          device,
+          error,
+          maxAttempts,
+          simctl,
+          spawned,
+          startDeadlineMs,
+        });
+        attemptFailures.push(failedAttempt.description);
+        if (failedAttempt.cleanupError) {
+          const message = this.buildProcessFailureMessage(
+            `Failed to clean up iOS recording after startup failed: ${failedAttempt.description}`,
+            "xcrun simctl",
+            args,
             captureTracker,
-            config,
-            device,
-            error,
-            maxAttempts,
-            simctl,
-            spawned,
-            startDeadlineMs,
-          }),
-        );
+          );
+          throw new VideoCaptureStartCleanupError(
+            message,
+            {
+              recordingId: config.recordingId,
+              outputPath: config.outputPath,
+              startedAt: config.startedAt,
+              backendHandle: {
+                kind: "ffmpeg",
+                platform: "ios",
+                captureTracker,
+                capturePath,
+                config,
+              } satisfies FfmpegBackendHandle,
+            },
+            { cause: failedAttempt.cleanupError },
+          );
+        }
 
         if (attempt >= maxAttempts) {
           throw new ActionableError(
@@ -739,8 +811,18 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     simctl: SimCtl;
     spawned: boolean;
     startDeadlineMs: number;
-  }): Promise<string> {
+  }): Promise<{ description: string; cleanupError?: unknown }> {
     const stopError = await this.cleanupFailedIosStart(input.captureTracker, input.startDeadlineMs);
+    const descriptionPrefix = `attempt ${input.attempt}/${input.maxAttempts}: ${input.error}`;
+    if (!input.spawned && input.captureTracker.process.pid === undefined) {
+      throw new ActionableError(`Failed to start iOS recording: ${input.error}`);
+    }
+    if (stopError) {
+      return {
+        description: `${descriptionPrefix}; cleanup failed: ${errorMessage(stopError)}`,
+        cleanupError: stopError,
+      };
+    }
     if (input.config.abortSignal?.aborted) {
       throw new ActionableError("iOS recording start was cancelled during shutdown.");
     }
@@ -756,8 +838,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     logger.warn(
       `[FfmpegVideo] iOS recording start attempt ${input.attempt}/${input.maxAttempts} failed: ${input.error} (${diagnostics})`,
     );
-    const cleanupSuffix = stopError ? `; cleanup failed: ${stopError}` : "";
-    return `attempt ${input.attempt}/${input.maxAttempts}: ${input.error}${cleanupSuffix}; ${diagnostics}`;
+    return { description: `${descriptionPrefix}; ${diagnostics}` };
   }
 
   private async cleanupFailedIosStart(

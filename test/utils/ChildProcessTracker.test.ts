@@ -67,6 +67,25 @@ describe("ChildProcessTracker", () => {
       expect(exitState.exitCode).toBe(0);
       expect(exitState.signal).toBeNull();
     });
+
+    test("keeps tracking an aborted spawned child until its exit event", async () => {
+      const process = new EventEmitter() as TrackedChildProcess;
+      process.pid = 123;
+      process.exitCode = null;
+      process.signalCode = null;
+      process.killed = true;
+      process.stderr = null;
+      process.kill = () => true;
+
+      const { exitState, exitPromise } = createExitTracker(process, []);
+      const abortError = new Error("The operation was aborted");
+      abortError.name = "AbortError";
+      process.emit("error", abortError);
+      process.emit("exit", null, "SIGTERM");
+
+      await expect(exitPromise).resolves.toBeUndefined();
+      expect(exitState.signal).toBe("SIGTERM");
+    });
   });
 
   describe("waitForExit", () => {

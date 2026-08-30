@@ -1,11 +1,12 @@
 import { ActionableError, type BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
 import { isIosPhysicalUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
-import type {
-  RecordingHandle,
-  RecordingResult,
-  VideoCaptureBackend,
-  VideoCaptureConfig,
+import {
+  VideoCaptureStartCleanupError,
+  type RecordingHandle,
+  type RecordingResult,
+  type VideoCaptureBackend,
+  type VideoCaptureConfig,
 } from "./VideoRecorderService";
 import { FfmpegVideoProcessingBackend } from "./FfmpegVideoProcessingBackend";
 import { IosPhysicalVideoCaptureBackend } from "./IosPhysicalVideoCaptureBackend";
@@ -41,8 +42,24 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
     }
 
     const backend = this.selectBackend(device);
-    const handle = await backend.start(config);
+    let handle: RecordingHandle;
+    try {
+      handle = await backend.start(config);
+    } catch (error) {
+      if (error instanceof VideoCaptureStartCleanupError) {
+        throw new VideoCaptureStartCleanupError(
+          error.message,
+          this.wrapHandle(error.handle, backend),
+          { cause: error },
+        );
+      }
+      throw error;
+    }
 
+    return this.wrapHandle(handle, backend);
+  }
+
+  private wrapHandle(handle: RecordingHandle, backend: VideoCaptureBackend): RecordingHandle {
     return {
       ...handle,
       backendHandle: {

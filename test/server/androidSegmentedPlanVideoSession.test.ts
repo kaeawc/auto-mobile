@@ -50,6 +50,24 @@ function makeActiveRecording(id: string, outputPath: string) {
 }
 
 describe("AndroidSegmentedPlanVideoSession", () => {
+  test("forwards session ownership to every segment", async () => {
+    const requests: Array<{ ownerSessionUuid?: string }> = [];
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "owned",
+      ownerSessionUuid: "owner-a",
+      startVideoRecording: async (request) => {
+        requests.push(request);
+        return makeActiveRecording(`r${requests.length}`, `/tmp/r${requests.length}.mp4`);
+      },
+    });
+
+    await session.startFirstSegment();
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.ownerSessionUuid).toBe("owner-a");
+  });
+
   test("finalize stops the active segment and returns its path", async () => {
     const start = mock(async () => makeActiveRecording("r1", "/tmp/r1.mp4"));
     const stop = mock(async () => ({

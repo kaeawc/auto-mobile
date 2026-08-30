@@ -31,6 +31,8 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   maxDurationSeconds?: number;
   /** Quality/config overrides forwarded to every segment's recording. */
   configOverrides?: VideoRecordingConfigInput;
+  /** Daemon session that owns every segment in this recording session. */
+  ownerSessionUuid?: string;
   /** Cancellation for the caller-owned initial segment startup only. */
   startupAbortSignal?: AbortSignal;
   /**
@@ -73,6 +75,8 @@ export class AndroidSegmentedPlanVideoSession {
 
   private readonly configOverrides: VideoRecordingConfigInput | undefined;
 
+  private readonly ownerSessionUuid: string | undefined;
+
   private readonly startupAbortSignal: AbortSignal | undefined;
 
   private activeRecordingId: string | undefined;
@@ -100,6 +104,8 @@ export class AndroidSegmentedPlanVideoSession {
   /** Cancels a rotation queued after {@link abort} begins. */
   private readonly sessionAbortController = new AbortController();
 
+  private stopPromise: Promise<{ filePaths: string[]; recordingIds: string[] }> | undefined;
+
   private segmentIndex = 0;
 
   private segmentStartedAtMs = 0;
@@ -110,6 +116,9 @@ export class AndroidSegmentedPlanVideoSession {
 
   /** IDs whose stop failed during rotation and still need rollback on abort. */
   private readonly pendingRollbackRecordingIds: string[] = [];
+
+  /** Errors from failed segment stops, retained for a failed finalization report. */
+  private readonly pendingRollbackErrors: unknown[] = [];
 
   private readonly startVideoRecordingFn: (
     request: Parameters<typeof defaultStartVideoRecording>[0],
@@ -129,6 +138,7 @@ export class AndroidSegmentedPlanVideoSession {
       options.segmentRotateAfterMs ?? ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
     this.maxDurationSeconds = options.maxDurationSeconds;
     this.configOverrides = options.configOverrides;
+    this.ownerSessionUuid = options.ownerSessionUuid;
     this.startupAbortSignal = options.startupAbortSignal;
     this.onFinalized = options.onFinalized;
     this.startVideoRecordingFn = options.startVideoRecording ?? defaultStartVideoRecording;
@@ -231,6 +241,18 @@ export class AndroidSegmentedPlanVideoSession {
    * waits for any in-flight rotation, then finalizes and returns every segment.
    */
   async stop(): Promise<{ filePaths: string[]; recordingIds: string[] }> {
+    if (this.stopPromise) {
+      return this.stopPromise;
+    }
+    const stopPromise = this.stopInternal();
+    this.stopPromise = stopPromise.catch((error: unknown) => {
+      this.stopPromise = undefined;
+      throw error;
+    });
+    return this.stopPromise;
+  }
+
+  private async stopInternal(): Promise<{ filePaths: string[]; recordingIds: string[] }> {
     this.timerDriven = false;
     this.clearTimers();
     await this.pendingRotation;
@@ -269,6 +291,7 @@ export class AndroidSegmentedPlanVideoSession {
     this.completedRecordingIds.splice(0);
     this.completedFilePaths.splice(0);
     this.pendingRollbackRecordingIds.splice(0);
+    this.pendingRollbackErrors.splice(0);
     this.notifyFinalized();
   }
 
@@ -321,6 +344,7 @@ export class AndroidSegmentedPlanVideoSession {
       outputName: this.segmentOutputName(),
       maxDurationSeconds: ANDROID_SCREENRECORD_MAX_SECONDS,
       configOverrides: this.configOverrides,
+      ownerSessionUuid: this.ownerSessionUuid,
       abortSignal: abortSignal ?? this.sessionAbortController.signal,
     });
     this.activeRecordingId = recording.recordingId;
@@ -352,6 +376,10 @@ export class AndroidSegmentedPlanVideoSession {
         `[SegmentedPlanVideo] Failed to stop segment ${previousId}: ${errorMessage(error)}`,
       );
       this.pendingRollbackRecordingIds.push(previousId);
+      this.pendingRollbackErrors.push(error);
+      this.timerDriven = false;
+      this.clearTimers();
+      return;
     } finally {
       this.activeRecordingId = undefined;
     }
@@ -392,6 +420,13 @@ export class AndroidSegmentedPlanVideoSession {
         this.pendingRollbackRecordingIds.push(id);
         throw error;
       }
+    }
+
+    if (this.pendingRollbackErrors.length > 0) {
+      throw new AggregateError(
+        this.pendingRollbackErrors,
+        "Failed to finalize every segmented recording",
+      );
     }
 
     return {

@@ -456,6 +456,7 @@ export function registerVideoRecordingTools(): void {
               device: target,
               outputNamePrefix: args.outputName ?? `recording-${target.deviceId}`,
               configOverrides: buildConfigOverrides(args),
+              ownerSessionUuid: args.sessionUuid,
               timer: segmentedSessions.timer,
               maxDurationSeconds,
               startupAbortSignal: signal,

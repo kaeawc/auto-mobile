@@ -407,6 +407,8 @@ export class RealObserveScreen implements ObserveScreen {
         }
       }
 
+      await this.reconcileActiveWindowAttribution(result, foregroundIdentity);
+
       // Freshness diagnostics.
       //
       // This used to read `isFresh = requestedAfter === undefined ? true : …`,
@@ -797,6 +799,38 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   // ---------- Helpers ----------
+
+  /**
+   * Correct stale accessibility-service window metadata when both the captured
+   * hierarchy and the device's resumed activity identify the same app.
+   *
+   * CtrlProxy can retain a prior `foregroundActivity` after a window transition
+   * even when its hierarchy has already caught up. The hierarchy package and
+   * the device's foreground activity independently confirm the replacement, so
+   * they are safer than the stale activity name for `activeWindow` consumers
+   * such as `waitFor` (issue #5972). System UI is intentionally excluded: a
+   * system panel can validly be the accessible window while another app remains
+   * the resumed activity beneath it.
+   */
+  private async reconcileActiveWindowAttribution(
+    result: ObserveResult,
+    foregroundIdentity: Promise<string | undefined>,
+  ): Promise<void> {
+    const foreground = await foregroundIdentity;
+    const observed = result.viewHierarchy?.packageName;
+    const activeWindow = result.activeWindow;
+    const hasConfirmedReplacement =
+      foreground !== undefined &&
+      observed === foreground &&
+      activeWindow !== undefined &&
+      activeWindow.appId !== foreground &&
+      !SYSTEM_UI_WINDOW_PACKAGES.has(observed);
+    if (!hasConfirmedReplacement) {
+      return;
+    }
+
+    result.activeWindow = { ...activeWindow, appId: foreground, activityName: "" };
+  }
 
   /**
    * Compare the app the observed hierarchy was captured from against the

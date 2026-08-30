@@ -261,6 +261,7 @@ describe("AndroidCtrlProxyClient", function () {
 
   test("aborts a connect whose platform setup completes after close()", async () => {
     const manualTimer = new FakeTimer();
+    const lease = new FakeCtrlProxyForwardLease();
     let releaseForward!: () => void;
     const forwardGate = new Promise<void>((resolve) => {
       releaseForward = resolve;
@@ -292,6 +293,15 @@ describe("AndroidCtrlProxyClient", function () {
       gatedAdb,
       factory,
       manualTimer,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      lease,
     );
     try {
       const connectPromise = client.ensureConnected();
@@ -300,6 +310,9 @@ describe("AndroidCtrlProxyClient", function () {
 
       // Shutdown teardown closes the client while port-forward setup is pending.
       await client.close();
+      // An ADB command can ignore its abort signal. Its lease must remain held
+      // until the old setup and its late cleanup have stopped touching forwards.
+      expect(lease.releases).toBe(0);
 
       // Platform setup now finishes — after close().
       releaseForward();
@@ -309,6 +322,7 @@ describe("AndroidCtrlProxyClient", function () {
       expect(socket).toBeNull();
       expect(client.isConnected()).toBe(false);
       await expect(connectPromise).resolves.toBe(false);
+      expect(lease.releases).toBe(1);
     } finally {
       releaseForward();
       await client.close();

@@ -14,7 +14,6 @@
  * - CtrlProxyHighlights: Visual highlight overlays
  */
 
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import WebSocket from "ws";
 import {
@@ -121,6 +120,7 @@ import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 import { defaultIdGenerator } from "../../../utils/IdGenerator";
 import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../../../utils/fileLock";
+import { getTempDir, TEMP_SUBDIRS } from "../../../utils/tempDir";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
@@ -1001,8 +1001,6 @@ interface CtrlProxyForwardLease {
   release(): void;
 }
 
-const CTRL_PROXY_FORWARD_LEASE_DIRECTORY = join(tmpdir(), "auto-mobile-ctrlproxy-forwards");
-
 class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
   private readonly lockPath: string;
   private readonly ownerToken = defaultIdGenerator.next();
@@ -1011,7 +1009,10 @@ class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
   public constructor(deviceId: string) {
     // base64url makes arbitrary Android serials safe as one path segment.
     this.lockPath = join(
-      CTRL_PROXY_FORWARD_LEASE_DIRECTORY,
+      // Do not derive this from os.tmpdir(): package runners may give each
+      // process an isolated TMPDIR while they still share one ADB server.
+      getTempDir(TEMP_SUBDIRS.STATE),
+      "ctrlproxy-forwards",
       `${Buffer.from(deviceId).toString("base64url")}.lock`,
     );
   }
@@ -1022,6 +1023,7 @@ class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     }
     this.acquired = tryAcquireExclusiveLock(this.lockPath, {
       ownerToken: this.ownerToken,
+      reclaimOwnPid: true,
     });
     return this.acquired;
   }
@@ -1079,6 +1081,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Android-specific state
   private portForwardingSetup: boolean = false;
   private readonly ctrlProxyForwardLease: CtrlProxyForwardLease;
+  private ctrlProxyForwardLeaseReleaseScheduled: boolean = false;
   private inFlightConnection: Promise<boolean> | null = null;
   private cleanupHeldPort: number | null = null;
   private lastWebSocketTimeout: number = 0;
@@ -3117,7 +3120,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Error during cleanup: ${error}`);
     } finally {
-      this.ctrlProxyForwardLease.release();
+      this.releaseCtrlProxyForwardLeaseAfterConnectionSettles();
     }
   }
 
@@ -3321,6 +3324,26 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     this.cleanupHeldPort = null;
     PortManager.releaseIfAllocated(this.device.deviceId, this.localPort);
     PortManager.releaseCleanupHold(heldPort);
+  }
+
+  /**
+   * ADB commands may ignore cancellation. Keep the cross-process ownership
+   * lease until an in-flight connection (including its forward setup) settles,
+   * so its late cleanup cannot remove a replacement process's forward.
+   */
+  private releaseCtrlProxyForwardLeaseAfterConnectionSettles(): void {
+    if (this.ctrlProxyForwardLeaseReleaseScheduled) {
+      return;
+    }
+    this.ctrlProxyForwardLeaseReleaseScheduled = true;
+
+    const releaseLease = (): void => this.ctrlProxyForwardLease.release();
+    const inFlightConnection = this.inFlightConnection;
+    if (inFlightConnection === null) {
+      releaseLease();
+      return;
+    }
+    void inFlightConnection.then(releaseLease, releaseLease);
   }
 
   /**

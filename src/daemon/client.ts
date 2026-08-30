@@ -154,7 +154,9 @@ export class DaemonClient {
       const params = (value as { params?: Record<string, unknown> }).params;
       if (params && typeof params === "object") {
         const existingArgs =
-          params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments)
+          params.arguments &&
+          typeof params.arguments === "object" &&
+          !Array.isArray(params.arguments)
             ? (params.arguments as Record<string, unknown>)
             : {};
         params.arguments = { ...existingArgs, [DAEMON_NON_FINITE_ENCODED_PARAM]: true };

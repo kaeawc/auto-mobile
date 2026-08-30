@@ -112,8 +112,13 @@ function encodeInto(value: unknown, state: { encoded: boolean }): unknown {
     // If the (encoded) object carries the reserved TAG key, its bare shape could be
     // misread as a sentinel on decode. Escape it: stash the entries under
     // `{ [TAG]: { [ESCAPE_KEY]: entries } }`, which decode reverses. This makes a
-    // raw sentinel shape on the wire provably our own.
+    // raw sentinel shape on the wire provably our own. Escaping needs its inverse
+    // (decode) to run, and decode is provenance-gated on `encoded`, so an escape
+    // must flip `encoded` too — otherwise a collision-shaped object with no
+    // co-occurring non-finite number would be escaped on the wire but never
+    // un-escaped by the receiver, corrupting a payload #5863 promises to preserve.
     if (Object.prototype.hasOwnProperty.call(value, NON_FINITE_TAG)) {
+      state.encoded = true;
       return { [NON_FINITE_TAG]: { [ESCAPE_KEY]: encodedEntries } };
     }
     return fromEntries(encodedEntries);
@@ -123,9 +128,11 @@ function encodeInto(value: unknown, state: { encoded: boolean }): unknown {
 
 /**
  * Encode non-finite numbers as JSON-safe sentinels and escape any real object that
- * collides with the sentinel shape. Returns a decoded-safe copy plus whether any
- * non-finite number was actually encoded (transport provenance — the client only
- * flags requests where this is true). The input is not mutated.
+ * collides with the sentinel shape. Returns a decoded-safe copy plus whether the
+ * payload was transformed at all — a non-finite encoded OR a collision escaped.
+ * Both need {@link decodeNonFinite} to run to be reversed, so the client flags a
+ * request (transport provenance) exactly when `encoded` is true. The input is not
+ * mutated.
  */
 export function encodeNonFinite(value: unknown): { value: unknown; encoded: boolean } {
   const state = { encoded: false };
@@ -153,9 +160,7 @@ export function decodeNonFinite(value: unknown): unknown {
   if (escaped) {
     return fromEntries(escaped.map(([key, child]) => [key, decodeNonFinite(child)]));
   }
-  return fromEntries(
-    Object.entries(value).map(([key, child]) => [key, decodeNonFinite(child)]),
-  );
+  return fromEntries(Object.entries(value).map(([key, child]) => [key, decodeNonFinite(child)]));
 }
 
 /**

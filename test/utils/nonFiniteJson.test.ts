@@ -23,6 +23,20 @@ function throughWire(value: unknown): unknown {
   return decodeNonFinite(afterHops);
 }
 
+// Model the FULL client→server path, including the provenance gate: the client
+// stamps the flag only when `encodeNonFinite` reports it transformed the payload,
+// and the server (`reviveNonFiniteArguments`) decodes only flagged requests. This
+// is the path an argument actually travels — decode does not run unconditionally.
+function throughDaemon(args: unknown): unknown {
+  const { value, encoded } = encodeNonFinite(args);
+  const wire =
+    encoded && value !== null && typeof value === "object" && !Array.isArray(value)
+      ? { ...(value as Record<string, unknown>), [DAEMON_NON_FINITE_ENCODED_PARAM]: true }
+      : value;
+  const afterHops = JSON.parse(JSON.stringify(JSON.parse(JSON.stringify(wire))));
+  return reviveNonFiniteArguments(afterHops);
+}
+
 describe("encodeNonFinite encodes non-finite numbers as sentinels", () => {
   test("Infinity/-Infinity/NaN become tagged objects on the wire", () => {
     const { value, encoded } = encodeNonFinite({
@@ -167,5 +181,31 @@ describe("reviveNonFiniteArguments applies revival only by transport provenance"
   test("non-object arguments pass through", () => {
     expect(reviveNonFiniteArguments(undefined)).toBe(undefined);
     expect(reviveNonFiniteArguments("x")).toBe("x");
+  });
+
+  // Regression (#5863): escaping is applied whenever a real object collides with
+  // the sentinel shape, but un-escaping (decode) is provenance-gated. If a request
+  // whose ONLY special feature is a collision-shaped object — no co-occurring
+  // non-finite number — did not set the flag, the escaped wrapper would reach the
+  // tool uncorrected. The client must flag escape-only requests too.
+  test("a collision-shaped argument with NO non-finite still round-trips end-to-end", () => {
+    const bare = { __autoMobileNonFinite__: "NaN" };
+    expect(throughDaemon(bare)).toEqual(bare);
+
+    const nested = { responseHeaders: { __autoMobileNonFinite__: "Infinity" }, ok: 1 };
+    expect(throughDaemon(nested)).toEqual(nested);
+  });
+
+  test("encodeNonFinite reports encoded=true when it only escaped a collision", () => {
+    // No non-finite number anywhere, but the payload is transformed (escaped), so
+    // the flag must fire — otherwise decode never runs to reverse the escape.
+    const { encoded } = encodeNonFinite({ __autoMobileNonFinite__: "Infinity" });
+    expect(encoded).toBe(true);
+  });
+
+  test("a non-finite argument still round-trips end-to-end through the gate", () => {
+    const revived = throughDaemon({ duration: Infinity, ok: 3 }) as Record<string, unknown>;
+    expect(revived.duration).toBe(Infinity);
+    expect(revived.ok).toBe(3);
   });
 });

@@ -479,3 +479,31 @@ jobs:
 
           echo "Release dispatch for $TAG did not materialize within 60 seconds" >&2
           exit 1
+
+  cleanup-staging-ref:
+    if: ${{ always() }}
+    needs: [verify-prepared-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          fetch-depth: 1
+          token: ${{ secrets.AUTO_MOBILE_PR_TOKEN }}
+
+      - name: Delete run-scoped staging ref
+        shell: bash
+        env:
+          STAGING_REF: release-prepare/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          if git ls-remote --exit-code origin "refs/heads/$STAGING_REF" >/dev/null 2>&1; then
+            git push origin --delete "$STAGING_REF"
+            echo "Deleted staging ref $STAGING_REF"
+          else
+            echo "Staging ref $STAGING_REF is already absent"
+          fi

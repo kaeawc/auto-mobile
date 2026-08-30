@@ -1804,18 +1804,20 @@ export class DaemonMcpProxy {
     requestedArgs: Record<string, unknown>,
     result: unknown,
   ): void {
-    if (
-      name !== SET_TOOL_ENABLED_TOOL_NAME ||
-      (typeof requestedArgs.sessionUuid === "string" && requestedArgs.sessionUuid.trim().length > 0)
-    ) {
+    if (name !== SET_TOOL_ENABLED_TOOL_NAME) {
       return;
     }
-    const sessionUuid = toolSelectionProfileUuidFromResponse(result);
-    if (sessionUuid) {
-      this.toolSelectionProfileUuid = sessionUuid;
-      this.discoveryEpoch += 1;
-      this.cachedTools = null;
+    const hasExplicitSessionUuid =
+      typeof requestedArgs.sessionUuid === "string" && requestedArgs.sessionUuid.trim().length > 0;
+    if (!hasExplicitSessionUuid) {
+      const sessionUuid = toolSelectionProfileUuidFromResponse(result);
+      if (sessionUuid) {
+        this.toolSelectionProfileUuid = sessionUuid;
+      }
     }
+    // Do not depend solely on the daemon's best-effort list_changed delivery.
+    // The successful update has already changed the authoritative tool surface.
+    this.notifyListChanged("tools");
   }
 
   private isBoundSessionReplayExpired(): boolean {

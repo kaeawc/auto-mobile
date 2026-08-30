@@ -3898,6 +3898,120 @@ describe("DaemonMcpProxy", () => {
   });
 
   describe("connection tool-selection profiles", () => {
+    test("invalidates cached discovery after an explicit tool update without waiting for list_changed (#5980)", async () => {
+      const daemonMethodResults = new Map<string, any>([
+        ["tools/list", { tools: [{ name: "setToolEnabled" }] }],
+      ]);
+      const client = new FakeDaemonClient({
+        daemonMethodResults,
+        onCallTool: (toolName) => {
+          if (toolName === "setToolEnabled") {
+            daemonMethodResults.set("tools/list", {
+              tools: [{ name: "setToolEnabled" }, { name: "openLink" }],
+            });
+          }
+        },
+        toolResultFor: (toolName) =>
+          toolName === "setToolEnabled"
+            ? {
+                content: [
+                  {
+                    type: "text",
+                    text: JSON.stringify({
+                      sessionUuid: "device-session-a",
+                      toolName: "openLink",
+                      enabled: true,
+                    }),
+                  },
+                ],
+              }
+            : undefined,
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+      const listChangedKinds: string[] = [];
+      proxy.onListChanged((kind) => listChangedKinds.push(kind));
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "device-session-a" });
+        expect(await proxy.listTools()).toEqual([{ name: "setToolEnabled" }]);
+
+        await proxy.callTool("setToolEnabled", {
+          toolName: "openLink",
+          enabled: true,
+          sessionUuid: "device-session-a",
+        });
+
+        expect(await proxy.listTools()).toEqual([{ name: "setToolEnabled" }, { name: "openLink" }]);
+        expect(listChangedKinds).toEqual(["tools"]);
+        expect(client.callDaemonMethodCalls.filter((call) => call.method === "tools/list")).toEqual(
+          [
+            { method: "tools/list", params: { sessionUuid: "device-session-a" } },
+            { method: "tools/list", params: { sessionUuid: "device-session-a" } },
+          ],
+        );
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("retains explicit tool-selection discovery scope across a daemon reconnect (#5980)", async () => {
+      const firstClient = new FakeDaemonClient({
+        toolResultFor: (toolName) =>
+          toolName === "setToolEnabled"
+            ? {
+                content: [
+                  {
+                    type: "text",
+                    text: JSON.stringify({
+                      sessionUuid: "device-session-a",
+                      toolName: "openLink",
+                      enabled: true,
+                    }),
+                  },
+                ],
+              }
+            : undefined,
+      });
+      const replacementClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([
+          ["tools/list", { tools: [{ name: "setToolEnabled" }, { name: "openLink" }] }],
+        ]),
+      });
+      const clients: DaemonClientLike[] = [firstClient, replacementClient];
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => clients.shift()!,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "device-session-a" });
+        await proxy.callTool("setToolEnabled", {
+          toolName: "openLink",
+          enabled: true,
+          sessionUuid: "device-session-a",
+        });
+        firstClient.emitConnectionClosed();
+        await Promise.resolve();
+
+        expect(await proxy.listTools()).toEqual([{ name: "setToolEnabled" }, { name: "openLink" }]);
+        expect(replacementClient.callDaemonMethodCalls).toContainEqual({
+          method: "tools/list",
+          params: { sessionUuid: "device-session-a" },
+        });
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("keeps an omitted tool-selection update on the connection profile after device routing binds", async () => {
       const client = new ScriptedDaemonClient({
         toolResult: {

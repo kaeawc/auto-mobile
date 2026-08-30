@@ -25,7 +25,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
-import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.datasource.StorageDataSource
@@ -53,8 +53,7 @@ fun StorageDashboard(
   deviceId: String? = null,
   packageName: String? = null,
   platform: StoragePlatform = StoragePlatform.Android,
-  observationStreamClient: ObservationStreamClient? =
-    null, // Shared stream client for live storage changes
+  observationStreamClient: ObservationStream? = null, // Shared stream for live storage changes
 ) {
   val graph = LocalAutoMobileGraph.current
   val colors = SharedTheme.globalColors
@@ -240,7 +239,18 @@ fun StorageDashboard(
           keyValueFiles = keyValueFiles,
           onSetValue =
             dataSource?.let { ds ->
-              { fileName, key, value, type -> ds.setKeyValue(fileName, key, value, type) }
+              { fileName, key, value, type ->
+                val result = ds.setKeyValue(fileName, key, value, type)
+                // Optimistic local update: reflect the saved value immediately rather than leaving
+                // it stale until a live storage_update frame arrives (or the facet is reopened).
+                // A later frame for the same key folds in idempotently over this (#4709). No
+                // highlight — a highlight signals a change that happened *under* the user, not one
+                // they just made.
+                if (result is Result.Success) {
+                  keyValueFiles = keyValueFiles.applyKeyValueEdit(fileName, key, value, type)
+                }
+                result
+              }
             },
           recentlyChangedKeys = recentlyChangedKeys,
           modifier = Modifier.fillMaxSize(),

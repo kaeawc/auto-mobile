@@ -187,4 +187,45 @@ class KeyValueLiveUpdatesTest {
     assertEquals(KeyValueType.Int, KeyValueType.fromProtocolName("INT"))
     assertEquals(KeyValueType.Unknown, KeyValueType.fromProtocolName("nonsense"))
   }
+
+  // -- Optimistic post-save edit (#4709): the same fold the live stream uses, but driven locally
+  // right after a successful setKeyValue so the displayed value never shows stale.
+
+  @Test
+  fun `an optimistic edit replaces the saved value in place`() {
+    val files = listOf(file("prefs.xml", "theme" to "light", "locale" to "en"))
+
+    val result = files.applyKeyValueEdit("prefs.xml", "theme", "dark", KeyValueType.String)
+
+    val entries = result.single().entries
+    assertEquals(listOf("theme", "locale"), entries.map { it.key }, "order should be preserved")
+    assertEquals("dark", entries.first { it.key == "theme" }.value)
+  }
+
+  @Test
+  fun `an optimistic edit decodes to the saved value's type`() {
+    val files = listOf(file("prefs.xml", "count" to 0))
+
+    val result = files.applyKeyValueEdit("prefs.xml", "count", "42", KeyValueType.Int)
+
+    assertEquals(42, result.single().entries.single().value)
+  }
+
+  @Test
+  fun `an optimistic edit with a null value deletes the key`() {
+    val files = listOf(file("prefs.xml", "theme" to "light", "locale" to "en"))
+
+    val result = files.applyKeyValueEdit("prefs.xml", "theme", null, KeyValueType.String)
+
+    assertEquals(listOf("locale"), result.single().entries.map { it.key })
+  }
+
+  @Test
+  fun `an optimistic edit for an unloaded file is ignored`() {
+    val files = listOf(file("prefs.xml", "theme" to "light"))
+
+    val result = files.applyKeyValueEdit("never-fetched.xml", "theme", "dark", KeyValueType.String)
+
+    assertSame(files, result, "an edit to a file the pane hasn't loaded changes nothing")
+  }
 }

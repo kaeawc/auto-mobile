@@ -88,6 +88,35 @@ internal fun List<KeyValueFile>.applyStorageUpdate(
 }
 
 /**
+ * Optimistically folds a just-saved key-value edit into the displayed files, so the inspector
+ * reflects the new value immediately after a successful save without waiting for the daemon's live
+ * `storage_update` frame (or a facet reopen). Delegates to [applyStorageUpdate] so the add/update
+ * (and, for a null [value], delete) semantics — including value parsing and the "ignore an unloaded
+ * file" rule — stay identical to the live-stream path; the stream frame, if it later arrives for
+ * the same key, folds in idempotently over this. The stream-only fields
+ * ([StorageStreamUpdate.deviceId], timestamp, packageName, sequence) don't affect the fold, so
+ * placeholders are used.
+ */
+internal fun List<KeyValueFile>.applyKeyValueEdit(
+  fileName: String,
+  key: String,
+  value: String?,
+  type: KeyValueType,
+): List<KeyValueFile> =
+  applyStorageUpdate(
+    StorageStreamUpdate(
+      deviceId = null,
+      timestamp = 0L,
+      packageName = "",
+      fileName = fileName,
+      key = key,
+      value = value,
+      valueType = type,
+      sequenceNumber = 0L,
+    )
+  )
+
+/**
  * The highlight identities a live update should light up: the single changed key, or every key in a
  * cleared file.
  */

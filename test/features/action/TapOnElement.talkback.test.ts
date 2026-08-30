@@ -944,6 +944,10 @@ describe("TapOnElement screen-reader navigation result", () => {
     accessibilityDetector.setTalkBackEnabled(true);
     const strategy = new FakeTalkBackTapStrategy();
     strategy.setTapResult(tapResult);
+    const observation = {
+      viewHierarchy: { hierarchy: {} },
+      screenSize: { width: 100, height: 100 },
+    } as any;
     const command = new TapOnElement(
       { name: "test-device", platform: "android", deviceId: "emulator-5554" } as any,
       new FakeAdbClient() as any,
@@ -951,15 +955,21 @@ describe("TapOnElement screen-reader navigation result", () => {
         accessibilityDetector,
         timer: new FakeTimer(),
         talkBackStrategy: strategy,
+        waitForCondition: {
+          execute: async () => ({
+            matched: false,
+            candidates: [],
+            observation,
+            polls: 0,
+            waitMs: 0,
+            timedOut: true,
+          }),
+        },
         featureFlags: {
           isEnabled: (key: string) => key === "screen-reader-navigation",
         } as FeatureFlagService,
       },
     );
-    const observation = {
-      viewHierarchy: { hierarchy: {} },
-      screenSize: { width: 100, height: 100 },
-    } as any;
     spyOn(command as any, "observedInteraction").mockImplementation(async (block: any) => ({
       ...(await block(observation)),
       observation,

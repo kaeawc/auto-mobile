@@ -80,6 +80,12 @@ type KeyboardDetection = {
   open: boolean;
   bounds?: ElementBounds[];
   error?: string;
+  /** How `open` was decided: a real IME window vs. the content-desc fallback. */
+  source?: "window" | "heuristic";
+  /** True when the accessibility service reported window metadata for this sample. */
+  windowInfoAvailable?: boolean;
+  /** True when an IME window (type 2) is present, even without usable bounds. */
+  imeWindowPresent?: boolean;
 };
 
 export class Keyboard {
@@ -279,6 +285,22 @@ export class Keyboard {
       };
     }
 
+    // A heuristic-only "open" (a node whose content-desc matches
+    // delete/enter/emoji/keyboard/shift) is NOT sufficient to send Back: an app
+    // can expose such a control while the IME is genuinely closed, and Back would
+    // then navigate the app or discard a form (#5899). Only issue Back when a real
+    // IME window corroborates the open state, or when window info is genuinely
+    // unavailable — the deliberate fallback for IMEs that never surface an IME
+    // window (e.g. one that exposes a window without bounds, or none at all).
+    const corroborated = state.imeWindowPresent === true || state.windowInfoAvailable !== true;
+    if (!corroborated) {
+      return {
+        success: true,
+        open: false,
+        message: "Keyboard not open (no IME window); skipped Back",
+      };
+    }
+
     await this.adb.executeCommand(
       "shell input keyevent KEYCODE_BACK",
       undefined,
@@ -366,13 +388,25 @@ export class Keyboard {
       return { open: false, error: "No view hierarchy available" };
     }
 
+    const windows = viewHierarchy.windows ?? [];
+    const windowInfoAvailable = windows.length > 0;
+    const imeWindowPresent = windows.some(
+      (windowInfo) => windowInfo.type === Keyboard.INPUT_METHOD_WINDOW_TYPE,
+    );
+
     const windowBounds = this.findKeyboardWindowBounds(viewHierarchy);
     if (windowBounds) {
-      return { open: true, bounds: [windowBounds] };
+      return {
+        open: true,
+        bounds: [windowBounds],
+        source: "window",
+        windowInfoAvailable,
+        imeWindowPresent: true,
+      };
     }
 
     if (this.detectKeyboardInHierarchy(viewHierarchy)) {
-      return { open: true };
+      return { open: true, source: "heuristic", windowInfoAvailable, imeWindowPresent };
     }
 
     const hierarchyError = viewHierarchy.hierarchy?.error;

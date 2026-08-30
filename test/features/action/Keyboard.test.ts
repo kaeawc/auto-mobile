@@ -53,6 +53,34 @@ describe("Keyboard", () => {
     },
   });
 
+  // The a11y service reports window metadata, but none of it is an IME window —
+  // yet an app control exposes a content-desc the heuristic matches ("Delete").
+  // The IME is genuinely closed; close() must not send Back (#5899).
+  const heuristicFalsePositiveHierarchy = (): ViewHierarchyResult => ({
+    hierarchy: {
+      node: {
+        $: {
+          "content-desc": "Delete",
+        },
+      },
+    },
+    windows: [{ type: 1, bounds: { left: 0, top: 0, right: 1080, bottom: 1920 } }],
+  });
+
+  // A real IME window is present (type 2) but exposes no usable bounds; the
+  // content-desc heuristic corroborates it. This is the "IME known not to expose
+  // window bounds" case — close() must still send Back.
+  const boundlessImeWindowHierarchy = (): ViewHierarchyResult => ({
+    hierarchy: {
+      node: {
+        $: {
+          "content-desc": "Delete",
+        },
+      },
+    },
+    windows: [{ type: 2 }],
+  });
+
   const focusedInputHierarchy = (): ViewHierarchyResult => ({
     hierarchy: {
       node: {
@@ -119,6 +147,46 @@ describe("Keyboard", () => {
 
   test("close sends back keyevent when keyboard is open", async () => {
     fakeHierarchy.setResults([keyboardWindowHierarchy(), baseHierarchy()]);
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    const result = await keyboard.execute("close");
+
+    expect(result.success).toBe(true);
+    expect(result.open).toBe(false);
+    expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_BACK")).toBe(true);
+  });
+
+  test("close does not send Back when only the content-desc heuristic matches and window info is available", async () => {
+    // Windows are reported and none is an IME window, so a lone content-desc
+    // match is app content, not the keyboard. Sending Back here would navigate
+    // the app (#5899).
+    fakeHierarchy.setResults([heuristicFalsePositiveHierarchy()]);
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    const result = await keyboard.execute("close");
+
+    expect(result.success).toBe(true);
+    expect(result.open).toBe(false);
+    expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_BACK")).toBe(false);
+    // No Back means no confirmation polling either.
+    expect(fakeTimer.getSleepCallCount()).toBe(0);
+  });
+
+  test("close sends Back for a real IME window that exposes no bounds", async () => {
+    fakeHierarchy.setResults([boundlessImeWindowHierarchy(), baseHierarchy()]);
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    const result = await keyboard.execute("close");
+
+    expect(result.success).toBe(true);
+    expect(result.open).toBe(false);
+    expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_BACK")).toBe(true);
+  });
+
+  test("close falls back to the heuristic and sends Back when window info is unavailable", async () => {
+    // keyboardNodeHierarchy exposes no window metadata at all — the deliberate
+    // fallback for IMEs that never surface an IME window.
+    fakeHierarchy.setResults([keyboardNodeHierarchy(), baseHierarchy()]);
     const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
 
     const result = await keyboard.execute("close");

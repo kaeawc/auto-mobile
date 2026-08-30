@@ -480,6 +480,84 @@ export class TapOnElement extends BaseVisualChange {
     }
   }
 
+  private compareScreenIdentity(
+    previousObservation: ObserveResult,
+    currentObservation: ObserveResult,
+  ): TapOnElementResult["effect"] | undefined {
+    const previous = previousObservation.screenIdentity;
+    const current = currentObservation.screenIdentity;
+    if (!previous || !current || previous.platform !== current.platform) {
+      return undefined;
+    }
+    const changed = previous.key !== current.key;
+    return {
+      screenChanged: changed,
+      basis: changed ? "screenIdentity changed" : "screenIdentity unchanged",
+    };
+  }
+
+  private compareActiveWindow(
+    previousObservation: ObserveResult,
+    currentObservation: ObserveResult,
+  ): TapOnElementResult["effect"] | undefined {
+    const previous = previousObservation.activeWindow;
+    const current = currentObservation.activeWindow;
+    if (!this.hasCompleteActiveWindow(previous) || !this.hasCompleteActiveWindow(current)) {
+      return undefined;
+    }
+    const changed =
+      previous.appId !== current.appId ||
+      previous.activityName !== current.activityName ||
+      previous.layoutSeqSum !== current.layoutSeqSum;
+    return {
+      screenChanged: changed,
+      basis: changed ? "activeWindow+layoutSeqSum changed" : "activeWindow+layoutSeqSum unchanged",
+    };
+  }
+
+  private hasCompleteActiveWindow(
+    activeWindow: ObserveResult["activeWindow"],
+  ): activeWindow is NonNullable<ObserveResult["activeWindow"]> {
+    return Boolean(
+      activeWindow?.appId &&
+      activeWindow.activityName &&
+      Number.isInteger(activeWindow.layoutSeqSum),
+    );
+  }
+
+  private compareViewHierarchy(
+    previousObservation: ObserveResult,
+    currentObservation: ObserveResult,
+  ): TapOnElementResult["effect"] | undefined {
+    const previousHash = this.hashViewHierarchy(previousObservation.viewHierarchy ?? null);
+    const currentHash = this.hashViewHierarchy(currentObservation.viewHierarchy ?? null);
+    if (!previousHash || !currentHash) {
+      return undefined;
+    }
+    const changed = previousHash !== currentHash;
+    return {
+      screenChanged: changed,
+      basis: changed ? "viewHierarchy changed" : "viewHierarchy unchanged",
+    };
+  }
+
+  private deriveTapEffect(
+    previousObservation: ObserveResult | null,
+    currentObservation: ObserveResult | undefined,
+  ): TapOnElementResult["effect"] | undefined {
+    if (!previousObservation || !currentObservation) {
+      return undefined;
+    }
+    return (
+      this.compareScreenIdentity(previousObservation, currentObservation) ??
+      this.compareActiveWindow(previousObservation, currentObservation) ??
+      this.compareViewHierarchy(previousObservation, currentObservation) ?? {
+        screenChanged: false,
+        basis: "insufficient observation data",
+      }
+    );
+  }
+
   private isElementTapTargetOffScreen(
     element: Element,
     screenSize?: ObserveResult["screenSize"],
@@ -1614,6 +1692,7 @@ export class TapOnElement extends BaseVisualChange {
       );
 
       if (result.success && result.observation && result.element) {
+        result.effect = this.deriveTapEffect(previousObserveResult, result.observation);
         const selectedElements = await this.selectionStateTracker.finalize({
           action: options.action,
           selectionState: selectionCapture,

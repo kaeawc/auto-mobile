@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { Element, ViewHierarchyResult } from "../../../src/models";
+import type { Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -15,6 +15,14 @@ function makeElement(): Element {
 
 function makeHierarchy(marker: string): ViewHierarchyResult {
   return { hierarchy: { node: { marker } } } as unknown as ViewHierarchyResult;
+}
+
+function makeObservation(overrides: Partial<ObserveResult>): ObserveResult {
+  return {
+    screenSize: { width: 1080, height: 1920 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    ...overrides,
+  };
 }
 
 function createTapOnElement(): { tap: TapOnElement; timer: FakeTimer } {
@@ -143,6 +151,60 @@ describe("retryTapIfNoChange", () => {
     );
 
     expect(sleepDurations).toEqual([300, 100]);
+  });
+});
+
+describe("deriveTapEffect", () => {
+  test("reports a changed screen identity", () => {
+    const { tap } = createTapOnElement();
+    const previous = makeObservation({
+      screenIdentity: {
+        platform: "android",
+        source: "heuristic",
+        confidence: "high",
+        key: "clock:alarms",
+        components: {},
+      },
+    });
+    const current = makeObservation({
+      screenIdentity: {
+        platform: "android",
+        source: "heuristic",
+        confidence: "high",
+        key: "clock:select-time",
+        components: {},
+      },
+    });
+
+    expect((tap as any).deriveTapEffect(previous, current)).toEqual({
+      screenChanged: true,
+      basis: "screenIdentity changed",
+    });
+  });
+
+  test("reports an unchanged active window when screen identity is unavailable", () => {
+    const { tap } = createTapOnElement();
+    const activeWindow = {
+      appId: "com.example.clock",
+      activityName: "AlarmActivity",
+      layoutSeqSum: 42,
+    };
+    const previous = makeObservation({ activeWindow });
+    const current = makeObservation({ activeWindow: { ...activeWindow } });
+
+    expect((tap as any).deriveTapEffect(previous, current)).toEqual({
+      screenChanged: false,
+      basis: "activeWindow+layoutSeqSum unchanged",
+    });
+  });
+
+  test("reports insufficient data without claiming a screen change", () => {
+    const { tap } = createTapOnElement();
+
+    expect((tap as any).deriveTapEffect(makeObservation({}), makeObservation({}))).toEqual({
+      screenChanged: false,
+      basis: "insufficient observation data",
+    });
   });
 });
 

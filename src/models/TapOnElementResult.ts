@@ -5,6 +5,20 @@ import { BaseActionResult } from "./BaseActionResult";
 import { ToolDebugInfo } from "../utils/DebugContextBuilder";
 import type { ScreenReaderNavigationResult } from "../features/talkback/TalkBackTapStrategy";
 
+export type TapEffectBasis =
+  | "screenIdentity changed"
+  | "screenIdentity unchanged"
+  | "activeWindow+layoutSeqSum changed"
+  | "activeWindow+layoutSeqSum unchanged"
+  | "viewHierarchy changed"
+  | "viewHierarchy unchanged"
+  | "insufficient observation data";
+
+export interface TapEffect {
+  screenChanged: boolean;
+  basis: TapEffectBasis;
+}
+
 export interface TapOnSelectedElementBounds extends ElementBounds {
   centerX: number;
   centerY: number;
@@ -27,6 +41,7 @@ export interface TapOnSelectedElement {
 export interface TapOnElementResult extends BaseActionResult {
   action: string;
   element: Element;
+  effect?: TapEffect;
   /** Semantic link confirmed by the native runner. */
   activatedSubtext?: {
     text: string;

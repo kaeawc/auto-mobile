@@ -120,7 +120,7 @@ import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 import { defaultIdGenerator } from "../../../utils/IdGenerator";
 import { releaseExclusiveLock, tryAcquireExclusiveLock } from "../../../utils/fileLock";
-import { getTempDir, TEMP_SUBDIRS } from "../../../utils/tempDir";
+import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../../utils/tempDir";
 
 // Import delegates
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
@@ -1011,8 +1011,7 @@ class FileCtrlProxyForwardLease implements CtrlProxyForwardLease {
     this.lockPath = join(
       // Do not derive this from os.tmpdir(): package runners may give each
       // process an isolated TMPDIR while they still share one ADB server.
-      getTempDir(TEMP_SUBDIRS.STATE),
-      "ctrlproxy-forwards",
+      ensureSecureTempDirSync(join(TEMP_SUBDIRS.STATE, "ctrlproxy-forwards")),
       `${Buffer.from(deviceId).toString("base64url")}.lock`,
     );
   }

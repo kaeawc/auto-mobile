@@ -1015,6 +1015,23 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         return;
       }
 
+      // Start the device client setup before yielding to the base async subscription handler.
+      // The desktop client sends its remembered subscribe_storage commands immediately after
+      // subscribe; BaseSocketServer processes input lines concurrently, so delaying this callback
+      // until after `await super.processLine()` lets a storage command observe no CtrlProxy client
+      // following a daemon restart. The daemon callback creates the Android client synchronously
+      // before beginning its asynchronous initial-frame work.
+      if (
+        this.onSubscriberConnected &&
+        (deviceSessionUuid === null || subscribedDeviceId !== null)
+      ) {
+        try {
+          this.onSubscriberConnected(subscribedDeviceId);
+        } catch (error) {
+          logger.warn(`[DeviceDataStream] Error in onSubscriberConnected callback: ${error}`);
+        }
+      }
+
       // Let base class handle the subscription
       await super.processLine(socket, line);
 
@@ -1025,18 +1042,6 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       if (deviceSessionUuid === null || subscribedDeviceId !== null) {
         this.notifyScreenshotCadenceChanged(subscribedDeviceId);
         this.notifyHierarchyCadenceChanged(subscribedDeviceId);
-      }
-
-      // Trigger the callback if set
-      if (
-        this.onSubscriberConnected &&
-        (deviceSessionUuid === null || subscribedDeviceId !== null)
-      ) {
-        try {
-          this.onSubscriberConnected(subscribedDeviceId);
-        } catch (error) {
-          logger.warn(`[DeviceDataStream] Error in onSubscriberConnected callback: ${error}`);
-        }
       }
       return;
     }

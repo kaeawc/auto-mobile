@@ -2279,6 +2279,40 @@ describe("DeviceDataStreamSocketServer", () => {
       subscribe: boolean;
     }
 
+    it("starts subscriber setup before a concurrently received storage subscription", async () => {
+      const callOrder: string[] = [];
+      server.setOnSubscriberConnected(() => {
+        callOrder.push("subscriber");
+      });
+      server.setOnStorageSubscriptionRequested(async () => {
+        callOrder.push("storage");
+      });
+
+      const socket = new FakeSocket();
+      await Promise.all([
+        server.processLineForTest(
+          socket,
+          JSON.stringify({
+            id: "stream-subscribe",
+            command: "subscribe",
+            deviceId: "emulator-5554",
+          }),
+        ),
+        server.processLineForTest(
+          socket,
+          JSON.stringify({
+            id: "storage-subscribe",
+            command: "subscribe_storage",
+            deviceId: "emulator-5554",
+            packageName: "com.example.app",
+            fileName: "prefs.xml",
+          }),
+        ),
+      ]);
+
+      expect(callOrder).toEqual(["subscriber", "storage"]);
+    });
+
     it("invokes the callback with the raw deviceId and acknowledges a subscribe", async () => {
       const calls: StorageSubReq[] = [];
       server.setOnStorageSubscriptionRequested(async (req) => {

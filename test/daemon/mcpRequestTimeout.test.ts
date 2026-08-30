@@ -394,6 +394,10 @@ describe("resolveMcpRequestTimeoutMs", () => {
     expect(DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS).toBeGreaterThan(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
   });
 
+  test("videoRecording preserves the compatibility floor", () => {
+    expect(MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS).toBe(90_000);
+  });
+
   test("keeps transport alive beyond the startDevice tool budget", () => {
     const request: DaemonRequest = {
       id: "1",

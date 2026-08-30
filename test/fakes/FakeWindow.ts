@@ -11,6 +11,7 @@ export class FakeWindow implements Window {
   private configuredActiveWindow: ActiveWindow | null = null;
   private cachedActiveWindowCallCount: number = 0;
   private getActiveCallCount: number = 0;
+  private getActiveForceRefreshes: boolean[] = [];
   private configuredActiveHash: string = "fake-active-hash";
 
   /**
@@ -62,6 +63,7 @@ export class FakeWindow implements Window {
     this.executedOperations = [];
     this.cachedActiveWindowCallCount = 0;
     this.getActiveCallCount = 0;
+    this.getActiveForceRefreshes = [];
   }
 
   /**
@@ -78,6 +80,10 @@ export class FakeWindow implements Window {
     return this.getActiveCallCount;
   }
 
+  getGetActiveForceRefreshes(): boolean[] {
+    return [...this.getActiveForceRefreshes];
+  }
+
   // Implementation of Window interface
 
   async getCachedActiveWindow(): Promise<ActiveWindow | null> {
@@ -89,6 +95,7 @@ export class FakeWindow implements Window {
   async getActive(forceRefresh: boolean = false): Promise<ActiveWindow> {
     this.executedOperations.push("getActive");
     this.getActiveCallCount++;
+    this.getActiveForceRefreshes.push(forceRefresh);
     if (!forceRefresh && this.configuredCachedActiveWindow) {
       return this.configuredCachedActiveWindow;
     }

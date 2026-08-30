@@ -1,7 +1,12 @@
 import { ActionableError, type BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
-import { getFileSize, waitForExit, type ProcessTracker } from "../../utils/ChildProcessTracker";
+import {
+  getFileSize,
+  PROCESS_EXIT_TIMEOUT_MS,
+  waitForExit,
+  type ProcessTracker,
+} from "../../utils/ChildProcessTracker";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import {
   DefaultHostCommandExecutor,
@@ -23,11 +28,12 @@ import {
   readScreenCaptureHelperEnvOverride,
   resolveIosScreenCaptureHelperPath,
 } from "../screen-stream/screenCaptureHelperPath";
-import type {
-  RecordingHandle,
-  RecordingResult,
-  VideoCaptureBackend,
-  VideoCaptureConfig,
+import {
+  VideoCaptureStartCleanupError,
+  type RecordingHandle,
+  type RecordingResult,
+  type VideoCaptureBackend,
+  type VideoCaptureConfig,
 } from "./VideoRecorderService";
 
 /** Hardware H.264 encoder used whenever the host ffmpeg exposes it. */
@@ -97,12 +103,12 @@ export interface CaptureDeviceInfo {
  * `ScreenCaptureHelper/main.swift`), so the mapping has to be resolved here.
  */
 export interface CaptureDeviceLister {
-  list(binaryPath: string): Promise<CaptureDeviceInfo[]>;
+  list(binaryPath: string, signal?: AbortSignal): Promise<CaptureDeviceInfo[]>;
 }
 
 /** Resolution seam for the signed `screen-capture-helper` binary. */
 export interface ScreenCaptureHelperEnsurer {
-  ensure(): Promise<string | null>;
+  ensure(signal?: AbortSignal): Promise<string | null>;
 }
 
 /**
@@ -247,11 +253,11 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
 
     const { abortSignal } = config;
     throwIfCaptureStartAborted(abortSignal);
-    const encoderName = await this.resolveEncoder();
+    const encoderName = await this.resolveEncoder(abortSignal);
     throwIfCaptureStartAborted(abortSignal);
-    const binaryPath = await this.resolveHelperBinary();
+    const binaryPath = await this.resolveHelperBinary(abortSignal);
     throwIfCaptureStartAborted(abortSignal);
-    const uniqueId = await this.resolveCaptureUniqueId(binaryPath, device);
+    const uniqueId = await this.resolveCaptureUniqueId(binaryPath, device, abortSignal);
     throwIfCaptureStartAborted(abortSignal);
 
     const captureFps = clampCaptureFps(config.fps);
@@ -319,24 +325,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     });
     helper.on("frame", (frame) => this.onFrame(frame, state, captureConfig));
 
-    try {
-      await helper.start();
-    } catch (error) {
-      // The frame listener is already wired, so a helper that emitted a frame
-      // before rejecting may have spawned ffmpeg. No handle is returned here, so
-      // nothing else could ever stop it.
-      await this.abandonStartedCapture(helper, state);
-      throw error;
-    }
-
-    if (abortSignal?.aborted) {
-      // Shutdown landed while the helper was spawning: tear it down here, or the
-      // capture process outlives the recording that was never handed back.
-      await this.abandonStartedCapture(helper, state);
-      throwIfCaptureStartAborted(abortSignal);
-    }
-
-    return {
+    const handle: RecordingHandle = {
       recordingId: captureConfig.recordingId,
       outputPath: captureConfig.outputPath,
       startedAt: captureConfig.startedAt,
@@ -348,6 +337,40 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
         config: captureConfig,
       } satisfies IosPhysicalBackendHandle,
     };
+
+    try {
+      await waitForCaptureStart(Promise.resolve(helper.start()), abortSignal);
+    } catch (error) {
+      // The frame listener is already wired, so a helper that emitted a frame
+      // before rejecting may have spawned ffmpeg. No handle is returned here, so
+      // nothing else could ever stop it.
+      try {
+        await this.abandonStartedCapture(helper, state);
+      } catch (cleanupError) {
+        throw new VideoCaptureStartCleanupError(
+          `Failed to clean up physical iOS recording after startup failed: ${errorMessage(cleanupError)}`,
+          handle,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+
+    if (abortSignal?.aborted) {
+      // Shutdown landed while the helper was spawning: tear it down here, or the
+      // capture process outlives the recording that was never handed back.
+      try {
+        await this.abandonStartedCapture(helper, state);
+      } catch (cleanupError) {
+        throw new VideoCaptureStartCleanupError(
+          `Failed to clean up physical iOS recording after startup was cancelled: ${errorMessage(cleanupError)}`,
+          handle,
+        );
+      }
+      throwIfCaptureStartAborted(abortSignal);
+    }
+
+    return handle;
   }
 
   async stop(handle: RecordingHandle): Promise<RecordingResult> {
@@ -412,12 +435,31 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     if (!backendHandle || backendHandle.kind !== "ios-physical") {
       throw new Error("Missing backend handle for physical iOS video recording.");
     }
-    const helperStop = backendHandle.helper.stop();
+    backendHandle.state.stopRequested = true;
+    const cleanupOperations: Promise<unknown>[] = [backendHandle.helper.stop()];
     const encoder = backendHandle.state.encoder;
-    if (encoder && encoder.exitCode === null && !encoder.killed) {
+    if (encoder && backendHandle.state.encoderTracker) {
+      cleanupOperations.push(
+        waitForExit(encoder, backendHandle.state.encoderTracker.exitPromise, {
+          timeoutMs: 0,
+          forceKillTimeoutMs: PROCESS_EXIT_TIMEOUT_MS,
+          signal: "SIGKILL",
+          timer: this.timer,
+        }),
+      );
+    } else if (encoder && encoder.exitCode === null) {
       encoder.kill("SIGKILL");
     }
-    await helperStop;
+    const results = await Promise.allSettled(cleanupOperations);
+    const failures = results
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason);
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        `Failed to fully stop physical iOS recording: ${failures.map(errorMessage).join("; ")}`,
+      );
+    }
   }
 
   private onFrame(frame: DecodedFrame, state: CaptureState, config: VideoCaptureConfig): void {
@@ -799,18 +841,30 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     state: CaptureState,
   ): Promise<void> {
     state.stopRequested = true;
-    try {
-      await helper.stop();
-    } catch (error) {
-      // Already-aborting path: report the leak risk but keep the abort as the
-      // error the caller sees.
-      logger.warn(
-        `[IosPhysicalVideo] failed to stop the capture helper after an aborted start: ${errorMessage(error)}`,
-      );
-    }
+    await helper.stop();
+    const cleanupOperations: Promise<unknown>[] = [];
     const encoder = state.encoder;
-    if (encoder && encoder.exitCode === null && !encoder.killed) {
+    if (encoder && state.encoderTracker) {
+      cleanupOperations.push(
+        waitForExit(encoder, state.encoderTracker.exitPromise, {
+          timeoutMs: 0,
+          forceKillTimeoutMs: PROCESS_EXIT_TIMEOUT_MS,
+          signal: "SIGKILL",
+          timer: this.timer,
+        }),
+      );
+    } else if (encoder && encoder.exitCode === null) {
       encoder.kill("SIGKILL");
+    }
+    const results = await Promise.allSettled(cleanupOperations);
+    const failures = results
+      .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+      .map((result) => result.reason);
+    if (failures.length > 0) {
+      throw new AggregateError(
+        failures,
+        `Failed to abandon physical iOS recording start: ${failures.map(errorMessage).join("; ")}`,
+      );
     }
   }
 
@@ -819,11 +873,12 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
    * supported macOS host, but a self-built ffmpeg can lack it, so fall back to
    * software encoding rather than failing the recording.
    */
-  private async resolveEncoder(): Promise<string> {
+  private async resolveEncoder(signal?: AbortSignal): Promise<string> {
     let encoders: string[];
     try {
-      encoders = (await this.ffmpegClient.probe()).encoders;
+      encoders = (await waitForCaptureStart(this.ffmpegClient.probe({ signal }), signal)).encoders;
     } catch (error) {
+      throwIfCaptureStartAborted(signal);
       throw new ActionableError(
         "FFmpeg is not available. Please install FFmpeg to use video recording.\n" +
           "  macOS: brew install ffmpeg\n" +
@@ -866,7 +921,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     );
   }
 
-  private async resolveHelperBinary(): Promise<string> {
+  private async resolveHelperBinary(signal?: AbortSignal): Promise<string> {
     // Daemon startup skips the release prefetch when the developer override is
     // set, so a local build must win over the pinned release asset — the same
     // order IosH264Source.resolveHelperPath() uses.
@@ -878,7 +933,7 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
       });
     }
 
-    const binaryPath = await this.helperProvider.ensure();
+    const binaryPath = await waitForCaptureStart(this.helperProvider.ensure(signal), signal);
     if (!binaryPath) {
       throw new ActionableError(
         "Physical iOS video recording requires the signed screen-capture-helper from the matching GitHub Release, " +
@@ -895,8 +950,12 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
    * without the UDID's hyphen, so fall back to a normalized comparison and then
    * — only when exactly one device is attached — to that device.
    */
-  private async resolveCaptureUniqueId(binaryPath: string, device: BootedDevice): Promise<string> {
-    const devices = await this.deviceLister.list(binaryPath);
+  private async resolveCaptureUniqueId(
+    binaryPath: string,
+    device: BootedDevice,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const devices = await waitForCaptureStart(this.deviceLister.list(binaryPath, signal), signal);
     if (devices.length === 0) {
       throw new ActionableError(
         `No muxed external capture devices found for ${device.deviceId}. Connect the iPhone/iPad over USB, ` +
@@ -940,6 +999,26 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
 function throwIfCaptureStartAborted(abortSignal: AbortSignal | undefined): void {
   if (abortSignal?.aborted) {
     throw new ActionableError("Physical iOS recording start was cancelled during shutdown.");
+  }
+}
+
+async function waitForCaptureStart<T>(operation: Promise<T>, signal?: AbortSignal): Promise<T> {
+  throwIfCaptureStartAborted(signal);
+  if (!signal) {
+    return operation;
+  }
+  let abortListener: (() => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    abortListener = () =>
+      reject(new ActionableError("Physical iOS recording start was cancelled during shutdown."));
+    signal.addEventListener("abort", abortListener, { once: true });
+  });
+  try {
+    return await Promise.race([operation, aborted]);
+  } finally {
+    if (abortListener) {
+      signal.removeEventListener("abort", abortListener);
+    }
   }
 }
 
@@ -1049,9 +1128,10 @@ export class HelperCaptureDeviceLister implements CaptureDeviceLister {
     private readonly timeoutMs: number = 15000,
   ) {}
 
-  async list(binaryPath: string): Promise<CaptureDeviceInfo[]> {
+  async list(binaryPath: string, signal?: AbortSignal): Promise<CaptureDeviceInfo[]> {
     const result = await this.executor.executeCommand(binaryPath, ["--list-devices"], {
       timeoutMs: this.timeoutMs,
+      signal,
     });
     return parseCaptureDeviceList(result.stdout);
   }

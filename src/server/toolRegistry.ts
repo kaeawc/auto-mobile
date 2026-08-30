@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { toJSONSchema } from "zod/v4";
-import { DeviceSessionManager } from "../utils/DeviceSessionManager";
+import { DeviceSessionManager, type DeviceReadinessLevel } from "../utils/DeviceSessionManager";
 import { ActionableError, BootedDevice, SomePlatform } from "../models";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { UIStateExtractor } from "../features/navigation/UIStateExtractor";
@@ -154,6 +154,7 @@ interface ToolRegistrationOptions {
 
 interface DeviceAwareToolOptions<T = any> extends ToolRegistrationOptions {
   shouldEnsureDevice?: (args: T) => boolean;
+  deviceReadiness?: DeviceReadinessLevel | ((args: T) => DeviceReadinessLevel);
   nonDeviceHandler?: ToolHandler<T>;
   embeddedSdkOnly?: boolean;
   planExecutable?: boolean;
@@ -210,6 +211,7 @@ interface ExecutionTargetInput {
   args: any;
   options: DeviceAwareToolOptions;
   deviceSessionManager: DeviceSessionManager;
+  signal?: AbortSignal;
 }
 
 interface ExecutionTargetContext {
@@ -362,7 +364,8 @@ interface ToolRegistryPipelineOverrides {
 class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
   constructor(private readonly logger: Logger = logger) {}
   async resolveExecutionTarget(input: ExecutionTargetInput): Promise<ExecutionTargetContext> {
-    const { name, args, options, deviceSessionManager } = input;
+    const { name, args, options, deviceSessionManager, signal } = input;
+    signal?.throwIfAborted();
     const shouldResolveDevice = options.shouldEnsureDevice
       ? options.shouldEnsureDevice(args)
       : true;
@@ -544,6 +547,11 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         );
         device = await deviceSessionManager.ensureDeviceReady(platform, providedDeviceId, {
           skipCtrlProxyDownload: serverConfig.isSkipCtrlProxyDownloadEnabled(),
+          readiness:
+            typeof options.deviceReadiness === "function"
+              ? options.deviceReadiness(args)
+              : options.deviceReadiness,
+          signal,
         });
         logger.info(`[ToolRegistry] ${name}: Using device ${device.deviceId}`);
       }
@@ -1143,7 +1151,9 @@ export class ToolRegistryClass {
           args: handlerArgs,
           options,
           deviceSessionManager: this.deviceSessionManager,
+          signal,
         });
+        signal?.throwIfAborted();
         sessionUuid = resolvedTarget.sessionUuid;
         return await runWithToolSelectionContext(
           // Bind the ROUTING session, not the selection profile, so

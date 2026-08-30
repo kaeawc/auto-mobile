@@ -5,6 +5,7 @@ import { promises as fsPromises } from "node:fs";
 import { pathExists } from "../../../src/utils/filesystem/DefaultFileSystem";
 import {
   VideoRecorderService,
+  VideoCaptureStartCleanupError,
   parseVideoRecordingConfig,
   DEFAULT_VIDEO_RECORDING_CONFIG,
 } from "../../../src/features/video/VideoRecorderService";
@@ -138,6 +139,22 @@ describe("VideoRecorderService", () => {
     await expect(service.stopRecording(recording.recordingId)).rejects.toThrow(
       "No active recording found",
     );
+  });
+
+  test("force-stops a failed-start cleanup handle before rethrowing", async () => {
+    const retainedHandle = {
+      recordingId: "rec-1",
+      outputPath: path.join(archiveRoot, "rec-1", "capture.mp4"),
+      startedAt: "2024-01-15T10:30:00.000Z",
+    };
+    backend.start = async () => {
+      throw new VideoCaptureStartCleanupError("startup cleanup timed out", retainedHandle);
+    };
+
+    await expect(service.startRecording()).rejects.toThrow("startup cleanup timed out");
+
+    expect(backend.forceStopCalls).toEqual([retainedHandle]);
+    expect(service.listActiveRecordingIds()).toEqual([]);
   });
 
   test("allows a later graceful stop after a force-stop failure", async () => {
@@ -278,6 +295,17 @@ describe("VideoRecorderService", () => {
       await service.startRecording();
       const dir = path.join(archiveRoot, "rec-1");
       expect(await pathExists(dir)).toBe(true);
+    });
+
+    test("removes partial output when startup rejects without a cleanup handle", async () => {
+      backend.start = async (config) => {
+        await fsPromises.writeFile(config.outputPath, "partial video");
+        throw new Error("capture startup aborted");
+      };
+
+      await expect(service.startRecording()).rejects.toThrow("capture startup aborted");
+
+      expect(await pathExists(path.join(archiveRoot, "rec-1"))).toBe(false);
     });
 
     test("passes outputName through", async () => {

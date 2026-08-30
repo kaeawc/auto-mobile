@@ -30,16 +30,19 @@ export interface StoppableProcess {
 
 export interface WaitForExitOptions {
   timeoutMs?: number;
+  forceKillTimeoutMs?: number;
   timer?: Timer;
   signal?: NodeJS.Signals | null;
 }
 
 export interface SpawnableProcess {
+  pid?: number;
   once(event: "spawn", listener: () => void): unknown;
   once(event: "error", listener: (error: Error) => void): unknown;
 }
 
 export interface TrackedChildProcess extends StoppableProcess {
+  pid?: number;
   signalCode: NodeJS.Signals | null;
   stderr: {
     on(event: "data", listener: (chunk: Buffer | string) => void): unknown;
@@ -51,14 +54,23 @@ export interface TrackedChildProcess extends StoppableProcess {
     listener: (code: number | null, signal: NodeJS.Signals | null) => void,
   ): unknown;
   once(event: "error", listener: (error: Error) => void): unknown;
-  off(event: "exit", listener: () => void): unknown;
+  off(
+    event: "exit",
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): unknown;
   off(event: "error", listener: (error: Error) => void): unknown;
+}
+
+interface CloseAwareProcess {
+  once(event: "close", listener: () => void): unknown;
+  off(event: "close", listener: () => void): unknown;
 }
 
 export function createExitTracker(
   process: TrackedChildProcess,
   stderr: string[],
 ): { exitState: ProcessExitState; exitPromise: Promise<void> } {
+  const closeAwareProcess = process as TrackedChildProcess & CloseAwareProcess;
   const exitState: ProcessExitState = {};
   let resolvePromise: () => void = () => undefined;
   let rejectPromise: (error: Error) => void = () => undefined;
@@ -68,25 +80,59 @@ export function createExitTracker(
     rejectPromise = reject;
   });
 
-  process.once("error", (error) => {
+  const cleanupProcessListeners = () => {
+    process.off("error", onError);
+    process.off("exit", onExit);
+  };
+  const cleanup = () => {
+    cleanupProcessListeners();
+    closeAwareProcess.off("close", onClose);
+    process.stderr?.off("data", onStderr);
+  };
+  const onError = (error: Error) => {
+    // Node emits AbortError when an already-spawned child's AbortSignal fires,
+    // then emits exit once signal delivery completes. Keep the exit listener
+    // and promise alive so callers can prove the child was actually reaped.
+    if (error.name === "AbortError" && process.pid !== undefined) {
+      return;
+    }
+    exitState.endedAt = new Date().toISOString();
+    cleanupProcessListeners();
+    if (!process.stderr) {
+      cleanup();
+    }
     rejectPromise(error instanceof Error ? error : new Error(String(error)));
-  });
+  };
 
-  process.once("exit", (code, signal) => {
+  const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
     exitState.exitCode = code;
     exitState.signal = signal;
     exitState.endedAt = new Date().toISOString();
+    cleanupProcessListeners();
+    if (!process.stderr) {
+      cleanup();
+    }
     resolvePromise();
-  });
+  };
 
-  process.stderr?.on("data", (chunk) => {
+  // Node emits child `exit` before stdio necessarily drains, then `close` after
+  // the streams are closed. Keep collecting diagnostics through that gap.
+  const onClose = () => cleanup();
+
+  const onStderr = (chunk: Buffer | string) => {
     stderr.push(chunk.toString());
-  });
+  };
 
-  if (process.exitCode !== null) {
+  process.once("error", onError);
+  process.once("exit", onExit);
+  closeAwareProcess.once("close", onClose);
+  process.stderr?.on("data", onStderr);
+
+  if (process.exitCode !== null && process.exitCode !== undefined) {
     exitState.exitCode = process.exitCode;
     exitState.signal = process.signalCode;
     exitState.endedAt = new Date().toISOString();
+    cleanup();
     resolvePromise();
   }
 
@@ -113,53 +159,77 @@ export async function waitForExit(
 ): Promise<void> {
   const timer = options.timer ?? defaultTimer;
   const timeoutMs = options.timeoutMs ?? PROCESS_EXIT_TIMEOUT_MS;
+  const forceKillTimeoutMs = options.forceKillTimeoutMs ?? PROCESS_EXIT_TIMEOUT_MS;
   const signal = options.signal === undefined ? "SIGINT" : options.signal;
 
-  if (process.exitCode !== null) {
+  if (hasExited(process)) {
     await exitPromise;
     return;
   }
 
-  // `killed` means a prior graceful stop already sent a signal; it does not
-  // mean the child has been reaped. Await that stop rather than truncating an
-  // in-progress iOS recording with a second signal. Backend force-stop paths
-  // intentionally use `exitCode` alone when escalation is required.
-  if (process.killed) {
-    await exitPromise;
-    return;
+  // `killed` means only that a signal was sent, not that the process was
+  // reaped. Preserve the original grace window, then escalate if it remains.
+  sendInitialSignal(process, signal);
+
+  let gracefulResult: "exited" | "timeout";
+  try {
+    gracefulResult = await waitForExitOrTimeout(exitPromise, timeoutMs, timer);
+  } catch (error) {
+    forceKillIfRunning(process);
+    throw error;
   }
 
-  if (signal !== null) {
+  if (gracefulResult === "exited") {
+    return;
+  }
+  forceKillIfRunning(process);
+
+  const forceResult = await waitForExitOrTimeout(exitPromise, forceKillTimeoutMs, timer);
+  if (forceResult === "timeout") {
+    throw new Error(
+      `Process did not exit within ${timeoutMs}ms plus ${forceKillTimeoutMs}ms after SIGKILL`,
+    );
+  }
+}
+
+function hasExited(process: StoppableProcess): boolean {
+  return process.exitCode !== null && process.exitCode !== undefined;
+}
+
+function sendInitialSignal(process: StoppableProcess, signal: NodeJS.Signals | null): void {
+  if (!process.killed && signal !== null) {
     process.kill(signal);
   }
+}
 
+function forceKillIfRunning(process: StoppableProcess): void {
+  if (!hasExited(process)) {
+    process.kill("SIGKILL");
+  }
+}
+
+async function waitForExitOrTimeout(
+  exitPromise: Promise<void>,
+  timeoutMs: number,
+  timer: Timer,
+): Promise<"exited" | "timeout"> {
   let timeoutId: NodeJS.Timeout | undefined;
-  const timeoutPromise = new Promise<void>((resolve) => {
-    timeoutId = timer.setTimeout(() => {
-      if (process.exitCode === null) {
-        process.kill("SIGKILL");
-      }
-      resolve();
-    }, timeoutMs);
+  const timeoutPromise = new Promise<"timeout">((resolve) => {
+    timeoutId = timer.setTimeout(() => resolve("timeout"), Math.max(0, timeoutMs));
   });
-
-  // Clear the SIGKILL timer in `finally`: `exitPromise` rejects on the child's
-  // 'error' event (see createExitTracker), which makes the race throw. Clearing
-  // only on the resolve path leaked the timer, so it later fired process.kill
-  // ("SIGKILL") on the already-failed process and kept the event loop alive up to
-  // `timeoutMs` (#3617).
   try {
-    await Promise.race([exitPromise, timeoutPromise]);
+    return await Promise.race([exitPromise.then(() => "exited" as const), timeoutPromise]);
   } finally {
     if (timeoutId) {
       timer.clearTimeout(timeoutId);
     }
   }
-
-  await exitPromise;
 }
 
 export async function waitForSpawn(process: SpawnableProcess): Promise<void> {
+  if (process.pid !== undefined) {
+    return;
+  }
   await new Promise<void>((resolve, reject) => {
     process.once("spawn", () => resolve());
     process.once("error", (error) => reject(error));

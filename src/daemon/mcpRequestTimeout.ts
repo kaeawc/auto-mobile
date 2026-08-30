@@ -49,10 +49,8 @@ export const MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS =
 export const MIN_LAUNCH_APP_MCP_TIMEOUT_MS = 90_000;
 
 /**
- * Floor for `videoRecording` — an iOS recording can be the first operation
- * that starts CtrlProxy on a cold simulator. Aborting at the generic 30s
- * deadline leaves the recording active while the client reports a failure,
- * making a retry collide with that still-live recording.
+ * Compatibility floor while video recording startup moves to a strict,
+ * backend-owned five-second budget.
  */
 export const MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS = 90_000;
 

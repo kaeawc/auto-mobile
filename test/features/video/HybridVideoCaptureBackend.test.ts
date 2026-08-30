@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { HybridVideoCaptureBackend } from "../../../src/features/video/HybridVideoCaptureBackend";
-import type {
-  RecordingHandle,
-  RecordingResult,
-  VideoCaptureBackend,
-  VideoCaptureConfig,
+import {
+  VideoCaptureStartCleanupError,
+  type RecordingHandle,
+  type RecordingResult,
+  type VideoCaptureBackend,
+  type VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
 
@@ -12,6 +13,7 @@ class FakeBackend implements VideoCaptureBackend {
   readonly name: string;
   startCalls: VideoCaptureConfig[] = [];
   stopCalls: RecordingHandle[] = [];
+  forceStopCalls: RecordingHandle[] = [];
   constructor(name: string) {
     this.name = name;
   }
@@ -36,6 +38,10 @@ class FakeBackend implements VideoCaptureBackend {
       sizeBytes: 123,
       codec: "h264",
     };
+  }
+
+  async forceStop(handle: RecordingHandle): Promise<void> {
+    this.forceStopCalls.push(handle);
   }
 }
 
@@ -200,6 +206,31 @@ describe("HybridVideoCaptureBackend - Unit Tests", function () {
         backendHandle: { kind: "not-hybrid" } as never,
       }),
     ).rejects.toThrow("Missing backend handle for hybrid");
+  });
+
+  test("wraps a failed-start cleanup handle so force-stop reaches its backend", async function () {
+    const rawHandle: RecordingHandle = {
+      recordingId: baseConfig.recordingId,
+      outputPath: baseConfig.outputPath,
+      startedAt: baseConfig.startedAt,
+      backendHandle: { backend: "platform" },
+    };
+    platformBackend.start = async () => {
+      throw new VideoCaptureStartCleanupError("cleanup timed out", rawHandle);
+    };
+
+    let cleanupError: VideoCaptureStartCleanupError | undefined;
+    try {
+      await backend.start(baseConfig);
+    } catch (error) {
+      if (error instanceof VideoCaptureStartCleanupError) {
+        cleanupError = error;
+      }
+    }
+
+    expect(cleanupError).toBeDefined();
+    await backend.forceStop(cleanupError!.handle);
+    expect(platformBackend.forceStopCalls).toEqual([rawHandle]);
   });
 
   test("routes iOS recording to ffmpeg backend", async function () {

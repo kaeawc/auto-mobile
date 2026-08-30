@@ -6,7 +6,7 @@ import { reviveNonFiniteArguments } from "../utils/nonFiniteJson";
 import { logger } from "../utils/logger";
 import { defaultTimer } from "../utils/SystemTimer";
 import { executionTracker } from "./executionTracker";
-import { runWithAbortSignal } from "../utils/AbortContext";
+import { combineAbortSignals, runWithAbortSignal } from "../utils/AbortContext";
 import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanExecutionLock";
 import { SessionToolBinding } from "./SessionToolBinding";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
@@ -459,7 +459,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     };
   });
 
-  server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     // Revive non-finite arguments the daemon client encoded as sentinels so they
     // survive the socket + loopback-HTTP hops (#5854 §2). Done BEFORE logging and
     // validation so the request trace shows the real Infinity/-Infinity/NaN
@@ -623,6 +623,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       executionSessionUuid,
       sessionId,
     );
+    const requestSignal = combineAbortSignals(execution.abortController.signal, extra.signal);
     const handlerParams =
       parsedParams && typeof parsedParams === "object"
         ? {
@@ -656,7 +657,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       : undefined;
 
     try {
-      const result = await runWithAbortSignal(execution.abortController.signal, () =>
+      const result = await runWithAbortSignal(requestSignal, () =>
         runWithToolSelectionContext(
           {
             // A bound derived session may still target a sibling label. Resolve
@@ -677,7 +678,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
               options.sessionToolSelectionService ??
               (name === "executePlan" ? getSessionToolSelectionService() : undefined),
           },
-          () => tool.handler(handlerParams, progressCallback, execution.abortController.signal),
+          () => tool.handler(handlerParams, progressCallback, requestSignal),
         ),
       );
       if (

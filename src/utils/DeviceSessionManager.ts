@@ -240,9 +240,17 @@ export interface DeviceSessionManager {
   findOrStartIosDevice(options?: DeviceReadyOptions): Promise<BootedDevice>;
 }
 
+export type DeviceReadinessLevel = "booted" | "automationReady";
+
 export interface DeviceReadyOptions {
   skipCtrlProxyDownload?: boolean;
   signal?: AbortSignal;
+  /**
+   * `booted` verifies only that the target is connected and booted.
+   * `automationReady` additionally prepares CtrlProxy. Defaults to
+   * `automationReady` for existing device-aware tools.
+   */
+  readiness?: DeviceReadinessLevel;
   /**
    * @deprecated Use skipCtrlProxyDownload instead.
    */
@@ -525,6 +533,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
         deviceVerified = true;
         deviceSource = "current";
       } catch (error) {
+        // Request cancellation does not make the selected device stale. Preserve
+        // the user's explicit selection so a later platform-implicit call does
+        // not become ambiguous merely because this caller disconnected.
+        options?.signal?.throwIfAborted();
         if (error instanceof RunnerReadinessError) {
           throw error;
         }
@@ -600,6 +612,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
    * Verify an Android device is connected and ready
    */
   public async verifyAndroidDevice(deviceId: string, options?: DeviceReadyOptions): Promise<void> {
+    options?.signal?.throwIfAborted();
     const allDevices = await this.adb.getBootedAndroidDevices();
     const device = allDevices.find((device) => device.deviceId === deviceId);
 
@@ -608,35 +621,36 @@ export class DeviceSessionManager implements DeviceSessionManager {
         `Android device ${deviceId} is not connected. Available devices: ${describeDevices(allDevices)}`,
       );
     }
-
     // Check if we can get an active window from the device
     try {
       logger.info(`[DeviceSessionManager] Verifying Android device ${deviceId} readiness`);
 
       const window = this.provider.getWindow(device);
 
-      let activeWindow = await window.getActive();
+      const activeWindow = await window.getActive(true);
       if (!activeWindow || !activeWindow.appId || !activeWindow.activityName) {
-        activeWindow = await window.getActive(true);
-        if (!activeWindow || !activeWindow.appId || !activeWindow.activityName) {
-          logger.warn(`[DeviceSessionManager] Android device ${deviceId} is not fully ready`);
-          if (activeWindow) {
-            logger.warn(
-              `[DeviceSessionManager] activeWindow.appId: ${activeWindow.appId} | activeWindow.activityName: ${activeWindow.activityName}`,
-            );
-          } else {
-            logger.warn(`[DeviceSessionManager] activeWindow: ${activeWindow}`);
-          }
-          throw new ActionableError(
-            `Cannot get active window information from Android device ${deviceId}. The device may not be fully booted or is in an unusual state.`,
+        logger.warn(`[DeviceSessionManager] Android device ${deviceId} is not fully ready`);
+        if (activeWindow) {
+          logger.warn(
+            `[DeviceSessionManager] activeWindow.appId: ${activeWindow.appId} | activeWindow.activityName: ${activeWindow.activityName}`,
           );
+        } else {
+          logger.warn(`[DeviceSessionManager] activeWindow: ${activeWindow}`);
         }
+        throw new ActionableError(
+          `Cannot get active window information from Android device ${deviceId}. The device may not be fully booted or is in an unusual state.`,
+        );
       }
     } catch (error) {
       const errorMsg = errorMessage(error);
       throw new ActionableError(
         `Failed to verify Android device ${deviceId} readiness: ${errorMsg}`,
       );
+    }
+
+    options?.signal?.throwIfAborted();
+    if (options?.readiness === "booted") {
+      return;
     }
 
     // Always track setup timing (one-time per session, valuable for debugging)
@@ -832,6 +846,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
    * Verify an iOS device is connected and ready
    */
   public async verifyIosDevice(deviceId: string, options?: DeviceReadyOptions): Promise<void> {
+    options?.signal?.throwIfAborted();
+    const readiness = options?.readiness ?? "automationReady";
     // An explicit runner override that cannot be used must fail closed before any
     // other path, whatever the simulator/runner state. Every downstream branch
     // (already-connected, already-running, cached-start) skips the builder that
@@ -839,17 +855,20 @@ export class DeviceSessionManager implements DeviceSessionManager {
     // AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH would silently run the cached released
     // runner and the caller would attribute results to a local build that never
     // loaded (#4221).
-    const iosOverride = await checkIosCtrlProxyOverride();
-    if (iosOverride.present && !iosOverride.usable) {
-      throw new ActionableError(
-        `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH / _IPA_PATH is set but unusable: ${iosOverride.reason}`,
-      );
+    if (readiness === "automationReady") {
+      const iosOverride = await checkIosCtrlProxyOverride();
+      if (iosOverride.present && !iosOverride.usable) {
+        throw new ActionableError(
+          `AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH / _IPA_PATH is set but unusable: ${iosOverride.reason}`,
+        );
+      }
     }
 
     if (!this.simctl) {
       throw new ActionableError("iOS simulator tools not available");
     }
     const deviceInfo = await this.simctl.getDeviceInfo(deviceId);
+    options?.signal?.throwIfAborted();
 
     if (!deviceInfo) {
       throw new ActionableError(
@@ -867,6 +886,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
     if (deviceInfo.state !== "Booted") {
       logger.info(`iOS simulator ${deviceId} is not booted (state: ${deviceInfo.state})`);
       // Note: We could auto-boot here if desired, but keeping consistent with current behavior
+      return;
+    }
+
+    if (readiness === "booted") {
       return;
     }
 

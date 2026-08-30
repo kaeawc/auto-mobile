@@ -8,6 +8,8 @@ import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
 import {
+  forceStopVideoRecording as defaultForceStopVideoRecording,
+  interruptVideoRecording as defaultInterruptVideoRecording,
   startVideoRecording as defaultStartVideoRecording,
   stopVideoRecording as defaultStopVideoRecording,
 } from "./videoRecordingManager";
@@ -29,6 +31,8 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   maxDurationSeconds?: number;
   /** Quality/config overrides forwarded to every segment's recording. */
   configOverrides?: VideoRecordingConfigInput;
+  /** Cancellation for the caller-owned initial segment startup only. */
+  startupAbortSignal?: AbortSignal;
   /**
    * Invoked exactly once when the session finalizes (via {@link stop}), whether that
    * stop was caller-driven or the {@link maxDurationSeconds} auto-stop. Lets the owning
@@ -43,6 +47,7 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   stopVideoRecording?: (
     recordingId?: string,
   ) => Promise<{ metadata: VideoRecordingMetadata; evictedRecordingIds: string[] }>;
+  forceStopVideoRecording?: (recordingId: string) => Promise<void>;
 }
 
 /**
@@ -67,6 +72,8 @@ export class AndroidSegmentedPlanVideoSession {
   private readonly maxDurationSeconds: number | undefined;
 
   private readonly configOverrides: VideoRecordingConfigInput | undefined;
+
+  private readonly startupAbortSignal: AbortSignal | undefined;
 
   private activeRecordingId: string | undefined;
 
@@ -103,6 +110,8 @@ export class AndroidSegmentedPlanVideoSession {
     recordingId?: string,
   ) => Promise<{ metadata: VideoRecordingMetadata; evictedRecordingIds: string[] }>;
 
+  private readonly forceStopVideoRecordingFn: (recordingId: string) => Promise<void>;
+
   constructor(options: AndroidSegmentedPlanVideoSessionOptions) {
     this.device = options.device;
     this.outputNamePrefix = options.outputNamePrefix;
@@ -111,9 +120,16 @@ export class AndroidSegmentedPlanVideoSession {
       options.segmentRotateAfterMs ?? ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
     this.maxDurationSeconds = options.maxDurationSeconds;
     this.configOverrides = options.configOverrides;
+    this.startupAbortSignal = options.startupAbortSignal;
     this.onFinalized = options.onFinalized;
     this.startVideoRecordingFn = options.startVideoRecording ?? defaultStartVideoRecording;
     this.stopVideoRecordingFn = options.stopVideoRecording ?? defaultStopVideoRecording;
+    this.forceStopVideoRecordingFn =
+      options.forceStopVideoRecording ??
+      (async (recordingId) => {
+        await defaultForceStopVideoRecording(recordingId);
+        await defaultInterruptVideoRecording(recordingId);
+      });
   }
 
   /** Device this session is recording, so callers can match sessions by device. */
@@ -151,10 +167,40 @@ export class AndroidSegmentedPlanVideoSession {
    */
   async start(): Promise<ActiveVideoRecording> {
     this.timerDriven = true;
-    const first = await this.startFirstSegment();
+    let first: ActiveVideoRecording;
+    try {
+      first = await this.startSegment(this.startupAbortSignal);
+      this.startupAbortSignal?.throwIfAborted();
+    } catch (error) {
+      this.timerDriven = false;
+      await this.rollbackStartedSegment();
+      throw error;
+    }
     this.scheduleRotation();
     this.scheduleMaxDurationStop();
     return first;
+  }
+
+  private async rollbackStartedSegment(): Promise<void> {
+    const recordingId = this.activeRecordingId;
+    this.activeRecordingId = undefined;
+    if (!recordingId) {
+      return;
+    }
+    try {
+      await this.stopVideoRecordingFn(recordingId);
+    } catch (stopError) {
+      logger.warn(
+        `[SegmentedPlanVideo] Failed to stop cancelled segment ${recordingId}: ${errorMessage(stopError)}`,
+      );
+      try {
+        await this.forceStopVideoRecordingFn(recordingId);
+      } catch (forceStopError) {
+        logger.warn(
+          `[SegmentedPlanVideo] Failed to force-stop cancelled segment ${recordingId}: ${errorMessage(forceStopError)}`,
+        );
+      }
+    }
   }
 
   private scheduleRotation(): void {
@@ -238,12 +284,13 @@ export class AndroidSegmentedPlanVideoSession {
     return `${this.outputNamePrefix}${suffix}`;
   }
 
-  private async startSegment(): Promise<ActiveVideoRecording> {
+  private async startSegment(abortSignal?: AbortSignal): Promise<ActiveVideoRecording> {
     const recording = await this.startVideoRecordingFn({
       device: this.device,
       outputName: this.segmentOutputName(),
       maxDurationSeconds: ANDROID_SCREENRECORD_MAX_SECONDS,
       configOverrides: this.configOverrides,
+      abortSignal,
     });
     this.activeRecordingId = recording.recordingId;
     this.segmentStartedAtMs = this.timer.now();

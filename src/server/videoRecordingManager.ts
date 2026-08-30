@@ -20,8 +20,10 @@ import {
 import { serverConfig } from "../utils/ServerConfig";
 import { logger } from "../utils/logger";
 import { redactHomeDir } from "../utils/redactPath";
+import { errorMessage } from "../utils/describeUnknownError";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { createTimestampedId } from "../utils/IdGenerator";
+import { combineAbortSignals } from "../utils/AbortContext";
 import { ResourceRegistry } from "./resourceRegistry";
 import {
   VideoRecordingRepository,
@@ -132,6 +134,7 @@ interface StartVideoRecordingRequest {
    * do not carry a session (the recording stays legacy/unowned).
    */
   ownerSessionUuid?: string;
+  abortSignal?: AbortSignal;
 }
 
 interface StopVideoRecordingResult {
@@ -325,15 +328,20 @@ function resetVideoRecordingManagerState(): void {
   managerInitialized = false;
 }
 
-function beginVideoRecordingStart(): { abortSignal: AbortSignal; complete(): void } {
+function beginVideoRecordingStart(requestSignal?: AbortSignal): {
+  abortSignal: AbortSignal;
+  complete(): void;
+} {
+  requestSignal?.throwIfAborted();
   if (!acceptingVideoRecordingStarts) {
     throw new ActionableError("Video recording is unavailable while the daemon shuts down.");
   }
   inFlightVideoRecordingStarts++;
   const controller = new AbortController();
   inFlightVideoRecordingStartControllers.add(controller);
+  const abortSignal = combineAbortSignals(requestSignal, controller.signal)!;
   return {
-    abortSignal: controller.signal,
+    abortSignal,
     complete: () => {
       inFlightVideoRecordingStarts--;
       inFlightVideoRecordingStartControllers.delete(controller);
@@ -828,7 +836,7 @@ export async function updateVideoRecordingConfig(
 export async function startVideoRecording(
   request: StartVideoRecordingRequest,
 ): Promise<ActiveVideoRecording> {
-  const start = beginVideoRecordingStart();
+  const start = beginVideoRecordingStart(request.abortSignal);
   try {
     const deps = await getVideoRecordingDependencies();
     const { videoRecorderService, recordingRepository, timer } = deps;
@@ -861,47 +869,76 @@ export async function startVideoRecording(
       abortSignal: start.abortSignal,
     });
 
-    await recordingRepository.insertRecording({
-      recordingId: active.recordingId,
-      deviceId: request.device.deviceId,
-      platform: request.device.platform,
-      status: "recording",
-      outputName: active.outputName,
-      fileName: active.fileName,
-      filePath: active.outputPath,
-      format: active.config.format,
-      sizeBytes: 0,
-      durationMs: undefined,
-      codec: undefined,
-      createdAt: active.startedAt,
-      startedAt: active.startedAt,
-      endedAt: undefined,
-      lastAccessedAt: active.startedAt,
-      config: active.config,
-      ownerSessionUuid: request.ownerSessionUuid,
-    });
+    try {
+      start.abortSignal?.throwIfAborted();
+      await recordingRepository.insertRecording({
+        recordingId: active.recordingId,
+        deviceId: request.device.deviceId,
+        platform: request.device.platform,
+        status: "recording",
+        outputName: active.outputName,
+        fileName: active.fileName,
+        filePath: active.outputPath,
+        format: active.config.format,
+        sizeBytes: 0,
+        durationMs: undefined,
+        codec: undefined,
+        createdAt: active.startedAt,
+        startedAt: active.startedAt,
+        endedAt: undefined,
+        lastAccessedAt: active.startedAt,
+        config: active.config,
+        ownerSessionUuid: request.ownerSessionUuid,
+      });
 
-    const highlightSession = createHighlightSession(
-      active.recordingId,
-      request.device,
-      active.startedAt,
-      timer,
-    );
-    highlightSessions.set(active.recordingId, highlightSession);
-    highlightSessionsByDeviceId.set(request.device.deviceId, active.recordingId);
+      const highlightSession = createHighlightSession(
+        active.recordingId,
+        request.device,
+        active.startedAt,
+        timer,
+      );
+      highlightSessions.set(active.recordingId, highlightSession);
+      highlightSessionsByDeviceId.set(request.device.deviceId, active.recordingId);
 
-    if (highlightInputs.length > 0) {
-      await scheduleRecordingHighlights(highlightSession, request.device, highlightInputs, deps);
+      if (highlightInputs.length > 0) {
+        await scheduleRecordingHighlights(highlightSession, request.device, highlightInputs, deps);
+      }
+
+      await scheduleAutoStop(active.recordingId, maxDurationSeconds);
+
+      const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
+      scheduleInProgressSizeCap(active.recordingId, active.outputPath, capBytes, deps);
+      start.abortSignal?.throwIfAborted();
+      return active;
+    } catch (error) {
+      await cleanUpCancelledVideoRecording(active.recordingId, videoRecorderService);
+      throw error;
     }
-
-    await scheduleAutoStop(active.recordingId, maxDurationSeconds);
-
-    const capBytes = Math.floor((active.config.maxArchiveSizeMb ?? 0) * 1024 * 1024);
-    scheduleInProgressSizeCap(active.recordingId, active.outputPath, capBytes, deps);
-
-    return active;
   } finally {
     start.complete();
+  }
+}
+
+async function cleanUpCancelledVideoRecording(
+  recordingId: string,
+  videoRecorderService: VideoRecorderService,
+): Promise<void> {
+  try {
+    await videoRecorderService.forceStopRecording(recordingId);
+  } catch (cleanupError) {
+    logger.warn(
+      `[VideoRecording] Failed to force-stop cancelled recording ${recordingId}: ${errorMessage(cleanupError)}`,
+      cleanupError,
+    );
+    return;
+  }
+  try {
+    await interruptVideoRecording(recordingId);
+  } catch (cleanupError) {
+    logger.warn(
+      `[VideoRecording] Failed to mark cancelled recording ${recordingId} interrupted: ${errorMessage(cleanupError)}`,
+      cleanupError,
+    );
   }
 }
 

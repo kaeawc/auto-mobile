@@ -18,6 +18,7 @@ import type { VideoCaptureConfig } from "../../../src/features/video/VideoRecord
 import type { DecodedFrame } from "../../../src/features/screen-stream/frameProtocol";
 import type {
   FfmpegClient,
+  FfmpegProbeRequest,
   FfmpegProbeResult,
   FfmpegProcess,
   FfmpegStartRequest,
@@ -25,6 +26,8 @@ import type {
 } from "../../../src/utils/media/FfmpegClient";
 import { trackProcess } from "../../../src/utils/ChildProcessTracker";
 import type { BootedDevice } from "../../../src/models";
+import type { Timer } from "../../../src/utils/SystemTimer";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 const PHYSICAL_UDID = "00008030-001C2D3E1234567A";
 
@@ -96,6 +99,7 @@ class FakeFfmpegClient implements FfmpegClient {
   readonly startRequests: FfmpegStartRequest[] = [];
   readonly processes: FakeFfmpegProcess[] = [];
   probeError: Error | null = null;
+  probeRequest?: FfmpegProbeRequest;
   encoders: string[] = [VIDEOTOOLBOX_H264_ENCODER, SOFTWARE_H264_ENCODER];
 
   start(request: FfmpegStartRequest): FfmpegStartedProcess {
@@ -110,7 +114,8 @@ class FakeFfmpegClient implements FfmpegClient {
     throw new Error("run() is not used by the physical iOS backend");
   }
 
-  async probe(): Promise<FfmpegProbeResult> {
+  async probe(request?: FfmpegProbeRequest): Promise<FfmpegProbeResult> {
+    this.probeRequest = request;
     if (this.probeError) {
       throw this.probeError;
     }
@@ -222,6 +227,7 @@ function makeHarness(
     platform?: NodeJS.Platform;
     sizeBytes?: number;
     now?: () => number;
+    timer?: Timer;
   } = {},
 ): Harness {
   const ffmpeg = new FakeFfmpegClient();
@@ -245,6 +251,7 @@ function makeHarness(
     platformProvider: () => options.platform ?? "darwin",
     fileSize: async () => options.sizeBytes ?? 4096,
     now: options.now,
+    timer: options.timer,
   });
 
   return { backend, ffmpeg, helper, lister, helperOptions };
@@ -799,6 +806,28 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     expect(harness.helper.started).toBe(0);
   });
 
+  test("abort cancels a pending ffmpeg prerequisite probe", async function () {
+    const harness = makeHarness();
+    const controller = new AbortController();
+    let markProbeStarted: (() => void) | undefined;
+    const probeStarted = new Promise<void>((resolve) => {
+      markProbeStarted = resolve;
+    });
+    harness.ffmpeg.probe = async (request) => {
+      harness.ffmpeg.probeRequest = request;
+      markProbeStarted?.();
+      return await new Promise<FfmpegProbeResult>(() => {});
+    };
+
+    const starting = harness.backend.start(makeConfig({ abortSignal: controller.signal }));
+    await probeStarted;
+    controller.abort();
+
+    await expect(starting).rejects.toThrow("cancelled during shutdown");
+    expect(harness.ffmpeg.probeRequest?.signal).toBe(controller.signal);
+    expect(harness.helper.started).toBe(0);
+  });
+
   test("start cleans up an encoder spawned before helper.start() rejected", async function () {
     const ffmpeg = new FakeFfmpegClient();
     const helper = new FakeCaptureHelper();
@@ -834,6 +863,20 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     ).rejects.toThrow("cancelled during shutdown");
     expect(harness.helper.started).toBe(1);
     expect(harness.helper.stopped).toBe(1);
+  });
+
+  test("start force-stops an encoder spawned while cancelled helper shutdown settles", async function () {
+    const controller = new AbortController();
+    const harness = makeHarness();
+    harness.helper.on("started", () => controller.abort());
+    harness.helper.onStop = () => harness.helper.emitFrame(4, 2);
+
+    await expect(
+      harness.backend.start(makeConfig({ abortSignal: controller.signal })),
+    ).rejects.toThrow("cancelled during shutdown");
+
+    expect(harness.ffmpeg.processes).toHaveLength(1);
+    expect(harness.ffmpeg.processes[0].killSignals).toEqual(["SIGKILL"]);
   });
 
   test("start rejects on a non-macOS host before spawning anything", async function () {
@@ -940,6 +983,22 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     await expect(harness.backend.forceStop(handle)).rejects.toThrow("helper shutdown failed");
 
     expect(harness.ffmpeg.processes[0].killSignals).toEqual(["SIGKILL"]);
+  });
+
+  test("forceStop fails boundedly when the encoder cannot be reaped", async function () {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const harness = makeHarness({ timer });
+    const handle = await harness.backend.start(makeConfig());
+    harness.helper.emitFrame(2, 2);
+    const encoder = harness.ffmpeg.processes[0];
+    encoder.kill = (signal?: NodeJS.Signals | number) => {
+      encoder.killSignals.push(signal);
+      return true;
+    };
+
+    await expect(harness.backend.forceStop(handle)).rejects.toThrow("Process did not exit");
+    expect(encoder.killSignals).toEqual(["SIGKILL", "SIGKILL"]);
   });
 
   test("stop rejects a recording the capture helper aborted mid-stream", async function () {

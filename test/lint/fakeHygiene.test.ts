@@ -42,9 +42,8 @@ const ALLOWLIST: Record<string, string[]> = {
     "constructor(timer: Timer = defaultTimer) {",
   ],
   "FakeChildProcess.ts": [
-    'import { defaultTimer } from "../../src/utils/SystemTimer";',
-    "defaultTimer.setTimeout(() => {",
-    "defaultTimer.setTimeout(() => {",
+    'import { defaultTimer, Timer } from "../../src/utils/SystemTimer";',
+    "constructor(private readonly timer: Timer = defaultTimer) {",
   ],
   "FakeNavigationGraphManager.ts": ["timestamp: Date.now(),"],
   "FakeAdbExecutor.ts": ["return this.deviceTimestampMs ?? Date.now();"],

@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { Readable, Writable } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { defaultTimer } from "../../src/utils/SystemTimer";
+import { defaultTimer, Timer } from "../../src/utils/SystemTimer";
 
 /**
  * Fake ChildProcess for testing without spawning real processes
@@ -17,7 +17,7 @@ export class FakeChildProcess
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
   killed = false;
-  pid: number;
+  pid: number | undefined;
 
   private spawnDelay: number = 0;
   private exitDelay: number = 0;
@@ -28,7 +28,7 @@ export class FakeChildProcess
   private stdinData: Buffer[] = [];
   private stdinError: Error | null = null;
 
-  constructor() {
+  constructor(private readonly timer: Timer = defaultTimer) {
     super();
     this.stdout = new Readable({
       read() {
@@ -77,6 +77,7 @@ export class FakeChildProcess
   setSpawnError(message = "Failed to spawn"): void {
     this.shouldError = true;
     this.errorMessage = message;
+    this.pid = undefined;
   }
 
   /**
@@ -105,7 +106,7 @@ export class FakeChildProcess
    * Simulate the spawn lifecycle
    */
   simulateSpawn(): void {
-    defaultTimer.setTimeout(() => {
+    this.timer.setTimeout(() => {
       if (this.shouldError) {
         this.emit("error", new Error(this.errorMessage));
         return;
@@ -127,7 +128,7 @@ export class FakeChildProcess
    * Simulate process exit
    */
   simulateExit(code: number = 0, signal: NodeJS.Signals | null = null): void {
-    defaultTimer.setTimeout(() => {
+    this.timer.setTimeout(() => {
       this.exitCode = code;
       this.signalCode = signal;
       this.stdout.push(null); // End stdout stream

@@ -1096,6 +1096,9 @@ export class DaemonManager implements DaemonManagerLike {
     if (a.token !== undefined && b.token !== undefined) {
       return a.token === b.token;
     }
+    if (a.token !== b.token) {
+      return false;
+    }
     return a.livePid !== undefined && a.livePid === b.livePid;
   }
 

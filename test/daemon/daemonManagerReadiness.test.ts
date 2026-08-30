@@ -480,6 +480,36 @@ describe("DaemonManager readiness", () => {
     expect(waits).toBe(2);
   });
 
+  test("re-arbitrates when a legacy holder gains an owner token (#5928)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    writeFileSync(lockPath, String(process.pid));
+    let waits = 0;
+
+    class TestDaemonManager extends DaemonManager {
+      override async waitForReady(): Promise<boolean> {
+        waits++;
+        if (waits === 1) {
+          writeFileSync(lockPath, `${process.pid}\ntoken-b`);
+        }
+        return false;
+      }
+    }
+
+    const manager = new TestDaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+    );
+
+    await expect(manager.waitForLockHolderReadiness(30_000)).resolves.toBe(false);
+    expect(waits).toBe(2);
+  });
+
   test("waitForLockHolderReadiness confirms a daemon that published its socket before releasing the lock (#5904)", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();

@@ -48,6 +48,7 @@ import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { cleanupDaemonFiles, isProcessRunning as isDaemonProcessRunning } from "./daemonFiles";
 import { parseLockContent, releaseExclusiveLock, tryAcquireExclusiveLock } from "../utils/fileLock";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import {
   DAEMON_LAUNCH_CWD_ENV,
   resolveDaemonLaunchWorkingDirectory,
@@ -375,6 +376,29 @@ const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
 const ABANDONED_WAIT_CONFIRM_TIMEOUT_MS = 1000;
 
 /**
+ * Cadence at which the liveness watchdog re-samples the "keep waiting" predicate
+ * while a full-budget readiness probe is in flight (issue #5904). A per-poll
+ * precheck only samples liveness between probes; if the holder dies *during* a
+ * probe whose `connect()` stalls (an accepts-but-never-responds socket), nothing
+ * interrupts that probe and it can absorb the client's whole `tools/list`
+ * deadline before the actionable error is produced. The watchdog aborts the probe
+ * the instant no live holder remains. Matched to the readiness poll interval so it
+ * reacts within one poll without hammering the process table.
+ */
+const LIVENESS_WATCHDOG_INTERVAL_MS = 100;
+
+/**
+ * A snapshot of the daemon startup lock's current holder, as read from the lock
+ * file. `token` carries the holder's per-instance owner token (issue #5904) so a
+ * replacement holder is distinguishable from the prior one even under PID reuse.
+ */
+interface StartupLockHolder {
+  present: boolean;
+  livePid: number | undefined;
+  token: string | undefined;
+}
+
+/**
  * Surface of DaemonManager used by clients (e.g. DaemonMcpProxy).
  * Allows injecting fakes in tests without subclassing the concrete class.
  */
@@ -394,6 +418,13 @@ export interface DaemonManagerLike {
    * live one keeps it (issue #5878).
    */
   isStartupLockHeldByLiveProcess(): boolean;
+  /**
+   * Wait for the current live startup-lock holder to publish a connectable socket,
+   * re-arbitrating across replacement holders under one deadline (issue #5904).
+   * Returns false only once no live holder remains, so the caller delivers its
+   * actionable error rather than racing the client's `tools/list` deadline.
+   */
+  waitForLockHolderReadiness(timeoutMs: number): Promise<boolean>;
 }
 
 /**
@@ -420,6 +451,16 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly fallbackLauncher: DaemonLauncher;
   private readonly launchCommandResolver: (() => DaemonLaunchCommand) | undefined;
   private heldLockLogPath: string | undefined;
+  /**
+   * A per-instance owner token written into the startup lock alongside the PID
+   * (issue #5904). It distinguishes a genuinely new lock holder from the prior one
+   * even when the OS recycled the prior holder's PID, or when a *different*
+   * `DaemonManager` instance in this same process reacquires the lock with an
+   * identical `process.pid` — cases a PID-only identity check reads as "same
+   * holder" and stops waiting on. Generated from the injected `IdGenerator` so it
+   * is the one canonical randomness primitive rather than an ad-hoc UUID path.
+   */
+  private readonly startupLockOwnerToken: string;
 
   constructor(
     clientFactory: DaemonClientFactory | undefined = undefined,
@@ -435,7 +476,9 @@ export class DaemonManager implements DaemonManagerLike {
     extractionCleaner: ExtractionCleaner = fileSystemExtractionCleaner,
     launcher: DaemonLauncher | (() => DaemonLaunchCommand) | undefined = undefined,
     processSignaler: DaemonProcessSignaler = defaultDaemonProcessSignaler,
+    idGenerator: IdGenerator = defaultIdGenerator,
   ) {
+    this.startupLockOwnerToken = idGenerator.next();
     this.stateProvider = stateProvider;
     this.timer = timer;
     this.lockFilePath = resolvePathFromDaemonLaunchWorkingDirectory(lockFilePath);
@@ -484,6 +527,12 @@ export class DaemonManager implements DaemonManagerLike {
     const logPath = this.daemonLaunchLogPath();
     const acquired = tryAcquireExclusiveLock(this.lockFilePath, {
       isProcessRunning: (pid) => this.isProcessRunning(pid),
+      // Written on line 2 so a follower can tell a replacement holder apart from
+      // the one it was already waiting on even under PID reuse (issue #5904).
+      // `reclaimOwnPid` stays false (the daemon's documented same-process contract),
+      // so the token does not change acquire's stale-reclaim decision — it only
+      // feeds the replacement-identity read in `readStartupLockHolder`.
+      ownerToken: this.startupLockOwnerToken,
       metadata: Buffer.from(logPath, "utf8").toString("base64url"),
     });
     this.heldLockLogPath = acquired ? logPath : undefined;
@@ -495,7 +544,11 @@ export class DaemonManager implements DaemonManagerLike {
    * holds our PID, so it can't delete a lock another opener reclaimed.
    */
   releaseLock(): void {
-    releaseExclusiveLock(this.lockFilePath);
+    // Pass the token so release is incarnation-aware and symmetric with acquire: a
+    // same-PID lock bearing a DIFFERENT token belongs to another instance/incarnation
+    // that recycled our PID and must not be deleted (issue #5904). A lock with no
+    // token line (a pre-token incarnation) is still treated as ours on a PID match.
+    releaseExclusiveLock(this.lockFilePath, process.pid, this.startupLockOwnerToken);
     this.heldLockLogPath = undefined;
   }
 
@@ -592,7 +645,7 @@ export class DaemonManager implements DaemonManagerLike {
    */
   private async startByAwaitingLockHolder(options: DaemonOptions): Promise<void> {
     let holderLogPath: string | null = null;
-    let waitedOnPid = this.readStartupLockHolder().livePid;
+    let waitedOnHolder = this.readStartupLockHolder();
 
     // ONE arbitration deadline across every holder, replacements included, and the
     // final confirm bounded by whatever time is left under it — so a chain of
@@ -636,11 +689,15 @@ export class DaemonManager implements DaemonManagerLike {
       // We could not take over, so the lock is still held. Keep waiting only for a
       // genuinely different live holder (a replacement that reclaimed the lock while
       // the prior one died); a stuck same holder or a now-dead lock ends the loop.
-      const current = this.readStartupLockHolder().livePid;
-      if (current === undefined || current === waitedOnPid) {
+      // Identity is by owner token, not PID, so a replacement that reused the prior
+      // holder's PID — OS recycling, or a same-process sibling manager instance — is
+      // still recognized as a replacement rather than read as the same stuck holder
+      // (issue #5904).
+      const current = this.readStartupLockHolder();
+      if (current.livePid === undefined || this.isSameStartupLockHolder(current, waitedOnHolder)) {
         break;
       }
-      waitedOnPid = current;
+      waitedOnHolder = current;
       stderrLog("Startup lock reclaimed by another process, waiting again...");
     }
 
@@ -976,13 +1033,16 @@ export class DaemonManager implements DaemonManagerLike {
    * `present` is true while there is a holder worth waiting for — a live PID, or a
    * lock file mid-write whose PID is not yet readable; it is false once the lock is
    * gone or its holder has died. `livePid` is that holder's PID when it is both
-   * readable and alive, else `undefined`, so a caller can tell a *replacement*
-   * holder (a different live PID) from the same one it was already waiting on.
+   * readable and alive, else `undefined`. `token` is the holder's per-instance owner
+   * token (issue #5904) when present, so a caller can tell a *replacement* holder
+   * from the same one it was already waiting on even when the PID is identical (OS
+   * PID reuse, or a different `DaemonManager` instance in this same process) — a
+   * gap a PID-only comparison misses. See {@link isSameStartupLockHolder}.
    *
    * Reuses the injected liveness checker and the shared lock format so there is one
    * canonical primitive per concern rather than a second PID reader (issue #5878).
    */
-  private readStartupLockHolder(): { present: boolean; livePid: number | undefined } {
+  private readStartupLockHolder(): StartupLockHolder {
     let content: string;
     try {
       content = readFileSync(this.lockFilePath, "utf-8").trim();
@@ -992,22 +1052,40 @@ export class DaemonManager implements DaemonManagerLike {
       logger.debug(
         `[DaemonManager] Startup lock unreadable while waiting for holder: ${this.describeError(error)}`,
       );
-      return { present: false, livePid: undefined };
+      return { present: false, livePid: undefined, token: undefined };
     }
     if (content.length === 0) {
       // A holder created the lock but has not written its PID yet (mirrors the
       // fileLock mid-write window); treat as still held so we do not abandon it,
       // but with no comparable identity yet.
-      return { present: true, livePid: undefined };
+      return { present: true, livePid: undefined, token: undefined };
     }
-    const { pid } = parseLockContent(content);
+    const { pid, token } = parseLockContent(content);
     if (!Number.isSafeInteger(pid) || pid <= 0) {
       // Unreadable PID — a holder may still be filling it in; keep waiting.
-      return { present: true, livePid: undefined };
+      return { present: true, livePid: undefined, token };
     }
     return this.isProcessRunning(pid)
-      ? { present: true, livePid: pid }
-      : { present: false, livePid: undefined };
+      ? { present: true, livePid: pid, token }
+      : { present: false, livePid: undefined, token };
+  }
+
+  /**
+   * Whether two startup-lock reads refer to the same holder (issue #5904).
+   *
+   * Prefers owner-token identity: a replacement holder that reused the prior
+   * holder's PID — the OS recycling it, or a *different* `DaemonManager` instance in
+   * this same process re-acquiring with an identical `process.pid` — writes a
+   * different token and so reads as a genuinely new holder still worth waiting on,
+   * which a bare PID comparison would wrongly collapse to "same stuck holder". Falls
+   * back to PID identity only when a token is missing on either side (a pre-token
+   * lock, or a holder still mid-write), preserving the earlier PID-only behavior.
+   */
+  private isSameStartupLockHolder(a: StartupLockHolder, b: StartupLockHolder): boolean {
+    if (a.token !== undefined && b.token !== undefined) {
+      return a.token === b.token;
+    }
+    return a.livePid !== undefined && a.livePid === b.livePid;
   }
 
   /**
@@ -1026,6 +1104,67 @@ export class DaemonManager implements DaemonManagerLike {
    */
   isStartupLockHeldByLiveProcess(): boolean {
     return this.readStartupLockHolder().present;
+  }
+
+  /**
+   * Wait for whichever live process currently holds the startup lock to publish a
+   * connectable socket, re-arbitrating across *replacement* holders under ONE
+   * deadline (issue #5904).
+   *
+   * This is the waiting core shared with {@link startByAwaitingLockHolder}: a single
+   * liveness-gated {@link waitForReady} keeps the full budget while a live holder is
+   * bringing the daemon up, but the moment that holder is gone this re-reads the
+   * lock — and if a *different* live holder (by owner token, so PID reuse and
+   * same-process sibling instances don't read as "the same holder") reclaimed it,
+   * waits on that replacement under the remaining budget instead of giving up. It
+   * returns false only once no live holder remains, so the caller can deliver its
+   * actionable error rather than racing the client's ~30s `tools/list` deadline.
+   *
+   * Unlike `startByAwaitingLockHolder` it never takes over the lock itself — it is
+   * for callers (e.g. `DaemonMcpProxy.startDaemon`'s "reports running but socket not
+   * yet published" branch, #5664) that only wait for a holder to finish publishing.
+   */
+  async waitForLockHolderReadiness(timeoutMs: number): Promise<boolean> {
+    const deadline = this.timer.now() + timeoutMs;
+    let waitedOnHolder = this.readStartupLockHolder();
+
+    while (this.remainingTime(deadline) > 0) {
+      const ready = await this.waitForReady(this.remainingTime(deadline), undefined, () =>
+        this.isStartupLockHeldByLiveProcess(),
+      );
+      if (ready) {
+        return true;
+      }
+
+      // The holder we waited on is gone. Re-arbitrate: if a genuinely different live
+      // holder reclaimed the lock (A crashed, B took over between the predicate's
+      // lock read and its liveness check), wait on B under the remaining budget; a
+      // stuck same holder or a now-dead lock ends the wait.
+      const current = this.readStartupLockHolder();
+      if (current.livePid === undefined || this.isSameStartupLockHolder(current, waitedOnHolder)) {
+        break;
+      }
+      waitedOnHolder = current;
+    }
+
+    // A holder can publish its socket and release its lock in the window between a
+    // poll's socket check and its liveness check — and the liveness watchdog widens
+    // that window, since it aborts a slow-but-healthy in-flight probe the instant
+    // the lock is released rather than letting that probe complete. Confirm
+    // reachability directly before reporting failure, exactly as
+    // startByAwaitingLockHolder does: a bounded, NON-destructive probe that never
+    // unlinks a socket, so a healthy-but-slow daemon that just came up is reported
+    // ready instead of failed (issue #5904). Cap it to whatever time is left so it
+    // cannot push total elapsed past the client deadline (issue #5878).
+    const confirmBudget = Math.min(ABANDONED_WAIT_CONFIRM_TIMEOUT_MS, this.remainingTime(deadline));
+    if (
+      confirmBudget > 0 &&
+      existsSync(this.socketPath) &&
+      (await this.verifyDaemonConnection(confirmBudget))
+    ) {
+      return true;
+    }
+    return false;
   }
 
   private async getLockHolderStartupLogPath(): Promise<string | null> {
@@ -1374,13 +1513,12 @@ export class DaemonManager implements DaemonManagerLike {
       const keepWaiting = shouldContinueWaiting();
       if (existsSync(this.socketPath)) {
         socketObserved = true;
-        const probeDeadline = keepWaiting
-          ? deadline
-          : Math.min(deadline, this.timer.now() + ABANDONED_WAIT_CONFIRM_TIMEOUT_MS);
-        // Only the full-budget wait (holder still live) is authoritative enough to
-        // unlink a stale socket; a capped probe must not, or it could remove a
-        // healthy-but-slow daemon's socket (issue #5878).
-        const outcome = await this.probeObservedSocket(probeDeadline, signal, keepWaiting);
+        const outcome = await this.probeObservedSocketWithWatchdog(
+          keepWaiting,
+          deadline,
+          signal,
+          shouldContinueWaiting,
+        );
         if (outcome === "ready") {
           stderrLog(
             `Daemon readiness probe succeeded after ${this.timer.now() - startTime}ms ` +
@@ -1388,7 +1526,15 @@ export class DaemonManager implements DaemonManagerLike {
           );
           return true;
         }
+        // A probe abort is either the caller's own cancellation or the liveness
+        // watchdog firing because the holder died mid-probe (issue #5904); both end
+        // the wait, and reporting not-ready lets the caller deliver its actionable
+        // error rather than racing the client's ~30s deadline.
         if (outcome === "aborted") {
+          stderrLog(
+            `Daemon readiness probe aborted after ${this.timer.now() - startTime}ms ` +
+              `(${pollCount} polls); no longer waiting on the process bringing up the daemon`,
+          );
           return false;
         }
       }
@@ -1419,6 +1565,37 @@ export class DaemonManager implements DaemonManagerLike {
         `(${pollCount} polls; socket ${socketObserved ? "observed" : "not observed"})`,
     );
     return false;
+  }
+
+  /**
+   * Run a single observed-socket readiness probe, arming a liveness watchdog on the
+   * full-budget path so it cannot outlive its holder (issue #5904).
+   *
+   * On the full-budget probe (holder still live at the poll boundary) a stalled
+   * `connect()` would otherwise absorb the whole deadline if the holder died while
+   * the per-poll precheck was blocked; the watchdog aborts the probe the instant no
+   * live holder remains. The capped probe (holder already gone) is short enough to
+   * never race the client's deadline, so it needs no watchdog. Only the full-budget
+   * wait is authoritative enough to unlink a stale socket, so `allowSocketRemoval`
+   * tracks `keepWaiting` (issue #5878).
+   */
+  private async probeObservedSocketWithWatchdog(
+    keepWaiting: boolean,
+    deadline: number,
+    signal: AbortSignal | undefined,
+    shouldContinueWaiting: () => boolean,
+  ): Promise<"ready" | "aborted" | "unready"> {
+    const probeDeadline = keepWaiting
+      ? deadline
+      : Math.min(deadline, this.timer.now() + ABANDONED_WAIT_CONFIRM_TIMEOUT_MS);
+    const watchdog = keepWaiting
+      ? this.startLivenessWatchdog(signal, shouldContinueWaiting)
+      : undefined;
+    try {
+      return await this.probeObservedSocket(probeDeadline, watchdog?.signal ?? signal, keepWaiting);
+    } finally {
+      watchdog?.dispose();
+    }
   }
 
   /**
@@ -1456,6 +1633,50 @@ export class DaemonManager implements DaemonManagerLike {
       }
     }
     return "unready";
+  }
+
+  /**
+   * Arm a liveness watchdog for a single in-flight readiness probe (issue #5904).
+   *
+   * Returns an {@link AbortSignal} that fires when either the caller's own signal
+   * fires or a periodic `shouldContinueWaiting()` sample reports the process being
+   * waited on is gone. Racing this against the probe means a stalled `connect()`
+   * against an accepts-but-never-responds socket cannot keep running for the full
+   * startup budget after its holder dies — the actionable failure is delivered
+   * before the client's `tools/list` deadline instead of at it. The caller MUST
+   * invoke `dispose()` (in a `finally`) to clear the interval and detach the
+   * forwarded-abort listener, or the watchdog interval leaks past the probe.
+   */
+  private startLivenessWatchdog(
+    callerSignal: AbortSignal | undefined,
+    shouldContinueWaiting: () => boolean,
+  ): { signal: AbortSignal; dispose: () => void } {
+    const controller = new AbortController();
+    if (callerSignal?.aborted) {
+      controller.abort();
+    }
+    const onCallerAbort = () => controller.abort();
+    callerSignal?.addEventListener("abort", onCallerAbort, { once: true });
+    const interval = this.timer.setInterval(() => {
+      // Runs on a real timer tick, not an awaited path, so a throwing predicate here
+      // would surface as an unhandled exception (today's predicate cannot throw, but
+      // guard it so a future one cannot crash the process). On error, keep waiting —
+      // the budget deadline still bounds the probe.
+      try {
+        if (!shouldContinueWaiting()) {
+          controller.abort();
+        }
+      } catch (error) {
+        logger.debug(`[DaemonManager] liveness watchdog predicate threw: ${errorMessage(error)}`);
+      }
+    }, LIVENESS_WATCHDOG_INTERVAL_MS);
+    return {
+      signal: controller.signal,
+      dispose: () => {
+        this.timer.clearInterval(interval);
+        callerSignal?.removeEventListener("abort", onCallerAbort);
+      },
+    };
   }
 
   private async waitForExistingDaemon(timeout: number): Promise<boolean> {

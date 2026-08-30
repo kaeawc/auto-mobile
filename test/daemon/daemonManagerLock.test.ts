@@ -1,8 +1,9 @@
 import { describe, expect, test, afterEach } from "bun:test";
-import { existsSync, mkdirSync, writeFileSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, mkdtempSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { DaemonManager } from "../../src/daemon/manager";
+import { parseLockContent } from "../../src/utils/fileLock";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("DaemonManager file lock", () => {
@@ -40,6 +41,41 @@ describe("DaemonManager file lock", () => {
       expect(existsSync(lockPath)).toBe(true);
 
       manager.releaseLock();
+    });
+
+    test("writes a per-instance owner token alongside the PID (#5904)", () => {
+      const lockPath = createTempLockPath();
+      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+
+      expect(manager.acquireLock()).toBe(true);
+      const { pid, token } = parseLockContent(readFileSync(lockPath, "utf-8").trim());
+      // PID stays on line 1 (liveness readers are unaffected); the owner token is a
+      // non-empty line-2 value used to tell replacement holders apart under PID reuse.
+      expect(pid).toBe(process.pid);
+      expect(token).toBeDefined();
+      expect(token).not.toBe("");
+
+      manager.releaseLock();
+    });
+
+    test("two managers in one process write distinct owner tokens (#5904)", () => {
+      const lockPath = createTempLockPath();
+
+      const first = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      expect(first.acquireLock()).toBe(true);
+      const tokenA = parseLockContent(readFileSync(lockPath, "utf-8").trim()).token;
+      first.releaseLock();
+
+      const second = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      expect(second.acquireLock()).toBe(true);
+      const tokenB = parseLockContent(readFileSync(lockPath, "utf-8").trim()).token;
+      second.releaseLock();
+
+      // Same process, same PID — only the per-instance token distinguishes the two
+      // holders, which is what lets a same-PID replacement be re-arbitrated (#5904).
+      expect(tokenA).toBeDefined();
+      expect(tokenB).toBeDefined();
+      expect(tokenA).not.toBe(tokenB);
     });
 
     test("fails when lock is held by a live process", () => {
@@ -246,6 +282,52 @@ describe("DaemonManager file lock", () => {
       // pre-failure confirm is a direct probe, not a waitForReady call (#5878).
       // Diagnostics are captured before the retry holder releases, so they survive
       // into the thrown error.
+      expect(waitCount).toBe(2);
+    });
+
+    test("re-arbitrates for a same-PID replacement holder distinguished by owner token (#5904)", async () => {
+      const lockPath = createTempLockPath();
+      const socketPath = join(dirname(lockPath), "daemon.sock");
+      const pidPath = join(dirname(lockPath), "daemon.pid");
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      // Initial holder: this process's PID with token A.
+      writeFileSync(lockPath, `${process.pid}\ntoken-a`);
+      let waitCount = 0;
+
+      class TestDaemonManager extends DaemonManager {
+        override acquireLock(): boolean {
+          return false;
+        }
+        override async waitForReady(): Promise<boolean> {
+          waitCount++;
+          if (waitCount === 1) {
+            // A replacement reclaims the lock with the SAME PID but a DIFFERENT token
+            // (a different DaemonManager instance in this process). A PID-only identity
+            // check would read this as the same stuck holder and stop after one wait.
+            writeFileSync(lockPath, `${process.pid}\ntoken-b`);
+          }
+          return false;
+        }
+        override findAllDaemonProcesses(): number[] {
+          return [];
+        }
+      }
+
+      const manager = new TestDaemonManager(
+        undefined,
+        undefined,
+        fakeTimer,
+        lockPath,
+        pidPath,
+        socketPath,
+      );
+
+      await expect(manager.start()).rejects.toThrow();
+      // Wait #1 on holder A, then the token-B replacement is recognized as a genuinely
+      // new holder and waited on (#2); it then stays the same token-B holder so the
+      // loop stops. Two waits, not the single wait a PID-only check would allow.
       expect(waitCount).toBe(2);
     });
 

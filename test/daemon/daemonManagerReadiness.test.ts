@@ -377,6 +377,182 @@ describe("DaemonManager readiness", () => {
     expect(clients[0].connectionSignals[0].aborted).toBe(true);
   });
 
+  test("aborts a stalled full-budget probe the instant the lock holder dies mid-probe (#5904)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    writePidFile(pidPath, socketPath);
+    writeFileSync(socketPath, "socket placeholder");
+
+    const clients: ProbeClient[] = [];
+    const manager = new DaemonManager(
+      () => {
+        const client = new ProbeClient(true);
+        // Model an accepts-but-never-responds socket: connect() stalls forever and
+        // only settles when the probe's abort signal fires.
+        client.connect = async (timeoutMs?: number, signal?: AbortSignal) => {
+          client.connectCallCount++;
+          if (timeoutMs !== undefined) {
+            client.connectionTimeouts.push(timeoutMs);
+          }
+          if (signal !== undefined) {
+            client.connectionSignals.push(signal);
+          }
+          await new Promise<void>((_resolve, reject) => {
+            if (signal?.aborted) {
+              reject(new Error("probe aborted"));
+              return;
+            }
+            signal?.addEventListener("abort", () => reject(new Error("probe aborted")), {
+              once: true,
+            });
+          });
+        };
+        clients.push(client);
+        return client;
+      },
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+    );
+
+    // The holder is alive at the poll boundary (so the full budget is taken) but
+    // dies during the stalled probe; the liveness watchdog must interrupt the probe
+    // rather than let it absorb the whole DAEMON_STARTUP_TIMEOUT_MS budget (#5904).
+    let holderAlive = true;
+    let samples = 0;
+    const shouldContinueWaiting = () => {
+      samples++;
+      // Alive for the first sample (the poll-boundary precheck), dead thereafter.
+      if (samples > 1) {
+        holderAlive = false;
+      }
+      return holderAlive;
+    };
+
+    await expect(manager.waitForReady(30_000, undefined, shouldContinueWaiting)).resolves.toBe(
+      false,
+    );
+    // Interrupted early: fake time is nowhere near the 30s budget the un-watched
+    // probe would have consumed.
+    expect(fakeTimer.getCurrentTime()).toBeLessThan(1_000);
+    expect(clients).toHaveLength(1);
+    expect(clients[0].connectionSignals[0]?.aborted).toBe(true);
+  });
+
+  test("waitForLockHolderReadiness re-arbitrates across a token-distinguished replacement holder (#5904)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+
+    // Initial holder: this process's PID with token A.
+    writeFileSync(lockPath, `${process.pid}\ntoken-a`);
+    let waits = 0;
+
+    class TestDaemonManager extends DaemonManager {
+      override async waitForReady(): Promise<boolean> {
+        waits++;
+        if (waits === 1) {
+          // A replacement reclaims the lock with the same PID but a different token
+          // between this wait ending and the re-arbitration read (A crashed, B took
+          // over). Path 1 must wait on B rather than throwing on A being gone.
+          writeFileSync(lockPath, `${process.pid}\ntoken-b`);
+        }
+        return false;
+      }
+    }
+
+    const manager = new TestDaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+    );
+
+    await expect(manager.waitForLockHolderReadiness(30_000)).resolves.toBe(false);
+    // Wait on holder A, then re-arbitrate onto the token-B replacement (#2); B stays
+    // put so the wait then ends. Two waits, not the single wait a lone liveness-gated
+    // waitForReady would allow before throwing.
+    expect(waits).toBe(2);
+  });
+
+  test("waitForLockHolderReadiness confirms a daemon that published its socket before releasing the lock (#5904)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    writePidFile(pidPath, socketPath);
+    writeFileSync(socketPath, "socket placeholder");
+    // Initial holder present and alive.
+    writeFileSync(lockPath, `${process.pid}\ntoken-a`);
+
+    const clients: ProbeClient[] = [];
+
+    class TestDaemonManager extends DaemonManager {
+      override async waitForReady(): Promise<boolean> {
+        // The holder published the socket, then released its lock during our probe
+        // (the watchdog aborts a slow-but-healthy in-flight connect the instant the
+        // lock is gone). Model that: the lock file vanishes, but the socket stays
+        // connectable. The loop then sees the holder gone; only the final confirm
+        // catches that the daemon is actually up.
+        rmSync(lockPath, { force: true });
+        return false;
+      }
+    }
+
+    const manager = new TestDaemonManager(
+      () => {
+        const client = new ProbeClient(true);
+        clients.push(client);
+        return client;
+      },
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+    );
+
+    // Without the final non-destructive confirm, the holder-gone exit would report
+    // false and the proxy would throw DaemonUnavailableError for a reachable daemon.
+    await expect(manager.waitForLockHolderReadiness(30_000)).resolves.toBe(true);
+    expect(clients.length).toBeGreaterThan(0);
+  });
+
+  test("waitForLockHolderReadiness stops on the same live holder without re-arbitrating (#5904)", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+
+    writeFileSync(lockPath, `${process.pid}\ntoken-a`);
+    let waits = 0;
+
+    class TestDaemonManager extends DaemonManager {
+      override async waitForReady(): Promise<boolean> {
+        waits++;
+        // Holder never changes: same PID, same token — a genuinely stuck holder.
+        return false;
+      }
+    }
+
+    const manager = new TestDaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+    );
+
+    await expect(manager.waitForLockHolderReadiness(30_000)).resolves.toBe(false);
+    // No replacement, so exactly one wait: the loop must not spin on an unchanging
+    // live holder.
+    expect(waits).toBe(1);
+  });
+
   test("reports elapsed readiness timing when no daemon socket appears", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();

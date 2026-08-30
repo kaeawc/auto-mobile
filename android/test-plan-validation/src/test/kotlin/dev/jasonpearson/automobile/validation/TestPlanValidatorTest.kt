@@ -515,6 +515,9 @@ class TestPlanValidatorTest {
         - tool: launchApp
           params:
             appId: com.example.app
+        - tool: crashApp
+          params:
+            appId: com.example.app
         - tool: setAppPermissions
           params:
             appId: com.example.app

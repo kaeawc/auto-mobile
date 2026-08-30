@@ -268,6 +268,18 @@ describe("PlanMigrator", () => {
         expect(plan.steps[0].params.bundleId).toBeUndefined();
       });
 
+      test("renames packageName to appId for crashApp", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          mcpVersion: "1.0.0",
+          metadata: { createdAt: "2024-01-01", version: "1.0.0" },
+          steps: [{ tool: "crashApp", params: { packageName: "com.example.app" } }],
+        });
+
+        expect(plan.steps[0].params.appId).toBe("com.example.app");
+        expect(plan.steps[0].params.packageName).toBeUndefined();
+      });
+
       test("defaults tapOn.action to tap", () => {
         const { plan } = migratePlan({
           name: "Plan",

@@ -670,9 +670,18 @@ export class AdbClient implements AdbExecutor {
    * Get device time in milliseconds since epoch and identify its clock source.
    * Falls back to host time if the device timestamp cannot be retrieved.
    */
-  async getDeviceTimestampMsWithSource(): Promise<DeviceTimestampResult> {
+  async getDeviceTimestampMsWithSource(
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<DeviceTimestampResult> {
     try {
-      const result = await this.executeCommand("shell date +%s%3N");
+      const result = await this.executeCommand(
+        "shell date +%s%3N",
+        timeoutMs,
+        undefined,
+        true,
+        signal,
+      );
       const trimmed = result.stdout.trim();
       if (/^\d+$/.test(trimmed)) {
         const parsed = Number(trimmed);
@@ -681,11 +690,18 @@ export class AdbClient implements AdbExecutor {
         }
       }
     } catch (error) {
+      signal?.throwIfAborted();
       logger.debug(`[ADB] Failed to read device time with ms precision: ${error}`);
     }
 
     try {
-      const result = await this.executeCommand("shell date +%s");
+      const result = await this.executeCommand(
+        "shell date +%s",
+        timeoutMs,
+        undefined,
+        true,
+        signal,
+      );
       const trimmed = result.stdout.trim();
       if (/^\d+$/.test(trimmed)) {
         const parsed = Number(trimmed);
@@ -695,6 +711,7 @@ export class AdbClient implements AdbExecutor {
         }
       }
     } catch (error) {
+      signal?.throwIfAborted();
       logger.debug(`[ADB] Failed to read device time in seconds: ${error}`);
     }
 
@@ -1494,11 +1511,12 @@ export class AdbClient implements AdbExecutor {
    */
   async getForegroundApp(
     signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<{ packageName: string; userId: number } | null> {
     try {
       const result = await this.executeCommand(
         'shell dumpsys activity activities | grep -E "(mResumedActivity|mFocusedActivity|topResumedActivity)" | head -1',
-        undefined,
+        timeoutMs,
         undefined,
         true,
         signal,
@@ -1521,6 +1539,7 @@ export class AdbClient implements AdbExecutor {
       logger.debug("[ADB] No foreground app detected");
       return null;
     } catch (error) {
+      signal?.throwIfAborted();
       logger.debug(`[ADB] Failed to get foreground app: ${(error as Error).message}`);
       return null;
     }

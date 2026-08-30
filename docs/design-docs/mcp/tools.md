@@ -48,6 +48,7 @@ the exact arguments supported by your connection.
 | 📱 <code>listApps</code>                                                                         | Provides guidance for listing installed apps through MCP resources.                                                        |
 | 🚀 <code>launchApp</code>                                                                        | Launches an app by package name.                                                                                           |
 | ❌ <code>terminateApp</code>                                                                     | Terminates an app by package name.                                                                                         |
+| 💥 <code>crashApp</code>                                                                         | Intentionally crashes a running app through the platform crash path.                                                       |
 | 📦 <code>installApp</code>                                                                       | Installs an APK, app bundle, or IPA.                                                                                       |
 | 🗑️ <code>uninstallApp</code>                                                                     | Uninstalls an app by package name or bundle identifier.                                                                    |
 | 🔗 <code>getDeepLinks</code>                                                                     | Queries an app's deep links.                                                                                               |
@@ -57,6 +58,23 @@ the exact arguments supported by your connection.
 | 🗃️ <code>listDataStores</code> / 🗃️ <code>getDataStore</code>                                    | Lists or reads Android Jetpack DataStore entries with the SDK adapter.                                                     |
 | 🗄️ <code>sqlQuery</code>                                                                         | Executes SQL against an app SQLite database.                                                                               |
 | 🔐 <code>resetKeychain</code>                                                                    | Resets all Keychain data on an iOS Simulator after explicit confirmation; unsupported on Android and physical iOS devices. |
+
+??? note "Intentional crash contract"
+
+    <code>crashApp</code> accepts only an <code>appId</code>; it never accepts a PID,
+    signal, or shell command. Android uses ActivityManager's VM-crash path for the
+    resolved user. iOS Simulator sends SIGABRT to the exact launchd application
+    process. Physical iOS devices return <code>supported: false</code> and never fall
+    back to normal termination.
+
+    Every result reports <code>success</code>, <code>supported</code>,
+    <code>platform</code>, <code>appId</code>, <code>mechanism</code>,
+    <code>timestamp</code>, and <code>confirmed</code>. It reports
+    <code>wasRunning</code> whenever preflight established process state;
+    confirmed crashes also report <code>processId</code> when available and include
+    immediate OS diagnostic evidence. <code>success: true</code> and
+    <code>confirmed: true</code> require fresh, target-specific crash evidence, not
+    merely command dispatch or process disappearance.
 
 ??? example "Copy a fixture into an app container"
 

@@ -16,6 +16,9 @@ import fs from "fs/promises";
 import path from "path";
 import { shellQuote } from "../../utils/shellQuote";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
+import { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
+
+export { ANDROID_PACKAGE_NAME_PATTERN } from "../../utils/androidPackageName";
 
 interface PostNotificationAction {
   label: string;
@@ -38,7 +41,6 @@ const NOTIFICATION_RECEIVER =
   "dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver";
 const SDK_RESULT_SUCCESS = 1;
 const DEVICE_IMAGE_DIR = "/sdcard/Download/automobile";
-export const ANDROID_PACKAGE_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/;
 
 export class PostNotification {
   private device: BootedDevice;

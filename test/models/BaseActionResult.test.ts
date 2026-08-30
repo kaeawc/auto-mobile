@@ -59,6 +59,7 @@ const EXTENDS_TYPES: Record<string, string> = {
   AppStatusResult: "isInstalled",
   BiometricAuthResult: "modality",
   ClearAppDataResult: "packageName",
+  CrashAppResult: "supported",
   DragAndDropResult: "distance",
   ExitDialogResult: "elementFound",
   InstallAppResult: "artifactPath",

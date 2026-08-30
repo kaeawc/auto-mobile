@@ -3,7 +3,7 @@ package dev.jasonpearson.automobile.ide.yaml
 object TestPlanToolCategories {
   private val categoryByTool: Map<String, String> =
     mapOf(
-        "App management" to setOf("launchApp", "terminateApp", "installApp"),
+        "App management" to setOf("launchApp", "terminateApp", "crashApp", "installApp"),
         "UI interactions" to setOf("tapOn", "swipeOn", "pinchOn", "dragAndDrop"),
         "Input" to
           setOf(

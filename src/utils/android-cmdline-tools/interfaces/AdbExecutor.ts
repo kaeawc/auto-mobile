@@ -93,7 +93,10 @@ export interface AdbExecutor {
    * Get the device time with the clock source used to derive it.
    * Host fallback is retained for callers that accept a best-effort timestamp.
    */
-  getDeviceTimestampMsWithSource(): Promise<DeviceTimestampResult>;
+  getDeviceTimestampMsWithSource(
+    timeoutMs?: number,
+    signal?: AbortSignal,
+  ): Promise<DeviceTimestampResult>;
 
   /**
    * Get the list of booted Android devices
@@ -140,7 +143,10 @@ export interface AdbExecutor {
    * Get the current foreground app package name and user ID
    * @returns Promise with { packageName: string, userId: number } or null if no app in foreground
    */
-  getForegroundApp(signal?: AbortSignal): Promise<{ packageName: string; userId: number } | null>;
+  getForegroundApp(
+    signal?: AbortSignal,
+    timeoutMs?: number,
+  ): Promise<{ packageName: string; userId: number } | null>;
 
   /** Get device time in milliseconds. */
   getDeviceTimestampMs(): Promise<number>;

@@ -712,6 +712,112 @@
     }
   },
   {
+    "name": "crashApp",
+    "description": "Intentionally crash a running app through the platform crash path",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["appId"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios"]
+        },
+        "appId": {
+          "type": "string"
+        },
+        "processId": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "mechanism": {
+          "type": "string",
+          "enum": ["android_am_crash", "ios_simulator_sigabrt", "unsupported"]
+        },
+        "timestamp": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "wasRunning": {
+          "type": "boolean"
+        },
+        "confirmed": {
+          "type": "boolean"
+        },
+        "evidence": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string",
+              "enum": ["android_logcat", "ios_unified_log"]
+            },
+            "summary": {
+              "type": "string"
+            }
+          },
+          "required": ["source", "summary"],
+          "additionalProperties": false
+        },
+        "userId": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "success",
+        "supported",
+        "platform",
+        "appId",
+        "mechanism",
+        "timestamp",
+        "confirmed"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "criticalSection",
     "description": "Synchronize multiple devices at a barrier, then run steps serially.",
     "inputSchema": {

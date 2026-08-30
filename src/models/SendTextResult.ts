@@ -6,6 +6,9 @@ import { BaseActionResult } from "./BaseActionResult";
 export interface SendTextResult extends BaseActionResult {
   text: string;
   imeAction?: string;
+  /** Identity of the field focused by an inputText selector, when available. */
+  matchedId?: string;
+  matchedText?: string;
   /**
    * For the Android `append` mode only: how many leading characters of `text`
    * were confirmed by adb as sent to the device as key events. Append is

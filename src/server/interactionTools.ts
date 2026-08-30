@@ -25,6 +25,7 @@ import {
   BootedDevice,
   ClipboardResult,
   OpenURLResult,
+  SendTextResult,
   SwipeOnToolPayload,
   type TapOnSelectedElement,
 } from "../models";
@@ -823,6 +824,23 @@ export function formatSwipeOnMessage(
     : `Swiped ${direction}`;
 }
 
+export function buildInputTextResultMessage(
+  result: Pick<SendTextResult, "success" | "error" | "matchedId" | "matchedText">,
+): string {
+  if (!result.success) {
+    return `Failed to input text: ${result.error ?? "unknown error"}`;
+  }
+
+  const identity: string[] = [];
+  if (result.matchedId) {
+    identity.push(`id=${result.matchedId}`);
+  }
+  if (result.matchedText) {
+    identity.push(`text=${JSON.stringify(result.matchedText)}`);
+  }
+  return identity.length > 0 ? `Input text into element (${identity.join(" ")})` : "Input text";
+}
+
 /**
  * Build the tapOn success message so it says *what* it matched, not just
  * "Tapped on element" (#5868). A correct tap and a wrong tap were byte-identical;
@@ -1361,11 +1379,12 @@ export function registerInteractionTools() {
       signal,
       args.selector,
     );
-    return createJSONToolResponse({
-      message: `Input text`,
+    const response = createJSONToolResponse({
+      message: buildInputTextResultMessage(result),
       observation: result.observation,
       ...result,
     });
+    return result.success ? response : { ...response, isError: true };
   };
 
   // Wake and unlock handler

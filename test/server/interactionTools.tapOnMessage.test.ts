@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { buildTapOnResultMessage } from "../../src/server/interactionTools";
+import {
+  buildInputTextResultMessage,
+  buildTapOnResultMessage,
+} from "../../src/server/interactionTools";
 import type { TapOnSelectedElement } from "../../src/models";
 
 const selected = (overrides: Partial<TapOnSelectedElement>): TapOnSelectedElement => ({
@@ -155,5 +158,26 @@ describe("buildTapOnResultMessage", () => {
   test("uses only the search summary when there is no selected element", () => {
     const summary = "2 view hierarchy changes over 5 requests within 300ms";
     expect(buildTapOnResultMessage(undefined, summary)).toBe(`Tapped on element (${summary})`);
+  });
+});
+
+describe("buildInputTextResultMessage", () => {
+  test("names the field targeted by a selector", () => {
+    expect(
+      buildInputTextResultMessage({
+        success: true,
+        matchedId: "com.test:id/first_name",
+        matchedText: "First name",
+      }),
+    ).toBe('Input text into element (id=com.test:id/first_name text="First name")');
+  });
+
+  test("reports selector failures as failures", () => {
+    expect(
+      buildInputTextResultMessage({
+        success: false,
+        error: "Element not found with provided text 'Missing'",
+      }),
+    ).toBe("Failed to input text: Element not found with provided text 'Missing'");
   });
 });

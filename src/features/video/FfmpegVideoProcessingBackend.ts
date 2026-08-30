@@ -527,9 +527,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
 
     logger.info(`[FfmpegVideo] Starting screenrecord: ${screenrecordArgs.join(" ")}`);
 
-    const captureProcess = await adb.spawn(screenrecordArgs, {
-      signal: config.abortSignal,
-    });
+    const captureProcess = await adb.spawn(screenrecordArgs);
     const captureTracker = trackProcess(captureProcess);
     let ffmpegProcess: FfmpegProcess | undefined;
     let ffmpegTracker: ProcessTracker | undefined;
@@ -702,12 +700,12 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       }
       const captureProcess = await simctl.startCommandArgs(args, {
         stdio: ["ignore", "ignore", "pipe"],
-        signal: config.abortSignal,
       });
       const captureTracker = trackProcess(captureProcess);
       let spawned = false;
 
       try {
+        throwIfRecordingStartAborted(config.abortSignal, "iOS");
         await waitWithinDeadline(
           waitForSpawn(captureProcess),
           startDeadlineMs,

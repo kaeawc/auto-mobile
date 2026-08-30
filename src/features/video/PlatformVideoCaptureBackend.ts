@@ -313,8 +313,15 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       `[VideoCapture] Bitrate: ${bitrateKbps}kbps (${bitrateBps}bps), Time limit: ${timeLimitSeconds}s`,
     );
 
-    const process = await adb.spawn(args, { signal: config.abortSignal });
-
+    // A recording owns its process after this method returns. The request signal
+    // must bound only startup, not kill an accepted recording after its caller
+    // has moved on to post-tool auditing.
+    const process = await adb.spawn(args);
+    const abortStartup = () => process.kill("SIGTERM");
+    config.abortSignal?.addEventListener("abort", abortStartup, { once: true });
+    if (config.abortSignal?.aborted) {
+      abortStartup();
+    }
     const stderr: string[] = [];
     const { exitState, exitPromise } = createExitTracker(process, stderr);
 
@@ -327,7 +334,7 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       device,
       deviceTempPath,
     };
-
+    config.abortSignal?.removeEventListener("abort", abortStartup);
     return {
       recordingId: config.recordingId,
       outputPath: config.outputPath,

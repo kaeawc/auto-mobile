@@ -865,6 +865,20 @@ describe("IosPhysicalVideoCaptureBackend - Unit Tests", function () {
     expect(harness.helper.stopped).toBe(1);
   });
 
+  test("start force-stops an encoder spawned while cancelled helper shutdown settles", async function () {
+    const controller = new AbortController();
+    const harness = makeHarness();
+    harness.helper.on("started", () => controller.abort());
+    harness.helper.onStop = () => harness.helper.emitFrame(4, 2);
+
+    await expect(
+      harness.backend.start(makeConfig({ abortSignal: controller.signal })),
+    ).rejects.toThrow("cancelled during shutdown");
+
+    expect(harness.ffmpeg.processes).toHaveLength(1);
+    expect(harness.ffmpeg.processes[0].killSignals).toEqual(["SIGKILL"]);
+  });
+
   test("start rejects on a non-macOS host before spawning anything", async function () {
     const harness = makeHarness({ platform: "linux" });
 

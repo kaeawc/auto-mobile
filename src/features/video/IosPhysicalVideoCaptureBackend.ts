@@ -841,7 +841,8 @@ export class IosPhysicalVideoCaptureBackend implements VideoCaptureBackend {
     state: CaptureState,
   ): Promise<void> {
     state.stopRequested = true;
-    const cleanupOperations: Promise<unknown>[] = [helper.stop()];
+    await helper.stop();
+    const cleanupOperations: Promise<unknown>[] = [];
     const encoder = state.encoder;
     if (encoder && state.encoderTracker) {
       cleanupOperations.push(

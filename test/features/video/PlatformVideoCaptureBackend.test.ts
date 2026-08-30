@@ -107,7 +107,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
     ).rejects.toThrow(/FfmpegVideoProcessingBackend/);
   });
 
-  test("passes startup cancellation through Android adb path resolution and spawn", async () => {
+  test("does not retain startup cancellation on an active Android capture", async () => {
     const fakeFactory = new FakeAdbClientFactory();
     const backend = new PlatformVideoCaptureBackend(fakeFactory);
     const controller = new AbortController();
@@ -132,7 +132,7 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       abortSignal: controller.signal,
     });
 
-    expect(fakeFactory.getFakeClient().getSpawnOptions()[0]?.signal).toBe(controller.signal);
+    expect(fakeFactory.getFakeClient().getSpawnOptions()[0]?.signal).toBeUndefined();
   });
 
   describe("Stop Operation", () => {

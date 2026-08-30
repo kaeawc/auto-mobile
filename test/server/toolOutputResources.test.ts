@@ -157,31 +157,36 @@ describe("tool-output artifact resource (#5882)", () => {
     expect(fileSystem.reads).toEqual([path.join(ARTIFACT_DIR, filename)]);
   });
 
-  test("refuses to follow a symlink to a file outside the issued set (#5917)", async () => {
-    // In a deliberately world-writable --tool-outputs-dir a foreign process could
-    // plant a writer-shaped symlink pointing at an arbitrary file. The node read
-    // opens with O_NOFOLLOW, so the symlink target is never served.
-    const dir = mkdtempSync(path.join(tmpdir(), "auto-mobile-symlink-"));
-    const secretPath = path.join(dir, "secret.txt");
-    const filename = "1788020656886-observe-evil.json";
-    const linkPath = path.join(dir, filename);
-    try {
-      writeFileSync(secretPath, "top secret");
-      symlinkSync(secretPath, linkPath);
+  // Unprivileged symlink creation is unavailable on Windows (needs admin/developer
+  // mode), and O_NOFOLLOW degrades to a no-op there anyway, so this is POSIX-only.
+  test.skipIf(process.platform === "win32")(
+    "refuses to follow a symlink to a file outside the issued set (#5917)",
+    async () => {
+      // In a deliberately world-writable --tool-outputs-dir a foreign process could
+      // plant a writer-shaped symlink pointing at an arbitrary file. The node read
+      // opens with O_NOFOLLOW, so the symlink target is never served.
+      const dir = mkdtempSync(path.join(tmpdir(), "auto-mobile-symlink-"));
+      const secretPath = path.join(dir, "secret.txt");
+      const filename = "1788020656886-observe-evil.json";
+      const linkPath = path.join(dir, filename);
+      try {
+        writeFileSync(secretPath, "top secret");
+        symlinkSync(secretPath, linkPath);
 
-      // Real node filesystem (not the fake), but a ledger that has "issued" the
-      // symlink path — provenance alone must not defeat symlink refusal.
-      const ledger = new ToolOutputArtifactLedger();
-      ledger.record(linkPath);
-      setToolOutputResourceDependencies({ ledger });
+        // Real node filesystem (not the fake), but a ledger that has "issued" the
+        // symlink path — provenance alone must not defeat symlink refusal.
+        const ledger = new ToolOutputArtifactLedger();
+        ledger.record(linkPath);
+        setToolOutputResourceDependencies({ ledger });
 
-      const content = await readArtifact(filename);
+        const content = await readArtifact(filename);
 
-      const parsed = JSON.parse(content.text!) as { error: string };
-      expect(parsed.error).toContain("not available");
-      expect(content.text).not.toContain("top secret");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  });
+        const parsed = JSON.parse(content.text!) as { error: string };
+        expect(parsed.error).toContain("not available");
+        expect(content.text).not.toContain("top secret");
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 });

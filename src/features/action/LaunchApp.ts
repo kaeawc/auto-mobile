@@ -24,6 +24,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 import { AndroidCtrlProxyClient } from "../observe/android";
+import { RealObserveScreen } from "../observe/ObserveScreen";
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -1025,6 +1026,10 @@ export class LaunchApp extends BaseVisualChange {
     expectedPackageName: string,
     staleObservation: ObserveResult,
   ): LaunchAppResult {
+    if (this.device.platform === "android") {
+      AndroidCtrlProxyClient.getExistingInstance(this.device.deviceId)?.invalidateCache();
+    }
+    RealObserveScreen.clearCache(this.device.deviceId);
     const reportedPackages = this.describeLaunchObservationPackages(staleObservation);
     logger.warn(
       `[LaunchApp] Omitting stale launch observation for ${expectedPackageName}; ` +

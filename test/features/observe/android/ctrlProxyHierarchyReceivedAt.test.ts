@@ -28,12 +28,14 @@ interface Harness {
   hierarchy: CtrlProxyHierarchy;
   timer: FakeTimer;
   setCached: (h: CachedHierarchy | null) => void;
+  setPackageRunning: (running: boolean) => void;
   restore: () => void;
 }
 
 function createHarness(): Harness {
   const timer = new FakeTimer();
   let cached: CachedHierarchy | null = null;
+  let packageRunning = true;
 
   const context: HierarchyDelegateContext = {
     getWebSocket: () => null,
@@ -42,7 +44,11 @@ function createHarness(): Harness {
     ensureConnected: async () => true,
     cancelScreenshotBackoff: () => {},
     device: { deviceId: "emulator-5554", platform: "android" } as never,
-    adb: {} as never,
+    adb: {
+      executeCommand: async () => ({
+        stdout: packageRunning ? "1234\n" : "",
+      }),
+    } as never,
     getCachedHierarchy: () => cached,
     setCachedHierarchy: (h) => {
       cached = h;
@@ -60,7 +66,11 @@ function createHarness(): Harness {
   // converted result so we can assert only the receipt-time metadata on it.
   const convertSpy = spyOn(hierarchy, "convertToViewHierarchyResult").mockImplementation(
     (h: AccessibilityHierarchy) =>
-      ({ hierarchy: { node: { $: {} } }, updatedAt: h.updatedAt }) as ViewHierarchyResult,
+      ({
+        hierarchy: { node: { $: {} } },
+        packageName: h.packageName,
+        updatedAt: h.updatedAt,
+      }) as ViewHierarchyResult,
   );
 
   return {
@@ -68,6 +78,9 @@ function createHarness(): Harness {
     timer,
     setCached: (h) => {
       cached = h;
+    },
+    setPackageRunning: (running) => {
+      packageRunning = running;
     },
     restore: () => {
       managerSpy.mockRestore();
@@ -128,5 +141,32 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
 
     expect(result).not.toBeNull();
     expect(result!.receivedAt).toBe(receivedAt);
+  });
+
+  test("invalidates cached hierarchy when its package is no longer running", async () => {
+    h = createHarness();
+    h.setCached({
+      hierarchy: {
+        updatedAt: h.timer.now(),
+        packageName: "com.stale.app",
+      } as AccessibilityHierarchy,
+      receivedAt: h.timer.now(),
+      fresh: false,
+    });
+    h.setPackageRunning(false);
+
+    const syncSpy = spyOn(h.hierarchy, "requestHierarchySync").mockResolvedValue({
+      hierarchy: {
+        updatedAt: h.timer.now(),
+        packageName: "com.current.app",
+      } as AccessibilityHierarchy,
+    });
+
+    const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
+
+    expect(syncSpy).toHaveBeenCalledTimes(1);
+    expect(result).not.toBeNull();
+    expect(result!.packageName).toBe("com.current.app");
+    syncSpy.mockRestore();
   });
 });

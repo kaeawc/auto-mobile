@@ -838,9 +838,7 @@ export function buildInputTextResultMessage(
   if (result.matchedText) {
     identity.push(`text=${JSON.stringify(result.matchedText)}`);
   }
-  return identity.length > 0
-    ? `Input text into element (${identity.join(" ")})`
-    : "Input text";
+  return identity.length > 0 ? `Input text into element (${identity.join(" ")})` : "Input text";
 }
 
 /**

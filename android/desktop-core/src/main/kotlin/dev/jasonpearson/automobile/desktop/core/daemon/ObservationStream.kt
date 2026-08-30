@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -16,7 +17,12 @@ interface ObservationStream {
   val navigationUpdates: SharedFlow<NavigationGraphStreamUpdate>
   val performanceUpdates: SharedFlow<PerformanceStreamUpdate>
   val storageUpdates: SharedFlow<StorageStreamUpdate>
-  val storageSubscriptionResponses: SharedFlow<StorageSubscriptionResponse>
+  /**
+   * Lossless, per-stream lifecycle acknowledgements. A stream belongs to one pane, and an
+   * acknowledgement belongs to the command from that pane, so this is intentionally a unicast
+   * [Flow] rather than a lossy broadcast buffer.
+   */
+  val storageSubscriptionResponses: Flow<StorageSubscriptionResponse>
   val deviceEvents: SharedFlow<DeviceStreamEvent>
   val connectionState: StateFlow<ConnectionState>
 

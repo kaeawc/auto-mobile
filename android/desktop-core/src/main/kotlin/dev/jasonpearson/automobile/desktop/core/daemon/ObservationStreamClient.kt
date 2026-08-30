@@ -20,12 +20,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -145,23 +147,17 @@ class ObservationStreamClient(
   override val performanceUpdates: SharedFlow<PerformanceStreamUpdate> =
     _performanceUpdates.asSharedFlow()
 
-  // Flow for live key/value storage changes. Storage writes can burst (a screen that persists
-  // several preferences at once), so this follows the performance flow's non-blocking policy
-  // rather than suspending the socket reader.
-  private val _storageUpdates =
-    MutableSharedFlow<StorageStreamUpdate>(
-      replay = 1,
-      extraBufferCapacity = 32,
-      onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-    )
+  // Storage updates must not be dropped: a lost write leaves an inspector permanently stale.
+  // Backpressure the socket reader while its active pane catches up instead.
+  private val _storageUpdates = MutableSharedFlow<StorageStreamUpdate>(replay = 1)
   override val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
 
-  // Lifecycle acknowledgements are replayed briefly so a newly-composed storage dashboard does
-  // not miss the registration result sent immediately after its DisposableEffect requests it.
-  private val _storageSubscriptionResponses =
-    MutableSharedFlow<StorageSubscriptionResponse>(replay = 1)
-  override val storageSubscriptionResponses: SharedFlow<StorageSubscriptionResponse> =
-    _storageSubscriptionResponses.asSharedFlow()
+  // A dashboard may issue several registrations before its acknowledgement collector starts.
+  // Keep every correlated response until that one pane consumes it; replay=1 loses all but the
+  // last initial file and leaves its snapshot gap unreconciled.
+  private val storageSubscriptionResponseChannel =
+    Channel<StorageSubscriptionResponse>(Channel.UNLIMITED)
+  override val storageSubscriptionResponses = storageSubscriptionResponseChannel.receiveAsFlow()
 
   // Flow for device-level stream events such as control connection loss.
   private val _deviceEvents = MutableSharedFlow<DeviceStreamEvent>(replay = 1)
@@ -600,7 +596,7 @@ class ObservationStreamClient(
         if (storageEvent == null) {
           log.warn("storage_update without a storageEvent payload, ignoring")
         } else {
-          _storageUpdates.tryEmit(
+          _storageUpdates.emit(
             StorageStreamUpdate(
               deviceId = response.deviceId,
               // The frame's own timestamp is the daemon's receive clock; the event carries the
@@ -814,7 +810,7 @@ class ObservationStreamClient(
         }
       }
     }
-    _storageSubscriptionResponses.emit(
+    storageSubscriptionResponseChannel.send(
       StorageSubscriptionResponse(
         requestId = requestId,
         key = pending.key,
@@ -823,9 +819,12 @@ class ObservationStreamClient(
         error = error,
       )
     )
-    // Desired state can have changed while this command was in flight. Issue exactly the next
-    // transition only after this acknowledgement establishes what the daemon actually completed.
-    driveStorageSubscription(pending.key)
+    // A permanent rejection establishes no new daemon state. Redriving it immediately creates a
+    // request/error busy loop; reconnect replay is the next opportunity to retry. A successful
+    // acknowledgement, however, may reveal a desired change that happened in flight.
+    if (success) {
+      driveStorageSubscription(pending.key)
+    }
     return true
   }
 

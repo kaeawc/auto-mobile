@@ -2356,6 +2356,17 @@ describe("DeviceDataStreamSocketServer", () => {
       await server.processLineForTest(
         socket,
         JSON.stringify({
+          id: "s-2-subscribe",
+          command: "subscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+      calls.length = 0;
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
           id: "s-2",
           command: "unsubscribe_storage",
           deviceId: "emulator-5554",
@@ -2588,6 +2599,118 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs).toHaveLength(1);
       expect(msgs[0].type).toBe("subscription_response");
       expect(msgs[0].success).toBe(true);
+    });
+
+    it("keeps a shared observer until its final desktop owner unsubscribes", async () => {
+      const calls: StorageSubReq[] = [];
+      server.setOnStorageSubscriptionRequested(async (request) => {
+        calls.push(request);
+      });
+      const first = new FakeSocket();
+      const second = new FakeSocket();
+      const subscribe = (socket: FakeSocket, id: string) =>
+        server.processLineForTest(
+          socket,
+          JSON.stringify({
+            id,
+            command: "subscribe_storage",
+            deviceId: "emulator-5554",
+            packageName: "com.example.app",
+            fileName: "prefs.xml",
+          }),
+        );
+      const unsubscribe = (socket: FakeSocket, id: string) =>
+        server.processLineForTest(
+          socket,
+          JSON.stringify({
+            id,
+            command: "unsubscribe_storage",
+            deviceId: "emulator-5554",
+            packageName: "com.example.app",
+            fileName: "prefs.xml",
+          }),
+        );
+
+      await subscribe(first, "subscribe-first");
+      await subscribe(second, "subscribe-second");
+      await unsubscribe(first, "unsubscribe-first");
+      expect(calls).toEqual([expect.objectContaining({ subscribe: true, fileName: "prefs.xml" })]);
+
+      await unsubscribe(second, "unsubscribe-second");
+      expect(calls).toEqual([
+        expect.objectContaining({ subscribe: true, fileName: "prefs.xml" }),
+        expect.objectContaining({ subscribe: false, fileName: "prefs.xml" }),
+      ]);
+    });
+
+    it("retries a shared observer after concurrent registration failures", async () => {
+      const calls: StorageSubReq[] = [];
+      server.setOnStorageSubscriptionRequested(async (request) => {
+        calls.push(request);
+        throw new Error("runner unavailable");
+      });
+      const subscribe = (socket: FakeSocket, id: string) =>
+        server.processLineForTest(
+          socket,
+          JSON.stringify({
+            id,
+            command: "subscribe_storage",
+            deviceId: "emulator-5554",
+            packageName: "com.example.app",
+            fileName: "prefs.xml",
+          }),
+        );
+
+      const first = new FakeSocket();
+      const firstRequest = subscribe(first, "subscribe-first");
+      await Promise.resolve();
+      const second = new FakeSocket();
+      await Promise.all([firstRequest, subscribe(second, "subscribe-second")]);
+
+      expect(calls).toHaveLength(1);
+      for (const socket of [first, second]) {
+        expect(socket.getWrittenMessages<{ type: string; success?: boolean }>()[0]).toMatchObject({
+          type: "error",
+          success: false,
+        });
+      }
+
+      server.setOnStorageSubscriptionRequested(async (request) => {
+        calls.push(request);
+      });
+      const retry = new FakeSocket();
+      await subscribe(retry, "subscribe-retry");
+
+      expect(calls).toHaveLength(2);
+      expect(retry.getWrittenMessages<{ type: string; success?: boolean }>()[0]).toMatchObject({
+        type: "subscription_response",
+        success: true,
+      });
+    });
+
+    it("replays active observers when the Android CtrlProxy reconnects", async () => {
+      const calls: StorageSubReq[] = [];
+      server.setOnStorageSubscriptionRequested(async (request) => {
+        calls.push(request);
+      });
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "subscribe",
+          command: "subscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+
+      await server.reapplyStorageSubscriptionsForDevice("emulator-5554");
+
+      expect(calls).toEqual([
+        expect.objectContaining({ subscribe: true, fileName: "prefs.xml" }),
+        expect.objectContaining({ subscribe: true, fileName: "prefs.xml" }),
+      ]);
     });
   });
 });

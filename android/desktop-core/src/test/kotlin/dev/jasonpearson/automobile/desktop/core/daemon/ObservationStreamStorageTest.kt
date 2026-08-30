@@ -307,6 +307,30 @@ class ObservationStreamStorageTest {
         assertEquals(false, response.success)
         assertEquals("runner unavailable", response.error)
         assertEquals(request.id, response.requestId)
+        // A permanent rejection must not be redriven in a tight request/error loop.
+        assertEquals(
+          1,
+          factory.opened.single().sentRequests().count { it.command == "subscribe_storage" },
+        )
+      }
+    }
+  }
+
+  @Test
+  fun `retains every acknowledgement received before collection starts`() {
+    withConnectedClient { client, factory ->
+      client.subscribeStorage("com.example", "first.xml")
+      client.subscribeStorage("com.example", "second.xml")
+      val requests = factory.opened.single().sentRequests().filter { it.command == "subscribe_storage" }
+
+      // DisposableEffect can issue both commands before a later LaunchedEffect starts collecting.
+      // The acknowledgements must remain correlated one-for-one, not collapse to replay=1.
+      client.handleMessage("""{"id":"${requests[0].id}","type":"subscription_response","success":true}""")
+      client.handleMessage("""{"id":"${requests[1].id}","type":"subscription_response","success":true}""")
+
+      client.storageSubscriptionResponses.test {
+        assertEquals(requests[0].id, awaitItem().requestId)
+        assertEquals(requests[1].id, awaitItem().requestId)
       }
     }
   }

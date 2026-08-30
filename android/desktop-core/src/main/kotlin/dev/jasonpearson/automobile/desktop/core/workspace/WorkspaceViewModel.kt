@@ -177,8 +177,25 @@ class WorkspaceViewModel(
     _state.update { current ->
       val columns = (current as? WorkspaceUiState.Content)?.columns ?: emptyList()
       if (columns.any { it.deviceId == column.deviceId }) {
-        LOG.debug("Device ${column.deviceId} already observed; refocusing")
-        WorkspaceUiState.Content(columns, focusedDeviceId = column.deviceId)
+        // A restarted emulator can keep its serial while receiving a fresh daemon-minted epoch.
+        // Preserve the pane's UI state but replace identity/device metadata so its facets dispose
+        // stale streams and reconnect with the current session UUID.
+        LOG.debug("Device ${column.deviceId} already observed; refreshing and refocusing")
+        WorkspaceUiState.Content(
+          columns.map { existing ->
+            if (existing.deviceId != column.deviceId) {
+              existing
+            } else {
+              column.copy(
+                mode = existing.mode,
+                activeTool = existing.activeTool,
+                shrunk = existing.shrunk,
+                orientation = existing.orientation,
+              )
+            }
+          },
+          focusedDeviceId = column.deviceId,
+        )
       } else {
         WorkspaceUiState.Content(columns + column, focusedDeviceId = column.deviceId)
       }

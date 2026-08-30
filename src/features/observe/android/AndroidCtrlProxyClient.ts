@@ -1740,6 +1740,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   protected onConnectionEstablished(): void {
     this.syncNetworkStateToDevice();
     this.syncAccessibilityFlagsToDevice();
+    // The runner loses its in-process content observers across a service restart while the desktop
+    // Unix stream remains connected. The stream server retains the pane-owned subscriptions and
+    // replays them on this new CtrlProxy connection.
+    void getDeviceDataStreamServer()?.reapplyStorageSubscriptionsForDevice(this.device.deviceId);
     // Resume the screenshot keepalive after a (re)connect. onConnectionClosed()
     // cancels it; without restarting here, a transient drop on a STATIC screen
     // leaves the live view frozen forever (no UI change to retrigger a capture).

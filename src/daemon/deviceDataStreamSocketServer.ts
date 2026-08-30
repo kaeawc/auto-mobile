@@ -304,6 +304,14 @@ export type OnStorageSubscriptionRequestedCallback = (request: {
   subscribe: boolean;
 }) => Promise<void>;
 
+/** One device-side observer, shared by every connected desktop stream that owns it. */
+interface StorageSubscriptionState {
+  deviceId: string | null;
+  packageName: string;
+  fileName: string;
+  owners: Set<Socket>;
+}
+
 // iOS observe (ViewHierarchy.getiOSViewHierarchy -> getLatestHierarchy) can
 // legitimately wait up to 15s for a fresh hierarchy. Keep this wrapper timeout
 // above that so slow-but-valid iOS captures are not reported as stream errors
@@ -358,6 +366,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   private onObservationRequested: OnObservationRequestedCallback | null = null;
   private onNavigationGraphRequested: OnNavigationGraphRequestedCallback | null = null;
   private onStorageSubscriptionRequested: OnStorageSubscriptionRequestedCallback | null = null;
+  /**
+   * Storage observers are daemon-owned resources rather than one-command side effects. Track the
+   * desktop sockets that own each observer so one pane closing cannot unsubscribe another pane,
+   * and so a newly connected Android runner can restore all active observers.
+   */
+  private readonly storageSubscriptions = new Map<string, StorageSubscriptionState>();
+  private readonly storageSubscriptionKeysBySocket = new Map<Socket, Set<string>>();
   /** Serializes lifecycle operations for one device-side storage observer. */
   private readonly storageOperations = new Map<string, Promise<void>>();
   private observationRequestTimeoutMs = DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS;
@@ -960,37 +975,26 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         return;
       }
 
-      if (this.onStorageSubscriptionRequested) {
-        const key = `${storageDeviceSessionUuid ?? storageDeviceId ?? "all"}:${packageName}:${fileName}`;
-        const previous = this.storageOperations.get(key) ?? Promise.resolve();
-        const operation = previous
-          .catch(() => undefined)
-          .then(() =>
-            this.onStorageSubscriptionRequested!({
-              deviceId: storageDeviceId,
-              packageName,
-              fileName,
-              subscribe,
-            }),
-          );
-        this.storageOperations.set(key, operation);
-        try {
-          await operation;
-        } catch (error) {
-          logger.warn(
-            `[DeviceDataStream] Error handling ${request.command} for ${packageName}/${fileName}: ${errorMessage(error)}`,
-          );
-          const errorResponse: SubscriptionResponse = {
-            id: request.id,
-            type: "error",
-            success: false,
-            error: errorMessage(error),
-          };
-          this.sendJson(socket, errorResponse);
-          return;
-        } finally {
-          this.clearStorageOperation(key, operation);
+      const key = `${storageDeviceSessionUuid ?? storageDeviceId ?? "all"}:${packageName}:${fileName}`;
+      const storageRequest = { deviceId: storageDeviceId, packageName, fileName, subscribe };
+      try {
+        if (subscribe) {
+          await this.subscribeStorageForSocket(socket, key, storageRequest);
+        } else {
+          await this.unsubscribeStorageForSocket(socket, key, storageRequest);
         }
+      } catch (error) {
+        logger.warn(
+          `[DeviceDataStream] Error handling ${request.command} for ${packageName}/${fileName}: ${errorMessage(error)}`,
+        );
+        const errorResponse: SubscriptionResponse = {
+          id: request.id,
+          type: "error",
+          success: false,
+          error: errorMessage(error),
+        };
+        this.sendJson(socket, errorResponse);
+        return;
       }
 
       const response: SubscriptionResponse = {
@@ -1109,6 +1113,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   protected onConnectionClose(socket: Socket): void {
     const filters = this.getSubscribersForSocket(socket).map((subscriber) => subscriber.filter);
     super.onConnectionClose(socket);
+    this.releaseStorageSubscriptionsForSocket(socket);
     for (const filter of filters) {
       this.notifyCadenceChangedForFilter(filter);
     }
@@ -1117,6 +1122,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   protected onConnectionError(socket: Socket, error: Error): void {
     const filters = this.getSubscribersForSocket(socket).map((subscriber) => subscriber.filter);
     super.onConnectionError(socket, error);
+    this.releaseStorageSubscriptionsForSocket(socket);
     for (const filter of filters) {
       this.notifyCadenceChangedForFilter(filter);
     }
@@ -1167,6 +1173,166 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     subscriptionId: string,
   ): DeviceDataStreamMessage {
     return { ...data.message, subscriptionId };
+  }
+
+  /**
+   * Re-register every active observer for [deviceId] after its Android CtrlProxy reconnects.
+   * Desktop socket ownership deliberately remains intact across that runner-only reconnect.
+   */
+  async reapplyStorageSubscriptionsForDevice(deviceId: string): Promise<void> {
+    const subscriptions = [...this.storageSubscriptions.entries()].filter(
+      ([, subscription]) => subscription.deviceId === deviceId,
+    );
+    for (const [key, subscription] of subscriptions) {
+      try {
+        await this.queueStorageOperation(key, { ...subscription, subscribe: true });
+      } catch (error) {
+        logger.warn(
+          `[DeviceDataStream] Failed to replay storage observer for ${subscription.packageName}/${subscription.fileName}: ${errorMessage(error)}`,
+        );
+      }
+    }
+  }
+
+  private async subscribeStorageForSocket(
+    socket: Socket,
+    key: string,
+    request: {
+      deviceId: string | null;
+      packageName: string;
+      fileName: string;
+      subscribe: boolean;
+    },
+  ): Promise<void> {
+    const existing = this.storageSubscriptions.get(key);
+    if (existing) {
+      this.addStorageSubscriptionOwner(socket, key, existing);
+      try {
+        await this.storageOperations.get(key);
+      } catch (error) {
+        // This socket joined a registration already in flight. If it fails, it never acquired an
+        // observer and must not leave a stale owner that makes later retries appear successful.
+        this.removeStorageSubscriptionOwner(socket, key, existing);
+        throw error;
+      }
+      return;
+    }
+
+    const subscription: StorageSubscriptionState = {
+      deviceId: request.deviceId,
+      packageName: request.packageName,
+      fileName: request.fileName,
+      owners: new Set(),
+    };
+    this.storageSubscriptions.set(key, subscription);
+    this.addStorageSubscriptionOwner(socket, key, subscription);
+    try {
+      await this.queueStorageOperation(key, request);
+    } catch (error) {
+      this.removeStorageSubscriptionOwner(socket, key, subscription);
+      throw error;
+    }
+  }
+
+  private async unsubscribeStorageForSocket(
+    socket: Socket,
+    key: string,
+    request: {
+      deviceId: string | null;
+      packageName: string;
+      fileName: string;
+      subscribe: boolean;
+    },
+  ): Promise<void> {
+    const subscription = this.storageSubscriptions.get(key) ?? null;
+    if (!subscription || !this.removeStorageSubscriptionOwner(socket, key, subscription)) {
+      return;
+    }
+    if (subscription.owners.size === 0) {
+      await this.queueStorageOperation(key, request);
+    }
+  }
+
+  private addStorageSubscriptionOwner(
+    socket: Socket,
+    key: string,
+    subscription: StorageSubscriptionState,
+  ): void {
+    if (!subscription.owners.add(socket)) {
+      return;
+    }
+    const keys = this.storageSubscriptionKeysBySocket.get(socket) ?? new Set<string>();
+    keys.add(key);
+    this.storageSubscriptionKeysBySocket.set(socket, keys);
+  }
+
+  /**
+   * Returns true only when [socket] actually owned the observer. The final owner removes the
+   * record before awaiting teardown so a concurrent reconnect creates a new, ordered lifecycle.
+   */
+  private removeStorageSubscriptionOwner(
+    socket: Socket,
+    key: string,
+    subscription: StorageSubscriptionState,
+  ): boolean {
+    if (!subscription.owners.delete(socket)) {
+      return false;
+    }
+    const keys = this.storageSubscriptionKeysBySocket.get(socket);
+    keys?.delete(key);
+    if (keys?.size === 0) {
+      this.storageSubscriptionKeysBySocket.delete(socket);
+    }
+    if (subscription.owners.size === 0 && this.storageSubscriptions.get(key) === subscription) {
+      this.storageSubscriptions.delete(key);
+    }
+    return true;
+  }
+
+  /** Release every observer owned by a desktop socket that disconnected without an explicit UI tear-down. */
+  private releaseStorageSubscriptionsForSocket(socket: Socket): void {
+    const keys = this.storageSubscriptionKeysBySocket.get(socket);
+    if (!keys) {
+      return;
+    }
+    for (const key of [...keys]) {
+      const subscription = this.storageSubscriptions.get(key);
+      if (
+        subscription &&
+        this.removeStorageSubscriptionOwner(socket, key, subscription) &&
+        subscription.owners.size === 0
+      ) {
+        void this.queueStorageOperation(key, { ...subscription, subscribe: false }).catch(
+          (error) => {
+            logger.warn(
+              `[DeviceDataStream] Failed to release storage observer for ${subscription.packageName}/${subscription.fileName}: ${errorMessage(error)}`,
+            );
+          },
+        );
+      }
+    }
+  }
+
+  /** Queue an observer operation behind any prior command for the same device/package/file. */
+  private queueStorageOperation(
+    key: string,
+    request: {
+      deviceId: string | null;
+      packageName: string;
+      fileName: string;
+      subscribe: boolean;
+    },
+  ): Promise<void> {
+    if (!this.onStorageSubscriptionRequested) {
+      return Promise.resolve();
+    }
+    const previous = this.storageOperations.get(key) ?? Promise.resolve();
+    const operation = previous
+      .catch(() => undefined)
+      .then(() => this.onStorageSubscriptionRequested!(request));
+    this.storageOperations.set(key, operation);
+    void operation.finally(() => this.clearStorageOperation(key, operation)).catch(() => undefined);
+    return operation;
   }
 
   private parseScreenshotIntervalMs(value: unknown): number | null {

@@ -3,12 +3,15 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.connection.isConnected
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 
 /**
  * In-memory [ObservationStream] for UI tests: records subscription lifecycle (connect/disconnect/
@@ -40,9 +43,10 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
     _performanceUpdates.asSharedFlow()
   private val _storageUpdates = flow<StorageStreamUpdate>()
   override val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
-  private val _storageSubscriptionResponses = flow<StorageSubscriptionResponse>()
-  override val storageSubscriptionResponses: SharedFlow<StorageSubscriptionResponse> =
-    _storageSubscriptionResponses.asSharedFlow()
+  private val storageSubscriptionResponseChannel =
+    Channel<StorageSubscriptionResponse>(Channel.UNLIMITED)
+  override val storageSubscriptionResponses: Flow<StorageSubscriptionResponse> =
+    storageSubscriptionResponseChannel.receiveAsFlow()
   private val _deviceEvents = flow<DeviceStreamEvent>()
   override val deviceEvents: SharedFlow<DeviceStreamEvent> = _deviceEvents.asSharedFlow()
 
@@ -165,7 +169,7 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
   fun emitStorage(update: StorageStreamUpdate): Boolean = _storageUpdates.tryEmit(update)
 
   fun emitStorageSubscriptionResponse(response: StorageSubscriptionResponse): Boolean =
-    _storageSubscriptionResponses.tryEmit(response)
+    storageSubscriptionResponseChannel.trySend(response).isSuccess
 
   fun emitHierarchy(update: HierarchyStreamUpdate): Boolean = _hierarchyUpdates.tryEmit(update)
 

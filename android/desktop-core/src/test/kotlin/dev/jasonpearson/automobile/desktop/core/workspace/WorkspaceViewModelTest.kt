@@ -63,6 +63,38 @@ class WorkspaceViewModelTest {
     }
 
   @Test
+  fun `reobserving a reincarnated device refreshes its session UUID`() = testScope.runTest {
+    val vm = WorkspaceViewModel(this)
+    vm.onAction(
+      WorkspaceAction.ObserveDevice(
+        DeviceColumn(
+          deviceId = "a",
+          name = "Device a",
+          platform = Platform.Android,
+          activeTool = Tool.Storage,
+          deviceSessionUuid = "epoch-a",
+        )
+      )
+    )
+
+    vm.onAction(
+      WorkspaceAction.ObserveDevice(
+        DeviceColumn(
+          deviceId = "a",
+          name = "Device a (restarted)",
+          platform = Platform.Android,
+          deviceSessionUuid = "epoch-b",
+        )
+      )
+    )
+
+    val state = vm.state.value as WorkspaceUiState.Content
+    assertEquals(1, state.columns.size)
+    assertEquals("epoch-b", state.columns.single().deviceSessionUuid)
+    assertEquals(Tool.Storage, state.columns.single().activeTool)
+  }
+
+  @Test
   fun `closing a column removes it and refocuses when the focused one closes`() =
     testScope.runTest {
       val vm = WorkspaceViewModel(this)

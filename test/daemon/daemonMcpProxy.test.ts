@@ -2726,6 +2726,52 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("keeps tool-output artifact reads retrievable after a terminal release (#5917)", async () => {
+      // executePlan auto-releases its bound session, then every resource read is
+      // fenced — except the session-independent tool-output artifact read, whose
+      // diagnostic payload must stay fetchable after auto-release. It is a plain
+      // file read with no device access and no session data, so it forwards with
+      // no session params at all (unlike the fresh-screenshot exemption, which
+      // must still target the released session).
+      const artifactUri = "automobile:tool-output/1788020656886-observe-abc123.json";
+      const expectedResult = {
+        contents: [
+          {
+            uri: artifactUri,
+            mimeType: "application/json",
+            text: JSON.stringify({ viewHierarchy: { hierarchy: { node: { text: "Home" } } } }),
+          },
+        ],
+      };
+      const fakeClient = new FakeDaemonClient({
+        daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        resourceResult: expectedResult,
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        initialSessionUuid: "session-a",
+        clientFactory: () => fakeClient,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.listTools();
+        fakeClient.emitNotification(SESSION_RELEASED_NOTIFICATION_METHOD, "session-a");
+
+        await expect(proxy.readResource(artifactUri)).resolves.toEqual(expectedResult);
+        // A non-exempt resource read on the same fenced connection still rejects.
+        await expect(proxy.readResource("automobile:observation/latest")).rejects.toThrow(
+          /session-a.*(?:expired|released)/i,
+        );
+        // The tool-output read forwards with no session params — session-independent.
+        expect(fakeClient.readResourceParams).toEqual([{}]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("preserves the daemon heartbeat snapshot on a terminal binding error", async () => {
       const timer = new FakeTimer();
       const fakeClient = new FakeDaemonClient({

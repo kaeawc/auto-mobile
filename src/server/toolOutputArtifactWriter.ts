@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { toActionableError } from "../models/ActionableError";
 import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
@@ -8,6 +9,10 @@ import { stringifyToolResponse } from "../utils/toolUtils";
 import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 import { logger } from "../utils/logger";
 import { buildToolOutputResourceUri } from "./toolOutputResources";
+import {
+  toolOutputArtifactLedger,
+  type ToolOutputArtifactLedger,
+} from "./toolOutputArtifactLedger";
 import type {
   ObservationArtifactMetadata,
   ObservationArtifactWriter,
@@ -78,6 +83,7 @@ export interface JsonToolOutputArtifactWriterOptions {
   idGenerator?: IdGenerator;
   timer?: Timer;
   retention?: ToolOutputArtifactRetention;
+  ledger?: ToolOutputArtifactLedger;
 }
 
 export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
@@ -86,6 +92,7 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
   private readonly idGenerator: IdGenerator;
   private readonly timer: Timer;
   private readonly retention: ToolOutputArtifactRetention | undefined;
+  private readonly ledger: ToolOutputArtifactLedger;
 
   constructor(options: JsonToolOutputArtifactWriterOptions) {
     this.outputDirectory = resolvePathFromDaemonLaunchWorkingDirectory(options.outputDirectory);
@@ -93,6 +100,9 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
     this.idGenerator = options.idGenerator ?? defaultIdGenerator;
     this.timer = options.timer ?? defaultTimer;
     this.retention = options.retention;
+    // Default to the process-wide ledger the tool-output resource reads from, so
+    // an artifact this writer creates is fetchable in-band (issue #5917).
+    this.ledger = options.ledger ?? toolOutputArtifactLedger;
   }
 
   writeJsonArtifact(input: ObservationArtifactWriteInput): ObservationArtifactMetadata {
@@ -105,6 +115,12 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
       const filename = `${Math.trunc(this.timer.now())}-${safeFilenameSegment(input.tool)}-${safeFilenameSegment(this.idGenerator.next())}.json`;
       const artifactPath = path.join(this.outputDirectory, filename);
       this.fileSystem.writeFileExclusive(artifactPath, content, 0o600);
+      // Record provenance (path + content hash) so the resource serves only the
+      // exact bytes we wrote: it re-hashes what it reads and rejects any later
+      // replacement at that path — symlink, regular-file swap, or inode-reuse
+      // alias — in a world-writable --tool-outputs-dir (#5917).
+      const sha256 = createHash("sha256").update(content, "utf8").digest("hex");
+      this.ledger.record(artifactPath, sha256);
 
       return {
         artifact: {
@@ -147,6 +163,8 @@ export class JsonToolOutputArtifactWriter implements ObservationArtifactWriter {
 
       for (const filePath of filesToDelete) {
         this.fileSystem.deleteFile(filePath);
+        // Keep provenance in lockstep so a pruned file stops resolving (#5917).
+        this.ledger.forget(filePath);
       }
     } catch (error) {
       logger.warn(`Failed to prune old tool output artifacts: ${error}`, error);

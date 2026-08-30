@@ -1,7 +1,9 @@
-import { beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { TapOnElement } from "../../../src/features/action/TapOnElement";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
+import { FakeTalkBackNavigationDriver } from "../../fakes/FakeTalkBackNavigationDriver";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeTalkBackTapStrategy } from "../../fakes/FakeTalkBackTapStrategy";
 import type { FeatureFlagService } from "../../../src/features/featureFlags/FeatureFlagService";
@@ -927,6 +929,18 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
 });
 
 describe("TapOnElement screen-reader navigation result", () => {
+  let androidGetInstanceSpy: ReturnType<typeof spyOn>;
+
+  beforeEach(() => {
+    androidGetInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      {} as AndroidCtrlProxyClient,
+    );
+  });
+
+  afterEach(() => {
+    androidGetInstanceSpy.mockRestore();
+  });
+
   const element = {
     "resource-id": "test:id/button",
     bounds: { left: 0, top: 0, right: 100, bottom: 100 },
@@ -944,6 +958,8 @@ describe("TapOnElement screen-reader navigation result", () => {
     accessibilityDetector.setTalkBackEnabled(true);
     const strategy = new FakeTalkBackTapStrategy();
     strategy.setTapResult(tapResult);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
     const observation = {
       viewHierarchy: { hierarchy: {} },
       screenSize: { width: 100, height: 100 },
@@ -953,8 +969,11 @@ describe("TapOnElement screen-reader navigation result", () => {
       new FakeAdbClient() as any,
       {
         accessibilityDetector,
-        timer: new FakeTimer(),
+        timer,
         talkBackStrategy: strategy,
+        talkBackDriverFactory: {
+          createDriver: () => new FakeTalkBackNavigationDriver(),
+        },
         waitForCondition: {
           execute: async () => ({
             matched: false,
@@ -984,6 +1003,7 @@ describe("TapOnElement screen-reader navigation result", () => {
       element,
       usedParent: false,
     });
+    spyOn(command as any, "executeAndroidTapWithCoordinates").mockResolvedValue(undefined);
     spyOn((command as any).selectionStateTracker, "prepare").mockResolvedValue(null);
     spyOn((command as any).selectionStateTracker, "finalize").mockResolvedValue([]);
     return command;

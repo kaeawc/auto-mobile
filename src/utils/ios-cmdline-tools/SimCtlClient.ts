@@ -22,6 +22,7 @@ import { PlistClient, type PlistReader } from "./PlistClient";
 import { inferIosFormFactor, isIosSimulatorUdid } from "./iosDeviceType";
 import { getAbortSignal } from "../AbortContext";
 import { Mutex } from "async-mutex";
+import { iosSimulatorCapabilityInventory } from "../../features/device-control/virtualDeviceCapabilities";
 
 const COMMAND_SETTLEMENT_GRACE_MS = 1_000;
 const SIMCTL_AVAILABILITY_PROBE_TIMEOUT_MS = 10_000;
@@ -1473,6 +1474,11 @@ export class SimCtlClient implements SimCtl {
             runtime: runtimeId,
             model: device.model,
             architecture: device.architecture,
+            capabilityInventory: iosSimulatorCapabilityInventory({
+              isAvailable: device.isAvailable,
+              availabilityError: device.availabilityError,
+              runtime: runtimeId,
+            }),
           } as DeviceInfo);
         }
       }

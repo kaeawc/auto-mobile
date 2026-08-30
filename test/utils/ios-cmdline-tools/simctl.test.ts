@@ -518,6 +518,18 @@ describe("Simctl", function () {
       const devices = await simctl.listSimulatorImages();
 
       expect(devices.map((device) => device.name)).toEqual(["iPhone 17 Pro"]);
+      expect(devices[0]?.capabilityInventory).toEqual({
+        schemaVersion: 1,
+        capabilities: [
+          { id: "ios.simulator.biometric", state: "available", source: "platform" },
+          {
+            id: "ios.simulator.nfc",
+            state: "unsupported",
+            source: "platform",
+            reason: "iOS Simulator cannot emulate NFC hardware.",
+          },
+        ],
+      });
       expect(commands).toEqual(["xcrun simctl list devices --json"]);
     });
 

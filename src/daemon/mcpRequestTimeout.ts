@@ -50,11 +50,12 @@ export const MIN_LAUNCH_APP_MCP_TIMEOUT_MS = 90_000;
 
 /**
  * Floor for `videoRecording` — an iOS recording can be the first operation
- * that starts CtrlProxy on a cold simulator. Aborting at the generic 30s
- * deadline leaves the recording active while the client reports a failure,
- * making a retry collide with that still-live recording.
+ * that starts CtrlProxy on a cold simulator. The recording backend can spend
+ * 30s waiting for simctl's first-frame handshake, then clean up and retry once.
+ * Give that bounded recovery path enough transport time to return its actual
+ * failure or recording ID instead of letting the socket abort mid-start.
  */
-export const MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS = 90_000;
+export const MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS = 180_000;
 
 /**
  * Floor for `uninstallApp` — the Android command has a 20s local deadline,

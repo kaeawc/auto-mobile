@@ -126,7 +126,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
       ViewHierarchy(
         packageName = rootNode.packageName?.toString(),
-        userId = UserHandle.myUserId(),
+        userId = UserHandle.getUserId(android.os.Process.myUid()),
         hierarchy = unifiedHierarchy?.let { WireNodeCodec.materialize(it) },
         intentChooserDetected = intentChooserDetected,
         notificationPermissionDetected = notificationPermissionDetected,
@@ -438,7 +438,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
     return ViewHierarchy(
       packageName = mainPackageName,
-      userId = UserHandle.myUserId(),
+      userId = UserHandle.getUserId(android.os.Process.myUid()),
       hierarchy = unifiedHierarchy?.let { WireNodeCodec.materialize(it) },
       windows = windowInfos.takeIf { it.isNotEmpty() },
       intentChooserDetected = intentChooserDetected,

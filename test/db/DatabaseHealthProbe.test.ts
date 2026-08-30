@@ -95,7 +95,11 @@ describe("DefaultDatabaseHealthProbe", () => {
     });
 
     // A healthy DB makes the worker post `{ ok: true }`; check() resolves.
-    await expect(probe.check()).resolves.toBeUndefined();
+    try {
+      await expect(probe.check()).resolves.toBeUndefined();
+    } finally {
+      await probe.dispose();
+    }
   });
 
   test("rejects with the worker's error envelope when the sqlite file cannot be opened", async () => {
@@ -110,7 +114,11 @@ describe("DefaultDatabaseHealthProbe", () => {
       getDatabasePath: () => missingPath,
     });
 
-    await expect(probe.check()).rejects.toThrow(/unable to open database file/);
+    try {
+      await expect(probe.check()).rejects.toThrow(/unable to open database file/);
+    } finally {
+      await probe.dispose();
+    }
   });
 
   test("bounds a wedged SELECT 1 probe", async () => {

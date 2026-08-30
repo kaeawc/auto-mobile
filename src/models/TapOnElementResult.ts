@@ -8,8 +8,8 @@ import type { ScreenReaderNavigationResult } from "../features/talkback/TalkBack
 export type TapEffectBasis =
   | "screenIdentity changed"
   | "screenIdentity unchanged"
-  | "activeWindow+layoutSeqSum changed"
-  | "activeWindow+layoutSeqSum unchanged"
+  | "activeWindow changed"
+  | "activeWindow unchanged"
   | "viewHierarchy changed"
   | "viewHierarchy unchanged"
   | "insufficient observation data";

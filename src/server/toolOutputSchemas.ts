@@ -224,8 +224,8 @@ const tapEffectSchema = z
     basis: z.enum([
       "screenIdentity changed",
       "screenIdentity unchanged",
-      "activeWindow+layoutSeqSum changed",
-      "activeWindow+layoutSeqSum unchanged",
+      "activeWindow changed",
+      "activeWindow unchanged",
       "viewHierarchy changed",
       "viewHierarchy unchanged",
       "insufficient observation data",

@@ -30,8 +30,9 @@ describe("CtrlProxyManager", function () {
   let originalSkipDownloadEnv: string | undefined;
   let originalSkipShaEnv: string | undefined;
   let originalLaunchCwdEnv: string | undefined;
+  let prefetchCacheDir: string;
 
-  beforeEach(function () {
+  beforeEach(async function () {
     originalApkPathEnv = process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     originalSkipChecksumEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
     originalSkipDownloadEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
@@ -58,6 +59,8 @@ describe("CtrlProxyManager", function () {
     AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting({
       hasAndroidPrerequisites: async () => true,
     });
+    prefetchCacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "ctrlproxy-cache-"));
+    AndroidCtrlProxyManager.setPrefetchCacheDirForTesting(prefetchCacheDir);
 
     accessibilityServiceClient = AndroidCtrlProxyManager.getInstance(testDevice, fakeAdbFactory);
     accessibilityServiceClient.clearAvailabilityCache();
@@ -68,6 +71,8 @@ describe("CtrlProxyManager", function () {
     AndroidCtrlProxyManager.setAccessibilityDetectorForTesting(null);
     AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting(null);
     await AndroidCtrlProxyManager.cleanupPrefetchedApk();
+    AndroidCtrlProxyManager.setPrefetchCacheDirForTesting(null);
+    await fs.rm(prefetchCacheDir, { recursive: true, force: true });
     if (originalApkPathEnv === undefined) {
       delete process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     } else {
@@ -843,6 +848,83 @@ describe("CtrlProxyManager", function () {
         expect(retriedPath).not.toBeNull();
       } finally {
         (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
+      }
+    });
+
+    test("reuses a verified cache asset and reaps stale staging directories across daemon lifecycles", async function () {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("");
+      const zip = new AdmZip();
+      zip.addFile(
+        "AndroidManifest.xml",
+        Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"),
+      );
+      zip.addFile("classes.dex", crypto.randomBytes(15000));
+      const payload = zip.toBuffer();
+      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
+      let downloadCalls = 0;
+
+      try {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
+          download: async (_url: string, destination: string) => {
+            downloadCalls++;
+            await fs.writeFile(destination, payload);
+          },
+        };
+
+        const firstPath = await AndroidCtrlProxyManager.prefetchApk();
+        await AndroidCtrlProxyManager.cleanupPrefetchedApk();
+        const staleStagingDir = path.join(prefetchCacheDir, "auto-mobile-prefetch-orphan");
+        await fs.mkdir(staleStagingDir);
+        const staleTime = new Date(Date.now() - 2 * 60 * 60 * 1000);
+        await fs.utimes(staleStagingDir, staleTime, staleTime);
+        const secondPath = await AndroidCtrlProxyManager.prefetchApk();
+
+        expect(firstPath).not.toBeNull();
+        expect(secondPath).toBe(firstPath);
+        expect(downloadCalls).toBe(1);
+        expect(await fs.stat(firstPath!)).toBeDefined();
+        const staleStatError = await fs.stat(staleStagingDir).then(
+          () => null,
+          (error: NodeJS.ErrnoException) => error,
+        );
+        expect(staleStatError?.code).toBe("ENOENT");
+      } finally {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
+      }
+    });
+
+    test("removes the successful prefetch staging directory after publishing the cache", async function () {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("");
+      const zip = new AdmZip();
+      zip.addFile(
+        "AndroidManifest.xml",
+        Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"),
+      );
+      zip.addFile("classes.dex", crypto.randomBytes(15000));
+      const payload = zip.toBuffer();
+      const stageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ctrlproxy-stage-root-"));
+      const stageDir = path.join(stageRoot, "auto-mobile-prefetch-stage");
+      await fs.mkdir(stageDir);
+      const mkdtempSpy = spyOn(fs, "mkdtemp").mockResolvedValue(stageDir);
+      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
+
+      try {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
+          download: async (_url: string, destination: string) => {
+            await fs.writeFile(destination, payload);
+          },
+        };
+
+        await expect(AndroidCtrlProxyManager.prefetchApk()).resolves.not.toBeNull();
+        const statError = await fs.stat(stageDir).then(
+          () => null,
+          (error: NodeJS.ErrnoException) => error,
+        );
+        expect(statError?.code).toBe("ENOENT");
+      } finally {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
+        mkdtempSpy.mockRestore();
+        await fs.rm(stageRoot, { recursive: true, force: true });
       }
     });
 

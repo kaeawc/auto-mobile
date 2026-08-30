@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import * as fs from "fs/promises";
+import os from "os";
+import * as path from "path";
 import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
 import type { AndroidPrerequisiteDetector } from "../../src/utils/android-cmdline-tools/AndroidPrerequisiteDetector";
 import { FakeFileDownloader } from "../fakes/FakeFileDownloader";
@@ -10,6 +13,7 @@ import { FakeFileDownloader } from "../fakes/FakeFileDownloader";
 describe("AndroidCtrlProxyManager prefetch prerequisite gate", function () {
   let fakeDownloader: FakeFileDownloader;
   let originalApkPathEnv: string | undefined;
+  let prefetchCacheDir: string;
 
   const detectorReturning = (value: boolean): AndroidPrerequisiteDetector => ({
     hasAndroidPrerequisites: async () => value,
@@ -20,6 +24,8 @@ describe("AndroidCtrlProxyManager prefetch prerequisite gate", function () {
     // The local-APK override short-circuits prefetch entirely; keep it unset.
     delete process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     await AndroidCtrlProxyManager.cleanupPrefetchedApk();
+    prefetchCacheDir = await fs.mkdtemp(path.join(os.tmpdir(), "ctrlproxy-prefetch-gate-"));
+    AndroidCtrlProxyManager.setPrefetchCacheDirForTesting(prefetchCacheDir);
     fakeDownloader = new FakeFileDownloader();
     AndroidCtrlProxyManager.setPrefetchFileDownloaderForTesting(fakeDownloader);
   });
@@ -28,6 +34,8 @@ describe("AndroidCtrlProxyManager prefetch prerequisite gate", function () {
     AndroidCtrlProxyManager.setAndroidPrerequisiteDetectorForTesting(null);
     AndroidCtrlProxyManager.setPrefetchFileDownloaderForTesting(null);
     await AndroidCtrlProxyManager.cleanupPrefetchedApk();
+    AndroidCtrlProxyManager.setPrefetchCacheDirForTesting(null);
+    await fs.rm(prefetchCacheDir, { recursive: true, force: true });
     if (originalApkPathEnv === undefined) {
       delete process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     } else {

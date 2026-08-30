@@ -464,10 +464,17 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // survive the socket + loopback-HTTP hops (#5854 §2). Done BEFORE logging and
     // validation so the request trace shows the real Infinity/-Infinity/NaN
     // instead of `null`, and the schema rejects it with "must be a finite number".
-    // Scoped by transport provenance (#5863): revival runs only for requests the
-    // daemon client actually sentinel-encoded (flagged inside `arguments`); direct
-    // in-memory / stdio clients are left untouched. The flag is stripped here.
-    if (request.params && request.params.arguments) {
+    // Scoped by transport provenance (#5863, hardened #5919): revival runs only for
+    // daemon-forwarded requests. `daemonMode` is a server-CONSTRUCTION boundary the
+    // tool caller cannot influence, so a direct in-memory / stdio client
+    // (`daemonMode: false`) can never assert daemon transport provenance by forging
+    // the in-arguments flag — its arguments are left untouched regardless. Sentinel
+    // encoding is only ever performed by the daemon client (`daemon/client.ts`),
+    // whose requests always terminate at this `daemonMode: true` loopback server, so
+    // gating reverts nothing legitimate. `reviveNonFiniteArguments` still strips the
+    // flag when present; a forged flag on a direct server is stripped instead by
+    // `stripInternalToolParams` before the tool runs.
+    if (daemonMode && request.params && request.params.arguments) {
       request.params.arguments = reviveNonFiniteArguments(request.params.arguments) as Record<
         string,
         unknown

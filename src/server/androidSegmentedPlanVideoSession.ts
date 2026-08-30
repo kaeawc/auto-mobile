@@ -179,7 +179,14 @@ export class AndroidSegmentedPlanVideoSession {
     } catch (error) {
       this.timerDriven = false;
       if (this.activeRecordingId) {
-        await this.abort();
+        try {
+          await this.abort();
+        } catch (abortError) {
+          throw new AggregateError(
+            [error, abortError],
+            `${errorMessage(error)}; segmented rollback failed: ${errorMessage(abortError)}`,
+          );
+        }
       }
       throw error;
     }

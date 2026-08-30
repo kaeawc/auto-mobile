@@ -139,13 +139,14 @@ export class FakeAdbClient implements FakeAdbClientContract {
   async spawn(args: string[], options?: AdbSpawnOptions): Promise<AdbProcess> {
     this.spawnCalls.push([...args]);
     this.spawnOptions.push(options);
-    const proc = new FakeAdbProcess();
-    this.spawnedProcesses.push(proc);
     const joined = args.join(" ");
     const behavior = this.spawnBehaviors.find((b) => joined.includes(b.match));
     if (behavior?.outcome.kind === "reject") {
       throw behavior.outcome.error;
-    } else if (behavior?.outcome.kind === "error") {
+    }
+    const proc = new FakeAdbProcess();
+    this.spawnedProcesses.push(proc);
+    if (behavior?.outcome.kind === "error") {
       proc.scheduleError(behavior.outcome.error);
     } else {
       proc.scheduleExit(behavior?.outcome.kind === "exit" ? behavior.outcome.code : 0);
@@ -370,6 +371,7 @@ export class FakeAdbClient implements FakeAdbClientContract {
     this.foregroundAppError = null;
     this.hangingCommandPatterns = [];
     this.spawnCalls = [];
+    this.spawnedProcesses = [];
     this.spawnBehaviors = [];
     this.deviceTimestampMs = null;
   }

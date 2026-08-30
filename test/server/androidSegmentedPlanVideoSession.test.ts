@@ -343,6 +343,33 @@ describe("AndroidSegmentedPlanVideoSession (timer-driven)", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test("preserves startup and rollback failures when initial cleanup fails", async () => {
+    const controller = new AbortController();
+    const startupError = new Error("startup cancelled");
+    controller.abort(startupError);
+    const rollbackError = new Error("rollback failed");
+    const session = new AndroidSegmentedPlanVideoSession({
+      device: androidDevice,
+      outputNamePrefix: "vid",
+      startupAbortSignal: controller.signal,
+      startVideoRecording: async () => makeActiveRecording("id-vid", "/tmp/id-vid.mp4"),
+      stopVideoRecording: async () => ({
+        metadata: makeStopMetadata("id-vid", "/tmp/id-vid.mp4"),
+        evictedRecordingIds: [],
+      }),
+      rollbackVideoRecordingStart: async () => {
+        throw rollbackError;
+      },
+    });
+
+    const failure = await session.start().catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    const aggregate = failure as AggregateError;
+    expect(aggregate.errors[0]).toBe(startupError);
+    expect(aggregate.errors[1]).toBeInstanceOf(AggregateError);
+    expect((aggregate.errors[1] as AggregateError).errors).toEqual([rollbackError]);
+  });
+
   test("waits for a plan-step rotation to observe cancellation before rollback", async () => {
     let now = 0;
     let resolveReplacement!: () => void;

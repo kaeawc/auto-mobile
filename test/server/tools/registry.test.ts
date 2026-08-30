@@ -26,6 +26,7 @@ describe("MCP Tools Registry", () => {
     // Should include app management tools (MCP app lifecycle)
     expect(toolNames).toContain("launchApp");
     expect(toolNames).toContain("terminateApp");
+    expect(toolNames).toContain("crashApp");
     expect(toolNames).toContain("listApps");
   });
 
@@ -61,7 +62,7 @@ describe("MCP Tools Registry", () => {
   test("should expose registered output schemas in generated MCP tool definitions", () => {
     const toolDefinitions = ToolRegistry.getToolDefinitions();
 
-    for (const toolName of ["executePlan", "tapOn"]) {
+    for (const toolName of ["executePlan", "tapOn", "crashApp"]) {
       const tool = toolDefinitions.find((definition) => definition.name === toolName);
       expect(tool).toBeDefined();
       expect(tool).toHaveProperty("outputSchema");
@@ -112,7 +113,7 @@ describe("MCP Tools Registry", () => {
         "dragAndDrop",
         "pinchOn",
       ],
-      app: ["launchApp", "terminateApp", "installApp", "uninstallApp", "listApps"],
+      app: ["launchApp", "terminateApp", "crashApp", "installApp", "uninstallApp", "listApps"],
       utility: ["rotate", "setActiveDevice", "openLink", "getDeviceState", "setDeviceState"],
       device: [
         "listDeviceImages",

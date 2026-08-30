@@ -1,4 +1,40 @@
-const PROCESS_RECORD_PATTERN = /(?:^|\s)\d+:([A-Za-z0-9_.:]+)\/(u(\d+)a\d+|\d+)(?=[\s}]|$)/gm;
+const PROCESS_RECORD_PATTERN = /(?:^|\s)(\d+):([A-Za-z0-9_.:]+)\/(u(\d+)a\d+|\d+)(?=[\s}]|$)/gm;
+
+/**
+ * Finds a process PID for an Android package in the selected user, preferring
+ * the package's main process over a `package:suffix` secondary process.
+ */
+export function findAndroidPackageProcessId(
+  processesOutput: string,
+  packageName: string,
+  userId: number,
+): number | null {
+  PROCESS_RECORD_PATTERN.lastIndex = 0;
+  let secondaryPid: number | null = null;
+
+  for (const match of processesOutput.matchAll(PROCESS_RECORD_PATTERN)) {
+    const processName = match[2];
+    if (processName !== packageName && !processName.startsWith(`${packageName}:`)) {
+      continue;
+    }
+
+    const uid = match[3];
+    const processUserId = uid.startsWith("u")
+      ? Number(match[4])
+      : Math.floor(Number(uid) / 100_000);
+    if (processUserId !== userId) {
+      continue;
+    }
+
+    const pid = Number(match[1]);
+    if (processName === packageName) {
+      return pid;
+    }
+    secondaryPid ??= pid;
+  }
+
+  return secondaryPid;
+}
 
 /**
  * Determines whether an Android package has a process for the selected user.
@@ -21,13 +57,13 @@ export function isAndroidPackageRunning(
   PROCESS_RECORD_PATTERN.lastIndex = 0;
 
   for (const match of processesOutput.matchAll(PROCESS_RECORD_PATTERN)) {
-    if (match[1] !== packageName && !match[1].startsWith(`${packageName}:`)) {
+    if (match[2] !== packageName && !match[2].startsWith(`${packageName}:`)) {
       continue;
     }
 
-    const uid = match[2];
+    const uid = match[3];
     const processUserId = uid.startsWith("u")
-      ? Number(match[3])
+      ? Number(match[4])
       : Math.floor(Number(uid) / 100_000);
     if (userId === undefined || processUserId === userId) {
       return true;

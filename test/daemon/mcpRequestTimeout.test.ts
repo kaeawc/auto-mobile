@@ -5,6 +5,7 @@ import {
   DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS,
   LEGACY_OBSERVE_MCP_TIMEOUT_ENV_VAR,
   LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
+  MIN_CRASH_APP_MCP_TIMEOUT_MS,
   MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
   MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
   MIN_PREFERENCE_MCP_TIMEOUT_MS,
@@ -101,6 +102,11 @@ describe("resolveMcpRequestTimeoutMs", () => {
       expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
     },
     {
+      name: "crashApp floor when timeoutMs omitted",
+      tool: "crashApp",
+      expected: MIN_CRASH_APP_MCP_TIMEOUT_MS,
+    },
+    {
       name: "videoRecording floor when timeoutMs omitted",
       tool: "videoRecording",
       expected: MIN_VIDEO_RECORDING_MCP_TIMEOUT_MS,
@@ -161,6 +167,12 @@ describe("resolveMcpRequestTimeoutMs", () => {
       tool: "launchApp",
       timeoutMs: 10_000,
       expected: MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
+    },
+    {
+      name: "raises short crashApp to floor",
+      tool: "crashApp",
+      timeoutMs: 30_000,
+      expected: MIN_CRASH_APP_MCP_TIMEOUT_MS,
     },
     {
       name: "raises short videoRecording to floor",

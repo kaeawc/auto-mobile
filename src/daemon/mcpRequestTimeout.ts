@@ -49,6 +49,15 @@ export const MIN_TEARDOWN_DEVICE_MCP_TIMEOUT_MS =
 export const MIN_LAUNCH_APP_MCP_TIMEOUT_MS = 90_000;
 
 /**
+ * Floor for `crashApp` — Android ActivityManager can take several seconds to
+ * deliver the in-process exception, and target-specific process/log evidence is
+ * collected afterward. Device readiness also consumes the same request budget.
+ * A transport timeout after induction falsely reports failure and makes retrying
+ * unsafe because the original crash may already have completed.
+ */
+export const MIN_CRASH_APP_MCP_TIMEOUT_MS = 60_000;
+
+/**
  * Compatibility floor while video recording startup moves to a strict,
  * backend-owned five-second budget.
  */
@@ -70,7 +79,8 @@ export const MIN_UNINSTALL_APP_MCP_TIMEOUT_MS = 60_000;
  */
 export const MIN_PREFERENCE_MCP_TIMEOUT_MS = 60_000;
 
-const PREFERENCE_TOOL_TIMEOUT_FLOORS: Readonly<Record<string, number>> = {
+const TOOL_TIMEOUT_FLOORS: Readonly<Record<string, number>> = {
+  crashApp: MIN_CRASH_APP_MCP_TIMEOUT_MS,
   getPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
   setPreference: MIN_PREFERENCE_MCP_TIMEOUT_MS,
 };
@@ -116,8 +126,8 @@ function resolveEnvTimeoutFloorMs(
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
 }
 
-function resolvePreferenceToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
-  return PREFERENCE_TOOL_TIMEOUT_FLOORS[toolName ?? ""];
+function resolveFixedToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
+  return TOOL_TIMEOUT_FLOORS[toolName ?? ""];
 }
 
 function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
@@ -151,7 +161,7 @@ function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undef
         DEFAULT_OBSERVE_MCP_TIMEOUT_MS,
       );
     default:
-      return resolvePreferenceToolTimeoutFloorMs(toolName);
+      return resolveFixedToolTimeoutFloorMs(toolName);
   }
 }
 

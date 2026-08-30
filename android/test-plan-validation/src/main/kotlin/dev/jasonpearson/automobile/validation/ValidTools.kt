@@ -17,6 +17,7 @@ object ValidTools {
       "clearMockNetwork",
       "clearText",
       "clipboard",
+      "crashApp",
       "criticalSection",
       "debugSearch",
       "deleteSnapshot",

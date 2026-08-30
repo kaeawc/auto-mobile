@@ -9,6 +9,7 @@ import {
 } from "../../src/server/toolSchemaHelpers";
 import { accessibilitySchema } from "../../src/server/accessibilityTools";
 import {
+  crashAppSchema,
   packageNameSchema,
   launchAppSchema,
   installAppSchema,
@@ -222,6 +223,19 @@ describe("appId aliases on tool schemas", () => {
     }
   });
 
+  test("crashAppSchema accepts bundleId as an appId alias", () => {
+    const result = crashAppSchema.safeParse({
+      bundleId: "com.example.app",
+      platform: "ios",
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.appId).toBe("com.example.app");
+      expect("bundleId" in result.data).toBe(false);
+    }
+  });
+
   test("launchAppSchema accepts natural app identifier aliases", () => {
     for (const alias of [
       "package",
@@ -368,6 +382,7 @@ describe("generated tool definitions", () => {
 describe("platform field accepted by all device-targeting tool schemas", () => {
   const toolSchemas: [string, z.ZodType<any>, Record<string, unknown>][] = [
     ["accessibilitySchema", accessibilitySchema, {}],
+    ["crashAppSchema", crashAppSchema, { appId: "com.example" }],
     ["packageNameSchema", packageNameSchema, { appId: "com.example" }],
     ["launchAppSchema", launchAppSchema, { appId: "com.example" }],
     ["installAppSchema", installAppSchema, { artifactPath: "/tmp/app.apk" }],

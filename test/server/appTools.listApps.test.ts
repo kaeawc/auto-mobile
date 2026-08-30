@@ -2,8 +2,10 @@ import Ajv2020 from "ajv/dist/2020";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   registerAppTools,
+  resetCrashAppToolDependencies,
   resetListAppsToolDependencies,
   resetTerminateAppToolDependencies,
+  setCrashAppToolDependencies,
   setListAppsToolDependencies,
   setTerminateAppToolDependencies,
 } from "../../src/server/appTools";
@@ -169,6 +171,84 @@ describe("terminateApp tool", () => {
     await expect(tool!.deviceAwareHandler!(device, { appId: "com.example.app" })).rejects.toThrow(
       "The installed-app listing failed",
     );
+  });
+});
+
+describe("crashApp tool", () => {
+  const device: BootedDevice = {
+    deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE",
+    name: "iPhone 15",
+    platform: "ios",
+  };
+
+  beforeEach(() => {
+    ToolRegistry.clearTools();
+    resetCrashAppToolDependencies();
+    registerAppTools();
+  });
+
+  afterEach(() => {
+    ToolRegistry.clearTools();
+    resetCrashAppToolDependencies();
+  });
+
+  test("returns an explicit unsupported result as structured JSON", async () => {
+    setCrashAppToolDependencies({
+      createCrashApp: () => ({
+        execute: async () => ({
+          success: false,
+          supported: false,
+          platform: "ios",
+          appId: "com.example.app",
+          mechanism: "unsupported",
+          timestamp: 1234,
+          wasRunning: false,
+          confirmed: false,
+          error: "Physical iOS devices are unsupported",
+        }),
+      }),
+    });
+    const tool = ToolRegistry.getTool("crashApp");
+
+    const response = await tool!.deviceAwareHandler!(device, {
+      appId: "com.example.app",
+    });
+    const payload = JSON.parse(response.content[0].text);
+
+    expect(payload).toMatchObject({
+      message: "Physical iOS devices are unsupported",
+      success: false,
+      supported: false,
+      confirmed: false,
+    });
+  });
+
+  test("reports the mechanism and OS confirmation on success", async () => {
+    setCrashAppToolDependencies({
+      createCrashApp: () => ({
+        execute: async () => ({
+          success: true,
+          supported: true,
+          platform: "ios",
+          appId: "com.example.app",
+          processId: 42,
+          mechanism: "ios_simulator_sigabrt",
+          timestamp: 1234,
+          wasRunning: true,
+          confirmed: true,
+        }),
+      }),
+    });
+    const tool = ToolRegistry.getTool("crashApp");
+
+    const response = await tool!.deviceAwareHandler!(device, {
+      appId: "com.example.app",
+    });
+    const payload = JSON.parse(response.content[0].text);
+
+    expect(payload.message).toContain("ios_simulator_sigabrt");
+    expect(payload.message).toContain("OS crash confirmed");
+    expect(payload.confirmed).toBe(true);
   });
 });
 

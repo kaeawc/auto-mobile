@@ -3,9 +3,11 @@ import { ToolRegistry } from "./toolRegistry";
 import {
   ActionableError,
   BootedDevice,
+  type CrashAppResult,
   type LaunchAppResult,
   type TerminateAppResult,
 } from "../models";
+import { CrashApp } from "../features/action/CrashApp";
 import { LaunchApp } from "../features/action/LaunchApp";
 import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
@@ -94,6 +96,36 @@ export function resetTerminateAppToolDependencies(): void {
   terminateAppToolDependencies = null;
 }
 
+export interface CrashAppExecutor {
+  execute(appId: string, signal?: AbortSignal): Promise<CrashAppResult>;
+}
+
+export interface CrashAppToolDependencies {
+  createCrashApp(device: BootedDevice): CrashAppExecutor;
+}
+
+let crashAppToolDependencies: CrashAppToolDependencies | null = null;
+
+function getCrashAppToolDependencies(): CrashAppToolDependencies {
+  if (!crashAppToolDependencies) {
+    crashAppToolDependencies = {
+      createCrashApp: (device) => new CrashApp(device),
+    };
+  }
+  return crashAppToolDependencies;
+}
+
+export function setCrashAppToolDependencies(deps: Partial<CrashAppToolDependencies>): void {
+  const currentDeps = getCrashAppToolDependencies();
+  crashAppToolDependencies = {
+    createCrashApp: deps.createCrashApp ?? currentDeps.createCrashApp,
+  };
+}
+
+export function resetCrashAppToolDependencies(): void {
+  crashAppToolDependencies = null;
+}
+
 /**
  * Build the launchApp tool response from a {@link LaunchAppResult}, enforcing the
  * launch postcondition instead of reporting a flat "Launched app X" success
@@ -157,6 +189,35 @@ export const terminateAppSchema = withAppIdAliases(
     }),
   ),
 );
+
+export const crashAppSchema = withAppIdAliases(
+  addDeviceTargetingToSchema(
+    z.object({
+      appId: z.string().trim().min(1),
+    }),
+  ),
+);
+
+export const crashAppResultSchema = z.object({
+  message: z.string(),
+  success: z.boolean(),
+  supported: z.boolean(),
+  platform: z.enum(["android", "ios"]),
+  appId: z.string(),
+  processId: z.number().int().positive().optional(),
+  mechanism: z.enum(["android_am_crash", "ios_simulator_sigabrt", "unsupported"]),
+  timestamp: z.number().int().nonnegative(),
+  wasRunning: z.boolean().optional(),
+  confirmed: z.boolean(),
+  evidence: z
+    .object({
+      source: z.enum(["android_logcat", "ios_unified_log"]),
+      summary: z.string(),
+    })
+    .optional(),
+  userId: z.number().int().nonnegative().optional(),
+  error: z.string().optional(),
+});
 
 export const launchAppSchema = withAppIdAliases(
   addDeviceTargetingToSchema(
@@ -326,6 +387,10 @@ export interface AppActionArgs {
   appId: string;
 }
 
+export interface CrashAppActionArgs {
+  appId: string;
+}
+
 export interface LaunchAppActionArgs {
   appId: string;
   clearAppData?: boolean;
@@ -452,6 +517,42 @@ export function registerAppTools() {
         await notifyInstalledAppResourceUpdated(device.deviceId);
       } catch (error) {
         logger.warn(`[AppTools] Failed to refresh app resources after terminate: ${error}`);
+      }
+    }
+  };
+
+  const crashAppHandler = async (
+    device: BootedDevice,
+    args: CrashAppActionArgs,
+    _progress?: unknown,
+    signal?: AbortSignal,
+  ) => {
+    try {
+      signal?.throwIfAborted();
+      const result = await getCrashAppToolDependencies()
+        .createCrashApp(device)
+        .execute(args.appId, signal);
+      signal?.throwIfAborted();
+
+      const message = result.success
+        ? `Crashed app ${args.appId} via ${result.mechanism}${
+            result.confirmed ? " (OS crash confirmed)" : " (confirmation unavailable)"
+          }`
+        : (result.error ?? `Failed to crash app ${args.appId}`);
+      return createJSONToolResponse({ message, ...result });
+    } catch (error) {
+      if (isDeviceLostError(error) || error instanceof ActionableError) {
+        throw error;
+      }
+      throw new ActionableError(`Failed to crash app: ${error}`);
+    } finally {
+      if (!signal?.aborted) {
+        try {
+          invalidateInstalledAppResourceCache(device.deviceId);
+          await notifyInstalledAppResourceUpdated(device.deviceId);
+        } catch (error) {
+          logger.warn(`[AppTools] Failed to refresh app resources after crash: ${error}`);
+        }
       }
     }
   };
@@ -592,6 +693,14 @@ export function registerAppTools() {
     terminateAppSchema,
     terminateAppHandler,
     { defaultEnabled: true },
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "crashApp",
+    "Intentionally crash a running app through the platform crash path",
+    crashAppSchema,
+    crashAppHandler,
+    { defaultEnabled: true, outputSchema: crashAppResultSchema },
   );
 
   ToolRegistry.registerDeviceAware(

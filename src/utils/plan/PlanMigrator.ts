@@ -228,7 +228,7 @@ const migrateStepFields = (
 
   step.tool = normalizedTool;
 
-  if (["launchApp", "terminateApp", "stopApp"].includes(normalizedTool)) {
+  if (["launchApp", "terminateApp", "crashApp", "stopApp"].includes(normalizedTool)) {
     if (mergedParams.appId === undefined && typeof mergedParams.packageName === "string") {
       mergedParams.appId = mergedParams.packageName;
       delete mergedParams.packageName;

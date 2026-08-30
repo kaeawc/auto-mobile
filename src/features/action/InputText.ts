@@ -71,7 +71,7 @@ export type AppendKeyEventValidator = (
 ) => Promise<{ success: boolean; error?: string }>;
 
 interface KeyboardCloser {
-  close(): Promise<KeyboardResult>;
+  close(signal?: AbortSignal): Promise<KeyboardResult>;
 }
 
 type KeyboardCloserFactory = (device: BootedDevice, adbFactory: AdbClientFactory) => KeyboardCloser;
@@ -79,7 +79,7 @@ type KeyboardCloserFactory = (device: BootedDevice, adbFactory: AdbClientFactory
 const defaultKeyboardCloserFactory: KeyboardCloserFactory = (device, adbFactory) => {
   const keyboard = new Keyboard(device, adbFactory);
   return {
-    close: () => keyboard.execute("close"),
+    close: (signal) => keyboard.execute("close", signal),
   };
 };
 
@@ -259,17 +259,43 @@ export class InputText extends BaseVisualChange {
     }
 
     // Use accessibility service exclusively (fastest method, ~10-30ms vs ~200-300ms for ADB)
-    // It also natively supports Unicode without needing virtual keyboard
+    // It also natively supports Unicode without needing virtual keyboard.
+    // Text is set WITHOUT the runner's dismissKeyboard flag: SHOW_MODE_HIDDEN
+    // suppresses re-showing the keyboard but does not dismiss an already-visible
+    // IME window, and combining it with the Keyboard.close() route below would
+    // leave close() deciding to send Back off a cached "IME open" tree after the
+    // runner had already hidden the window — navigating the app instead (#5887).
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const a11yResult = await a11yClient.requestSetText(text, { dismissKeyboard });
+    const a11yResult = await a11yClient.requestSetText(text);
     assertInputNotAborted(signal);
 
     if (a11yResult.success) {
       logger.info(`[InputText] Text input via accessibility service: ${a11yResult.totalTimeMs}ms`);
 
-      // Handle IME action if specified
+      // Run the IME action (submit/next) BEFORE dismissing: dismissing first can
+      // move focus so Enter/Tab/Search lands on the wrong target, and a dismissal
+      // failure must not skip the action the caller actually asked for (#5887).
       if (imeAction) {
         await this.executeImeAction(imeAction, signal);
+      }
+
+      // Dismiss via the confirmed Keyboard.close() route (KEYCODE_BACK + state
+      // poll), the same path eventOnly/append use (issue #5887).
+      if (dismissKeyboard) {
+        const dismissError = await this.dismissKeyboardViaCloser("a11y", signal);
+        if (dismissError) {
+          // Text (and any imeAction) already landed — only the cleanup dismiss
+          // failed. Carry imeAction so a consumer can tell a post-submit cleanup
+          // failure from an operation that never ran and must not blindly retry
+          // (issue #5887 review).
+          return {
+            success: false,
+            text,
+            imeAction,
+            error: dismissError,
+            method: "a11y",
+          };
+        }
       }
 
       return {
@@ -351,8 +377,8 @@ export class InputText extends BaseVisualChange {
 
     await this.executeKeyEventPlan(keyEventPlan, undefined, false, undefined, signal);
 
-    if (suffix.length > 0 || dismissKeyboard) {
-      const finalResult = await a11yClient.requestSetText(text, { dismissKeyboard });
+    if (suffix.length > 0) {
+      const finalResult = await a11yClient.requestSetText(text);
       assertInputNotAborted(signal);
       if (!finalResult.success) {
         return this.setTextFailure(
@@ -365,8 +391,25 @@ export class InputText extends BaseVisualChange {
       }
     }
 
+    // IME action before dismiss — see the a11y path for why (issue #5887).
     if (imeAction) {
       await this.executeImeAction(imeAction, signal);
+    }
+
+    // Dismiss via the confirmed Keyboard.close() route (issue #5887).
+    if (dismissKeyboard) {
+      const dismissError = await this.dismissKeyboardViaCloser("eventLast", signal);
+      if (dismissError) {
+        // imeAction already ran — carry it so a dismiss-only failure is not
+        // mistaken for a no-op and retried (issue #5887 review).
+        return {
+          success: false,
+          text,
+          imeAction,
+          error: dismissError,
+          method: "eventLast",
+        };
+      }
     }
 
     return {
@@ -447,7 +490,7 @@ export class InputText extends BaseVisualChange {
     }
 
     if (dismissKeyboard) {
-      const finalResult = await a11yClient.requestSetText(text, { dismissKeyboard: true });
+      const finalResult = await a11yClient.requestSetText(text);
       assertInputNotAborted(signal);
       if (!finalResult.success) {
         return this.setTextFailure(
@@ -460,8 +503,25 @@ export class InputText extends BaseVisualChange {
       }
     }
 
+    // IME action before dismiss — see the a11y path for why (issue #5887).
     if (imeAction) {
       await this.executeImeAction(imeAction, signal);
+    }
+
+    // Dismiss via the confirmed Keyboard.close() route (issue #5887).
+    if (dismissKeyboard) {
+      const dismissError = await this.dismissKeyboardViaCloser("eventAll", signal);
+      if (dismissError) {
+        // imeAction already ran — carry it so a dismiss-only failure is not
+        // mistaken for a no-op and retried (issue #5887 review).
+        return {
+          success: false,
+          text,
+          imeAction,
+          error: dismissError,
+          method: "eventAll",
+        };
+      }
     }
 
     return {
@@ -561,18 +621,20 @@ export class InputText extends BaseVisualChange {
       return this.appendFailure(text, typed.error, typed.charsSent);
     }
 
-    if (dismissKeyboard) {
-      const dismissError = await this.dismissKeyboardAfterAppend();
-      assertInputNotAborted(signal);
-      if (dismissError) {
-        // All characters landed; only the post-typing keyboard dismissal failed,
-        // so the full text was sent — a retry must NOT re-append any of it.
-        return this.appendFailure(text, dismissError, typed.charsSent);
-      }
-    }
-
+    // IME action before dismiss — see the a11y path for why (issue #5887).
     if (imeAction) {
       await this.executeImeAction(imeAction, signal);
+    }
+
+    if (dismissKeyboard) {
+      const dismissError = await this.dismissKeyboardViaCloser("append", signal);
+      if (dismissError) {
+        // All characters landed (and any imeAction already ran); only the
+        // post-typing keyboard dismissal failed, so the full text was sent — a
+        // retry must NOT re-append any of it, and imeAction is carried so a
+        // dismiss-only failure is not mistaken for a no-op (issue #5887 review).
+        return this.appendFailure(text, dismissError, typed.charsSent, imeAction);
+      }
     }
 
     return {
@@ -719,14 +781,36 @@ export class InputText extends BaseVisualChange {
     return { charsSent };
   }
 
-  /** Returns an error message when the keyboard could not be dismissed, else null. */
-  private async dismissKeyboardAfterAppend(): Promise<string | null> {
-    const keyboardResult = await this.keyboardCloserFactory(this.device, this.adbFactory).close();
+  /**
+   * Dismiss the soft keyboard through the confirmed `Keyboard.close()` route
+   * (KEYCODE_BACK + state-confirmation poll), returning an error message when the
+   * dismissal could not be confirmed, else null.
+   *
+   * Every Android mode routes `dismissKeyboard:true` here rather than through the
+   * runner-side `SHOW_MODE_HIDDEN`: that flag suppresses the a11y service from
+   * *re-showing* the keyboard but does not dismiss an already-visible IME window,
+   * leaving `SoftInputWindow` foregrounded after the call (issue #5887). setText is
+   * issued WITHOUT the runner flag so the IME stays genuinely visible until the
+   * closer dismisses it — otherwise the closer could decide to send Back off a
+   * cached "IME open" tree after the runner had already hidden the window,
+   * navigating the app instead. The closer detects the current keyboard state
+   * first, so when the keyboard is already closed it short-circuits without a Back.
+   *
+   * @param method - The input mode label, used in the failure message.
+   */
+  private async dismissKeyboardViaCloser(
+    method: InputTextMode,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    const keyboardResult = await this.keyboardCloserFactory(this.device, this.adbFactory).close(
+      signal,
+    );
+    assertInputNotAborted(signal);
     if (keyboardResult.success) {
       return null;
     }
     const cause = keyboardResult.error ?? keyboardResult.message ?? "unknown error";
-    return `append input completed but keyboard dismissal failed: ${cause}`;
+    return `${method} input completed but keyboard dismissal failed: ${cause}`;
   }
 
   /**
@@ -752,12 +836,14 @@ export class InputText extends BaseVisualChange {
     text: string,
     error: string,
     charsSent?: number,
+    imeAction?: ImeAction,
   ): SendTextResult & { method?: InputTextMode } {
     return {
       success: false,
       text,
       error,
       method: "append",
+      ...(imeAction !== undefined ? { imeAction } : {}),
       ...(charsSent !== undefined ? { charsSent } : {}),
     };
   }
@@ -809,23 +895,24 @@ export class InputText extends BaseVisualChange {
       await this.executeKeyEventPlan(keyEventPlan, undefined, false, undefined, signal);
     }
 
+    // IME action before dismiss — see the a11y path for why (issue #5887).
+    if (imeAction) {
+      await this.executeImeAction(imeAction, signal);
+    }
+
     if (dismissKeyboard) {
-      const keyboardResult = await this.keyboardCloserFactory(this.device, this.adbFactory).close();
-      assertInputNotAborted(signal);
-      if (!keyboardResult.success) {
+      const dismissError = await this.dismissKeyboardViaCloser("eventOnly", signal);
+      if (dismissError) {
+        // imeAction already ran — carry it so a dismiss-only failure is not
+        // mistaken for a no-op and retried (issue #5887 review).
         return {
           success: false,
           text,
-          error: `eventOnly input completed but keyboard dismissal failed: ${
-            keyboardResult.error ?? keyboardResult.message ?? "unknown error"
-          }`,
+          imeAction,
+          error: dismissError,
           method: "eventOnly",
         };
       }
-    }
-
-    if (imeAction) {
-      await this.executeImeAction(imeAction, signal);
     }
 
     return {

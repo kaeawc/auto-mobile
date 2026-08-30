@@ -257,6 +257,26 @@ describe("Keyboard", () => {
     expect(fakeTimer.getSleepCallCount()).toBe(0);
   });
 
+  test("close does not send Back off a stale cached IME-open sample", async () => {
+    // The cache still serves a pre-action sample showing the IME open, but a
+    // forced-fresh read sees it already closed (an IME action or navigation hid
+    // it). close() must decide off the fresh read and NOT send a stray
+    // KEYCODE_BACK that would navigate the destination screen (#5887 / #5899).
+    fakeHierarchy.setCachedResult(keyboardWindowHierarchy());
+    fakeHierarchy.setResults([baseHierarchy()]);
+    const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+
+    const result = await keyboard.execute("close");
+
+    expect(result.success).toBe(true);
+    expect(result.open).toBe(false);
+    expect(result.message).toBe("Keyboard already closed");
+    expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_BACK")).toBe(false);
+    // The send-Back decision read forced past the cache.
+    expect(fakeHierarchy.getReadOptions()[0]?.forceFresh).toBe(true);
+    expect(fakeHierarchy.getCallCount()).toBe(1);
+  });
+
   test("every confirmation read forces past the hierarchy cache", async () => {
     fakeHierarchy.setResults([focusedInputHierarchy(), baseHierarchy(), keyboardWindowHierarchy()]);
     const keyboard = new Keyboard(testDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);

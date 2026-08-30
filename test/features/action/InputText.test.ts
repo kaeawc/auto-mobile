@@ -220,7 +220,7 @@ describe("InputText", () => {
     expect(result.success).toBe(true);
     expect(setTextCalls).toEqual([
       { text: "abc de", dismissKeyboard: undefined },
-      { text: "abc def  ", dismissKeyboard: false },
+      { text: "abc def  ", dismissKeyboard: undefined },
     ]);
     expect(inputCommands(factory)).toEqual(["shell input keyevent KEYCODE_F"]);
   });
@@ -265,7 +265,7 @@ describe("InputText", () => {
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("a11y");
-    expect(setTextCalls).toEqual([{ text: "HellO", dismissKeyboard: false }]);
+    expect(setTextCalls).toEqual([{ text: "HellO", dismissKeyboard: undefined }]);
     expect(inputCommands(factory)).toEqual([]);
   });
 
@@ -962,6 +962,170 @@ describe("InputText", () => {
       "shell input keyevent KEYCODE_X",
       "shell input keyevent KEYCODE_T",
     ]);
+  });
+
+  // Regression for https://github.com/kaeawc/auto-mobile/issues/5887.
+  // The default a11y path implemented dismissKeyboard:true by forwarding the flag
+  // to the runner's requestSetText (SHOW_MODE_HIDDEN), which suppresses re-showing
+  // the keyboard but does not dismiss an already-visible IME window — so the IME
+  // (SoftInputWindow) stayed foregrounded after inputText. The confirmed dismissal
+  // must go through the Keyboard.close() route the event/append modes already use.
+  test("a11y dismisses the keyboard via the keyboard closer when dismissKeyboard is true", async () => {
+    const factory = new FakeAdbClientFactory();
+    const closeCalls: string[] = [];
+    const setTextCalls: Array<{ text: string; dismissKeyboard?: boolean }> = [];
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
+      close: async () => {
+        closeCalls.push("close");
+        return { success: true, open: false, message: "Keyboard closed" };
+      },
+    }));
+
+    stubAndroidSetText(async (text, options) => {
+      setTextCalls.push({ text, dismissKeyboard: options?.dismissKeyboard });
+      return { success: true, totalTimeMs: 1 };
+    });
+
+    const result = await testInputText(inputText).executeAndroidTextInput("hello", undefined, true);
+
+    expect(result.success).toBe(true);
+    expect(result.method).toBe("a11y");
+    // setText must NOT carry the runner dismissKeyboard flag — the confirmed
+    // Keyboard.close() route owns dismissal so close() never decides to send Back
+    // off a cached "IME open" tree the runner had already hidden (issue #5887).
+    expect(setTextCalls).toEqual([{ text: "hello", dismissKeyboard: undefined }]);
+    expect(closeCalls).toEqual(["close"]);
+  });
+
+  test("a11y does not invoke the keyboard closer when dismissKeyboard is false", async () => {
+    const factory = new FakeAdbClientFactory();
+    const closeCalls: string[] = [];
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
+      close: async () => {
+        closeCalls.push("close");
+        return { success: true, open: false, message: "Keyboard closed" };
+      },
+    }));
+
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "hello",
+      undefined,
+      false,
+    );
+
+    expect(result.success).toBe(true);
+    expect(closeCalls).toEqual([]);
+  });
+
+  // Regression for the #5887 review: the IME action must run BEFORE the keyboard
+  // dismiss, so a dismissal failure cannot skip the action the caller asked for
+  // (and dismissing first can't move focus out from under Enter/Tab/Search).
+  test("a11y runs the IME action even when the keyboard dismissal fails", async () => {
+    const factory = new FakeAdbClientFactory();
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const inputText = new InputText(
+      androidDevice,
+      factory as AdbClientFactory,
+      () => ({
+        close: async () => ({
+          success: false,
+          open: true,
+          error: "Keyboard state unavailable",
+        }),
+      }),
+      timer,
+    );
+
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    const result = await (
+      inputText as unknown as {
+        executeAndroidTextInput: (
+          text: string,
+          imeAction?: string,
+          dismissKeyboard?: boolean,
+        ) => Promise<{ success: boolean; error?: string }>;
+      }
+    ).executeAndroidTextInput("hello", "done", true);
+
+    // The dismissal failure surfaces, but the IME action (Enter) already ran —
+    // pre-fix the dismiss-first ordering would have skipped it entirely.
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Keyboard state unavailable");
+    expect(inputCommands(factory)).toContain("shell input keyevent KEYCODE_ENTER");
+    // The completed action is carried on the failure result so a consumer can tell
+    // a post-submit cleanup failure from a no-op and not double-submit (#5887).
+    expect((result as { imeAction?: string }).imeAction).toBe("done");
+  });
+
+  test("a11y reports a keyboard dismissal failure when the closer fails", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
+      close: async () => ({
+        success: false,
+        open: true,
+        error: "Keyboard state unavailable",
+      }),
+    }));
+
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    const result = await testInputText(inputText).executeAndroidTextInput("hello", undefined, true);
+
+    expect(result.success).toBe(false);
+    expect(result.method).toBe("a11y");
+    expect(result.error).toContain("Keyboard state unavailable");
+  });
+
+  test("eventAll dismisses the keyboard via the keyboard closer when dismissKeyboard is true", async () => {
+    const factory = new FakeAdbClientFactory();
+    const closeCalls: string[] = [];
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
+      close: async () => {
+        closeCalls.push("close");
+        return { success: true, open: false, message: "Keyboard closed" };
+      },
+    }));
+
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "ab",
+      undefined,
+      true,
+      "eventAll",
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.method).toBe("eventAll");
+    expect(closeCalls).toEqual(["close"]);
+  });
+
+  test("eventLast dismisses the keyboard via the keyboard closer when dismissKeyboard is true", async () => {
+    const factory = new FakeAdbClientFactory();
+    const closeCalls: string[] = [];
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory, () => ({
+      close: async () => {
+        closeCalls.push("close");
+        return { success: true, open: false, message: "Keyboard closed" };
+      },
+    }));
+
+    stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
+
+    const result = await testInputText(inputText).executeAndroidTextInput(
+      "abc",
+      undefined,
+      true,
+      "eventLast",
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.method).toBe("eventLast");
+    expect(closeCalls).toEqual(["close"]);
   });
 
   test("a11y reports setText timeouts without sending key events", async () => {

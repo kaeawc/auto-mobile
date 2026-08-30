@@ -1504,6 +1504,92 @@ describe("Daemon manager process detection", () => {
     }
   });
 
+  test("the contention loop is bounded by the arbitration deadline, not a fixed holder count (#5878)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-replacement-churn-"));
+    const lockPath = join(dir, "daemon.lock");
+    const livePids = new Set<number>([60001]);
+    writeFileSync(lockPath, formatLockContent(60001));
+    const fakeTimer = new FakeTimer();
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses: () => [],
+      isProcessRunning: (pid: number) => livePids.has(pid),
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: () => {
+        throw new Error("should not spawn during replacement churn");
+      },
+    };
+
+    // Each wait consumes part of the budget, then the holder is replaced by a new
+    // live contender — more than three handoffs, all within one deadline.
+    class ChurnDaemonManager extends DaemonManager {
+      readonly grantedTimeouts: number[] = [];
+      override acquireLock(): boolean {
+        return false;
+      }
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+      override async waitForReady(timeout: number): Promise<boolean> {
+        this.grantedTimeouts.push(timeout);
+        fakeTimer.advanceTime(Math.min(timeout, 5000));
+        const nextPid = 60001 + this.grantedTimeouts.length;
+        livePids.add(nextPid);
+        writeFileSync(lockPath, formatLockContent(nextPid));
+        return false;
+      }
+    }
+
+    try {
+      const manager = new ChurnDaemonManager(
+        () => ({
+          async connect() {
+            throw new Error("connection refused");
+          },
+          async close() {},
+          async callTool() {
+            return {};
+          },
+          async readResource() {
+            return {};
+          },
+          async callDaemonMethod() {
+            return {};
+          },
+        }),
+        undefined,
+        fakeTimer,
+        lockPath,
+        join(dir, "daemon.pid"),
+        join(dir, "daemon.sock"),
+        processFinder,
+        processSpawner,
+      );
+
+      const startedAt = fakeTimer.now();
+      await manager.start().then(
+        () => {
+          throw new Error("expected start to reject");
+        },
+        (rejection: unknown) => rejection as Error,
+      );
+      const elapsed = fakeTimer.now() - startedAt;
+
+      // The loop waits on more than three successive live replacement holders — an
+      // earlier fixed count cap would have stopped at three and reported failure
+      // with time still on the clock (#5878) — while the shared deadline still
+      // bounds the total.
+      expect(manager.grantedTimeouts.length).toBeGreaterThan(3);
+      expect(elapsed).toBeLessThanOrEqual(DAEMON_STARTUP_TIMEOUT_MS);
+      // Each successive wait is granted only the shrinking remaining time.
+      for (let i = 1; i < manager.grantedTimeouts.length; i++) {
+        expect(manager.grantedTimeouts[i]).toBeLessThan(manager.grantedTimeouts[i - 1]);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("explicit restart force-stops an unreachable daemon without the default namespace PID record", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();

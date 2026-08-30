@@ -375,16 +375,6 @@ const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
 const ABANDONED_WAIT_CONFIRM_TIMEOUT_MS = 1000;
 
 /**
- * Upper bound on how many successive live startup-lock holders `start()` will wait
- * on before reporting failure (issue #5878). Each distinct live holder that
- * reclaims the lock is a process actively bringing the daemon up, so waiting for it
- * is correct; the cap only stops a pathological churn of holders that die and are
- * replaced from looping without end. A stuck same holder or a dead lock ends the
- * loop immediately regardless of this cap.
- */
-const MAX_PEER_STARTUP_WAITS = 3;
-
-/**
  * Surface of DaemonManager used by clients (e.g. DaemonMcpProxy).
  * Allows injecting fakes in tests without subclassing the concrete class.
  */
@@ -604,18 +594,22 @@ export class DaemonManager implements DaemonManagerLike {
     let holderLogPath: string | null = null;
     let waitedOnPid = this.readStartupLockHolder().livePid;
 
-    // ONE arbitration deadline across every holder, replacements included. Each
-    // wait gets only the remaining time, so a chain of holders (A replaced by B
-    // near A's deadline) cannot reset the budget and push the failure past the
-    // client's ~30s `tools/list` deadline — which would hide the very error this
-    // change exists to deliver (issue #5878).
+    // ONE arbitration deadline across every holder, replacements included, and the
+    // final confirm bounded by whatever time is left under it — so a chain of
+    // holders (A replaced by B near A's deadline) plus the confirm cannot push the
+    // failure past the client's ~30s `tools/list` deadline, which would hide the
+    // very error this change exists to deliver (issue #5878). The loop is bounded by
+    // this deadline rather than a fixed iteration count, so a legitimate replacement
+    // that reclaims the lock with time still on the clock is not cut off prematurely.
     const arbitrationDeadline = this.timer.now() + DAEMON_STARTUP_TIMEOUT_MS;
 
-    for (let attempt = 1; attempt <= MAX_PEER_STARTUP_WAITS; attempt++) {
+    // A wait on a live holder polls on an interval and so consumes real time, and
+    // a dead holder is either taken over or ends the loop — so the arbitration
+    // deadline bounds the number of iterations; no separate count cap is needed
+    // (and a count cap would wrongly cut off a legitimate replacement that reclaims
+    // the lock with time still on the clock).
+    while (this.remainingTime(arbitrationDeadline) > 0) {
       const remaining = this.remainingTime(arbitrationDeadline);
-      if (remaining === 0) {
-        break;
-      }
       stderrLog("Another process is starting the daemon, waiting...");
       // Capture diagnostics while the current holder still holds the lock, so they
       // survive into the failure message if the holder later releases on failure.
@@ -654,11 +648,18 @@ export class DaemonManager implements DaemonManagerLike {
     // between a poll's socket check and its liveness check, so confirm reachability
     // directly before reporting failure. Use verifyDaemonConnection rather than
     // waitForReady: it is a bounded, NON-destructive probe that never unlinks a
-    // socket, so a healthy-but-slow daemon that just came up is not torn down
-    // (issue #5878).
+    // socket, so a healthy-but-slow daemon that just came up is not torn down. Cap
+    // it to whatever time is left under the arbitration deadline so it cannot push
+    // total elapsed past the client deadline (issue #5878); when the loop already
+    // consumed the whole budget there is no release-race window to catch anyway.
+    const confirmBudget = Math.min(
+      ABANDONED_WAIT_CONFIRM_TIMEOUT_MS,
+      this.remainingTime(arbitrationDeadline),
+    );
     if (
+      confirmBudget > 0 &&
       existsSync(this.socketPath) &&
-      (await this.verifyDaemonConnection(ABANDONED_WAIT_CONFIRM_TIMEOUT_MS))
+      (await this.verifyDaemonConnection(confirmBudget))
     ) {
       stderrLog("Daemon became ready before reporting startup failure");
       return;

@@ -141,8 +141,14 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     },
     {
       capabilities: {
-        resources: {},
-        tools: {},
+        // Declare listChanged: this proxy is the boundary external MCP clients
+        // connect to, and it emits notifications/{tools,resources}/list_changed —
+        // both the daemon-forwarded invalidations (issue #3223) and the
+        // post-lazy-connect tools reconciliation (issue #5879). Without the
+        // capability a spec-strict client may ignore those notifications and keep
+        // a stale (cold, over-broad) tool list for the session.
+        resources: { listChanged: true },
+        tools: { listChanged: true },
         prompts: {},
       },
     },
@@ -182,10 +188,13 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     };
   });
 
-  // Register tools/list handler - forward to daemon
+  // Register tools/list handler. Serves the static tool surface without
+  // connecting to the daemon when no connection exists yet, deferring the daemon
+  // connect/start to the first actual tool call (issue #5879). Once connected,
+  // the accurate session-scoped list is served.
   server.server.setRequestHandler(ListToolsRequestSchema, async () => {
     try {
-      const tools = await proxy.listTools();
+      const tools = await proxy.listAdvertisedTools();
       return { tools };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
@@ -244,10 +253,13 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     }
   });
 
-  // Register resources/list handler - forward to daemon
+  // Register resources/list handler. Serves a cold (empty/cached) roster without
+  // connecting when no connection exists yet, deferring the daemon connect to the
+  // first tool call (issue #5879) so a host that enumerates resources on init
+  // never blocks on a wedged daemon. Once connected, the live list is served.
   server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
     try {
-      const resources = await proxy.listResources();
+      const resources = await proxy.listAdvertisedResources();
       return { resources };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
@@ -261,10 +273,11 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     }
   });
 
-  // Register resources/templates/list handler - forward to daemon
+  // Register resources/templates/list handler. Cold-serves without connecting
+  // (see resources/list above); defers the daemon connect to the first tool call.
   server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
     try {
-      const resourceTemplates = await proxy.listResourceTemplates();
+      const resourceTemplates = await proxy.listAdvertisedResourceTemplates();
       return { resourceTemplates };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {

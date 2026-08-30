@@ -44,6 +44,7 @@ import {
   getCurrentBuildIdentity,
 } from "./buildIdentity";
 import { DeviceControlTransportError } from "./deviceControlTransportFailure";
+import { getStaticToolDefinitions } from "./staticToolDefinitions";
 
 export type VersionMismatchReason =
   | "autoStartDisabled"
@@ -279,6 +280,12 @@ export interface DaemonMcpProxyConfig {
   clientVersion?: string;
   /** Existing device-pool session bound before the first discovery request. */
   initialSessionUuid?: string;
+  /**
+   * Supplies the static tool surface served by `listAdvertisedTools()` before a
+   * daemon connection exists (issue #5879). Defaults to the committed
+   * `schemas/tool-definitions.json`; injectable for testing.
+   */
+  staticToolDefinitionsProvider?: () => ProxiedToolDefinition[];
 }
 
 /**
@@ -288,6 +295,11 @@ export interface ProxiedToolDefinition {
   name: string;
   description?: string;
   inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  // Passed through verbatim from the daemon (live path) or the committed static
+  // surface (cold path) — e.g. the MCP Apps UI pointer `_meta.ui.resourceUri`
+  // (issue #4669). Non-Apps hosts ignore it.
+  _meta?: Record<string, unknown>;
 }
 
 /**
@@ -674,6 +686,20 @@ export class DaemonMcpProxy {
   // discovery refetches under the current scope (issue #4655).
   private discoveryEpoch: number = 0;
 
+  // Supplies the static tool surface for listAdvertisedTools() before a daemon
+  // connection exists (issue #5879).
+  private readonly staticToolDefinitionsProvider: () => ProxiedToolDefinition[];
+  // Set when listAdvertisedTools() served the static surface without a live
+  // connection. On the next successful connect the proxy emits a tools
+  // list_changed so the client re-fetches the accurate (session-scoped) list.
+  private servedStaticToolList = false;
+  // Set when listAdvertisedResources()/listAdvertisedResourceTemplates() served
+  // a cold (empty/cached) roster without a live connection. On the next connect
+  // the proxy emits a resources list_changed so the client re-fetches the real
+  // resources (issue #5879 review — a host that enumerates resources on init
+  // must not block on a wedged daemon before the first tool call).
+  private servedStaticResourceList = false;
+
   // Cached definitions from daemon
   private cachedTools: ProxiedToolDefinition[] | null = null;
   private cachedResources: ProxiedResourceDefinition[] | null = null;
@@ -718,6 +744,8 @@ export class DaemonMcpProxy {
       this.initialSessionBindingConfigured = true;
       this.ownedDeviceSessions.add(this.boundSessionUuid);
     }
+    this.staticToolDefinitionsProvider =
+      config.staticToolDefinitionsProvider ?? getStaticToolDefinitions;
     this.buildIdentity = config.buildIdentity ?? getCurrentBuildIdentity();
     this.clientVersion = config.clientVersion ?? DAEMON_VERSION;
     this.clientAssetVersion = isExplicitPin() ? resolveAssetVersion(resolvePinnedVersion()) : null;
@@ -848,6 +876,42 @@ export class DaemonMcpProxy {
         // cached behavior instead of failing the connection. Unexpected against
         // a same-version daemon (the handshake gate pins versions), so warn.
         logger.warn(`[DaemonMcpProxy] Failed to subscribe to daemon notifications: ${error}`);
+      }
+    }
+
+    // If a client `tools/list` was served statically before this connection
+    // existed (issue #5879), prompt it to re-fetch now that the daemon can
+    // return the accurate (session-scoped) list. A no-op in the common case
+    // where the static and live lists match; correct when a tool-selection
+    // profile filters the live list.
+    if (this.servedStaticToolList) {
+      this.servedStaticToolList = false;
+      this.notifyListChanged("tools");
+    }
+    if (this.servedStaticResourceList) {
+      this.servedStaticResourceList = false;
+      this.notifyListChanged("resources");
+    }
+  }
+
+  // Invalidate the matching cache and re-emit a list_changed to listeners,
+  // mirroring the daemon-pushed invalidation path (see handleDaemonNotification)
+  // so a re-fetch is never stale.
+  private notifyListChanged(kind: ListChangedKind): void {
+    this.discoveryEpoch += 1;
+    if (kind === "tools") {
+      this.cachedTools = null;
+    } else {
+      this.cachedResources = null;
+      this.cachedResourceTemplates = null;
+    }
+    for (const listener of this.listChangedListeners) {
+      try {
+        listener(kind);
+      } catch (error) {
+        // Best-effort re-emit: a dead/mid-teardown client transport must not
+        // break sibling listeners.
+        logger.warn(`[DaemonMcpProxy] list_changed listener failed for ${kind}: ${error}`);
       }
     }
   }
@@ -1352,6 +1416,88 @@ export class DaemonMcpProxy {
     } catch (error) {
       logger.warn(`[DaemonMcpProxy] Failed to close stale daemon client: ${error}`);
     }
+  }
+
+  /**
+   * Serve the tool surface for a client `tools/list` request.
+   *
+   * When no daemon connection exists yet, this returns the static tool surface
+   * (`schemas/tool-definitions.json`) WITHOUT connecting or starting the daemon,
+   * and defers the daemon connect/start to the first actual tool call (issue
+   * #5879). A wedged or absent daemon therefore never hides the tool surface at
+   * `tools/list` time; the client still gets one clear error on first use.
+   *
+   * Once a connection is established, it delegates to {@link listTools} so the
+   * accurate (session-scoped) list is served. The first successful connect after
+   * a static serve emits a tools `list_changed` (see {@link doConnect}) so the
+   * client re-fetches and reconciles any difference.
+   *
+   * The static path deliberately does NOT call `throwIfBoundSessionUnavailable()`
+   * (unlike {@link listTools}): re-coupling `tools/list` to daemon/session state
+   * is exactly what issue #5879 removes. A fenced/expired bound session still
+   * surfaces its ownership-lost error on the next actual tool call, which routes
+   * through {@link callTool}'s gate.
+   */
+  async listAdvertisedTools(): Promise<ProxiedToolDefinition[]> {
+    if (this.connected && this.client) {
+      return this.listTools();
+    }
+    this.servedStaticToolList = true;
+    return this.staticToolDefinitionsProvider();
+  }
+
+  /**
+   * Serve a client `resources/list` request without connecting when no daemon
+   * connection exists yet (issue #5879 review). AutoMobile resources are dynamic
+   * and daemon-owned (device-session screenshots, per-app navigation graphs), so
+   * there is no static cold surface — the cold roster is whatever a prior
+   * connection cached, else empty. Deferring the connect keeps a host that
+   * enumerates resources during initialization from blocking on a wedged daemon
+   * before the first tool call. The first successful connect after a cold serve
+   * emits a resources `list_changed` (see {@link doConnect}) so the client
+   * re-fetches the real resources.
+   */
+  async listAdvertisedResources(): Promise<ProxiedResourceDefinition[]> {
+    if (this.connected && this.client) {
+      return this.listResources();
+    }
+    this.serveResourcesColdAndConnectInBackground();
+    return this.cachedResources ?? [];
+  }
+
+  /**
+   * Serve a client `resources/templates/list` request without connecting when no
+   * daemon connection exists yet. See {@link listAdvertisedResources}.
+   */
+  async listAdvertisedResourceTemplates(): Promise<ProxiedResourceTemplate[]> {
+    if (this.connected && this.client) {
+      return this.listResourceTemplates();
+    }
+    this.serveResourcesColdAndConnectInBackground();
+    return this.cachedResourceTemplates ?? [];
+  }
+
+  // Resource discovery has no "first use that connects" equivalent — a
+  // resource-only client may list resources and never call a tool, so nothing
+  // would ever establish the connection that populates its daemon-owned
+  // resources (e.g. `automobile:devices/booted`). Kick off a NON-BLOCKING
+  // background connect so the daemon connects and the reconciliation
+  // `resources/list_changed` fires, WITHOUT blocking this cold discovery
+  // response (issue #5879 review). The `connecting` guard in ensureConnected()
+  // dedupes concurrent/polled calls, so at most one attempt is in flight.
+  private serveResourcesColdAndConnectInBackground(): void {
+    this.servedStaticResourceList = true;
+    if (this.connecting || this.closing) {
+      return;
+    }
+    void this.ensureConnected().catch((error) => {
+      // Best-effort: the cold roster already returned, and the tool surface is
+      // visible via tools/list. A wedged/absent daemon must not surface here; the
+      // next actual request still reports the failure to the client.
+      logger.debug(
+        `[DaemonMcpProxy] background connect after cold resource discovery failed: ${error}`,
+      );
+    });
   }
 
   /**

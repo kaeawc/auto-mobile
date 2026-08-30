@@ -911,30 +911,34 @@ export async function startVideoRecording(
       start.abortSignal?.throwIfAborted();
       return active;
     } catch (error) {
-      let forceStopped = false;
-      try {
-        await videoRecorderService.forceStopRecording(active.recordingId);
-        forceStopped = true;
-      } catch (cleanupError) {
-        logger.warn(
-          `[VideoRecording] Failed to force-stop cancelled recording ${active.recordingId}: ${errorMessage(cleanupError)}`,
-          cleanupError,
-        );
-      }
-      if (forceStopped) {
-        try {
-          await interruptVideoRecording(active.recordingId);
-        } catch (cleanupError) {
-          logger.warn(
-            `[VideoRecording] Failed to mark cancelled recording ${active.recordingId} interrupted: ${errorMessage(cleanupError)}`,
-            cleanupError,
-          );
-        }
-      }
+      await cleanUpCancelledVideoRecording(active.recordingId, videoRecorderService);
       throw error;
     }
   } finally {
     start.complete();
+  }
+}
+
+async function cleanUpCancelledVideoRecording(
+  recordingId: string,
+  videoRecorderService: VideoRecorderService,
+): Promise<void> {
+  try {
+    await videoRecorderService.forceStopRecording(recordingId);
+  } catch (cleanupError) {
+    logger.warn(
+      `[VideoRecording] Failed to force-stop cancelled recording ${recordingId}: ${errorMessage(cleanupError)}`,
+      cleanupError,
+    );
+    return;
+  }
+  try {
+    await interruptVideoRecording(recordingId);
+  } catch (cleanupError) {
+    logger.warn(
+      `[VideoRecording] Failed to mark cancelled recording ${recordingId} interrupted: ${errorMessage(cleanupError)}`,
+      cleanupError,
+    );
   }
 }
 

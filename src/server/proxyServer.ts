@@ -253,10 +253,13 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     }
   });
 
-  // Register resources/list handler - forward to daemon
+  // Register resources/list handler. Serves a cold (empty/cached) roster without
+  // connecting when no connection exists yet, deferring the daemon connect to the
+  // first tool call (issue #5879) so a host that enumerates resources on init
+  // never blocks on a wedged daemon. Once connected, the live list is served.
   server.server.setRequestHandler(ListResourcesRequestSchema, async () => {
     try {
-      const resources = await proxy.listResources();
+      const resources = await proxy.listAdvertisedResources();
       return { resources };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
@@ -270,10 +273,11 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
     }
   });
 
-  // Register resources/templates/list handler - forward to daemon
+  // Register resources/templates/list handler. Cold-serves without connecting
+  // (see resources/list above); defers the daemon connect to the first tool call.
   server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
     try {
-      const resourceTemplates = await proxy.listResourceTemplates();
+      const resourceTemplates = await proxy.listAdvertisedResourceTemplates();
       return { resourceTemplates };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {

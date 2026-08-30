@@ -165,26 +165,52 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     }
   });
 
-  test("derives outputSchema suppression from daemon options, not serverConfig (AC #5879 review)", async () => {
-    // The default provider must drop outputSchema when the daemon the proxy will
-    // connect to runs with toolResultsNoStructuredContent — read from the proxy's
-    // daemonOptions, since proxy-mode startup never sets this on serverConfig.
-    const suppressed = new DaemonMcpProxy({
-      autoStartDaemon: false,
-      daemonOptions: { toolResultsNoStructuredContent: true },
-    });
-    const advertised = new DaemonMcpProxy({
-      autoStartDaemon: false,
-      daemonOptions: { toolResultsNoStructuredContent: false },
-    });
+  test("never advertises outputSchema cold (reconciliation delivers it post-connect)", async () => {
+    const proxy = new DaemonMcpProxy({ autoStartDaemon: false });
     try {
-      const suppressedTools = await suppressed.listAdvertisedTools();
-      const advertisedTools = await advertised.listAdvertisedTools();
-      expect(suppressedTools.some((tool) => tool.outputSchema !== undefined)).toBe(false);
-      expect(advertisedTools.some((tool) => tool.outputSchema !== undefined)).toBe(true);
+      const tools = await proxy.listAdvertisedTools();
+      expect(tools.some((tool) => tool.outputSchema !== undefined)).toBe(false);
     } finally {
-      await suppressed.close();
-      await advertised.close();
+      await proxy.close();
+    }
+  });
+
+  test("serves an empty resource roster without connecting, then reconciles (AC #5879 review)", async () => {
+    const fakeClient = new FakeDaemonClient({
+      daemonMethodResults: new Map<string, any>([
+        ["tools/list", { tools: [] }],
+        ["resources/list", { resources: [{ uri: "automobile:live", name: "live" }] }],
+        ["resources/list-templates", { resourceTemplates: [] }],
+      ]),
+    });
+    const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    const proxy = new DaemonMcpProxy({
+      clientFactory: () => fakeClient,
+      daemonManager: matchingDaemonManager(),
+      autoStartDaemon: false,
+    });
+    const kinds: ListChangedKind[] = [];
+    proxy.onListChanged((kind) => kinds.push(kind));
+
+    try {
+      // Cold: empty roster, no connection, no socket probe.
+      expect(await proxy.listAdvertisedResources()).toEqual([]);
+      expect(await proxy.listAdvertisedResourceTemplates()).toEqual([]);
+      expect(proxy.isConnected()).toBe(false);
+      expect(isAvailableSpy).not.toHaveBeenCalled();
+      expect(kinds).toEqual([]);
+
+      // First tool call connects; the cold resource serve is reconciled.
+      await proxy.callTool("observe", {});
+      expect(proxy.isConnected()).toBe(true);
+      expect(kinds).toContain("resources");
+
+      // Once connected, the live resource roster is served.
+      const resources = await proxy.listAdvertisedResources();
+      expect(resources.map((resource) => resource.uri)).toEqual(["automobile:live"]);
+    } finally {
+      isAvailableSpy.mockRestore();
+      await proxy.close();
     }
   });
 

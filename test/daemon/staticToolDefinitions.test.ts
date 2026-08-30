@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { getStaticToolDefinitions } from "../../src/daemon/staticToolDefinitions";
 
-// Issue #5879 / Codex review: the static cold-start surface must mirror the
-// runtime `ToolRegistry.getToolDefinitions()` shape, not just carry names.
+// Issue #5879 / review: the static cold-start surface mirrors the runtime
+// `ToolRegistry.getToolDefinitions()` shape for the flag-independent fields
+// (name, description, inputSchema, _meta) and deliberately omits outputSchema,
+// which depends on daemon flag state the proxy cannot read cold.
 
 describe("getStaticToolDefinitions", () => {
   const originalAlwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS;
@@ -15,26 +17,16 @@ describe("getStaticToolDefinitions", () => {
     }
   });
 
-  test("preserves _meta (the MCP Apps UI pointer) for tools that carry it", () => {
-    const observe = getStaticToolDefinitions().find((tool) => tool.name === "observe");
-    expect(observe).toBeDefined();
-    expect(observe!._meta).toEqual({ ui: { resourceUri: "ui://automobile/observe" } });
-  });
-
-  test("advertises outputSchema by default", () => {
-    const withOutput = getStaticToolDefinitions().filter((tool) => tool.outputSchema !== undefined);
-    expect(withOutput.length).toBeGreaterThan(0);
-  });
-
-  test("drops outputSchema when suppressOutputSchema is set", () => {
-    const anyOutputSchema = getStaticToolDefinitions({ suppressOutputSchema: true }).some(
+  test("never advertises outputSchema cold (reconciliation delivers it post-connect)", () => {
+    const anyOutputSchema = getStaticToolDefinitions().some(
       (tool) => tool.outputSchema !== undefined,
     );
     expect(anyOutputSchema).toBe(false);
-    // _meta and names are unaffected by suppression.
-    const observe = getStaticToolDefinitions({ suppressOutputSchema: true }).find(
-      (tool) => tool.name === "observe",
-    );
+  });
+
+  test("preserves _meta (the MCP Apps UI pointer) for tools that carry it", () => {
+    const observe = getStaticToolDefinitions().find((tool) => tool.name === "observe");
+    expect(observe).toBeDefined();
     expect(observe!._meta).toEqual({ ui: { resourceUri: "ui://automobile/observe" } });
   });
 

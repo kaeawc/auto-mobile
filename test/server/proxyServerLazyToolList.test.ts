@@ -55,6 +55,38 @@ describe("proxy server lazy tools/list", () => {
     }
   });
 
+  test("resources/list returns an empty roster without connecting to the daemon", async () => {
+    const isAvailableProbe = spyOn(DaemonClient, "isAvailable");
+    isAvailableSpy = isAvailableProbe;
+    const fakeClient = new FakeDaemonClient();
+    const { server, proxy } = createProxyMcpServer({
+      proxyConfig: {
+        clientFactory: () => fakeClient,
+        daemonManager: new FakeDaemonManager(),
+        autoStartDaemon: false,
+      },
+    });
+    const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "lazy-resources-test-client", version: "0.0.1" });
+
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+
+      const resources = await client.listResources();
+      const templates = await client.listResourceTemplates();
+
+      expect(resources.resources).toEqual([]);
+      expect(templates.resourceTemplates).toEqual([]);
+      expect(proxy.isConnected()).toBe(false);
+      expect(fakeClient.isConnected()).toBe(false);
+      expect(isAvailableProbe).not.toHaveBeenCalled();
+    } finally {
+      await client.close();
+      await proxy.close();
+    }
+  });
+
   test("advertises tools.listChanged so clients honor the reconciliation notification", async () => {
     isAvailableSpy = spyOn(DaemonClient, "isAvailable");
     const { server, proxy } = createProxyMcpServer({

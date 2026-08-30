@@ -19,43 +19,37 @@ import type { ProxiedToolDefinition } from "./daemonMcpProxy";
  * (see `DaemonMcpProxy.doConnect`) narrows the client to the accurate list once
  * connected. This matches the issue's "show the tools, one clear error on first
  * use" intent.
+ *
+ * `outputSchema` is deliberately NOT advertised cold. Whether the daemon
+ * suppresses it depends on `toolResultsNoStructuredContent`, which can be set by
+ * CLI, by persisted feature-flag DB state, or by a runtime toggle — none of
+ * which this proxy can read without connecting. Advertising an output schema the
+ * daemon may then strip from results would violate the MCP contract before the
+ * client can call anything. The cold list therefore carries only the
+ * flag-independent shape (name, description, inputSchema, `_meta`); the
+ * post-connect reconciliation delivers the accurate list, `outputSchema`
+ * included when the daemon advertises it (issue #5879 review).
  */
 interface RawToolDefinition {
   name: string;
   description?: string;
   inputSchema: Record<string, unknown>;
-  outputSchema?: Record<string, unknown>;
   _meta?: Record<string, unknown>;
 }
 
 // Parse once at module load; the per-call mapping below is cheap (tools/list is
-// not a hot path) and must re-read the runtime inputs (suppression flag, env)
-// each call.
+// not a hot path) and must re-read the always-load env each call.
 const RAW_DEFINITIONS: RawToolDefinition[] = toolDefinitionsJson as RawToolDefinition[];
-
-export interface StaticToolDefinitionsOptions {
-  /**
-   * Drop `outputSchema` from the advertised surface, mirroring
-   * `ToolRegistry.getToolDefinitions()` when `toolResultsNoStructuredContent` is
-   * enabled: a server advertising an output schema is expected to return matching
-   * `structuredContent`, which that flag strips (issue #2899). The proxy derives
-   * this from the daemon options it is configured with — NOT from its own
-   * `serverConfig`, which proxy-mode startup never populates for this flag.
-   */
-  suppressOutputSchema?: boolean;
-}
 
 /**
  * The static tool surface served by `tools/list` before a daemon connection is
  * established. `_meta` (e.g. the MCP Apps UI pointer, issue #4669) is preserved
  * verbatim, and `_meta["anthropic/alwaysLoad"]` is synthesized when
  * `AUTOMOBILE_ALWAYS_LOAD_TOOLS=true`, both matching
- * `ToolRegistry.getToolDefinitions()`.
+ * `ToolRegistry.getToolDefinitions()`. `outputSchema` is intentionally omitted
+ * (see the file docstring).
  */
-export function getStaticToolDefinitions(
-  options: StaticToolDefinitionsOptions = {},
-): ProxiedToolDefinition[] {
-  const suppressOutputSchema = options.suppressOutputSchema ?? false;
+export function getStaticToolDefinitions(): ProxiedToolDefinition[] {
   const alwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true";
   return RAW_DEFINITIONS.map((tool) => {
     const meta: Record<string, unknown> = {
@@ -68,9 +62,6 @@ export function getStaticToolDefinitions(
     };
     if (tool.description !== undefined) {
       definition.description = tool.description;
-    }
-    if (tool.outputSchema !== undefined && !suppressOutputSchema) {
-      definition.outputSchema = tool.outputSchema;
     }
     if (Object.keys(meta).length > 0) {
       definition._meta = meta;

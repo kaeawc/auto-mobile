@@ -693,6 +693,12 @@ export class DaemonMcpProxy {
   // connection. On the next successful connect the proxy emits a tools
   // list_changed so the client re-fetches the accurate (session-scoped) list.
   private servedStaticToolList = false;
+  // Set when listAdvertisedResources()/listAdvertisedResourceTemplates() served
+  // a cold (empty/cached) roster without a live connection. On the next connect
+  // the proxy emits a resources list_changed so the client re-fetches the real
+  // resources (issue #5879 review — a host that enumerates resources on init
+  // must not block on a wedged daemon before the first tool call).
+  private servedStaticResourceList = false;
 
   // Cached definitions from daemon
   private cachedTools: ProxiedToolDefinition[] | null = null;
@@ -738,16 +744,8 @@ export class DaemonMcpProxy {
       this.initialSessionBindingConfigured = true;
       this.ownedDeviceSessions.add(this.boundSessionUuid);
     }
-    // The default provider derives outputSchema suppression from the daemon
-    // options this proxy is configured with (the flag the connected daemon will
-    // enforce) — NOT from this process's serverConfig, which proxy-mode startup
-    // never sets for this flag (issue #5879 review).
     this.staticToolDefinitionsProvider =
-      config.staticToolDefinitionsProvider ??
-      (() =>
-        getStaticToolDefinitions({
-          suppressOutputSchema: this.config.daemonOptions?.toolResultsNoStructuredContent === true,
-        }));
+      config.staticToolDefinitionsProvider ?? getStaticToolDefinitions;
     this.buildIdentity = config.buildIdentity ?? getCurrentBuildIdentity();
     this.clientVersion = config.clientVersion ?? DAEMON_VERSION;
     this.clientAssetVersion = isExplicitPin() ? resolveAssetVersion(resolvePinnedVersion()) : null;
@@ -888,23 +886,32 @@ export class DaemonMcpProxy {
     // profile filters the live list.
     if (this.servedStaticToolList) {
       this.servedStaticToolList = false;
-      this.notifyToolListChanged();
+      this.notifyListChanged("tools");
+    }
+    if (this.servedStaticResourceList) {
+      this.servedStaticResourceList = false;
+      this.notifyListChanged("resources");
     }
   }
 
-  // Invalidate the tool cache and re-emit a tools list_changed to listeners,
+  // Invalidate the matching cache and re-emit a list_changed to listeners,
   // mirroring the daemon-pushed invalidation path (see handleDaemonNotification)
   // so a re-fetch is never stale.
-  private notifyToolListChanged(): void {
+  private notifyListChanged(kind: ListChangedKind): void {
     this.discoveryEpoch += 1;
-    this.cachedTools = null;
+    if (kind === "tools") {
+      this.cachedTools = null;
+    } else {
+      this.cachedResources = null;
+      this.cachedResourceTemplates = null;
+    }
     for (const listener of this.listChangedListeners) {
       try {
-        listener("tools");
+        listener(kind);
       } catch (error) {
         // Best-effort re-emit: a dead/mid-teardown client transport must not
         // break sibling listeners.
-        logger.warn(`[DaemonMcpProxy] list_changed listener failed for tools: ${error}`);
+        logger.warn(`[DaemonMcpProxy] list_changed listener failed for ${kind}: ${error}`);
       }
     }
   }
@@ -1421,6 +1428,37 @@ export class DaemonMcpProxy {
     }
     this.servedStaticToolList = true;
     return this.staticToolDefinitionsProvider();
+  }
+
+  /**
+   * Serve a client `resources/list` request without connecting when no daemon
+   * connection exists yet (issue #5879 review). AutoMobile resources are dynamic
+   * and daemon-owned (device-session screenshots, per-app navigation graphs), so
+   * there is no static cold surface — the cold roster is whatever a prior
+   * connection cached, else empty. Deferring the connect keeps a host that
+   * enumerates resources during initialization from blocking on a wedged daemon
+   * before the first tool call. The first successful connect after a cold serve
+   * emits a resources `list_changed` (see {@link doConnect}) so the client
+   * re-fetches the real resources.
+   */
+  async listAdvertisedResources(): Promise<ProxiedResourceDefinition[]> {
+    if (this.connected && this.client) {
+      return this.listResources();
+    }
+    this.servedStaticResourceList = true;
+    return this.cachedResources ?? [];
+  }
+
+  /**
+   * Serve a client `resources/templates/list` request without connecting when no
+   * daemon connection exists yet. See {@link listAdvertisedResources}.
+   */
+  async listAdvertisedResourceTemplates(): Promise<ProxiedResourceTemplate[]> {
+    if (this.connected && this.client) {
+      return this.listResourceTemplates();
+    }
+    this.servedStaticResourceList = true;
+    return this.cachedResourceTemplates ?? [];
   }
 
   /**

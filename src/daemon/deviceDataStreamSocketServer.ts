@@ -989,9 +989,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
           this.sendJson(socket, errorResponse);
           return;
         } finally {
-          if (this.storageOperations.get(key) === operation) {
-            this.storageOperations.delete(key);
-          }
+          this.clearStorageOperation(key, operation);
         }
       }
 
@@ -1368,6 +1366,12 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       if (timeoutHandle) {
         this.timer.clearTimeout(timeoutHandle);
       }
+    }
+  }
+
+  private clearStorageOperation(key: string, operation: Promise<void>): void {
+    if (this.storageOperations.get(key) === operation) {
+      this.storageOperations.delete(key);
     }
   }
 }

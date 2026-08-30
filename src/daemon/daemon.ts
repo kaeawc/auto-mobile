@@ -2313,7 +2313,10 @@ export class Daemon {
         },
         {
           name: "health check timer",
-          run: () => this.stopHealthCheckTimer(),
+          run: async () => {
+            this.stopHealthCheckTimer();
+            await this.databaseHealthProbe.dispose?.();
+          },
         },
         {
           name: "shutdown monitors",

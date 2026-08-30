@@ -22,6 +22,44 @@ function createSqliteFile(dbPath: string): void {
   }
 }
 
+class FakeProbeWorker {
+  private messageListener: ((message: { id: number; ok: boolean }) => void) | undefined;
+  private errorListener: ((error: Error) => void) | undefined;
+  private exitListener: ((code: number) => void) | undefined;
+  terminateCalls = 0;
+
+  postMessage(message: { id: number }): void {
+    queueMicrotask(() => this.messageListener?.({ id: message.id, ok: true }));
+  }
+
+  on(
+    event: "message" | "error" | "exit",
+    listener:
+      | ((message: { id: number; ok: boolean }) => void)
+      | ((error: Error) => void)
+      | ((code: number) => void),
+  ): this {
+    if (event === "message") {
+      this.messageListener = listener as (message: { id: number; ok: boolean }) => void;
+    } else if (event === "error") {
+      this.errorListener = listener as (error: Error) => void;
+    } else if (event === "exit") {
+      this.exitListener = listener as (code: number) => void;
+    }
+    return this;
+  }
+
+  async terminate(): Promise<number> {
+    this.terminateCalls++;
+    this.exitListener?.(0);
+    return 0;
+  }
+
+  fail(error: Error): void {
+    this.errorListener?.(error);
+  }
+}
+
 describe("DefaultDatabaseHealthProbe", () => {
   let tempDirs: string[] = [];
 
@@ -87,5 +125,45 @@ describe("DefaultDatabaseHealthProbe", () => {
     await expect(timer.resolvePromise(probe.check(), 25)).rejects.toThrow(
       "Database health probe timed out after 25ms",
     );
+  });
+
+  test("reuses one worker across checks and terminates it on dispose", async () => {
+    const workers: FakeProbeWorker[] = [];
+    const probe = new DefaultDatabaseHealthProbe({
+      getMigrationsError: () => null,
+      getDatabasePath: () => "/tmp/auto-mobile-test.db",
+      workerFactory: () => {
+        const worker = new FakeProbeWorker();
+        workers.push(worker);
+        return worker;
+      },
+    });
+
+    await probe.check();
+    await probe.check();
+    expect(workers).toHaveLength(1);
+    expect(workers[0]?.terminateCalls).toBe(0);
+
+    await probe.dispose();
+    expect(workers[0]?.terminateCalls).toBe(1);
+  });
+
+  test("replaces a worker that fails between checks", async () => {
+    const workers: FakeProbeWorker[] = [];
+    const probe = new DefaultDatabaseHealthProbe({
+      getMigrationsError: () => null,
+      getDatabasePath: () => "/tmp/auto-mobile-test.db",
+      workerFactory: () => {
+        const worker = new FakeProbeWorker();
+        workers.push(worker);
+        return worker;
+      },
+    });
+
+    await probe.check();
+    workers[0]?.fail(new Error("worker stopped"));
+    await probe.check();
+
+    expect(workers).toHaveLength(2);
   });
 });

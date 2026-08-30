@@ -32,6 +32,7 @@ interface Harness {
   setProcessUserId: (userId: number) => void;
   setProcessNameSuffix: (suffix: string) => void;
   setProbeError: (error: Error | undefined) => void;
+  getProbeCommand: () => string | undefined;
   setProbeGate: (gate: Promise<void>) => void;
   waitForProbeStart: () => Promise<void>;
   restore: () => void;
@@ -44,6 +45,7 @@ function createHarness(): Harness {
   let processUserId = 0;
   let processNameSuffix = "";
   let probeError: Error | undefined;
+  let probeCommand: string | undefined;
   let probeGate: Promise<void> = Promise.resolve();
   let resolveProbeStart!: () => void;
   const probeStarted = new Promise<void>((resolve) => {
@@ -65,6 +67,7 @@ function createHarness(): Harness {
         _synchronous?: boolean,
         signal?: AbortSignal,
       ) => {
+        probeCommand = command;
         resolveProbeStart();
         await probeGate;
         if (signal?.aborted) {
@@ -125,6 +128,7 @@ function createHarness(): Harness {
     setProbeError: (error) => {
       probeError = error;
     },
+    getProbeCommand: () => probeCommand,
     setProbeGate: (gate) => {
       probeGate = gate;
     },
@@ -232,6 +236,7 @@ describe("Android CtrlProxyHierarchy host-domain receivedAt (#5377)", () => {
     const result = await h.hierarchy.getAccessibilityHierarchy(undefined, undefined, true, 0);
 
     expect(result!.packageName).toBe("com.test.app");
+    expect(h.getProbeCommand()).toBe("shell dumpsys activity processes");
   });
 
   test("invalidates a work-profile cache when the package runs only for another user", async () => {

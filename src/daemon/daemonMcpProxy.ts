@@ -33,6 +33,7 @@ import {
 import { OUTPUT_REDUCTION_FLAG_SPECS } from "../utils/outputReductionFlags";
 import { compareStrictNumericVersions } from "../server/deviceMatcher";
 import { releaseVersion } from "../utils/mcpVersion";
+import { shellQuote } from "../utils/shellQuote";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { SingleFlightInterval } from "./SingleFlightInterval";

@@ -372,6 +372,7 @@ export class AndroidSegmentedPlanVideoSession {
         logger.warn(
           `[SegmentedPlanVideo] Failed to finalize segment ${id}: ${errorMessage(error)}`,
         );
+        this.pendingRollbackRecordingIds.push(id);
       } finally {
         this.activeRecordingId = undefined;
       }

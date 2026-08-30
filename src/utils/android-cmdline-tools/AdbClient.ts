@@ -640,6 +640,7 @@ export class AdbClient implements AdbExecutor {
     await new Promise<void>((resolve, reject) => {
       const onSpawn = () => {
         child.off("error", onInitialError);
+        signal?.removeEventListener("abort", onAbort);
         settleStart = undefined;
         resolve();
       };

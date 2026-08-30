@@ -36,6 +36,18 @@ export function discoverySourceFor(
   return deviceId !== undefined && isIosPhysicalUdid(deviceId) ? "ios-physical" : "ios-simulator";
 }
 
+/**
+ * The discovery sources that make up a platform's sweep.
+ *
+ * Android has one; iOS has two independent sources (`simctl` and `devicectl`),
+ * so a per-platform completeness flag cannot express which half of a mixed
+ * outcome is authoritative (#5683). A consumer that reports completeness per
+ * source enumerates a platform's sources through this.
+ */
+export function sourcesForPlatform(platform: Platform): DiscoverySource[] {
+  return platform === "android" ? ["android"] : ["ios-simulator", "ios-physical"];
+}
+
 /** The completeness half of a discovery result, per platform and per source. */
 export interface DiscoveryCompleteness {
   succeededPlatforms: ReadonlySet<Platform>;

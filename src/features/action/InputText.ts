@@ -284,9 +284,14 @@ export class InputText extends BaseVisualChange {
       if (dismissKeyboard) {
         const dismissError = await this.dismissKeyboardViaCloser("a11y", signal);
         if (dismissError) {
+          // Text (and any imeAction) already landed — only the cleanup dismiss
+          // failed. Carry imeAction so a consumer can tell a post-submit cleanup
+          // failure from an operation that never ran and must not blindly retry
+          // (issue #5887 review).
           return {
             success: false,
             text,
+            imeAction,
             error: dismissError,
             method: "a11y",
           };
@@ -395,9 +400,12 @@ export class InputText extends BaseVisualChange {
     if (dismissKeyboard) {
       const dismissError = await this.dismissKeyboardViaCloser("eventLast", signal);
       if (dismissError) {
+        // imeAction already ran — carry it so a dismiss-only failure is not
+        // mistaken for a no-op and retried (issue #5887 review).
         return {
           success: false,
           text,
+          imeAction,
           error: dismissError,
           method: "eventLast",
         };
@@ -504,9 +512,12 @@ export class InputText extends BaseVisualChange {
     if (dismissKeyboard) {
       const dismissError = await this.dismissKeyboardViaCloser("eventAll", signal);
       if (dismissError) {
+        // imeAction already ran — carry it so a dismiss-only failure is not
+        // mistaken for a no-op and retried (issue #5887 review).
         return {
           success: false,
           text,
+          imeAction,
           error: dismissError,
           method: "eventAll",
         };
@@ -618,9 +629,11 @@ export class InputText extends BaseVisualChange {
     if (dismissKeyboard) {
       const dismissError = await this.dismissKeyboardViaCloser("append", signal);
       if (dismissError) {
-        // All characters landed; only the post-typing keyboard dismissal failed,
-        // so the full text was sent — a retry must NOT re-append any of it.
-        return this.appendFailure(text, dismissError, typed.charsSent);
+        // All characters landed (and any imeAction already ran); only the
+        // post-typing keyboard dismissal failed, so the full text was sent — a
+        // retry must NOT re-append any of it, and imeAction is carried so a
+        // dismiss-only failure is not mistaken for a no-op (issue #5887 review).
+        return this.appendFailure(text, dismissError, typed.charsSent, imeAction);
       }
     }
 
@@ -823,12 +836,14 @@ export class InputText extends BaseVisualChange {
     text: string,
     error: string,
     charsSent?: number,
+    imeAction?: ImeAction,
   ): SendTextResult & { method?: InputTextMode } {
     return {
       success: false,
       text,
       error,
       method: "append",
+      ...(imeAction !== undefined ? { imeAction } : {}),
       ...(charsSent !== undefined ? { charsSent } : {}),
     };
   }
@@ -888,9 +903,12 @@ export class InputText extends BaseVisualChange {
     if (dismissKeyboard) {
       const dismissError = await this.dismissKeyboardViaCloser("eventOnly", signal);
       if (dismissError) {
+        // imeAction already ran — carry it so a dismiss-only failure is not
+        // mistaken for a no-op and retried (issue #5887 review).
         return {
           success: false,
           text,
+          imeAction,
           error: dismissError,
           method: "eventOnly",
         };

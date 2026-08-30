@@ -1056,6 +1056,9 @@ describe("InputText", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("Keyboard state unavailable");
     expect(inputCommands(factory)).toContain("shell input keyevent KEYCODE_ENTER");
+    // The completed action is carried on the failure result so a consumer can tell
+    // a post-submit cleanup failure from a no-op and not double-submit (#5887).
+    expect((result as { imeAction?: string }).imeAction).toBe("done");
   });
 
   test("a11y reports a keyboard dismissal failure when the closer fails", async () => {

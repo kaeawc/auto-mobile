@@ -251,7 +251,16 @@ export class Keyboard {
   }
 
   private async close(signal?: AbortSignal): Promise<KeyboardResult> {
-    const { state } = await this.getHierarchyWithState(signal);
+    // Decide whether to send Back from a FORCED-FRESH read, never the cache. An
+    // IME action (Done/Go/Search/Send) or the app itself may hide the keyboard or
+    // navigate immediately before this runs; a stale ~1s-cached "IME open" sample
+    // would then send a second KEYCODE_BACK on the destination screen, navigating
+    // away or discarding a form (#5887 / #5899). Bounded by the confirmation
+    // window so an unbounded read cannot fall back to the 10s hierarchy sync.
+    const { state } = await this.getHierarchyWithState(signal, {
+      timeoutMs: Keyboard.STATE_CONFIRMATION_TIMEOUT_MS,
+      forceFresh: true,
+    });
     if (state.error) {
       return {
         success: false,

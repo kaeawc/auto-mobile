@@ -214,7 +214,7 @@ type ObservationDiffReason =
   | "diff_emitted"
   | "missing_baseline"
   | "screen_changed"
-  | "missing_session"
+  | "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations"
   | "unrenderable_hierarchy"
   | "disabled"
   | "stripped_by_actions_no_observe";
@@ -393,13 +393,11 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       // SKELETON_DEFAULT_ACTION_TOOLS (the tools that also expose the `raw`/`project`
       // opt-out), so the default and the escape hatch never diverge. The compact
       // form lands under the same `skeleton` key `observe` uses; `raw:true` /
-      // `project:"full"` opts back into the raw `viewHierarchy`. Two paths always
-      // keep the full tree: internal tool-to-tool consumers read
-      // `.observation.viewHierarchy`, and the opt-in `--actions-diff-observe`
-      // pipeline diffs against (and emits) the full hierarchy.
+      // `project:"full"` opts back into the raw `viewHierarchy`. Internal
+      // tool-to-tool consumers always keep the full tree, while a computed diff
+      // replaces the action observation only on the path that emits a diff.
       const servedObservation =
         !ctx.internal &&
-        !diffActive &&
         SKELETON_DEFAULT_ACTION_TOOLS.has(ctx.name) &&
         resolveObserveProjection(ctx.args) === "skeleton"
           ? sanitizeObserveResult(payload.observation as ObserveResult, {
@@ -417,7 +415,8 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
       } else if (!ctx.sessionUuid || !ctx.baselineStore) {
         observationDiff = {
           mode: "full",
-          reason: "missing_session",
+          reason:
+            "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
           toScreen: observationScreenIdentity(sanitized),
         };
       } else if (!hasRenderableHierarchy(sanitized)) {

@@ -617,7 +617,11 @@ describe("finalizeToolResponse", () => {
         success: true,
         observation: makeObserveResultWithBounds(),
       });
-      const finalized = finalizeToolResponse(response, { name: "tapOn", sessionUuid: "s1" });
+      const finalized = finalizeToolResponse(response, {
+        name: "tapOn",
+        sessionUuid: "s1",
+        args: { project: "full" },
+      });
 
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.viewHierarchy.hierarchy.node.bounds).toEqual([0, 0, 1080, 1920]);
@@ -637,7 +641,10 @@ describe("finalizeToolResponse", () => {
         success: true,
         observation: makeObserveResultWithBounds(),
       });
-      const finalized = finalizeToolResponse(response, { name: "tapOn" });
+      const finalized = finalizeToolResponse(response, {
+        name: "tapOn",
+        args: { project: "full" },
+      });
 
       const node = (finalized.structuredContent as any).observation.viewHierarchy.hierarchy.node;
       expect(Array.isArray(node.bounds)).toBe(true);
@@ -756,7 +763,7 @@ describe("finalizeToolResponse", () => {
         }),
         {
           name,
-          args: actionArgs,
+          args: { ...actionArgs, project: "full" },
           sessionUuid: "s1",
           baselineStore: store,
         },
@@ -829,7 +836,7 @@ describe("finalizeToolResponse", () => {
       (next.viewHierarchy!.hierarchy.node as any).node[0].checked = "true";
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, args: { project: "full" } },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -866,11 +873,16 @@ describe("finalizeToolResponse", () => {
 
       const first = finalizeToolResponse(
         createStructuredToolResponse({ success: false, observation: hierarchyLess(12) }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, args: { project: "full" } },
       );
       const second = finalizeToolResponse(
         createStructuredToolResponse({ success: false, observation: hierarchyLess(13) }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          sessionUuid: "s1",
+          baselineStore: store,
+          args: { project: "full" },
+        },
       );
 
       const firstObs = (first.structuredContent as any).observation;
@@ -901,7 +913,12 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          sessionUuid: "s1",
+          baselineStore: store,
+          args: { project: "full" },
+        },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -941,7 +958,12 @@ describe("finalizeToolResponse", () => {
       const { store, map } = makeStore();
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          sessionUuid: "s1",
+          baselineStore: store,
+          args: { project: "full" },
+        },
       );
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
@@ -954,12 +976,32 @@ describe("finalizeToolResponse", () => {
     test("falls back to the full observation when the session baseline store is missing", () => {
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", sessionUuid: "s1" },
+        { name: "tapOn", sessionUuid: "s1", args: { project: "full" } },
       );
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
       expect(obsSc.viewHierarchy).toBeDefined();
-      expectObservationDiff(finalized, { mode: "full", reason: "missing_session" });
+      expectObservationDiff(finalized, {
+        mode: "full",
+        reason:
+          "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+      });
+    });
+
+    test("default projection still skeletonizes a missing-session full fallback", () => {
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
+        { name: "tapOn", sessionUuid: "s1" },
+      );
+      const observation = (finalized.structuredContent as any).observation;
+      expect(observation.isDiff).toBeUndefined();
+      expect(observation.skeleton).toBeDefined();
+      expect(observation.viewHierarchy).toBeUndefined();
+      expectObservationDiff(finalized, {
+        mode: "full",
+        reason:
+          "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+      });
     });
 
     test("falls back to full when the screen (app/activity/package) changed", () => {
@@ -976,7 +1018,7 @@ describe("finalizeToolResponse", () => {
       } as ObserveResult;
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: otherScreen }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, args: { project: "full" } },
       );
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
@@ -999,7 +1041,12 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          sessionUuid: "s1",
+          baselineStore: store,
+          args: { project: "full" },
+        },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -1028,7 +1075,12 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          sessionUuid: "s1",
+          baselineStore: store,
+          args: { project: "full" },
+        },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -1077,7 +1129,12 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          sessionUuid: "s1",
+          baselineStore: store,
+          args: { project: "full" },
+        },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -1100,7 +1157,12 @@ describe("finalizeToolResponse", () => {
 
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: next }),
-        { name: "tapOn", sessionUuid: "s1", baselineStore: store },
+        {
+          name: "tapOn",
+          sessionUuid: "s1",
+          baselineStore: store,
+          args: { project: "full" },
+        },
       );
 
       const obsSc = (finalized.structuredContent as any).observation;
@@ -1270,12 +1332,16 @@ describe("finalizeToolResponse", () => {
       const { store, map } = makeStore();
       const finalized = finalizeToolResponse(
         createStructuredToolResponse({ success: true, observation: sameScreenObserve() }),
-        { name: "tapOn", baselineStore: store },
+        { name: "tapOn", baselineStore: store, args: { project: "full" } },
       );
       const obsSc = (finalized.structuredContent as any).observation;
       expect(obsSc.isDiff).toBeUndefined();
       expect(obsSc.viewHierarchy).toBeDefined();
-      expectObservationDiff(finalized, { mode: "full", reason: "missing_session" });
+      expectObservationDiff(finalized, {
+        mode: "full",
+        reason:
+          "missing_session — pass sessionUuid from getAndroid/getApple to receive diffs instead of full observations",
+      });
       expect(map.size).toBe(0);
     });
 

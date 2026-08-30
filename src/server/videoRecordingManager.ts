@@ -911,21 +911,25 @@ export async function startVideoRecording(
       start.abortSignal?.throwIfAborted();
       return active;
     } catch (error) {
+      let forceStopped = false;
       try {
         await videoRecorderService.forceStopRecording(active.recordingId);
+        forceStopped = true;
       } catch (cleanupError) {
         logger.warn(
           `[VideoRecording] Failed to force-stop cancelled recording ${active.recordingId}: ${errorMessage(cleanupError)}`,
           cleanupError,
         );
       }
-      try {
-        await interruptVideoRecording(active.recordingId);
-      } catch (cleanupError) {
-        logger.warn(
-          `[VideoRecording] Failed to mark cancelled recording ${active.recordingId} interrupted: ${errorMessage(cleanupError)}`,
-          cleanupError,
-        );
+      if (forceStopped) {
+        try {
+          await interruptVideoRecording(active.recordingId);
+        } catch (cleanupError) {
+          logger.warn(
+            `[VideoRecording] Failed to mark cancelled recording ${active.recordingId} interrupted: ${errorMessage(cleanupError)}`,
+            cleanupError,
+          );
+        }
       }
       throw error;
     }

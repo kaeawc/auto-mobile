@@ -141,7 +141,7 @@ describe("VideoRecorderService", () => {
     );
   });
 
-  test("retains a failed-start cleanup handle for a force-stop retry", async () => {
+  test("force-stops a failed-start cleanup handle before rethrowing", async () => {
     const retainedHandle = {
       recordingId: "rec-1",
       outputPath: path.join(archiveRoot, "rec-1", "capture.mp4"),
@@ -153,8 +153,6 @@ describe("VideoRecorderService", () => {
 
     await expect(service.startRecording()).rejects.toThrow("startup cleanup timed out");
 
-    expect(service.listActiveRecordingIds()).toEqual(["rec-1"]);
-    await service.forceStopRecording("rec-1");
     expect(backend.forceStopCalls).toEqual([retainedHandle]);
     expect(service.listActiveRecordingIds()).toEqual([]);
   });

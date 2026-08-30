@@ -205,6 +205,31 @@ describe("videoRecordingManager", () => {
     expect((await fakeRepository.getRecording(insertedRecordingId!))?.status).toBe("interrupted");
   });
 
+  test("keeps a recording discoverable when cancellation force-stop fails", async () => {
+    const controller = new AbortController();
+    const originalInsert = fakeRepository.insertRecording.bind(fakeRepository);
+    let insertedRecordingId: string | undefined;
+    fakeBackend.forceStop = async () => {
+      throw new Error("force stop failed");
+    };
+    fakeRepository.insertRecording = async (record) => {
+      insertedRecordingId = record.recordingId;
+      controller.abort(new Error("request cancelled"));
+      await originalInsert(record);
+    };
+
+    await expect(
+      startVideoRecording({
+        device: testDevice,
+        maxDurationSeconds: 3,
+        abortSignal: controller.signal,
+      }),
+    ).rejects.toThrow("request cancelled");
+
+    expect(insertedRecordingId).toBeDefined();
+    expect((await fakeRepository.getRecording(insertedRecordingId!))?.status).toBe("recording");
+  });
+
   test("rejects recording starts once shutdown begins", async () => {
     await stopAcceptingVideoRecordingStarts();
 

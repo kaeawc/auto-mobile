@@ -237,6 +237,14 @@ export class VideoRecorderService {
           handle: error.handle,
           forceStopRequested: false,
         });
+        try {
+          await this.forceStopRecording(recordingId);
+          await fsPromises.rm(recordingDir, { recursive: true, force: true });
+        } catch (cleanupError) {
+          this.log.warn(
+            `[VideoRecorderService] Failed to force-stop aborted recording ${recordingId}: ${String(cleanupError)}`,
+          );
+        }
       } else {
         try {
           await fsPromises.rm(recordingDir, { recursive: true, force: true });

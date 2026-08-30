@@ -533,6 +533,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
         deviceVerified = true;
         deviceSource = "current";
       } catch (error) {
+        // Request cancellation does not make the selected device stale. Preserve
+        // the user's explicit selection so a later platform-implicit call does
+        // not become ambiguous merely because this caller disconnected.
+        options?.signal?.throwIfAborted();
         if (error instanceof RunnerReadinessError) {
           throw error;
         }
@@ -617,11 +621,6 @@ export class DeviceSessionManager implements DeviceSessionManager {
         `Android device ${deviceId} is not connected. Available devices: ${describeDevices(allDevices)}`,
       );
     }
-    options?.signal?.throwIfAborted();
-    if (options?.readiness === "booted") {
-      return;
-    }
-
     // Check if we can get an active window from the device
     try {
       logger.info(`[DeviceSessionManager] Verifying Android device ${deviceId} readiness`);
@@ -650,6 +649,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
       throw new ActionableError(
         `Failed to verify Android device ${deviceId} readiness: ${errorMsg}`,
       );
+    }
+
+    options?.signal?.throwIfAborted();
+    if (options?.readiness === "booted") {
+      return;
     }
 
     // Always track setup timing (one-time per session, valuable for debugging)

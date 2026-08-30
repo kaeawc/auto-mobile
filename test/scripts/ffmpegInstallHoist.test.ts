@@ -80,4 +80,15 @@ describe("#4124 ffmpeg install hoist", () => {
     expect(videoStep?.env?.AUTOMOBILE_ENABLED_TOOLS).toBe(enabledTools);
     expect(navigationStep?.env?.AUTOMOBILE_ENABLED_TOOLS).toBe(enabledTools);
   });
+
+  test("the stable daemon starts with the integration database override", () => {
+    const databaseStep = stepNamed(steps, "Prepare isolated video recording database");
+    const databaseIndex = indexOfNamed(steps, "Prepare isolated video recording database");
+    const daemonIndex = indexOfNamed(steps, "Ensure AutoMobile daemon ready (Xcode 26.5)");
+
+    expect(databaseStep?.run).toContain("AUTOMOBILE_DB_DIR=");
+    expect(databaseStep?.run).toContain("GITHUB_ENV");
+    expect(databaseIndex).toBeGreaterThanOrEqual(0);
+    expect(databaseIndex).toBeLessThan(daemonIndex);
+  });
 });

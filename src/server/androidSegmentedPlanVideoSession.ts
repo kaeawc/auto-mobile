@@ -29,6 +29,8 @@ export interface AndroidSegmentedPlanVideoSessionOptions {
   maxDurationSeconds?: number;
   /** Quality/config overrides forwarded to every segment's recording. */
   configOverrides?: VideoRecordingConfigInput;
+  /** Cancellation for the caller-owned initial segment startup only. */
+  startupAbortSignal?: AbortSignal;
   /**
    * Invoked exactly once when the session finalizes (via {@link stop}), whether that
    * stop was caller-driven or the {@link maxDurationSeconds} auto-stop. Lets the owning
@@ -67,6 +69,8 @@ export class AndroidSegmentedPlanVideoSession {
   private readonly maxDurationSeconds: number | undefined;
 
   private readonly configOverrides: VideoRecordingConfigInput | undefined;
+
+  private readonly startupAbortSignal: AbortSignal | undefined;
 
   private activeRecordingId: string | undefined;
 
@@ -111,6 +115,7 @@ export class AndroidSegmentedPlanVideoSession {
       options.segmentRotateAfterMs ?? ANDROID_PLAN_VIDEO_SEGMENT_ROTATE_MS;
     this.maxDurationSeconds = options.maxDurationSeconds;
     this.configOverrides = options.configOverrides;
+    this.startupAbortSignal = options.startupAbortSignal;
     this.onFinalized = options.onFinalized;
     this.startVideoRecordingFn = options.startVideoRecording ?? defaultStartVideoRecording;
     this.stopVideoRecordingFn = options.stopVideoRecording ?? defaultStopVideoRecording;
@@ -151,7 +156,17 @@ export class AndroidSegmentedPlanVideoSession {
    */
   async start(): Promise<ActiveVideoRecording> {
     this.timerDriven = true;
-    const first = await this.startFirstSegment();
+    let first: ActiveVideoRecording;
+    try {
+      first = await this.startSegment(this.startupAbortSignal);
+      this.startupAbortSignal?.throwIfAborted();
+    } catch (error) {
+      this.timerDriven = false;
+      if (this.activeRecordingId) {
+        await this.stop();
+      }
+      throw error;
+    }
     this.scheduleRotation();
     this.scheduleMaxDurationStop();
     return first;
@@ -238,12 +253,13 @@ export class AndroidSegmentedPlanVideoSession {
     return `${this.outputNamePrefix}${suffix}`;
   }
 
-  private async startSegment(): Promise<ActiveVideoRecording> {
+  private async startSegment(abortSignal?: AbortSignal): Promise<ActiveVideoRecording> {
     const recording = await this.startVideoRecordingFn({
       device: this.device,
       outputName: this.segmentOutputName(),
       maxDurationSeconds: ANDROID_SCREENRECORD_MAX_SECONDS,
       configOverrides: this.configOverrides,
+      abortSignal,
     });
     this.activeRecordingId = recording.recordingId;
     this.segmentStartedAtMs = this.timer.now();

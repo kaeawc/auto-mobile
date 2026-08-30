@@ -289,6 +289,51 @@ describe("videoRecording tool segmentation branch", () => {
     );
   });
 
+  test("cancellation reaches initial segmented startup and finalizes a raced successful start", async () => {
+    const controller = new AbortController();
+    let resolveStart!: (recording: ActiveVideoRecording) => void;
+    const startMayComplete = new Promise<ActiveVideoRecording>((resolve) => {
+      resolveStart = resolve;
+    });
+    let receivedSignal: AbortSignal | undefined;
+    setSegmentedSessionRecordingDependencies({
+      startVideoRecording: async (request) => {
+        receivedSignal = request.abortSignal;
+        return await startMayComplete;
+      },
+      stopVideoRecording: async (recordingId) => {
+        const id = recordingId ?? "segment-0";
+        segmentStops.push(id);
+        return {
+          metadata: makeSegmentMetadata(id),
+          evictedRecordingIds: [],
+        };
+      },
+    });
+
+    const starting = handler()(
+      androidDevice,
+      {
+        action: "start",
+        platform: "android",
+        deviceId: androidDevice.deviceId,
+        maxDuration: 300,
+        outputName: "cancelled",
+      },
+      undefined,
+      controller.signal,
+    );
+    await waitFor(() => receivedSignal !== undefined, "segmented start to receive abort signal");
+
+    controller.abort(new Error("request cancelled"));
+    resolveStart(makeSegmentRecording("cancelled", "cancelled"));
+
+    await expect(starting).rejects.toThrow("request cancelled");
+    expect(receivedSignal).toBe(controller.signal);
+    expect(segmentStops).toEqual(["cancelled"]);
+    expect(segmentTimer.getPendingTimeoutCount()).toBe(0);
+  });
+
   test("bare (by-device) stop finalizes the segmented session and leaves no rotation timer", async () => {
     setSegmentedSessionRecordingDependencies({
       startVideoRecording: async (request) => {

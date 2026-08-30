@@ -2024,6 +2024,13 @@ jobs:
       # failure surface loudly here instead of silently skipping the test (#2730);
       # `auto-mobile` (installed to ~/.bun/bin by `bun add -g .`) is thereby on PATH
       # for the swift-test steps.
+      - name: "Prepare isolated video recording database"
+        if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
+        run: |
+          integration_db_dir="${RUNNER_TEMP}/auto-mobile-video-recording-db"
+          mkdir -p "${integration_db_dir}"
+          echo "AUTOMOBILE_DB_DIR=${integration_db_dir}" >> "${GITHUB_ENV}"
+
       - name: "Ensure AutoMobile daemon ready (Xcode 26.5)"
         if: ${{ !cancelled() && steps.build-ctrlproxy.outcome == 'success' }}
         env:

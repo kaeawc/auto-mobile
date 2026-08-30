@@ -198,6 +198,31 @@ describe("DeviceSessionManager", () => {
     expect(accessibilityManager.wasMethodCalled("setup")).toBe(true);
   });
 
+  test("booted Android readiness verifies the active window without initializing CtrlProxy", async () => {
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
+
+    await expect(
+      manager.verifyAndroidDevice(device.deviceId, { readiness: "booted" }),
+    ).resolves.toBeUndefined();
+
+    expect(fakeWindow.wasMethodCalled("getActive")).toBe(true);
+  });
+
+  test("booted Android readiness rejects a device whose UI has not finished booting", async () => {
+    const notReadyWindow = new FakeWindow();
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: notReadyWindow,
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
+
+    await expect(
+      manager.verifyAndroidDevice(device.deviceId, { readiness: "booted" }),
+    ).rejects.toThrow("Failed to verify Android device device-1 readiness");
+  });
+
   test("should skip setup when accessibility is already enabled and WebSocket connects", async () => {
     const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(true);
@@ -1048,6 +1073,23 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     // The device should still be set (not cleared by a failed iOS verification)
     expect(manager.getCurrentPlatform()).toBe("android");
     expect(manager.getCurrentDevice()?.deviceId).toBe("emulator-5554");
+  });
+
+  test("request cancellation preserves the current device selection", async () => {
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
+    const controller = new AbortController();
+    manager.setCurrentDevice(androidDevice, "android");
+    controller.abort(new Error("request cancelled"));
+
+    await expect(
+      manager.ensureDeviceReady("either", undefined, {
+        readiness: "booted",
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow("request cancelled");
+
+    expect(manager.getCurrentPlatform()).toBe("android");
+    expect(manager.getCurrentDevice()?.deviceId).toBe(androidDevice.deviceId);
   });
 
   test("reserves the current simulator through readiness verification", async () => {

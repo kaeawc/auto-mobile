@@ -415,6 +415,7 @@ export function registerVideoRecordingTools(): void {
               configOverrides: buildConfigOverrides(args),
               timer: segmentedSessions.timer,
               maxDurationSeconds,
+              startupAbortSignal: signal,
               // Auto-stop finalizes without going through stopAndRemove, so drop the
               // tracked entry here to avoid a registry leak on fire-and-forget recordings.
               onFinalized: () => segmentedSessions.remove(session),

@@ -87,8 +87,13 @@ rm -rf "${DISPLAY_WARMUP_DIR}"
 # AUTOMOBILE_DB_PATH=':memory:' —
 # is used deliberately, since :memory: additionally trips the #3071 production
 # in-memory guard unless AUTOMOBILE_ALLOW_IN_MEMORY_DB is set.
-INTEGRATION_DB_DIR="$(mktemp -d)"
-export AUTOMOBILE_DB_DIR="${INTEGRATION_DB_DIR}"
+# The workflow may have started its stable warmed daemon with an isolated
+# database already. Reuse that override so the CLI does not silently talk to a
+# daemon backed by ~/.auto-mobile while this test process points elsewhere.
+if [[ -z "${AUTOMOBILE_DB_DIR:-}" ]]; then
+  AUTOMOBILE_DB_DIR="$(mktemp -d)"
+fi
+export AUTOMOBILE_DB_DIR
 # `auto-mobile --cli` may start or restart the shared daemon with this database.
 # The following navigation integration step reuses that daemon, so deleting its
 # live database here causes SQLite disk-I/O failures. The directory is under the

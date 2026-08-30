@@ -175,7 +175,10 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     }
   });
 
-  test("serves an empty resource roster without connecting, then reconciles (AC #5879 review)", async () => {
+  test("serves an empty resource roster immediately, then reconciles for a resource-only client (AC #5879 review)", async () => {
+    // A resource-only client never calls a tool, so the reconciliation must be
+    // driven by a non-blocking background connect kicked off from cold resource
+    // discovery — not by a tool call.
     const fakeClient = new FakeDaemonClient({
       daemonMethodResults: new Map<string, any>([
         ["tools/list", { tools: [] }],
@@ -193,17 +196,16 @@ describe("DaemonMcpProxy.listAdvertisedTools (lazy tools/list — issue #5879)",
     proxy.onListChanged((kind) => kinds.push(kind));
 
     try {
-      // Cold: empty roster, no connection, no socket probe.
+      // Cold discovery returns an empty roster immediately (non-blocking).
       expect(await proxy.listAdvertisedResources()).toEqual([]);
       expect(await proxy.listAdvertisedResourceTemplates()).toEqual([]);
-      expect(proxy.isConnected()).toBe(false);
-      expect(isAvailableSpy).not.toHaveBeenCalled();
-      expect(kinds).toEqual([]);
 
-      // First tool call connects; the cold resource serve is reconciled.
-      await proxy.callTool("observe", {});
+      // A background connect was kicked off — WITHOUT any tool call. Await it to
+      // settle (ensureConnected returns the in-flight connecting promise).
+      await proxy.ensureConnected();
       expect(proxy.isConnected()).toBe(true);
       expect(kinds).toContain("resources");
+      expect(fakeClient.callToolCalls).toHaveLength(0);
 
       // Once connected, the live resource roster is served.
       const resources = await proxy.listAdvertisedResources();

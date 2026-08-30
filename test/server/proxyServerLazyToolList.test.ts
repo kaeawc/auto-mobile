@@ -55,8 +55,11 @@ describe("proxy server lazy tools/list", () => {
     }
   });
 
-  test("resources/list returns an empty roster without connecting to the daemon", async () => {
-    const isAvailableProbe = spyOn(DaemonClient, "isAvailable");
+  test("resources/list returns an immediate empty roster without blocking (daemon absent)", async () => {
+    // With no daemon available and auto-start disabled, the background connect
+    // kicked off by cold resource discovery fails silently; the client still gets
+    // an immediate empty roster rather than a blocked/errored request.
+    const isAvailableProbe = spyOn(DaemonClient, "isAvailable").mockResolvedValue(false);
     isAvailableSpy = isAvailableProbe;
     const fakeClient = new FakeDaemonClient();
     const { server, proxy } = createProxyMcpServer({
@@ -78,9 +81,10 @@ describe("proxy server lazy tools/list", () => {
 
       expect(resources.resources).toEqual([]);
       expect(templates.resourceTemplates).toEqual([]);
+      // Auto-start is disabled and the daemon is absent, so the best-effort
+      // background connect cannot establish a connection.
       expect(proxy.isConnected()).toBe(false);
       expect(fakeClient.isConnected()).toBe(false);
-      expect(isAvailableProbe).not.toHaveBeenCalled();
     } finally {
       await client.close();
       await proxy.close();

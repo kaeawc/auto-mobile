@@ -1445,7 +1445,7 @@ export class DaemonMcpProxy {
     if (this.connected && this.client) {
       return this.listResources();
     }
-    this.servedStaticResourceList = true;
+    this.serveResourcesColdAndConnectInBackground();
     return this.cachedResources ?? [];
   }
 
@@ -1457,8 +1457,31 @@ export class DaemonMcpProxy {
     if (this.connected && this.client) {
       return this.listResourceTemplates();
     }
-    this.servedStaticResourceList = true;
+    this.serveResourcesColdAndConnectInBackground();
     return this.cachedResourceTemplates ?? [];
+  }
+
+  // Resource discovery has no "first use that connects" equivalent — a
+  // resource-only client may list resources and never call a tool, so nothing
+  // would ever establish the connection that populates its daemon-owned
+  // resources (e.g. `automobile:devices/booted`). Kick off a NON-BLOCKING
+  // background connect so the daemon connects and the reconciliation
+  // `resources/list_changed` fires, WITHOUT blocking this cold discovery
+  // response (issue #5879 review). The `connecting` guard in ensureConnected()
+  // dedupes concurrent/polled calls, so at most one attempt is in flight.
+  private serveResourcesColdAndConnectInBackground(): void {
+    this.servedStaticResourceList = true;
+    if (this.connecting || this.closing) {
+      return;
+    }
+    void this.ensureConnected().catch((error) => {
+      // Best-effort: the cold roster already returned, and the tool surface is
+      // visible via tools/list. A wedged/absent daemon must not surface here; the
+      // next actual request still reports the failure to the client.
+      logger.debug(
+        `[DaemonMcpProxy] background connect after cold resource discovery failed: ${error}`,
+      );
+    });
   }
 
   /**

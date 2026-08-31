@@ -5,6 +5,7 @@ import {
   NAL_TYPE_SPS,
   nalUnitType,
 } from "../../src/features/webrtc/h264";
+import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 
 export interface H264CaptureReadiness {
   readonly chunks: Buffer[];
@@ -21,6 +22,7 @@ export interface H264CaptureReadiness {
 export function createH264CaptureReadiness(
   minimumSpsCount: number = 1,
   timeoutMs: number = 15_000,
+  timer: Timer = defaultTimer,
 ): H264CaptureReadiness {
   const chunks: Buffer[] = [];
   const parser = new H264AnnexBParser();
@@ -36,7 +38,7 @@ export function createH264CaptureReadiness(
 
   const clearDeadline = (): void => {
     if (timeout !== undefined) {
-      clearTimeout(timeout);
+      timer.clearTimeout(timeout);
       timeout = undefined;
     }
   };
@@ -45,8 +47,8 @@ export function createH264CaptureReadiness(
     if (
       !settled &&
       (counts.get(NAL_TYPE_SPS) ?? 0) >= minimumSpsCount &&
-      (counts.get(NAL_TYPE_PPS) ?? 0) >= 1 &&
-      (counts.get(NAL_TYPE_IDR) ?? 0) >= 1
+      (counts.get(NAL_TYPE_PPS) ?? 0) >= minimumSpsCount &&
+      (counts.get(NAL_TYPE_IDR) ?? 0) >= minimumSpsCount
     ) {
       settled = true;
       clearDeadline();
@@ -58,11 +60,15 @@ export function createH264CaptureReadiness(
     chunks,
     onData(chunk): void {
       chunks.push(chunk);
-      for (const nal of parser.push(chunk)) {
-        const type = nalUnitType(nal);
-        counts.set(type, (counts.get(type) ?? 0) + 1);
+      try {
+        for (const nal of parser.push(chunk)) {
+          const type = nalUnitType(nal);
+          counts.set(type, (counts.get(type) ?? 0) + 1);
+        }
+        checkReady();
+      } catch (error) {
+        this.onError(error instanceof Error ? error : new Error(String(error)));
       }
-      checkReady();
     },
     onError(error): void {
       if (!settled) {
@@ -73,7 +79,7 @@ export function createH264CaptureReadiness(
     },
     async wait(): Promise<void> {
       if (!settled) {
-        timeout = setTimeout(() => {
+        timeout = timer.setTimeout(() => {
           settled = true;
           rejectReady(
             new Error(

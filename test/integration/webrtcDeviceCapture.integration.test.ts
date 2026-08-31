@@ -45,14 +45,6 @@ function integrationPort(environmentName: string, fallback: number): number {
   return port;
 }
 
-// The MediaMTX config and Chrome CLI both expose listener ports. Keep these
-// test-only overrides here rather than introducing daemon configuration solely
-// for parallel integration workers.
-const webRtcPort = integrationPort("AUTOMOBILE_WEBRTC_DEVICE_MEDIAMTX_PORT", 8889);
-const mediaMtxUdpPort = integrationPort("AUTOMOBILE_WEBRTC_DEVICE_MEDIAMTX_UDP_PORT", 8189);
-const mediaMtxTcpPort = integrationPort("AUTOMOBILE_WEBRTC_DEVICE_MEDIAMTX_TCP_PORT", 8189);
-const chromeDebugPort = integrationPort("AUTOMOBILE_WEBRTC_DEVICE_CHROME_DEBUG_PORT", 9222);
-
 function workerIdentity(): string {
   const identity =
     process.env.AUTOMOBILE_WEBRTC_DEVICE_WORKER_ID ??
@@ -61,6 +53,33 @@ function workerIdentity(): string {
       .join("-");
   return (identity || platform || "local").replaceAll(/[^a-zA-Z0-9_-]/g, "_");
 }
+
+function workerPortOffset(identity: string): number {
+  let hash = 0;
+  for (const character of identity) {
+    hash = (hash * 31 + character.charCodeAt(0)) % 100;
+  }
+  return hash;
+}
+
+// The MediaMTX config and Chrome CLI both expose listener ports. Keep these
+// test-only overrides here rather than introducing daemon configuration solely
+// for parallel integration workers. The ranges deliberately avoid the
+// publisher suite's fixed 8889 listener and the legacy shared 8189/9222 ports.
+const portOffset = workerPortOffset(workerIdentity());
+const webRtcPort = integrationPort("AUTOMOBILE_WEBRTC_DEVICE_MEDIAMTX_PORT", 8890 + portOffset);
+const mediaMtxUdpPort = integrationPort(
+  "AUTOMOBILE_WEBRTC_DEVICE_MEDIAMTX_UDP_PORT",
+  8190 + portOffset,
+);
+const mediaMtxTcpPort = integrationPort(
+  "AUTOMOBILE_WEBRTC_DEVICE_MEDIAMTX_TCP_PORT",
+  8290 + portOffset,
+);
+const chromeDebugPort = integrationPort(
+  "AUTOMOBILE_WEBRTC_DEVICE_CHROME_DEBUG_PORT",
+  9230 + portOffset,
+);
 
 const streamId = `device-capture-${platform ?? "unknown"}-${workerIdentity()}`;
 let artifactDir: string | undefined;

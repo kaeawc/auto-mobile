@@ -103,6 +103,19 @@ function execFileOptionNames(source: string): string[][] {
  * runner happened to take (#4343).
  */
 describe("#4343 device capture latency instrumentation", () => {
+  test("uses worker-specific ports outside the publisher suite's defaults", () => {
+    const source = withoutComments(read(INTEGRATION_TEST_PATH));
+
+    expect(source).toContain("function workerPortOffset(identity: string): number");
+    expect(source).toContain(
+      'integrationPort("AUTOMOBILE_WEBRTC_DEVICE_MEDIAMTX_PORT", 8890 + portOffset)',
+    );
+    expect(source).toContain("8190 + portOffset");
+    expect(source).toContain("8290 + portOffset");
+    expect(source).toContain("9230 + portOffset");
+    expect(source).not.toContain('integrationPort("AUTOMOBILE_WEBRTC_DEVICE_MEDIAMTX_PORT", 8889)');
+  });
+
   test("marks every capture-to-browser stage, in pipeline order", () => {
     const source = withoutComments(read(INTEGRATION_TEST_PATH));
     const positions = CAPTURE_STAGES.map((stage) => source.indexOf(`timeline.mark("${stage}")`));

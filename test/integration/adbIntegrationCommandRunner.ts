@@ -17,7 +17,11 @@ export async function waitForAdbCondition(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (true) {
-    if (await predicate()) {
+    const matched = await predicate();
+    if (Date.now() >= deadline) {
+      throw new Error(`${message} within ${timeoutMs}ms`);
+    }
+    if (matched) {
       return;
     }
     const remainingMs = deadline - Date.now();

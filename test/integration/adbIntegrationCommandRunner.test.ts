@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 import type { ExecResult } from "../../src/models";
@@ -7,6 +7,7 @@ import { createExecResult } from "../../src/utils/execResult";
 import {
   ADB_INTEGRATION_COMMAND_TIMEOUT_MS,
   createAdbIntegrationCommandRunner,
+  waitForAdbCondition,
 } from "./adbIntegrationCommandRunner";
 
 const FAST_TEST_TIMEOUT_MS = 100;
@@ -34,6 +35,22 @@ const androidH264DirectAdbExecutionCalls = directAdbExecutionCalls(
 );
 
 describe("createAdbIntegrationCommandRunner", () => {
+  test(
+    "does not accept a condition that completes after its deadline",
+    async () => {
+      const now = spyOn(Date, "now");
+      now.mockReturnValueOnce(0).mockReturnValueOnce(6);
+      try {
+        await expect(
+          waitForAdbCondition(async () => true, "screenrecord process did not exit after stop", 5),
+        ).rejects.toThrow("screenrecord process did not exit after stop within 5ms");
+      } finally {
+        now.mockRestore();
+      }
+    },
+    FAST_TEST_TIMEOUT_MS,
+  );
+
   test(
     "bounds every query through the host command executor",
     async () => {

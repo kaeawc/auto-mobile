@@ -132,12 +132,12 @@ async function waitFor(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (await predicate()) {
+    if (await predicate(deadline)) {
       return;
     }
     await Bun.sleep(100);
   }
-  if (!(await predicate())) {
+  if (!(await predicate(deadline))) {
     throw new Error(typeof message === "function" ? message() : message);
   }
 }

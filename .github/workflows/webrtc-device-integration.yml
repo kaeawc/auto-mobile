@@ -100,7 +100,11 @@ jobs:
         # Diagnostic-only: a failure here must never redden a green capture lane,
         # same as the upload step below.
         continue-on-error: true
-        run: bash scripts/webrtc/explain-device-results.sh android
+        run: |
+          result_path="$(find scratch/webrtc-device-integration -mindepth 2 -maxdepth 2 -name result.txt -type f -print -quit 2>/dev/null || true)"
+          results_dir="${result_path%/result.txt}"
+          AUTOMOBILE_WEBRTC_RESULTS_DIR="${results_dir:-scratch/webrtc-device-integration}" \
+            bash scripts/webrtc/explain-device-results.sh android
       # Always keep the stage-latency record (#4343): p50/p95 baselines need the
       # passing runs too. continue-on-error keeps a missing or failed upload from
       # turning a green capture lane red.
@@ -212,7 +216,7 @@ jobs:
         # Attempt 2 runs ONLY after reaping attempt 1's processes. The test's own
         # finally-block teardown stops MediaMTX and the daemon, but bun SKIPS that
         # finally when a test-body deadline fires (exactly this timeout flake), which
-        # would leave MediaMTX bound to 8889 and the daemon subprocess alive and make
+        # would leave MediaMTX bound and the daemon subprocess alive and make
         # a naive retry fail deterministically on a port/socket conflict.
         run: |
           set -uo pipefail
@@ -221,23 +225,23 @@ jobs:
             # AutoMobile daemon subprocess: DaemonLauncher spawns it as
             # `<bun> dist/src/index.js --daemon-mode`; nothing else carries that flag.
             pkill -f "index.js --daemon-mode" 2>/dev/null || true
-            # MediaMTX SFU — binds the WHIP/WHEP port 8889 the next attempt needs free.
+            # MediaMTX SFU — binds the WHIP/WHEP port the next attempt needs free.
             pkill -x mediamtx 2>/dev/null || true
-            # Headless Chrome WHEP reader — binds the fixed CDP debug port 9222.
-            pkill -f "remote-debugging-port=9222" 2>/dev/null || true
+            # Headless Chrome WHEP reader — binds the worker-specific CDP port.
+            pkill -f "remote-debugging-port=" 2>/dev/null || true
             # Give SIGTERM a moment, then hard-kill any straggler still holding a port.
             sleep 2
             pkill -KILL -x mediamtx 2>/dev/null || true
             pkill -KILL -f "index.js --daemon-mode" 2>/dev/null || true
-            # Confirm 8889 is actually free before retrying; wait for the kernel to
-            # release the listener. A retry into a still-bound port is worse than no
-            # retry, so abort the retry (fail the step) rather than guarantee a
-            # second failure.
+            pkill -KILL -f "remote-debugging-port=" 2>/dev/null || true
+            # Confirm every MediaMTX process has exited before retrying. A retry into
+            # a still-bound worker-specific port is worse than no retry, so abort the
+            # retry (fail the step) rather than guarantee a second failure.
             for _ in $(seq 1 15); do
-              lsof -nP -iTCP:8889 -sTCP:LISTEN >/dev/null 2>&1 || return 0
+              pgrep -x mediamtx >/dev/null 2>&1 || return 0
               sleep 1
             done
-            echo "::error::Port 8889 still bound after cleanup; skipping retry to avoid a guaranteed conflict." >&2
+            echo "::error::MediaMTX still running after cleanup; skipping retry to avoid a guaranteed conflict." >&2
             return 1
           }
 
@@ -268,7 +272,11 @@ jobs:
         # Diagnostic-only: a failure here must never redden a green capture lane,
         # same as the upload step below.
         continue-on-error: true
-        run: bash scripts/webrtc/explain-device-results.sh ios
+        run: |
+          result_path="$(find scratch/webrtc-device-integration -mindepth 2 -maxdepth 2 -name result.txt -type f -print -quit 2>/dev/null || true)"
+          results_dir="${result_path%/result.txt}"
+          AUTOMOBILE_WEBRTC_RESULTS_DIR="${results_dir:-scratch/webrtc-device-integration}" \
+            bash scripts/webrtc/explain-device-results.sh ios
       # Always keep the stage-latency record (#4343): p50/p95 baselines need the
       # passing runs too. continue-on-error keeps a missing or failed upload from
       # turning a green capture lane red.

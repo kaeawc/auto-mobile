@@ -186,7 +186,7 @@ wiring_requires_yq() {
   [[ "$block" != *"- ios-xcode-build"* ]]
 }
 
-@test "cross-platform unit lane avoids Windows isolation and preserves macOS timeout headroom" {
+@test "cross-platform unit lane avoids Windows isolation and enforces its unit timeout" {
   wiring_requires_yq
   local run_step
   run_step="$(yq -r '
@@ -196,5 +196,5 @@ wiring_requires_yq() {
   ' "$WF")"
   [[ "$run_step" == *'[[ "$RUNNER_OS" == "Windows" ]]'* ]]
   [[ "$run_step" == *"bun run test"* ]]
-  [[ "$run_step" == *"run_with_timeout 720 bun run test"* ]]
+  [[ "$run_step" == *"run_with_timeout 30 bun run test"* ]]
 }

@@ -140,6 +140,10 @@ describe("#4308 device WebRTC integration workflow", () => {
       expect(explain?.if).toBe("always()");
       expect(explain?.run).toContain("scripts/webrtc/explain-device-results.sh");
       expect(explain?.run).toContain(platform);
+      // Each integration attempt records under a generated worker subdirectory,
+      // so the workflow must hand the legend the matching result directory.
+      expect(explain?.run).toContain("find scratch/webrtc-device-integration");
+      expect(explain?.run).toContain("AUTOMOBILE_WEBRTC_RESULTS_DIR");
       // A diagnostic-only step must not redden a green capture lane if it throws.
       expect(explain?.["continue-on-error"]).toBe(true);
 

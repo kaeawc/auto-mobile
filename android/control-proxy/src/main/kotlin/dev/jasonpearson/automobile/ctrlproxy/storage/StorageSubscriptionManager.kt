@@ -398,13 +398,13 @@ class StorageSubscriptionManager(private val context: Context) {
    *
    * @param packageName The target app package name
    * @param fileName The preferences file name
-   * @return true if unsubscribed successfully, false if not subscribed
+   * @return true once the subscription is absent (including when it was already absent)
    */
   fun unsubscribe(packageName: String, fileName: String): Boolean {
     val subscriptionId = "$packageName:$fileName"
 
     if (!subscriptions.containsKey(subscriptionId)) {
-      return false
+      return true
     }
 
     try {

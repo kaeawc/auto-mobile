@@ -27,6 +27,8 @@ interface ObservationStream {
    * [Flow] rather than a lossy broadcast buffer.
    */
   val storageSubscriptionResponses: Flow<StorageSubscriptionResponse>
+  /** Files that need a fresh snapshot because their runner-side observer was recreated. */
+  val storageReconciliationRequests: Flow<StorageSubscriptionKey>
   val deviceEvents: SharedFlow<DeviceStreamEvent>
   val connectionState: StateFlow<ConnectionState>
 

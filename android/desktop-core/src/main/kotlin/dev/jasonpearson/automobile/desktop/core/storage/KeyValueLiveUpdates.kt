@@ -19,6 +19,12 @@ internal fun highlightKey(fileName: String, key: String): String =
 internal fun hasStorageSequenceGap(previousSequence: Long?, currentSequence: Long): Boolean =
   currentSequence > 0L && currentSequence > (previousSequence ?: 0L) + 1L
 
+/** True when a restarted app process reset its process-local storage sequence. */
+internal fun hasStorageSequenceRegressed(
+  previousSequence: Long?,
+  currentSequence: Long,
+): Boolean = previousSequence != null && currentSequence > 0L && currentSequence < previousSequence
+
 /** Entry identities whose value, type, presence, or absence differs between two file snapshots. */
 internal fun changedStorageEntryKeys(
   before: List<KeyValueFile>,

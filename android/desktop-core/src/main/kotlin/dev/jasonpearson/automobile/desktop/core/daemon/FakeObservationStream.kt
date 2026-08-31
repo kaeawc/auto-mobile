@@ -47,6 +47,10 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
     Channel<StorageSubscriptionResponse>(Channel.UNLIMITED)
   override val storageSubscriptionResponses: Flow<StorageSubscriptionResponse> =
     storageSubscriptionResponseChannel.receiveAsFlow()
+  private val storageReconciliationRequestChannel =
+    Channel<StorageSubscriptionKey>(Channel.BUFFERED)
+  override val storageReconciliationRequests: Flow<StorageSubscriptionKey> =
+    storageReconciliationRequestChannel.receiveAsFlow()
   private val _deviceEvents = flow<DeviceStreamEvent>()
   override val deviceEvents: SharedFlow<DeviceStreamEvent> = _deviceEvents.asSharedFlow()
 
@@ -106,6 +110,7 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
     disconnect()
     storageUpdateChannel.close()
     storageSubscriptionResponseChannel.close()
+    storageReconciliationRequestChannel.close()
   }
 
   override fun setCadence(screenshotIntervalMs: Long?, hierarchyIntervalMs: Long?) = Unit
@@ -173,6 +178,9 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
 
   fun emitStorageSubscriptionResponse(response: StorageSubscriptionResponse): Boolean =
     storageSubscriptionResponseChannel.trySend(response).isSuccess
+
+  fun emitStorageReconciliationRequest(key: StorageSubscriptionKey): Boolean =
+    storageReconciliationRequestChannel.trySend(key).isSuccess
 
   fun emitHierarchy(update: HierarchyStreamUpdate): Boolean = _hierarchyUpdates.tryEmit(update)
 

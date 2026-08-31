@@ -2919,6 +2919,15 @@ describe("DeviceDataStreamSocketServer", () => {
         expect.objectContaining({ subscribe: true, fileName: "prefs.xml" }),
         expect.objectContaining({ subscribe: true, fileName: "prefs.xml" }),
       ]);
+      expect(
+        socket
+          .getWrittenMessages<{ type: string; packageName?: string; fileName?: string }>()
+          .at(-1),
+      ).toMatchObject({
+        type: "storage_reconciliation_required",
+        packageName: "com.example.app",
+        fileName: "prefs.xml",
+      });
     });
   });
 });

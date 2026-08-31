@@ -112,14 +112,24 @@ fun StorageDashboard(
       if (packageName != null && update.packageName != packageName) return@collect
 
       if (update.sequenceNumber > 0L) {
-        if (hasStorageSequenceGap(lastStorageSequence, update.sequenceNumber)) {
+        val sequenceRegressed =
+          hasStorageSequenceRegressed(lastStorageSequence, update.sequenceNumber)
+        if (
+          sequenceRegressed || hasStorageSequenceGap(lastStorageSequence, update.sequenceNumber)
+        ) {
           // The SDK sequence is process-global across preference files. A missing number may
           // belong to any loaded file, so reconcile all of them rather than guessing from the
-          // first post-gap event.
+          // first post-gap event. A regression means the app process restarted and its local
+          // sequence reset; writes during that restart gap likewise require a fresh snapshot.
           pendingStorageReconciliationFiles.addAll(keyValueFiles.map { it.name })
           storageReconciliationSignal.trySend(Unit)
         }
-        lastStorageSequence = maxOf(lastStorageSequence ?: 0L, update.sequenceNumber)
+        lastStorageSequence =
+          if (sequenceRegressed) {
+            update.sequenceNumber
+          } else {
+            maxOf(lastStorageSequence ?: 0L, update.sequenceNumber)
+          }
       }
 
       val filePresent = keyValueFiles.any { it.name == update.fileName }
@@ -187,6 +197,18 @@ fun StorageDashboard(
       if (keyValueFiles.none { it.name == fileName }) return@collect
       if (!handledStorageSubscriptionRequestIds.add(response.requestId)) return@collect
       pendingStorageReconciliationFiles.add(fileName)
+      storageReconciliationSignal.trySend(Unit)
+    }
+  }
+
+  // A runner-only reconnect recreates observers without reconnecting this desktop stream. Refresh
+  // the affected file because writes made while CtrlProxy was unavailable produced no delta.
+  LaunchedEffect(observationStreamClient, deviceId, packageName) {
+    val stream = observationStreamClient ?: return@LaunchedEffect
+    stream.storageReconciliationRequests.collect { key ->
+      if (key.packageName != packageName) return@collect
+      if (keyValueFiles.none { it.name == key.fileName }) return@collect
+      pendingStorageReconciliationFiles.add(key.fileName)
       storageReconciliationSignal.trySend(Unit)
     }
   }

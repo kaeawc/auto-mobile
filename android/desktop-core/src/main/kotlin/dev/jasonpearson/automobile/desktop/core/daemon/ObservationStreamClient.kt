@@ -170,6 +170,9 @@ class ObservationStreamClient(
   private val storageSubscriptionResponseChannel =
     Channel<StorageSubscriptionResponse>(Channel.UNLIMITED)
   override val storageSubscriptionResponses = storageSubscriptionResponseChannel.receiveAsFlow()
+  private val storageReconciliationRequestChannel =
+    Channel<StorageSubscriptionKey>(Channel.BUFFERED)
+  override val storageReconciliationRequests = storageReconciliationRequestChannel.receiveAsFlow()
 
   // Flow for device-level stream events such as control connection loss.
   private val _deviceEvents = MutableSharedFlow<DeviceStreamEvent>(replay = 1)
@@ -343,6 +346,7 @@ class ObservationStreamClient(
     disconnect()
     storageUpdateSignal.close()
     storageSubscriptionResponseChannel.close()
+    storageReconciliationRequestChannel.close()
     scope.coroutineContext[Job]?.cancel()
   }
 
@@ -661,6 +665,15 @@ class ObservationStreamClient(
           if (!enqueueStorageUpdate(update)) {
             log.warn("Storage update channel closed before update delivery")
           }
+        }
+      }
+      "storage_reconciliation_required" -> {
+        val packageName = response.packageName
+        val fileName = response.fileName
+        if (packageName == null || fileName == null) {
+          log.warn("storage_reconciliation_required without packageName/fileName, ignoring")
+        } else {
+          storageReconciliationRequestChannel.send(StorageSubscriptionKey(packageName, fileName))
         }
       }
       "ping" -> {
@@ -1005,6 +1018,8 @@ data class StreamResponse(
   val performanceData: PerformanceStreamData? = null,
   val hierarchyDiff: HierarchyDiffSummary? = null,
   val storageEvent: StorageEventData? = null,
+  val packageName: String? = null,
+  val fileName: String? = null,
   /**
    * Shared capture identity for the device geometry this message describes (issue #3348). Monotonic
    * per device, assigned on each `hierarchy_update` and echoed on each `screenshot_update` that

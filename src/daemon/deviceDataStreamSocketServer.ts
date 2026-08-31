@@ -87,6 +87,7 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
     | "navigation_update"
     | "performance_update"
     | "storage_update"
+    | "storage_reconciliation_required"
     | "device_session_started"
     | "device_session_ended"
     | "ping"
@@ -94,6 +95,8 @@ interface DeviceDataStreamMessage extends ScreenshotMetadata {
     | "error";
   success?: boolean;
   error?: string;
+  packageName?: string;
+  fileName?: string;
   deviceId?: string;
   /**
    * Stable device-session routing key for this frame's device epoch (epic #5256,
@@ -1193,6 +1196,16 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
           ...subscription,
           subscribe: subscription.owners.size > 0,
         });
+        if (subscription.owners.size > 0) {
+          for (const owner of subscription.owners) {
+            this.sendJson(owner, {
+              type: "storage_reconciliation_required",
+              deviceId,
+              packageName: subscription.packageName,
+              fileName: subscription.fileName,
+            });
+          }
+        }
         this.removeStorageSubscriptionIfUnowned(key, subscription);
       } catch (error) {
         logger.warn(

@@ -17,7 +17,6 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -462,10 +461,10 @@ class StorageSubscriptionManagerTest {
   }
 
   @Test
-  fun `unsubscribe returns false when not subscribed`() {
+  fun `unsubscribe is idempotent when not subscribed`() {
     val result = manager.unsubscribe("com.example.app", "nonexistent")
 
-    assertFalse(result)
+    assertTrue(result)
   }
 
   @Test

@@ -72,6 +72,28 @@ class ObservationStreamStorageTest {
   }
 
   @Test
+  fun `emits a reconciliation request after the runner observer is replayed`() = runTest {
+    val client = ObservationStreamClient()
+
+    client.storageReconciliationRequests.test {
+      client.handleMessage(
+        """
+        {
+          "type": "storage_reconciliation_required",
+          "deviceId": "emulator-5554",
+          "packageName": "com.example",
+          "fileName": "prefs.xml"
+        }
+        """
+          .trimIndent()
+      )
+
+      assertEquals(StorageSubscriptionKey("com.example", "prefs.xml"), awaitItem())
+    }
+    client.dispose()
+  }
+
+  @Test
   fun `uses the device-side event timestamp rather than the frame timestamp`() = runTest {
     val client = ObservationStreamClient()
 
@@ -180,7 +202,9 @@ class ObservationStreamStorageTest {
     (1L..100L).forEach { sequence -> queue.add(update("com.noisy", sequence)) }
     val updates = generateSequence {
       queue.pollBatch().takeIf { it.isNotEmpty() }
-    }.flatten().toList()
+    }
+      .flatten()
+      .toList()
 
     assertEquals(
       listOf(1L),

@@ -169,6 +169,13 @@ class KeyValueLiveUpdatesTest {
   }
 
   @Test
+  fun `a lower positive sequence identifies a producer restart`() {
+    assertTrue(hasStorageSequenceRegressed(previousSequence = 100L, currentSequence = 1L))
+    assertTrue(!hasStorageSequenceRegressed(previousSequence = 100L, currentSequence = 101L))
+    assertTrue(!hasStorageSequenceRegressed(previousSequence = null, currentSequence = 1L))
+  }
+
+  @Test
   fun `snapshot differences identify changed added and removed entries`() {
     val before =
       listOf(

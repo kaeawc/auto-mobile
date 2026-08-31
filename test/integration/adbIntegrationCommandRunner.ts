@@ -9,6 +9,25 @@ export interface AdbIntegrationCommandRunner {
   run(args: string[], phase: string): Promise<ExecResult>;
 }
 
+/** Poll a device observable until it reaches its expected postcondition. */
+export async function waitForAdbCondition(
+  predicate: () => Promise<boolean>,
+  message: string,
+  timeoutMs: number = 5_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    if (await predicate()) {
+      return;
+    }
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error(`${message} within ${timeoutMs}ms`);
+    }
+    await Bun.sleep(Math.min(100, remainingMs));
+  }
+}
+
 /**
  * Creates the bounded executor for short-lived ADB queries performed by an
  * integration suite. Streaming commands intentionally use their own lifecycle.

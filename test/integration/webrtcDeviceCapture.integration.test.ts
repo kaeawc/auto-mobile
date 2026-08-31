@@ -2,10 +2,11 @@ import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { createWriteStream, existsSync, readFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { dump, load } from "js-yaml";
 import WebSocket from "ws";
 import { sendWebRtcStreamRequest } from "../../src/daemon/webrtcStreamClient";
 import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
@@ -28,9 +29,64 @@ const execFileAsync = promisify(execFile);
 const runIntegration = process.env.AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION === "1";
 const describeIntegration = runIntegration ? describe : describe.skip;
 const platform = process.env.AUTOMOBILE_WEBRTC_DEVICE_PLATFORM;
-const webRtcPort = 8889;
-const streamId = `device-capture-${platform ?? "unknown"}`;
-const artifactDir = resolve("scratch/webrtc-device-integration");
+const artifactRoot = resolve(
+  process.env.AUTOMOBILE_WEBRTC_DEVICE_ARTIFACT_ROOT ?? "scratch/webrtc-device-integration",
+);
+
+function integrationPort(environmentName: string, fallback: number): number {
+  const value = process.env[environmentName];
+  if (!value) {
+    return fallback;
+  }
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error(`${environmentName} must be an integer from 1 through 65535.`);
+  }
+  return port;
+}
+
+// The MediaMTX config and Chrome CLI both expose listener ports. Keep these
+// test-only overrides here rather than introducing daemon configuration solely
+// for parallel integration workers.
+const webRtcPort = integrationPort("AUTOMOBILE_WEBRTC_DEVICE_MEDIAMTX_PORT", 8889);
+const mediaMtxUdpPort = integrationPort("AUTOMOBILE_WEBRTC_DEVICE_MEDIAMTX_UDP_PORT", 8189);
+const mediaMtxTcpPort = integrationPort("AUTOMOBILE_WEBRTC_DEVICE_MEDIAMTX_TCP_PORT", 8189);
+const chromeDebugPort = integrationPort("AUTOMOBILE_WEBRTC_DEVICE_CHROME_DEBUG_PORT", 9222);
+
+function workerIdentity(): string {
+  const identity =
+    process.env.AUTOMOBILE_WEBRTC_DEVICE_WORKER_ID ??
+    [process.env.GITHUB_RUN_ID, process.env.GITHUB_RUN_ATTEMPT, process.env.GITHUB_JOB]
+      .filter((value): value is string => Boolean(value))
+      .join("-");
+  return (identity || platform || "local").replaceAll(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+const streamId = `device-capture-${platform ?? "unknown"}-${workerIdentity()}`;
+let artifactDir: string | undefined;
+
+async function createRunArtifactDir(): Promise<string> {
+  await mkdir(artifactRoot, { recursive: true });
+  artifactDir = await mkdtemp(join(artifactRoot, `${workerIdentity()}-`));
+  return artifactDir;
+}
+
+async function createMediaMtxConfig(directory: string): Promise<string> {
+  const source = await readFile(resolve("examples/mediamtx/mediamtx.yml"), "utf8");
+  const parsed = load(source);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("MediaMTX configuration must be a YAML mapping.");
+  }
+  const config = { ...(parsed as Record<string, unknown>) };
+  config.webrtcAddress = `127.0.0.1:${webRtcPort}`;
+  // MediaMTX's WebRTC HTTP listener is only signaling. Its ICE TCP and UDP
+  // listeners otherwise retain the shared :8189 defaults and still collide.
+  config.webrtcLocalUDPAddress = `127.0.0.1:${mediaMtxUdpPort}`;
+  config.webrtcLocalTCPAddress = `127.0.0.1:${mediaMtxTcpPort}`;
+  const configPath = join(directory, "mediamtx.yml");
+  await writeFile(configPath, dump(config, { lineWidth: -1 }), "utf8");
+  return configPath;
+}
 // Hosted iOS runners can spend more than three minutes on daemon bootstrap,
 // Simulator commands, and Chrome startup before the bounded 30s decode checks.
 const deviceIntegrationTimeoutMs = 360_000;
@@ -289,14 +345,16 @@ function chromeBinary(): string {
   return binary;
 }
 
-const CHROME_DEBUG_PORT = 9222;
-const CHROME_LAUNCH_ARGS = [
-  "--headless=new",
-  "--autoplay-policy=no-user-gesture-required",
-  `--remote-debugging-port=${CHROME_DEBUG_PORT}`,
-  "--no-first-run",
-  "about:blank",
-];
+function chromeLaunchArgs(userDataDir: string): string[] {
+  return [
+    "--headless=new",
+    "--autoplay-policy=no-user-gesture-required",
+    `--remote-debugging-port=${chromeDebugPort}`,
+    "--no-first-run",
+    `--user-data-dir=${userDataDir}`,
+    "about:blank",
+  ];
+}
 
 /** The Chrome process exit status + a tail of its log, for diagnosing a
  * headless-startup flake (the log was empty and unsurfaced before #4409). */
@@ -328,11 +386,7 @@ async function launchChromeReader(
   let lastError: Error | undefined;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const userDataDir = await mkdtemp(join(tmpdir(), "automobile-chrome-"));
-    const chrome = start(
-      chromeBinary(),
-      [...CHROME_LAUNCH_ARGS, `--user-data-dir=${userDataDir}`],
-      logFile,
-    );
+    const chrome = start(chromeBinary(), chromeLaunchArgs(userDataDir), logFile);
     onStarted(chrome);
     try {
       const cdp = await connectReader(chrome, logFile);
@@ -340,7 +394,7 @@ async function launchChromeReader(
     } catch (error) {
       lastError = error as Error;
       await stop(chrome);
-      // Free the debugging port before relaunching on the same port.
+      // Free the selected debugging port before relaunching on it.
       if (attempt < maxAttempts) {
         await Bun.sleep(1_000);
       }
@@ -369,7 +423,7 @@ async function connectReader(
       }
       try {
         const targets = (await (
-          await fetch(`http://127.0.0.1:${CHROME_DEBUG_PORT}/json/list`, {
+          await fetch(`http://127.0.0.1:${chromeDebugPort}/json/list`, {
             signal: AbortSignal.timeout(REAL_IO_TIMEOUT_MS),
           })
         ).json()) as ChromeTarget[];
@@ -617,7 +671,32 @@ async function recoverySample(cdp: CdpClient): Promise<KeyframeRecoverySample | 
 }
 
 function androidDeviceId(): string {
-  return process.env.AUTOMOBILE_ANDROID_H264_DEVICE_ID ?? "emulator-5554";
+  return (
+    process.env.AUTOMOBILE_WEBRTC_DEVICE_ANDROID_ID ??
+    process.env.AUTOMOBILE_WEBRTC_DEVICE_ID ??
+    process.env.AUTOMOBILE_ANDROID_H264_DEVICE_ID ??
+    "emulator-5554"
+  );
+}
+
+function iosSimulatorId(): string {
+  return (
+    process.env.AUTOMOBILE_WEBRTC_DEVICE_IOS_SIMULATOR_UDID ??
+    process.env.AUTOMOBILE_WEBRTC_DEVICE_ID ??
+    process.env.AUTOMOBILE_IOS_SIMULATOR_UDID ??
+    "booted"
+  );
+}
+
+function streamDeviceId(): string | undefined {
+  if (platform === "android") {
+    return androidDeviceId();
+  }
+  if (platform === "ios") {
+    const id = iosSimulatorId();
+    return id === "booted" ? undefined : id;
+  }
+  return undefined;
 }
 
 interface CaptureProfile {
@@ -667,7 +746,7 @@ async function captureProfile(): Promise<CaptureProfile> {
     // that output belongs to the CarPlay screen, so a naive match reports
     // 720x480 for every simulator. SimCtlClient gates on the integrated display.
     const { SimCtlClient } = await import("../../src/utils/ios-cmdline-tools/SimCtlClient");
-    const screen = await new SimCtlClient().getScreenSize("booted", REAL_IO_TIMEOUT_MS);
+    const screen = await new SimCtlClient().getScreenSize(iosSimulatorId(), REAL_IO_TIMEOUT_MS);
     return { sourceSize: { width: screen.width, height: screen.height }, configuredFps };
   } catch (error) {
     // Diagnostic metadata only — a failed size query must not fail the lane.
@@ -692,12 +771,13 @@ async function launchFixture(signal?: AbortSignal): Promise<void> {
     return;
   }
   if (platform === "ios") {
-    await execFileAsync("xcrun", ["simctl", "launch", "booted", "com.apple.Preferences"], {
+    const id = iosSimulatorId();
+    await execFileAsync("xcrun", ["simctl", "launch", id, "com.apple.Preferences"], {
       timeout: REAL_IO_TIMEOUT_MS,
       killSignal: "SIGKILL",
       signal,
     });
-    await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"], {
+    await execFileAsync("xcrun", ["simctl", "ui", id, "appearance", "light"], {
       timeout: REAL_IO_TIMEOUT_MS,
       killSignal: "SIGKILL",
       signal,
@@ -721,7 +801,7 @@ async function changeFixture(signal?: AbortSignal): Promise<void> {
     return;
   }
   if (platform === "ios") {
-    await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "dark"], {
+    await execFileAsync("xcrun", ["simctl", "ui", iosSimulatorId(), "appearance", "dark"], {
       timeout: REAL_IO_TIMEOUT_MS,
       killSignal: "SIGKILL",
       signal,
@@ -748,7 +828,7 @@ afterEach(async () => {
           });
         }
         if (platform === "ios") {
-          await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"], {
+          await execFileAsync("xcrun", ["simctl", "ui", iosSimulatorId(), "appearance", "light"], {
             timeout: FIXTURE_RESTORE_TIMEOUT_MS,
             killSignal: "SIGKILL",
           });
@@ -887,12 +967,13 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
     console.log(`[#4343] device capture stage latency\n${summary}`);
     // Written for passing runs too: the p50/p95 baselines this feeds need the
     // successful samples, and a failure keeps whatever stages it reached.
-    await mkdir(artifactDir, { recursive: true });
-    await writeFile(
-      join(artifactDir, "stage-latency.json"),
-      `${JSON.stringify(record, null, 2)}\n`,
-    );
-    await writeFile(join(artifactDir, "result.txt"), `${summary}\n`);
+    if (artifactDir) {
+      await writeFile(
+        join(artifactDir, "stage-latency.json"),
+        `${JSON.stringify(record, null, 2)}\n`,
+      );
+      await writeFile(join(artifactDir, "result.txt"), `${summary}\n`);
+    }
     if (cleanupError) {
       throw cleanupError;
     }
@@ -901,11 +982,11 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
   test(
     "the real device capture path renders changing video and stops cleanly",
     async () => {
+      const runArtifactDir = await createRunArtifactDir();
       if (!process.env.AUTOMOBILE_MEDIAMTX_BINARY) {
         throw new Error("MediaMTX runner did not provide AUTOMOBILE_MEDIAMTX_BINARY");
       }
-      await mkdir(artifactDir, { recursive: true });
-      const daemonDir = await mkdtemp(join(artifactDir, "daemon-"));
+      const daemonDir = await mkdtemp(join(runArtifactDir, "daemon-"));
       const daemonDbDir = join(daemonDir, "db");
       // macOS limits Unix-domain socket paths to 104 bytes. The artifact directory
       // is deliberately descriptive and can exceed that limit on hosted runners,
@@ -939,10 +1020,11 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
       };
       delete daemonEnvironment.AUTOMOBILE_DB_PATH;
       delete daemonEnvironment.AUTO_MOBILE_DB_PATH;
+      const mediamtxConfig = await createMediaMtxConfig(runArtifactDir);
       const mediamtx = start(
         process.env.AUTOMOBILE_MEDIAMTX_BINARY,
-        ["examples/mediamtx/mediamtx.yml"],
-        join(artifactDir, "mediamtx.log"),
+        [mediamtxConfig],
+        join(runArtifactDir, "mediamtx.log"),
       );
       let chrome: ChildProcessWithoutNullStreams | undefined;
       const rememberChrome = (nextChrome: ChildProcessWithoutNullStreams): void => {
@@ -1013,7 +1095,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         await waitFor(async () => {
           if (mediamtx.exitCode !== null || mediamtx.signalCode !== null) {
             throw new Error(
-              "MediaMTX exited before it became ready; inspect scratch/webrtc-device-integration/mediamtx.log",
+              `MediaMTX exited before it became ready; inspect ${join(runArtifactDir, "mediamtx.log")}`,
             );
           }
           const response = await fetch(`http://127.0.0.1:${webRtcPort}/`, {
@@ -1032,7 +1114,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
         // Chrome is launched before the measured window opens so its cold start —
         // seconds on a hosted runner — is not charged to the WHEP-connect stage.
         ({ chrome, cdp } = await launchChromeReader(
-          join(artifactDir, "chrome.log"),
+          join(runArtifactDir, "chrome.log"),
           rememberChrome,
         ));
         await ensureWebRtcDaemon(webRtcSocketPath, daemonEnvironment);
@@ -1069,6 +1151,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
             streamId,
             platform,
             whipEndpoint: `http://127.0.0.1:${webRtcPort}/${streamId}/whip`,
+            deviceId: streamDeviceId(),
             // Both peers are local to the CI worker. Suppress the public STUN
             // default so host-candidate negotiation cannot depend on runner DNS.
             iceServers: [],
@@ -1181,7 +1264,7 @@ describeIntegration("device capture -> WHIP -> MediaMTX -> WHEP (#4308)", () => 
             // viewer starts cold, so its baseline is zero on both counters.
             ({ chrome, cdp } = await subscribeRecoveryReader(
               { chrome: chrome!, cdp: cdp! },
-              join(artifactDir, "chrome.log"),
+              join(runArtifactDir, "chrome.log"),
               rememberChrome,
             ));
             const baseline: KeyframeRecoverySample = { keyFramesDecoded: 0, framesDecoded: 0 };

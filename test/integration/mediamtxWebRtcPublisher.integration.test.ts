@@ -79,10 +79,15 @@ class CdpClient {
     });
   }
 
-  static async connect(url: string): Promise<CdpClient> {
+  static async connect(url: string, timeoutMs: number = 10_000): Promise<CdpClient> {
     const socket = new WebSocket(url);
-    await once(socket, "open");
-    return new CdpClient(socket);
+    try {
+      await boundedOnce(socket, "open", "Chrome DevTools WebSocket", timeoutMs);
+      return new CdpClient(socket);
+    } catch (error) {
+      socket.close();
+      throw error;
+    }
   }
 
   async command(method: string, params: Record<string, unknown> = {}): Promise<CdpResponse> {
@@ -121,7 +126,7 @@ function startProcess(command: string, args: string[], cwd: string): StartedProc
 }
 
 async function waitFor(
-  predicate: () => boolean | Promise<boolean>,
+  predicate: (deadline: number) => boolean | Promise<boolean>,
   message: string | (() => string),
   timeoutMs: number = 15_000,
 ): Promise<void> {
@@ -135,6 +140,14 @@ async function waitFor(
   if (!(await predicate())) {
     throw new Error(typeof message === "function" ? message() : message);
   }
+}
+
+async function fetchBeforeDeadline(url: string, deadline: number): Promise<Response> {
+  const remainingMs = deadline - Date.now();
+  if (remainingMs <= 0) {
+    throw new Error(`Fetch deadline elapsed before requesting ${url}`);
+  }
+  return fetch(url, { signal: AbortSignal.timeout(remainingMs) });
 }
 
 function exitedProcessDescription(process: ChildProcessWithoutNullStreams): string | undefined {
@@ -154,7 +167,7 @@ async function waitForHttpServer(
   name: string,
   processError?: () => Error | undefined,
 ): Promise<void> {
-  await waitFor(async () => {
+  await waitFor(async (deadline) => {
     const spawnError = processError?.();
     if (spawnError) {
       throw new Error(`${name} failed to start: ${spawnError.message}\n${logs()}`);
@@ -164,11 +177,10 @@ async function waitForHttpServer(
       throw new Error(`${name} exited before readiness (${exited}):\n${logs()}`);
     }
     try {
-      const response = await fetch(url);
+      const response = await fetchBeforeDeadline(url, deadline);
       if (response.status >= 500) {
         return false;
       }
-      await Bun.sleep(100);
       const exitedAfterProbe = exitedProcessDescription(process);
       if (exitedAfterProbe) {
         throw new Error(`${name} exited before readiness (${exitedAfterProbe}):\n${logs()}`);
@@ -226,7 +238,7 @@ function resolveChromeBinary(): string {
 async function waitForChromeTarget(port: string, chrome: StartedProcess): Promise<ChromeTarget> {
   let targets: ChromeTarget[] = [];
   await waitFor(
-    async () => {
+    async (deadline) => {
       const spawnError = chrome.error();
       if (spawnError) {
         throw new Error(`Chrome failed to start: ${spawnError.message}`);
@@ -236,7 +248,7 @@ async function waitForChromeTarget(port: string, chrome: StartedProcess): Promis
         throw new Error(`Chrome exited before DevTools started (${exited}):\n${chrome.logs()}`);
       }
       try {
-        const response = await fetch(`http://127.0.0.1:${port}/json/list`);
+        const response = await fetchBeforeDeadline(`http://127.0.0.1:${port}/json/list`, deadline);
         targets = (await response.json()) as ChromeTarget[];
         return targets.some((target) => target.type === "page" && target.webSocketDebuggerUrl);
       } catch {

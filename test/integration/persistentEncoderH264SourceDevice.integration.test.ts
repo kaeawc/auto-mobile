@@ -1,6 +1,4 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { PersistentEncoderH264Source } from "../../src/features/webrtc/PersistentEncoderH264Source";
 import { resolveVideoServerJarPath } from "../../src/features/webrtc/videoServerJar";
 import {
@@ -11,7 +9,13 @@ import {
   nalUnitType,
 } from "../../src/features/webrtc/h264";
 import type { BootedDevice } from "../../src/models";
-import { defaultTimer } from "../../src/utils/SystemTimer";
+import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
+import {
+  ADB_INTEGRATION_COMMAND_TIMEOUT_MS,
+  createAdbIntegrationCommandRunner,
+  waitForAdbCondition,
+} from "./adbIntegrationCommandRunner";
+import { createH264CaptureReadiness } from "./h264CaptureReadiness";
 
 /**
  * On-device verification (issue #3776) that the persistent on-device encoder
@@ -23,17 +27,17 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
  * Opt-in: set `AUTOMOBILE_PERSISTENT_ENCODER_INTEGRATION=1` (and optionally
  * `AUTOMOBILE_VIDEO_SERVER_JAR=<path>` / `AUTOMOBILE_ANDROID_H264_DEVICE_ID`).
  */
-const execFileAsync = promisify(execFile);
 const RUN_INTEGRATION = process.env.AUTOMOBILE_PERSISTENT_ENCODER_INTEGRATION === "1";
 const describeIntegration = RUN_INTEGRATION ? describe : describe.skip;
-const CAPTURE_MS = 3000;
+const ADB_SETUP_HOOK_TIMEOUT_MS = ADB_INTEGRATION_COMMAND_TIMEOUT_MS * 2 + 1000;
+const adb = createAdbIntegrationCommandRunner(new DefaultHostCommandExecutor());
 
 async function resolveDeviceId(): Promise<string> {
   const explicit = process.env.AUTOMOBILE_ANDROID_H264_DEVICE_ID;
   if (explicit) {
     return explicit;
   }
-  const { stdout } = await execFileAsync("adb", ["devices"]);
+  const { stdout } = await adb.run(["devices"], "discovering an Android device");
   const serial = stdout
     .split("\n")
     .slice(1)
@@ -47,7 +51,10 @@ async function resolveDeviceId(): Promise<string> {
 }
 
 async function countAppProcesses(deviceId: string): Promise<number> {
-  const { stdout } = await execFileAsync("adb", ["-s", deviceId, "shell", "ps", "-A"]);
+  const { stdout } = await adb.run(
+    ["-s", deviceId, "shell", "ps", "-A"],
+    "checking for video-server processes",
+  );
   return stdout.split("\n").filter((line) => line.includes("automobile.video")).length;
 }
 
@@ -72,7 +79,7 @@ describeIntegration("PersistentEncoderH264Source on-device capture (#3776)", () 
   let jarPath: string;
 
   beforeAll(async () => {
-    await execFileAsync("adb", ["version"]);
+    await adb.run(["version"], "checking ADB availability");
     deviceId = await resolveDeviceId();
     const resolved = resolveVideoServerJarPath();
     if (!resolved) {
@@ -82,7 +89,7 @@ describeIntegration("PersistentEncoderH264Source on-device capture (#3776)", () 
       );
     }
     jarPath = resolved;
-  });
+  }, ADB_SETUP_HOOK_TIMEOUT_MS);
 
   function makeDevice(): BootedDevice {
     return { deviceId, platform: "android", name: deviceId } as BootedDevice;
@@ -91,21 +98,26 @@ describeIntegration("PersistentEncoderH264Source on-device capture (#3776)", () 
   async function capture(
     overrides: Record<string, unknown> = {},
   ): Promise<{ chunks: Buffer[]; errors: Error[] }> {
-    const chunks: Buffer[] = [];
+    const captureReadiness = createH264CaptureReadiness();
     const errors: Error[] = [];
     const source = new PersistentEncoderH264Source({
       device: makeDevice(),
-      onData: (chunk) => chunks.push(chunk),
-      onError: (error) => errors.push(error),
+      onData: captureReadiness.onData,
+      onError: (error) => {
+        errors.push(error);
+        captureReadiness.onError(error);
+      },
       jarPath,
       quality: "low",
       ...overrides,
     });
     await source.start();
-    await defaultTimer.sleep(CAPTURE_MS);
-    await source.stop();
-    await defaultTimer.sleep(500);
-    return { chunks, errors };
+    try {
+      await captureReadiness.wait();
+    } finally {
+      await source.stop();
+    }
+    return { chunks: captureReadiness.chunks, errors };
   }
 
   test("captures a continuous Annex-B stream with SPS, PPS, and an IDR", async () => {
@@ -132,7 +144,9 @@ describeIntegration("PersistentEncoderH264Source on-device capture (#3776)", () 
     const baseline = await countAppProcesses(deviceId);
     const { errors } = await capture();
     expect(errors).toEqual([]);
-    const after = await countAppProcesses(deviceId);
-    expect(after).toBeLessThanOrEqual(baseline);
+    await waitForAdbCondition(
+      async () => (await countAppProcesses(deviceId)) <= baseline,
+      "video-server process did not exit after stop",
+    );
   }, 40000);
 });

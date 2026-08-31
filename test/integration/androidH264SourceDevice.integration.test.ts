@@ -9,12 +9,13 @@ import {
 } from "../../src/features/webrtc/h264";
 import type { BootedDevice } from "../../src/models";
 import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
-import { defaultTimer } from "../../src/utils/SystemTimer";
 import {
   ADB_INTEGRATION_COMMAND_TIMEOUT_MS,
   createAdbIntegrationCommandRunner,
   type AdbIntegrationCommandRunner,
+  waitForAdbCondition,
 } from "./adbIntegrationCommandRunner";
+import { createH264CaptureReadiness } from "./h264CaptureReadiness";
 
 /**
  * On-device verification of the ONE seam the unit tests structurally cannot
@@ -30,7 +31,6 @@ import {
  */
 const RUN_INTEGRATION = process.env.AUTOMOBILE_ANDROID_H264_INTEGRATION === "1";
 const describeIntegration = RUN_INTEGRATION ? describe : describe.skip;
-const CAPTURE_MS = 3000;
 // The two sequential setup queries must each be killed by their own child-process
 // deadline. This hook budget is only a final backstop if a future setup step stalls.
 const ADB_SETUP_HOOK_TIMEOUT_MS = ADB_INTEGRATION_COMMAND_TIMEOUT_MS * 2 + 1000;
@@ -98,22 +98,26 @@ describeIntegration("AndroidH264Source on-device capture (#3775)", () => {
 
   async function capture(
     overrides: Partial<ConstructorParameters<typeof AndroidH264Source>[0]> = {},
-    captureMs: number = CAPTURE_MS,
+    minimumSpsCount: number = 1,
   ): Promise<{ chunks: Buffer[]; errors: Error[]; source: AndroidH264Source }> {
-    const chunks: Buffer[] = [];
+    const captureReadiness = createH264CaptureReadiness(minimumSpsCount);
     const errors: Error[] = [];
     const source = new AndroidH264Source({
       device: makeDevice(),
-      onData: (chunk) => chunks.push(chunk),
-      onError: (error) => errors.push(error),
+      onData: captureReadiness.onData,
+      onError: (error) => {
+        errors.push(error);
+        captureReadiness.onError(error);
+      },
       ...overrides,
     });
     await source.start();
-    await defaultTimer.sleep(captureMs);
-    await source.stop();
-    // Let the killed `adb`/`screenrecord` processes wind down before assertions.
-    await defaultTimer.sleep(500);
-    return { chunks, errors, source };
+    try {
+      await captureReadiness.wait();
+    } finally {
+      await source.stop();
+    }
+    return { chunks: captureReadiness.chunks, errors, source };
   }
 
   test("captures a real Annex-B stream with SPS, PPS, and an IDR key frame", async () => {
@@ -167,7 +171,7 @@ describeIntegration("AndroidH264Source on-device capture (#3775)", () => {
     // Force fast rotation: cap each segment at 2s and rotate at 1.5s.
     const { chunks, errors, source } = await capture(
       { segmentTimeLimitSeconds: 2, segmentRotateMs: 1500 },
-      5000,
+      2,
     );
 
     expect(errors).toEqual([]);
@@ -190,7 +194,9 @@ describeIntegration("AndroidH264Source on-device capture (#3775)", () => {
     // After stop + wind-down, the device-side screenrecord count must return to
     // (or below) the baseline — our session leaves nothing running. A leak would
     // show up as a count above baseline.
-    const after = await countScreenrecordProcesses(adb, deviceId);
-    expect(after).toBeLessThanOrEqual(baseline);
+    await waitForAdbCondition(
+      async () => (await countScreenrecordProcesses(adb, deviceId)) <= baseline,
+      "screenrecord process did not exit after stop",
+    );
   }, 30000);
 });

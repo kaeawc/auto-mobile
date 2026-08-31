@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.net.Uri
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import java.io.File
+import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
@@ -26,6 +27,13 @@ internal class SharedPreferencesDriverImpl(
 
     /** URI path for change notifications. */
     const val CHANGES_PATH = "changes"
+
+    /**
+     * Retain enough recent writes for transient CtrlProxy delays without allowing an unavailable
+     * consumer to exhaust the inspected app's memory. Evicting older entries leaves a sequence gap,
+     * which the desktop reconciles from a fresh snapshot.
+     */
+    private const val MAX_QUEUED_CHANGES_PER_FILE = 256
   }
 
   private val listeners = CopyOnWriteArrayList<OnPreferenceChangeListener>()
@@ -36,8 +44,8 @@ internal class SharedPreferencesDriverImpl(
   private val sharedPrefsListeners =
     ConcurrentHashMap<String, SharedPreferences.OnSharedPreferenceChangeListener>()
 
-  /** Per-file change queues for push-based notifications. */
-  private val changeQueues = ConcurrentHashMap<String, CopyOnWriteArrayList<PreferenceChange>>()
+  /** Per-file bounded change queues for push-based notifications. */
+  private val changeQueues = ConcurrentHashMap<String, BoundedPreferenceChangeQueue>()
 
   /**
    * Per-file snapshot of the last-known values, keyed by preference key. Seeded on [startListening]
@@ -105,7 +113,9 @@ internal class SharedPreferencesDriverImpl(
     if (sharedPrefsListeners.containsKey(fileName)) return
 
     // Initialize change queue for this file
-    changeQueues.getOrPut(fileName) { CopyOnWriteArrayList() }
+    changeQueues.getOrPut(fileName) {
+      BoundedPreferenceChangeQueue(MAX_QUEUED_CHANGES_PER_FILE)
+    }
 
     val prefs = context.getSharedPreferences(fileName, Context.MODE_PRIVATE)
 
@@ -212,17 +222,7 @@ internal class SharedPreferencesDriverImpl(
    * @return List of changes since the given sequence number
    */
   internal fun getQueuedChanges(fileName: String, sinceSequence: Long): List<PreferenceChange> {
-    val queue = changeQueues[fileName] ?: return emptyList()
-
-    // Find changes after the given sequence
-    val changes = queue.filter { it.sequenceNumber > sinceSequence }
-
-    // Remove the returned changes from the queue
-    if (changes.isNotEmpty()) {
-      queue.removeAll(changes.toSet())
-    }
-
-    return changes
+    return changeQueues[fileName]?.drainAfter(sinceSequence) ?: emptyList()
   }
 
   /** Notifies observers that changes are available via ContentResolver. */
@@ -320,5 +320,29 @@ internal class SharedPreferencesDriverImpl(
       is Set<*> -> KeyValueType.STRING_SET
       else -> KeyValueType.UNKNOWN
     }
+  }
+}
+
+/**
+ * Synchronizes each file's queue independently so application writes never contend across files.
+ * Its finite capacity intentionally evicts the oldest event: the remaining sequence discontinuity
+ * tells the desktop to refresh its authoritative snapshot.
+ */
+private class BoundedPreferenceChangeQueue(private val capacity: Int) {
+  private val changes = ArrayDeque<PreferenceChange>(capacity)
+
+  @Synchronized
+  fun add(change: PreferenceChange) {
+    if (changes.size == capacity) {
+      changes.removeFirst()
+    }
+    changes.addLast(change)
+  }
+
+  @Synchronized
+  fun drainAfter(sequenceNumber: Long): List<PreferenceChange> {
+    val pendingChanges = changes.filter { it.sequenceNumber > sequenceNumber }
+    changes.removeAll(pendingChanges.toSet())
+    return pendingChanges
   }
 }

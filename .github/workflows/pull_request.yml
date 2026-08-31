@@ -1394,10 +1394,10 @@ jobs:
             # shellcheck source=scripts/ios/run_with_timeout.sh
             source scripts/ios/run_with_timeout.sh
             test_status=0
-            run_with_timeout 720 bun run test 2>&1 \
+            run_with_timeout 30 bun run test 2>&1 \
               | tee "ci-logs/bun-test-${{ matrix.os }}.log" || test_status=$?
             if [[ "$test_status" -eq 124 ]]; then
-              echo "::error::macOS fake-only unit suite exceeded its wall-clock ceiling."
+              echo "::error::fake-only unit suite exceeded its 30-second wall-clock ceiling."
             fi
             exit "$test_status"
           fi

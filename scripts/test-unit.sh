@@ -5,7 +5,7 @@
 # must remain safe to run continuously while editing.
 set -euo pipefail
 
-readonly UNIT_TEST_TIMEOUT_SECONDS="${AUTOMOBILE_UNIT_TEST_TIMEOUT_SECONDS:-15}"
+readonly UNIT_TEST_TIMEOUT_SECONDS="${AUTOMOBILE_UNIT_TEST_TIMEOUT_SECONDS:-30}"
 readonly UNIT_TEST_WORKERS="${AUTOMOBILE_UNIT_TEST_WORKERS:-12}"
 readonly UNIT_TEST_BASE_REF="${AUTOMOBILE_UNIT_TEST_BASE_REF:-origin/main}"
 

@@ -735,6 +735,33 @@ export function normalizeStorageWireValue(value: unknown): string | null {
   return typeof value === "string" ? value : JSON.stringify(value);
 }
 
+interface JsonParseContext {
+  source?: string;
+}
+
+/**
+ * Parse a CtrlProxy frame without rounding legacy bare 64-bit storage values. Modern runners quote
+ * LONG values, but older runners sent them as JSON numbers. Bun's standard JSON.parse source
+ * context exposes the original numeric token before IEEE-754 conversion loses digits.
+ */
+export function parseCtrlProxyJson<T>(text: string): T {
+  return JSON.parse(
+    text,
+    (key: string, value: unknown, context?: JsonParseContext): unknown => {
+      if (
+        (key === "value" || key === "previousValue") &&
+        typeof value === "number" &&
+        Number.isInteger(value) &&
+        !Number.isSafeInteger(value) &&
+        context?.source
+      ) {
+        return context.source;
+      }
+      return value;
+    },
+  );
+}
+
 /**
  * Discriminated union of all WebSocket messages from the accessibility service.
  * The `type` field is the discriminant.
@@ -3413,7 +3440,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private async handleWebSocketMessage(data: WebSocket.Data): Promise<void> {
     try {
-      const message: WebSocketMessage = JSON.parse(data.toString());
+      const message = parseCtrlProxyJson<WebSocketMessage>(data.toString());
 
       if (message.type === "connected") {
         this.supportedCommands = Array.isArray(message.supportedCommands)

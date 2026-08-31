@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { normalizeStorageWireValue } from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
+import {
+  normalizeStorageWireValue,
+  parseCtrlProxyJson,
+} from "../../../../src/features/observe/android/AndroidCtrlProxyClient";
 
 /**
  * Unit tests for the pure wire-value normalization used by the Android
@@ -19,6 +22,14 @@ describe("normalizeStorageWireValue (#4709)", () => {
 
   test("re-encodes an INT/LONG value to its decimal string", () => {
     expect(normalizeStorageWireValue(42)).toBe("42");
+  });
+
+  test("preserves an unsafe legacy bare LONG before JSON number rounding", () => {
+    const message = parseCtrlProxyJson<{ value: unknown }>(
+      '{"type":"storage_changed","valueType":"LONG","value":9223372036854775807}',
+    );
+
+    expect(normalizeStorageWireValue(message.value)).toBe("9223372036854775807");
   });
 
   test("re-encodes a FLOAT value to its string form", () => {

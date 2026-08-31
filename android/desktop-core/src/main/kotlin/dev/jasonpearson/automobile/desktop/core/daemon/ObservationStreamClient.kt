@@ -110,6 +110,9 @@ class ObservationStreamClient(
   // mutated while holding this lock, so a read loop's generation check and connect()/disconnect()'s
   // reassignment can never interleave.
   private val ownershipLock = Any()
+  // A request frame is three writer operations (payload, newline, flush). Keep them atomic across
+  // UI lifecycle commands and read-loop pong responses.
+  private val writerLock = Any()
 
   // Single owning reference to the live transport. Closed at its death point in the read loop (EOF
   // or read error) and in disconnect(), so no reconnect abandons a still-open socket (issue #5261).
@@ -147,8 +150,10 @@ class ObservationStreamClient(
   override val performanceUpdates: SharedFlow<PerformanceStreamUpdate> =
     _performanceUpdates.asSharedFlow()
 
-  // Storage updates must not be dropped: a lost write leaves an inspector permanently stale.
-  // Backpressure the socket reader while its active pane catches up instead.
+  // Storage updates must not be dropped, but the multiplexed socket reader must remain free to
+  // process pings and other frames. An unbounded channel transfers updates losslessly to a
+  // dedicated flow emitter.
+  private val storageUpdateChannel = Channel<StorageStreamUpdate>(Channel.UNLIMITED)
   private val _storageUpdates = MutableSharedFlow<StorageStreamUpdate>(replay = 1)
   override val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
 
@@ -166,6 +171,14 @@ class ObservationStreamClient(
   // Flow for connection state
   private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
   override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+
+  init {
+    scope.launch {
+      for (update in storageUpdateChannel) {
+        _storageUpdates.emit(update)
+      }
+    }
+  }
 
   // Requested observation cadence, remembered so it is re-applied on every (re)subscribe (so the
   // cadence survives reconnects). Managed via setCadence(); null means "use the daemon's default".
@@ -391,17 +404,19 @@ class ObservationStreamClient(
   }
 
   private fun sendRequest(request: StreamRequest): Boolean {
-    val currentWriter = transport?.writer ?: return false
-
-    return try {
-      val message = json.encodeToString(serializer<StreamRequest>(), request)
-      currentWriter.write(message)
-      currentWriter.newLine()
-      currentWriter.flush()
-      true
-    } catch (e: Exception) {
-      log.warn("Failed to send request: ${e.message}")
-      false
+    val message = json.encodeToString(serializer<StreamRequest>(), request)
+    return synchronized(writerLock) {
+      val currentWriter =
+        synchronized(ownershipLock) { transport?.writer } ?: return@synchronized false
+      try {
+        currentWriter.write(message)
+        currentWriter.newLine()
+        currentWriter.flush()
+        true
+      } catch (e: Exception) {
+        log.warn("Failed to send request: ${e.message}")
+        false
+      }
     }
   }
 
@@ -599,7 +614,7 @@ class ObservationStreamClient(
         if (storageEvent == null) {
           log.warn("storage_update without a storageEvent payload, ignoring")
         } else {
-          _storageUpdates.emit(
+          val update =
             StorageStreamUpdate(
               deviceId = response.deviceId,
               // The frame's own timestamp is the daemon's receive clock; the event carries the
@@ -612,7 +627,9 @@ class ObservationStreamClient(
               valueType = KeyValueType.fromProtocolName(storageEvent.valueType),
               sequenceNumber = storageEvent.sequenceNumber,
             )
-          )
+          if (storageUpdateChannel.trySend(update).isFailure) {
+            log.warn("Storage update channel closed before update delivery")
+          }
         }
       }
       "ping" -> {
@@ -804,15 +821,31 @@ class ObservationStreamClient(
         pendingStorageSubscriptions.remove(requestId)
       } ?: return false
 
-    synchronized(ownershipLock) {
-      if (success) {
-        if (pending.subscribe) {
-          confirmedStorageSubscriptions.add(pending.key)
+    val intentChangedDuringFailure =
+      synchronized(ownershipLock) {
+        if (success) {
+          if (pending.subscribe) {
+            confirmedStorageSubscriptions.add(pending.key)
+          } else {
+            confirmedStorageSubscriptions.remove(pending.key)
+          }
+          false
         } else {
-          confirmedStorageSubscriptions.remove(pending.key)
+          val desired = pending.key in desiredStorageSubscriptions
+          if (desired != pending.subscribe) {
+            // The runner may have applied the timed-out command before its failure reached us.
+            // Assume that target state, then drive the newer opposite intent as compensation.
+            if (pending.subscribe) {
+              confirmedStorageSubscriptions.add(pending.key)
+            } else {
+              confirmedStorageSubscriptions.remove(pending.key)
+            }
+            true
+          } else {
+            false
+          }
         }
       }
-    }
     storageSubscriptionResponseChannel.send(
       StorageSubscriptionResponse(
         requestId = requestId,
@@ -825,7 +858,7 @@ class ObservationStreamClient(
     // A permanent rejection establishes no new daemon state. Redriving it immediately creates a
     // request/error busy loop; reconnect replay is the next opportunity to retry. A successful
     // acknowledgement, however, may reveal a desired change that happened in flight.
-    if (success) {
+    if (success || intentChangedDuringFailure) {
       driveStorageSubscription(pending.key)
     }
     return true

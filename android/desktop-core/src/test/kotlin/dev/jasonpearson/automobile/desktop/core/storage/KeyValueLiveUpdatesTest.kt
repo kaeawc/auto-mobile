@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.storage
 import dev.jasonpearson.automobile.desktop.core.daemon.StorageStreamUpdate
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -149,7 +150,15 @@ class KeyValueLiveUpdatesTest {
   fun `highlight keys are scoped by file name`() {
     val files = listOf(file("prefs.xml", "theme" to "light"))
 
-    assertEquals(setOf("prefs.xml:theme"), update(key = "theme").highlightKeys(files))
+    assertEquals(
+      setOf(highlightKey("prefs.xml", "theme")),
+      update(key = "theme").highlightKeys(files),
+    )
+  }
+
+  @Test
+  fun `entry identities do not collide when file names or keys contain separators`() {
+    assertNotEquals(highlightKey("a:b", "c"), highlightKey("a", "b:c"))
   }
 
   @Test
@@ -157,7 +166,7 @@ class KeyValueLiveUpdatesTest {
     val files = listOf(file("prefs.xml", "theme" to "light", "locale" to "en"))
 
     assertEquals(
-      setOf("prefs.xml:theme", "prefs.xml:locale"),
+      setOf(highlightKey("prefs.xml", "theme"), highlightKey("prefs.xml", "locale")),
       update(key = null, value = null).highlightKeys(files),
     )
   }

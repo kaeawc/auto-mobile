@@ -9,9 +9,11 @@ private val json = Json { ignoreUnknownKeys = true }
 
 /**
  * Identifies an entry for highlight purposes. Keys are only unique within a file, so the file name
- * is part of the identity.
+ * is part of the identity. Prefixing the file name with its length keeps the identity unambiguous
+ * even when either component contains the separator.
  */
-internal fun highlightKey(fileName: String, key: String): String = "$fileName:$key"
+internal fun highlightKey(fileName: String, key: String): String =
+  "${fileName.length}:$fileName$key"
 
 /**
  * Decodes a daemon-supplied value string into the representation [KeyValueEntry.value] holds.

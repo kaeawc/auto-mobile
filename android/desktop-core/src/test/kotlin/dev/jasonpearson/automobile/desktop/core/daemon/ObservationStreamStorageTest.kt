@@ -10,8 +10,13 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
 
 /**
@@ -123,6 +128,34 @@ class ObservationStreamStorageTest {
       client.handleMessage("""{"type":"storage_update","deviceId":"emulator-5554"}""")
 
       expectNoEvents()
+    }
+  }
+
+  @Test
+  fun `a slow storage collector does not block the multiplexed frame reader`() = runTest {
+    val client = ObservationStreamClient()
+    val firstUpdateStarted = CompletableDeferred<Unit>()
+    val collector = launch {
+      client.storageUpdates.collect {
+        firstUpdateStarted.complete(Unit)
+        awaitCancellation()
+      }
+    }
+    try {
+      client.handleMessage(storageFrame())
+      firstUpdateStarted.await()
+
+      // The dedicated delivery coroutine is now blocked on the slow collector. Additional
+      // storage frames must still enqueue immediately so the socket loop can process pings and
+      // hierarchy/screenshot frames.
+      withTimeout(1_000) {
+        repeat(100) { index ->
+          client.handleMessage(storageFrame(key = "\"key-$index\"", value = "\"$index\""))
+        }
+      }
+    } finally {
+      collector.cancel()
+      client.dispose()
     }
   }
 
@@ -319,6 +352,33 @@ class ObservationStreamStorageTest {
           factory.opened.single().sentRequests().count { it.command == "subscribe_storage" },
         )
       }
+    }
+  }
+
+  @Test
+  fun `an intent change during a failed unsubscribe sends a compensating subscribe`() {
+    withConnectedClient { client, factory ->
+      val transport = factory.opened.single()
+      client.subscribeStorage("com.example", "prefs.xml")
+      val initialSubscribe = transport.sentRequests().single { it.command == "subscribe_storage" }
+      client.handleMessage(
+        """{"id":"${initialSubscribe.id}","type":"subscription_response","success":true}"""
+      )
+
+      client.unsubscribeStorage("com.example", "prefs.xml")
+      val unsubscribe = transport.sentRequests().single { it.command == "unsubscribe_storage" }
+      client.subscribeStorage("com.example", "prefs.xml")
+
+      // The runner may have applied the unsubscribe before its response failed. The newer desired
+      // state therefore needs an explicit subscribe instead of trusting the old confirmation.
+      client.handleMessage(
+        """{"id":"${unsubscribe.id}","type":"error","success":false,"error":"response lost"}"""
+      )
+
+      assertEquals(
+        2,
+        transport.sentRequests().count { it.command == "subscribe_storage" },
+      )
     }
   }
 

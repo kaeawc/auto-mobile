@@ -10,9 +10,9 @@ import android.util.Log
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
 
 /**
  * Manages subscriptions to SharedPreferences changes across multiple target apps.
@@ -51,8 +51,10 @@ class StorageSubscriptionManager(private val context: Context) {
   private val packageObservers =
     ConcurrentHashMap<String, PackageObserverState>() // packageName -> state
 
-  private val _changeEvents = MutableSharedFlow<PreferenceChangeEvent>(extraBufferCapacity = 64)
-  val changeEvents: SharedFlow<PreferenceChangeEvent> = _changeEvents.asSharedFlow()
+  // ContentObserver callbacks cannot suspend. Keep every event in an unbounded single-consumer
+  // channel so a temporary WebSocket slowdown cannot silently lose a storage mutation.
+  private val changeEventChannel = Channel<PreferenceChangeEvent>(Channel.UNLIMITED)
+  val changeEvents: Flow<PreferenceChangeEvent> = changeEventChannel.receiveAsFlow()
 
   private val handler = Handler(Looper.getMainLooper())
 
@@ -346,12 +348,16 @@ class StorageSubscriptionManager(private val context: Context) {
       } else {
         val subscription = StorageSubscription(packageName, fileName, subscriptionId)
 
-        // Track the subscription
-        subscriptions[subscriptionId] = SubscriptionState(subscription)
-
         // Register ContentObserver for this package if not already registered
-        registerPackageObserver(packageName, fileName)
+        if (!registerPackageObserver(packageName, fileName)) {
+          return Result.failure(
+            StorageError.SdkError("Failed to register storage observer for $packageName")
+          )
+        }
 
+        // Commit the subscription only after observer registration succeeds. Otherwise a retry
+        // would short-circuit against state that can never receive a change notification.
+        subscriptions[subscriptionId] = SubscriptionState(subscription)
         Log.d(TAG, "Subscribed to $subscriptionId")
         Result.success(subscription)
       }
@@ -610,39 +616,39 @@ class StorageSubscriptionManager(private val context: Context) {
   // holds the per-bin lock for the key, so the second caller sees the first's state and
   // only merges its file name; it also serializes register against a concurrent
   // remove-if-unused for the same package.
-  private fun registerPackageObserver(packageName: String, fileName: String) {
-    packageObservers.compute(packageName) { _, existing ->
-      if (existing != null) {
-        existing.subscriptions.add(fileName)
-        return@compute existing
-      }
-
-      val authority = packageName + AUTHORITY_SUFFIX
-      val changesUri = Uri.parse("content://$authority/$CHANGES_PATH")
-
-      val observer =
-        object : ContentObserver(handler) {
-          override fun onChange(selfChange: Boolean) {
-            super.onChange(selfChange)
-            Log.d(TAG, "ContentObserver notified for $packageName")
-            fetchChangesForPackage(packageName)
-          }
+  private fun registerPackageObserver(packageName: String, fileName: String): Boolean =
+    packageObservers
+      .compute(packageName) { _, existing ->
+        if (existing != null) {
+          existing.subscriptions.add(fileName)
+          return@compute existing
         }
 
-      try {
-        context.contentResolver.registerContentObserver(changesUri, false, observer)
-        Log.d(TAG, "Registered ContentObserver for $packageName")
-        PackageObserverState(
-          observer,
-          ConcurrentHashMap.newKeySet<String>().apply { add(fileName) },
-        )
-      } catch (e: Exception) {
-        Log.e(TAG, "Failed to register ContentObserver for $packageName", e)
-        // Leave the package unmapped, as before, so a later subscribe can retry.
-        null
+        val authority = packageName + AUTHORITY_SUFFIX
+        val changesUri = Uri.parse("content://$authority/$CHANGES_PATH")
+
+        val observer =
+          object : ContentObserver(handler) {
+            override fun onChange(selfChange: Boolean) {
+              super.onChange(selfChange)
+              Log.d(TAG, "ContentObserver notified for $packageName")
+              fetchChangesForPackage(packageName)
+            }
+          }
+
+        try {
+          context.contentResolver.registerContentObserver(changesUri, false, observer)
+          Log.d(TAG, "Registered ContentObserver for $packageName")
+          PackageObserverState(
+            observer,
+            ConcurrentHashMap.newKeySet<String>().apply { add(fileName) },
+          )
+        } catch (e: Exception) {
+          Log.e(TAG, "Failed to register ContentObserver for $packageName", e)
+          null
+        }
       }
-    }
-  }
+      .let { it != null }
 
   private fun unregisterPackageObserverIfUnused(packageName: String, fileName: String) {
     packageObservers.compute(packageName) { _, state ->
@@ -700,8 +706,15 @@ class StorageSubscriptionManager(private val context: Context) {
                   previousValueType = change.previousValueType,
                 )
 
-              _changeEvents.tryEmit(event)
-              subState.lastSequence = maxOf(subState.lastSequence, change.sequenceNumber)
+              if (changeEventChannel.trySend(event).isSuccess) {
+                subState.lastSequence = maxOf(subState.lastSequence, change.sequenceNumber)
+              } else {
+                Log.w(
+                  TAG,
+                  "Could not queue storage change for $packageName:$fileName; retaining sequence ${subState.lastSequence}",
+                )
+                break
+              }
             }
           }
         }

@@ -53,7 +53,7 @@ private val HIGHLIGHT_COLOR = Color(0xFF4CAF50).copy(alpha = 0.3f)
  * @param keyValueFiles List of key-value storage files to display
  * @param onSetValue Optional callback to persist a value change. Receives (fileName, key, value,
  *   type).
- * @param recentlyChangedKeys Entries to highlight as just-changed, as `"fileName:key"` identities.
+ * @param recentlyChangedKeys Entries to highlight as just-changed, using [highlightKey] identities.
  *   Hoisted so the caller owns both the live-update source and the highlight lifetime; see
  *   [StorageDashboard], which drives this from the observation stream's `storage_update` frames.
  * @param modifier Modifier for the composable

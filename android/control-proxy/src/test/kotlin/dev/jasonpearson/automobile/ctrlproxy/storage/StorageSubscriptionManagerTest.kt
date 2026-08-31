@@ -2,12 +2,20 @@ package dev.jasonpearson.automobile.ctrlproxy.storage
 
 import android.content.ContentResolver
 import android.content.Context
+import android.database.ContentObserver
 import android.net.Uri
 import android.os.Bundle
+import dev.jasonpearson.automobile.protocol.StorageChangeEvent
+import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
+import dev.jasonpearson.automobile.protocol.StorageResponse
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -297,6 +305,67 @@ class StorageSubscriptionManagerTest {
         any(),
       )
     }
+  }
+
+  @Test
+  fun `subscribe failure can retry after observer registration fails`() {
+    val bundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"fileName":"auth","subscribed":true}""")
+      }
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns bundle
+    every { contentResolver.registerContentObserver(any(), any(), any()) } throws
+      IllegalStateException("registration failed")
+
+    assertTrue(manager.subscribe("com.example.app", "auth").isFailure)
+    assertTrue(manager.subscribe("com.example.app", "auth").isFailure)
+
+    verify(exactly = 2) {
+      contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any())
+      contentResolver.registerContentObserver(any(), any(), any())
+    }
+    assertTrue(manager.getActiveSubscriptions().isEmpty())
+  }
+
+  @Test
+  fun `storage event bursts remain lossless while the consumer is behind`() = runBlocking {
+    val observerSlot = slot<ContentObserver>()
+    val subscribeBundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"fileName":"auth","subscribed":true}""")
+      }
+    val changes =
+      (1L..100L).map { sequence ->
+        StorageChangeEvent(
+          fileName = "auth",
+          key = "key-$sequence",
+          value = sequence.toString(),
+          type = "LONG",
+          timestamp = sequence,
+          sequenceNumber = sequence,
+        )
+      }
+    val changesBundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString(
+          "result",
+          StorageProtocolSerializer.responseToJson(StorageResponse.Changes("auth", changes)),
+        )
+      }
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      subscribeBundle
+    every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } returns changesBundle
+    every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
+      Unit
+
+    assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+    observerSlot.captured.onChange(false)
+
+    val received = withTimeout(1_000) { manager.changeEvents.take(changes.size).toList() }
+    assertEquals(changes.map { it.sequenceNumber }, received.map { it.sequenceNumber })
   }
 
   // ================= Unsubscribe Tests =================

@@ -16,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,6 +89,10 @@ fun StorageDashboard(
     }
   val handledStorageSubscriptionRequestIds =
     remember(deviceId, packageName) { mutableSetOf<String>() }
+  val respondedStorageSubscriptionFiles = remember(deviceId, packageName) { mutableSetOf<String>() }
+  val successfulStorageSubscriptionFiles =
+    remember(deviceId, packageName) { mutableSetOf<String>() }
+  val currentDataSource by rememberUpdatedState(dataSource)
   val recentlyChangedKeys = highlightExpiries.keys
 
   LaunchedEffect(observationStreamClient, deviceId, packageName) {
@@ -134,6 +139,7 @@ fun StorageDashboard(
   // list with the same paths) does not churn subscriptions; releases every subscription when the
   // facet leaves composition or the device/app changes. The stream dedups repeat subscribes.
   val subscribedFileNames = keyValueFiles.map { it.name }.distinct()
+  val currentSubscribedFileNames by rememberUpdatedState(subscribedFileNames)
   DisposableEffect(observationStreamClient, deviceId, packageName, subscribedFileNames) {
     val stream = observationStreamClient
     val pkg = packageName
@@ -151,24 +157,35 @@ fun StorageDashboard(
   // its file after that acknowledgement to recover writes between the initial snapshot A and
   // registration B. Entries delivered as live updates while this refresh is awaiting are replayed
   // over the result, so a later C cannot be clobbered by an earlier snapshot.
-  LaunchedEffect(observationStreamClient, dataSource, packageName) {
+  LaunchedEffect(observationStreamClient, packageName) {
     val stream = observationStreamClient ?: return@LaunchedEffect
     stream.storageSubscriptionResponses.collect { response ->
       if (!response.subscribe || response.key.packageName != packageName) return@collect
+      if (!handledStorageSubscriptionRequestIds.add(response.requestId)) return@collect
+      val expectedFiles = currentSubscribedFileNames.toSet()
+      if (response.key.fileName !in expectedFiles) return@collect
+      respondedStorageSubscriptionFiles.retainAll(expectedFiles)
+      successfulStorageSubscriptionFiles.retainAll(expectedFiles)
+      respondedStorageSubscriptionFiles.add(response.key.fileName)
       if (!response.success) {
-        if (!handledStorageSubscriptionRequestIds.add(response.requestId)) return@collect
         LOG.warn(
           "StorageDashboard: failed to enable live updates for ${response.key.fileName}: ${response.error}"
         )
-        return@collect
+      } else {
+        successfulStorageSubscriptionFiles.add(response.key.fileName)
       }
-      val source = dataSource ?: return@collect
-      val fileName = response.key.fileName
-      if (keyValueFiles.none { it.name == fileName }) return@collect
-      if (!handledStorageSubscriptionRequestIds.add(response.requestId)) return@collect
-      val snapshotStartGeneration = storageFileUpdateGenerations[fileName] ?: 0L
+      if (!respondedStorageSubscriptionFiles.containsAll(expectedFiles)) return@collect
+
+      val filesToReconcile = successfulStorageSubscriptionFiles.toSet()
+      respondedStorageSubscriptionFiles.clear()
+      successfulStorageSubscriptionFiles.clear()
+      if (filesToReconcile.isEmpty()) return@collect
+      val source = currentDataSource ?: return@collect
+      val snapshotStartGenerations = filesToReconcile.associateWith { fileName ->
+        storageFileUpdateGenerations[fileName] ?: 0L
+      }
       storageReconciliationStartGenerations =
-        storageReconciliationStartGenerations + (fileName to snapshotStartGeneration)
+        storageReconciliationStartGenerations + snapshotStartGenerations
       try {
         when (
           val result =
@@ -177,29 +194,31 @@ fun StorageDashboard(
             }
         ) {
           is Result.Success -> {
-            val updatesSinceSnapshotStarted =
-              storageUpdateHistory[fileName]
-                .orEmpty()
-                .filter { (generation, _) -> generation > snapshotStartGeneration }
-                .map { (_, update) -> update }
-            keyValueFiles =
-              keyValueFiles.reconcileStorageFileSnapshot(
-                result.data,
-                fileName,
-                updatesSinceSnapshotStarted,
-              )
+            filesToReconcile.forEach { fileName ->
+              val snapshotStartGeneration = snapshotStartGenerations.getValue(fileName)
+              val updatesSinceSnapshotStarted =
+                storageUpdateHistory[fileName]
+                  .orEmpty()
+                  .filter { (generation, _) -> generation > snapshotStartGeneration }
+                  .map { (_, update) -> update }
+              keyValueFiles =
+                keyValueFiles.reconcileStorageFileSnapshot(
+                  result.data,
+                  fileName,
+                  updatesSinceSnapshotStarted,
+                )
+            }
           }
           is Result.Error ->
-            LOG.warn(
-              "StorageDashboard: failed to reconcile ${response.key.fileName}: ${result.message}"
-            )
+            LOG.warn("StorageDashboard: failed to reconcile subscribed files: ${result.message}")
           Result.Loading -> LOG.warn("StorageDashboard: reconciliation remained loading")
         }
       } catch (e: Exception) {
-        LOG.warn("StorageDashboard: reconciliation failed for $fileName: ${e.message}")
+        LOG.warn("StorageDashboard: reconciliation failed: ${e.message}")
       } finally {
-        storageReconciliationStartGenerations = storageReconciliationStartGenerations - fileName
-        storageUpdateHistory = storageUpdateHistory - fileName
+        storageReconciliationStartGenerations =
+          storageReconciliationStartGenerations - filesToReconcile
+        storageUpdateHistory = storageUpdateHistory - filesToReconcile
       }
     }
   }

@@ -543,11 +543,15 @@ jobs:
           ./mcp-publisher publish
 
       - name: Publish Homebrew formula
-        # continue-on-error pairs with REQUIRE_TOKEN below: a missing/expired
-        # HOMEBREW_TAP_TOKEN turns this step red (surfaced, not silently
-        # skipped) while still letting the GitHub Release and other channels
-        # complete. Before REQUIRE_TOKEN, a never-configured token made the
-        # script exit 0 and the formula never landed across every release.
+        id: publish_homebrew
+        # continue-on-error lets the remaining release channels (Docker) and the
+        # already-created GitHub Release complete even if the tap publish fails,
+        # rather than aborting the job mid-way. The failure is NOT swallowed:
+        # REQUIRE_TOKEN makes a missing/expired token exit non-zero, and the
+        # "Fail the release if the Homebrew publish failed" step at the end of
+        # the job re-raises that outcome so the workflow result goes red. Before
+        # REQUIRE_TOKEN, a never-configured token made the script exit 0 and the
+        # formula never landed across every release, while the run stayed green.
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
@@ -680,6 +684,20 @@ jobs:
           MSG="The npm package includes APK and IPA checksums at"
           MSG="$MSG build time, ensuring integrity verification."
           echo "$MSG" >> "$S"
+
+      - name: Fail the release if the Homebrew publish failed
+        # The Homebrew step is continue-on-error so it never aborts the other
+        # release channels or the already-created GitHub Release. Its outcome
+        # must still reach the workflow result, though — otherwise a stale tap
+        # (missing/expired token, or a clone/push failure) hides behind a green
+        # run, which is the exact regression REQUIRE_TOKEN exists to expose.
+        # Re-raise it here, after every other channel has published. Safe to
+        # re-run: the tap publish is idempotent and the other channels are
+        # guarded against duplicates.
+        if: steps.publish_homebrew.outcome == 'failure'
+        run: |
+          echo "::error::Homebrew formula publish failed; the kaeawc/homebrew-tap formula may be stale. See the 'Publish Homebrew formula' step above." >&2
+          exit 1
 
   # --- Conveyor desktop publish (macOS + Linux) --------------------------------
   # Gated on the DESKTOP_PUBLISHER repo variable. When it is set to "conveyor", the macOS + Linux

@@ -1384,44 +1384,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ci-logs
-          # Bun 1.3.14 regresses per-file isolation on Windows; keep that
-          # platform's suite in one global while other platforms stay isolated.
+          # The default suite is the strictly bounded, fake-only unit lane.
+          # Socket/process/file-system contract coverage runs explicitly through
+          # `test:integration`, keeping normal iteration fast and hermetic.
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            bun run test:windows 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
+            bun run test 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
           else
-            # macOS-only (this job's matrix is macos + windows; the ubuntu Node TS
-            # suite is a SEPARATE job that keeps the tight 5s ceiling). The hosted
-            # macos runner is markedly slower / more contended than the Linux lane,
-            # so this ~13k-test --isolate suite intermittently trips bun's default
-            # 5s per-test / 10s hook ceiling by a hair (observed 5002/5004ms on
-            # fully-faked tests; a 10052ms beforeEach/afterEach hook) — a pure
-            # runner-contention flake, macos-only (ubuntu + windows had zero). Raise
-            # bun's timeout to give that headroom; --timeout covers BOTH the test and
-            # hook budgets (verified). Bypass turbo like the Windows branch so the
-            # flag applies directly (macos then always runs, which also keeps the
-            # native-source-scan guard tests from ever replaying a cached result).
-            #
-            # bun's --timeout ONLY bounds individual test()/hook bodies. It cannot
-            # bound a hang OUTSIDE that scope: module-level/describe-body evaluation,
-            # a leaked real socket/child that keeps the process alive at teardown, or
-            # a real-timer/real-socket poll that never settles. Several files in this
-            # suite do real I/O (unix-socket daemon servers, a werift WebRTC loopback,
-            # real child spawns) rather than injected fakes, so one of them can wedge
-            # the whole run. Before this bound such a wedge rode the 25-minute JOB
-            # timeout to a silent CANCELLED (run 32156898919: bun hung mid-suite for
-            # ~24m, GitHub dropped the streamed log, no actionable signal). Wrap the
-            # invocation in a portable wall-clock watchdog (macos has no GNU
-            # `timeout`; this helper kills the whole process group and returns 124 on
-            # expiry) sized well above a healthy run (~6m observed) but far below the
-            # job timeout, so a hang fails FAST and RED with the tee'd log preserved
-            # for the "Upload Build/Test Logs" step to capture (issue: macos test hang).
+            # Keep an outer watchdog for failures before the unit script can start.
             # shellcheck source=scripts/ios/run_with_timeout.sh
             source scripts/ios/run_with_timeout.sh
             test_status=0
-            run_with_timeout 720 bun test --isolate --timeout 20000 2>&1 \
+            run_with_timeout 720 bun run test 2>&1 \
               | tee "ci-logs/bun-test-${{ matrix.os }}.log" || test_status=$?
             if [[ "$test_status" -eq 124 ]]; then
-              echo "::error::macOS bun test suite exceeded the 12-minute wall-clock ceiling and was aborted (a test is hanging on real I/O — a real socket/child/timer, not an injected fake). Inspect the last ::group:: in the uploaded ci-logs/bun-test-macos-latest.log to find the file that ran last."
+              echo "::error::macOS fake-only unit suite exceeded its wall-clock ceiling."
             fi
             exit "$test_status"
           fi

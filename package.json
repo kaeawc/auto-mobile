@@ -38,7 +38,8 @@
     "access": "public"
   },
   "scripts": {
-    "test": "bun test --isolate",
+    "test": "bash scripts/test-unit.sh",
+    "test:integration": "bun test --isolate test/contracts/runAll.test.ts test/daemon/daemonClient*.test.ts test/daemon/daemonManagerReadiness.test.ts test/daemon/socketServer*.test.ts test/daemon/socketServer/BaseSocketServerOwnership.test.ts test/daemon/videoStreamSocketServer.test.ts test/db/database*Migration*.test.ts test/features/video/FfmpegVideoProcessingBackend.test.ts test/integration/*.test.ts test/package/webrtcRuntimeMetadata.test.ts test/scripts/xcodegenDriftCheck.test.ts test/stress/*.test.ts test/utils/ios/IOSHostPortAvailabilityChecker.test.ts",
     "test:windows": "bun test",
     "test:coverage": "bun test --isolate --coverage",
     "test:fast": "bash scripts/test-fast.sh",

@@ -364,7 +364,9 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       hierarchy: {
         node: {
           bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
-          node: [{ text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } }],
+          // CtrlProxy serializes a singleton child as an object rather than an
+          // array. The freshness traversal must accept both wire shapes.
+          node: { text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } },
         },
       },
     } as any);
@@ -391,6 +393,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.verified).toBe(false);
     expect(result.freshness?.warning).toContain("status-bar");
     expect(result.freshness?.warning).toContain("com.android.settings");
+    expect(result.error).toBeUndefined();
     expect(result.freshness?.warning).toContain(
       'pressButton { platform: "android", button: "home" }',
     );

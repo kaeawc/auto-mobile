@@ -115,8 +115,9 @@ function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
         return false;
       }
     }
-    if (node.node) {
-      nodes.push(...node.node);
+    const children = node.node;
+    if (children) {
+      nodes.push(...(Array.isArray(children) ? children : [children]));
     }
   }
   return hasBounds;

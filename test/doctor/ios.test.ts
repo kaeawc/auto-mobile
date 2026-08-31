@@ -757,13 +757,23 @@ describe("checkIosCtrlProxyRunner", () => {
   });
 
   test("accepts the immutable 0.0.66 runner before the feature handshake release", async () => {
-    const result = await checkIosCtrlProxyRunner(
-      withRunners([inspection({ supportedFeatures: null })]),
-    );
+    const previousVersion = process.env.AUTOMOBILE_VERSION;
+    process.env.AUTOMOBILE_VERSION = "0.0.66";
+    try {
+      const result = await checkIosCtrlProxyRunner(
+        withRunners([inspection({ supportedFeatures: null })]),
+      );
 
-    expect(result.status).toBe("pass");
-    expect(result.message).toContain("versionStatus=compatible");
-    expect(result.message).not.toContain("missingFeatures");
+      expect(result.status).toBe("pass");
+      expect(result.message).toContain("versionStatus=compatible");
+      expect(result.message).not.toContain("missingFeatures");
+    } finally {
+      if (previousVersion === undefined) {
+        delete process.env.AUTOMOBILE_VERSION;
+      } else {
+        process.env.AUTOMOBILE_VERSION = previousVersion;
+      }
+    }
   });
 
   test("reports unknown when the runner is installed but not running", async () => {

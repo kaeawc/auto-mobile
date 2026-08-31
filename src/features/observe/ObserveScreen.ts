@@ -152,6 +152,20 @@ function isBackStackActivityInPackage(
   );
 }
 
+function resolveBackStackActivityAttribution(
+  result: ObserveResult,
+): { packageName: string; activityName: string } | undefined {
+  const packageName = result.viewHierarchy?.packageName;
+  const activityName =
+    result.backStack?.source === "adb" ? result.backStack.currentActivity?.name : undefined;
+  if (!packageName || !activityName) {
+    return undefined;
+  }
+  return isBackStackActivityInPackage(result.backStack, activityName, packageName)
+    ? { packageName, activityName }
+    : undefined;
+}
+
 export class RealObserveScreen implements ObserveScreen {
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -885,15 +899,21 @@ export class RealObserveScreen implements ObserveScreen {
       return { sampled: false, identity: undefined };
     }
 
-    const currentActivity =
-      result.backStack?.source === "adb" ? result.backStack.currentActivity?.name : undefined;
+    const backStackAttribution = resolveBackStackActivityAttribution(result);
     if (
-      currentActivity &&
-      isBackStackActivityInPackage(result.backStack, currentActivity, observed)
+      backStackAttribution &&
+      activeWindow.activityName !== backStackAttribution.activityName &&
+      (await this.recaptureHierarchyForBackStackAttribution(result, backStackAttribution, signal))
     ) {
       // The tree and adb agree on the application, while CtrlProxy can keep a
       // prior activity (or a view class) across same-package navigation (#5992).
-      result.activeWindow = { ...activeWindow, appId: observed, activityName: currentActivity };
+      // Do not pair a later adb activity with the earlier tree: the recapture
+      // and repeated back-stack read establish their ordering before relabeling.
+      result.activeWindow = {
+        ...activeWindow,
+        appId: backStackAttribution.packageName,
+        activityName: backStackAttribution.activityName,
+      };
       return { sampled: false, identity: undefined };
     }
 
@@ -906,6 +926,41 @@ export class RealObserveScreen implements ObserveScreen {
       result.activeWindow = { ...activeWindow, appId: observed, activityName: "" };
     }
     return { sampled: true, identity: confirmed };
+  }
+
+  private async recaptureHierarchyForBackStackAttribution(
+    result: ObserveResult,
+    expected: { packageName: string; activityName: string },
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    let hierarchy: ObserveResult["viewHierarchy"];
+    try {
+      hierarchy = await this.viewHierarchy.getViewHierarchy(
+        undefined,
+        new NoOpPerformanceTracker(),
+        false,
+        0,
+        signal,
+      );
+    } catch (error) {
+      logger.debug(
+        `[OBSERVE] Attribution recapture failed; preserving original hierarchy: ${error}`,
+      );
+      return false;
+    }
+    if (!hierarchy) {
+      return false;
+    }
+    result.viewHierarchy = hierarchy;
+    result.updatedAt = hierarchy.updatedAt ?? result.updatedAt;
+    result.focusedElement = this.viewHierarchy.findFocusedElement(hierarchy) ?? undefined;
+    result.accessibilityFocusedElement =
+      this.viewHierarchy.findAccessibilityFocusedElement(hierarchy) ?? undefined;
+    if (result.viewHierarchy?.packageName !== expected.packageName) {
+      return false;
+    }
+    await this.deviceStateCollector.collectBackStack(result, new NoOpPerformanceTracker(), signal);
+    return resolveBackStackActivityAttribution(result)?.activityName === expected.activityName;
   }
 
   /**

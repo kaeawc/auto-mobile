@@ -8,6 +8,7 @@ import type { Element, ScreenIdentity, ViewHierarchyResult } from "../../src/mod
 export class FakeViewHierarchy implements ViewHierarchy {
   private calls: { skipWaitForFresh?: boolean; minTimestamp?: number }[] = [];
   private configuredHierarchy: ViewHierarchyResult = { hierarchy: {} };
+  private configuredHierarchySequence: ViewHierarchyResult[] = [];
   private configuredFocusedElement: Element | null = null;
   private configuredAccessibilityFocusedElement: Element | null = null;
   private configuredScreenIdentity: ScreenIdentity | undefined;
@@ -29,7 +30,7 @@ export class FakeViewHierarchy implements ViewHierarchy {
     }
 
     this.calls.push({ skipWaitForFresh, minTimestamp });
-    return { ...this.configuredHierarchy };
+    return { ...(this.configuredHierarchySequence.shift() ?? this.configuredHierarchy) };
   }
 
   /**
@@ -93,6 +94,12 @@ export class FakeViewHierarchy implements ViewHierarchy {
     this.configuredHierarchy = hierarchy;
   }
 
+  /** Configure consecutive hierarchy reads, then fall back to the final configured value. */
+  configureHierarchySequence(hierarchies: ViewHierarchyResult[]): void {
+    this.configuredHierarchy = hierarchies.at(-1) ?? this.configuredHierarchy;
+    this.configuredHierarchySequence = [...hierarchies];
+  }
+
   /**
    * Configure the focused element to return.
    */
@@ -148,6 +155,7 @@ export class FakeViewHierarchy implements ViewHierarchy {
   reset(): void {
     this.calls = [];
     this.configuredHierarchy = { hierarchy: {} };
+    this.configuredHierarchySequence = [];
     this.configuredFocusedElement = null;
     this.configuredAccessibilityFocusedElement = null;
     this.configuredScreenIdentity = undefined;

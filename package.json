@@ -170,7 +170,7 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^0.120.0",
+    "@anthropic-ai/sdk": "^0.122.0",
     "@faker-js/faker": "^10.2.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "@types/js-yaml": "^4.0.9",

@@ -83,6 +83,8 @@ markdown_extensions:
 
 nav:
   - "Overview": index.md
+  - "Install":
+      - "Homebrew": install/homebrew.md
   - "MCP Tools": design-docs/mcp/tools.md
   - "Using AutoMobile":
       - "Explore an app": using/ux-exploration.md

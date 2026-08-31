@@ -41,6 +41,18 @@ teardown() {
   [[ "$output" == *"skipping Homebrew formula publish"* ]]
 }
 
+@test "fails loudly when GH_TOKEN is unset and REQUIRE_TOKEN=1" {
+  cd "$TEST_ROOT"
+  # On a real tagged release the workflow sets REQUIRE_TOKEN=1, so a
+  # missing/expired tap token must fail (surfaced) rather than silently
+  # no-op the formula publish as it historically did.
+  run env -u GH_TOKEN -u RENDER_ONLY TAG=v0.0.26 REPO=kaeawc/auto-mobile \
+    REQUIRE_TOKEN=1 \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"REQUIRE_TOKEN=1"* ]]
+}
+
 @test "rejects a zero-padded BREW_TARBALL_FETCH_ATTEMPTS override" {
   cd "$TEST_ROOT"
   # "08" is invalid octal in bash arithmetic; without up-front validation the
@@ -84,4 +96,27 @@ teardown() {
   grep -qE '^  sha256 "[0-9a-f]{64}"$' auto-mobile.rb
   grep -qF 'depends_on "bun"' auto-mobile.rb
   grep -qF 'homepage "https://github.com/kaeawc/auto-mobile"' auto-mobile.rb
+}
+
+@test "RENDER_ONLY emits a livecheck block tracking the npm dist-tag" {
+  cd "$TEST_ROOT"
+  run env TAG=v0.0.26 REPO=kaeawc/auto-mobile RENDER_ONLY=1 \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -eq 0 ]
+  [ -f auto-mobile.rb ]
+
+  grep -qF 'livecheck do' auto-mobile.rb
+  grep -qF 'url "https://registry.npmjs.org/@kaeawc/auto-mobile"' auto-mobile.rb
+  grep -qF 'json.dig("dist-tags", "latest")' auto-mobile.rb
+}
+
+@test "RENDER_ONLY uses the sanctioned formula_opt_bin path helper" {
+  cd "$TEST_ROOT"
+  # Homebrew/FormulaPathMethods rubocop cop: prefer formula_opt_bin("bun")
+  # over Formula["bun"].opt_bin.
+  run env TAG=v0.0.26 REPO=kaeawc/auto-mobile RENDER_ONLY=1 \
+    bash scripts/release/update-brew-formula.sh
+  [ "$status" -eq 0 ]
+  grep -qF 'formula_opt_bin("bun")' auto-mobile.rb
+  ! grep -qF 'Formula["bun"].opt_bin' auto-mobile.rb
 }

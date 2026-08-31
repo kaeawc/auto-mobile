@@ -30,6 +30,18 @@ set -euo pipefail
 # (tests) never pushes, so it does not need the token. When the token IS set,
 # any clone/push failure below still fails the step under `set -e`.
 if [[ "${RENDER_ONLY:-0}" != "1" && -z "${GH_TOKEN:-}" ]]; then
+  # REQUIRE_TOKEN=1 (set by the release workflow's publish step) turns the
+  # historically-silent skip into a loud failure. The silent skip is what let
+  # the Homebrew channel no-op unnoticed across every release when the tap
+  # token was never configured: the step "passed" while the formula never
+  # landed. On a real tagged release a missing/expired token is a defect we
+  # want surfaced, not swallowed. Pair this with `continue-on-error: true` on
+  # the workflow step so the failure shows red without blocking the other
+  # release channels (Maven, npm, GitHub Release) that run alongside it.
+  if [[ "${REQUIRE_TOKEN:-0}" == "1" ]]; then
+    echo "ERROR: GH_TOKEN (HOMEBREW_TAP_TOKEN) is not set but REQUIRE_TOKEN=1; refusing to silently skip the Homebrew formula publish." >&2
+    exit 1
+  fi
   echo "GH_TOKEN (HOMEBREW_TAP_TOKEN) is not set; skipping Homebrew formula publish." >&2
   exit 0
 fi
@@ -85,13 +97,23 @@ class AutoMobile < Formula
   sha256 "${SHA}"
   license "Apache-2.0"
 
+  # Track new releases from the npm registry's dist-tags. \`brew livecheck\`
+  # (and Homebrew's autobump tooling) reads this to detect that a newer
+  # version than the pinned \`url\` is available.
+  livecheck do
+    url "https://registry.npmjs.org/${PKG}"
+    strategy :json do |json|
+      json.dig("dist-tags", "latest")
+    end
+  end
+
   depends_on "bun"
 
   def install
     libexec.install Dir["*"]
     (bin/"auto-mobile").write <<~SH
       #!/bin/bash
-      exec "#{Formula["bun"].opt_bin}/bun" "#{libexec}/dist/src/index.js" "\$@"
+      exec "#{formula_opt_bin("bun")}/bun" "#{libexec}/dist/src/index.js" "\$@"
     SH
     chmod 0755, bin/"auto-mobile"
   end

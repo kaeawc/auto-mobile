@@ -543,10 +543,17 @@ jobs:
           ./mcp-publisher publish
 
       - name: Publish Homebrew formula
+        # continue-on-error pairs with REQUIRE_TOKEN below: a missing/expired
+        # HOMEBREW_TAP_TOKEN turns this step red (surfaced, not silently
+        # skipped) while still letting the GitHub Release and other channels
+        # complete. Before REQUIRE_TOKEN, a never-configured token made the
+        # script exit 0 and the formula never landed across every release.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           TAG: ${{ steps.version.outputs.tag }}
           REPO: ${{ github.repository }}
+          REQUIRE_TOKEN: "1"
         run: bash scripts/release/update-brew-formula.sh
 
       - name: Free Disk Space

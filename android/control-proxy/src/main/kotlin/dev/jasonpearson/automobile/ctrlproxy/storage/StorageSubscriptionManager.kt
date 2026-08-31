@@ -9,11 +9,11 @@ import android.os.Looper
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
+import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.flow
 
 /**
  * Manages subscriptions to SharedPreferences changes across multiple target apps.
@@ -44,6 +44,10 @@ class StorageSubscriptionManager(private val context: Context) {
     val subscriptions: MutableSet<String> = ConcurrentHashMap.newKeySet(), // file names
   )
 
+  private data class PackageEventBuffer(
+    val events: ArrayDeque<PreferenceChangeEvent> = ArrayDeque()
+  )
+
   // Mutated from Dispatchers.IO (subscribe/unsubscribe) and the main looper
   // (ContentObserver.onChange, destroy). ConcurrentHashMap avoids the
   // resize-under-concurrent-put corruption / ConcurrentModificationException a
@@ -53,15 +57,19 @@ class StorageSubscriptionManager(private val context: Context) {
   private val packageObservers =
     ConcurrentHashMap<String, PackageObserverState>() // packageName -> state
 
-  // Retain recent mutations without allowing a stalled WebSocket to exhaust the service process.
-  // Dropping the oldest event creates a sequence gap that StorageDashboard reconciles from a fresh
-  // snapshot.
-  private val changeEventChannel =
-    Channel<PreferenceChangeEvent>(
-      capacity = STORAGE_EVENT_BUFFER_CAPACITY,
-      onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
-  val changeEvents: Flow<PreferenceChangeEvent> = changeEventChannel.receiveAsFlow()
+  // Bound events independently per package. If one package overflows, its newest event is retained
+  // and exposes the sequence gap needed for snapshot recovery; unrelated packages cannot hide it.
+  private val changeEventBuffers = ConcurrentHashMap<String, PackageEventBuffer>()
+  private val changeEventSignal = Channel<Unit>(Channel.CONFLATED)
+  val changeEvents: Flow<PreferenceChangeEvent> = flow {
+    for (ignored in changeEventSignal) {
+      while (true) {
+        val events = takeChangeEventBatch()
+        if (events.isEmpty()) break
+        for (event in events) emit(event)
+      }
+    }
+  }
 
   private val handler = Handler(Looper.getMainLooper())
 
@@ -622,7 +630,7 @@ class StorageSubscriptionManager(private val context: Context) {
     // Clear any remaining state
     subscriptions.clear()
     packageObservers.clear()
-    changeEventChannel.close()
+    changeEventSignal.close()
   }
 
   // Create-or-merge and remove-if-unused run through ConcurrentHashMap.compute so the
@@ -728,7 +736,7 @@ class StorageSubscriptionManager(private val context: Context) {
                   previousValueType = change.previousValueType,
                 )
 
-              if (changeEventChannel.trySend(event).isFailure) {
+              if (!enqueueChangeEvent(event)) {
                 Log.w(TAG, "Stopping storage-change fetch after event delivery channel closed")
                 return
               }
@@ -741,6 +749,24 @@ class StorageSubscriptionManager(private val context: Context) {
       }
     }
   }
+
+  private fun enqueueChangeEvent(event: PreferenceChangeEvent): Boolean {
+    val buffer = changeEventBuffers.computeIfAbsent(event.packageName) { PackageEventBuffer() }
+    synchronized(buffer) {
+      if (buffer.events.size == STORAGE_EVENT_BUFFER_CAPACITY) {
+        buffer.events.removeFirst()
+      }
+      buffer.events.addLast(event)
+    }
+    return changeEventSignal.trySend(Unit).isSuccess
+  }
+
+  private fun takeChangeEventBatch(): List<PreferenceChangeEvent> =
+    changeEventBuffers.values.mapNotNull { buffer ->
+      synchronized(buffer) {
+        buffer.events.pollFirst()
+      }
+    }
 }
 
 /** Information about SDK availability. */

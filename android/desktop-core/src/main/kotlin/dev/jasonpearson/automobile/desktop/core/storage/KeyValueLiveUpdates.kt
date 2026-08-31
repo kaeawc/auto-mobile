@@ -19,6 +19,22 @@ internal fun highlightKey(fileName: String, key: String): String =
 internal fun hasStorageSequenceGap(previousSequence: Long?, currentSequence: Long): Boolean =
   currentSequence > 0L && currentSequence > (previousSequence ?: 0L) + 1L
 
+/** Entry identities whose value, type, presence, or absence differs between two file snapshots. */
+internal fun changedStorageEntryKeys(
+  before: List<KeyValueFile>,
+  after: List<KeyValueFile>,
+  fileNames: Collection<String>,
+): Set<String> =
+  fileNames.flatMapTo(linkedSetOf()) { fileName ->
+    val oldEntries =
+      before.firstOrNull { it.name == fileName }?.entries.orEmpty().associateBy { it.key }
+    val newEntries =
+      after.firstOrNull { it.name == fileName }?.entries.orEmpty().associateBy { it.key }
+    (oldEntries.keys + newEntries.keys)
+      .filter { key -> oldEntries[key] != newEntries[key] }
+      .map { key -> highlightKey(fileName, key) }
+  }
+
 /**
  * Decodes a daemon-supplied value string into the representation [KeyValueEntry.value] holds.
  *

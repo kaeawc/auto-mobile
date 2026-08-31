@@ -32,6 +32,8 @@ class ObservationStreamStorageTest {
     key: String? = "\"theme\"",
     value: String? = "\"dark\"",
     valueType: String = "STRING",
+    packageName: String = "com.example",
+    sequenceNumber: Long = 7L,
   ) =
     """
     {
@@ -39,13 +41,13 @@ class ObservationStreamStorageTest {
       "deviceId": "emulator-5554",
       "timestamp": 9999,
       "storageEvent": {
-        "packageName": "com.example",
+        "packageName": "$packageName",
         "fileName": "prefs.xml",
         "key": ${key ?: "null"},
         "value": ${value ?: "null"},
         "valueType": "$valueType",
         "timestamp": 1234,
-        "sequenceNumber": 7
+        "sequenceNumber": $sequenceNumber
       }
     }
     """
@@ -157,6 +159,37 @@ class ObservationStreamStorageTest {
       collector.cancel()
       client.dispose()
     }
+  }
+
+  @Test
+  fun `bounded delivery preserves each packages latest update independently`() {
+    val queue = PackageStorageUpdateQueue(capacityPerPackage = 64)
+    fun update(packageName: String, sequenceNumber: Long) =
+      StorageStreamUpdate(
+        deviceId = "emulator-5554",
+        timestamp = sequenceNumber,
+        packageName = packageName,
+        fileName = "prefs.xml",
+        key = "key-$sequenceNumber",
+        value = sequenceNumber.toString(),
+        valueType = KeyValueType.Long,
+        sequenceNumber = sequenceNumber,
+      )
+
+    queue.add(update("com.target", 1L))
+    (1L..100L).forEach { sequence -> queue.add(update("com.noisy", sequence)) }
+    val updates = generateSequence {
+      queue.pollBatch().takeIf { it.isNotEmpty() }
+    }.flatten().toList()
+
+    assertEquals(
+      listOf(1L),
+      updates.filter { it.packageName == "com.target" }.map { it.sequenceNumber },
+    )
+    assertEquals(
+      (37L..100L).toList(),
+      updates.filter { it.packageName == "com.noisy" }.map { it.sequenceNumber },
+    )
   }
 
   @Test

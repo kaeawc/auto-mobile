@@ -169,6 +169,29 @@ class KeyValueLiveUpdatesTest {
   }
 
   @Test
+  fun `snapshot differences identify changed added and removed entries`() {
+    val before =
+      listOf(
+        file("prefs.xml", "changed" to "old", "removed" to "gone"),
+        file("other.xml", "untouched" to "same"),
+      )
+    val after =
+      listOf(
+        file("prefs.xml", "changed" to "new", "added" to "here"),
+        file("other.xml", "untouched" to "different"),
+      )
+
+    assertEquals(
+      setOf(
+        highlightKey("prefs.xml", "changed"),
+        highlightKey("prefs.xml", "removed"),
+        highlightKey("prefs.xml", "added"),
+      ),
+      changedStorageEntryKeys(before, after, listOf("prefs.xml")),
+    )
+  }
+
+  @Test
   fun `clearing a file highlights every key it had`() {
     val files = listOf(file("prefs.xml", "theme" to "light", "locale" to "en"))
 

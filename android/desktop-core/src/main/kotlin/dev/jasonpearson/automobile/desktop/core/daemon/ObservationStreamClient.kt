@@ -15,12 +15,13 @@ import java.nio.channels.SocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.ArrayDeque
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -156,14 +157,10 @@ class ObservationStreamClient(
   override val performanceUpdates: SharedFlow<PerformanceStreamUpdate> =
     _performanceUpdates.asSharedFlow()
 
-  // Keep the multiplexed socket reader free to process pings without allowing a stalled Compose
-  // collector to grow memory without bound. DROP_OLDEST always retains the newest sequence;
-  // StorageDashboard detects any resulting sequence gap and reconciles a fresh file snapshot.
-  private val storageUpdateChannel =
-    Channel<StorageStreamUpdate>(
-      capacity = STORAGE_UPDATE_BUFFER_CAPACITY,
-      onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
+  // Bound updates independently per package. If one package overflows, its newest update remains
+  // available to expose the sequence gap; traffic from another package cannot hide that loss.
+  private val storageUpdateQueue = PackageStorageUpdateQueue(STORAGE_UPDATE_BUFFER_CAPACITY)
+  private val storageUpdateSignal = Channel<Unit>(Channel.CONFLATED)
   private val _storageUpdates = MutableSharedFlow<StorageStreamUpdate>(replay = 1)
   override val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
 
@@ -184,8 +181,12 @@ class ObservationStreamClient(
 
   init {
     scope.launch {
-      for (update in storageUpdateChannel) {
-        _storageUpdates.emit(update)
+      for (ignored in storageUpdateSignal) {
+        while (true) {
+          val updates = storageUpdateQueue.pollBatch()
+          if (updates.isEmpty()) break
+          for (update in updates) _storageUpdates.emit(update)
+        }
       }
     }
   }
@@ -340,7 +341,7 @@ class ObservationStreamClient(
    */
   override fun dispose() {
     disconnect()
-    storageUpdateChannel.close()
+    storageUpdateSignal.close()
     storageSubscriptionResponseChannel.close()
     scope.coroutineContext[Job]?.cancel()
   }
@@ -657,7 +658,7 @@ class ObservationStreamClient(
               valueType = KeyValueType.fromProtocolName(storageEvent.valueType),
               sequenceNumber = storageEvent.sequenceNumber,
             )
-          if (storageUpdateChannel.trySend(update).isFailure) {
+          if (!enqueueStorageUpdate(update)) {
             log.warn("Storage update channel closed before update delivery")
           }
         }
@@ -680,6 +681,11 @@ class ObservationStreamClient(
         log.warn("Unknown message type: ${response.type}")
       }
     }
+  }
+
+  private fun enqueueStorageUpdate(update: StorageStreamUpdate): Boolean {
+    storageUpdateQueue.add(update)
+    return storageUpdateSignal.trySend(Unit).isSuccess
   }
 
   @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -953,6 +959,25 @@ private data class PendingStorageSubscription(
   val forcedReconciliation: Boolean,
   val connectionGeneration: Long,
 )
+
+internal class PackageStorageUpdateQueue(private val capacityPerPackage: Int) {
+  private val buffers = ConcurrentHashMap<String, ArrayDeque<StorageStreamUpdate>>()
+
+  fun add(update: StorageStreamUpdate) {
+    val buffer = buffers.computeIfAbsent(update.packageName) { ArrayDeque() }
+    synchronized(buffer) {
+      if (buffer.size == capacityPerPackage) buffer.removeFirst()
+      buffer.addLast(update)
+    }
+  }
+
+  fun pollBatch(): List<StorageStreamUpdate> =
+    buffers.values.mapNotNull { buffer ->
+      synchronized(buffer) {
+        buffer.pollFirst()
+      }
+    }
+}
 
 @Serializable
 data class StreamResponse(

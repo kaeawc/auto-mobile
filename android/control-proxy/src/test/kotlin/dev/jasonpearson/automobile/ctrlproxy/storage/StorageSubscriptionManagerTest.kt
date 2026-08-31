@@ -380,6 +380,67 @@ class StorageSubscriptionManagerTest {
       assertEquals((37L..100L).toList(), received.map { it.sequenceNumber })
     }
 
+  @Test
+  fun `one package cannot evict another packages latest event`() = runBlocking {
+    val observers = mutableMapOf<String, ContentObserver>()
+    val subscribeBundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"fileName":"auth","subscribed":true}""")
+      }
+    fun changesBundle(count: Long) =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString(
+          "result",
+          StorageProtocolSerializer.responseToJson(
+            StorageResponse.Changes(
+              "auth",
+              (1L..count).map { sequence ->
+                StorageChangeEvent(
+                  fileName = "auth",
+                  key = "key-$sequence",
+                  value = sequence.toString(),
+                  type = "LONG",
+                  timestamp = sequence,
+                  sequenceNumber = sequence,
+                )
+              },
+            )
+          ),
+        )
+      }
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      subscribeBundle
+    every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } answers
+      {
+        if (firstArg<Uri>().authority?.startsWith("com.target") == true) {
+          changesBundle(1)
+        } else {
+          changesBundle(100)
+        }
+      }
+    every { contentResolver.registerContentObserver(any(), any(), any()) } answers
+      {
+        observers[firstArg<Uri>().authority.orEmpty()] = thirdArg()
+      }
+
+    assertTrue(manager.subscribe("com.target", "auth").isSuccess)
+    assertTrue(manager.subscribe("com.noisy", "auth").isSuccess)
+    observers.getValue("com.target.automobile.sharedprefs").onChange(false)
+    observers.getValue("com.noisy.automobile.sharedprefs").onChange(false)
+
+    val received = withTimeout(1_000) { manager.changeEvents.take(65).toList() }
+    assertEquals(
+      listOf(1L),
+      received.filter { it.packageName == "com.target" }.map { it.sequenceNumber },
+    )
+    assertEquals(
+      (37L..100L).toList(),
+      received.filter { it.packageName == "com.noisy" }.map { it.sequenceNumber },
+    )
+  }
+
   // ================= Unsubscribe Tests =================
 
   @Test

@@ -219,7 +219,8 @@ fun StorageDashboard(
             }
         ) {
           is Result.Success -> {
-            keyValueFiles =
+            val filesBeforeReconciliation = keyValueFiles
+            val reconciledFiles =
               activeFileNames.fold(keyValueFiles) { files, fileName ->
                 val updatesSinceSnapshotStarted =
                   storageUpdateHistory[fileName]
@@ -233,6 +234,17 @@ fun StorageDashboard(
                   fileName,
                   updatesSinceSnapshotStarted,
                 )
+              }
+            keyValueFiles = reconciledFiles
+            val reconciledEntryKeys =
+              changedStorageEntryKeys(
+                filesBeforeReconciliation,
+                reconciledFiles,
+                activeFileNames,
+              )
+            storageUpdateGenerations =
+              reconciledEntryKeys.fold(storageUpdateGenerations) { generations, changedKey ->
+                generations + (changedKey to ((generations[changedKey] ?: 0L) + 1L))
               }
             reconciliationSucceeded = true
           }

@@ -30,8 +30,9 @@ for path in "${integration_paths[@]}"; do
   ignore_args+=(--path-ignore-patterns "${path}")
 done
 
-# shellcheck source=scripts/ios/run_with_timeout.sh
+# The validation wrapper passes scripts independently, so ShellCheck cannot follow this path.
+# shellcheck disable=SC1091
 source scripts/ios/run_with_timeout.sh
 run_with_timeout "${UNIT_TEST_TIMEOUT_SECONDS}" \
   bun test --changed="${UNIT_TEST_BASE_REF}" --parallel="${UNIT_TEST_WORKERS}" \
-    --timeout 5000 --no-orphans "${ignore_args[@]}" "$@"
+    --timeout 5000 --no-orphans ${ignore_args[@]+"${ignore_args[@]}"} "$@"

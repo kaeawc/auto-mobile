@@ -1,0 +1,1 @@
+../XCTestRunner/AutoMobileVersion.swift

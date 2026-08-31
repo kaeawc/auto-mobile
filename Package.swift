@@ -21,6 +21,10 @@ let package = Package(
             name: "XCTestRunner",
             targets: ["XCTestRunner"]
         ),
+        .library(
+            name: "XCTestRunnerRewrite",
+            targets: ["XCTestRunnerRewrite"]
+        ),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.4.3"),
@@ -39,6 +43,15 @@ let package = Package(
             dependencies: [.product(name: "Tachikoma", package: "Tachikoma")],
             path: "ios/XCTestRunner/Sources/XCTestRunner",
             swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
+        // Swift-6 concurrency-clean rewrite (in progress). Compiled by `ios-spm-root-package-build`
+        // so the strict-concurrency target is release-built alongside the reference oracle until the
+        // cutover renames it back to `XCTestRunner`.
+        .target(
+            name: "XCTestRunnerRewrite",
+            dependencies: [.product(name: "Tachikoma", package: "Tachikoma")],
+            path: "ios/XCTestRunner/Sources/XCTestRunnerRewrite",
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]
 )

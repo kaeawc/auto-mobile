@@ -1,5 +1,6 @@
 import XCTest
 @testable import XCTestRunner
+import XCTestRunnerTestSupport
 
 final class XCTestRunnerTests: XCTestCase {
     func testExecutePlanBuildsExpectedArguments() throws {
@@ -474,7 +475,7 @@ private struct FakePlanLoader: AutoMobilePlanLoading {
     }
 }
 
-private final class FakeMCPClient: AutoMobileMCPClient {
+private final class FakeMCPClient: AutoMobileMCPClient, @unchecked Sendable {
     struct Call {
         let name: String
         let arguments: [String: Any]
@@ -565,7 +566,7 @@ private struct NullLogger: AutoMobileLogger {
     func error(_: String) {}
 }
 
-private final class FakeDaemonEnsurer: AutoMobileDaemonEnsuring {
+private final class FakeDaemonEnsurer: AutoMobileDaemonEnsuring, @unchecked Sendable {
     private(set) var repoRoots: [String?] = []
 
     func ensureDaemonRunning(repoRoot: String?) -> Bool {

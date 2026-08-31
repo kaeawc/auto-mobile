@@ -207,7 +207,7 @@ final class RemindersPlanContentTests: XCTestCase {
     /// reordering is inactive. CI disables timing data, so the default suite must be returned
     /// untouched in that path.
     func testDefaultTestSuiteOnlyReadsTestsWhenTimingOrderingIsActive() throws {
-        let source = try loadRepositoryFile("ios/XCTestRunner/Sources/XCTestRunner/AutoMobileTestCase.swift")
+        let source = try loadRepositoryFile("ios/XCTestRunner/Sources/XCTestRunner/TestCase/AutoMobileTestCase.swift")
         let body = classBody(named: "AutoMobileTestCase", in: source)
 
         guard let timingAvailableRange = body.range(of: "let timingAvailable = TestTimingCache.shared.hasTimings()")

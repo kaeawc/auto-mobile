@@ -1,7 +1,10 @@
 import Darwin
 import Foundation
 
-/// Simple performance timing utility for debugging test execution
+/// Simple performance timing utility for debugging test execution.
+///
+/// A caseless enum (uninhabited namespace) with an immutable `Date` start time, so it is trivially
+/// concurrency-safe under strict concurrency — no isolation or lock needed.
 public enum PerfTimer {
     private static let startTime = Date()
 

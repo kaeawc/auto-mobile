@@ -1,6 +1,6 @@
 import Foundation
 import os
-import XCTestRunnerRewrite
+import XCTestRunner
 
 /// Deterministic test timer: `now()` returns a controllable clock and `sleep` advances it (recording
 /// each interval) instead of blocking. Relocated out of the shipping target (the reference shipped it

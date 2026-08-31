@@ -30,21 +30,8 @@ for path in "${integration_paths[@]}"; do
   ignore_args+=(--path-ignore-patterns "${path}")
 done
 
-base_commit="$(git merge-base "${UNIT_TEST_BASE_REF}" HEAD)"
-changed_tests=()
-while IFS= read -r path; do
-  case "${path}" in
-    test/*.test.ts) changed_tests+=("${path}") ;;
-  esac
-done < <(git diff --name-only "${base_commit}...HEAD" -- test)
-
-if [ "${#changed_tests[@]}" -eq 0 ]; then
-  echo "No changed TypeScript tests relative to ${UNIT_TEST_BASE_REF}."
-  exit 0
-fi
-
 # shellcheck source=scripts/ios/run_with_timeout.sh
 source scripts/ios/run_with_timeout.sh
 run_with_timeout "${UNIT_TEST_TIMEOUT_SECONDS}" \
-  bun test --parallel="${UNIT_TEST_WORKERS}" --timeout 5000 --no-orphans \
-  "${ignore_args[@]}" "${changed_tests[@]}" "$@"
+  bun test --changed="${UNIT_TEST_BASE_REF}" --parallel="${UNIT_TEST_WORKERS}" \
+    --timeout 5000 --no-orphans "${ignore_args[@]}" "$@"

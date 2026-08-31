@@ -2,6 +2,9 @@
   "$schema": "https://turborepo.dev/schema.json",
   "ui": "stream",
   "envMode": "strict",
+  "futureFlags": {
+    "affectedUsingTaskInputs": true
+  },
   "globalDependencies": ["tsconfig.json"],
   "tasks": {
     "build": {

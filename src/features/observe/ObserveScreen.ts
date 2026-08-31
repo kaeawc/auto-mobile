@@ -97,12 +97,15 @@ interface PostCaptureForegroundIdentity {
 
 function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
   const statusBarHeight = result.systemInsets.top;
+  const navigationBarHeight = result.systemInsets.bottom;
+  const screenHeight = result.screenSize.height;
   const root = result.viewHierarchy?.hierarchy.node;
-  if (statusBarHeight <= 0 || !root) {
+  if ((statusBarHeight <= 0 && navigationBarHeight <= 0) || !root) {
     return false;
   }
 
   let hasBounds = false;
+  const navigationBarTop = screenHeight - navigationBarHeight;
   const nodes = Array.isArray(root) ? [...root] : [root];
   while (nodes.length > 0) {
     const node = nodes.pop();
@@ -111,7 +114,9 @@ function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
     }
     if (node.bounds) {
       hasBounds = true;
-      if (node.bounds.bottom > statusBarHeight) {
+      const isInStatusBar = node.bounds.bottom <= statusBarHeight;
+      const isInNavigationBar = node.bounds.top >= navigationBarTop;
+      if (!isInStatusBar && !isInNavigationBar) {
         return false;
       }
     }
@@ -938,6 +943,9 @@ export class RealObserveScreen implements ObserveScreen {
   ): Promise<{ foreground: string } | undefined> {
     const foreground = await foregroundIdentity;
     if (!foreground || SYSTEM_UI_WINDOW_PACKAGES.has(foreground)) {
+      return undefined;
+    }
+    if (result.viewHierarchy?.packageName === foreground) {
       return undefined;
     }
     return isStatusBarOnlyHierarchy(result) ? { foreground } : undefined;

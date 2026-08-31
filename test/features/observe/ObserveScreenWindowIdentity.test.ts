@@ -399,7 +399,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     );
   });
 
-  test("retracts freshness for status-bar-only multiple hierarchy roots", async () => {
+  test("retracts freshness for system-chrome-only multiple hierarchy roots", async () => {
     // CtrlProxy preserves multiple extracted windows as a top-level node array.
     const now = 1_700_000_000_000;
     const timer = new FakeTimer();
@@ -412,7 +412,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       fresh: true,
       screenWidth: 1080,
       screenHeight: 2400,
-      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+      systemInsets: { top: 63, right: 0, bottom: 63, left: 0 },
       packageName: "com.android.systemui",
       foregroundActivity: "com.android.settings/.SubSettings",
       hierarchy: {
@@ -421,6 +421,10 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
           {
             contentDesc: "Wifi signal full.",
             bounds: { left: 892, top: 11, right: 931, bottom: 50 },
+          },
+          {
+            contentDesc: "Home",
+            bounds: { left: 486, top: 2337, right: 594, bottom: 2400 },
           },
         ],
       },
@@ -446,6 +450,36 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
 
     expect(result.freshness?.isFresh).toBe(false);
     expect(result.freshness?.verified).toBe(false);
+  });
+
+  test("does not retract a same-package hierarchy reduced to status-bar content", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      systemInsets: { top: 63, right: 0, bottom: 63, left: 0 },
+      packageName: "com.google.android.calendar",
+      foregroundActivity: "com.google.android.calendar/.MainActivity",
+      hierarchy: {
+        node: { text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.google.android.calendar", userId: 0 });
+    const screen = makeScreen(viewHierarchy, fakeAdb);
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.verified).toBe(true);
   });
 
   test("a transient app transition is not flagged: the confirming read settles onto the observed app", async () => {

@@ -730,7 +730,10 @@ export function storageTelemetryInputFromWire(
  * as a bare JSON number; JavaScript has already rounded unsafe values by the time this function
  * receives them, so return `undefined` to make callers reject rather than forward corrupted data.
  */
-export function normalizeStorageWireValue(value: unknown, valueType?: string): string | null | undefined {
+export function normalizeStorageWireValue(
+  value: unknown,
+  valueType?: string,
+): string | null | undefined {
   if (value === null || value === undefined) {
     return null;
   }
@@ -750,21 +753,18 @@ interface JsonParseContext {
  * context exposes the original numeric token before IEEE-754 conversion loses digits.
  */
 export function parseCtrlProxyJson<T>(text: string): T {
-  return JSON.parse(
-    text,
-    (key: string, value: unknown, context?: JsonParseContext): unknown => {
-      if (
-        (key === "value" || key === "previousValue") &&
-        typeof value === "number" &&
-        Number.isInteger(value) &&
-        !Number.isSafeInteger(value) &&
-        context?.source
-      ) {
-        return context.source;
-      }
-      return value;
-    },
-  );
+  return JSON.parse(text, (key: string, value: unknown, context?: JsonParseContext): unknown => {
+    if (
+      (key === "value" || key === "previousValue") &&
+      typeof value === "number" &&
+      Number.isInteger(value) &&
+      !Number.isSafeInteger(value) &&
+      context?.source
+    ) {
+      return context.source;
+    }
+    return value;
+  });
 }
 
 /**

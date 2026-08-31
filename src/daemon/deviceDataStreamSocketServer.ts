@@ -1301,10 +1301,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   /** Release every observer owned by a desktop socket that disconnected without an explicit UI tear-down. */
-  private releaseStorageSubscriptionsForSocket(
-    socket: Socket,
-    retainForCloseRetry: boolean,
-  ): void {
+  private releaseStorageSubscriptionsForSocket(socket: Socket, retainForCloseRetry: boolean): void {
     const keys = this.storageSubscriptionKeysBySocket.get(socket);
     if (!keys) {
       return;

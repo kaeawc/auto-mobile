@@ -9,9 +9,37 @@ private val json = Json { ignoreUnknownKeys = true }
 
 /**
  * Identifies an entry for highlight purposes. Keys are only unique within a file, so the file name
- * is part of the identity.
+ * is part of the identity. The length prefix keeps distinct file/key pairs distinct even when
+ * either component contains a colon.
  */
-internal fun highlightKey(fileName: String, key: String): String = "$fileName:$key"
+internal fun highlightKey(fileName: String, key: String): String =
+  "${fileName.length}:$fileName:$key"
+
+/** True when one or more bounded-queue updates are missing before [currentSequence]. */
+internal fun hasStorageSequenceGap(previousSequence: Long?, currentSequence: Long): Boolean =
+  currentSequence > 0L && currentSequence > (previousSequence ?: 0L) + 1L
+
+/** True when a restarted app process reset its process-local storage sequence. */
+internal fun hasStorageSequenceRegressed(
+  previousSequence: Long?,
+  currentSequence: Long,
+): Boolean = previousSequence != null && currentSequence > 0L && currentSequence < previousSequence
+
+/** Entry identities whose value, type, presence, or absence differs between two file snapshots. */
+internal fun changedStorageEntryKeys(
+  before: List<KeyValueFile>,
+  after: List<KeyValueFile>,
+  fileNames: Collection<String>,
+): Set<String> =
+  fileNames.flatMapTo(linkedSetOf()) { fileName ->
+    val oldEntries =
+      before.firstOrNull { it.name == fileName }?.entries.orEmpty().associateBy { it.key }
+    val newEntries =
+      after.firstOrNull { it.name == fileName }?.entries.orEmpty().associateBy { it.key }
+    (oldEntries.keys + newEntries.keys)
+      .filter { key -> oldEntries[key] != newEntries[key] }
+      .map { key -> highlightKey(fileName, key) }
+  }
 
 /**
  * Decodes a daemon-supplied value string into the representation [KeyValueEntry.value] holds.
@@ -84,6 +112,82 @@ internal fun List<KeyValueFile>.applyStorageUpdate(
 
   return map { file ->
     if (file.name == update.fileName) file.copy(entries = updatedEntries) else file
+  }
+}
+
+/**
+ * Optimistically folds a just-saved key-value edit into the displayed files, so the inspector
+ * reflects the new value immediately after a successful save without waiting for the daemon's live
+ * `storage_update` frame (or a facet reopen). Delegates to [applyStorageUpdate] so the add/update
+ * (and, for a null [value], delete) semantics — including value parsing and the "ignore an unloaded
+ * file" rule — stay identical to the live-stream path; the stream frame, if it later arrives for
+ * the same key, folds in idempotently over this. The stream-only fields
+ * ([StorageStreamUpdate.deviceId], timestamp, packageName, sequence) don't affect the fold, so
+ * placeholders are used.
+ */
+internal fun List<KeyValueFile>.applyKeyValueEdit(
+  fileName: String,
+  key: String,
+  value: String?,
+  type: KeyValueType,
+): List<KeyValueFile> =
+  applyStorageUpdate(
+    StorageStreamUpdate(
+      deviceId = null,
+      timestamp = 0L,
+      packageName = "",
+      fileName = fileName,
+      key = key,
+      value = value,
+      valueType = type,
+      sequenceNumber = 0L,
+    )
+  )
+
+/**
+ * Folds a just-saved optimistic edit in [applyKeyValueEdit], but only when the entry has not
+ * changed under a concurrent live `storage_update` frame that landed while the save was in flight
+ * (#4709 review).
+ *
+ * [expectedGeneration] is captured before the suspending save is awaited. Every live update for the
+ * key advances its generation, even when a sequence of updates returns to the original value. If
+ * the generation changed while the save was in flight, the older, just-submitted optimistic value
+ * must not clobber the newer live state, so the receiver is returned unchanged.
+ */
+internal fun List<KeyValueFile>.applyKeyValueEditIfGenerationUnchanged(
+  fileName: String,
+  key: String,
+  value: String?,
+  type: KeyValueType,
+  expectedGeneration: Long,
+  currentGeneration: Long,
+): List<KeyValueFile> =
+  if (currentGeneration == expectedGeneration) {
+    applyKeyValueEdit(fileName, key, value, type)
+  } else {
+    this
+  }
+
+/**
+ * Replaces one displayed file with a post-subscription snapshot, then replays every live mutation
+ * received while that snapshot was in flight. The replay makes the acknowledgement-to-snapshot
+ * bridge safe for a write C that arrives during reconciliation: the snapshot closes the earlier A→B
+ * registration gap without overwriting C.
+ */
+internal fun List<KeyValueFile>.reconcileStorageFileSnapshot(
+  snapshot: List<KeyValueFile>,
+  fileName: String,
+  updatesSinceSnapshotStarted: List<StorageStreamUpdate>,
+): List<KeyValueFile> {
+  val snapshotFile = snapshot.firstOrNull { it.name == fileName }
+  val withSnapshot =
+    if (snapshotFile == null) {
+      filterNot { it.name == fileName }
+    } else {
+      map { file -> if (file.name == fileName) snapshotFile else file }
+    }
+  return updatesSinceSnapshotStarted.fold(withSnapshot) { files, update ->
+    files.applyStorageUpdate(update)
   }
 }
 

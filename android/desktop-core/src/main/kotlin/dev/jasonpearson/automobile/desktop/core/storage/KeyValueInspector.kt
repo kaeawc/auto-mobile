@@ -47,13 +47,19 @@ import kotlinx.coroutines.launch
 /** Color for highlighting recently changed entries */
 private val HIGHLIGHT_COLOR = Color(0xFF4CAF50).copy(alpha = 0.3f)
 
+private data class EditingEntryIdentity(
+  val filePath: String,
+  val key: String,
+  val type: KeyValueType,
+)
+
 /**
  * Key-Value storage inspector for SharedPreferences (Android) / UserDefaults (iOS).
  *
  * @param keyValueFiles List of key-value storage files to display
  * @param onSetValue Optional callback to persist a value change. Receives (fileName, key, value,
  *   type).
- * @param recentlyChangedKeys Entries to highlight as just-changed, as `"fileName:key"` identities.
+ * @param recentlyChangedKeys Entries to highlight as just-changed, using [highlightKey] identities.
  *   Hoisted so the caller owns both the live-update source and the highlight lifetime; see
  *   [StorageDashboard], which drives this from the observation stream's `storage_update` frames.
  * @param modifier Modifier for the composable
@@ -70,11 +76,17 @@ fun KeyValueInspector(
   val colors = SharedTheme.globalColors
   val scope = rememberCoroutineScope()
 
-  // State
-  var selectedFile by remember(keyValueFiles) { mutableStateOf(keyValueFiles.firstOrNull()) }
+  // State. Selection is tracked by stable identity (the file's path) rather than by the
+  // KeyValueFile instance so that a list rebuild -- from an optimistic edit fold or a live
+  // storage_update frame -- does not reset the inspector to the first file and hide the value the
+  // user just edited (#4709 review). Falls back to the first file when the remembered path is
+  // absent: the initial load (no selection yet) or when the selected file disappears from the list.
+  var selectedPath by remember { mutableStateOf<String?>(null) }
+  val selectedFile =
+    keyValueFiles.firstOrNull { it.path == selectedPath } ?: keyValueFiles.firstOrNull()
   var searchQuery by remember { mutableStateOf("") }
   var selectedEntry by remember { mutableStateOf<KeyValueEntry?>(null) }
-  var editingEntry by remember { mutableStateOf<KeyValueEntry?>(null) }
+  var editingEntry by remember { mutableStateOf<EditingEntryIdentity?>(null) }
   var editValue by remember { mutableStateOf("") }
   var isSaving by remember { mutableStateOf(false) }
   var saveError by remember { mutableStateOf<String?>(null) }
@@ -116,7 +128,7 @@ fun KeyValueInspector(
           Row(
             modifier =
               Modifier.fillMaxWidth()
-                .clickable { selectedFile = file }
+                .clickable { selectedPath = file.path }
                 .pointerHoverIcon(PointerIcon.Hand)
                 .background(
                   if (isSelected) colors.text.normal.copy(alpha = 0.08f) else Color.Transparent
@@ -268,7 +280,10 @@ fun KeyValueInspector(
         LazyColumn(modifier = Modifier.fillMaxSize()) {
           items(filteredEntries) { entry ->
             val isSelected = entry == selectedEntry
-            val isEditing = entry == editingEntry
+            val isEditing =
+              editingEntry?.let {
+                it.filePath == selectedFile?.path && it.key == entry.key && it.type == entry.type
+              } == true
 
             // Check if this entry was recently changed
             val changeKey = highlightKey(selectedFile?.name.orEmpty(), entry.key)
@@ -414,7 +429,13 @@ fun KeyValueInspector(
                         color = colors.text.normal.copy(alpha = 0.4f),
                         modifier =
                           Modifier.clickable {
-                              editingEntry = entry
+                              val filePath = selectedFile?.path ?: return@clickable
+                              editingEntry =
+                                EditingEntryIdentity(
+                                  filePath = filePath,
+                                  key = entry.key,
+                                  type = entry.type,
+                                )
                               editValue = entry.value.toString()
                             }
                             .pointerHoverIcon(PointerIcon.Hand),
@@ -451,13 +472,13 @@ fun KeyValueInspector(
           horizontalArrangement = Arrangement.SpaceBetween,
         ) {
           Text(
-            selectedFile!!.path,
+            selectedFile.path,
             fontSize = 10.sp,
             color = colors.text.normal.copy(alpha = 0.4f),
             fontFamily = FontFamily.Monospace,
           )
           Text(
-            "${filteredEntries.size} of ${selectedFile!!.entries.size} entries",
+            "${filteredEntries.size} of ${selectedFile.entries.size} entries",
             fontSize = 10.sp,
             color = colors.text.normal.copy(alpha = 0.5f),
           )

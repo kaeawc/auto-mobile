@@ -24,6 +24,7 @@ import {
 import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
+import { DeviceSessionRegistry } from "../../../src/daemon/deviceSessionRegistry";
 import { SessionManager } from "../../../src/daemon/sessionManager";
 import { z } from "zod/v4";
 
@@ -615,6 +616,48 @@ describe("MCP Booted Device Resources", () => {
 
       // Clean up SessionManager timer to prevent process hang
       sessionManager.stopCleanupTimer();
+    });
+
+    test("exposes the registry epoch UUID for each live device", async function () {
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const sessionManager = new SessionManager(fakeTimer, new FakeDeviceSessionPersistence());
+      const { FakeInstalledAppsRepository } =
+        await import("../../fakes/FakeInstalledAppsRepository");
+      const devicePool = new DevicePool(
+        sessionManager,
+        "test-daemon-session-id",
+        fakeTimer,
+        new FakeInstalledAppsRepository(),
+        fakeDeviceUtils,
+      );
+      await devicePool.initializeWithDevices([mockAndroidDevice1]);
+      const registry = new DeviceSessionRegistry(fakeTimer);
+      const epoch = registry.onDeviceConnected({
+        deviceId: mockAndroidDevice1.deviceId,
+        platform: "android",
+        incarnation: 1,
+      });
+      DaemonState.getInstance().initialize(sessionManager, devicePool, registry);
+
+      try {
+        const { client } = fixture.getContext();
+        const result = await client.readResource({ uri: "automobile:devices/booted" });
+        const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+
+        expect(data.devices).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              deviceId: mockAndroidDevice1.deviceId,
+              deviceSessionUuid: epoch.deviceSessionUuid,
+            }),
+          ]),
+        );
+      } finally {
+        sessionManager.stopCleanupTimer();
+      }
     });
 
     test("should not include phantom pool devices in pool status", async function () {

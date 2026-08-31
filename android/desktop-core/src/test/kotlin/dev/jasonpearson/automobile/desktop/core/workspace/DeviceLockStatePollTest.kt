@@ -56,4 +56,23 @@ class DeviceLockStatePollTest {
     assertTrue(parseBootedLockStates("not json").isEmpty())
     assertTrue(parseBootedLockStates("").isEmpty())
   }
+
+  @Test
+  fun `extracts only known device session UUIDs from booted devices`() {
+    val payload =
+      """
+      {"totalCount":2,"androidCount":2,"iosCount":0,"virtualCount":2,"physicalCount":0,
+       "lastUpdated":"x","devices":[
+         {"name":"P8","platform":"android","deviceId":"emulator-5554","source":"local","isVirtual":true,"status":"booted","deviceSessionUuid":"epoch-a"},
+         {"name":"P9","platform":"android","deviceId":"emulator-5556","source":"local","isVirtual":true,"status":"booted"}]}
+      """
+        .trimIndent()
+
+    assertEquals(mapOf("emulator-5554" to "epoch-a"), parseBootedDeviceSessionUuids(payload))
+  }
+
+  @Test
+  fun `device session UUID extraction is empty for malformed payload`() {
+    assertTrue(parseBootedDeviceSessionUuids("not json").isEmpty())
+  }
 }

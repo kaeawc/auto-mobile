@@ -4,6 +4,7 @@ import android.content.Context
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -12,6 +13,31 @@ import org.robolectric.RuntimeEnvironment
 
 @RunWith(RobolectricTestRunner::class)
 class SharedPreferencesDriverImplConcurrencyTest {
+
+  @Test
+  fun `bounds one file queue and exposes the evicted sequence gap`() {
+    val context = RuntimeEnvironment.getApplication() as Context
+    val driver = SharedPreferencesDriverImpl(context)
+    val fileName = "bounded-changes"
+    val preferences = context.getSharedPreferences(fileName, Context.MODE_PRIVATE)
+    preferences.edit().clear().commit()
+
+    driver.startListening(fileName)
+    try {
+      repeat(257) { index ->
+        preferences.edit().putInt("value", index).commit()
+      }
+
+      val changes = driver.getQueuedChanges(fileName, 0)
+
+      assertEquals(256, changes.size)
+      assertEquals(2L, changes.first().sequenceNumber)
+      assertEquals(257L, changes.last().sequenceNumber)
+    } finally {
+      driver.stopListening(fileName)
+      preferences.edit().clear().commit()
+    }
+  }
 
   @Test
   fun `concurrent start stop and getQueuedChanges do not corrupt maps`() {

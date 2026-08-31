@@ -3,12 +3,15 @@ package dev.jasonpearson.automobile.desktop.core.daemon
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.connection.isConnected
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 
 /**
  * In-memory [ObservationStream] for UI tests: records subscription lifecycle (connect/disconnect/
@@ -38,8 +41,16 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
   private val _performanceUpdates = flow<PerformanceStreamUpdate>()
   override val performanceUpdates: SharedFlow<PerformanceStreamUpdate> =
     _performanceUpdates.asSharedFlow()
-  private val _storageUpdates = flow<StorageStreamUpdate>()
-  override val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
+  private val storageUpdateChannel = Channel<StorageStreamUpdate>(Channel.UNLIMITED)
+  override val storageUpdates: Flow<StorageStreamUpdate> = storageUpdateChannel.receiveAsFlow()
+  private val storageSubscriptionResponseChannel =
+    Channel<StorageSubscriptionResponse>(Channel.UNLIMITED)
+  override val storageSubscriptionResponses: Flow<StorageSubscriptionResponse> =
+    storageSubscriptionResponseChannel.receiveAsFlow()
+  private val storageReconciliationRequestChannel =
+    Channel<StorageSubscriptionKey>(Channel.BUFFERED)
+  override val storageReconciliationRequests: Flow<StorageSubscriptionKey> =
+    storageReconciliationRequestChannel.receiveAsFlow()
   private val _deviceEvents = flow<DeviceStreamEvent>()
   override val deviceEvents: SharedFlow<DeviceStreamEvent> = _deviceEvents.asSharedFlow()
 
@@ -55,6 +66,9 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
   var lastConnectedDeviceId: String? = null
     private set
 
+  var lastConnectedDeviceSessionUuid: String? = null
+    private set
+
   var navigationRequestCount = 0
     private set
 
@@ -67,9 +81,10 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
   var lastObservationDeviceId: String? = null
     private set
 
-  override fun connect(deviceId: String?) {
+  override fun connect(deviceId: String?, deviceSessionUuid: String?) {
     connectCallCount++
     lastConnectedDeviceId = deviceId
+    lastConnectedDeviceSessionUuid = deviceSessionUuid
     if (failConnect) {
       _connectionState.value = ConnectionState.Disconnected("Socket not found")
       return
@@ -93,6 +108,9 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
 
   override fun dispose() {
     disconnect()
+    storageUpdateChannel.close()
+    storageSubscriptionResponseChannel.close()
+    storageReconciliationRequestChannel.close()
   }
 
   override fun setCadence(screenshotIntervalMs: Long?, hierarchyIntervalMs: Long?) = Unit
@@ -119,6 +137,33 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
     lastObservationDeviceId = deviceId
   }
 
+  /** Storage files currently subscribed (by [subscribeStorage], minus [unsubscribeStorage]). */
+  val storageSubscriptions: Set<StorageSubscriptionKey>
+    get() = _storageSubscriptions.toSet()
+
+  private val _storageSubscriptions = LinkedHashSet<StorageSubscriptionKey>()
+
+  /**
+   * All storage subscribe/unsubscribe calls in order, for asserting lifecycle (subscribe→release).
+   */
+  val storageSubscriptionCalls: List<Pair<String, StorageSubscriptionKey>>
+    get() = _storageSubscriptionCalls.toList()
+
+  private val _storageSubscriptionCalls = mutableListOf<Pair<String, StorageSubscriptionKey>>()
+
+  override fun subscribeStorage(packageName: String, fileName: String) {
+    val key = StorageSubscriptionKey(packageName, fileName)
+    // Mirror the real client's dedup: a repeated subscribe for the same file is a no-op.
+    if (!_storageSubscriptions.add(key)) return
+    _storageSubscriptionCalls.add("subscribe_storage" to key)
+  }
+
+  override fun unsubscribeStorage(packageName: String, fileName: String) {
+    val key = StorageSubscriptionKey(packageName, fileName)
+    if (!_storageSubscriptions.remove(key)) return
+    _storageSubscriptionCalls.add("unsubscribe_storage" to key)
+  }
+
   // -- Test helpers: push updates onto the flows --
   fun emitScreenshot(update: ScreenshotStreamUpdate): Boolean = _screenshotUpdates.tryEmit(update)
 
@@ -128,7 +173,14 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
   fun emitPerformance(update: PerformanceStreamUpdate): Boolean =
     _performanceUpdates.tryEmit(update)
 
-  fun emitStorage(update: StorageStreamUpdate): Boolean = _storageUpdates.tryEmit(update)
+  fun emitStorage(update: StorageStreamUpdate): Boolean =
+    storageUpdateChannel.trySend(update).isSuccess
+
+  fun emitStorageSubscriptionResponse(response: StorageSubscriptionResponse): Boolean =
+    storageSubscriptionResponseChannel.trySend(response).isSuccess
+
+  fun emitStorageReconciliationRequest(key: StorageSubscriptionKey): Boolean =
+    storageReconciliationRequestChannel.trySend(key).isSuccess
 
   fun emitHierarchy(update: HierarchyStreamUpdate): Boolean = _hierarchyUpdates.tryEmit(update)
 

@@ -10,11 +10,13 @@ import kotlinx.serialization.json.Json
  * `value`/`previousValue` — can be unit-tested for validity across add / modify / remove /
  * type-change cases (#3000).
  *
- * STRING values need JSON quoting + escaping; all other types (numbers, booleans, STRING_SET arrays
- * produced by the SDK) are already valid JSON fragments. Crucially, `previousValue` is quoted by
- * its OWN [PreferenceChangeEvent.previousValueType], not by the new value's [type]: on a remove
- * (new value null) or a type-changing write the new type is UNKNOWN, so quoting the prior value by
- * it would emit an unquoted STRING and break the entire message's JSON.
+ * STRING and LONG values need JSON quoting + escaping: JavaScript cannot represent all signed
+ * 64-bit integers exactly. A non-finite FLOAT also needs quoting because JSON has no NaN or
+ * infinity literals. INT, finite FLOAT, BOOLEAN and SDK-produced STRING_SET arrays are already
+ * valid JSON fragments. Crucially, `previousValue` is quoted by its OWN
+ * [PreferenceChangeEvent.previousValueType], not by the new value's [type]: on a remove (new value
+ * null) or a type-changing write the new type is UNKNOWN, so quoting the prior value by it would
+ * emit an unquoted STRING and break the entire message's JSON.
  */
 internal fun buildStorageChangedMessage(
   event: PreferenceChangeEvent,
@@ -51,10 +53,19 @@ internal fun buildStorageChangedMessage(
 
 /**
  * Encodes a JSON value fragment for a preference value. Returns the literal `null` for a null
- * value, a JSON-quoted+escaped string for STRING, and the already-valid-JSON [value] verbatim for
- * every other type (numbers, booleans, and SDK-produced STRING_SET arrays).
+ * value, a JSON-quoted+escaped string for STRING, LONG, and non-finite FLOAT, and the
+ * already-valid-JSON [value] verbatim for every other type (numbers, booleans, and SDK-produced
+ * STRING_SET arrays).
  */
 private fun encodeTypedValue(value: String?, type: String?, json: Json): String {
   if (value == null) return "null"
-  return if (type == "STRING") json.encodeToString(value) else value
+  return if (
+    type == "STRING" ||
+      type == "LONG" ||
+      (type == "FLOAT" && value.toDoubleOrNull()?.isFinite() != true)
+  ) {
+    json.encodeToString(value)
+  } else {
+    value
+  }
 }

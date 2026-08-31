@@ -714,6 +714,60 @@ export function storageTelemetryInputFromWire(
 }
 
 /**
+ * Normalize a `storage_changed` wire value to the JSON-encoded string that
+ * `StorageChangedEvent.value` and every downstream consumer expect.
+ *
+ * The CtrlProxy runner emits `value` as a raw JSON fragment: a quoted string for
+ * STRING preferences, but a bare JSON number / boolean / array for INT, LONG,
+ * FLOAT, BOOLEAN, and STRING_SET. `JSON.parse` on the wire frame therefore yields
+ * a JS `number`/`boolean`/`array` for those types, not a string. Forwarding that
+ * runtime value unchanged makes the desktop `storage_update` frame fail
+ * kotlinx-serialization decoding (its `StorageEventData.value` is `String?`), so
+ * live updates silently drop for every non-string preference type (#4709 review).
+ * Re-encoding non-strings with `JSON.stringify` restores the string contract:
+ * `42` -> `"42"`, `true` -> `"true"`, `["a","b"]` -> `'["a","b"]'` — each of which
+ * the desktop `parseKeyValue` decodes back to its declared type. A legacy runner can send LONG
+ * as a bare JSON number; JavaScript has already rounded unsafe values by the time this function
+ * receives them, so return `undefined` to make callers reject rather than forward corrupted data.
+ */
+export function normalizeStorageWireValue(
+  value: unknown,
+  valueType?: string,
+): string | null | undefined {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (valueType === "LONG" && typeof value === "number" && !Number.isSafeInteger(value)) {
+    return undefined;
+  }
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+interface JsonParseContext {
+  source?: string;
+}
+
+/**
+ * Parse a CtrlProxy frame without rounding legacy bare 64-bit storage values. Modern runners quote
+ * LONG values, but older runners sent them as JSON numbers. Bun's standard JSON.parse source
+ * context exposes the original numeric token before IEEE-754 conversion loses digits.
+ */
+export function parseCtrlProxyJson<T>(text: string): T {
+  return JSON.parse(text, (key: string, value: unknown, context?: JsonParseContext): unknown => {
+    if (
+      (key === "value" || key === "previousValue") &&
+      typeof value === "number" &&
+      Number.isInteger(value) &&
+      !Number.isSafeInteger(value) &&
+      context?.source
+    ) {
+      return context.source;
+    }
+    return value;
+  });
+}
+
+/**
  * Discriminated union of all WebSocket messages from the accessibility service.
  * The `type` field is the discriminant.
  */
@@ -1718,6 +1772,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   protected onConnectionEstablished(): void {
     this.syncNetworkStateToDevice();
     this.syncAccessibilityFlagsToDevice();
+    // The runner loses its in-process content observers across a service restart while the desktop
+    // Unix stream remains connected. The stream server retains the pane-owned subscriptions and
+    // replays them on this new CtrlProxy connection.
+    void getDeviceDataStreamServer()?.reapplyStorageSubscriptionsForDevice(this.device.deviceId);
     // Resume the screenshot keepalive after a (re)connect. onConnectionClosed()
     // cancels it; without restarting here, a transient drop on a STATIC screen
     // leaves the live view frozen forever (no UI change to retrigger a capture).
@@ -3387,7 +3445,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private async handleWebSocketMessage(data: WebSocket.Data): Promise<void> {
     try {
-      const message: WebSocketMessage = JSON.parse(data.toString());
+      const message = parseCtrlProxyJson<WebSocketMessage>(data.toString());
 
       if (message.type === "connected") {
         this.supportedCommands = Array.isArray(message.supportedCommands)
@@ -4019,11 +4077,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       // Handle storage_changed push event
       if (message.type === "storage_changed") {
+        const normalizedValue = normalizeStorageWireValue(message.value, message.valueType);
+        if (normalizedValue === undefined) {
+          logger.warn(
+            `[CTRL_PROXY] Ignoring unsafe legacy LONG storage value for ${message.packageName ?? "unknown"}/${message.fileName ?? "unknown"}`,
+          );
+          return;
+        }
         const storageEvent: StorageChangedEvent = {
           packageName: message.packageName ?? "",
           fileName: message.fileName ?? "",
           key: message.key ?? null,
-          value: message.value ?? null,
+          // Non-string preference types arrive as bare JSON (number/boolean/array); re-encode
+          // to the JSON string contract so the desktop storage_update frame decodes (#4709 review).
+          value: normalizedValue,
           valueType: message.valueType ?? "STRING",
           timestamp: message.timestamp ?? this.timer.now(),
           sequenceNumber: message.sequenceNumber ?? 0,

@@ -57,6 +57,13 @@ sealed interface WorkspaceAction {
    */
   data class SetLockStates(val locked: Map<String, Boolean>) : WorkspaceAction
 
+  /**
+   * Refresh daemon-minted device epochs for columns that are already open. A daemon restart
+   * replaces every process-local epoch while preserving device IDs, so an open UUID-scoped stream
+   * must be recreated with this new identity.
+   */
+  data class RefreshDeviceSessionUuids(val sessionUuids: Map<String, String>) : WorkspaceAction
+
   /** Open [tool] on every observed pane for like-for-like comparison (the facet ⧉ Diff control). */
   data class DiffTool(val tool: Tool) : WorkspaceAction
 }
@@ -104,6 +111,7 @@ class WorkspaceViewModel(
       is WorkspaceAction.PressDeviceButton -> pressDeviceButton(action.deviceId, action.button)
       is WorkspaceAction.SetLocale -> setLocale(action.deviceId, action.locale)
       is WorkspaceAction.SetLockStates -> setLockStates(action.locked)
+      is WorkspaceAction.RefreshDeviceSessionUuids -> refreshDeviceSessionUuids(action.sessionUuids)
       is WorkspaceAction.DiffTool -> diffTool(action.tool)
     }
   }
@@ -160,6 +168,26 @@ class WorkspaceViewModel(
     }
   }
 
+  /**
+   * Replace only non-null UUIDs from a fresh booted-devices snapshot. A missing UUID means an older
+   * daemon did not expose epoch identity; preserving the known UUID makes a transient or downgraded
+   * response unable to silently widen an existing UUID-scoped stream.
+   */
+  private fun refreshDeviceSessionUuids(sessionUuids: Map<String, String>) {
+    if (sessionUuids.isEmpty()) return
+    _state.update { current ->
+      val content = current as? WorkspaceUiState.Content ?: return@update current
+      content.copy(
+        columns =
+          content.columns.map { column ->
+            val refreshed = sessionUuids[column.deviceId] ?: return@map column
+            if (refreshed == column.deviceSessionUuid) column
+            else column.copy(deviceSessionUuid = refreshed)
+          }
+      )
+    }
+  }
+
   /** Open [tool] on every observed column so all panes show the same facet side by side. */
   private fun diffTool(tool: Tool) {
     _state.update { current ->
@@ -177,8 +205,25 @@ class WorkspaceViewModel(
     _state.update { current ->
       val columns = (current as? WorkspaceUiState.Content)?.columns ?: emptyList()
       if (columns.any { it.deviceId == column.deviceId }) {
-        LOG.debug("Device ${column.deviceId} already observed; refocusing")
-        WorkspaceUiState.Content(columns, focusedDeviceId = column.deviceId)
+        // A restarted emulator can keep its serial while receiving a fresh daemon-minted epoch.
+        // Preserve the pane's UI state but replace identity/device metadata so its facets dispose
+        // stale streams and reconnect with the current session UUID.
+        LOG.debug("Device ${column.deviceId} already observed; refreshing and refocusing")
+        WorkspaceUiState.Content(
+          columns.map { existing ->
+            if (existing.deviceId != column.deviceId) {
+              existing
+            } else {
+              column.copy(
+                mode = existing.mode,
+                activeTool = existing.activeTool,
+                shrunk = existing.shrunk,
+                orientation = existing.orientation,
+              )
+            }
+          },
+          focusedDeviceId = column.deviceId,
+        )
       } else {
         WorkspaceUiState.Content(columns + column, focusedDeviceId = column.deviceId)
       }

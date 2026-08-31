@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -15,12 +16,24 @@ interface ObservationStream {
   val screenshotUpdates: SharedFlow<ScreenshotStreamUpdate>
   val navigationUpdates: SharedFlow<NavigationGraphStreamUpdate>
   val performanceUpdates: SharedFlow<PerformanceStreamUpdate>
-  val storageUpdates: SharedFlow<StorageStreamUpdate>
+  /**
+   * Lossless storage deltas for this pane's stream. Unlike layout telemetry, every mutation is a
+   * durable state transition, so this is a unicast [Flow] rather than a lossy broadcast buffer.
+   */
+  val storageUpdates: Flow<StorageStreamUpdate>
+  /**
+   * Lossless, per-stream lifecycle acknowledgements. A stream belongs to one pane, and an
+   * acknowledgement belongs to the command from that pane, so this is intentionally a unicast
+   * [Flow] rather than a lossy broadcast buffer.
+   */
+  val storageSubscriptionResponses: Flow<StorageSubscriptionResponse>
+  /** Files that need a fresh snapshot because their runner-side observer was recreated. */
+  val storageReconciliationRequests: Flow<StorageSubscriptionKey>
   val deviceEvents: SharedFlow<DeviceStreamEvent>
   val connectionState: StateFlow<ConnectionState>
 
-  /** Subscribe to the stream, optionally filtered server-side to [deviceId]. */
-  fun connect(deviceId: String? = null)
+  /** Subscribe to the stream, optionally scoped to a daemon device epoch and [deviceId]. */
+  fun connect(deviceId: String? = null, deviceSessionUuid: String? = null)
 
   /** Unsubscribe and close the connection; the instance may be reconnected. */
   fun disconnect()
@@ -39,4 +52,30 @@ interface ObservationStream {
 
   /** Request a one-off observation for [deviceId] (or the subscribed device when null). */
   fun requestObservation(deviceId: String? = null)
+
+  /**
+   * Register a device-side content observer for [packageName]/[fileName] so external writes to that
+   * key/value store emit `storage_update` frames on [storageUpdates]. Idempotent per (package,
+   * file) and remembered so it is re-applied automatically across reconnects. No-op until
+   * connected.
+   */
+  fun subscribeStorage(packageName: String, fileName: String)
+
+  /** Release the content observer previously registered via [subscribeStorage]. */
+  fun unsubscribeStorage(packageName: String, fileName: String)
 }
+
+/**
+ * Acknowledgement for a storage observer lifecycle command.
+ *
+ * [requestId] correlates this result to the wire command. A successful subscribe means the daemon
+ * has registered the observer, so consumers may safely reconcile a snapshot taken before it was
+ * active; a failed or stale acknowledgement must not be treated as confirmation.
+ */
+data class StorageSubscriptionResponse(
+  val requestId: String,
+  val key: StorageSubscriptionKey,
+  val subscribe: Boolean,
+  val success: Boolean,
+  val error: String? = null,
+)

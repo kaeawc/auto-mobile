@@ -63,6 +63,69 @@ class WorkspaceViewModelTest {
     }
 
   @Test
+  fun `reobserving a reincarnated device refreshes its session UUID`() = testScope.runTest {
+    val vm = WorkspaceViewModel(this)
+    vm.onAction(
+      WorkspaceAction.ObserveDevice(
+        DeviceColumn(
+          deviceId = "a",
+          name = "Device a",
+          platform = Platform.Android,
+          activeTool = Tool.Storage,
+          deviceSessionUuid = "epoch-a",
+        )
+      )
+    )
+
+    vm.onAction(
+      WorkspaceAction.ObserveDevice(
+        DeviceColumn(
+          deviceId = "a",
+          name = "Device a (restarted)",
+          platform = Platform.Android,
+          deviceSessionUuid = "epoch-b",
+        )
+      )
+    )
+
+    val state = vm.state.value as WorkspaceUiState.Content
+    assertEquals(1, state.columns.size)
+    assertEquals("epoch-b", state.columns.single().deviceSessionUuid)
+    assertEquals(Tool.Storage, state.columns.single().activeTool)
+  }
+
+  @Test
+  fun `refreshing daemon epochs updates only already observed columns`() = testScope.runTest {
+    val vm = WorkspaceViewModel(this)
+    vm.onAction(
+      WorkspaceAction.ObserveDevice(
+        DeviceColumn(
+          deviceId = "a",
+          name = "Device a",
+          platform = Platform.Android,
+          activeTool = Tool.Storage,
+          deviceSessionUuid = "epoch-a",
+        )
+      )
+    )
+    vm.onAction(WorkspaceAction.ObserveDevice(column("b")))
+
+    vm.onAction(
+      WorkspaceAction.RefreshDeviceSessionUuids(
+        mapOf(
+          "a" to "epoch-b",
+          "not-open" to "unreachable",
+        )
+      )
+    )
+
+    val state = vm.state.value as WorkspaceUiState.Content
+    assertEquals("epoch-b", state.columns.first { it.deviceId == "a" }.deviceSessionUuid)
+    assertEquals(null, state.columns.first { it.deviceId == "b" }.deviceSessionUuid)
+    assertEquals(Tool.Storage, state.columns.first { it.deviceId == "a" }.activeTool)
+  }
+
+  @Test
   fun `closing a column removes it and refocuses when the focused one closes`() =
     testScope.runTest {
       val vm = WorkspaceViewModel(this)

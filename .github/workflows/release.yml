@@ -542,12 +542,13 @@ jobs:
             --private-key "${{ secrets.MCP_DNS_PRIVATE_KEY }}"
           ./mcp-publisher publish
 
-      - name: Publish Homebrew formula
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
-          REPO: ${{ github.repository }}
-        run: bash scripts/release/update-brew-formula.sh
+      # Homebrew publishing moved to its own terminal `publish-homebrew` job
+      # (needs: verify-and-release). A tap failure there fails the workflow
+      # visibly WITHOUT failing verify-and-release, so the Conveyor desktop jobs
+      # (needs: [validate-release-tag, verify-and-release]) are not skipped and
+      # the macOS/Linux desktop distributions still ship. Keeping it here as a
+      # continue-on-error step plus an end-of-job re-raise would fail
+      # verify-and-release and skip Conveyor in conveyor mode.
 
       - name: Free Disk Space
         continue-on-error: true
@@ -673,6 +674,31 @@ jobs:
           MSG="The npm package includes APK and IPA checksums at"
           MSG="$MSG build time, ensuring integrity verification."
           echo "$MSG" >> "$S"
+
+  # --- Homebrew formula publish ------------------------------------------------
+  # A terminal job, not a step in verify-and-release: the tap publish depends on
+  # npm having published (it resolves the just-published tarball's sha256), so it
+  # needs verify-and-release — but its failure must NOT fail verify-and-release,
+  # or the Conveyor desktop jobs (needs: [validate-release-tag,
+  # verify-and-release]) would be skipped and the macOS/Linux distributions would
+  # be dropped in conveyor mode. As its own job the failure still turns the
+  # overall workflow red (surfaced), while REQUIRE_TOKEN keeps a missing/expired
+  # token from silently no-oping. Safe to re-run: the publish is idempotent.
+  publish-homebrew:
+    name: "Publish Homebrew formula"
+    if: github.event_name == 'workflow_dispatch' && needs.validate-release-tag.outputs.is_release_tag == 'true'
+    needs: [validate-release-tag, verify-and-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Publish Homebrew formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ needs.validate-release-tag.outputs.tag }}
+          REPO: ${{ github.repository }}
+          REQUIRE_TOKEN: "1"
+        run: bash scripts/release/update-brew-formula.sh
 
   # --- Conveyor desktop publish (macOS + Linux) --------------------------------
   # Gated on the DESKTOP_PUBLISHER repo variable. When it is set to "conveyor", the macOS + Linux

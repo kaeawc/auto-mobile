@@ -1053,6 +1053,28 @@ final class ElementLocatorTests: XCTestCase {
         )
     }
 
+    func testPreferredSystemSurfaceBundleId_selectsSpotlightOnlyOverSpringBoard() {
+        XCTAssertEqual(
+            ElementLocator.preferredSystemSurfaceBundleId(
+                trackedBundleId: "com.apple.springboard",
+                spotlightStateRaw: 4
+            ),
+            "com.apple.Spotlight"
+        )
+        XCTAssertNil(
+            ElementLocator.preferredSystemSurfaceBundleId(
+                trackedBundleId: "com.apple.springboard",
+                spotlightStateRaw: 3
+            )
+        )
+        XCTAssertNil(
+            ElementLocator.preferredSystemSurfaceBundleId(
+                trackedBundleId: "com.apple.Preferences",
+                spotlightStateRaw: 4
+            )
+        )
+    }
+
     // AC3: the ~40-app foreground-detection sweep is bounded on the miss path.
     func testShouldRunSystemAppSweep_runsWhenNeverSwept() {
         // lastMissTime == 0 means the sweep has never cached a miss (or a

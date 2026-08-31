@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.3
 import PackageDescription
 
 // AI-assisted failure recovery (see AutoMobileRecovery.swift / TachikomaPlanRecoveryHandler.swift)
@@ -9,7 +9,7 @@ let package = Package(
     name: "XCTestRunner",
     platforms: [
         .iOS(.v17),
-        .macOS(.v14),
+        .macOS(.v15),
     ],
     products: [
         .library(
@@ -64,11 +64,20 @@ let package = Package(
                 .swiftLanguageMode(.v6),
             ]
         ),
+        // Shared test doubles for the rewrite (relocated out of the shipping target). NOT a dependency
+        // of the `.library` product, so the shipped module stays fake-free and Sendable-clean.
+        .target(
+            name: "XCTestRunnerTestSupport",
+            dependencies: ["XCTestRunnerRewrite"],
+            swiftSettings: [
+                .swiftLanguageMode(.v6),
+            ]
+        ),
         // Differential parity + rewrite unit tests. Links BOTH the reference and the rewrite so it can
         // diff old vs new behavior against shared wire/plan fixtures.
         .testTarget(
             name: "XCTestRunnerRewriteTests",
-            dependencies: ["XCTestRunner", "XCTestRunnerRewrite"],
+            dependencies: ["XCTestRunner", "XCTestRunnerRewrite", "XCTestRunnerTestSupport"],
             swiftSettings: [
                 .swiftLanguageMode(.v6),
             ]

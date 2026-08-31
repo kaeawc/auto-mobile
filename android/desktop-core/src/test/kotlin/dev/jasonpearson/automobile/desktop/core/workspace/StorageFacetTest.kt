@@ -246,4 +246,37 @@ class StorageFacetTest {
     waitForIdle()
     assertEquals("expected the storage facet to reconnect after a drop", 2, fake.connectCallCount)
   }
+
+  @Test
+  fun `recreates the storage stream when daemon recovery refreshes its device epoch`() =
+    runComposeUiTest {
+      val fake = FakeObservationStream()
+      val sessionUuid = mutableStateOf("epoch-a")
+      setContent {
+        CompositionLocalProvider(LocalAutoMobileGraph provides fakeGraph()) {
+          MaterialTheme {
+            StorageFacet(
+              column =
+                DeviceColumn(
+                  deviceId = "dev-1",
+                  name = "Pixel",
+                  platform = Platform.Android,
+                  deviceSessionUuid = sessionUuid.value,
+                ),
+              loadInstalledApps = { resolvedApps() },
+              observationStreamFactory = { fake },
+            )
+          }
+        }
+      }
+      waitForIdle()
+      assertEquals("epoch-a", fake.lastConnectedDeviceSessionUuid)
+
+      runOnIdle { sessionUuid.value = "epoch-b" }
+      waitForIdle()
+
+      assertEquals(2, fake.connectCallCount)
+      assertEquals("epoch-b", fake.lastConnectedDeviceSessionUuid)
+      assertTrue(fake.disconnectCallCount >= 1)
+    }
 }

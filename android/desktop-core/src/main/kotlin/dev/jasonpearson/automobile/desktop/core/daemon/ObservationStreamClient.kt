@@ -199,6 +199,9 @@ class ObservationStreamClient(
   private var subscribedDeviceId: String? = null
   private var subscribedDeviceSessionUuid: String? = null
   private var subscriptionId: String? = null
+  // A subscription is not active until the daemon acknowledges it. A rejected stale device epoch
+  // must make the transport reconnectable instead of leaving it falsely Connected.
+  private var streamSubscriptionRequestId: String? = null
   private var pendingCadenceUpdate = false
   private var requestedScreenshotIntervalMs: Long? = null
   private var requestedHierarchyIntervalMs: Long? = null
@@ -261,6 +264,7 @@ class ObservationStreamClient(
       subscribedDeviceId = deviceId
       subscribedDeviceSessionUuid = deviceSessionUuid
       subscriptionId = null
+      streamSubscriptionRequestId = null
       pendingCadenceUpdate = false
       subscribe(deviceId, deviceSessionUuid)
 
@@ -303,6 +307,7 @@ class ObservationStreamClient(
       pendingStorageSubscriptions.clear()
     }
     subscriptionId = null
+    streamSubscriptionRequestId = null
     pendingCadenceUpdate = false
     _connectionState.update { ConnectionState.Disconnected() }
   }
@@ -361,6 +366,9 @@ class ObservationStreamClient(
         hierarchyIntervalMs = requestedHierarchyIntervalMs,
       )
 
+    // The read loop runs concurrently and may receive the acknowledgement as soon as flush
+    // returns, so register its id before writing the request.
+    streamSubscriptionRequestId = request.id
     if (sendRequest(request)) {
       _connectionState.update { current ->
         if (current is ConnectionState.Connected) {
@@ -372,6 +380,8 @@ class ObservationStreamClient(
       log.info("Subscribed to observation stream (device: ${deviceId ?: "all"})")
       // Re-register any remembered per-file storage observers so live updates survive a reconnect.
       reapplyStorageSubscriptions()
+    } else {
+      streamSubscriptionRequestId = null
     }
   }
 
@@ -534,8 +544,11 @@ class ObservationStreamClient(
           return
         }
         if (response.success != true) {
-          log.warn("Subscription failed: ${response.error}")
+          if (!handleStreamSubscriptionFailure(responseId, response.error)) {
+            log.warn("Subscription failed: ${response.error}")
+          }
         } else if (response.subscriptionId != null) {
+          streamSubscriptionRequestId = null
           subscriptionId = response.subscriptionId
           if (pendingCadenceUpdate) {
             pendingCadenceUpdate = !sendCadenceUpdate(response.subscriptionId)
@@ -686,6 +699,9 @@ class ObservationStreamClient(
         if (
           responseId != null && handleStorageSubscriptionResponse(responseId, false, response.error)
         ) {
+          return
+        }
+        if (handleStreamSubscriptionFailure(responseId, response.error)) {
           return
         }
         emitDeviceEvent(response)
@@ -924,6 +940,20 @@ class ObservationStreamClient(
 
   private fun incrementStorageSubscriptionIntentVersion(key: StorageSubscriptionKey) {
     storageSubscriptionIntentVersions[key] = (storageSubscriptionIntentVersions[key] ?: 0L) + 1L
+  }
+
+  /**
+   * A daemon restart retires UUID-scoped device epochs. Treat a rejected primary subscription as a
+   * disconnected transport so the owner can refresh the epoch and reconnect.
+   */
+  private fun handleStreamSubscriptionFailure(requestId: String?, error: String?): Boolean {
+    if (requestId == null || requestId != streamSubscriptionRequestId) return false
+    streamSubscriptionRequestId = null
+    subscriptionId = null
+    pendingCadenceUpdate = false
+    _connectionState.update { ConnectionState.Disconnected(error ?: "Subscription failed") }
+    log.warn("Subscription failed: ${error ?: "unknown error"}")
+    return true
   }
 
   /**

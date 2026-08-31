@@ -57,6 +57,13 @@ sealed interface WorkspaceAction {
    */
   data class SetLockStates(val locked: Map<String, Boolean>) : WorkspaceAction
 
+  /**
+   * Refresh daemon-minted device epochs for columns that are already open. A daemon restart
+   * replaces every process-local epoch while preserving device IDs, so an open UUID-scoped stream
+   * must be recreated with this new identity.
+   */
+  data class RefreshDeviceSessionUuids(val sessionUuids: Map<String, String>) : WorkspaceAction
+
   /** Open [tool] on every observed pane for like-for-like comparison (the facet ⧉ Diff control). */
   data class DiffTool(val tool: Tool) : WorkspaceAction
 }
@@ -104,6 +111,7 @@ class WorkspaceViewModel(
       is WorkspaceAction.PressDeviceButton -> pressDeviceButton(action.deviceId, action.button)
       is WorkspaceAction.SetLocale -> setLocale(action.deviceId, action.locale)
       is WorkspaceAction.SetLockStates -> setLockStates(action.locked)
+      is WorkspaceAction.RefreshDeviceSessionUuids -> refreshDeviceSessionUuids(action.sessionUuids)
       is WorkspaceAction.DiffTool -> diffTool(action.tool)
     }
   }
@@ -155,6 +163,26 @@ class WorkspaceViewModel(
           content.columns.map { column ->
             val next = locked[column.deviceId] ?: return@map column
             if (next == column.locked) column else column.copy(locked = next)
+          }
+      )
+    }
+  }
+
+  /**
+   * Replace only non-null UUIDs from a fresh booted-devices snapshot. A missing UUID means an
+   * older daemon did not expose epoch identity; preserving the known UUID makes a transient or
+   * downgraded response unable to silently widen an existing UUID-scoped stream.
+   */
+  private fun refreshDeviceSessionUuids(sessionUuids: Map<String, String>) {
+    if (sessionUuids.isEmpty()) return
+    _state.update { current ->
+      val content = current as? WorkspaceUiState.Content ?: return@update current
+      content.copy(
+        columns =
+          content.columns.map { column ->
+            val refreshed = sessionUuids[column.deviceId] ?: return@map column
+            if (refreshed == column.deviceSessionUuid) column
+            else column.copy(deviceSessionUuid = refreshed)
           }
       )
     }

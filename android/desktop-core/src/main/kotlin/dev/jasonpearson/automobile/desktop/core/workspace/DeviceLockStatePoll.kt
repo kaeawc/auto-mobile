@@ -40,3 +40,14 @@ fun parseBootedLockStates(content: String): Map<String, Boolean> =
     ?.devices
     ?.mapNotNull { device -> device.locked?.let { device.deviceId to it } }
     ?.toMap() ?: emptyMap()
+
+/**
+ * Extract daemon-minted device epochs from a booted-devices payload. Devices from an older daemon
+ * that omit epoch identity are intentionally excluded, so callers retain their last known
+ * UUID-scoped subscription instead of widening it to an unscoped stream.
+ */
+fun parseBootedDeviceSessionUuids(content: String): Map<String, String> =
+  DeviceResourceParser.parseBootedDevices(content)
+    ?.devices
+    ?.mapNotNull { device -> device.deviceSessionUuid?.let { device.deviceId to it } }
+    ?.toMap() ?: emptyMap()

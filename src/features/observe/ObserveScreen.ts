@@ -95,6 +95,14 @@ interface PostCaptureForegroundIdentity {
   identity: string | undefined;
 }
 
+function isWithinSystemBar(
+  bounds: { top: number; bottom: number },
+  statusBarHeight: number,
+  navigationBarTop: number,
+): boolean {
+  return bounds.bottom <= statusBarHeight || bounds.top >= navigationBarTop;
+}
+
 function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
   const statusBarHeight = result.systemInsets.top;
   const navigationBarHeight = result.systemInsets.bottom;
@@ -114,9 +122,7 @@ function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
     }
     if (node.bounds) {
       hasBounds = true;
-      const isInStatusBar = node.bounds.bottom <= statusBarHeight;
-      const isInNavigationBar = node.bounds.top >= navigationBarTop;
-      if (!isInStatusBar && !isInNavigationBar) {
+      if (!isWithinSystemBar(node.bounds, statusBarHeight, navigationBarTop)) {
         return false;
       }
     }

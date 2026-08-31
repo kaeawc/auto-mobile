@@ -955,6 +955,29 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `pickPrimaryAppWindowId preserves focused app selection when its root is unavailable`() {
+    // Regression for #5981: do not fall back to an active status-bar window when the focused
+    // application temporarily has no accessible root.
+    val windows =
+      listOf(
+        ViewHierarchyExtractor.WindowMeta(
+          id = 10,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          layer = 5,
+          hasRoot = false,
+          isFocused = true,
+        ),
+        ViewHierarchyExtractor.WindowMeta(
+          id = 11,
+          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+          layer = 6,
+          hasRoot = true,
+        ),
+      )
+    assertEquals(10, extractor.pickPrimaryAppWindowId(windows))
+  }
+
+  @Test
   fun `pickPrimaryAppWindowId leaves active-window fallback when no app is focused or IME is present`() {
     val windows =
       listOf(

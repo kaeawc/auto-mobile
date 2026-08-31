@@ -3,11 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { execFile } from "node:child_process";
 import { existsSync, promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import type { BootedDevice, ExecResult } from "../../models";
 import { CheckResult, DoctorOptions } from "../types";
 import { SimCtl, SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -26,7 +24,7 @@ import {
 import { ObserveElementsBuilder } from "../../features/observe/ObserveElementsBuilder";
 import type { CtrlProxyHierarchy } from "../../features/observe/ios/types";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
-import { createExecResult } from "../../utils/execResult";
+import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
 import {
   SecurityClient,
   type SecurityClientApi,
@@ -92,7 +90,11 @@ type IosRunnerVersionStatus = "compatible" | "stale" | "unknown";
  */
 const DOCTOR_EXEC_TIMEOUT_MS = Number(process.env.AUTOMOBILE_DOCTOR_TIMEOUT_MS) || 5000;
 
-const execFileAsync = promisify(execFile);
+// Route generic host-command execution through the shared HostCommandExecutor
+// seam rather than a raw child_process execFile. The exec leaf lives in
+// HostCommandExecutor, so the xcodebuild boundary ratchet does not flag this
+// file, and xcodebuild specifically still goes through XcodebuildClient below.
+const hostCommandExecutor = new DefaultHostCommandExecutor();
 
 export interface IosDoctorDependencies {
   platform: () => NodeJS.Platform;
@@ -368,13 +370,8 @@ export function createIosObserveRoundTripInspector(
 
 const createIosDoctorDependencies = (): IosDoctorDependencies => ({
   platform: () => process.platform,
-  execFile: async (file, args) => {
-    const result = await execFileAsync(file, args, {
-      timeout: DOCTOR_EXEC_TIMEOUT_MS,
-      killSignal: "SIGKILL",
-    });
-    return createExecResult(result.stdout, result.stderr);
-  },
+  execFile: (file, args) =>
+    hostCommandExecutor.executeCommand(file, args, { timeoutMs: DOCTOR_EXEC_TIMEOUT_MS }),
   xcodebuild: new XcodebuildClient(),
   fileExists: existsSync,
   readDir: async (path) => fs.readdir(path),

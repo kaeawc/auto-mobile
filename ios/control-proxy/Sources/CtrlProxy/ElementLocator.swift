@@ -189,6 +189,8 @@ public class ElementLocator: ElementLocating {
         /// Springboard app for detecting foreground app - always kept
         private lazy var springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
 
+        private static let spotlightBundleId = "com.apple.Spotlight"
+
         /// Thread-safe cache of resource IDs to XCUIElements
         private let elementCache = ThreadSafeCache<XCUIElement>()
 
@@ -348,6 +350,7 @@ public class ElementLocator: ElementLocating {
             "com.apple.MobileAddressBook", // Contacts
             "com.apple.mobilephone", // Phone
             "com.apple.MobileSMS", // Messages
+            "com.apple.Spotlight", // Spotlight search
             "com.apple.mobileslideshow", // Photos
             "com.apple.camera", // Camera
             "com.apple.AppStore", // App Store
@@ -390,6 +393,17 @@ public class ElementLocator: ElementLocating {
             // with a mutation on another thread (issue #3614).
             let currentBundleId = tracker.bundleId
             let observedBundleIds = tracker.observedBundleIds
+
+            // Spotlight owns its accessibility hierarchy. SpringBoard's snapshot
+            // exposes only the status bar while Spotlight is foreground.
+            if let preferredSystemSurface = Self.preferredSystemSurfaceBundleId(
+                trackedBundleId: currentBundleId,
+                spotlightStateRaw: runOnMainThreadNonThrowing({
+                    XCUIApplication(bundleIdentifier: Self.spotlightBundleId).state.rawValue
+                }, fallback: 0)
+            ) {
+                return preferredSystemSurface
+            }
 
             // First, try to find bundle IDs from springboard's element tree
             // This can work when apps embed their bundle ID in element identifiers
@@ -1521,6 +1535,18 @@ public class ElementLocator: ElementLocating {
         springBoardLookup: () -> Element?
     ) -> Element? {
         foregroundLookup() ?? springBoardLookup()
+    }
+
+    /// Spotlight must take precedence over SpringBoard while it owns the
+    /// foreground accessibility hierarchy; other tracked apps retain their roots.
+    static func preferredSystemSurfaceBundleId(
+        trackedBundleId: String?,
+        spotlightStateRaw: UInt
+    ) -> String? {
+        guard trackedBundleId == "com.apple.springboard", spotlightStateRaw >= 4 else {
+            return nil
+        }
+        return "com.apple.Spotlight"
     }
 
     // MARK: - Same-Type Child Collapsing & Sibling Dedup

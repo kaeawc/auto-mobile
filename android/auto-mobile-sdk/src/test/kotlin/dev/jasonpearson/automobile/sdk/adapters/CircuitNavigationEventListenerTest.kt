@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.sdk.adapters
 
-import android.os.Parcel
 import androidx.compose.runtime.Applier
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Composition
@@ -310,35 +309,15 @@ class CircuitNavigationEventListenerTest {
 
   private fun fakeNavigator(root: Screen): FakeNavigator = FakeNavigator(SaveableNavStack(root))
 
-  private data object HomeScreen : Screen {
-    override fun describeContents(): Int = 0
+  private data object HomeScreen : Screen
 
-    override fun writeToParcel(dest: Parcel, flags: Int) = Unit
-  }
+  private data object SettingsScreen : Screen
 
-  private data object SettingsScreen : Screen {
-    override fun describeContents(): Int = 0
+  private data class DetailScreen(val id: String) : Screen
 
-    override fun writeToParcel(dest: Parcel, flags: Int) = Unit
-  }
+  private data object RequestedScreen : Screen
 
-  private data class DetailScreen(val id: String) : Screen {
-    override fun describeContents(): Int = 0
-
-    override fun writeToParcel(dest: Parcel, flags: Int) = Unit
-  }
-
-  private data object RequestedScreen : Screen {
-    override fun describeContents(): Int = 0
-
-    override fun writeToParcel(dest: Parcel, flags: Int) = Unit
-  }
-
-  private data object RewrittenScreen : Screen {
-    override fun describeContents(): Int = 0
-
-    override fun writeToParcel(dest: Parcel, flags: Int) = Unit
-  }
+  private data object RewrittenScreen : Screen
 
   private object RewriteGoToInterceptor : NavigationInterceptor {
     override fun goTo(

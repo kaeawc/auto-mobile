@@ -32,6 +32,16 @@ class OnboardingScreenUiTest {
   }
 
   @Test
+  fun `qualifies storage as Android-only so the inspect copy doesn't over-promise on iOS`() =
+    runComposeUiTest {
+      setContent { MaterialTheme { OnboardingScreen(onGetStarted = {}) } }
+      // Storage tooling is Android-only (#4708): WorkspaceFacet routes Tool.Storage to a
+      // placeholder on iOS. The inspect capability copy must platform-qualify storage rather
+      // than naming it as universally available (#4721).
+      onNodeWithText("storage on Android", substring = true, ignoreCase = true).assertIsDisplayed()
+    }
+
+  @Test
   fun `carries no AI or assistant framing`() = runComposeUiTest {
     setContent { MaterialTheme { OnboardingScreen(onGetStarted = {}) } }
     // The onboarding must stay free of AI/LLM/assistant connotations (explicit product

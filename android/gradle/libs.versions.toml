@@ -56,7 +56,7 @@ test-androidx-espresso = "3.7.0"
 
 # Navigation versions
 navigation3 = "1.1.5"              # Used in playground app
-circuit = "0.37.1"
+circuit = "0.38.0"
 
 # Kotlin ecosystem
 kotlinx-serialization-json = "1.11.0"

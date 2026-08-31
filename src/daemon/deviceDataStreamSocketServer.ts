@@ -1314,6 +1314,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       }
       const releasedOwner = this.removeStorageSubscriptionOwner(socket, key, subscription);
       if ((releasedOwner || subscription.owners.size === 0) && subscription.owners.size === 0) {
+        // Keep a zero-owner tombstone until CtrlProxy confirms teardown. An error event is normally
+        // followed by close; retaining the key lets that close retry a teardown that failed here.
+        this.retainStorageSubscriptionKeyForSocket(socket, key);
         void this.queueStorageOperation(key, { ...subscription, subscribe: false }).then(
           () => {
             this.removeStorageSubscriptionIfUnowned(key, subscription);

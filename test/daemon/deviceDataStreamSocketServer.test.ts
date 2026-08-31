@@ -85,6 +85,10 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
   closeConnectionForTest(socket: FakeSocket): void {
     this.onConnectionClose(socket as unknown as Socket);
   }
+
+  errorConnectionForTest(socket: FakeSocket): void {
+    this.onConnectionError(socket as unknown as Socket, new Error("socket error"));
+  }
 }
 
 describe("DeviceDataStreamSocketServer", () => {
@@ -2706,6 +2710,54 @@ describe("DeviceDataStreamSocketServer", () => {
       server.closeConnectionForTest(socket);
       await Promise.resolve();
       await Promise.resolve();
+
+      expect(calls).toEqual([
+        expect.objectContaining({ subscribe: true }),
+        expect.objectContaining({ subscribe: false }),
+        expect.objectContaining({ subscribe: false }),
+      ]);
+    });
+
+    it("retries a failed final-owner teardown when a socket error is followed by close", async () => {
+      const calls: StorageSubReq[] = [];
+      let failTeardown = true;
+      let notifyFailedTeardown: (() => void) | undefined;
+      const failedTeardown = new Promise<void>((resolve) => {
+        notifyFailedTeardown = resolve;
+      });
+      let notifyRetriedTeardown: (() => void) | undefined;
+      const retriedTeardown = new Promise<void>((resolve) => {
+        notifyRetriedTeardown = resolve;
+      });
+      server.setOnStorageSubscriptionRequested(async (request) => {
+        calls.push(request);
+        if (!request.subscribe && failTeardown) {
+          failTeardown = false;
+          notifyFailedTeardown?.();
+          throw new Error("runner unavailable");
+        }
+        if (!request.subscribe) {
+          notifyRetriedTeardown?.();
+        }
+      });
+      const socket = new FakeSocket();
+      const request = (id: string) =>
+        server.processLineForTest(
+          socket,
+          JSON.stringify({
+            id,
+            command: "subscribe_storage",
+            deviceId: "emulator-5554",
+            packageName: "com.example.app",
+            fileName: "prefs.xml",
+          }),
+        );
+
+      await request("subscribe_storage");
+      server.errorConnectionForTest(socket);
+      await failedTeardown;
+      server.closeConnectionForTest(socket);
+      await retriedTeardown;
 
       expect(calls).toEqual([
         expect.objectContaining({ subscribe: true }),

@@ -83,7 +83,7 @@ export function createH264CaptureReadiness(
           settled = true;
           rejectReady(
             new Error(
-              `H.264 capture did not emit ${minimumSpsCount} SPS, PPS, and an IDR within ${timeoutMs}ms`,
+              `H.264 capture did not emit at least ${minimumSpsCount} each of SPS, PPS, and IDR within ${timeoutMs}ms`,
             ),
           );
         }, timeoutMs);

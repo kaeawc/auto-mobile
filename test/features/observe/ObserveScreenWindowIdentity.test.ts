@@ -18,7 +18,20 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
 import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
 import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
-import type { BootedDevice } from "../../../src/models";
+import { AccessibilityAuditor } from "../../../src/features/observe/audits/AccessibilityAuditor";
+import { AccessibilityStateDetector } from "../../../src/features/observe/audits/AccessibilityStateDetector";
+import { PerformanceAuditor } from "../../../src/features/observe/audits/PerformanceAuditor";
+import type { ObserveScreenDependencies } from "../../../src/features/observe/ObserveScreenDependencies";
+import type { Window } from "../../../src/features/observe/interfaces/Window";
+import type { AccessibilityNode } from "../../../src/features/observe/android/types";
+import type {
+  ActiveWindowInfo,
+  ObserveResult,
+  BootedDevice,
+  ViewHierarchyResult,
+} from "../../../src/models";
+import type { ObserveResultCacheStore } from "../../../src/features/observe/cache/ObserveResultCacheStore";
+import type { PerformanceTracker } from "../../../src/utils/PerformanceTracker";
 
 const androidDevice: BootedDevice = {
   deviceId: "emulator-5554",
@@ -26,11 +39,111 @@ const androidDevice: BootedDevice = {
   platform: "android",
 };
 
+class FakePerformanceAuditor extends PerformanceAuditor {
+  constructor(private readonly onRun: (result: ObserveResult) => void = () => {}) {
+    super({ device: androidDevice, isEnabled: () => false });
+  }
+
+  override async run(result: ObserveResult, _perf: PerformanceTracker): Promise<void> {
+    this.onRun(result);
+  }
+}
+
+class FakeAccessibilityAuditor extends AccessibilityAuditor {
+  constructor() {
+    super({ device: androidDevice, getConfig: () => null });
+  }
+
+  override async run(_result: ObserveResult, _perf: PerformanceTracker): Promise<void> {}
+}
+
+class FakeAccessibilityStateDetector extends AccessibilityStateDetector {
+  constructor() {
+    super({ device: androidDevice, adb: new FakeAdbExecutor() });
+  }
+
+  override async run(
+    _result: ObserveResult,
+    _perf: PerformanceTracker,
+    _signal?: AbortSignal,
+  ): Promise<void> {}
+}
+
+function createNoOpAudits(): Pick<
+  ObserveScreenDependencies,
+  "performanceAuditor" | "accessibilityAuditor" | "accessibilityStateDetector"
+> {
+  return {
+    performanceAuditor: new FakePerformanceAuditor(),
+    accessibilityAuditor: new FakeAccessibilityAuditor(),
+    accessibilityStateDetector: new FakeAccessibilityStateDetector(),
+  };
+}
+
+class FakeWindow implements Window {
+  constructor(private readonly activeWindow: ActiveWindowInfo) {}
+
+  async getActive(): Promise<ActiveWindowInfo> {
+    return this.activeWindow;
+  }
+
+  async getActiveHash(): Promise<string> {
+    return "hash";
+  }
+
+  async getCachedActiveWindow(): Promise<ActiveWindowInfo | null> {
+    return null;
+  }
+
+  async setCachedActiveWindow(_activeWindow: ActiveWindowInfo): Promise<void> {}
+
+  async clearCache(): Promise<void> {}
+}
+
+type AndroidHierarchyFixture = Omit<ViewHierarchyResult, "hierarchy"> & {
+  hierarchy: AccessibilityNode;
+};
+
+function configureHierarchy(
+  viewHierarchy: FakeViewHierarchy,
+  hierarchy: AndroidHierarchyFixture,
+): void {
+  // The Android wire hierarchy uses direct attributes while ViewHierarchyResult
+  // describes its normalized XML shape.
+  viewHierarchy.configureHierarchy(hierarchy as unknown as ViewHierarchyResult);
+}
+
+class SnapshotObserveCacheStore implements ObserveResultCacheStore {
+  snapshot: ObserveResult | undefined;
+
+  async put(_deviceId: string, result: ObserveResult): Promise<void> {
+    this.snapshot = structuredClone(result);
+  }
+
+  async getMostRecent(_deviceId: string): Promise<ObserveResult | undefined> {
+    return undefined;
+  }
+
+  getRecentInMemory(): ObserveResult | undefined {
+    return undefined;
+  }
+
+  getRecentInMemoryForDevice(_deviceId: string): ObserveResult | undefined {
+    return undefined;
+  }
+
+  clear(_deviceId?: string): void {}
+
+  currentGeneration(_deviceId: string): number {
+    return 0;
+  }
+}
+
 function makeScreen(
   viewHierarchy: FakeViewHierarchy,
   fakeAdb: FakeAdbExecutor,
   timer: FakeTimer = new FakeTimer(),
-  window?: any,
+  window?: Window,
 ): RealObserveScreen {
   return new RealObserveScreen(
     androidDevice,
@@ -39,15 +152,13 @@ function makeScreen(
       viewHierarchy,
       window,
       cacheStore: new FakeObserveCacheStore(timer),
-      performanceAuditor: { run: async () => undefined } as any,
-      accessibilityAuditor: { run: async () => undefined } as any,
-      accessibilityStateDetector: { run: async () => undefined } as any,
+      ...createNoOpAudits(),
     },
     timer,
   );
 }
 
-function calendarHierarchy(now: number): any {
+function calendarHierarchy(now: number): AndroidHierarchyFixture {
   return {
     updatedAt: now,
     receivedAt: now,
@@ -76,7 +187,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
+    configureHierarchy(viewHierarchy, {
       updatedAt: now,
       receivedAt: now,
       fresh: true,
@@ -89,21 +200,15 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
           bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
         },
       },
-    } as any);
+    });
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.example.app", userId: 0 });
-    const fallbackWindow = {
-      getActive: async () => ({
-        appId: "com.example.app",
-        activityName: "com.example.app.MainActivity",
-        layoutSeqSum: 0,
-      }),
-      getActiveHash: async () => "hash",
-      getCachedActiveWindow: async () => null,
-      setCachedActiveWindow: async () => undefined,
-      clearCache: async () => undefined,
-    };
+    const fallbackWindow = new FakeWindow({
+      appId: "com.example.app",
+      activityName: "com.example.app.MainActivity",
+      layoutSeqSum: 0,
+    });
 
     const screen = new RealObserveScreen(
       androidDevice,
@@ -112,9 +217,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
         viewHierarchy,
         window: fallbackWindow,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        ...createNoOpAudits(),
       },
       timer,
     );
@@ -134,7 +237,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy(calendarHierarchy(now));
+    configureHierarchy(viewHierarchy, calendarHierarchy(now));
 
     const fakeAdb = new FakeAdbExecutor();
     // Ground truth: Settings is the resumed activity, not Calendar.
@@ -146,9 +249,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       {
         viewHierarchy,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        ...createNoOpAudits(),
       },
       timer,
     );
@@ -176,44 +277,30 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy(calendarHierarchy(now));
+    configureHierarchy(viewHierarchy, calendarHierarchy(now));
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
 
-    let putSnapshot: any;
-    const snapshotStore = {
-      async put(_deviceId: string, result: any): Promise<void> {
-        putSnapshot = JSON.parse(JSON.stringify(result));
-      },
-      async getMostRecent(): Promise<any> {
-        return undefined;
-      },
-      getRecentInMemory: () => undefined,
-      getRecentInMemoryForDevice: () => undefined,
-      clear: () => undefined,
-      currentGeneration: () => 0,
-    };
+    const snapshotStore = new SnapshotObserveCacheStore();
 
     const screen = new RealObserveScreen(
       androidDevice,
       new FakeAdbClientFactory(fakeAdb),
       {
         viewHierarchy,
-        cacheStore: snapshotStore as any,
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        cacheStore: snapshotStore,
+        ...createNoOpAudits(),
       },
       timer,
     );
 
     await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
-    expect(putSnapshot).toBeDefined();
-    expect(putSnapshot.freshness?.verified).toBe(false);
-    expect(putSnapshot.freshness?.isFresh).toBe(false);
-    expect(putSnapshot.freshness?.warning).toContain("wrong-window");
+    expect(snapshotStore.snapshot).toBeDefined();
+    expect(snapshotStore.snapshot?.freshness?.verified).toBe(false);
+    expect(snapshotStore.snapshot?.freshness?.isFresh).toBe(false);
+    expect(snapshotStore.snapshot?.freshness?.warning).toContain("wrong-window");
   });
 
   test("does not retract freshness when the observed window matches the top resumed activity", async () => {
@@ -222,7 +309,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy(calendarHierarchy(now));
+    configureHierarchy(viewHierarchy, calendarHierarchy(now));
 
     const fakeAdb = new FakeAdbExecutor();
     // Ground truth agrees with the observed window.
@@ -234,9 +321,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       {
         viewHierarchy,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        ...createNoOpAudits(),
       },
       timer,
     );
@@ -253,7 +338,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
+    configureHierarchy(viewHierarchy, {
       updatedAt: now,
       receivedAt: now,
       fresh: true,
@@ -269,7 +354,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
           node: [{ text: "Gmail", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
         },
       },
-    } as any);
+    });
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.google.android.apps.nexuslauncher", userId: 0 });
@@ -281,13 +366,10 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       {
         viewHierarchy,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: {
-          run: async (observedResult: ObserveResult) => {
-            performanceAuditAppId = observedResult.activeWindow?.appId;
-          },
-        } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        ...createNoOpAudits(),
+        performanceAuditor: new FakePerformanceAuditor((observedResult) => {
+          performanceAuditAppId = observedResult.activeWindow?.appId;
+        }),
       },
       timer,
     );
@@ -316,7 +398,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
+    configureHierarchy(viewHierarchy, {
       updatedAt: now,
       receivedAt: now,
       fresh: true,
@@ -330,7 +412,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
           node: [{ text: "Silent", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
         },
       },
-    } as any);
+    });
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.google.android.calendar", userId: 0 });
@@ -341,9 +423,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       {
         viewHierarchy,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        ...createNoOpAudits(),
       },
       timer,
     );
@@ -363,7 +443,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
+    configureHierarchy(viewHierarchy, {
       updatedAt: now,
       receivedAt: now,
       fresh: true,
@@ -380,7 +460,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
           node: { text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } },
         },
       },
-    } as any);
+    });
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
@@ -391,9 +471,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       {
         viewHierarchy,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        ...createNoOpAudits(),
       },
       timer,
     );
@@ -417,7 +495,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
+    configureHierarchy(viewHierarchy, {
       updatedAt: now,
       receivedAt: now,
       fresh: true,
@@ -443,7 +521,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
           },
         ],
       },
-    } as any);
+    });
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
@@ -454,9 +532,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       {
         viewHierarchy,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        ...createNoOpAudits(),
       },
       timer,
     );
@@ -473,7 +549,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
+    configureHierarchy(viewHierarchy, {
       updatedAt: now,
       receivedAt: now,
       fresh: true,
@@ -485,7 +561,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       hierarchy: {
         node: { text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } },
       },
-    } as any);
+    });
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.google.android.calendar", userId: 0 });
@@ -503,7 +579,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
+    configureHierarchy(viewHierarchy, {
       updatedAt: now,
       receivedAt: now,
       fresh: true,
@@ -512,7 +588,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       hierarchy: {
         node: { bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } },
       },
-    } as any);
+    });
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
@@ -530,7 +606,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
+    configureHierarchy(viewHierarchy, {
       updatedAt: now,
       receivedAt: now,
       fresh: true,
@@ -541,18 +617,16 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       hierarchy: {
         node: { text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } },
       },
-    } as any);
+    });
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
-    const noActiveWindow = {
-      getActive: async () => null,
-      getActiveHash: async () => "hash",
-      getCachedActiveWindow: async () => null,
-      setCachedActiveWindow: async () => undefined,
-      clearCache: async () => undefined,
-    };
-    const screen = makeScreen(viewHierarchy, fakeAdb, timer, noActiveWindow);
+    const emptyActiveWindow = new FakeWindow({
+      appId: "",
+      activityName: "",
+      layoutSeqSum: 0,
+    });
+    const screen = makeScreen(viewHierarchy, fakeAdb, timer, emptyActiveWindow);
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 
@@ -567,7 +641,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
+    configureHierarchy(viewHierarchy, {
       updatedAt: now,
       receivedAt: now,
       fresh: true,
@@ -578,7 +652,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       hierarchy: {
         node: { text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } },
       },
-    } as any);
+    });
 
     const sequence = [
       { packageName: "com.android.settings", userId: 0 },
@@ -607,7 +681,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
+    configureHierarchy(viewHierarchy, {
       ...calendarHierarchy(now),
       // CtrlProxy has not yet updated the active window from Settings.
       foregroundActivity: "com.android.settings/.Settings",
@@ -632,9 +706,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       {
         viewHierarchy,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        ...createNoOpAudits(),
       },
       timer,
     );
@@ -652,7 +724,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
+    configureHierarchy(viewHierarchy, {
       ...calendarHierarchy(now),
       foregroundActivity: "com.android.settings/.Settings",
     });
@@ -676,9 +748,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       {
         viewHierarchy,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        ...createNoOpAudits(),
       },
       timer,
     );
@@ -700,7 +770,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy({
+    configureHierarchy(viewHierarchy, {
       updatedAt: now,
       receivedAt: now,
       fresh: true,
@@ -714,7 +784,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
           node: [{ text: "Note", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
         },
       },
-    } as any);
+    });
 
     const fakeAdb = new FakeAdbExecutor();
     // Ground truth: the app is the resumed activity (the IME is not an activity).
@@ -726,9 +796,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       {
         viewHierarchy,
         cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-        performanceAuditor: { run: async () => undefined } as any,
-        accessibilityAuditor: { run: async () => undefined } as any,
-        accessibilityStateDetector: { run: async () => undefined } as any,
+        ...createNoOpAudits(),
       },
       timer,
     );
@@ -746,7 +814,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     timer.setCurrentTime(now);
 
     const viewHierarchy = new FakeViewHierarchy();
-    viewHierarchy.configureHierarchy(calendarHierarchy(now));
+    configureHierarchy(viewHierarchy, calendarHierarchy(now));
 
     const fakeAdb = new FakeAdbExecutor();
     // getForegroundApp returns null (default) — cannot compare, must not flag.

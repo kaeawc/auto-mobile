@@ -1048,6 +1048,38 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `extractFromAllWindows does not promote null-package fallback after null primary root`() {
+    val statusBarRoot = accessibilityNode("com.android.systemui", "12:34")
+    val unknownRoot = accessibilityNode(null, "Unknown fallback content")
+    val windows =
+      listOf(
+        accessibilityWindow(
+          id = 10,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          root = null,
+          isFocused = true,
+        ),
+        accessibilityWindow(
+          id = 11,
+          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+          root = statusBarRoot,
+          isActive = true,
+        ),
+      )
+
+    val result =
+      extractor.extractFromAllWindows(
+        windows = windows,
+        activeWindowRoot = unknownRoot,
+        disableAllFiltering = true,
+      )
+
+    assertNull(result.packageName)
+    assertEquals(true, result.ctrlProxyIncomplete)
+    assertEquals(listOf("12:34"), result.hierarchy!!.children.map { it.text })
+  }
+
+  @Test
   fun `pickPrimaryAppWindowId leaves active-window fallback when no app is focused or IME is present`() {
     val windows =
       listOf(
@@ -1887,7 +1919,7 @@ class ViewHierarchyExtractorTest {
     )
   }
 
-  private fun accessibilityNode(packageName: String, text: String): AccessibilityNodeInfo {
+  private fun accessibilityNode(packageName: String?, text: String): AccessibilityNodeInfo {
     return spyk(AccessibilityNodeInfo.obtain().apply {
       this.packageName = packageName
       this.text = text

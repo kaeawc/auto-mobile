@@ -1,5 +1,6 @@
 import type { ExecResult } from "../../src/models";
 import type { HostCommandExecutor } from "../../src/utils/HostCommandExecutor";
+import { defaultTimer, type Timer } from "../../src/utils/SystemTimer";
 
 /** Bounds short-lived ADB queries so an unresponsive server cannot wedge an integration run. */
 export const ADB_INTEGRATION_COMMAND_TIMEOUT_MS = 15_000;
@@ -14,21 +15,22 @@ export async function waitForAdbCondition(
   predicate: () => Promise<boolean>,
   message: string,
   timeoutMs: number = 5_000,
+  timer: Timer = defaultTimer,
 ): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = timer.now() + timeoutMs;
   while (true) {
     const matched = await predicate();
-    if (Date.now() >= deadline) {
+    if (timer.now() >= deadline) {
       throw new Error(`${message} within ${timeoutMs}ms`);
     }
     if (matched) {
       return;
     }
-    const remainingMs = deadline - Date.now();
+    const remainingMs = deadline - timer.now();
     if (remainingMs <= 0) {
       throw new Error(`${message} within ${timeoutMs}ms`);
     }
-    await Bun.sleep(Math.min(100, remainingMs));
+    await timer.sleep(Math.min(100, remainingMs));
   }
 }
 

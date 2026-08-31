@@ -1,9 +1,10 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { executionBoundaryAst } from "../../scripts/lib/executionBoundaryAst";
 import type { ExecResult } from "../../src/models";
 import type { HostCommandExecutor } from "../../src/utils/HostCommandExecutor";
 import { createExecResult } from "../../src/utils/execResult";
+import { FakeTimer } from "../fakes/FakeTimer";
 import {
   ADB_INTEGRATION_COMMAND_TIMEOUT_MS,
   createAdbIntegrationCommandRunner,
@@ -38,15 +39,19 @@ describe("createAdbIntegrationCommandRunner", () => {
   test(
     "does not accept a condition that completes after its deadline",
     async () => {
-      const now = spyOn(Date, "now");
-      now.mockReturnValueOnce(0).mockReturnValueOnce(6);
-      try {
-        await expect(
-          waitForAdbCondition(async () => true, "screenrecord process did not exit after stop", 5),
-        ).rejects.toThrow("screenrecord process did not exit after stop within 5ms");
-      } finally {
-        now.mockRestore();
-      }
+      const timer = new FakeTimer();
+
+      await expect(
+        waitForAdbCondition(
+          async () => {
+            timer.advanceTime(6);
+            return true;
+          },
+          "screenrecord process did not exit after stop",
+          5,
+          timer,
+        ),
+      ).rejects.toThrow("screenrecord process did not exit after stop within 5ms");
     },
     FAST_TEST_TIMEOUT_MS,
   );

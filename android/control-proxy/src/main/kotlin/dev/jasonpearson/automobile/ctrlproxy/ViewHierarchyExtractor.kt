@@ -336,7 +336,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       mainHierarchy == null &&
         activeWindowRoot != null &&
         (!primaryAppWindowHasNullRoot ||
-          activeWindowRoot.packageName?.toString() != "com.android.systemui")
+          activeWindowRoot.packageName?.toString()?.let { it != "com.android.systemui" } == true)
     ) {
       val element =
         extractNodeInfo(

@@ -32,6 +32,18 @@ describe("createH264CaptureReadiness", () => {
     expect(timer.getPendingTimeoutCount()).toBe(0);
   });
 
+  test("reports that the minimum count applies to each required NAL type", async () => {
+    const timer = new FakeTimer();
+    const readiness = createH264CaptureReadiness(2, 100, timer);
+    const waiting = readiness.wait();
+
+    timer.advanceTime(100);
+
+    await expect(waiting).rejects.toThrow(
+      "H.264 capture did not emit at least 2 each of SPS, PPS, and IDR within 100ms",
+    );
+  });
+
   test("routes parser failures through wait and clears its injected timer", async () => {
     const timer = new FakeTimer();
     const parserFailure = new Error("malformed H.264");

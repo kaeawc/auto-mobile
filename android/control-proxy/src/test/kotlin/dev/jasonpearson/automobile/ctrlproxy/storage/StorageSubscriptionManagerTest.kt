@@ -339,44 +339,46 @@ class StorageSubscriptionManagerTest {
   }
 
   @Test
-  fun `storage event bursts remain lossless while the consumer is behind`() = runBlocking {
-    val observerSlot = slot<ContentObserver>()
-    val subscribeBundle =
-      Bundle().apply {
-        putBoolean("success", true)
-        putString("result", """{"fileName":"auth","subscribed":true}""")
-      }
-    val changes =
-      (1L..100L).map { sequence ->
-        StorageChangeEvent(
-          fileName = "auth",
-          key = "key-$sequence",
-          value = sequence.toString(),
-          type = "LONG",
-          timestamp = sequence,
-          sequenceNumber = sequence,
-        )
-      }
-    val changesBundle =
-      Bundle().apply {
-        putBoolean("success", true)
-        putString(
-          "result",
-          StorageProtocolSerializer.responseToJson(StorageResponse.Changes("auth", changes)),
-        )
-      }
-    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
-      subscribeBundle
-    every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } returns changesBundle
-    every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
-      Unit
+  fun `storage event bursts retain a bounded latest sequence for gap reconciliation`() =
+    runBlocking {
+      val observerSlot = slot<ContentObserver>()
+      val subscribeBundle =
+        Bundle().apply {
+          putBoolean("success", true)
+          putString("result", """{"fileName":"auth","subscribed":true}""")
+        }
+      val changes =
+        (1L..100L).map { sequence ->
+          StorageChangeEvent(
+            fileName = "auth",
+            key = "key-$sequence",
+            value = sequence.toString(),
+            type = "LONG",
+            timestamp = sequence,
+            sequenceNumber = sequence,
+          )
+        }
+      val changesBundle =
+        Bundle().apply {
+          putBoolean("success", true)
+          putString(
+            "result",
+            StorageProtocolSerializer.responseToJson(StorageResponse.Changes("auth", changes)),
+          )
+        }
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        subscribeBundle
+      every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } returns
+        changesBundle
+      every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
+        Unit
 
-    assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
-    observerSlot.captured.onChange(false)
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      observerSlot.captured.onChange(false)
 
-    val received = withTimeout(1_000) { manager.changeEvents.take(changes.size).toList() }
-    assertEquals(changes.map { it.sequenceNumber }, received.map { it.sequenceNumber })
-  }
+      val received = withTimeout(1_000) { manager.changeEvents.take(64).toList() }
+      assertEquals((37L..100L).toList(), received.map { it.sequenceNumber })
+    }
 
   // ================= Unsubscribe Tests =================
 

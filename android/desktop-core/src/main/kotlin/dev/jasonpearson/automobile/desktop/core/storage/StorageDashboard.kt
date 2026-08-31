@@ -90,9 +90,11 @@ fun StorageDashboard(
     }
   val handledStorageSubscriptionRequestIds =
     remember(deviceId, packageName) { mutableSetOf<String>() }
-  val storageReconciliationRequests =
+  val lastStorageSequenceByFile = remember(deviceId, packageName) { mutableMapOf<String, Long>() }
+  val pendingStorageReconciliationFiles = remember(deviceId, packageName) { mutableSetOf<String>() }
+  val storageReconciliationSignal =
     remember(deviceId, packageName) {
-      kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+      kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
     }
   val recentlyChangedKeys = highlightExpiries.keys
 
@@ -105,6 +107,16 @@ fun StorageDashboard(
         return@collect
       }
       if (packageName != null && update.packageName != packageName) return@collect
+
+      if (update.sequenceNumber > 0L) {
+        val previousSequence = lastStorageSequenceByFile[update.fileName]
+        if (hasStorageSequenceGap(previousSequence, update.sequenceNumber)) {
+          pendingStorageReconciliationFiles.add(update.fileName)
+          storageReconciliationSignal.trySend(Unit)
+        }
+        lastStorageSequenceByFile[update.fileName] =
+          maxOf(previousSequence ?: 0L, update.sequenceNumber)
+      }
 
       val filePresent = keyValueFiles.any { it.name == update.fileName }
       val newlyHighlighted = update.highlightKeys(keyValueFiles)
@@ -170,7 +182,8 @@ fun StorageDashboard(
       val fileName = response.key.fileName
       if (keyValueFiles.none { it.name == fileName }) return@collect
       if (!handledStorageSubscriptionRequestIds.add(response.requestId)) return@collect
-      storageReconciliationRequests.trySend(fileName)
+      pendingStorageReconciliationFiles.add(fileName)
+      storageReconciliationSignal.trySend(Unit)
     }
   }
 
@@ -178,12 +191,10 @@ fun StorageDashboard(
   // replayed afterward, so coalescing retains the snapshot-to-observer gap protection.
   LaunchedEffect(observationStreamClient, deviceId, packageName) {
     while (true) {
-      val fileNames = linkedSetOf(storageReconciliationRequests.receive())
+      storageReconciliationSignal.receive()
       kotlinx.coroutines.yield()
-      while (true) {
-        val queuedFileName = storageReconciliationRequests.tryReceive().getOrNull() ?: break
-        fileNames.add(queuedFileName)
-      }
+      val fileNames = pendingStorageReconciliationFiles.toSet()
+      pendingStorageReconciliationFiles.clear()
 
       val activeFileNames = fileNames.filter { fileName ->
         keyValueFiles.any { it.name == fileName }

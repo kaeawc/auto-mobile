@@ -15,6 +15,10 @@ private val json = Json { ignoreUnknownKeys = true }
 internal fun highlightKey(fileName: String, key: String): String =
   "${fileName.length}:$fileName:$key"
 
+/** True when one or more bounded-queue updates are missing before [currentSequence]. */
+internal fun hasStorageSequenceGap(previousSequence: Long?, currentSequence: Long): Boolean =
+  currentSequence > 0L && currentSequence > (previousSequence ?: 0L) + 1L
+
 /**
  * Decodes a daemon-supplied value string into the representation [KeyValueEntry.value] holds.
  *

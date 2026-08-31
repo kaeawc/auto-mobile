@@ -256,6 +256,41 @@ class ObservationStreamStorageTest {
   }
 
   @Test
+  fun `a lifecycle request recorded before reconnect is not written to the new transport`() =
+    runBlocking {
+      val socket = Files.createTempFile("obs-storage-generation", ".sock")
+      val factory = CapturingTransportFactory()
+      var rotateBeforeFirstStorageWrite = true
+      lateinit var client: ObservationStreamClient
+      client =
+        ObservationStreamClient(
+          transportFactory = factory,
+          socketPathProvider = { socket.toString() },
+          beforeStorageRequestSend = {
+            if (rotateBeforeFirstStorageWrite) {
+              rotateBeforeFirstStorageWrite = false
+              client.disconnect()
+              client.connect("emulator-5554", "epoch-b")
+            }
+          },
+        )
+      try {
+        client.connect("emulator-5554", "epoch-a")
+        client.subscribeStorage("com.example", "prefs.xml")
+
+        assertTrue(factory.opened[0].sentRequests().none { it.command.endsWith("_storage") })
+        val replay =
+          factory.opened[1].sentRequests().single {
+            it.command == "subscribe_storage" && it.fileName == "prefs.xml"
+          }
+        assertEquals("epoch-b", replay.deviceSessionUuid)
+      } finally {
+        client.dispose()
+        Files.deleteIfExists(socket)
+      }
+    }
+
+  @Test
   fun `unsubscribeStorage sends unsubscribe_storage and stops re-applying on reconnect`() {
     withConnectedClient { client, factory ->
       client.subscribeStorage("com.example", "prefs.xml")

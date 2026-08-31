@@ -47,6 +47,12 @@ import kotlinx.coroutines.launch
 /** Color for highlighting recently changed entries */
 private val HIGHLIGHT_COLOR = Color(0xFF4CAF50).copy(alpha = 0.3f)
 
+private data class EditingEntryIdentity(
+  val filePath: String,
+  val key: String,
+  val type: KeyValueType,
+)
+
 /**
  * Key-Value storage inspector for SharedPreferences (Android) / UserDefaults (iOS).
  *
@@ -80,7 +86,7 @@ fun KeyValueInspector(
     keyValueFiles.firstOrNull { it.path == selectedPath } ?: keyValueFiles.firstOrNull()
   var searchQuery by remember { mutableStateOf("") }
   var selectedEntry by remember { mutableStateOf<KeyValueEntry?>(null) }
-  var editingEntry by remember { mutableStateOf<KeyValueEntry?>(null) }
+  var editingEntry by remember { mutableStateOf<EditingEntryIdentity?>(null) }
   var editValue by remember { mutableStateOf("") }
   var isSaving by remember { mutableStateOf(false) }
   var saveError by remember { mutableStateOf<String?>(null) }
@@ -274,7 +280,8 @@ fun KeyValueInspector(
         LazyColumn(modifier = Modifier.fillMaxSize()) {
           items(filteredEntries) { entry ->
             val isSelected = entry == selectedEntry
-            val isEditing = entry == editingEntry
+            val isEditing =
+              editingEntry?.let { it.filePath == selectedFile?.path && it.key == entry.key } == true
 
             // Check if this entry was recently changed
             val changeKey = highlightKey(selectedFile?.name.orEmpty(), entry.key)
@@ -420,7 +427,13 @@ fun KeyValueInspector(
                         color = colors.text.normal.copy(alpha = 0.4f),
                         modifier =
                           Modifier.clickable {
-                              editingEntry = entry
+                              val filePath = selectedFile?.path ?: return@clickable
+                              editingEntry =
+                                EditingEntryIdentity(
+                                  filePath = filePath,
+                                  key = entry.key,
+                                  type = entry.type,
+                                )
                               editValue = entry.value.toString()
                             }
                             .pointerHoverIcon(PointerIcon.Hand),

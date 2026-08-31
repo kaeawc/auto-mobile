@@ -20,6 +20,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -94,8 +95,13 @@ class ObservationStreamClient(
   // Test seam: invoked when a readMessages() invocation returns (superseded or not), so a test can
   // await a specific read loop's completion deterministically. No-op in production.
   private val onReadLoopExit: () -> Unit = {},
+  // Test seam for rotating the connection after lifecycle intent is recorded but before its frame
+  // is written. No-op in production.
+  private val beforeStorageRequestSend: () -> Unit = {},
 ) : ObservationStream {
   companion object {
+    private const val STORAGE_UPDATE_BUFFER_CAPACITY = 64
+
     internal fun getSocketPath(): String =
       AutoMobileSocketPaths.socketPath("observation-stream.sock")
 
@@ -150,10 +156,14 @@ class ObservationStreamClient(
   override val performanceUpdates: SharedFlow<PerformanceStreamUpdate> =
     _performanceUpdates.asSharedFlow()
 
-  // Storage updates must not be dropped, but the multiplexed socket reader must remain free to
-  // process pings and other frames. An unbounded channel transfers updates losslessly to a
-  // dedicated flow emitter.
-  private val storageUpdateChannel = Channel<StorageStreamUpdate>(Channel.UNLIMITED)
+  // Keep the multiplexed socket reader free to process pings without allowing a stalled Compose
+  // collector to grow memory without bound. DROP_OLDEST always retains the newest sequence;
+  // StorageDashboard detects any resulting sequence gap and reconciles a fresh file snapshot.
+  private val storageUpdateChannel =
+    Channel<StorageStreamUpdate>(
+      capacity = STORAGE_UPDATE_BUFFER_CAPACITY,
+      onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
   private val _storageUpdates = MutableSharedFlow<StorageStreamUpdate>(replay = 1)
   override val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
 
@@ -407,22 +417,38 @@ class ObservationStreamClient(
     return false
   }
 
-  private fun sendRequest(request: StreamRequest): Boolean {
+  private fun sendRequest(
+    request: StreamRequest,
+    expectedConnectionGeneration: Long? = null,
+  ): Boolean {
     val message = json.encodeToString(serializer<StreamRequest>(), request)
     return synchronized(writerLock) {
-      val currentWriter =
-        synchronized(ownershipLock) { transport?.writer } ?: return@synchronized false
-      try {
-        currentWriter.write(message)
-        currentWriter.newLine()
-        currentWriter.flush()
-        true
-      } catch (e: Exception) {
-        log.warn("Failed to send request: ${e.message}")
-        false
+      if (expectedConnectionGeneration == null) {
+        val currentWriter = synchronized(ownershipLock) { transport?.writer }
+        if (currentWriter == null) false else writeRequest(currentWriter, message)
+      } else {
+        synchronized(ownershipLock) {
+          val currentWriter = transport?.writer
+          if (connectionGeneration != expectedConnectionGeneration || currentWriter == null) {
+            false
+          } else {
+            writeRequest(currentWriter, message)
+          }
+        }
       }
     }
   }
+
+  private fun writeRequest(writer: BufferedWriter, message: String): Boolean =
+    try {
+      writer.write(message)
+      writer.newLine()
+      writer.flush()
+      true
+    } catch (e: Exception) {
+      log.warn("Failed to send request: ${e.message}")
+      false
+    }
 
   private suspend fun readMessages(generation: Long) {
     // Bind to the transport for this generation. If a disconnect()/reconnect already superseded us
@@ -792,10 +818,12 @@ class ObservationStreamClient(
             subscribe = subscribe,
             intentVersion = storageSubscriptionIntentVersions[key] ?: 0L,
             forcedReconciliation = forceReconciliation,
+            connectionGeneration = connectionGeneration,
           )
           .also { pendingStorageSubscriptions[id] = it }
       }
 
+    beforeStorageRequestSend()
     val sent =
       sendRequest(
         StreamRequest(
@@ -805,7 +833,8 @@ class ObservationStreamClient(
           deviceSessionUuid = subscribedDeviceSessionUuid,
           packageName = key.packageName,
           fileName = key.fileName,
-        )
+        ),
+        expectedConnectionGeneration = request.connectionGeneration,
       )
     if (!sent) {
       synchronized(ownershipLock) {
@@ -922,6 +951,7 @@ private data class PendingStorageSubscription(
   val subscribe: Boolean,
   val intentVersion: Long,
   val forcedReconciliation: Boolean,
+  val connectionGeneration: Long,
 )
 
 @Serializable

@@ -9,6 +9,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.StorageStreamUpdate
@@ -120,6 +121,32 @@ class StorageDashboardUiTest {
       }
       onNodeWithText("\"light\"", substring = true).assertIsDisplayed()
     }
+
+  @Test
+  fun `a live update preserves the draft for the entry being edited`() = runComposeUiTest {
+    val stream = FakeObservationStream()
+    setContent {
+      MaterialTheme {
+        StorageDashboard(
+          dataSourceMode = DataSourceMode.Fake,
+          deviceId = "emulator-5554",
+          packageName = "com.example.app",
+          observationStreamClient = stream,
+        )
+      }
+    }
+    onNodeWithText("Key-Value").performClick()
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("theme").fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithText("theme").performClick()
+    onNodeWithText("\u270E").performClick()
+    onNodeWithText("dark").performTextReplacement("draft-value")
+
+    runOnIdle { stream.emitStorage(themeUpdate("light")) }
+
+    onNodeWithText("draft-value").assertIsDisplayed()
+  }
 
   @Test
   fun `subscribes each loaded key-value file and releases every subscription on dispose (#4709)`() =

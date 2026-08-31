@@ -10,6 +10,7 @@ import android.util.Log
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -26,6 +27,7 @@ class StorageSubscriptionManager(private val context: Context) {
     private const val TAG = "StorageSubscriptionMgr"
     private const val AUTHORITY_SUFFIX = ".automobile.sharedprefs"
     private const val CHANGES_PATH = "changes"
+    private const val STORAGE_EVENT_BUFFER_CAPACITY = 64
   }
 
   /** State for a single subscription. */
@@ -51,9 +53,14 @@ class StorageSubscriptionManager(private val context: Context) {
   private val packageObservers =
     ConcurrentHashMap<String, PackageObserverState>() // packageName -> state
 
-  // Storage mutations are durable state transitions. Keep them lossless while CtrlProxy's
-  // WebSocket sender is behind instead of advancing the SDK sequence past a dropped event.
-  private val changeEventChannel = Channel<PreferenceChangeEvent>(Channel.UNLIMITED)
+  // Retain recent mutations without allowing a stalled WebSocket to exhaust the service process.
+  // Dropping the oldest event creates a sequence gap that StorageDashboard reconciles from a fresh
+  // snapshot.
+  private val changeEventChannel =
+    Channel<PreferenceChangeEvent>(
+      capacity = STORAGE_EVENT_BUFFER_CAPACITY,
+      onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
   val changeEvents: Flow<PreferenceChangeEvent> = changeEventChannel.receiveAsFlow()
 
   private val handler = Handler(Looper.getMainLooper())

@@ -162,6 +162,13 @@ class KeyValueLiveUpdatesTest {
   }
 
   @Test
+  fun `sequence gaps include a dropped initial prefix and later missing updates`() {
+    assertTrue(hasStorageSequenceGap(previousSequence = null, currentSequence = 37L))
+    assertTrue(hasStorageSequenceGap(previousSequence = 40L, currentSequence = 42L))
+    assertTrue(!hasStorageSequenceGap(previousSequence = 40L, currentSequence = 41L))
+  }
+
+  @Test
   fun `clearing a file highlights every key it had`() {
     val files = listOf(file("prefs.xml", "theme" to "light", "locale" to "en"))
 

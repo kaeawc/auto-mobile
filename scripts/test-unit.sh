@@ -5,9 +5,16 @@
 # must remain safe to run continuously while editing.
 set -euo pipefail
 
-readonly UNIT_TEST_TIMEOUT_SECONDS="${AUTOMOBILE_UNIT_TEST_TIMEOUT_SECONDS:-30}"
+if [[ "${RUNNER_OS:-}" == "macOS" ]]; then
+  default_timeout_seconds=30
+  per_test_timeout_ms=20000
+else
+  default_timeout_seconds=30
+  per_test_timeout_ms=5000
+fi
+
+readonly UNIT_TEST_TIMEOUT_SECONDS="${AUTOMOBILE_UNIT_TEST_TIMEOUT_SECONDS:-${default_timeout_seconds}}"
 readonly UNIT_TEST_WORKERS="${AUTOMOBILE_UNIT_TEST_WORKERS:-12}"
-readonly UNIT_TEST_BASE_REF="${AUTOMOBILE_UNIT_TEST_BASE_REF:-origin/main}"
 
 readonly -a integration_paths=(
   "test/contracts/runAll.test.ts"
@@ -30,9 +37,14 @@ for path in "${integration_paths[@]}"; do
   ignore_args+=(--path-ignore-patterns "${path}")
 done
 
+test_args=(bun test --timeout "${per_test_timeout_ms}" --no-orphans)
+if [[ "${RUNNER_OS:-}" != "Windows" ]]; then
+  test_args+=(--parallel="${UNIT_TEST_WORKERS}")
+fi
+test_args+=(${ignore_args[@]+"${ignore_args[@]}"})
+
 # The validation wrapper passes scripts independently, so ShellCheck cannot follow this path.
 # shellcheck disable=SC1091
 source scripts/ios/run_with_timeout.sh
 run_with_timeout "${UNIT_TEST_TIMEOUT_SECONDS}" \
-  bun test --changed="${UNIT_TEST_BASE_REF}" --parallel="${UNIT_TEST_WORKERS}" \
-    --timeout 5000 --no-orphans ${ignore_args[@]+"${ignore_args[@]}"} "$@"
+  "${test_args[@]}" "$@"

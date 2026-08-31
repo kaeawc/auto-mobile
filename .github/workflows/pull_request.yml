@@ -1391,6 +1391,7 @@ jobs:
             bun run test 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
           else
             # Keep an outer watchdog for failures before the unit script can start.
+            # The inner test runner also enforces this fixed feedback budget.
             # shellcheck source=scripts/ios/run_with_timeout.sh
             source scripts/ios/run_with_timeout.sh
             test_status=0

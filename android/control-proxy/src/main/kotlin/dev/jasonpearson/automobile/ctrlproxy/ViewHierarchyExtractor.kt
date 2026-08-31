@@ -329,10 +329,15 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       }
     }
 
-    // Fallback to activeWindowRoot only when no primary app window was selected. When the selected
-    // app has no root, rootInActiveWindow can be the active system status bar, which is not a
-    // substitute for application content.
-    if (mainHierarchy == null && activeWindowRoot != null && !primaryAppWindowHasNullRoot) {
+    // Fallback to activeWindowRoot when it can still recover application content. When the
+    // selected app has no root, rootInActiveWindow can be the active system status bar, which is
+    // not a substitute for application content.
+    if (
+      mainHierarchy == null &&
+        activeWindowRoot != null &&
+        (!primaryAppWindowHasNullRoot ||
+          activeWindowRoot.packageName?.toString() != "com.android.systemui")
+    ) {
       val element =
         extractNodeInfo(
           activeWindowRoot,

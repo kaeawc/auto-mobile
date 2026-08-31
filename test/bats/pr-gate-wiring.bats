@@ -185,3 +185,16 @@ wiring_requires_yq() {
   [[ "$block" != *"- ios-swift-packages"* ]]
   [[ "$block" != *"- ios-xcode-build"* ]]
 }
+
+@test "cross-platform unit lane avoids Windows isolation and preserves macOS timeout headroom" {
+  wiring_requires_yq
+  local run_step
+  run_step="$(yq -r '
+    .jobs."mcp-build-and-test".steps[]
+    | select(.name == "Run Tests")
+    | .run
+  ' "$WF")"
+  [[ "$run_step" == *'[[ "$RUNNER_OS" == "Windows" ]]'* ]]
+  [[ "$run_step" == *"bun run test"* ]]
+  [[ "$run_step" == *"run_with_timeout 720 bun run test"* ]]
+}

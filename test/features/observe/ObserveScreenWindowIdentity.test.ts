@@ -26,14 +26,25 @@ const androidDevice: BootedDevice = {
   platform: "android",
 };
 
-function makeScreen(viewHierarchy: FakeViewHierarchy, fakeAdb: FakeAdbExecutor): RealObserveScreen {
-  return new RealObserveScreen(androidDevice, new FakeAdbClientFactory(fakeAdb), {
-    viewHierarchy,
-    cacheStore: new FakeObserveCacheStore(new FakeTimer()),
-    performanceAuditor: { run: async () => undefined } as any,
-    accessibilityAuditor: { run: async () => undefined } as any,
-    accessibilityStateDetector: { run: async () => undefined } as any,
-  });
+function makeScreen(
+  viewHierarchy: FakeViewHierarchy,
+  fakeAdb: FakeAdbExecutor,
+  timer: FakeTimer = new FakeTimer(),
+  window?: any,
+): RealObserveScreen {
+  return new RealObserveScreen(
+    androidDevice,
+    new FakeAdbClientFactory(fakeAdb),
+    {
+      viewHierarchy,
+      window,
+      cacheStore: new FakeObserveCacheStore(timer),
+      performanceAuditor: { run: async () => undefined } as any,
+      accessibilityAuditor: { run: async () => undefined } as any,
+      accessibilityStateDetector: { run: async () => undefined } as any,
+    },
+    timer,
+  );
 }
 
 function calendarHierarchy(now: number): any {
@@ -478,7 +489,107 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
 
     const fakeAdb = new FakeAdbExecutor();
     fakeAdb.setForegroundApp({ packageName: "com.google.android.calendar", userId: 0 });
-    const screen = makeScreen(viewHierarchy, fakeAdb);
+    const screen = makeScreen(viewHierarchy, fakeAdb, timer);
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.verified).toBe(true);
+  });
+
+  test("does not classify a full System UI hierarchy without screen dimensions as system chrome", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      systemInsets: { top: 63, right: 0, bottom: 63, left: 0 },
+      packageName: "com.android.systemui",
+      hierarchy: {
+        node: { bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    const screen = makeScreen(viewHierarchy, fakeAdb, timer);
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(true);
+    expect(result.freshness?.verified).toBe(true);
+  });
+
+  test("retracts an incomplete package-less system-chrome hierarchy", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+      ctrlProxyIncomplete: true,
+      hierarchy: {
+        node: { text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    const noActiveWindow = {
+      getActive: async () => null,
+      getActiveHash: async () => "hash",
+      getCachedActiveWindow: async () => null,
+      setCachedActiveWindow: async () => undefined,
+      clearCache: async () => undefined,
+    };
+    const screen = makeScreen(viewHierarchy, fakeAdb, timer, noActiveWindow);
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.warning).toContain("status-bar");
+  });
+
+  test("does not retract System UI during a foreground transition", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+      packageName: "com.android.systemui",
+      hierarchy: {
+        node: { text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } },
+      },
+    } as any);
+
+    const sequence = [
+      { packageName: "com.android.settings", userId: 0 },
+      { packageName: "com.google.android.calendar", userId: 0 },
+    ];
+    class SequencedForegroundAdb extends FakeAdbExecutor {
+      async getForegroundApp(): Promise<{ packageName: string; userId: number } | null> {
+        return sequence.shift() ?? null;
+      }
+    }
+    const screen = makeScreen(viewHierarchy, new SequencedForegroundAdb(), timer);
 
     const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
 

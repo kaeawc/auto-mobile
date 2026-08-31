@@ -39,6 +39,7 @@
   },
   "scripts": {
     "test": "bash scripts/test-unit.sh",
+    "test:changed": "bash scripts/test-unit.sh --changed=${AUTOMOBILE_UNIT_TEST_BASE_REF:-origin/main}",
     "turbo:test:affected": "turbo run test --affected",
     "test:integration": "bun test --parallel=12 --isolate test/contracts/runAll.test.ts test/daemon/daemonClientAvailability.test.ts test/daemon/daemonClientHandshake.test.ts test/daemon/daemonClientStaleSocketRecovery.test.ts test/daemon/daemonManagerReadiness.test.ts test/daemon/socketServer*.test.ts test/daemon/socketServer/BaseSocketServerOwnership.test.ts test/daemon/videoStreamSocketServer.test.ts test/db/database*Migration*.test.ts test/features/video/FfmpegVideoProcessingBackend.test.ts test/integration/*.test.ts test/package/webrtcRuntimeMetadata.test.ts test/stress/*.test.ts test/utils/ios/IOSHostPortAvailabilityChecker.test.ts",
     "test:windows": "bun test",

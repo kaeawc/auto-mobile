@@ -100,11 +100,14 @@ function isWithinSystemBar(
   systemInsets: ObserveResult["systemInsets"],
   screenSize: ObserveResult["screenSize"],
 ): boolean {
+  if (screenSize.width <= 0 || screenSize.height <= 0) {
+    return false;
+  }
   return (
-    bounds.bottom <= systemInsets.top ||
-    bounds.top >= screenSize.height - systemInsets.bottom ||
-    bounds.right <= systemInsets.left ||
-    bounds.left >= screenSize.width - systemInsets.right
+    (systemInsets.top > 0 && bounds.bottom <= systemInsets.top) ||
+    (systemInsets.bottom > 0 && bounds.top >= screenSize.height - systemInsets.bottom) ||
+    (systemInsets.left > 0 && bounds.right <= systemInsets.left) ||
+    (systemInsets.right > 0 && bounds.left >= screenSize.width - systemInsets.right)
   );
 }
 
@@ -486,6 +489,8 @@ export class RealObserveScreen implements ObserveScreen {
         statusBarOnlyHierarchy: await this.resolveStatusBarOnlyHierarchy(
           result,
           foregroundIdentity,
+          postCaptureForeground,
+          signal,
         ),
         windowIdentityMismatch: await this.resolveWindowIdentityMismatch(
           result,
@@ -947,15 +952,31 @@ export class RealObserveScreen implements ObserveScreen {
   private async resolveStatusBarOnlyHierarchy(
     result: ObserveResult,
     foregroundIdentity: Promise<string | undefined>,
+    postCaptureForeground: PostCaptureForegroundIdentity,
+    signal?: AbortSignal,
   ): Promise<{ foreground: string } | undefined> {
     const foreground = await foregroundIdentity;
     if (!foreground || SYSTEM_UI_WINDOW_PACKAGES.has(foreground)) {
       return undefined;
     }
-    if (!SYSTEM_UI_WINDOW_PACKAGES.has(result.viewHierarchy?.packageName ?? "")) {
+    const hierarchy = result.viewHierarchy;
+    const observed = hierarchy?.packageName;
+    if (
+      (observed !== undefined && !SYSTEM_UI_WINDOW_PACKAGES.has(observed)) ||
+      (observed === undefined && hierarchy?.ctrlProxyIncomplete !== true)
+    ) {
       return undefined;
     }
-    if (result.viewHierarchy?.packageName === foreground) {
+    if (observed === foreground) {
+      return undefined;
+    }
+    const confirmed = await this.resolvePostCaptureForegroundIdentity(
+      foreground,
+      observed ?? "",
+      postCaptureForeground,
+      signal,
+    );
+    if (confirmed !== foreground) {
       return undefined;
     }
     return isStatusBarOnlyHierarchy(result) ? { foreground } : undefined;

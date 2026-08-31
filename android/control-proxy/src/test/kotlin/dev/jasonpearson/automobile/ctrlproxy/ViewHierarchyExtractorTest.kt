@@ -4,10 +4,14 @@ import android.graphics.Rect
 import android.text.SpannableString
 import android.text.style.ClickableSpan
 import android.view.View
+import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.SemanticLink
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.spyk
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -978,6 +982,72 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `extractFromAllWindows keeps incomplete attribution for a focused null-root app`() {
+    val statusBarRoot = accessibilityNode("com.android.systemui", "12:34")
+    val windows =
+      listOf(
+        accessibilityWindow(
+          id = 10,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          root = null,
+          isFocused = true,
+        ),
+        accessibilityWindow(
+          id = 11,
+          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+          root = statusBarRoot,
+          isActive = true,
+        ),
+      )
+
+    val result =
+      extractor.extractFromAllWindows(
+        windows = windows,
+        activeWindowRoot = statusBarRoot,
+        disableAllFiltering = true,
+      )
+
+    assertNull(
+      "System UI must not be selected as the main application hierarchy",
+      result.packageName,
+    )
+    assertEquals(true, result.ctrlProxyIncomplete)
+    assertNotNull(result.hierarchy)
+  }
+
+  @Test
+  fun `extractFromAllWindows recovers a non-SystemUI active root after null primary root`() {
+    val statusBarRoot = accessibilityNode("com.android.systemui", "12:34")
+    val recoveredAppRoot = accessibilityNode("com.example.app", "Recovered app content")
+    val windows =
+      listOf(
+        accessibilityWindow(
+          id = 10,
+          type = AccessibilityWindowInfo.TYPE_APPLICATION,
+          root = null,
+          isFocused = true,
+        ),
+        accessibilityWindow(
+          id = 11,
+          type = AccessibilityWindowInfo.TYPE_SYSTEM,
+          root = statusBarRoot,
+          isActive = true,
+        ),
+      )
+
+    val result =
+      extractor.extractFromAllWindows(
+        windows = windows,
+        activeWindowRoot = recoveredAppRoot,
+        disableAllFiltering = true,
+      )
+
+    assertEquals("com.example.app", result.packageName)
+    assertEquals(true, result.ctrlProxyIncomplete)
+    assertNotNull(result.hierarchy)
+  }
+
+  @Test
   fun `pickPrimaryAppWindowId leaves active-window fallback when no app is focused or IME is present`() {
     val windows =
       listOf(
@@ -1815,6 +1885,36 @@ class ViewHierarchyExtractorTest {
       bounds = bounds(0, 0, 1440, 3000),
       children = listOf(hiddenBoundary),
     )
+  }
+
+  private fun accessibilityNode(packageName: String, text: String): AccessibilityNodeInfo {
+    return spyk(AccessibilityNodeInfo.obtain().apply {
+      this.packageName = packageName
+      this.text = text
+      setBoundsInScreen(Rect(0, 0, 1080, 100))
+    }).also { node ->
+      every { node.findFocus(any()) } returns null
+    }
+  }
+
+  private fun accessibilityWindow(
+    id: Int,
+    type: Int,
+    root: AccessibilityNodeInfo?,
+    isActive: Boolean = false,
+    isFocused: Boolean = false,
+  ): AccessibilityWindowInfo {
+    val window = mockk<AccessibilityWindowInfo>(relaxed = true)
+    every { window.id } returns id
+    every { window.type } returns type
+    every { window.root } returns root
+    every { window.isActive } returns isActive
+    every { window.isFocused } returns isFocused
+    every { window.layer } returns id
+    every { window.getBoundsInScreen(any()) } answers {
+      firstArg<Rect>().set(0, 0, 1080, 100)
+    }
+    return window
   }
 
   private fun findElementByResourceId(

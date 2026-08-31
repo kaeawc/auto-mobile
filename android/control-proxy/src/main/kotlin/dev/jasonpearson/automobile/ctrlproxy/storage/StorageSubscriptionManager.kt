@@ -358,13 +358,14 @@ class StorageSubscriptionManager(private val context: Context) {
         // Do not claim success until the local observer is active. Otherwise a registration
         // failure leaves an entry that makes later retries falsely report an existing observer.
         val observerRegistration = registerPackageObserver(packageName, fileName)
-        if (observerRegistration.isFailure) {
+        val observerRegistrationError = observerRegistration.exceptionOrNull()
+        if (observerRegistrationError != null) {
           try {
             context.contentResolver.call(uri, "unsubscribeFromFile", null, extras)
           } catch (rollbackError: Exception) {
             Log.w(TAG, "Failed to roll back SDK subscription for $subscriptionId", rollbackError)
           }
-          return Result.failure(observerRegistration.exceptionOrNull()!!)
+          return Result.failure(observerRegistrationError)
         }
 
         // Track the subscription after the observer exists, so a retry can repair a failed setup.
@@ -373,9 +374,6 @@ class StorageSubscriptionManager(private val context: Context) {
           return Result.success(existing.subscription)
         }
 
-        // Commit the subscription only after observer registration succeeds. Otherwise a retry
-        // would short-circuit against state that can never receive a change notification.
-        subscriptions[subscriptionId] = SubscriptionState(subscription)
         Log.d(TAG, "Subscribed to $subscriptionId")
         Result.success(subscription)
       }

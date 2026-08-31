@@ -919,10 +919,19 @@ function classifyRunner(
   } else {
     const advertised = new Set(inspection.supportedCommands);
     missingCommands = IOS_RUNNER_FEATURE_COMMANDS.filter((command) => !advertised.has(command));
-    const advertisedFeatures = new Set(inspection.supportedFeatures ?? []);
-    missingFeatures = getRequiredIosRunnerFeatureFlags().filter(
-      (feature) => !advertisedFeatures.has(feature),
-    );
+    // supportedFeatures === null is the immutable 0.0.66 IPA, which predates the
+    // feature handshake and cannot advertise feature flags at all. Grandfather
+    // it: the required-flag gate (getRequiredIosRunnerFeatureFlags, min release
+    // 0.0.67) applies to runners built from handshake-aware source, which report
+    // a (possibly empty) feature list. Treating null as "advertises nothing"
+    // would wrongly flag every pre-handshake runner stale the moment the
+    // pipeline cut 0.0.67.
+    if (inspection.supportedFeatures !== null) {
+      const advertisedFeatures = new Set(inspection.supportedFeatures);
+      missingFeatures = getRequiredIosRunnerFeatureFlags().filter(
+        (feature) => !advertisedFeatures.has(feature),
+      );
+    }
     status = missingCommands.length === 0 && missingFeatures.length === 0 ? "compatible" : "stale";
   }
 

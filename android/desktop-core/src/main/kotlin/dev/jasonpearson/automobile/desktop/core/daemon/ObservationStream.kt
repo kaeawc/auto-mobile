@@ -16,7 +16,11 @@ interface ObservationStream {
   val screenshotUpdates: SharedFlow<ScreenshotStreamUpdate>
   val navigationUpdates: SharedFlow<NavigationGraphStreamUpdate>
   val performanceUpdates: SharedFlow<PerformanceStreamUpdate>
-  val storageUpdates: SharedFlow<StorageStreamUpdate>
+  /**
+   * Lossless storage deltas for this pane's stream. Unlike layout telemetry, every mutation is a
+   * durable state transition, so this is a unicast [Flow] rather than a lossy broadcast buffer.
+   */
+  val storageUpdates: Flow<StorageStreamUpdate>
   /**
    * Lossless, per-stream lifecycle acknowledgements. A stream belongs to one pane, and an
    * acknowledgement belongs to the command from that pane, so this is intentionally a unicast

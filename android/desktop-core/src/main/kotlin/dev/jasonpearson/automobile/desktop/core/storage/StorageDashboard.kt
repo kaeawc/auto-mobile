@@ -16,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,6 +64,7 @@ fun StorageDashboard(
 
   // Fetch storage data from data source
   var dataSource by remember { mutableStateOf<StorageDataSource?>(null) }
+  val currentDataSource by rememberUpdatedState(dataSource)
   var databases by remember { mutableStateOf<List<DatabaseInfo>>(emptyList()) }
   var keyValueFiles by remember { mutableStateOf<List<KeyValueFile>>(emptyList()) }
   var isLoading by remember { mutableStateOf(true) }
@@ -88,6 +90,10 @@ fun StorageDashboard(
     }
   val handledStorageSubscriptionRequestIds =
     remember(deviceId, packageName) { mutableSetOf<String>() }
+  val storageReconciliationRequests =
+    remember(deviceId, packageName) {
+      kotlinx.coroutines.channels.Channel<String>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+    }
   val recentlyChangedKeys = highlightExpiries.keys
 
   LaunchedEffect(observationStreamClient, deviceId, packageName) {
@@ -147,11 +153,10 @@ fun StorageDashboard(
     }
   }
 
-  // A storage observer starts only after the daemon acknowledges this specific request. Refresh
-  // its file after that acknowledgement to recover writes between the initial snapshot A and
-  // registration B. Entries delivered as live updates while this refresh is awaiting are replayed
-  // over the result, so a later C cannot be clobbered by an earlier snapshot.
-  LaunchedEffect(observationStreamClient, dataSource, packageName) {
+  // A storage observer starts only after the daemon acknowledges this specific request. Queue its
+  // file for reconciliation after that acknowledgement; a separate consumer coalesces several
+  // acknowledgements into one full snapshot instead of issuing an O(N²) series of reads.
+  LaunchedEffect(observationStreamClient, deviceId, packageName) {
     val stream = observationStreamClient ?: return@LaunchedEffect
     stream.storageSubscriptionResponses.collect { response ->
       if (!response.subscribe || response.key.packageName != packageName) return@collect
@@ -162,13 +167,34 @@ fun StorageDashboard(
         )
         return@collect
       }
-      val source = dataSource ?: return@collect
       val fileName = response.key.fileName
       if (keyValueFiles.none { it.name == fileName }) return@collect
       if (!handledStorageSubscriptionRequestIds.add(response.requestId)) return@collect
-      val snapshotStartGeneration = storageFileUpdateGenerations[fileName] ?: 0L
+      storageReconciliationRequests.trySend(fileName)
+    }
+  }
+
+  // Reconcile every newly-active file from one snapshot. Live updates received during the read are
+  // replayed afterward, so coalescing retains the snapshot-to-observer gap protection.
+  LaunchedEffect(observationStreamClient, deviceId, packageName) {
+    while (true) {
+      val fileNames = linkedSetOf(storageReconciliationRequests.receive())
+      kotlinx.coroutines.yield()
+      while (true) {
+        val queuedFileName = storageReconciliationRequests.tryReceive().getOrNull() ?: break
+        fileNames.add(queuedFileName)
+      }
+
+      val activeFileNames = fileNames.filter { fileName ->
+        keyValueFiles.any { it.name == fileName }
+      }
+      if (activeFileNames.isEmpty()) continue
+      val source = currentDataSource ?: continue
+      val snapshotStartGenerations = activeFileNames.associateWith { fileName ->
+        storageFileUpdateGenerations[fileName] ?: 0L
+      }
       storageReconciliationStartGenerations =
-        storageReconciliationStartGenerations + (fileName to snapshotStartGeneration)
+        storageReconciliationStartGenerations + snapshotStartGenerations
       try {
         when (
           val result =
@@ -177,29 +203,32 @@ fun StorageDashboard(
             }
         ) {
           is Result.Success -> {
-            val updatesSinceSnapshotStarted =
-              storageUpdateHistory[fileName]
-                .orEmpty()
-                .filter { (generation, _) -> generation > snapshotStartGeneration }
-                .map { (_, update) -> update }
             keyValueFiles =
-              keyValueFiles.reconcileStorageFileSnapshot(
-                result.data,
-                fileName,
-                updatesSinceSnapshotStarted,
-              )
+              activeFileNames.fold(keyValueFiles) { files, fileName ->
+                val updatesSinceSnapshotStarted =
+                  storageUpdateHistory[fileName]
+                    .orEmpty()
+                    .filter { (generation, _) ->
+                      generation > (snapshotStartGenerations[fileName] ?: 0L)
+                    }
+                    .map { (_, update) -> update }
+                files.reconcileStorageFileSnapshot(
+                  result.data,
+                  fileName,
+                  updatesSinceSnapshotStarted,
+                )
+              }
           }
           is Result.Error ->
-            LOG.warn(
-              "StorageDashboard: failed to reconcile ${response.key.fileName}: ${result.message}"
-            )
+            LOG.warn("StorageDashboard: failed to reconcile storage files: ${result.message}")
           Result.Loading -> LOG.warn("StorageDashboard: reconciliation remained loading")
         }
       } catch (e: Exception) {
-        LOG.warn("StorageDashboard: reconciliation failed for $fileName: ${e.message}")
+        LOG.warn("StorageDashboard: reconciliation failed for $activeFileNames: ${e.message}")
       } finally {
-        storageReconciliationStartGenerations = storageReconciliationStartGenerations - fileName
-        storageUpdateHistory = storageUpdateHistory - fileName
+        storageReconciliationStartGenerations =
+          storageReconciliationStartGenerations - activeFileNames.toSet()
+        storageUpdateHistory = storageUpdateHistory - activeFileNames.toSet()
       }
     }
   }

@@ -41,8 +41,8 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
   private val _performanceUpdates = flow<PerformanceStreamUpdate>()
   override val performanceUpdates: SharedFlow<PerformanceStreamUpdate> =
     _performanceUpdates.asSharedFlow()
-  private val _storageUpdates = flow<StorageStreamUpdate>()
-  override val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
+  private val storageUpdateChannel = Channel<StorageStreamUpdate>(Channel.UNLIMITED)
+  override val storageUpdates: Flow<StorageStreamUpdate> = storageUpdateChannel.receiveAsFlow()
   private val storageSubscriptionResponseChannel =
     Channel<StorageSubscriptionResponse>(Channel.UNLIMITED)
   override val storageSubscriptionResponses: Flow<StorageSubscriptionResponse> =
@@ -104,6 +104,8 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
 
   override fun dispose() {
     disconnect()
+    storageUpdateChannel.close()
+    storageSubscriptionResponseChannel.close()
   }
 
   override fun setCadence(screenshotIntervalMs: Long?, hierarchyIntervalMs: Long?) = Unit
@@ -166,7 +168,8 @@ class FakeObservationStream(private val failConnect: Boolean = false) : Observat
   fun emitPerformance(update: PerformanceStreamUpdate): Boolean =
     _performanceUpdates.tryEmit(update)
 
-  fun emitStorage(update: StorageStreamUpdate): Boolean = _storageUpdates.tryEmit(update)
+  fun emitStorage(update: StorageStreamUpdate): Boolean =
+    storageUpdateChannel.trySend(update).isSuccess
 
   fun emitStorageSubscriptionResponse(response: StorageSubscriptionResponse): Boolean =
     storageSubscriptionResponseChannel.trySend(response).isSuccess

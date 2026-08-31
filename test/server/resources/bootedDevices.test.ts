@@ -642,19 +642,22 @@ describe("MCP Booted Device Resources", () => {
       });
       DaemonState.getInstance().initialize(sessionManager, devicePool, registry);
 
-      const { client } = fixture.getContext();
-      const result = await client.readResource({ uri: "automobile:devices/booted" });
-      const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+      try {
+        const { client } = fixture.getContext();
+        const result = await client.readResource({ uri: "automobile:devices/booted" });
+        const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
 
-      expect(data.devices).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            deviceId: mockAndroidDevice1.deviceId,
-            deviceSessionUuid: epoch.deviceSessionUuid,
-          }),
-        ]),
-      );
-      sessionManager.stopCleanupTimer();
+        expect(data.devices).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              deviceId: mockAndroidDevice1.deviceId,
+              deviceSessionUuid: epoch.deviceSessionUuid,
+            }),
+          ]),
+        );
+      } finally {
+        sessionManager.stopCleanupTimer();
+      }
     });
 
     test("should not include phantom pool devices in pool status", async function () {

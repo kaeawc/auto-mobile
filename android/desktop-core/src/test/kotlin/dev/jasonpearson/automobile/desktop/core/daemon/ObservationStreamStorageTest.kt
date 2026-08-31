@@ -323,6 +323,34 @@ class ObservationStreamStorageTest {
   }
 
   @Test
+  fun `a changed intent retries once after an ambiguous failed unsubscribe`() {
+    withConnectedClient { client, factory ->
+      client.subscribeStorage("com.example", "prefs.xml")
+      val transport = factory.opened.single()
+      val initialSubscribe = transport.sentRequests().single { it.command == "subscribe_storage" }
+      client.handleMessage(
+        """{"id":"${initialSubscribe.id}","type":"subscription_response","success":true}"""
+      )
+
+      client.unsubscribeStorage("com.example", "prefs.xml")
+      val pendingUnsubscribe =
+        transport.sentRequests().single { it.command == "unsubscribe_storage" }
+      // The pane is restored before the runner replies. The unsubscribe may still have reached the
+      // runner even when its reply is lost, so a response error must reconcile the latest intent.
+      client.subscribeStorage("com.example", "prefs.xml")
+      client.handleMessage(
+        """{"id":"${pendingUnsubscribe.id}","type":"error","success":false,"error":"connection lost"}"""
+      )
+
+      assertEquals(
+        2,
+        transport.sentRequests().count { it.command == "subscribe_storage" },
+        "the restored desired state needs one compensating subscribe",
+      )
+    }
+  }
+
+  @Test
   fun `retains every acknowledgement received before collection starts`() {
     withConnectedClient { client, factory ->
       client.subscribeStorage("com.example", "first.xml")

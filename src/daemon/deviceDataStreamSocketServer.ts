@@ -1116,7 +1116,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   protected onConnectionClose(socket: Socket): void {
     const filters = this.getSubscribersForSocket(socket).map((subscriber) => subscriber.filter);
     super.onConnectionClose(socket);
-    this.releaseStorageSubscriptionsForSocket(socket);
+    this.releaseStorageSubscriptionsForSocket(socket, true);
     for (const filter of filters) {
       this.notifyCadenceChangedForFilter(filter);
     }
@@ -1301,7 +1301,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   /** Release every observer owned by a desktop socket that disconnected without an explicit UI tear-down. */
-  private releaseStorageSubscriptionsForSocket(socket: Socket): void {
+  private releaseStorageSubscriptionsForSocket(socket: Socket, terminal = false): void {
     const keys = this.storageSubscriptionKeysBySocket.get(socket);
     if (!keys) {
       return;
@@ -1312,8 +1312,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         this.forgetStorageSubscriptionKeyForSocket(socket, key);
         continue;
       }
-      const releasedOwner = this.removeStorageSubscriptionOwner(socket, key, subscription);
-      if ((releasedOwner || subscription.owners.size === 0) && subscription.owners.size === 0) {
+      this.removeStorageSubscriptionOwner(socket, key, subscription);
+      if (subscription.owners.size === 0) {
         // Keep a zero-owner tombstone until CtrlProxy confirms teardown. An error event is normally
         // followed by close; retaining the key lets that close retry a teardown that failed here.
         this.retainStorageSubscriptionKeyForSocket(socket, key);
@@ -1326,6 +1326,12 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
             logger.warn(
               `[DeviceDataStream] Failed to release storage observer for ${subscription.packageName}/${subscription.fileName}: ${errorMessage(error)}`,
             );
+            // An error callback can be followed by onConnectionClose(), which makes one final
+            // teardown attempt. Once close has fired, retain only the subscription tombstone for
+            // runner-reconnect replay, never the destroyed socket.
+            if (terminal) {
+              this.forgetStorageSubscriptionKeyForSocket(socket, key);
+            }
           },
         );
       }

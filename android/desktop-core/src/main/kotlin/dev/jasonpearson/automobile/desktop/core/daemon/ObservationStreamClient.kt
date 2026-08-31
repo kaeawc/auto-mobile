@@ -148,9 +148,10 @@ class ObservationStreamClient(
     _performanceUpdates.asSharedFlow()
 
   // Storage updates must not be dropped: a lost write leaves an inspector permanently stale.
-  // Backpressure the socket reader while its active pane catches up instead.
-  private val _storageUpdates = MutableSharedFlow<StorageStreamUpdate>(replay = 1)
-  override val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
+  // This pane-scoped channel decouples a delayed UI collector from the socket reader, which must
+  // continue processing pings and other multiplexed frame types.
+  private val storageUpdateChannel = Channel<StorageStreamUpdate>(Channel.UNLIMITED)
+  override val storageUpdates = storageUpdateChannel.receiveAsFlow()
 
   // A dashboard may issue several registrations before its acknowledgement collector starts.
   // Keep every correlated response until that one pane consumes it; replay=1 loses all but the
@@ -182,6 +183,8 @@ class ObservationStreamClient(
   private val desiredStorageSubscriptions = LinkedHashSet<StorageSubscriptionKey>()
   private val confirmedStorageSubscriptions = LinkedHashSet<StorageSubscriptionKey>()
   private val pendingStorageSubscriptions = LinkedHashMap<String, PendingStorageSubscription>()
+  private val storageSubscriptionIntentVersions = LinkedHashMap<StorageSubscriptionKey, Long>()
+  private val forcedStorageReconciliations = LinkedHashSet<StorageSubscriptionKey>()
 
   /**
    * Connect to the observation stream socket and subscribe to updates. Any cadence configured via
@@ -315,6 +318,8 @@ class ObservationStreamClient(
    */
   override fun dispose() {
     disconnect()
+    storageUpdateChannel.close()
+    storageSubscriptionResponseChannel.close()
     scope.coroutineContext[Job]?.cancel()
   }
 
@@ -391,13 +396,16 @@ class ObservationStreamClient(
   }
 
   private fun sendRequest(request: StreamRequest): Boolean {
-    val currentWriter = transport?.writer ?: return false
-
     return try {
       val message = json.encodeToString(serializer<StreamRequest>(), request)
-      currentWriter.write(message)
-      currentWriter.newLine()
-      currentWriter.flush()
+      synchronized(ownershipLock) {
+        val currentWriter = transport?.writer ?: return false
+        // write/newLine/flush form a single protocol frame. Pongs originate in the read loop
+        // while storage lifecycle commands originate in Compose, so this must be atomic.
+        currentWriter.write(message)
+        currentWriter.newLine()
+        currentWriter.flush()
+      }
       true
     } catch (e: Exception) {
       log.warn("Failed to send request: ${e.message}")
@@ -599,20 +607,27 @@ class ObservationStreamClient(
         if (storageEvent == null) {
           log.warn("storage_update without a storageEvent payload, ignoring")
         } else {
-          _storageUpdates.emit(
-            StorageStreamUpdate(
-              deviceId = response.deviceId,
-              // The frame's own timestamp is the daemon's receive clock; the event carries the
-              // device-side time the change actually happened, which is what ordering wants.
-              timestamp = storageEvent.timestamp,
-              packageName = storageEvent.packageName,
-              fileName = storageEvent.fileName,
-              key = storageEvent.key,
-              value = storageEvent.value,
-              valueType = KeyValueType.fromProtocolName(storageEvent.valueType),
-              sequenceNumber = storageEvent.sequenceNumber,
-            )
-          )
+          if (
+            !storageUpdateChannel
+              .trySend(
+                StorageStreamUpdate(
+                  deviceId = response.deviceId,
+                  // The frame's own timestamp is the daemon's receive clock; the event carries
+                  // the device-side time the change actually happened, which is what ordering
+                  // wants.
+                  timestamp = storageEvent.timestamp,
+                  packageName = storageEvent.packageName,
+                  fileName = storageEvent.fileName,
+                  key = storageEvent.key,
+                  value = storageEvent.value,
+                  valueType = KeyValueType.fromProtocolName(storageEvent.valueType),
+                  sequenceNumber = storageEvent.sequenceNumber,
+                )
+              )
+              .isSuccess
+          ) {
+            log.warn("Dropping storage update because the stream client has been disposed")
+          }
         }
       }
       "ping" -> {
@@ -725,6 +740,7 @@ class ObservationStreamClient(
     val key = StorageSubscriptionKey(packageName, fileName)
     synchronized(ownershipLock) {
       if (!desiredStorageSubscriptions.add(key)) return
+      incrementStorageSubscriptionIntentVersion(key)
     }
     driveStorageSubscription(key)
   }
@@ -733,6 +749,7 @@ class ObservationStreamClient(
     val key = StorageSubscriptionKey(packageName, fileName)
     synchronized(ownershipLock) {
       if (!desiredStorageSubscriptions.remove(key)) return
+      incrementStorageSubscriptionIntentVersion(key)
     }
     // If subscribe is pending, this does nothing until its acknowledgement arrives. The response
     // handler then issues a compensating unsubscribe instead of leaking the newly-confirmed
@@ -754,14 +771,23 @@ class ObservationStreamClient(
 
         val desired = key in desiredStorageSubscriptions
         val confirmed = key in confirmedStorageSubscriptions
+        val forceReconciliation = key in forcedStorageReconciliations
         val subscribe =
           when {
+            forceReconciliation -> desired
             desired && !confirmed -> true
             !desired && confirmed -> false
             else -> return
           }
         val id = UUID.randomUUID().toString()
-        PendingStorageSubscription(id, key, subscribe).also { pendingStorageSubscriptions[id] = it }
+        PendingStorageSubscription(
+            requestId = id,
+            key = key,
+            subscribe = subscribe,
+            intentVersion = storageSubscriptionIntentVersions[key] ?: 0L,
+            forcedReconciliation = forceReconciliation,
+          )
+          .also { pendingStorageSubscriptions[id] = it }
       }
 
     val sent =
@@ -778,6 +804,10 @@ class ObservationStreamClient(
     if (!sent) {
       synchronized(ownershipLock) {
         pendingStorageSubscriptions.remove(request.requestId)
+      }
+    } else if (request.forcedReconciliation) {
+      synchronized(ownershipLock) {
+        forcedStorageReconciliations.remove(key)
       }
     }
   }
@@ -804,15 +834,17 @@ class ObservationStreamClient(
         pendingStorageSubscriptions.remove(requestId)
       } ?: return false
 
-    synchronized(ownershipLock) {
-      if (success) {
-        if (pending.subscribe) {
-          confirmedStorageSubscriptions.add(pending.key)
-        } else {
-          confirmedStorageSubscriptions.remove(pending.key)
+    val intentChanged =
+      synchronized(ownershipLock) {
+        if (success) {
+          if (pending.subscribe) {
+            confirmedStorageSubscriptions.add(pending.key)
+          } else {
+            confirmedStorageSubscriptions.remove(pending.key)
+          }
         }
+        (storageSubscriptionIntentVersions[pending.key] ?: 0L) != pending.intentVersion
       }
-    }
     storageSubscriptionResponseChannel.send(
       StorageSubscriptionResponse(
         requestId = requestId,
@@ -822,13 +854,22 @@ class ObservationStreamClient(
         error = error,
       )
     )
-    // A permanent rejection establishes no new daemon state. Redriving it immediately creates a
-    // request/error busy loop; reconnect replay is the next opportunity to retry. A successful
-    // acknowledgement, however, may reveal a desired change that happened in flight.
-    if (success) {
+    // A permanent rejection establishes no new daemon state. Redriving an unchanged intent creates
+    // a request/error busy loop. But if the user changed their intent while the command's outcome
+    // became ambiguous, force one compensating command for the latest state.
+    if (success || intentChanged) {
+      if (!success) {
+        synchronized(ownershipLock) {
+          forcedStorageReconciliations.add(pending.key)
+        }
+      }
       driveStorageSubscription(pending.key)
     }
     return true
+  }
+
+  private fun incrementStorageSubscriptionIntentVersion(key: StorageSubscriptionKey) {
+    storageSubscriptionIntentVersions[key] = (storageSubscriptionIntentVersions[key] ?: 0L) + 1L
   }
 
   /**
@@ -873,6 +914,8 @@ private data class PendingStorageSubscription(
   val requestId: String,
   val key: StorageSubscriptionKey,
   val subscribe: Boolean,
+  val intentVersion: Long,
+  val forcedReconciliation: Boolean,
 )
 
 @Serializable

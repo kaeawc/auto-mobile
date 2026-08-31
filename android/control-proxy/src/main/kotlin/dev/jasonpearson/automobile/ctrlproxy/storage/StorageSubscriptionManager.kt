@@ -10,9 +10,9 @@ import android.util.Log
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
 
 /**
  * Manages subscriptions to SharedPreferences changes across multiple target apps.
@@ -51,8 +51,10 @@ class StorageSubscriptionManager(private val context: Context) {
   private val packageObservers =
     ConcurrentHashMap<String, PackageObserverState>() // packageName -> state
 
-  private val _changeEvents = MutableSharedFlow<PreferenceChangeEvent>(extraBufferCapacity = 64)
-  val changeEvents: SharedFlow<PreferenceChangeEvent> = _changeEvents.asSharedFlow()
+  // Storage mutations are durable state transitions. Keep them lossless while CtrlProxy's
+  // WebSocket sender is behind instead of advancing the SDK sequence past a dropped event.
+  private val changeEventChannel = Channel<PreferenceChangeEvent>(Channel.UNLIMITED)
+  val changeEvents: Flow<PreferenceChangeEvent> = changeEventChannel.receiveAsFlow()
 
   private val handler = Handler(Looper.getMainLooper())
 
@@ -346,11 +348,23 @@ class StorageSubscriptionManager(private val context: Context) {
       } else {
         val subscription = StorageSubscription(packageName, fileName, subscriptionId)
 
-        // Track the subscription
-        subscriptions[subscriptionId] = SubscriptionState(subscription)
+        // Do not claim success until the local observer is active. Otherwise a registration
+        // failure leaves an entry that makes later retries falsely report an existing observer.
+        val observerRegistration = registerPackageObserver(packageName, fileName)
+        if (observerRegistration.isFailure) {
+          try {
+            context.contentResolver.call(uri, "unsubscribeFromFile", null, extras)
+          } catch (rollbackError: Exception) {
+            Log.w(TAG, "Failed to roll back SDK subscription for $subscriptionId", rollbackError)
+          }
+          return Result.failure(observerRegistration.exceptionOrNull()!!)
+        }
 
-        // Register ContentObserver for this package if not already registered
-        registerPackageObserver(packageName, fileName)
+        // Track the subscription after the observer exists, so a retry can repair a failed setup.
+        val existing = subscriptions.putIfAbsent(subscriptionId, SubscriptionState(subscription))
+        if (existing != null) {
+          return Result.success(existing.subscription)
+        }
 
         Log.d(TAG, "Subscribed to $subscriptionId")
         Result.success(subscription)
@@ -600,6 +614,7 @@ class StorageSubscriptionManager(private val context: Context) {
     // Clear any remaining state
     subscriptions.clear()
     packageObservers.clear()
+    changeEventChannel.close()
   }
 
   // Create-or-merge and remove-if-unused run through ConcurrentHashMap.compute so the
@@ -610,7 +625,8 @@ class StorageSubscriptionManager(private val context: Context) {
   // holds the per-bin lock for the key, so the second caller sees the first's state and
   // only merges its file name; it also serializes register against a concurrent
   // remove-if-unused for the same package.
-  private fun registerPackageObserver(packageName: String, fileName: String) {
+  private fun registerPackageObserver(packageName: String, fileName: String): Result<Unit> {
+    var registrationError: Exception? = null
     packageObservers.compute(packageName) { _, existing ->
       if (existing != null) {
         existing.subscriptions.add(fileName)
@@ -638,10 +654,14 @@ class StorageSubscriptionManager(private val context: Context) {
         )
       } catch (e: Exception) {
         Log.e(TAG, "Failed to register ContentObserver for $packageName", e)
-        // Leave the package unmapped, as before, so a later subscribe can retry.
+        registrationError = e
+        // Leave the package unmapped so a later subscribe can retry.
         null
       }
     }
+    return registrationError?.let {
+      Result.failure(StorageError.SdkError("Failed to register observer: ${it.message}"))
+    } ?: Result.success(Unit)
   }
 
   private fun unregisterPackageObserverIfUnused(packageName: String, fileName: String) {
@@ -700,7 +720,10 @@ class StorageSubscriptionManager(private val context: Context) {
                   previousValueType = change.previousValueType,
                 )
 
-              _changeEvents.tryEmit(event)
+              if (changeEventChannel.trySend(event).isFailure) {
+                Log.w(TAG, "Stopping storage-change fetch after event delivery channel closed")
+                return
+              }
               subState.lastSequence = maxOf(subState.lastSequence, change.sequenceNumber)
             }
           }

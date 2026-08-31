@@ -299,6 +299,37 @@ class StorageSubscriptionManagerTest {
     }
   }
 
+  @Test
+  fun `subscribe rolls back failed observer registration so a later attempt can succeed`() {
+    val bundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"fileName":"auth","subscribed":true}""")
+      }
+    var failRegistration = true
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns bundle
+    every { contentResolver.registerContentObserver(any(), any(), any()) } answers
+      {
+        if (failRegistration) {
+          throw SecurityException("observer registration denied")
+        }
+      }
+
+    val failed = manager.subscribe("com.example.app", "auth")
+
+    assertTrue(failed.isFailure)
+    assertTrue(manager.getActiveSubscriptions().isEmpty())
+
+    failRegistration = false
+    val retried = manager.subscribe("com.example.app", "auth")
+
+    assertTrue(retried.isSuccess)
+    assertEquals(
+      listOf("com.example.app:auth"),
+      manager.getActiveSubscriptions().map { it.subscriptionId },
+    )
+  }
+
   // ================= Unsubscribe Tests =================
 
   @Test

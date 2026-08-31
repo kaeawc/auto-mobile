@@ -726,11 +726,16 @@ export function storageTelemetryInputFromWire(
  * live updates silently drop for every non-string preference type (#4709 review).
  * Re-encoding non-strings with `JSON.stringify` restores the string contract:
  * `42` -> `"42"`, `true` -> `"true"`, `["a","b"]` -> `'["a","b"]'` — each of which
- * the desktop `parseKeyValue` decodes back to its declared type.
+ * the desktop `parseKeyValue` decodes back to its declared type. A legacy runner can send LONG
+ * as a bare JSON number; JavaScript has already rounded unsafe values by the time this function
+ * receives them, so return `undefined` to make callers reject rather than forward corrupted data.
  */
-export function normalizeStorageWireValue(value: unknown): string | null {
+export function normalizeStorageWireValue(value: unknown, valueType?: string): string | null | undefined {
   if (value === null || value === undefined) {
     return null;
+  }
+  if (valueType === "LONG" && typeof value === "number" && !Number.isSafeInteger(value)) {
+    return undefined;
   }
   return typeof value === "string" ? value : JSON.stringify(value);
 }
@@ -4045,13 +4050,20 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       // Handle storage_changed push event
       if (message.type === "storage_changed") {
+        const normalizedValue = normalizeStorageWireValue(message.value, message.valueType);
+        if (normalizedValue === undefined) {
+          logger.warn(
+            `[CTRL_PROXY] Ignoring unsafe legacy LONG storage value for ${message.packageName ?? "unknown"}/${message.fileName ?? "unknown"}`,
+          );
+          return;
+        }
         const storageEvent: StorageChangedEvent = {
           packageName: message.packageName ?? "",
           fileName: message.fileName ?? "",
           key: message.key ?? null,
           // Non-string preference types arrive as bare JSON (number/boolean/array); re-encode
           // to the JSON string contract so the desktop storage_update frame decodes (#4709 review).
-          value: normalizeStorageWireValue(message.value),
+          value: normalizedValue,
           valueType: message.valueType ?? "STRING",
           timestamp: message.timestamp ?? this.timer.now(),
           sequenceNumber: message.sequenceNumber ?? 0,

@@ -19,6 +19,14 @@ describe("normalizeStorageWireValue (#4709)", () => {
 
   test("re-encodes an INT/LONG value to its decimal string", () => {
     expect(normalizeStorageWireValue(42)).toBe("42");
+    expect(normalizeStorageWireValue(42, "LONG")).toBe("42");
+  });
+
+  test("rejects an unsafe bare legacy LONG rather than forwarding rounded digits", () => {
+    // JSON.parse has already rounded this value before the client can normalize it. A re-cut
+    // runner sends LONG as a quoted decimal string; until then, dropping the change is safer
+    // than reporting a different stored value.
+    expect(normalizeStorageWireValue(9_223_372_036_854_775_807, "LONG")).toBeUndefined();
   });
 
   test("re-encodes a FLOAT value to its string form", () => {

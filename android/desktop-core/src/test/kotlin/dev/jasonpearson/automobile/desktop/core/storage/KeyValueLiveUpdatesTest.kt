@@ -149,7 +149,12 @@ class KeyValueLiveUpdatesTest {
   fun `highlight keys are scoped by file name`() {
     val files = listOf(file("prefs.xml", "theme" to "light"))
 
-    assertEquals(setOf("prefs.xml:theme"), update(key = "theme").highlightKeys(files))
+    assertEquals(setOf("9:prefs.xml:theme"), update(key = "theme").highlightKeys(files))
+  }
+
+  @Test
+  fun `highlight keys do not collide when names contain colons`() {
+    assertTrue(highlightKey("a:b", "c") != highlightKey("a", "b:c"))
   }
 
   @Test
@@ -157,7 +162,7 @@ class KeyValueLiveUpdatesTest {
     val files = listOf(file("prefs.xml", "theme" to "light", "locale" to "en"))
 
     assertEquals(
-      setOf("prefs.xml:theme", "prefs.xml:locale"),
+      setOf("9:prefs.xml:theme", "9:prefs.xml:locale"),
       update(key = null, value = null).highlightKeys(files),
     )
   }

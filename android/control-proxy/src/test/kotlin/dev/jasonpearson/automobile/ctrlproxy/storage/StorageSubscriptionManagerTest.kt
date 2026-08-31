@@ -2,14 +2,21 @@ package dev.jasonpearson.automobile.ctrlproxy.storage
 
 import android.content.ContentResolver
 import android.content.Context
+import android.database.ContentObserver
 import android.net.Uri
 import android.os.Bundle
+import dev.jasonpearson.automobile.protocol.StorageChangeEvent
+import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
+import dev.jasonpearson.automobile.protocol.StorageResponse
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -299,6 +306,175 @@ class StorageSubscriptionManagerTest {
     }
   }
 
+  @Test
+  fun `subscribe rolls back failed observer registration so a later attempt can succeed`() {
+    val bundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"fileName":"auth","subscribed":true}""")
+      }
+    var failRegistration = true
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns bundle
+    every { contentResolver.registerContentObserver(any(), any(), any()) } answers
+      {
+        if (failRegistration) {
+          throw SecurityException("observer registration denied")
+        }
+      }
+
+    val failed = manager.subscribe("com.example.app", "auth")
+
+    assertTrue(failed.isFailure)
+    assertTrue(manager.getActiveSubscriptions().isEmpty())
+
+    failRegistration = false
+    val retried = manager.subscribe("com.example.app", "auth")
+
+    assertTrue(retried.isSuccess)
+    assertEquals(
+      listOf("com.example.app:auth"),
+      manager.getActiveSubscriptions().map { it.subscriptionId },
+    )
+  }
+
+  @Test
+  fun `failed concurrent acquisition cannot roll back a successful subscription`() {
+    val bundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"fileName":"auth","subscribed":true}""")
+      }
+    val firstRegistrationEntered = java.util.concurrent.CountDownLatch(1)
+    val releaseFirstRegistration = java.util.concurrent.CountDownLatch(1)
+    val registrationCalls = java.util.concurrent.atomic.AtomicInteger()
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns bundle
+    every { contentResolver.registerContentObserver(any(), any(), any()) } answers
+      {
+        if (registrationCalls.getAndIncrement() == 0) {
+          firstRegistrationEntered.countDown()
+          assertTrue(releaseFirstRegistration.await(1, java.util.concurrent.TimeUnit.SECONDS))
+          throw SecurityException("first registration denied")
+        }
+      }
+
+    var firstResult: Result<StorageSubscription>? = null
+    var secondResult: Result<StorageSubscription>? = null
+    val first = Thread { firstResult = manager.subscribe("com.example.app", "auth") }
+    first.start()
+    assertTrue(firstRegistrationEntered.await(1, java.util.concurrent.TimeUnit.SECONDS))
+    val second = Thread { secondResult = manager.subscribe("com.example.app", "auth") }
+    second.start()
+    releaseFirstRegistration.countDown()
+    first.join(1_000)
+    second.join(1_000)
+
+    assertTrue(firstResult?.isFailure == true)
+    assertTrue(secondResult?.isSuccess == true)
+    assertEquals(
+      listOf("com.example.app:auth"),
+      manager.getActiveSubscriptions().map { it.subscriptionId },
+    )
+  }
+
+  @Test
+  fun `storage event bursts retain a bounded latest sequence for gap reconciliation`() =
+    runBlocking {
+      val observerSlot = slot<ContentObserver>()
+      val subscribeBundle =
+        Bundle().apply {
+          putBoolean("success", true)
+          putString("result", """{"fileName":"auth","subscribed":true}""")
+        }
+      val changes =
+        (1L..100L).map { sequence ->
+          StorageChangeEvent(
+            fileName = "auth",
+            key = "key-$sequence",
+            value = sequence.toString(),
+            type = "LONG",
+            timestamp = sequence,
+            sequenceNumber = sequence,
+          )
+        }
+      val changesBundle =
+        Bundle().apply {
+          putBoolean("success", true)
+          putString(
+            "result",
+            StorageProtocolSerializer.responseToJson(StorageResponse.Changes("auth", changes)),
+          )
+        }
+      every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+        subscribeBundle
+      every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } returns
+        changesBundle
+      every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
+        Unit
+
+      assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+      observerSlot.captured.onChange(false)
+
+      val received = withTimeout(1_000) { manager.changeEvents.take(64).toList() }
+      assertEquals((37L..100L).toList(), received.map { it.sequenceNumber })
+    }
+
+  @Test
+  fun `one file cannot evict another files latest event`() = runBlocking {
+    val observers = mutableMapOf<String, ContentObserver>()
+    val subscribeBundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"fileName":"auth","subscribed":true}""")
+      }
+    fun changesBundle(fileName: String, count: Long) =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString(
+          "result",
+          StorageProtocolSerializer.responseToJson(
+            StorageResponse.Changes(
+              fileName,
+              (1L..count).map { sequence ->
+                StorageChangeEvent(
+                  fileName = fileName,
+                  key = "key-$sequence",
+                  value = sequence.toString(),
+                  type = "LONG",
+                  timestamp = sequence,
+                  sequenceNumber = sequence,
+                )
+              },
+            )
+          ),
+        )
+      }
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      subscribeBundle
+    every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } answers
+      {
+        val fileName = arg<Bundle>(3).getString("fileName").orEmpty()
+        changesBundle(fileName, if (fileName == "target") 1 else 100)
+      }
+    every { contentResolver.registerContentObserver(any(), any(), any()) } answers
+      {
+        observers[firstArg<Uri>().authority.orEmpty()] = thirdArg()
+      }
+
+    assertTrue(manager.subscribe("com.example.app", "target").isSuccess)
+    assertTrue(manager.subscribe("com.example.app", "noisy").isSuccess)
+    observers.getValue("com.example.app.automobile.sharedprefs").onChange(false)
+
+    val received = withTimeout(1_000) { manager.changeEvents.take(65).toList() }
+    assertEquals(
+      listOf(1L),
+      received.filter { it.fileName == "target" }.map { it.sequenceNumber },
+    )
+    assertEquals(
+      (37L..100L).toList(),
+      received.filter { it.fileName == "noisy" }.map { it.sequenceNumber },
+    )
+  }
+
   // ================= Unsubscribe Tests =================
 
   @Test
@@ -320,10 +496,10 @@ class StorageSubscriptionManagerTest {
   }
 
   @Test
-  fun `unsubscribe returns false when not subscribed`() {
+  fun `unsubscribe is idempotent when not subscribed`() {
     val result = manager.unsubscribe("com.example.app", "nonexistent")
 
-    assertFalse(result)
+    assertTrue(result)
   }
 
   @Test
@@ -342,6 +518,72 @@ class StorageSubscriptionManagerTest {
     manager.unsubscribe("com.example.app", "auth")
 
     verify { contentResolver.unregisterContentObserver(any()) }
+  }
+
+  @Test
+  fun `unsubscribe waits for in-flight fetch and clears its buffered events`() = runBlocking {
+    val observerSlot = slot<ContentObserver>()
+    val subscribeBundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"fileName":"auth","subscribed":true}""")
+      }
+    fun changesBundle(sequence: Long) =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString(
+          "result",
+          StorageProtocolSerializer.responseToJson(
+            StorageResponse.Changes(
+              "auth",
+              listOf(
+                StorageChangeEvent(
+                  fileName = "auth",
+                  key = "key-$sequence",
+                  value = sequence.toString(),
+                  type = "LONG",
+                  timestamp = sequence,
+                  sequenceNumber = sequence,
+                )
+              ),
+            )
+          ),
+        )
+      }
+    val fetchEntered = java.util.concurrent.CountDownLatch(1)
+    val releaseFetch = java.util.concurrent.CountDownLatch(1)
+    val fetchCalls = java.util.concurrent.atomic.AtomicInteger()
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      subscribeBundle
+    every { contentResolver.call(any<Uri>(), eq("unsubscribeFromFile"), any(), any()) } returns
+      Bundle()
+    every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } answers
+      {
+        val call = fetchCalls.incrementAndGet()
+        if (call == 1) {
+          fetchEntered.countDown()
+          assertTrue(releaseFetch.await(1, java.util.concurrent.TimeUnit.SECONDS))
+        }
+        changesBundle(call.toLong())
+      }
+    every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
+      Unit
+
+    assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+    val fetchThread = Thread { observerSlot.captured.onChange(false) }
+    fetchThread.start()
+    assertTrue(fetchEntered.await(1, java.util.concurrent.TimeUnit.SECONDS))
+
+    val unsubscribeThread = Thread { manager.unsubscribe("com.example.app", "auth") }
+    unsubscribeThread.start()
+    releaseFetch.countDown()
+    fetchThread.join(1_000)
+    unsubscribeThread.join(1_000)
+    assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+    observerSlot.captured.onChange(false)
+
+    val received = withTimeout(1_000) { manager.changeEvents.take(1).toList() }
+    assertEquals(listOf(2L), received.map { it.sequenceNumber })
   }
 
   // ================= Active Subscriptions Tests =================
@@ -439,5 +681,58 @@ class StorageSubscriptionManagerTest {
     assertTrue("concurrent access threw: ${errors.firstOrNull()}", errors.isEmpty())
     // Every subscribe (unique id) was matched by an unsubscribe.
     assertTrue(manager.getActiveSubscriptions().isEmpty())
+  }
+
+  @Test
+  fun `concurrent first subscribe registers exactly one observer per package`() {
+    val bundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"subscribed":true}""")
+      }
+    every { contentResolver.call(any<Uri>(), any(), any(), any()) } returns bundle
+
+    val observers =
+      java.util.concurrent.ConcurrentHashMap.newKeySet<android.database.ContentObserver>()
+    every { contentResolver.registerContentObserver(any(), any(), any()) } answers
+      {
+        observers += thirdArg<android.database.ContentObserver>()
+      }
+
+    val threadCount = 12
+    val barrier = java.util.concurrent.CyclicBarrier(threadCount)
+    val errors = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+    val latch = java.util.concurrent.CountDownLatch(threadCount)
+
+    // All threads race to first-subscribe DISTINCT files of the SAME package, aligned
+    // on a barrier to maximize contention on the initial packageObservers entry. The
+    // package observer must be created exactly once and every file merged into it; a
+    // non-atomic check-then-put lets two callers both see no entry, register separate
+    // observers, and overwrite the map with single-file state — leaking the losing
+    // observer and dropping its file (Codex #4709 review). The atomic compute fix keeps
+    // exactly one observer for the package.
+    for (t in 0 until threadCount) {
+      Thread {
+        try {
+          barrier.await()
+          manager.subscribe("com.example.app", "file-$t")
+        } catch (e: Throwable) {
+          errors.add(e)
+        } finally {
+          latch.countDown()
+        }
+      }
+        .start()
+    }
+
+    assertTrue(
+      "concurrent subscribe timed out",
+      latch.await(30, java.util.concurrent.TimeUnit.SECONDS),
+    )
+    assertTrue("concurrent subscribe threw: ${errors.firstOrNull()}", errors.isEmpty())
+    // Exactly one ContentObserver for the single package — no leaked duplicates.
+    assertEquals(1, observers.size)
+    // Every distinct file's subscription is live and merged under that one observer.
+    assertEquals(threadCount, manager.getActiveSubscriptions().size)
   }
 }

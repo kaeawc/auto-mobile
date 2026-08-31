@@ -92,4 +92,26 @@ class PickerModelsTest {
 
     assertEquals(false, physical.single().isVirtual)
   }
+
+  @Test
+  fun `booted device preserves its live session UUID for workspace scoping`() {
+    val devices =
+      buildPickerDevices(
+        booted =
+          listOf(
+            BootedDeviceInfo(
+              name = "Pixel 8",
+              platform = "android",
+              deviceId = "emulator-5554",
+              source = "local",
+              isVirtual = true,
+              status = "booted",
+              deviceSessionUuid = "epoch-a",
+            )
+          ),
+        images = emptyList(),
+      )
+
+    assertEquals("epoch-a", devices.single().deviceSessionUuid)
+  }
 }

@@ -32,6 +32,8 @@ data class PickerDevice(
   val locked: Boolean = false,
   /** Whether the device is virtual; shutdown images are simulator/emulator definitions. */
   val isVirtual: Boolean = true,
+  /** Daemon-minted identity for the booted device epoch; absent on older daemon resources. */
+  val deviceSessionUuid: String? = null,
 )
 
 private val ANDROID_TARGET = Regex("android-(\\d+)")
@@ -98,6 +100,7 @@ fun buildPickerDevices(
       // Seed value only; an unknown (null) lock state seeds unlocked and the host poll refines it.
       locked = device.locked == true,
       isVirtual = device.isVirtual,
+      deviceSessionUuid = device.deviceSessionUuid,
     )
   }
 

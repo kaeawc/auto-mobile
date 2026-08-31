@@ -9,10 +9,11 @@ import android.os.Looper
 import android.util.Log
 import dev.jasonpearson.automobile.protocol.StorageProtocolSerializer
 import dev.jasonpearson.automobile.protocol.StorageResponse
+import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
 
 /**
  * Manages subscriptions to SharedPreferences changes across multiple target apps.
@@ -26,6 +27,7 @@ class StorageSubscriptionManager(private val context: Context) {
     private const val TAG = "StorageSubscriptionMgr"
     private const val AUTHORITY_SUFFIX = ".automobile.sharedprefs"
     private const val CHANGES_PATH = "changes"
+    private const val STORAGE_EVENT_BUFFER_CAPACITY = 64
   }
 
   /** State for a single subscription. */
@@ -42,17 +44,34 @@ class StorageSubscriptionManager(private val context: Context) {
     val subscriptions: MutableSet<String> = ConcurrentHashMap.newKeySet(), // file names
   )
 
+  private data class SubscriptionEventBuffer(
+    val events: ArrayDeque<PreferenceChangeEvent> = ArrayDeque()
+  )
+
   // Mutated from Dispatchers.IO (subscribe/unsubscribe) and the main looper
   // (ContentObserver.onChange, destroy). ConcurrentHashMap avoids the
   // resize-under-concurrent-put corruption / ConcurrentModificationException a
   // plain HashMap would hit here (#3600).
   private val subscriptions =
     ConcurrentHashMap<String, SubscriptionState>() // subscriptionId -> state
+  private val subscriptionLocks = ConcurrentHashMap<String, Any>()
   private val packageObservers =
     ConcurrentHashMap<String, PackageObserverState>() // packageName -> state
 
-  private val _changeEvents = MutableSharedFlow<PreferenceChangeEvent>(extraBufferCapacity = 64)
-  val changeEvents: SharedFlow<PreferenceChangeEvent> = _changeEvents.asSharedFlow()
+  // Bound events independently per subscribed file. If one file overflows, its newest event is
+  // retained and exposes the sequence gap needed for snapshot recovery; unrelated files cannot
+  // hide it.
+  private val changeEventBuffers = ConcurrentHashMap<String, SubscriptionEventBuffer>()
+  private val changeEventSignal = Channel<Unit>(Channel.CONFLATED)
+  val changeEvents: Flow<PreferenceChangeEvent> = flow {
+    for (ignored in changeEventSignal) {
+      while (true) {
+        val events = takeChangeEventBatch()
+        if (events.isEmpty()) break
+        for (event in events) emit(event)
+      }
+    }
+  }
 
   private val handler = Handler(Looper.getMainLooper())
 
@@ -326,10 +345,17 @@ class StorageSubscriptionManager(private val context: Context) {
    */
   fun subscribe(packageName: String, fileName: String): Result<StorageSubscription> {
     val subscriptionId = "$packageName:$fileName"
+    val lock = subscriptionLocks.computeIfAbsent(subscriptionId) { Any() }
+    return synchronized(lock) { subscribeLocked(packageName, fileName, subscriptionId) }
+  }
 
-    // Check if already subscribed
-    if (subscriptions.containsKey(subscriptionId)) {
-      return Result.success(subscriptions[subscriptionId]!!.subscription)
+  private fun subscribeLocked(
+    packageName: String,
+    fileName: String,
+    subscriptionId: String,
+  ): Result<StorageSubscription> {
+    subscriptions[subscriptionId]?.let {
+      return Result.success(it.subscription)
     }
 
     return try {
@@ -346,11 +372,24 @@ class StorageSubscriptionManager(private val context: Context) {
       } else {
         val subscription = StorageSubscription(packageName, fileName, subscriptionId)
 
-        // Track the subscription
-        subscriptions[subscriptionId] = SubscriptionState(subscription)
+        // Do not claim success until the local observer is active. Otherwise a registration
+        // failure leaves an entry that makes later retries falsely report an existing observer.
+        val observerRegistration = registerPackageObserver(packageName, fileName)
+        val observerRegistrationError = observerRegistration.exceptionOrNull()
+        if (observerRegistrationError != null) {
+          try {
+            context.contentResolver.call(uri, "unsubscribeFromFile", null, extras)
+          } catch (rollbackError: Exception) {
+            Log.w(TAG, "Failed to roll back SDK subscription for $subscriptionId", rollbackError)
+          }
+          return Result.failure(observerRegistrationError)
+        }
 
-        // Register ContentObserver for this package if not already registered
-        registerPackageObserver(packageName, fileName)
+        // Track the subscription after the observer exists, so a retry can repair a failed setup.
+        val existing = subscriptions.putIfAbsent(subscriptionId, SubscriptionState(subscription))
+        if (existing != null) {
+          return Result.success(existing.subscription)
+        }
 
         Log.d(TAG, "Subscribed to $subscriptionId")
         Result.success(subscription)
@@ -368,13 +407,21 @@ class StorageSubscriptionManager(private val context: Context) {
    *
    * @param packageName The target app package name
    * @param fileName The preferences file name
-   * @return true if unsubscribed successfully, false if not subscribed
+   * @return true once the subscription is absent (including when it was already absent)
    */
   fun unsubscribe(packageName: String, fileName: String): Boolean {
     val subscriptionId = "$packageName:$fileName"
+    val lock = subscriptionLocks.computeIfAbsent(subscriptionId) { Any() }
+    return synchronized(lock) { unsubscribeLocked(packageName, fileName, subscriptionId) }
+  }
 
+  private fun unsubscribeLocked(
+    packageName: String,
+    fileName: String,
+    subscriptionId: String,
+  ): Boolean {
     if (!subscriptions.containsKey(subscriptionId)) {
-      return false
+      return true
     }
 
     try {
@@ -388,6 +435,7 @@ class StorageSubscriptionManager(private val context: Context) {
 
     // Remove the subscription
     subscriptions.remove(subscriptionId)
+    changeEventBuffers.remove(eventBufferKey(packageName, fileName))
 
     // Unregister package observer if no more subscriptions for this package
     unregisterPackageObserverIfUnused(packageName, fileName)
@@ -600,52 +648,74 @@ class StorageSubscriptionManager(private val context: Context) {
     // Clear any remaining state
     subscriptions.clear()
     packageObservers.clear()
+    changeEventBuffers.clear()
+    changeEventSignal.close()
   }
 
-  private fun registerPackageObserver(packageName: String, fileName: String) {
-    val existingState = packageObservers[packageName]
-    if (existingState != null) {
-      existingState.subscriptions.add(fileName)
-      return
-    }
-
-    val authority = packageName + AUTHORITY_SUFFIX
-    val changesUri = Uri.parse("content://$authority/$CHANGES_PATH")
-
-    val observer =
-      object : ContentObserver(handler) {
-        override fun onChange(selfChange: Boolean) {
-          super.onChange(selfChange)
-          Log.d(TAG, "ContentObserver notified for $packageName")
-          fetchChangesForPackage(packageName)
-        }
+  // Create-or-merge and remove-if-unused run through ConcurrentHashMap.compute so the
+  // whole check-then-act is atomic per package. Two files of one package subscribing
+  // concurrently on Dispatchers.IO would otherwise both observe no entry, register
+  // separate ContentObservers, and overwrite the map with single-file state — leaking
+  // the losing observer and dropping changes for its file (Codex #4709 review). compute
+  // holds the per-bin lock for the key, so the second caller sees the first's state and
+  // only merges its file name; it also serializes register against a concurrent
+  // remove-if-unused for the same package.
+  private fun registerPackageObserver(packageName: String, fileName: String): Result<Unit> {
+    var registrationError: Exception? = null
+    packageObservers.compute(packageName) { _, existing ->
+      if (existing != null) {
+        existing.subscriptions.add(fileName)
+        return@compute existing
       }
 
-    try {
-      context.contentResolver.registerContentObserver(changesUri, false, observer)
-      packageObservers[packageName] =
+      val authority = packageName + AUTHORITY_SUFFIX
+      val changesUri = Uri.parse("content://$authority/$CHANGES_PATH")
+
+      val observer =
+        object : ContentObserver(handler) {
+          override fun onChange(selfChange: Boolean) {
+            super.onChange(selfChange)
+            Log.d(TAG, "ContentObserver notified for $packageName")
+            fetchChangesForPackage(packageName)
+          }
+        }
+
+      try {
+        context.contentResolver.registerContentObserver(changesUri, false, observer)
+        Log.d(TAG, "Registered ContentObserver for $packageName")
         PackageObserverState(
           observer,
           ConcurrentHashMap.newKeySet<String>().apply { add(fileName) },
         )
-      Log.d(TAG, "Registered ContentObserver for $packageName")
-    } catch (e: Exception) {
-      Log.e(TAG, "Failed to register ContentObserver for $packageName", e)
+      } catch (e: Exception) {
+        Log.e(TAG, "Failed to register ContentObserver for $packageName", e)
+        registrationError = e
+        // Leave the package unmapped so a later subscribe can retry.
+        null
+      }
     }
+    return registrationError?.let {
+      Result.failure(StorageError.SdkError("Failed to register observer: ${it.message}"))
+    } ?: Result.success(Unit)
   }
 
   private fun unregisterPackageObserverIfUnused(packageName: String, fileName: String) {
-    val state = packageObservers[packageName] ?: return
-    state.subscriptions.remove(fileName)
+    packageObservers.compute(packageName) { _, state ->
+      if (state == null) return@compute null
+      state.subscriptions.remove(fileName)
 
-    if (state.subscriptions.isEmpty()) {
-      try {
-        context.contentResolver.unregisterContentObserver(state.observer)
-        Log.d(TAG, "Unregistered ContentObserver for $packageName")
-      } catch (e: Exception) {
-        Log.w(TAG, "Error unregistering ContentObserver", e)
+      if (state.subscriptions.isEmpty()) {
+        try {
+          context.contentResolver.unregisterContentObserver(state.observer)
+          Log.d(TAG, "Unregistered ContentObserver for $packageName")
+        } catch (e: Exception) {
+          Log.w(TAG, "Error unregistering ContentObserver", e)
+        }
+        // Returning null removes the mapping.
+        null
+      } else {
+        state
       }
-      packageObservers.remove(packageName)
     }
   }
 
@@ -685,7 +755,10 @@ class StorageSubscriptionManager(private val context: Context) {
                   previousValueType = change.previousValueType,
                 )
 
-              _changeEvents.tryEmit(event)
+              if (!enqueueChangeEvent(event)) {
+                Log.w(TAG, "Stopping storage-change fetch after event delivery channel closed")
+                return
+              }
               subState.lastSequence = maxOf(subState.lastSequence, change.sequenceNumber)
             }
           }
@@ -695,6 +768,35 @@ class StorageSubscriptionManager(private val context: Context) {
       }
     }
   }
+
+  private fun enqueueChangeEvent(event: PreferenceChangeEvent): Boolean {
+    val subscriptionId = "${event.packageName}:${event.fileName}"
+    val lock = subscriptionLocks.computeIfAbsent(subscriptionId) { Any() }
+    synchronized(lock) {
+      if (!subscriptions.containsKey(subscriptionId)) {
+        return true
+      }
+      val bufferKey = eventBufferKey(event.packageName, event.fileName)
+      val buffer = changeEventBuffers.computeIfAbsent(bufferKey) { SubscriptionEventBuffer() }
+      synchronized(buffer) {
+        if (buffer.events.size == STORAGE_EVENT_BUFFER_CAPACITY) {
+          buffer.events.removeFirst()
+        }
+        buffer.events.addLast(event)
+      }
+    }
+    return changeEventSignal.trySend(Unit).isSuccess
+  }
+
+  private fun eventBufferKey(packageName: String, fileName: String): String =
+    "${packageName.length}:$packageName:$fileName"
+
+  private fun takeChangeEventBatch(): List<PreferenceChangeEvent> =
+    changeEventBuffers.values.mapNotNull { buffer ->
+      synchronized(buffer) {
+        buffer.events.pollFirst()
+      }
+    }
 }
 
 /** Information about SDK availability. */

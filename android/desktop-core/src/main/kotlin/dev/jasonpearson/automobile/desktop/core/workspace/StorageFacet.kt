@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
+import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
@@ -26,6 +28,7 @@ import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.storage.StorageDashboard
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /**
@@ -55,11 +58,24 @@ private sealed interface StorageFacetState {
  * [loadInstalledApps], which is injected so resolution and its loading/error/empty states are
  * testable without real MCP; the default reads the device's installed-app list through the DI
  * graph. An app-list failure surfaces a retryable error rather than being masked as "no app".
+ *
+ * While the dashboard is shown, a per-pane [ObservationStream] created via
+ * [observationStreamFactory] is connected to [column]'s device so live `storage_update` frames flow
+ * into the key-value inspector (issue #4709), mirroring how [PerformanceFacet] drives its metrics.
+ * The stream reconnects automatically if it drops while the facet is open (see
+ * [rememberReconnectingObservationStream]); the factory, [backoffDelay], and [socketAvailable] are
+ * injected so the per-device connect/dispose lifecycle can be verified with a
+ * [FakeObservationStream] and virtual time. Because each pane resolves its own device-scoped
+ * stream, panes in a multi-device workspace stay isolated (the dashboard also filters updates to
+ * [column]'s device and app).
  */
 @Composable
 fun StorageFacet(
   column: DeviceColumn,
   loadInstalledApps: (suspend (String) -> Result<List<InstalledApp>>)? = null,
+  observationStreamFactory: (String) -> ObservationStream = { ObservationStreamClient() },
+  backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
+  socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
 ) {
   val graph = LocalAutoMobileGraph.current
   val loader: suspend (String) -> Result<List<InstalledApp>> =
@@ -95,14 +111,27 @@ fun StorageFacet(
     StorageFacetState.Loading -> FacetNote("Resolving app…")
     StorageFacetState.NoApp -> FacetNote("No app found on this device")
     is StorageFacetState.Error -> FacetError(current.message) { attempt++ }
-    is StorageFacetState.Resolved ->
+    is StorageFacetState.Resolved -> {
+      // Per-pane, device-scoped stream with automatic reconnect; lives only while the dashboard is
+      // shown (disposed when this branch leaves composition or the device changes).
+      val stream =
+        rememberReconnectingObservationStream(
+          deviceId = column.deviceId,
+          deviceSessionUuid = column.deviceSessionUuid,
+          requireDeviceSessionUuid = true,
+          streamFactory = { observationStreamFactory(column.deviceId) },
+          backoffDelay = backoffDelay,
+          socketAvailable = socketAvailable,
+        )
       StorageDashboard(
         dataSourceMode = DataSourceMode.Real,
         clientProvider = { graph.autoMobileClient },
         deviceId = column.deviceId,
         packageName = current.packageName,
         platform = column.platform.toStoragePlatform(),
+        observationStreamClient = stream,
       )
+    }
   }
 }
 

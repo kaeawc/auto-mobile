@@ -38,17 +38,30 @@ import kotlinx.coroutines.isActive
 @Composable
 fun rememberReconnectingObservationStream(
   deviceId: String,
+  deviceSessionUuid: String? = null,
+  requireDeviceSessionUuid: Boolean = false,
   streamFactory: () -> ObservationStream,
   backoffDelay: suspend (attempt: Int) -> Unit = { attempt -> delay(reconnectBackoffMs(attempt)) },
   socketAvailable: () -> Boolean = { ObservationStreamClient.socketExists() },
 ): ObservationStream? {
-  var stream by remember(deviceId) { mutableStateOf<ObservationStream?>(null) }
-  DisposableEffect(deviceId) {
-    val connected = streamFactory().also { it.connect(deviceId = deviceId) }
-    stream = connected
-    onDispose {
-      connected.dispose()
+  var stream by
+    remember(deviceId, deviceSessionUuid, requireDeviceSessionUuid) {
+      mutableStateOf<ObservationStream?>(null)
+    }
+  DisposableEffect(deviceId, deviceSessionUuid, requireDeviceSessionUuid) {
+    if (requireDeviceSessionUuid && deviceSessionUuid == null) {
       stream = null
+      onDispose {}
+    } else {
+      val connected =
+        streamFactory().also {
+          it.connect(deviceId = deviceId, deviceSessionUuid = deviceSessionUuid)
+        }
+      stream = connected
+      onDispose {
+        connected.dispose()
+        stream = null
+      }
     }
   }
 
@@ -56,7 +69,7 @@ fun rememberReconnectingObservationStream(
   // Reconnect loop, keyed on the live stream so it restarts for a new device and is cancelled on
   // dispose (which ends reconnection). Driven by the stream's connection state — the single source
   // of truth the real client updates on connect success/failure and on EOF ("Stream ended").
-  LaunchedEffect(active, deviceId) {
+  LaunchedEffect(active, deviceId, deviceSessionUuid) {
     val s = active ?: return@LaunchedEffect
     var attempt = 0
     while (isActive) {
@@ -82,7 +95,7 @@ fun rememberReconnectingObservationStream(
           backoffDelay(attempt)
           if (!isActive) break
           if (socketAvailable()) {
-            s.connect(deviceId = deviceId)
+            s.connect(deviceId = deviceId, deviceSessionUuid = deviceSessionUuid)
           }
         }
       }

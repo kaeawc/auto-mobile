@@ -410,6 +410,48 @@ class ObservationStreamClientTest {
   }
 
   @Test
+  fun `rejected primary subscription leaves the client reconnectable`() {
+    runBlocking {
+      val tempSocket = Files.createTempFile("obs-stream-subscribe-rejected", ".sock")
+      try {
+        val factory = RecordingTransportFactory(blocking = true)
+        val client =
+          ObservationStreamClient(
+            transportFactory = factory,
+            socketPathProvider = { tempSocket.toString() },
+          )
+
+        client.connect("emulator-5554", "retired-epoch")
+        val transport = factory.opened.single()
+        transport.awaitReadEntered()
+        val subscribe =
+          wireJson.decodeFromString(
+            StreamRequest.serializer(),
+            transport.writtenFrames().trim(),
+          )
+
+        client.handleMessage(
+          """{"id":"${subscribe.id}","type":"subscription_response","success":false,"error":"retired epoch"}"""
+        )
+
+        assertFalse(
+          client.isConnected(),
+          "a rejected subscribe must not park the client as Connected",
+        )
+        assertEquals(
+          ConnectionState.Disconnected("retired epoch"),
+          client.connectionState.value,
+        )
+
+        transport.releaseEof()
+        client.awaitStreamEnded()
+      } finally {
+        Files.deleteIfExists(tempSocket)
+      }
+    }
+  }
+
+  @Test
   fun `closes the dead transport on EOF and opens a fresh one on reconnect without leaking`() {
     // Regression for issue #5261 (supersedes #5045): before the fix, the read loop set
     // Disconnected("Stream ended") on EOF without closing the SocketChannel, and disconnect()
@@ -559,8 +601,9 @@ class ObservationStreamClientTest {
    */
   private class FakeStreamTransport(blocking: Boolean = false) : ObservationStreamTransport {
     private val controllableReader = ControllableReader(blocking)
+    private val recordedWriter = StringWriter()
     override val reader: BufferedReader = BufferedReader(controllableReader)
-    override val writer: BufferedWriter = BufferedWriter(StringWriter())
+    override val writer: BufferedWriter = BufferedWriter(recordedWriter)
 
     var closeCount = 0
       private set
@@ -573,6 +616,8 @@ class ObservationStreamClientTest {
 
     /** Release the parked read so it returns EOF, ending the read loop. */
     fun releaseEof() = controllableReader.releaseEof()
+
+    fun writtenFrames(): String = recordedWriter.toString()
 
     override fun close() {
       closeCount++

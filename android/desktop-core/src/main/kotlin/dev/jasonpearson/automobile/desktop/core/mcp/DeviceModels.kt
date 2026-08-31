@@ -42,6 +42,9 @@ data class BootedDeviceInfo(
   // probe timeout, or iOS — so `null` means "unknown, keep the pane's current state" rather than
   // "unlocked". A non-null value gates the pane Unlock control.
   val locked: Boolean? = null,
+  // Daemon-minted identity for this live device epoch. Older daemons omit it, so it must remain
+  // optional while UUID-scoped consumers fail closed.
+  val deviceSessionUuid: String? = null,
 )
 
 @Serializable

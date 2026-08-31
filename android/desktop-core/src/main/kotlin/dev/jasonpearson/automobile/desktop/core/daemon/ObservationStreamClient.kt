@@ -15,17 +15,21 @@ import java.nio.channels.SocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.ArrayDeque
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -92,8 +96,13 @@ class ObservationStreamClient(
   // Test seam: invoked when a readMessages() invocation returns (superseded or not), so a test can
   // await a specific read loop's completion deterministically. No-op in production.
   private val onReadLoopExit: () -> Unit = {},
+  // Test seam for rotating the connection after lifecycle intent is recorded but before its frame
+  // is written. No-op in production.
+  private val beforeStorageRequestSend: () -> Unit = {},
 ) : ObservationStream {
   companion object {
+    private const val STORAGE_UPDATE_BUFFER_CAPACITY = 64
+
     internal fun getSocketPath(): String =
       AutoMobileSocketPaths.socketPath("observation-stream.sock")
 
@@ -108,6 +117,9 @@ class ObservationStreamClient(
   // mutated while holding this lock, so a read loop's generation check and connect()/disconnect()'s
   // reassignment can never interleave.
   private val ownershipLock = Any()
+  // A request frame is three writer operations (payload, newline, flush). Keep them atomic across
+  // UI lifecycle commands and read-loop pong responses.
+  private val writerLock = Any()
 
   // Single owning reference to the live transport. Closed at its death point in the read loop (EOF
   // or read error) and in disconnect(), so no reconnect abandons a still-open socket (issue #5261).
@@ -145,16 +157,22 @@ class ObservationStreamClient(
   override val performanceUpdates: SharedFlow<PerformanceStreamUpdate> =
     _performanceUpdates.asSharedFlow()
 
-  // Flow for live key/value storage changes. Storage writes can burst (a screen that persists
-  // several preferences at once), so this follows the performance flow's non-blocking policy
-  // rather than suspending the socket reader.
-  private val _storageUpdates =
-    MutableSharedFlow<StorageStreamUpdate>(
-      replay = 1,
-      extraBufferCapacity = 32,
-      onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST,
-    )
+  // Bound updates independently per package. If one package overflows, its newest update remains
+  // available to expose the sequence gap; traffic from another package cannot hide that loss.
+  private val storageUpdateQueue = PackageStorageUpdateQueue(STORAGE_UPDATE_BUFFER_CAPACITY)
+  private val storageUpdateSignal = Channel<Unit>(Channel.CONFLATED)
+  private val _storageUpdates = MutableSharedFlow<StorageStreamUpdate>(replay = 1)
   override val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
+
+  // A dashboard may issue several registrations before its acknowledgement collector starts.
+  // Keep every correlated response until that one pane consumes it; replay=1 loses all but the
+  // last initial file and leaves its snapshot gap unreconciled.
+  private val storageSubscriptionResponseChannel =
+    Channel<StorageSubscriptionResponse>(Channel.UNLIMITED)
+  override val storageSubscriptionResponses = storageSubscriptionResponseChannel.receiveAsFlow()
+  private val storageReconciliationRequestChannel =
+    Channel<StorageSubscriptionKey>(Channel.BUFFERED)
+  override val storageReconciliationRequests = storageReconciliationRequestChannel.receiveAsFlow()
 
   // Flow for device-level stream events such as control connection loss.
   private val _deviceEvents = MutableSharedFlow<DeviceStreamEvent>(replay = 1)
@@ -164,13 +182,38 @@ class ObservationStreamClient(
   private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
   override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
+  init {
+    scope.launch {
+      for (ignored in storageUpdateSignal) {
+        while (true) {
+          val updates = storageUpdateQueue.pollBatch()
+          if (updates.isEmpty()) break
+          for (update in updates) _storageUpdates.emit(update)
+        }
+      }
+    }
+  }
+
   // Requested observation cadence, remembered so it is re-applied on every (re)subscribe (so the
   // cadence survives reconnects). Managed via setCadence(); null means "use the daemon's default".
   private var subscribedDeviceId: String? = null
+  private var subscribedDeviceSessionUuid: String? = null
   private var subscriptionId: String? = null
+  // A subscription is not active until the daemon acknowledges it. A rejected stale device epoch
+  // must make the transport reconnectable instead of leaving it falsely Connected.
+  private var streamSubscriptionRequestId: String? = null
   private var pendingCadenceUpdate = false
   private var requestedScreenshotIntervalMs: Long? = null
   private var requestedHierarchyIntervalMs: Long? = null
+
+  // Per-file storage subscription intent and confirmation are deliberately distinct. A command
+  // can be in flight while the UI removes a file, so "asked for" does not mean the observer exists
+  // on the runner. Every collection is guarded by [ownershipLock].
+  private val desiredStorageSubscriptions = LinkedHashSet<StorageSubscriptionKey>()
+  private val confirmedStorageSubscriptions = LinkedHashSet<StorageSubscriptionKey>()
+  private val pendingStorageSubscriptions = LinkedHashMap<String, PendingStorageSubscription>()
+  private val storageSubscriptionIntentVersions = LinkedHashMap<StorageSubscriptionKey, Long>()
+  private val forcedStorageReconciliations = LinkedHashSet<StorageSubscriptionKey>()
 
   /**
    * Connect to the observation stream socket and subscribe to updates. Any cadence configured via
@@ -178,7 +221,7 @@ class ObservationStreamClient(
    *
    * @param deviceId Optional device ID to subscribe to. If null, subscribes to all devices.
    */
-  override fun connect(deviceId: String?) {
+  override fun connect(deviceId: String?, deviceSessionUuid: String?) {
     if (_connectionState.value.isConnected) {
       log.info("Already connected to observation stream")
       return
@@ -207,6 +250,10 @@ class ObservationStreamClient(
         previousTransport = transport
         transport = newTransport
         generation = ++connectionGeneration
+        // A transport change makes previous acknowledgements unknowable. Retain desired intent,
+        // but do not let a late response from the old socket confirm it on this connection.
+        confirmedStorageSubscriptions.clear()
+        pendingStorageSubscriptions.clear()
       }
       closeQuietly(previousTransport)
 
@@ -215,9 +262,11 @@ class ObservationStreamClient(
 
       // Send subscribe request (carries any cadence configured via setCadence)
       subscribedDeviceId = deviceId
+      subscribedDeviceSessionUuid = deviceSessionUuid
       subscriptionId = null
+      streamSubscriptionRequestId = null
       pendingCadenceUpdate = false
-      subscribe(deviceId)
+      subscribe(deviceId, deviceSessionUuid)
 
       // Start reading messages for this generation
       scope.launch {
@@ -251,7 +300,14 @@ class ObservationStreamClient(
     }
 
     releaseActiveTransport()
+    synchronized(ownershipLock) {
+      // The daemon may have acted just before this transport died, but its acknowledgement can no
+      // longer be trusted. Forget it rather than allowing a stale response to drive reconciliation.
+      confirmedStorageSubscriptions.clear()
+      pendingStorageSubscriptions.clear()
+    }
     subscriptionId = null
+    streamSubscriptionRequestId = null
     pendingCadenceUpdate = false
     _connectionState.update { ConnectionState.Disconnected() }
   }
@@ -293,19 +349,26 @@ class ObservationStreamClient(
    */
   override fun dispose() {
     disconnect()
+    storageUpdateSignal.close()
+    storageSubscriptionResponseChannel.close()
+    storageReconciliationRequestChannel.close()
     scope.coroutineContext[Job]?.cancel()
   }
 
-  private fun subscribe(deviceId: String?) {
+  private fun subscribe(deviceId: String?, deviceSessionUuid: String?) {
     val request =
       StreamRequest(
         id = UUID.randomUUID().toString(),
         command = "subscribe",
         deviceId = deviceId,
+        deviceSessionUuid = deviceSessionUuid,
         screenshotIntervalMs = requestedScreenshotIntervalMs,
         hierarchyIntervalMs = requestedHierarchyIntervalMs,
       )
 
+    // The read loop runs concurrently and may receive the acknowledgement as soon as flush
+    // returns, so register its id before writing the request.
+    streamSubscriptionRequestId = request.id
     if (sendRequest(request)) {
       _connectionState.update { current ->
         if (current is ConnectionState.Connected) {
@@ -315,6 +378,10 @@ class ObservationStreamClient(
         }
       }
       log.info("Subscribed to observation stream (device: ${deviceId ?: "all"})")
+      // Re-register any remembered per-file storage observers so live updates survive a reconnect.
+      reapplyStorageSubscriptions()
+    } else {
+      streamSubscriptionRequestId = null
     }
   }
 
@@ -352,6 +419,7 @@ class ObservationStreamClient(
         command = "update_cadence",
         subscriptionId = currentSubscriptionId,
         deviceId = subscribedDeviceId,
+        deviceSessionUuid = subscribedDeviceSessionUuid,
         screenshotIntervalMs = requestedScreenshotIntervalMs,
         hierarchyIntervalMs = requestedHierarchyIntervalMs,
       )
@@ -364,20 +432,38 @@ class ObservationStreamClient(
     return false
   }
 
-  private fun sendRequest(request: StreamRequest): Boolean {
-    val currentWriter = transport?.writer ?: return false
+  private fun sendRequest(
+    request: StreamRequest,
+    expectedConnectionGeneration: Long? = null,
+  ): Boolean {
+    val message = json.encodeToString(serializer<StreamRequest>(), request)
+    return synchronized(writerLock) {
+      if (expectedConnectionGeneration == null) {
+        val currentWriter = synchronized(ownershipLock) { transport?.writer }
+        if (currentWriter == null) false else writeRequest(currentWriter, message)
+      } else {
+        synchronized(ownershipLock) {
+          val currentWriter = transport?.writer
+          if (connectionGeneration != expectedConnectionGeneration || currentWriter == null) {
+            false
+          } else {
+            writeRequest(currentWriter, message)
+          }
+        }
+      }
+    }
+  }
 
-    return try {
-      val message = json.encodeToString(serializer<StreamRequest>(), request)
-      currentWriter.write(message)
-      currentWriter.newLine()
-      currentWriter.flush()
+  private fun writeRequest(writer: BufferedWriter, message: String): Boolean =
+    try {
+      writer.write(message)
+      writer.newLine()
+      writer.flush()
       true
     } catch (e: Exception) {
       log.warn("Failed to send request: ${e.message}")
       false
     }
-  }
 
   private suspend fun readMessages(generation: Long) {
     // Bind to the transport for this generation. If a disconnect()/reconnect already superseded us
@@ -430,6 +516,10 @@ class ObservationStreamClient(
       }
     if (stillOwner) {
       closeQuietly(activeTransport)
+      synchronized(ownershipLock) {
+        confirmedStorageSubscriptions.clear()
+        pendingStorageSubscriptions.clear()
+      }
       _connectionState.update { ConnectionState.Disconnected("Stream ended") }
       log.info("Observation stream disconnected")
     }
@@ -446,9 +536,19 @@ class ObservationStreamClient(
     when (response.type) {
       "subscription_response" -> {
         log.info("Subscription response: success=${response.success}")
+        val responseId = response.id
+        if (
+          responseId != null &&
+            handleStorageSubscriptionResponse(responseId, response.success == true, response.error)
+        ) {
+          return
+        }
         if (response.success != true) {
-          log.warn("Subscription failed: ${response.error}")
+          if (!handleStreamSubscriptionFailure(responseId, response.error)) {
+            log.warn("Subscription failed: ${response.error}")
+          }
         } else if (response.subscriptionId != null) {
+          streamSubscriptionRequestId = null
           subscriptionId = response.subscriptionId
           if (pendingCadenceUpdate) {
             pendingCadenceUpdate = !sendCadenceUpdate(response.subscriptionId)
@@ -562,7 +662,7 @@ class ObservationStreamClient(
         if (storageEvent == null) {
           log.warn("storage_update without a storageEvent payload, ignoring")
         } else {
-          _storageUpdates.tryEmit(
+          val update =
             StorageStreamUpdate(
               deviceId = response.deviceId,
               // The frame's own timestamp is the daemon's receive clock; the event carries the
@@ -575,7 +675,18 @@ class ObservationStreamClient(
               valueType = KeyValueType.fromProtocolName(storageEvent.valueType),
               sequenceNumber = storageEvent.sequenceNumber,
             )
-          )
+          if (!enqueueStorageUpdate(update)) {
+            log.warn("Storage update channel closed before update delivery")
+          }
+        }
+      }
+      "storage_reconciliation_required" -> {
+        val packageName = response.packageName
+        val fileName = response.fileName
+        if (packageName == null || fileName == null) {
+          log.warn("storage_reconciliation_required without packageName/fileName, ignoring")
+        } else {
+          storageReconciliationRequestChannel.send(StorageSubscriptionKey(packageName, fileName))
         }
       }
       "ping" -> {
@@ -584,12 +695,26 @@ class ObservationStreamClient(
       }
       "error" -> {
         log.warn("Observation stream error: ${response.error}")
+        val responseId = response.id
+        if (
+          responseId != null && handleStorageSubscriptionResponse(responseId, false, response.error)
+        ) {
+          return
+        }
+        if (handleStreamSubscriptionFailure(responseId, response.error)) {
+          return
+        }
         emitDeviceEvent(response)
       }
       else -> {
         log.warn("Unknown message type: ${response.type}")
       }
     }
+  }
+
+  private fun enqueueStorageUpdate(update: StorageStreamUpdate): Boolean {
+    storageUpdateQueue.add(update)
+    return storageUpdateSignal.trySend(Unit).isSuccess
   }
 
   @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -664,6 +789,7 @@ class ObservationStreamClient(
         id = UUID.randomUUID().toString(),
         command = "request_observation",
         deviceId = deviceId,
+        deviceSessionUuid = subscribedDeviceSessionUuid,
       )
     sendRequest(request)
   }
@@ -675,6 +801,159 @@ class ObservationStreamClient(
         command = "pong",
       )
     sendRequest(request)
+  }
+
+  override fun subscribeStorage(packageName: String, fileName: String) {
+    val key = StorageSubscriptionKey(packageName, fileName)
+    synchronized(ownershipLock) {
+      if (!desiredStorageSubscriptions.add(key)) return
+      incrementStorageSubscriptionIntentVersion(key)
+    }
+    driveStorageSubscription(key)
+  }
+
+  override fun unsubscribeStorage(packageName: String, fileName: String) {
+    val key = StorageSubscriptionKey(packageName, fileName)
+    synchronized(ownershipLock) {
+      if (!desiredStorageSubscriptions.remove(key)) return
+      incrementStorageSubscriptionIntentVersion(key)
+    }
+    // If subscribe is pending, this does nothing until its acknowledgement arrives. The response
+    // handler then issues a compensating unsubscribe instead of leaking the newly-confirmed
+    // observer after the pane/file has gone away.
+    driveStorageSubscription(key)
+  }
+
+  /**
+   * Send the one transition needed to make a file's confirmed observer state match its desired
+   * state. A single pending command per file preserves order (subscribe→unsubscribe and
+   * unsubscribe→subscribe) without guessing whether the daemon has completed the older command.
+   */
+  private fun driveStorageSubscription(key: StorageSubscriptionKey) {
+    if (!_connectionState.value.isConnected) return
+
+    val request =
+      synchronized(ownershipLock) {
+        if (pendingStorageSubscriptions.values.any { it.key == key }) return
+
+        val desired = key in desiredStorageSubscriptions
+        val confirmed = key in confirmedStorageSubscriptions
+        val forceReconciliation = key in forcedStorageReconciliations
+        val subscribe =
+          when {
+            forceReconciliation -> desired
+            desired && !confirmed -> true
+            !desired && confirmed -> false
+            else -> return
+          }
+        val id = UUID.randomUUID().toString()
+        PendingStorageSubscription(
+            requestId = id,
+            key = key,
+            subscribe = subscribe,
+            intentVersion = storageSubscriptionIntentVersions[key] ?: 0L,
+            forcedReconciliation = forceReconciliation,
+            connectionGeneration = connectionGeneration,
+          )
+          .also { pendingStorageSubscriptions[id] = it }
+      }
+
+    beforeStorageRequestSend()
+    val sent =
+      sendRequest(
+        StreamRequest(
+          id = request.requestId,
+          command = if (request.subscribe) "subscribe_storage" else "unsubscribe_storage",
+          deviceId = subscribedDeviceId,
+          deviceSessionUuid = subscribedDeviceSessionUuid,
+          packageName = key.packageName,
+          fileName = key.fileName,
+        ),
+        expectedConnectionGeneration = request.connectionGeneration,
+      )
+    if (!sent) {
+      synchronized(ownershipLock) {
+        pendingStorageSubscriptions.remove(request.requestId)
+      }
+    } else if (request.forcedReconciliation) {
+      synchronized(ownershipLock) {
+        forcedStorageReconciliations.remove(key)
+      }
+    }
+  }
+
+  /** Drive every desired storage subscription after a stream subscription becomes active. */
+  private fun reapplyStorageSubscriptions() {
+    val keys = synchronized(ownershipLock) { desiredStorageSubscriptions.toList() }
+    for (key in keys) {
+      driveStorageSubscription(key)
+    }
+  }
+
+  /**
+   * Record a matched storage lifecycle acknowledgement and emit its correlated result. Returns
+   * false for ordinary stream subscription responses and for stale replies from a released socket.
+   */
+  private suspend fun handleStorageSubscriptionResponse(
+    requestId: String,
+    success: Boolean,
+    error: String?,
+  ): Boolean {
+    val pending =
+      synchronized(ownershipLock) {
+        pendingStorageSubscriptions.remove(requestId)
+      } ?: return false
+
+    val intentChanged =
+      synchronized(ownershipLock) {
+        if (success) {
+          if (pending.subscribe) {
+            confirmedStorageSubscriptions.add(pending.key)
+          } else {
+            confirmedStorageSubscriptions.remove(pending.key)
+          }
+        }
+        (storageSubscriptionIntentVersions[pending.key] ?: 0L) != pending.intentVersion
+      }
+    storageSubscriptionResponseChannel.send(
+      StorageSubscriptionResponse(
+        requestId = requestId,
+        key = pending.key,
+        subscribe = pending.subscribe,
+        success = success,
+        error = error,
+      )
+    )
+    // A permanent rejection establishes no new daemon state. Redriving an unchanged intent creates
+    // a request/error busy loop. But if the user changed their intent while the command's outcome
+    // became ambiguous, force one compensating command for the latest state.
+    if (success || intentChanged) {
+      if (!success) {
+        synchronized(ownershipLock) {
+          forcedStorageReconciliations.add(pending.key)
+        }
+      }
+      driveStorageSubscription(pending.key)
+    }
+    return true
+  }
+
+  private fun incrementStorageSubscriptionIntentVersion(key: StorageSubscriptionKey) {
+    storageSubscriptionIntentVersions[key] = (storageSubscriptionIntentVersions[key] ?: 0L) + 1L
+  }
+
+  /**
+   * A daemon restart retires UUID-scoped device epochs. Treat a rejected primary subscription as a
+   * disconnected transport so the owner can refresh the epoch and reconnect.
+   */
+  private fun handleStreamSubscriptionFailure(requestId: String?, error: String?): Boolean {
+    if (requestId == null || requestId != streamSubscriptionRequestId) return false
+    streamSubscriptionRequestId = null
+    subscriptionId = null
+    pendingCadenceUpdate = false
+    _connectionState.update { ConnectionState.Disconnected(error ?: "Subscription failed") }
+    log.warn("Subscription failed: ${error ?: "unknown error"}")
+    return true
   }
 
   /**
@@ -700,10 +979,48 @@ data class StreamRequest(
   val command: String,
   val subscriptionId: String? = null,
   val deviceId: String? = null,
+  val deviceSessionUuid: String? = null,
   val appId: String? = null,
   val screenshotIntervalMs: Long? = null,
   val hierarchyIntervalMs: Long? = null,
+  val packageName: String? = null,
+  val fileName: String? = null,
 )
+
+/**
+ * Identity of a per-file storage subscription: one device-side content observer per (package,
+ * file).
+ */
+data class StorageSubscriptionKey(val packageName: String, val fileName: String)
+
+/** A storage lifecycle command awaiting a response with [requestId]. */
+private data class PendingStorageSubscription(
+  val requestId: String,
+  val key: StorageSubscriptionKey,
+  val subscribe: Boolean,
+  val intentVersion: Long,
+  val forcedReconciliation: Boolean,
+  val connectionGeneration: Long,
+)
+
+internal class PackageStorageUpdateQueue(private val capacityPerPackage: Int) {
+  private val buffers = ConcurrentHashMap<String, ArrayDeque<StorageStreamUpdate>>()
+
+  fun add(update: StorageStreamUpdate) {
+    val buffer = buffers.computeIfAbsent(update.packageName) { ArrayDeque() }
+    synchronized(buffer) {
+      if (buffer.size == capacityPerPackage) buffer.removeFirst()
+      buffer.addLast(update)
+    }
+  }
+
+  fun pollBatch(): List<StorageStreamUpdate> =
+    buffers.values.mapNotNull { buffer ->
+      synchronized(buffer) {
+        buffer.pollFirst()
+      }
+    }
+}
 
 @Serializable
 data class StreamResponse(
@@ -731,6 +1048,8 @@ data class StreamResponse(
   val performanceData: PerformanceStreamData? = null,
   val hierarchyDiff: HierarchyDiffSummary? = null,
   val storageEvent: StorageEventData? = null,
+  val packageName: String? = null,
+  val fileName: String? = null,
   /**
    * Shared capture identity for the device geometry this message describes (issue #3348). Monotonic
    * per device, assigned on each `hierarchy_update` and echoed on each `screenshot_update` that

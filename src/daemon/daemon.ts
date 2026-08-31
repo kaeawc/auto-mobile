@@ -1209,6 +1209,33 @@ export class Daemon {
       }
     });
 
+    // Register/release a device-side content observer for one key/value store so external writes
+    // emit storage_update frames to the pane (issue #4709). Only Android exposes storage content
+    // observers today; a storage pane is always device-scoped, so target the resolved device and
+    // skip when no live CtrlProxy client exists. The device-side subscriptionId is deterministic
+    // ("packageName:fileName"), so unsubscribe reconstructs it without daemon-side bookkeeping.
+    server.setOnStorageSubscriptionRequested(
+      async ({ deviceId, packageName, fileName, subscribe }) => {
+        const devices = this.devicePool
+          .getAllDevices()
+          .filter((device) => deviceId === null || device.id === deviceId);
+        for (const device of devices) {
+          if (device.platform !== "android") {
+            continue;
+          }
+          const client = AndroidCtrlProxyClient.getExistingInstance(device.id);
+          if (!client) {
+            continue;
+          }
+          if (subscribe) {
+            await client.subscribeStorage(packageName, fileName);
+          } else {
+            await client.unsubscribeStorage(`${packageName}:${fileName}`);
+          }
+        }
+      },
+    );
+
     server.setOnObservationRequested(async ({ deviceId, signal }) => {
       const pooledDevices = deviceId
         ? [this.devicePool.getDevice(deviceId)].filter((device) => device !== null)

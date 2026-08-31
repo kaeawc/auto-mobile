@@ -54,6 +54,7 @@ class FakeDeviceDataStreamServer extends FakePushServer {
   hierarchyCadenceCallbackInstalled = false;
   observationCallbackInstalled = false;
   navigationRequestCallbackInstalled = false;
+  storageSubscriptionCallbackInstalled = false;
 
   pushDeviceSessionStarted(record: DeviceSessionRecord): void {
     this.started.push(record);
@@ -86,6 +87,10 @@ class FakeDeviceDataStreamServer extends FakePushServer {
 
   setOnNavigationGraphRequested(_handler: unknown): void {
     this.navigationRequestCallbackInstalled = true;
+  }
+
+  setOnStorageSubscriptionRequested(_handler: unknown): void {
+    this.storageSubscriptionCallbackInstalled = true;
   }
 }
 
@@ -164,6 +169,7 @@ describe("Daemon stream wiring", () => {
       expect(replacementStream.hierarchyCadenceCallbackInstalled).toBe(true);
       expect(replacementStream.observationCallbackInstalled).toBe(true);
       expect(replacementStream.navigationRequestCallbackInstalled).toBe(true);
+      expect(replacementStream.storageSubscriptionCallbackInstalled).toBe(true);
     } finally {
       daemon.getSessionManager().stopCleanupTimer();
     }

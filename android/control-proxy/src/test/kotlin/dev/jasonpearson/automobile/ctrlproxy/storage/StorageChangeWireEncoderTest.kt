@@ -72,6 +72,29 @@ class StorageChangeWireEncoderTest {
   }
 
   @Test
+  fun `long values retain both signed 64-bit boundaries as strings`() {
+    val obj =
+      encodeAndParse(
+        baseEvent(Long.MAX_VALUE.toString(), "LONG", Long.MIN_VALUE.toString(), "LONG")
+      )
+
+    assertEquals(Long.MAX_VALUE.toString(), obj["value"]!!.jsonPrimitive.content)
+    assertTrue(obj["value"]!!.jsonPrimitive.isString)
+    assertEquals(Long.MIN_VALUE.toString(), obj["previousValue"]!!.jsonPrimitive.content)
+    assertTrue(obj["previousValue"]!!.jsonPrimitive.isString)
+  }
+
+  @Test
+  fun `non-finite floats are quoted so the frame remains valid JSON`() {
+    val obj = encodeAndParse(baseEvent("NaN", "FLOAT", "-Infinity", "FLOAT"))
+
+    assertEquals("NaN", obj["value"]!!.jsonPrimitive.content)
+    assertTrue(obj["value"]!!.jsonPrimitive.isString)
+    assertEquals("-Infinity", obj["previousValue"]!!.jsonPrimitive.content)
+    assertTrue(obj["previousValue"]!!.jsonPrimitive.isString)
+  }
+
+  @Test
   fun `newly added key emits previousValue null`() {
     val obj = encodeAndParse(baseEvent("first", "STRING", null, "UNKNOWN"))
     assertEquals("first", obj["value"]!!.jsonPrimitive.content)

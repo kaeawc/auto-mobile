@@ -228,7 +228,9 @@ class ObservationStreamStorageTest {
       client.subscribeStorage("com.example", "prefs.xml")
       val subscribe =
         factory.opened.single().sentRequests().single { it.command == "subscribe_storage" }
-      client.handleMessage("""{"id":"${subscribe.id}","type":"subscription_response","success":true}""")
+      client.handleMessage(
+        """{"id":"${subscribe.id}","type":"subscription_response","success":true}"""
+      )
       client.unsubscribeStorage("com.example", "prefs.xml")
 
       val first = factory.opened[0].sentRequests()
@@ -283,10 +285,14 @@ class ObservationStreamStorageTest {
       client.unsubscribeStorage("com.example", "prefs.xml")
       assertEquals(1, transport.sentRequests().count { it.command.endsWith("storage") })
 
-      client.handleMessage("""{"id":"${subscribe.id}","type":"subscription_response","success":true}""")
+      client.handleMessage(
+        """{"id":"${subscribe.id}","type":"subscription_response","success":true}"""
+      )
 
       val unsubscribe = transport.sentRequests().single { it.command == "unsubscribe_storage" }
-      client.handleMessage("""{"id":"${unsubscribe.id}","type":"subscription_response","success":true}""")
+      client.handleMessage(
+        """{"id":"${unsubscribe.id}","type":"subscription_response","success":true}"""
+      )
       assertEquals(2, transport.sentRequests().count { it.command.endsWith("storage") })
     }
   }
@@ -321,12 +327,17 @@ class ObservationStreamStorageTest {
     withConnectedClient { client, factory ->
       client.subscribeStorage("com.example", "first.xml")
       client.subscribeStorage("com.example", "second.xml")
-      val requests = factory.opened.single().sentRequests().filter { it.command == "subscribe_storage" }
+      val requests =
+        factory.opened.single().sentRequests().filter { it.command == "subscribe_storage" }
 
       // DisposableEffect can issue both commands before a later LaunchedEffect starts collecting.
       // The acknowledgements must remain correlated one-for-one, not collapse to replay=1.
-      client.handleMessage("""{"id":"${requests[0].id}","type":"subscription_response","success":true}""")
-      client.handleMessage("""{"id":"${requests[1].id}","type":"subscription_response","success":true}""")
+      client.handleMessage(
+        """{"id":"${requests[0].id}","type":"subscription_response","success":true}"""
+      )
+      client.handleMessage(
+        """{"id":"${requests[1].id}","type":"subscription_response","success":true}"""
+      )
 
       client.storageSubscriptionResponses.test {
         assertEquals(requests[0].id, awaitItem().requestId)

@@ -86,7 +86,8 @@ fun StorageDashboard(
     remember(deviceId, packageName) {
       mutableStateOf<Map<String, List<Pair<Long, StorageStreamUpdate>>>>(emptyMap())
     }
-  val handledStorageSubscriptionRequestIds = remember(deviceId, packageName) { mutableSetOf<String>() }
+  val handledStorageSubscriptionRequestIds =
+    remember(deviceId, packageName) { mutableSetOf<String>() }
   val recentlyChangedKeys = highlightExpiries.keys
 
   LaunchedEffect(observationStreamClient, deviceId, packageName) {
@@ -104,7 +105,8 @@ fun StorageDashboard(
       keyValueFiles = keyValueFiles.applyStorageUpdate(update)
       if (filePresent) {
         val nextGeneration = (storageFileUpdateGenerations[update.fileName] ?: 0L) + 1L
-        storageFileUpdateGenerations = storageFileUpdateGenerations + (update.fileName to nextGeneration)
+        storageFileUpdateGenerations =
+          storageFileUpdateGenerations + (update.fileName to nextGeneration)
         if (storageReconciliationStartGenerations.containsKey(update.fileName)) {
           storageUpdateHistory =
             storageUpdateHistory +
@@ -168,9 +170,12 @@ fun StorageDashboard(
       storageReconciliationStartGenerations =
         storageReconciliationStartGenerations + (fileName to snapshotStartGeneration)
       try {
-        when (val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-          source.getKeyValueFiles()
-        }) {
+        when (
+          val result =
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+              source.getKeyValueFiles()
+            }
+        ) {
           is Result.Success -> {
             val updatesSinceSnapshotStarted =
               storageUpdateHistory[fileName]

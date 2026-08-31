@@ -477,7 +477,10 @@ class ObservationStreamClient(
       "subscription_response" -> {
         log.info("Subscription response: success=${response.success}")
         val responseId = response.id
-        if (responseId != null && handleStorageSubscriptionResponse(responseId, response.success == true, response.error)) {
+        if (
+          responseId != null &&
+            handleStorageSubscriptionResponse(responseId, response.success == true, response.error)
+        ) {
           return
         }
         if (response.success != true) {
@@ -619,7 +622,9 @@ class ObservationStreamClient(
       "error" -> {
         log.warn("Observation stream error: ${response.error}")
         val responseId = response.id
-        if (responseId != null && handleStorageSubscriptionResponse(responseId, false, response.error)) {
+        if (
+          responseId != null && handleStorageSubscriptionResponse(responseId, false, response.error)
+        ) {
           return
         }
         emitDeviceEvent(response)
@@ -777,9 +782,7 @@ class ObservationStreamClient(
     }
   }
 
-  /**
-   * Drive every desired storage subscription after a stream subscription becomes active.
-   */
+  /** Drive every desired storage subscription after a stream subscription becomes active. */
   private fun reapplyStorageSubscriptions() {
     val keys = synchronized(ownershipLock) { desiredStorageSubscriptions.toList() }
     for (key in keys) {

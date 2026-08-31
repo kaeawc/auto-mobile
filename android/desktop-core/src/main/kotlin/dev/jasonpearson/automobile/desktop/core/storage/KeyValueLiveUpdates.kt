@@ -143,8 +143,8 @@ internal fun List<KeyValueFile>.applyKeyValueEditIfGenerationUnchanged(
 /**
  * Replaces one displayed file with a post-subscription snapshot, then replays every live mutation
  * received while that snapshot was in flight. The replay makes the acknowledgement-to-snapshot
- * bridge safe for a write C that arrives during reconciliation: the snapshot closes the earlier
- * A→B registration gap without overwriting C.
+ * bridge safe for a write C that arrives during reconciliation: the snapshot closes the earlier A→B
+ * registration gap without overwriting C.
  */
 internal fun List<KeyValueFile>.reconcileStorageFileSnapshot(
   snapshot: List<KeyValueFile>,

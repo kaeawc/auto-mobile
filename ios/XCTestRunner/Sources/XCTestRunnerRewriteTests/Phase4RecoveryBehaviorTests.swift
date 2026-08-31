@@ -94,46 +94,7 @@ final class Phase4RecoveryBehaviorTests: XCTestCase {
     }
 }
 
-// MARK: - Fakes (single-threaded test use → @unchecked Sendable is acceptable for the recording state)
-
-private struct SilentLogger: AutoMobileLogger {
-    func info(_: String) {}
-    func warn(_: String) {}
-    func error(_: String) {}
-}
-
-private final class RecordingMCPClient: AutoMobileMCPClient, @unchecked Sendable {
-    struct Call {
-        let name: String
-        let arguments: [String: Any]
-    }
-
-    private(set) var calls: [Call] = []
-    private(set) var initializeCallCount = 0
-    private(set) var readResourceCallCount = 0
-    var flagResourceText = "{\"key\":\"ai-recovery\",\"enabled\":true,\"config\":{\"maxToolCalls\":5}}"
-    var observeText = "{\"elements\":{}}"
-    var toolResponseText = "{\"ok\":true}"
-
-    func initialize(timeout _: TimeInterval) throws {
-        initializeCallCount += 1
-    }
-
-    func callTool(name: String, arguments: [String: Any], timeout _: TimeInterval) throws -> MCPToolResponse {
-        calls.append(Call(name: name, arguments: arguments))
-        if name == "observe" {
-            return MCPToolResponse(text: observeText)
-        }
-        return MCPToolResponse(text: toolResponseText)
-    }
-
-    func readResource(uri _: String, timeout _: TimeInterval) throws -> MCPResourceResponse {
-        readResourceCallCount += 1
-        return MCPResourceResponse(text: flagResourceText)
-    }
-
-    func resetSession() {}
-}
+// MARK: - Recovery-specific fakes (shared fakes live in RewriteFakes.swift)
 
 /// Fake `ModelResponding` replaying a fixed script (from the reference RecoveryTests).
 private final class StubModelResponder: ModelResponding, @unchecked Sendable {

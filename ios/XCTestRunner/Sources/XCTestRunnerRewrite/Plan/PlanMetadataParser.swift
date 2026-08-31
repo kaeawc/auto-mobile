@@ -1,0 +1,199 @@
+import Foundation
+
+/// Hand-rolled parser for a plan's top-level `platform:` / `devices:` metadata (no YAML library).
+/// Internal (the reference kept it `private`) so the rewrite's tests can assert it directly.
+enum PlanMetadataParser {
+    static func parse(from yamlContent: String) throws -> PlanMetadata {
+        let lines = yamlContent.split(whereSeparator: \.isNewline).map { String($0) }
+        var platform: AutoMobilePlanExecutor.PlanPlatform?
+        var devicePlatforms: [String: AutoMobilePlanExecutor.PlanPlatform] = [:]
+        var deviceLabels: [String] = []
+        var hasDevices = false
+
+        var index = 0
+        while index < lines.count {
+            let line = stripComments(from: lines[index])
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                index += 1
+                continue
+            }
+
+            let indent = indentationLevel(line)
+            if indent == 0 && trimmed.hasPrefix("platform:") {
+                let value = trimmed.dropFirst("platform:".count).trimmingCharacters(in: .whitespaces)
+                let normalized = unquote(value)
+                if let parsed = AutoMobilePlanExecutor.PlanPlatform(rawValue: normalized) {
+                    platform = parsed
+                } else if !normalized.isEmpty {
+                    throw AutoMobilePlanExecutor.ExecutorError.invalidPlan("Unknown platform value: \(normalized)")
+                }
+                index += 1
+                continue
+            }
+
+            if indent == 0 && trimmed.hasPrefix("devices:") {
+                hasDevices = true
+                let listIndent = indentOfNextListItem(startingAt: index + 1, lines: lines) ?? (indent + 2)
+                index += 1
+                var currentLabel: String?
+                var currentPlatform: AutoMobilePlanExecutor.PlanPlatform?
+
+                while index < lines.count {
+                    let rawLine = stripComments(from: lines[index])
+                    if rawLine.trimmingCharacters(in: .whitespaces).isEmpty {
+                        index += 1
+                        continue
+                    }
+
+                    let currentIndent = indentationLevel(rawLine)
+                    if currentIndent < listIndent {
+                        break
+                    }
+
+                    let trimmedLine = rawLine.trimmingCharacters(in: .whitespaces)
+                    if currentIndent == listIndent && trimmedLine.hasPrefix("-") {
+                        if let label = currentLabel {
+                            deviceLabels.append(label)
+                        }
+                        if let label = currentLabel, let platformValue = currentPlatform {
+                            devicePlatforms[label] = platformValue
+                        } else if currentLabel != nil || currentPlatform != nil {
+                            throw AutoMobilePlanExecutor.ExecutorError.invalidPlan(
+                                "Each device entry must include label and platform."
+                            )
+                        }
+                        currentLabel = nil
+                        currentPlatform = nil
+
+                        let remainder = trimmedLine.dropFirst().trimmingCharacters(in: .whitespaces)
+                        if remainder.isEmpty {
+                            index += 1
+                            continue
+                        }
+                        if remainder.contains(":") {
+                            let (key, value) = splitKeyValue(remainder)
+                            if key == "label" {
+                                currentLabel = value
+                            } else if key == "platform" {
+                                currentPlatform = try parsePlatform(value)
+                            } else if key == "name" {
+                                currentLabel = value
+                            }
+                        } else {
+                            currentLabel = remainder
+                        }
+                        index += 1
+                        continue
+                    }
+
+                    if currentIndent > listIndent {
+                        let (key, value) = splitKeyValue(trimmedLine)
+                        if key == "label" || key == "name" {
+                            currentLabel = value
+                        } else if key == "platform" {
+                            currentPlatform = try parsePlatform(value)
+                        }
+                        index += 1
+                        continue
+                    }
+
+                    index += 1
+                }
+
+                if let label = currentLabel {
+                    deviceLabels.append(label)
+                }
+                if let label = currentLabel, let platformValue = currentPlatform {
+                    devicePlatforms[label] = platformValue
+                } else if currentLabel != nil || currentPlatform != nil {
+                    throw AutoMobilePlanExecutor.ExecutorError.invalidPlan(
+                        "Each device entry must include label and platform."
+                    )
+                }
+                continue
+            }
+
+            index += 1
+        }
+
+        if hasDevices && deviceLabels.isEmpty {
+            throw AutoMobilePlanExecutor.ExecutorError.invalidPlan(
+                "Multi-device plans must declare at least one device."
+            )
+        }
+
+        if hasDevices && devicePlatforms.count != deviceLabels.count {
+            throw AutoMobilePlanExecutor.ExecutorError.invalidPlan(
+                "Multi-device plans must declare platform for each device."
+            )
+        }
+
+        return PlanMetadata(
+            platform: platform,
+            devicePlatforms: devicePlatforms,
+            deviceLabels: deviceLabels,
+            hasDevices: hasDevices
+        )
+    }
+
+    private static func parsePlatform(_ value: String) throws -> AutoMobilePlanExecutor.PlanPlatform {
+        let normalized = unquote(value)
+        guard let platform = AutoMobilePlanExecutor.PlanPlatform(rawValue: normalized) else {
+            throw AutoMobilePlanExecutor.ExecutorError.invalidPlan("Unknown platform value: \(value)")
+        }
+        return platform
+    }
+
+    private static func indentationLevel(_ line: String) -> Int {
+        return line.prefix { $0 == " " }.count
+    }
+
+    private static func indentOfNextListItem(startingAt startIndex: Int, lines: [String]) -> Int? {
+        var index = startIndex
+        while index < lines.count {
+            let line = stripComments(from: lines[index])
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                index += 1
+                continue
+            }
+            let indent = indentationLevel(line)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("-") {
+                return indent
+            }
+            if indent == 0 {
+                return nil
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    private static func stripComments(from line: String) -> String {
+        guard let hashIndex = line.firstIndex(of: "#") else {
+            return line
+        }
+        return String(line[..<hashIndex])
+    }
+
+    private static func splitKeyValue(_ line: String) -> (String, String) {
+        let parts = line.split(separator: ":", maxSplits: 1).map { String($0) }
+        if parts.count == 2 {
+            return (
+                parts[0].trimmingCharacters(in: .whitespaces),
+                unquote(parts[1].trimmingCharacters(in: .whitespaces))
+            )
+        }
+        return (line.trimmingCharacters(in: .whitespaces), "")
+    }
+
+    private static func unquote(_ value: String) -> String {
+        if value.count >= 2 {
+            if (value.hasPrefix("\"") && value.hasSuffix("\"")) || (value.hasPrefix("'") && value.hasSuffix("'")) {
+                return String(value.dropFirst().dropLast())
+            }
+        }
+        return value
+    }
+}

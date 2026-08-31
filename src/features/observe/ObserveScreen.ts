@@ -95,6 +95,20 @@ interface PostCaptureForegroundIdentity {
   identity: string | undefined;
 }
 
+function isStatusBarOnlyCandidate(
+  hierarchy: ObserveResult["viewHierarchy"],
+  foreground: string | undefined,
+): boolean {
+  const observed = hierarchy?.packageName;
+  return (
+    foreground !== undefined &&
+    !SYSTEM_UI_WINDOW_PACKAGES.has(foreground) &&
+    (observed === undefined
+      ? hierarchy?.ctrlProxyIncomplete === true
+      : SYSTEM_UI_WINDOW_PACKAGES.has(observed))
+  );
+}
+
 function isWithinSystemBar(
   bounds: { left: number; top: number; right: number; bottom: number },
   systemInsets: ObserveResult["systemInsets"],
@@ -956,30 +970,23 @@ export class RealObserveScreen implements ObserveScreen {
     signal?: AbortSignal,
   ): Promise<{ foreground: string } | undefined> {
     const foreground = await foregroundIdentity;
-    if (!foreground || SYSTEM_UI_WINDOW_PACKAGES.has(foreground)) {
-      return undefined;
-    }
     const hierarchy = result.viewHierarchy;
-    const observed = hierarchy?.packageName;
-    if (
-      (observed !== undefined && !SYSTEM_UI_WINDOW_PACKAGES.has(observed)) ||
-      (observed === undefined && hierarchy?.ctrlProxyIncomplete !== true)
-    ) {
-      return undefined;
-    }
-    if (observed === foreground) {
+    if (!isStatusBarOnlyCandidate(hierarchy, foreground)) {
       return undefined;
     }
     const confirmed = await this.resolvePostCaptureForegroundIdentity(
       foreground,
-      observed ?? "",
+      hierarchy?.packageName ?? "",
       postCaptureForeground,
       signal,
     );
     if (confirmed !== foreground) {
       return undefined;
     }
-    return isStatusBarOnlyHierarchy(result) ? { foreground } : undefined;
+    if (!isStatusBarOnlyHierarchy(result)) {
+      return undefined;
+    }
+    return { foreground };
   }
 
   private async resolvePostCaptureForegroundIdentity(

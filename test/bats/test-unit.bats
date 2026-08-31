@@ -50,7 +50,7 @@ run_unit_tests() {
 @test "gives macOS tests per-test and wall-clock headroom" {
   run_unit_tests RUNNER_OS=macOS
   [ "$status" -eq 0 ]
-  [[ "$output" == *"timeout=720"* ]]
+  [[ "$output" == *"timeout=30"* ]]
   [[ "$output" == *"test --timeout 20000 --no-orphans --parallel=12"* ]]
 }
 

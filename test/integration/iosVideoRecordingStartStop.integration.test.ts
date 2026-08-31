@@ -3,11 +3,14 @@ import { execFile } from "node:child_process";
 import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import { defaultIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 
 const execFileAsync = promisify(execFile);
 const RUN_INTEGRATION = process.env.AUTOMOBILE_IOS_VIDEO_RECORDING_INTEGRATION === "1";
 const describeIntegration = RUN_INTEGRATION ? describe : describe.skip;
+const LOCAL_CLI_ENTRYPOINT = fileURLToPath(new URL("../../dist/src/index.js", import.meta.url));
 // Give a cold CI simulator enough time to render frames after the script's
 // screenshot readiness check, rather than stopping immediately after startup.
 const DEFAULT_WAIT_MS = 10000;
@@ -77,15 +80,49 @@ function formatError(error: unknown): string {
   return String(error);
 }
 
-async function runVideoRecordingCli(args: string[]): Promise<RecordingToolResult> {
+async function runLocalCli(args: string[]): Promise<ToolTextResponse> {
   // The workflow warms CtrlProxy in the daemon process before this test runs.
-  // Calling the public CLI keeps start and stop in that same process; importing
+  // Calling the local CLI keeps start and stop in that same process; importing
   // the tool handler here would create a second cold DeviceSessionManager and
   // reintroduce the runner-readiness timeout this test is meant to exercise.
-  const { stdout } = await execFileAsync("auto-mobile", ["--cli", "videoRecording", ...args], {
-    maxBuffer: 10 * 1024 * 1024,
-  });
-  return parseToolResult(JSON.parse(stdout) as ToolTextResponse);
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    [LOCAL_CLI_ENTRYPOINT, "--cli", ...args],
+    {
+      maxBuffer: 10 * 1024 * 1024,
+    },
+  );
+  return JSON.parse(stdout) as ToolTextResponse;
+}
+
+async function runVideoRecordingCli(
+  sessionUuid: string,
+  args: string[],
+): Promise<RecordingToolResult> {
+  return parseToolResult(
+    await runLocalCli(["--session-uuid", sessionUuid, "videoRecording", ...args]),
+  );
+}
+
+async function bindVideoRecordingSession(sessionUuid: string, deviceId: string): Promise<void> {
+  await runLocalCli([
+    "--session-uuid",
+    sessionUuid,
+    "setActiveDevice",
+    "--deviceId",
+    deviceId,
+    "--platform",
+    "ios",
+  ]);
+  await runLocalCli([
+    "--session-uuid",
+    sessionUuid,
+    "setToolEnabled",
+    "--toolName",
+    "videoRecording",
+    "--enabled",
+    "true",
+  ]);
 }
 
 async function assertCommandAvailable(command: string, args: string[]): Promise<void> {
@@ -136,6 +173,7 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
       let startPayload: RecordingToolResult | undefined;
       let stopPayload: RecordingToolResult | undefined;
       let outputPath: string | undefined;
+      let sessionUuid: string | undefined;
       let stopped = false;
 
       try {
@@ -143,12 +181,16 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
         if (!deviceId) {
           throw new Error("AUTOMOBILE_IOS_VIDEO_RECORDING_DEVICE_ID is required");
         }
-        startPayload = await runVideoRecordingCli([
+        sessionUuid = defaultIdGenerator.next();
+        await bindVideoRecordingSession(sessionUuid, deviceId);
+
+        startPayload = await runVideoRecordingCli(sessionUuid, [
           "--action",
           "start",
           "--platform",
           "ios",
-          ...(deviceId ? ["--deviceId", deviceId] : []),
+          "--deviceId",
+          deviceId,
           "--outputName",
           "issue-2628-ios-video-recording",
           "--qualityPreset",
@@ -183,7 +225,7 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
         }
         await defaultTimer.sleep(waitMs - firstWaitMs);
 
-        stopPayload = await runVideoRecordingCli([
+        stopPayload = await runVideoRecordingCli(sessionUuid, [
           "--action",
           "stop",
           "--platform",
@@ -212,9 +254,9 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
         expect(video.duration).toBeGreaterThan(0);
       } catch (error) {
         let cleanupError: string | undefined;
-        if (recordingId && !stopped) {
+        if (recordingId && sessionUuid && !stopped) {
           try {
-            await runVideoRecordingCli([
+            await runVideoRecordingCli(sessionUuid, [
               "--action",
               "stop",
               "--platform",

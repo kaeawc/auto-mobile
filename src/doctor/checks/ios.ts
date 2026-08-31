@@ -10,6 +10,7 @@ import type { BootedDevice, ExecResult } from "../../models";
 import { CheckResult, DoctorOptions } from "../types";
 import { SimCtl, SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { Xcodebuild, XcodebuildClient } from "../../utils/ios-cmdline-tools/XcodebuildClient";
+import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
 import { logger, type Logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { resolveAssetVersion, resolvePinnedVersion } from "../../constants/release";
@@ -24,7 +25,6 @@ import {
 import { ObserveElementsBuilder } from "../../features/observe/ObserveElementsBuilder";
 import type { CtrlProxyHierarchy } from "../../features/observe/ios/types";
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
-import { DefaultHostCommandExecutor } from "../../utils/HostCommandExecutor";
 import {
   SecurityClient,
   type SecurityClientApi,

@@ -412,7 +412,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
       fresh: true,
       screenWidth: 1080,
       screenHeight: 2400,
-      systemInsets: { top: 63, right: 0, bottom: 63, left: 0 },
+      systemInsets: { top: 63, right: 0, bottom: 63, left: 63 },
       packageName: "com.android.systemui",
       foregroundActivity: "com.android.settings/.SubSettings",
       hierarchy: {
@@ -425,6 +425,10 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
           {
             contentDesc: "Home",
             bounds: { left: 486, top: 2337, right: 594, bottom: 2400 },
+          },
+          {
+            contentDesc: "Back",
+            bounds: { left: 0, top: 63, right: 63, bottom: 2337 },
           },
         ],
       },

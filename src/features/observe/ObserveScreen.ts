@@ -96,24 +96,25 @@ interface PostCaptureForegroundIdentity {
 }
 
 function isWithinSystemBar(
-  bounds: { top: number; bottom: number },
-  statusBarHeight: number,
-  navigationBarTop: number,
+  bounds: { left: number; top: number; right: number; bottom: number },
+  systemInsets: ObserveResult["systemInsets"],
+  screenSize: ObserveResult["screenSize"],
 ): boolean {
-  return bounds.bottom <= statusBarHeight || bounds.top >= navigationBarTop;
+  return (
+    bounds.bottom <= systemInsets.top ||
+    bounds.top >= screenSize.height - systemInsets.bottom ||
+    bounds.right <= systemInsets.left ||
+    bounds.left >= screenSize.width - systemInsets.right
+  );
 }
 
 function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
-  const statusBarHeight = result.systemInsets.top;
-  const navigationBarHeight = result.systemInsets.bottom;
-  const screenHeight = result.screenSize.height;
   const root = result.viewHierarchy?.hierarchy.node;
-  if ((statusBarHeight <= 0 && navigationBarHeight <= 0) || !root) {
+  if (!root) {
     return false;
   }
 
   let hasBounds = false;
-  const navigationBarTop = screenHeight - navigationBarHeight;
   const nodes = Array.isArray(root) ? [...root] : [root];
   while (nodes.length > 0) {
     const node = nodes.pop();
@@ -122,7 +123,7 @@ function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
     }
     if (node.bounds) {
       hasBounds = true;
-      if (!isWithinSystemBar(node.bounds, statusBarHeight, navigationBarTop)) {
+      if (!isWithinSystemBar(node.bounds, result.systemInsets, result.screenSize)) {
         return false;
       }
     }
@@ -949,6 +950,9 @@ export class RealObserveScreen implements ObserveScreen {
   ): Promise<{ foreground: string } | undefined> {
     const foreground = await foregroundIdentity;
     if (!foreground || SYSTEM_UI_WINDOW_PACKAGES.has(foreground)) {
+      return undefined;
+    }
+    if (!SYSTEM_UI_WINDOW_PACKAGES.has(result.viewHierarchy?.packageName ?? "")) {
       return undefined;
     }
     if (result.viewHierarchy?.packageName === foreground) {

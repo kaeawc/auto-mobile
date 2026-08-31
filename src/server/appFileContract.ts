@@ -233,6 +233,7 @@ export function normalizeAppFileRelativePath(path: string): string {
   if (
     normalized.length === 0 ||
     normalized.startsWith("/") ||
+    normalized.includes("\0") ||
     segments.some((segment) => segment.length === 0 || segment === "." || segment === "..")
   ) {
     throw new Error(

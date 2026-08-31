@@ -975,7 +975,10 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         return;
       }
 
-      const key = `${storageDeviceSessionUuid ?? storageDeviceId ?? "all"}:${packageName}:${fileName}`;
+      // The CtrlProxy observer is keyed by serial/package/file, not by the session epoch. A
+      // reconnecting pane receives a new session UUID for the same serial; keeping UUIDs in this
+      // ownership key lets the retired pane's teardown unregister the refreshed pane's observer.
+      const key = `${storageDeviceId ?? "all"}:${packageName}:${fileName}`;
       const storageRequest = { deviceId: storageDeviceId, packageName, fileName, subscribe };
       try {
         if (subscribe) {
@@ -1177,7 +1180,8 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
   /**
    * Re-register every active observer for [deviceId] after its Android CtrlProxy reconnects.
-   * Desktop socket ownership deliberately remains intact across that runner-only reconnect.
+   * A retained zero-owner entry instead retries its failed teardown. Desktop socket ownership
+   * deliberately remains intact across that runner-only reconnect.
    */
   async reapplyStorageSubscriptionsForDevice(deviceId: string): Promise<void> {
     const subscriptions = [...this.storageSubscriptions.entries()].filter(
@@ -1185,10 +1189,14 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     );
     for (const [key, subscription] of subscriptions) {
       try {
-        await this.queueStorageOperation(key, { ...subscription, subscribe: true });
+        await this.queueStorageOperation(key, {
+          ...subscription,
+          subscribe: subscription.owners.size > 0,
+        });
+        this.removeStorageSubscriptionIfUnowned(key, subscription);
       } catch (error) {
         logger.warn(
-          `[DeviceDataStream] Failed to replay storage observer for ${subscription.packageName}/${subscription.fileName}: ${errorMessage(error)}`,
+          `[DeviceDataStream] Failed to replay storage observer lifecycle for ${subscription.packageName}/${subscription.fileName}: ${errorMessage(error)}`,
         );
       }
     }
@@ -1208,7 +1216,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     if (existing) {
       this.addStorageSubscriptionOwner(socket, key, existing);
       try {
-        await this.storageOperations.get(key);
+        if (existing.owners.size === 1) {
+          // A prior final-owner teardown failed and left a zero-owner tombstone. Queue a fresh
+          // registration rather than treating the retained record as a live observer.
+          await this.queueStorageOperation(key, request);
+        } else {
+          await this.storageOperations.get(key);
+        }
       } catch (error) {
         // This socket joined a registration already in flight. If it fails, it never acquired an
         // observer and must not leave a stale owner that makes later retries appear successful.
@@ -1249,7 +1263,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       return;
     }
     if (subscription.owners.size === 0) {
+      // Preserve a socket-owned tombstone while the final teardown is in flight. If CtrlProxy is
+      // transiently unavailable, connection close or runner reconnect can retry it instead of
+      // losing the only record of the device-side observer.
+      this.retainStorageSubscriptionKeyForSocket(socket, key);
       await this.queueStorageOperation(key, request);
+      this.forgetStorageSubscriptionKeyForSocket(socket, key);
+      this.removeStorageSubscriptionIfUnowned(key, subscription);
     }
   }
 
@@ -1261,9 +1281,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     if (!subscription.owners.add(socket)) {
       return;
     }
-    const keys = this.storageSubscriptionKeysBySocket.get(socket) ?? new Set<string>();
-    keys.add(key);
-    this.storageSubscriptionKeysBySocket.set(socket, keys);
+    this.retainStorageSubscriptionKeyForSocket(socket, key);
   }
 
   /**
@@ -1278,14 +1296,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     if (!subscription.owners.delete(socket)) {
       return false;
     }
-    const keys = this.storageSubscriptionKeysBySocket.get(socket);
-    keys?.delete(key);
-    if (keys?.size === 0) {
-      this.storageSubscriptionKeysBySocket.delete(socket);
-    }
-    if (subscription.owners.size === 0 && this.storageSubscriptions.get(key) === subscription) {
-      this.storageSubscriptions.delete(key);
-    }
+    this.forgetStorageSubscriptionKeyForSocket(socket, key);
     return true;
   }
 
@@ -1297,11 +1308,12 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     }
     for (const key of [...keys]) {
       const subscription = this.storageSubscriptions.get(key);
-      if (
-        subscription &&
-        this.removeStorageSubscriptionOwner(socket, key, subscription) &&
-        subscription.owners.size === 0
-      ) {
+      if (!subscription) {
+        this.forgetStorageSubscriptionKeyForSocket(socket, key);
+        continue;
+      }
+      const releasedOwner = this.removeStorageSubscriptionOwner(socket, key, subscription);
+      if ((releasedOwner || subscription.owners.size === 0) && subscription.owners.size === 0) {
         void this.queueStorageOperation(key, { ...subscription, subscribe: false }).catch(
           (error) => {
             logger.warn(
@@ -1309,7 +1321,34 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
             );
           },
         );
+        void this.storageOperations.get(key)?.then(
+          () => this.removeStorageSubscriptionIfUnowned(key, subscription),
+          () => undefined,
+        );
       }
+    }
+  }
+
+  private retainStorageSubscriptionKeyForSocket(socket: Socket, key: string): void {
+    const keys = this.storageSubscriptionKeysBySocket.get(socket) ?? new Set<string>();
+    keys.add(key);
+    this.storageSubscriptionKeysBySocket.set(socket, keys);
+  }
+
+  private forgetStorageSubscriptionKeyForSocket(socket: Socket, key: string): void {
+    const keys = this.storageSubscriptionKeysBySocket.get(socket);
+    keys?.delete(key);
+    if (keys?.size === 0) {
+      this.storageSubscriptionKeysBySocket.delete(socket);
+    }
+  }
+
+  private removeStorageSubscriptionIfUnowned(
+    key: string,
+    subscription: StorageSubscriptionState,
+  ): void {
+    if (subscription.owners.size === 0 && this.storageSubscriptions.get(key) === subscription) {
+      this.storageSubscriptions.delete(key);
     }
   }
 

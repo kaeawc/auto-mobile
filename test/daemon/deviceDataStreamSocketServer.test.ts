@@ -2643,6 +2643,77 @@ describe("DeviceDataStreamSocketServer", () => {
       ]);
     });
 
+    it("keeps the observer when a session UUID rotates before the retired socket closes", async () => {
+      const calls: StorageSubReq[] = [];
+      server.setOnStorageSubscriptionRequested(async (request) => {
+        calls.push(request);
+      });
+      server.sessionResolver.bind("emulator-5554", "session-old");
+      const retiredSocket = new FakeSocket();
+      await server.processLineForTest(
+        retiredSocket,
+        JSON.stringify({
+          id: "subscribe-old",
+          command: "subscribe_storage",
+          deviceSessionUuid: "session-old",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+
+      server.sessionResolver.bind("emulator-5554", "session-new");
+      const refreshedSocket = new FakeSocket();
+      await server.processLineForTest(
+        refreshedSocket,
+        JSON.stringify({
+          id: "subscribe-new",
+          command: "subscribe_storage",
+          deviceSessionUuid: "session-new",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+      server.closeConnectionForTest(retiredSocket);
+
+      expect(calls).toEqual([expect.objectContaining({ subscribe: true, fileName: "prefs.xml" })]);
+    });
+
+    it("retries a failed final-owner teardown when that socket closes", async () => {
+      const calls: StorageSubReq[] = [];
+      let failTeardown = true;
+      server.setOnStorageSubscriptionRequested(async (request) => {
+        calls.push(request);
+        if (!request.subscribe && failTeardown) {
+          failTeardown = false;
+          throw new Error("runner unavailable");
+        }
+      });
+      const socket = new FakeSocket();
+      const request = (id: string, command: "subscribe_storage" | "unsubscribe_storage") =>
+        server.processLineForTest(
+          socket,
+          JSON.stringify({
+            id,
+            command,
+            deviceId: "emulator-5554",
+            packageName: "com.example.app",
+            fileName: "prefs.xml",
+          }),
+        );
+
+      await request("subscribe", "subscribe_storage");
+      await request("unsubscribe", "unsubscribe_storage");
+      server.closeConnectionForTest(socket);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(calls).toEqual([
+        expect.objectContaining({ subscribe: true }),
+        expect.objectContaining({ subscribe: false }),
+        expect.objectContaining({ subscribe: false }),
+      ]);
+    });
+
     it("retries a shared observer after concurrent registration failures", async () => {
       const calls: StorageSubReq[] = [];
       server.setOnStorageSubscriptionRequested(async (request) => {

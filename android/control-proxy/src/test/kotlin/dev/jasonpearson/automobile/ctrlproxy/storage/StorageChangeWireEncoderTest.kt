@@ -85,6 +85,16 @@ class StorageChangeWireEncoderTest {
   }
 
   @Test
+  fun `non-finite floats are quoted so the frame remains valid JSON`() {
+    val obj = encodeAndParse(baseEvent("NaN", "FLOAT", "-Infinity", "FLOAT"))
+
+    assertEquals("NaN", obj["value"]!!.jsonPrimitive.content)
+    assertTrue(obj["value"]!!.jsonPrimitive.isString)
+    assertEquals("-Infinity", obj["previousValue"]!!.jsonPrimitive.content)
+    assertTrue(obj["previousValue"]!!.jsonPrimitive.isString)
+  }
+
+  @Test
   fun `newly added key emits previousValue null`() {
     val obj = encodeAndParse(baseEvent("first", "STRING", null, "UNKNOWN"))
     assertEquals("first", obj["value"]!!.jsonPrimitive.content)

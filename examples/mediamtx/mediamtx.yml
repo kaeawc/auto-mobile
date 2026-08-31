@@ -22,7 +22,7 @@
 
 # Enable the WebRTC server. It serves WHIP at /<name>/whip and WHEP at
 # /<name>/whep on webrtcAddress.
-webrtc: yes
+webrtc: true
 webrtcAddress: :8889
 
 # Android persistent encoding and iOS helper startup can take several seconds
@@ -82,11 +82,11 @@ webrtcICEServers2:
 # Trim the surface: AutoMobile only uses WebRTC. Disable the other ingress and
 # egress protocols so nothing else is listening.
 ###############################################################################
-rtsp: no
-rtmp: no
-hls: no
-srt: no
-moq: no
+rtsp: false
+rtmp: false
+hls: false
+srt: false
+moq: false
 
 ###############################################################################
 # Authentication

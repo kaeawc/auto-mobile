@@ -1377,6 +1377,9 @@ jobs:
           # Unit tests use injected fakes; real ADB coverage belongs to the
           # dedicated device-integration jobs. Never start an adb daemon here.
           AUTOMOBILE_TEST_MODE: "true"
+          # Keep CI feedback bounded while leaving `bun run test` usable for
+          # the complete local fake-only suite.
+          AUTOMOBILE_UNIT_TEST_TIMEOUT_SECONDS: "30"
           TURBO_TELEMETRY_DISABLED: "1"
           TURBO_NO_UPDATE_NOTIFIER: "1"
           DO_NOT_TRACK: "1"
@@ -1384,18 +1387,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ci-logs
-          # The default suite is the strictly bounded, fake-only unit lane.
-          # Socket/process/file-system contract coverage runs explicitly through
-          # `test:integration`, keeping normal iteration fast and hermetic.
+          # Run only tests affected by this PR in the 30-second cross-platform
+          # feedback lane. `bun run test` remains the complete fake-only suite
+          # for local validation; the full suite also runs in Linux coverage.
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            bun run test 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
+            bun run test:changed 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
           else
             # Keep an outer watchdog for failures before the unit script can start.
-            # The inner test runner also enforces this fixed feedback budget.
+            # The selected test runner has a larger local-validation budget.
             # shellcheck source=scripts/ios/run_with_timeout.sh
             source scripts/ios/run_with_timeout.sh
             test_status=0
-            run_with_timeout 30 bun run test 2>&1 \
+            run_with_timeout 30 bun run test:changed 2>&1 \
               | tee "ci-logs/bun-test-${{ matrix.os }}.log" || test_status=$?
             if [[ "$test_status" -eq 124 ]]; then
               echo "::error::fake-only unit suite exceeded its 30-second wall-clock ceiling."

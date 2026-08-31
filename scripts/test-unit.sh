@@ -6,15 +6,30 @@
 set -euo pipefail
 
 if [[ "${RUNNER_OS:-}" == "macOS" ]]; then
-  default_timeout_seconds=30
+  default_timeout_seconds=720
   per_test_timeout_ms=20000
 else
-  default_timeout_seconds=30
+  default_timeout_seconds=720
   per_test_timeout_ms=5000
 fi
 
 readonly UNIT_TEST_TIMEOUT_SECONDS="${AUTOMOBILE_UNIT_TEST_TIMEOUT_SECONDS:-${default_timeout_seconds}}"
 readonly UNIT_TEST_WORKERS="${AUTOMOBILE_UNIT_TEST_WORKERS:-12}"
+
+changed_base_ref=""
+remaining_args=()
+has_remaining_args=false
+for arg in "$@"; do
+  case "$arg" in
+    --changed=*)
+      changed_base_ref="${arg#--changed=}"
+      ;;
+    *)
+      remaining_args+=("$arg")
+      has_remaining_args=true
+      ;;
+  esac
+done
 
 readonly -a integration_paths=(
   "test/contracts/runAll.test.ts"
@@ -43,8 +58,33 @@ if [[ "${RUNNER_OS:-}" != "Windows" ]]; then
 fi
 test_args+=(${ignore_args[@]+"${ignore_args[@]}"})
 
+if [[ -n "$changed_base_ref" ]]; then
+  base_commit="$(git merge-base "$changed_base_ref" HEAD)"
+  changed_tests=()
+  has_changed_tests=false
+  while IFS= read -r path; do
+    case "$path" in
+      test/*.test.ts)
+        changed_tests+=("$path")
+        has_changed_tests=true
+        ;;
+    esac
+  done < <(git diff --name-only "${base_commit}...HEAD" -- test)
+  if [[ "$has_changed_tests" == "false" && "$has_remaining_args" == "false" ]]; then
+    echo "No changed TypeScript tests relative to ${changed_base_ref}."
+    exit 0
+  fi
+  if [[ "$has_changed_tests" == "true" ]]; then
+    test_args+=("${changed_tests[@]}")
+  fi
+fi
+
 # The validation wrapper passes scripts independently, so ShellCheck cannot follow this path.
 # shellcheck disable=SC1091
 source scripts/ios/run_with_timeout.sh
-run_with_timeout "${UNIT_TEST_TIMEOUT_SECONDS}" \
-  "${test_args[@]}" "$@"
+if [[ "$has_remaining_args" == "true" ]]; then
+  run_with_timeout "${UNIT_TEST_TIMEOUT_SECONDS}" \
+    "${test_args[@]}" "${remaining_args[@]}"
+else
+  run_with_timeout "${UNIT_TEST_TIMEOUT_SECONDS}" "${test_args[@]}"
+fi

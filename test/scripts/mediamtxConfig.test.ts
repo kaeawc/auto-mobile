@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { load } from "js-yaml";
+import { dump, load } from "js-yaml";
 import { IOS_FIRST_FRAME_TIMEOUT_MS } from "../../src/features/webrtc/IosH264Source";
 
 /**
@@ -52,6 +52,16 @@ const P95_SAFETY_FACTOR = 1.5;
 const DURATION_PATTERN = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/;
 const DURATION_UNIT_MS: Record<string, number> = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 };
 
+interface MediaMtxConfig {
+  webrtc?: boolean;
+  webrtcTrackGatherTimeout?: string;
+  rtsp?: boolean;
+  rtmp?: boolean;
+  hls?: boolean;
+  srt?: boolean;
+  moq?: boolean;
+}
+
 /** Parses MediaMTX's Go duration scalars ("30s", "1500ms"). */
 function parseDurationMs(value: string): number {
   const match = DURATION_PATTERN.exec(value);
@@ -61,15 +71,35 @@ function parseDurationMs(value: string): number {
   return Number(match[1]) * DURATION_UNIT_MS[match[2]];
 }
 
+function loadMediaMtxConfig(): MediaMtxConfig {
+  return load(readFileSync("examples/mediamtx/mediamtx.yml", "utf8")) as MediaMtxConfig;
+}
+
 function loadTrackGatherTimeoutMs(): number {
-  const config = load(readFileSync("examples/mediamtx/mediamtx.yml", "utf8")) as {
-    webrtcTrackGatherTimeout?: string;
-  };
+  const config = loadMediaMtxConfig();
   expect(config.webrtcTrackGatherTimeout).toBeString();
   return parseDurationMs(config.webrtcTrackGatherTimeout as string);
 }
 
 describe("MediaMTX WebRTC configuration", () => {
+  test("uses YAML booleans so generated worker configs keep protocol listeners typed", () => {
+    const config = loadMediaMtxConfig();
+    expect(config.webrtc).toBe(true);
+    expect(config.rtsp).toBe(false);
+    expect(config.rtmp).toBe(false);
+    expect(config.hls).toBe(false);
+    expect(config.srt).toBe(false);
+    expect(config.moq).toBe(false);
+
+    const generatedConfig = dump(config, { lineWidth: -1 });
+    expect(generatedConfig).toContain("webrtc: true\n");
+    expect(generatedConfig).toContain("rtsp: false\n");
+    expect(generatedConfig).toContain("rtmp: false\n");
+    expect(generatedConfig).toContain("hls: false\n");
+    expect(generatedConfig).toContain("srt: false\n");
+    expect(generatedConfig).toContain("moq: false\n");
+  });
+
   test("allows enough time for a device encoder to provide its first track", () => {
     expect(loadTrackGatherTimeoutMs()).toBe(30_000);
   });

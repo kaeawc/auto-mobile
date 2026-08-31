@@ -21,7 +21,16 @@ TIMEOUT
 printf '%s\n' "$*"
 BUN
 
-  chmod +x "$STUB_BIN/timeout" "$STUB_BIN/bun"
+  cat > "$STUB_BIN/git" <<'GIT'
+#!/usr/bin/env bash
+if [[ "$1" == "merge-base" ]]; then
+  printf 'test-base\n'
+else
+  printf 'test/features/observe/ObserveScreenWindowIdentity.test.ts\n'
+fi
+GIT
+
+  chmod +x "$STUB_BIN/timeout" "$STUB_BIN/bun" "$STUB_BIN/git"
 }
 
 teardown() {
@@ -35,6 +44,7 @@ run_unit_tests() {
 @test "runs the complete unit suite by default" {
   run_unit_tests
   [ "$status" -eq 0 ]
+  [[ "$output" == *"timeout=720"* ]]
   [[ "$output" == *"test --timeout 5000 --no-orphans --parallel=12"* ]]
   [[ "$output" == *"--path-ignore-patterns test/integration/*.test.ts"* ]]
   [[ "$output" != *"--changed="* ]]
@@ -50,12 +60,19 @@ run_unit_tests() {
 @test "gives macOS tests per-test and wall-clock headroom" {
   run_unit_tests RUNNER_OS=macOS
   [ "$status" -eq 0 ]
-  [[ "$output" == *"timeout=30"* ]]
+  [[ "$output" == *"timeout=720"* ]]
   [[ "$output" == *"test --timeout 20000 --no-orphans --parallel=12"* ]]
 }
 
-@test "forwards explicit changed-test selection" {
+@test "honors the CI wall-clock budget override" {
+  run_unit_tests AUTOMOBILE_UNIT_TEST_TIMEOUT_SECONDS=30
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"timeout=30"* ]]
+}
+
+@test "selects changed test files separately from the full default suite" {
   run env PATH="$STUB_BIN:$PATH" bash "$SCRIPT" --changed=origin/main
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--changed=origin/main"* ]]
+  [[ "$output" == *"test/features/observe/ObserveScreenWindowIdentity.test.ts"* ]]
+  [[ "$output" != *"--changed=origin/main"* ]]
 }

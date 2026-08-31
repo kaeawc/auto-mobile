@@ -98,7 +98,7 @@ interface PostCaptureForegroundIdentity {
 function isStatusBarOnlyCandidate(
   hierarchy: ObserveResult["viewHierarchy"],
   foreground: string | undefined,
-): boolean {
+): foreground is string {
   const observed = hierarchy?.packageName;
   return (
     foreground !== undefined &&

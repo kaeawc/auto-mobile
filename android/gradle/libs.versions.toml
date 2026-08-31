@@ -71,7 +71,7 @@ okhttp = "5.5.0"
 # Publishing
 mavenpublish = "0.37.0"
 dokka = "2.2.0"
-compose-multiplatform = "1.11.1"
+compose-multiplatform = "1.12.0"
 compose-hot-reload = "1.2.0"
 metro = "1.4.2"
 conveyor = "2.0"

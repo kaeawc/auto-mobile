@@ -150,6 +150,18 @@ describe("putAppFile canonical target contract (#5803)", () => {
     ).toBe(false);
   });
 
+  test("rejects NUL bytes in destination paths before media extension validation", () => {
+    const destinationPath = `evil.sh${String.fromCharCode(0)}.png`;
+
+    expect(() => normalizeAppFileRelativePath(destinationPath)).toThrow(/non-empty relative path/);
+    expect(
+      putAppFileSchema.safeParse({
+        target: { domain: "media_library" },
+        files: [{ destinationPath, contentText: "not a media filename" }],
+      }).success,
+    ).toBe(false);
+  });
+
   test("advertises the media-library filename requirement in generated tool definitions", () => {
     const definitions = JSON.parse(readFileSync("schemas/tool-definitions.json", "utf8")) as Array<{
       name: string;

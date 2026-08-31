@@ -169,9 +169,9 @@ class WorkspaceViewModel(
   }
 
   /**
-   * Replace only non-null UUIDs from a fresh booted-devices snapshot. A missing UUID means an
-   * older daemon did not expose epoch identity; preserving the known UUID makes a transient or
-   * downgraded response unable to silently widen an existing UUID-scoped stream.
+   * Replace only non-null UUIDs from a fresh booted-devices snapshot. A missing UUID means an older
+   * daemon did not expose epoch identity; preserving the known UUID makes a transient or downgraded
+   * response unable to silently widen an existing UUID-scoped stream.
    */
   private fun refreshDeviceSessionUuids(sessionUuids: Map<String, String>) {
     if (sessionUuids.isEmpty()) return

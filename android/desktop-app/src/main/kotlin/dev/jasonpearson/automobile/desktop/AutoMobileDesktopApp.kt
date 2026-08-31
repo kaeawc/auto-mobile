@@ -228,7 +228,12 @@ fun AutoMobileDesktopApp(
   // pinned to the previously-focused device (mirrors AutoMobileContent's binding path).
   val bindingMutex = remember(desktopDaemonSession) { Mutex() }
   val bindingGeneration = remember(desktopDaemonSession) { AtomicLong(0L) }
-  LaunchedEffect(desktopDaemonSession, resourceClient, focusedColumn?.deviceId, focusedColumn?.platform) {
+  LaunchedEffect(
+    desktopDaemonSession,
+    resourceClient,
+    focusedColumn?.deviceId,
+    focusedColumn?.platform,
+  ) {
     val session = desktopDaemonSession ?: return@LaunchedEffect
     val column = focusedColumn ?: return@LaunchedEffect
     val platform = column.platform.wireName()
@@ -253,26 +258,25 @@ fun AutoMobileDesktopApp(
         continue
       }
       if (refreshDeviceEpochs) {
-        val sessionUuids =
-          runCatching {
-            withContext(Dispatchers.IO) {
-              resourceClient.readResource(BOOTED_DEVICES_RESOURCE_URI)
-            }
+        val sessionUuids = runCatching {
+          withContext(Dispatchers.IO) {
+            resourceClient.readResource(BOOTED_DEVICES_RESOURCE_URI)
           }
-            .onFailure {
-              LOG.warn("Failed to refresh device epochs after daemon recovery: ${it.message}")
-            }
-            .getOrNull()
-            ?.let { result ->
-              when (result) {
-                is ResourceReadResult.Success -> parseBootedDeviceSessionUuids(result.content)
-                is ResourceReadResult.Error -> {
-                  LOG.warn("Failed to refresh device epochs after daemon recovery: ${result.message}")
-                  emptyMap()
-                }
+        }
+          .onFailure {
+            LOG.warn("Failed to refresh device epochs after daemon recovery: ${it.message}")
+          }
+          .getOrNull()
+          ?.let { result ->
+            when (result) {
+              is ResourceReadResult.Success -> parseBootedDeviceSessionUuids(result.content)
+              is ResourceReadResult.Error -> {
+                LOG.warn("Failed to refresh device epochs after daemon recovery: ${result.message}")
+                emptyMap()
               }
             }
-            .orEmpty()
+          }
+          .orEmpty()
         if (sessionUuids.isNotEmpty()) {
           workspaceViewModel.onAction(WorkspaceAction.RefreshDeviceSessionUuids(sessionUuids))
           refreshDeviceEpochs = false

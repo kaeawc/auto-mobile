@@ -40,6 +40,8 @@ private val LOG = LoggerFactory.getLogger("StorageDashboard")
 
 /** How long a live-changed entry stays highlighted in the key-value inspector. */
 private const val HIGHLIGHT_DURATION_MS = 2000L
+private const val STORAGE_RECONCILIATION_INITIAL_RETRY_MS = 250L
+private const val STORAGE_RECONCILIATION_MAX_RETRY_MS = 5_000L
 
 /** Storage tab options. */
 enum class StorageTab(val title: String, val icon: String) {
@@ -90,7 +92,8 @@ fun StorageDashboard(
     }
   val handledStorageSubscriptionRequestIds =
     remember(deviceId, packageName) { mutableSetOf<String>() }
-  val lastStorageSequenceByFile = remember(deviceId, packageName) { mutableMapOf<String, Long>() }
+  var lastStorageSequence by remember(deviceId, packageName) { mutableStateOf<Long?>(null) }
+  var storageReconciliationFailureCount by remember(deviceId, packageName) { mutableStateOf(0) }
   val pendingStorageReconciliationFiles = remember(deviceId, packageName) { mutableSetOf<String>() }
   val storageReconciliationSignal =
     remember(deviceId, packageName) {
@@ -109,13 +112,14 @@ fun StorageDashboard(
       if (packageName != null && update.packageName != packageName) return@collect
 
       if (update.sequenceNumber > 0L) {
-        val previousSequence = lastStorageSequenceByFile[update.fileName]
-        if (hasStorageSequenceGap(previousSequence, update.sequenceNumber)) {
-          pendingStorageReconciliationFiles.add(update.fileName)
+        if (hasStorageSequenceGap(lastStorageSequence, update.sequenceNumber)) {
+          // The SDK sequence is process-global across preference files. A missing number may
+          // belong to any loaded file, so reconcile all of them rather than guessing from the
+          // first post-gap event.
+          pendingStorageReconciliationFiles.addAll(keyValueFiles.map { it.name })
           storageReconciliationSignal.trySend(Unit)
         }
-        lastStorageSequenceByFile[update.fileName] =
-          maxOf(previousSequence ?: 0L, update.sequenceNumber)
+        lastStorageSequence = maxOf(lastStorageSequence ?: 0L, update.sequenceNumber)
       }
 
       val filePresent = keyValueFiles.any { it.name == update.fileName }
@@ -206,6 +210,7 @@ fun StorageDashboard(
       }
       storageReconciliationStartGenerations =
         storageReconciliationStartGenerations + snapshotStartGenerations
+      var reconciliationSucceeded = false
       try {
         when (
           val result =
@@ -229,17 +234,34 @@ fun StorageDashboard(
                   updatesSinceSnapshotStarted,
                 )
               }
+            reconciliationSucceeded = true
           }
           is Result.Error ->
             LOG.warn("StorageDashboard: failed to reconcile storage files: ${result.message}")
           Result.Loading -> LOG.warn("StorageDashboard: reconciliation remained loading")
         }
+      } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
       } catch (e: Exception) {
         LOG.warn("StorageDashboard: reconciliation failed for $activeFileNames: ${e.message}")
       } finally {
         storageReconciliationStartGenerations =
           storageReconciliationStartGenerations - activeFileNames.toSet()
         storageUpdateHistory = storageUpdateHistory - activeFileNames.toSet()
+      }
+      if (reconciliationSucceeded) {
+        storageReconciliationFailureCount = 0
+      } else {
+        storageReconciliationFailureCount = (storageReconciliationFailureCount + 1).coerceAtMost(6)
+        val retryDelayMs =
+          minOf(
+            STORAGE_RECONCILIATION_INITIAL_RETRY_MS *
+              (1L shl (storageReconciliationFailureCount - 1)),
+            STORAGE_RECONCILIATION_MAX_RETRY_MS,
+          )
+        kotlinx.coroutines.delay(retryDelayMs)
+        pendingStorageReconciliationFiles.addAll(activeFileNames)
+        storageReconciliationSignal.trySend(Unit)
       }
     }
   }

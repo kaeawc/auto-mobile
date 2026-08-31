@@ -180,14 +180,15 @@ fun StorageDashboard(
   // list with the same paths) does not churn subscriptions; releases every subscription when the
   // facet leaves composition or the device/app changes. The stream dedups repeat subscribes.
   val subscribedFileNames = keyValueFiles.map { it.name }.distinct()
-  DisposableEffect(observationStreamClient, deviceId, packageName, subscribedFileNames) {
+  DisposableEffect(observationStreamClient, deviceId, packageName, platform, subscribedFileNames) {
     val stream = observationStreamClient
     val pkg = packageName
-    if (stream != null && pkg != null) {
+    val supportsLiveStorage = platform == StoragePlatform.Android
+    if (supportsLiveStorage && stream != null && pkg != null) {
       subscribedFileNames.forEach { stream.subscribeStorage(pkg, it) }
     }
     onDispose {
-      if (stream != null && pkg != null) {
+      if (supportsLiveStorage && stream != null && pkg != null) {
         subscribedFileNames.forEach { stream.unsubscribeStorage(pkg, it) }
       }
     }

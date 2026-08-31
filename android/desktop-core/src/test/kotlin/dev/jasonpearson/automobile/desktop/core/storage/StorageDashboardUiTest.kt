@@ -207,6 +207,28 @@ class StorageDashboardUiTest {
     }
 
   @Test
+  fun `does not request unsupported live storage subscriptions for ios`() = runComposeUiTest {
+    val stream = FakeObservationStream()
+    setContent {
+      MaterialTheme {
+        StorageDashboard(
+          dataSourceMode = DataSourceMode.Fake,
+          deviceId = "ios-device",
+          packageName = "com.example.app",
+          platform = StoragePlatform.iOS,
+          observationStreamClient = stream,
+        )
+      }
+    }
+
+    onNodeWithText("Key-Value").performClick()
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("app_preferences", substring = true).fetchSemanticsNodes().isNotEmpty()
+    }
+    runOnIdle { check(stream.storageSubscriptions.isEmpty()) }
+  }
+
+  @Test
   fun `keeps the user's selected file when a live update rebuilds the list (#4709)`() =
     runComposeUiTest {
       val stream = FakeObservationStream()

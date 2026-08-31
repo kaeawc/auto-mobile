@@ -44,7 +44,7 @@ class StorageSubscriptionManager(private val context: Context) {
     val subscriptions: MutableSet<String> = ConcurrentHashMap.newKeySet(), // file names
   )
 
-  private data class PackageEventBuffer(
+  private data class SubscriptionEventBuffer(
     val events: ArrayDeque<PreferenceChangeEvent> = ArrayDeque()
   )
 
@@ -54,12 +54,14 @@ class StorageSubscriptionManager(private val context: Context) {
   // plain HashMap would hit here (#3600).
   private val subscriptions =
     ConcurrentHashMap<String, SubscriptionState>() // subscriptionId -> state
+  private val subscriptionLocks = ConcurrentHashMap<String, Any>()
   private val packageObservers =
     ConcurrentHashMap<String, PackageObserverState>() // packageName -> state
 
-  // Bound events independently per package. If one package overflows, its newest event is retained
-  // and exposes the sequence gap needed for snapshot recovery; unrelated packages cannot hide it.
-  private val changeEventBuffers = ConcurrentHashMap<String, PackageEventBuffer>()
+  // Bound events independently per subscribed file. If one file overflows, its newest event is
+  // retained and exposes the sequence gap needed for snapshot recovery; unrelated files cannot
+  // hide it.
+  private val changeEventBuffers = ConcurrentHashMap<String, SubscriptionEventBuffer>()
   private val changeEventSignal = Channel<Unit>(Channel.CONFLATED)
   val changeEvents: Flow<PreferenceChangeEvent> = flow {
     for (ignored in changeEventSignal) {
@@ -343,10 +345,17 @@ class StorageSubscriptionManager(private val context: Context) {
    */
   fun subscribe(packageName: String, fileName: String): Result<StorageSubscription> {
     val subscriptionId = "$packageName:$fileName"
+    val lock = subscriptionLocks.computeIfAbsent(subscriptionId) { Any() }
+    return synchronized(lock) { subscribeLocked(packageName, fileName, subscriptionId) }
+  }
 
-    // Check if already subscribed
-    if (subscriptions.containsKey(subscriptionId)) {
-      return Result.success(subscriptions[subscriptionId]!!.subscription)
+  private fun subscribeLocked(
+    packageName: String,
+    fileName: String,
+    subscriptionId: String,
+  ): Result<StorageSubscription> {
+    subscriptions[subscriptionId]?.let {
+      return Result.success(it.subscription)
     }
 
     return try {
@@ -402,7 +411,15 @@ class StorageSubscriptionManager(private val context: Context) {
    */
   fun unsubscribe(packageName: String, fileName: String): Boolean {
     val subscriptionId = "$packageName:$fileName"
+    val lock = subscriptionLocks.computeIfAbsent(subscriptionId) { Any() }
+    return synchronized(lock) { unsubscribeLocked(packageName, fileName, subscriptionId) }
+  }
 
+  private fun unsubscribeLocked(
+    packageName: String,
+    fileName: String,
+    subscriptionId: String,
+  ): Boolean {
     if (!subscriptions.containsKey(subscriptionId)) {
       return true
     }
@@ -751,7 +768,8 @@ class StorageSubscriptionManager(private val context: Context) {
   }
 
   private fun enqueueChangeEvent(event: PreferenceChangeEvent): Boolean {
-    val buffer = changeEventBuffers.computeIfAbsent(event.packageName) { PackageEventBuffer() }
+    val bufferKey = "${event.packageName.length}:${event.packageName}:${event.fileName}"
+    val buffer = changeEventBuffers.computeIfAbsent(bufferKey) { SubscriptionEventBuffer() }
     synchronized(buffer) {
       if (buffer.events.size == STORAGE_EVENT_BUFFER_CAPACITY) {
         buffer.events.removeFirst()

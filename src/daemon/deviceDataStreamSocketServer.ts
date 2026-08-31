@@ -1196,22 +1196,27 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
           ...subscription,
           subscribe: subscription.owners.size > 0,
         });
-        if (subscription.owners.size > 0) {
-          for (const owner of subscription.owners) {
-            this.sendJson(owner, {
-              type: "storage_reconciliation_required",
-              deviceId,
-              packageName: subscription.packageName,
-              fileName: subscription.fileName,
-            });
-          }
-        }
+        this.notifyStorageReconciliationRequired(deviceId, subscription);
         this.removeStorageSubscriptionIfUnowned(key, subscription);
       } catch (error) {
         logger.warn(
           `[DeviceDataStream] Failed to replay storage observer lifecycle for ${subscription.packageName}/${subscription.fileName}: ${errorMessage(error)}`,
         );
       }
+    }
+  }
+
+  private notifyStorageReconciliationRequired(
+    deviceId: string,
+    subscription: StorageSubscriptionState,
+  ): void {
+    for (const owner of subscription.owners) {
+      this.sendJson(owner, {
+        type: "storage_reconciliation_required",
+        deviceId,
+        packageName: subscription.packageName,
+        fileName: subscription.fileName,
+      });
     }
   }
 

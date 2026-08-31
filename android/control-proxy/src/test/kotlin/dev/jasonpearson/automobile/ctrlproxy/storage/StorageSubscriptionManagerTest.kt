@@ -338,6 +338,45 @@ class StorageSubscriptionManagerTest {
   }
 
   @Test
+  fun `failed concurrent acquisition cannot roll back a successful subscription`() {
+    val bundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"fileName":"auth","subscribed":true}""")
+      }
+    val firstRegistrationEntered = java.util.concurrent.CountDownLatch(1)
+    val releaseFirstRegistration = java.util.concurrent.CountDownLatch(1)
+    val registrationCalls = java.util.concurrent.atomic.AtomicInteger()
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns bundle
+    every { contentResolver.registerContentObserver(any(), any(), any()) } answers
+      {
+        if (registrationCalls.getAndIncrement() == 0) {
+          firstRegistrationEntered.countDown()
+          assertTrue(releaseFirstRegistration.await(1, java.util.concurrent.TimeUnit.SECONDS))
+          throw SecurityException("first registration denied")
+        }
+      }
+
+    var firstResult: Result<StorageSubscription>? = null
+    var secondResult: Result<StorageSubscription>? = null
+    val first = Thread { firstResult = manager.subscribe("com.example.app", "auth") }
+    first.start()
+    assertTrue(firstRegistrationEntered.await(1, java.util.concurrent.TimeUnit.SECONDS))
+    val second = Thread { secondResult = manager.subscribe("com.example.app", "auth") }
+    second.start()
+    releaseFirstRegistration.countDown()
+    first.join(1_000)
+    second.join(1_000)
+
+    assertTrue(firstResult?.isFailure == true)
+    assertTrue(secondResult?.isSuccess == true)
+    assertEquals(
+      listOf("com.example.app:auth"),
+      manager.getActiveSubscriptions().map { it.subscriptionId },
+    )
+  }
+
+  @Test
   fun `storage event bursts retain a bounded latest sequence for gap reconciliation`() =
     runBlocking {
       val observerSlot = slot<ContentObserver>()
@@ -380,24 +419,24 @@ class StorageSubscriptionManagerTest {
     }
 
   @Test
-  fun `one package cannot evict another packages latest event`() = runBlocking {
+  fun `one file cannot evict another files latest event`() = runBlocking {
     val observers = mutableMapOf<String, ContentObserver>()
     val subscribeBundle =
       Bundle().apply {
         putBoolean("success", true)
         putString("result", """{"fileName":"auth","subscribed":true}""")
       }
-    fun changesBundle(count: Long) =
+    fun changesBundle(fileName: String, count: Long) =
       Bundle().apply {
         putBoolean("success", true)
         putString(
           "result",
           StorageProtocolSerializer.responseToJson(
             StorageResponse.Changes(
-              "auth",
+              fileName,
               (1L..count).map { sequence ->
                 StorageChangeEvent(
-                  fileName = "auth",
+                  fileName = fileName,
                   key = "key-$sequence",
                   value = sequence.toString(),
                   type = "LONG",
@@ -413,30 +452,26 @@ class StorageSubscriptionManagerTest {
       subscribeBundle
     every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } answers
       {
-        if (firstArg<Uri>().authority?.startsWith("com.target") == true) {
-          changesBundle(1)
-        } else {
-          changesBundle(100)
-        }
+        val fileName = arg<Bundle>(3).getString("fileName").orEmpty()
+        changesBundle(fileName, if (fileName == "target") 1 else 100)
       }
     every { contentResolver.registerContentObserver(any(), any(), any()) } answers
       {
         observers[firstArg<Uri>().authority.orEmpty()] = thirdArg()
       }
 
-    assertTrue(manager.subscribe("com.target", "auth").isSuccess)
-    assertTrue(manager.subscribe("com.noisy", "auth").isSuccess)
-    observers.getValue("com.target.automobile.sharedprefs").onChange(false)
-    observers.getValue("com.noisy.automobile.sharedprefs").onChange(false)
+    assertTrue(manager.subscribe("com.example.app", "target").isSuccess)
+    assertTrue(manager.subscribe("com.example.app", "noisy").isSuccess)
+    observers.getValue("com.example.app.automobile.sharedprefs").onChange(false)
 
     val received = withTimeout(1_000) { manager.changeEvents.take(65).toList() }
     assertEquals(
       listOf(1L),
-      received.filter { it.packageName == "com.target" }.map { it.sequenceNumber },
+      received.filter { it.fileName == "target" }.map { it.sequenceNumber },
     )
     assertEquals(
       (37L..100L).toList(),
-      received.filter { it.packageName == "com.noisy" }.map { it.sequenceNumber },
+      received.filter { it.fileName == "noisy" }.map { it.sequenceNumber },
     )
   }
 

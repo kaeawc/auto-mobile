@@ -281,7 +281,9 @@ fun KeyValueInspector(
           items(filteredEntries) { entry ->
             val isSelected = entry == selectedEntry
             val isEditing =
-              editingEntry?.let { it.filePath == selectedFile?.path && it.key == entry.key } == true
+              editingEntry?.let {
+                it.filePath == selectedFile?.path && it.key == entry.key && it.type == entry.type
+              } == true
 
             // Check if this entry was recently changed
             val changeKey = highlightKey(selectedFile?.name.orEmpty(), entry.key)

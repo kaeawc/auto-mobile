@@ -5,6 +5,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -19,7 +20,7 @@ import org.junit.Test
 @OptIn(ExperimentalTestApi::class)
 class StorageDashboardUiTest {
 
-  private fun themeUpdate(value: String) =
+  private fun themeUpdate(value: String, valueType: KeyValueType = KeyValueType.String) =
     StorageStreamUpdate(
       deviceId = "emulator-5554",
       timestamp = 1_000L,
@@ -27,7 +28,7 @@ class StorageDashboardUiTest {
       fileName = "app_preferences",
       key = "theme",
       value = value,
-      valueType = KeyValueType.String,
+      valueType = valueType,
       sequenceNumber = 1L,
     )
 
@@ -146,6 +147,32 @@ class StorageDashboardUiTest {
     runOnIdle { stream.emitStorage(themeUpdate("light")) }
 
     onNodeWithText("draft-value").assertIsDisplayed()
+  }
+
+  @Test
+  fun `a live type change closes an editor with a stale type`() = runComposeUiTest {
+    val stream = FakeObservationStream()
+    setContent {
+      MaterialTheme {
+        StorageDashboard(
+          dataSourceMode = DataSourceMode.Fake,
+          deviceId = "emulator-5554",
+          packageName = "com.example.app",
+          observationStreamClient = stream,
+        )
+      }
+    }
+    onNodeWithText("Key-Value").performClick()
+    waitUntil(timeoutMillis = 5_000) {
+      onAllNodesWithText("theme").fetchSemanticsNodes().isNotEmpty()
+    }
+    onNodeWithText("theme").performClick()
+    onNodeWithText("\u270E").performClick()
+    onNodeWithText("dark").performTextReplacement("draft-value")
+
+    runOnIdle { stream.emitStorage(themeUpdate("true", KeyValueType.Boolean)) }
+
+    onAllNodesWithText("draft-value").assertCountEquals(0)
   }
 
   @Test

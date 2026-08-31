@@ -65,16 +65,30 @@ fun StorageDashboard(
   var selectedTab by remember { mutableStateOf(StorageTab.Database) }
 
   // Fetch storage data from data source
-  var dataSource by remember { mutableStateOf<StorageDataSource?>(null) }
+  var dataSource by
+    remember(dataSourceMode, clientProvider, deviceId, packageName) {
+      mutableStateOf<StorageDataSource?>(null)
+    }
   val currentDataSource by rememberUpdatedState(dataSource)
-  var databases by remember { mutableStateOf<List<DatabaseInfo>>(emptyList()) }
-  var keyValueFiles by remember { mutableStateOf<List<KeyValueFile>>(emptyList()) }
-  var isLoading by remember { mutableStateOf(true) }
-  var error by remember { mutableStateOf<String?>(null) }
+  var databases by
+    remember(dataSourceMode, clientProvider, deviceId, packageName) {
+      mutableStateOf<List<DatabaseInfo>>(emptyList())
+    }
+  var keyValueFiles by
+    remember(dataSourceMode, clientProvider, deviceId, packageName) {
+      mutableStateOf<List<KeyValueFile>>(emptyList())
+    }
+  var isLoading by
+    remember(dataSourceMode, clientProvider, deviceId, packageName) { mutableStateOf(true) }
+  var error by
+    remember(dataSourceMode, clientProvider, deviceId, packageName) {
+      mutableStateOf<String?>(null)
+    }
 
   // Live key/value changes pushed by the daemon. Highlight expiry is tracked per key rather than
   // as one shared deadline, so a later change can't cut short an earlier key's highlight.
-  var highlightExpiries by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
+  var highlightExpiries by
+    remember(deviceId, packageName) { mutableStateOf<Map<String, Long>>(emptyMap()) }
   // Incremented for every live update per key. An optimistic save snapshots its key's generation
   // before suspending, so an A -> B -> A update sequence cannot be mistaken for "unchanged".
   var storageUpdateGenerations by

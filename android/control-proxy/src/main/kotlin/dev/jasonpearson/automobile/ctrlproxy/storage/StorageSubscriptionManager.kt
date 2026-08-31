@@ -366,6 +366,9 @@ class StorageSubscriptionManager(private val context: Context) {
           return Result.success(existing.subscription)
         }
 
+        // Commit the subscription only after observer registration succeeds. Otherwise a retry
+        // would short-circuit against state that can never receive a change notification.
+        subscriptions[subscriptionId] = SubscriptionState(subscription)
         Log.d(TAG, "Subscribed to $subscriptionId")
         Result.success(subscription)
       }

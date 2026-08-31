@@ -2815,6 +2815,42 @@ describe("DeviceDataStreamSocketServer", () => {
       ]);
     });
 
+    it("does not retain a closed socket after its final teardown fails", async () => {
+      const calls: StorageSubReq[] = [];
+      let notifyFailedTeardown: (() => void) | undefined;
+      const failedTeardown = new Promise<void>((resolve) => {
+        notifyFailedTeardown = resolve;
+      });
+      server.setOnStorageSubscriptionRequested(async (request) => {
+        calls.push(request);
+        if (!request.subscribe) {
+          notifyFailedTeardown?.();
+          throw new Error("runner unavailable");
+        }
+      });
+      const socket = new FakeSocket();
+      await server.processLineForTest(
+        socket,
+        JSON.stringify({
+          id: "subscribe_storage",
+          command: "subscribe_storage",
+          deviceId: "emulator-5554",
+          packageName: "com.example.app",
+          fileName: "prefs.xml",
+        }),
+      );
+
+      server.closeConnectionForTest(socket);
+      await failedTeardown;
+      server.closeConnectionForTest(socket);
+      await Promise.resolve();
+
+      expect(calls).toEqual([
+        expect.objectContaining({ subscribe: true }),
+        expect.objectContaining({ subscribe: false }),
+      ]);
+    });
+
     it("retries a shared observer after concurrent registration failures", async () => {
       const calls: StorageSubReq[] = [];
       server.setOnStorageSubscriptionRequested(async (request) => {

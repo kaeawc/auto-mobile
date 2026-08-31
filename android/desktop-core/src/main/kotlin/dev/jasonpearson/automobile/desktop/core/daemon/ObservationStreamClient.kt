@@ -110,6 +110,9 @@ class ObservationStreamClient(
   // mutated while holding this lock, so a read loop's generation check and connect()/disconnect()'s
   // reassignment can never interleave.
   private val ownershipLock = Any()
+  // A request frame is three writer operations (payload, newline, flush). Keep them atomic across
+  // UI lifecycle commands and read-loop pong responses.
+  private val writerLock = Any()
 
   // Single owning reference to the live transport. Closed at its death point in the read loop (EOF
   // or read error) and in disconnect(), so no reconnect abandons a still-open socket (issue #5261).
@@ -147,11 +150,12 @@ class ObservationStreamClient(
   override val performanceUpdates: SharedFlow<PerformanceStreamUpdate> =
     _performanceUpdates.asSharedFlow()
 
-  // Storage updates must not be dropped: a lost write leaves an inspector permanently stale.
-  // This pane-scoped channel decouples a delayed UI collector from the socket reader, which must
-  // continue processing pings and other multiplexed frame types.
+  // Storage updates must not be dropped, but the multiplexed socket reader must remain free to
+  // process pings and other frames. An unbounded channel transfers updates losslessly to a
+  // dedicated flow emitter.
   private val storageUpdateChannel = Channel<StorageStreamUpdate>(Channel.UNLIMITED)
-  override val storageUpdates = storageUpdateChannel.receiveAsFlow()
+  private val _storageUpdates = MutableSharedFlow<StorageStreamUpdate>(replay = 1)
+  override val storageUpdates: SharedFlow<StorageStreamUpdate> = _storageUpdates.asSharedFlow()
 
   // A dashboard may issue several registrations before its acknowledgement collector starts.
   // Keep every correlated response until that one pane consumes it; replay=1 loses all but the
@@ -167,6 +171,14 @@ class ObservationStreamClient(
   // Flow for connection state
   private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
   override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+
+  init {
+    scope.launch {
+      for (update in storageUpdateChannel) {
+        _storageUpdates.emit(update)
+      }
+    }
+  }
 
   // Requested observation cadence, remembered so it is re-applied on every (re)subscribe (so the
   // cadence survives reconnects). Managed via setCadence(); null means "use the daemon's default".
@@ -396,20 +408,19 @@ class ObservationStreamClient(
   }
 
   private fun sendRequest(request: StreamRequest): Boolean {
-    return try {
-      val message = json.encodeToString(serializer<StreamRequest>(), request)
-      synchronized(ownershipLock) {
-        val currentWriter = transport?.writer ?: return false
-        // write/newLine/flush form a single protocol frame. Pongs originate in the read loop
-        // while storage lifecycle commands originate in Compose, so this must be atomic.
+    val message = json.encodeToString(serializer<StreamRequest>(), request)
+    return synchronized(writerLock) {
+      val currentWriter =
+        synchronized(ownershipLock) { transport?.writer } ?: return@synchronized false
+      try {
         currentWriter.write(message)
         currentWriter.newLine()
         currentWriter.flush()
+        true
+      } catch (e: Exception) {
+        log.warn("Failed to send request: ${e.message}")
+        false
       }
-      true
-    } catch (e: Exception) {
-      log.warn("Failed to send request: ${e.message}")
-      false
     }
   }
 
@@ -607,26 +618,21 @@ class ObservationStreamClient(
         if (storageEvent == null) {
           log.warn("storage_update without a storageEvent payload, ignoring")
         } else {
-          if (
-            !storageUpdateChannel
-              .trySend(
-                StorageStreamUpdate(
-                  deviceId = response.deviceId,
-                  // The frame's own timestamp is the daemon's receive clock; the event carries
-                  // the device-side time the change actually happened, which is what ordering
-                  // wants.
-                  timestamp = storageEvent.timestamp,
-                  packageName = storageEvent.packageName,
-                  fileName = storageEvent.fileName,
-                  key = storageEvent.key,
-                  value = storageEvent.value,
-                  valueType = KeyValueType.fromProtocolName(storageEvent.valueType),
-                  sequenceNumber = storageEvent.sequenceNumber,
-                )
-              )
-              .isSuccess
-          ) {
-            log.warn("Dropping storage update because the stream client has been disposed")
+          val update =
+            StorageStreamUpdate(
+              deviceId = response.deviceId,
+              // The frame's own timestamp is the daemon's receive clock; the event carries the
+              // device-side time the change actually happened, which is what ordering wants.
+              timestamp = storageEvent.timestamp,
+              packageName = storageEvent.packageName,
+              fileName = storageEvent.fileName,
+              key = storageEvent.key,
+              value = storageEvent.value,
+              valueType = KeyValueType.fromProtocolName(storageEvent.valueType),
+              sequenceNumber = storageEvent.sequenceNumber,
+            )
+          if (storageUpdateChannel.trySend(update).isFailure) {
+            log.warn("Storage update channel closed before update delivery")
           }
         }
       }

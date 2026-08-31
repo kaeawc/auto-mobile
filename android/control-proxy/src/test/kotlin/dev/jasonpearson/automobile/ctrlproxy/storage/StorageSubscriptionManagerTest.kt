@@ -520,6 +520,72 @@ class StorageSubscriptionManagerTest {
     verify { contentResolver.unregisterContentObserver(any()) }
   }
 
+  @Test
+  fun `unsubscribe waits for in-flight fetch and clears its buffered events`() = runBlocking {
+    val observerSlot = slot<ContentObserver>()
+    val subscribeBundle =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString("result", """{"fileName":"auth","subscribed":true}""")
+      }
+    fun changesBundle(sequence: Long) =
+      Bundle().apply {
+        putBoolean("success", true)
+        putString(
+          "result",
+          StorageProtocolSerializer.responseToJson(
+            StorageResponse.Changes(
+              "auth",
+              listOf(
+                StorageChangeEvent(
+                  fileName = "auth",
+                  key = "key-$sequence",
+                  value = sequence.toString(),
+                  type = "LONG",
+                  timestamp = sequence,
+                  sequenceNumber = sequence,
+                )
+              ),
+            )
+          ),
+        )
+      }
+    val fetchEntered = java.util.concurrent.CountDownLatch(1)
+    val releaseFetch = java.util.concurrent.CountDownLatch(1)
+    val fetchCalls = java.util.concurrent.atomic.AtomicInteger()
+    every { contentResolver.call(any<Uri>(), eq("subscribeToFile"), any(), any()) } returns
+      subscribeBundle
+    every { contentResolver.call(any<Uri>(), eq("unsubscribeFromFile"), any(), any()) } returns
+      Bundle()
+    every { contentResolver.call(any<Uri>(), eq("getChanges"), any(), any()) } answers
+      {
+        val call = fetchCalls.incrementAndGet()
+        if (call == 1) {
+          fetchEntered.countDown()
+          assertTrue(releaseFetch.await(1, java.util.concurrent.TimeUnit.SECONDS))
+        }
+        changesBundle(call.toLong())
+      }
+    every { contentResolver.registerContentObserver(any(), any(), capture(observerSlot)) } returns
+      Unit
+
+    assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+    val fetchThread = Thread { observerSlot.captured.onChange(false) }
+    fetchThread.start()
+    assertTrue(fetchEntered.await(1, java.util.concurrent.TimeUnit.SECONDS))
+
+    val unsubscribeThread = Thread { manager.unsubscribe("com.example.app", "auth") }
+    unsubscribeThread.start()
+    releaseFetch.countDown()
+    fetchThread.join(1_000)
+    unsubscribeThread.join(1_000)
+    assertTrue(manager.subscribe("com.example.app", "auth").isSuccess)
+    observerSlot.captured.onChange(false)
+
+    val received = withTimeout(1_000) { manager.changeEvents.take(1).toList() }
+    assertEquals(listOf(2L), received.map { it.sequenceNumber })
+  }
+
   // ================= Active Subscriptions Tests =================
 
   @Test

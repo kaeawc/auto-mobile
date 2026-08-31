@@ -257,34 +257,36 @@ fun AutoMobileDesktopApp(
         delay(DESKTOP_SESSION_HEARTBEAT_MS)
         continue
       }
-      if (refreshDeviceEpochs) {
-        val sessionUuids = runCatching {
-          withContext(Dispatchers.IO) {
-            resourceClient.readResource(BOOTED_DEVICES_RESOURCE_URI)
-          }
-        }
-          .onFailure {
-            LOG.warn("Failed to refresh device epochs after daemon recovery: ${it.message}")
-          }
-          .getOrNull()
-          ?.let { result ->
-            when (result) {
-              is ResourceReadResult.Success -> parseBootedDeviceSessionUuids(result.content)
-              is ResourceReadResult.Error -> {
-                LOG.warn("Failed to refresh device epochs after daemon recovery: ${result.message}")
-                emptyMap()
-              }
-            }
-          }
-          .orEmpty()
-        if (sessionUuids.isNotEmpty()) {
-          workspaceViewModel.onAction(WorkspaceAction.RefreshDeviceSessionUuids(sessionUuids))
-          refreshDeviceEpochs = false
-        }
-      }
       // Registered: heartbeat until one fails, then fall through to re-register.
       var alive = true
       while (isActive && alive) {
+        if (refreshDeviceEpochs) {
+          val sessionUuids = runCatching {
+            withContext(Dispatchers.IO) {
+              resourceClient.readResource(BOOTED_DEVICES_RESOURCE_URI)
+            }
+          }
+            .onFailure {
+              LOG.warn("Failed to refresh device epochs after daemon recovery: ${it.message}")
+            }
+            .getOrNull()
+            ?.let { result ->
+              when (result) {
+                is ResourceReadResult.Success -> parseBootedDeviceSessionUuids(result.content)
+                is ResourceReadResult.Error -> {
+                  LOG.warn(
+                    "Failed to refresh device epochs after daemon recovery: ${result.message}"
+                  )
+                  emptyMap()
+                }
+              }
+            }
+            .orEmpty()
+          if (sessionUuids.isNotEmpty()) {
+            workspaceViewModel.onAction(WorkspaceAction.RefreshDeviceSessionUuids(sessionUuids))
+            refreshDeviceEpochs = false
+          }
+        }
         delay(DESKTOP_SESSION_HEARTBEAT_MS)
         alive =
           runCatching { withContext(Dispatchers.IO) { session.heartbeat() } }

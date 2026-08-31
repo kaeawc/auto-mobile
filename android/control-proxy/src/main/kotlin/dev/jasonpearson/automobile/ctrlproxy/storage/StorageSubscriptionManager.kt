@@ -435,6 +435,7 @@ class StorageSubscriptionManager(private val context: Context) {
 
     // Remove the subscription
     subscriptions.remove(subscriptionId)
+    changeEventBuffers.remove(eventBufferKey(packageName, fileName))
 
     // Unregister package observer if no more subscriptions for this package
     unregisterPackageObserverIfUnused(packageName, fileName)
@@ -647,6 +648,7 @@ class StorageSubscriptionManager(private val context: Context) {
     // Clear any remaining state
     subscriptions.clear()
     packageObservers.clear()
+    changeEventBuffers.clear()
     changeEventSignal.close()
   }
 
@@ -768,16 +770,26 @@ class StorageSubscriptionManager(private val context: Context) {
   }
 
   private fun enqueueChangeEvent(event: PreferenceChangeEvent): Boolean {
-    val bufferKey = "${event.packageName.length}:${event.packageName}:${event.fileName}"
-    val buffer = changeEventBuffers.computeIfAbsent(bufferKey) { SubscriptionEventBuffer() }
-    synchronized(buffer) {
-      if (buffer.events.size == STORAGE_EVENT_BUFFER_CAPACITY) {
-        buffer.events.removeFirst()
+    val subscriptionId = "${event.packageName}:${event.fileName}"
+    val lock = subscriptionLocks.computeIfAbsent(subscriptionId) { Any() }
+    synchronized(lock) {
+      if (!subscriptions.containsKey(subscriptionId)) {
+        return true
       }
-      buffer.events.addLast(event)
+      val bufferKey = eventBufferKey(event.packageName, event.fileName)
+      val buffer = changeEventBuffers.computeIfAbsent(bufferKey) { SubscriptionEventBuffer() }
+      synchronized(buffer) {
+        if (buffer.events.size == STORAGE_EVENT_BUFFER_CAPACITY) {
+          buffer.events.removeFirst()
+        }
+        buffer.events.addLast(event)
+      }
     }
     return changeEventSignal.trySend(Unit).isSuccess
   }
+
+  private fun eventBufferKey(packageName: String, fileName: String): String =
+    "${packageName.length}:$packageName:$fileName"
 
   private fun takeChangeEventBatch(): List<PreferenceChangeEvent> =
     changeEventBuffers.values.mapNotNull { buffer ->

@@ -2647,6 +2647,55 @@ describe("DeviceDataStreamSocketServer", () => {
       ]);
     });
 
+    it("releases only a closing socket's final owned observers", async () => {
+      const calls: StorageSubReq[] = [];
+      const secondaryReleased = Promise.withResolvers<void>();
+      const sharedReleased = Promise.withResolvers<void>();
+      server.setOnStorageSubscriptionRequested(async (request) => {
+        calls.push(request);
+        if (!request.subscribe && request.fileName === "secondary.xml") {
+          secondaryReleased.resolve();
+        }
+        if (!request.subscribe && request.fileName === "prefs.xml") {
+          sharedReleased.resolve();
+        }
+      });
+      const first = new FakeSocket();
+      const second = new FakeSocket();
+      const subscribe = (socket: FakeSocket, id: string, fileName: string) =>
+        server.processLineForTest(
+          socket,
+          JSON.stringify({
+            id,
+            command: "subscribe_storage",
+            deviceId: "emulator-5554",
+            packageName: "com.example.app",
+            fileName,
+          }),
+        );
+
+      await subscribe(first, "first-shared", "prefs.xml");
+      await subscribe(first, "first-secondary", "secondary.xml");
+      await subscribe(second, "second-shared", "prefs.xml");
+
+      server.closeConnectionForTest(first);
+      await secondaryReleased.promise;
+      expect(calls).toEqual([
+        expect.objectContaining({ subscribe: true, fileName: "prefs.xml" }),
+        expect.objectContaining({ subscribe: true, fileName: "secondary.xml" }),
+        expect.objectContaining({ subscribe: false, fileName: "secondary.xml" }),
+      ]);
+
+      server.closeConnectionForTest(second);
+      await sharedReleased.promise;
+      expect(calls).toEqual([
+        expect.objectContaining({ subscribe: true, fileName: "prefs.xml" }),
+        expect.objectContaining({ subscribe: true, fileName: "secondary.xml" }),
+        expect.objectContaining({ subscribe: false, fileName: "secondary.xml" }),
+        expect.objectContaining({ subscribe: false, fileName: "prefs.xml" }),
+      ]);
+    });
+
     it("keeps the observer when a session UUID rotates before the retired socket closes", async () => {
       const calls: StorageSubReq[] = [];
       server.setOnStorageSubscriptionRequested(async (request) => {

@@ -175,30 +175,16 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
 
         const waitMs = getWaitMs();
         const firstWaitMs = Math.floor(waitMs / 2);
-        // Simulator recordings may contain one frame when the display remains static. Change a
-        // visible system element so the multi-frame assertion measures capture, not UI idleness.
-        await execFileAsync("xcrun", [
-          "simctl",
-          "status_bar",
-          deviceId,
-          "override",
-          "--time",
-          "9:41",
-        ]);
+        // Simulator recordings may contain one frame when the display remains static. Force a
+        // full compositor redraw so the multi-frame assertion measures capture, not UI idleness.
+        // Device readiness sets light mode before recording, making this first transition real.
+        await execFileAsync("xcrun", ["simctl", "ui", deviceId, "appearance", "dark"]);
         try {
           await defaultTimer.sleep(firstWaitMs);
-          await execFileAsync("xcrun", [
-            "simctl",
-            "status_bar",
-            deviceId,
-            "override",
-            "--time",
-            "9:42",
-          ]);
-          await defaultTimer.sleep(waitMs - firstWaitMs);
         } finally {
-          await execFileAsync("xcrun", ["simctl", "status_bar", deviceId, "clear"]);
+          await execFileAsync("xcrun", ["simctl", "ui", deviceId, "appearance", "light"]);
         }
+        await defaultTimer.sleep(waitMs - firstWaitMs);
 
         stopPayload = await runVideoRecordingCli([
           "--action",

@@ -132,6 +132,10 @@ function isAccessibilityViewClass(foregroundActivity: string): boolean {
   );
 }
 
+function isActivityInPackage(activityName: string, packageName: string): boolean {
+  return activityName === packageName || activityName.startsWith(`${packageName}.`);
+}
+
 export class RealObserveScreen implements ObserveScreen {
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -860,9 +864,21 @@ export class RealObserveScreen implements ObserveScreen {
     if (
       observed === undefined ||
       activeWindow === undefined ||
-      activeWindow.appId === observed ||
       SYSTEM_UI_WINDOW_PACKAGES.has(observed)
     ) {
+      return { sampled: false, identity: undefined };
+    }
+
+    const currentActivity =
+      result.backStack?.source === "adb" ? result.backStack.currentActivity?.name : undefined;
+    if (currentActivity && isActivityInPackage(currentActivity, observed)) {
+      // The tree and adb agree on the application, while CtrlProxy can keep a
+      // prior activity (or a view class) across same-package navigation (#5992).
+      result.activeWindow = { ...activeWindow, appId: observed, activityName: currentActivity };
+      return { sampled: false, identity: undefined };
+    }
+
+    if (activeWindow.appId === observed) {
       return { sampled: false, identity: undefined };
     }
 

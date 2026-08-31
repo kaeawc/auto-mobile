@@ -399,6 +399,55 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     );
   });
 
+  test("retracts freshness for status-bar-only multiple hierarchy roots", async () => {
+    // CtrlProxy preserves multiple extracted windows as a top-level node array.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+      packageName: "com.android.systemui",
+      foregroundActivity: "com.android.settings/.SubSettings",
+      hierarchy: {
+        node: [
+          { text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } },
+          {
+            contentDesc: "Wifi signal full.",
+            bounds: { left: 892, top: 11, right: 931, bottom: 50 },
+          },
+        ],
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.verified).toBe(false);
+  });
+
   test("a transient app transition is not flagged: the confirming read settles onto the observed app", async () => {
     // The parallel foreground sample lags the newer captured hierarchy during an
     // A→B transition: sample1 = the old app, observed hierarchy = the new app.

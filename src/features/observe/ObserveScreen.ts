@@ -103,7 +103,7 @@ function isStatusBarOnlyHierarchy(result: ObserveResult): boolean {
   }
 
   let hasBounds = false;
-  const nodes = [root];
+  const nodes = Array.isArray(root) ? [...root] : [root];
   while (nodes.length > 0) {
     const node = nodes.pop();
     if (!node) {

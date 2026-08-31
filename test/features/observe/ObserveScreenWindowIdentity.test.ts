@@ -347,6 +347,63 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.verified).toBe(true);
   });
 
+  test("uses the back-stack task owner for an activity outside its package namespace", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      packageName: "com.google.android.contacts",
+      foregroundActivity: "com.google.android.contacts/.ContactsActivity",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [{ text: "Contacts", bounds: { left: 0, top: 100, right: 200, bottom: 160 } }],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.google.android.contacts", userId: 0 });
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        backStack: {
+          execute: async () => ({
+            depth: 1,
+            activities: [],
+            tasks: [{ id: 7, packageName: "com.google.android.contacts" }],
+            currentActivity: {
+              name: "com.google.android.apps.contacts.activities.OnboardingSignInActivity",
+              taskId: 7,
+            },
+            source: "adb",
+          }),
+        } as any,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(result.activeWindow?.activityName).toBe(
+      "com.google.android.apps.contacts.activities.OnboardingSignInActivity",
+    );
+    expect(result.freshness?.verified).toBe(true);
+  });
+
   test("an expanded system-UI shade is not flagged as a wrong-window capture", async () => {
     // When the notification shade / quick settings takes accessibility focus,
     // the observed window is com.android.systemui while the resumed activity

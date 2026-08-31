@@ -136,6 +136,22 @@ function isActivityInPackage(activityName: string, packageName: string): boolean
   return activityName === packageName || activityName.startsWith(`${packageName}.`);
 }
 
+function isBackStackActivityInPackage(
+  backStack: ObserveResult["backStack"],
+  activityName: string,
+  packageName: string,
+): boolean {
+  if (isActivityInPackage(activityName, packageName)) {
+    return true;
+  }
+  const currentTaskId = backStack?.currentActivity?.taskId;
+  return (
+    backStack?.tasks.some(
+      (task) => task.id === currentTaskId && task.packageName === packageName,
+    ) === true
+  );
+}
+
 export class RealObserveScreen implements ObserveScreen {
   private device: BootedDevice;
   private adb: AdbExecutor;
@@ -871,7 +887,10 @@ export class RealObserveScreen implements ObserveScreen {
 
     const currentActivity =
       result.backStack?.source === "adb" ? result.backStack.currentActivity?.name : undefined;
-    if (currentActivity && isActivityInPackage(currentActivity, observed)) {
+    if (
+      currentActivity &&
+      isBackStackActivityInPackage(result.backStack, currentActivity, observed)
+    ) {
       // The tree and adb agree on the application, while CtrlProxy can keep a
       // prior activity (or a view class) across same-package navigation (#5992).
       result.activeWindow = { ...activeWindow, appId: observed, activityName: currentActivity };

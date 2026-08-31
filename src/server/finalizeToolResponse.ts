@@ -453,7 +453,8 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
           shouldDiffObservation(baseline, sanitized, classifyObservationAction(ctx.name, ctx.args))
         ) {
           const diff = diffObserveResult(baseline, sanitized);
-          const screenChangedWithEmptyDiff = hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff);
+          const screenChangedWithEmptyDiff =
+            hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff);
           observationOut = screenChangedWithEmptyDiff ? servedObservation : diff;
           observationDiff = {
             mode: screenChangedWithEmptyDiff ? "full" : "diff",

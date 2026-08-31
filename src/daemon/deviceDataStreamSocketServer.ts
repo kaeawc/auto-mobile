@@ -1314,16 +1314,16 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       }
       const releasedOwner = this.removeStorageSubscriptionOwner(socket, key, subscription);
       if ((releasedOwner || subscription.owners.size === 0) && subscription.owners.size === 0) {
-        void this.queueStorageOperation(key, { ...subscription, subscribe: false }).catch(
+        void this.queueStorageOperation(key, { ...subscription, subscribe: false }).then(
+          () => {
+            this.removeStorageSubscriptionIfUnowned(key, subscription);
+            this.forgetStorageSubscriptionKeyForSocket(socket, key);
+          },
           (error) => {
             logger.warn(
               `[DeviceDataStream] Failed to release storage observer for ${subscription.packageName}/${subscription.fileName}: ${errorMessage(error)}`,
             );
           },
-        );
-        void this.storageOperations.get(key)?.then(
-          () => this.removeStorageSubscriptionIfUnowned(key, subscription),
-          () => undefined,
         );
       }
     }

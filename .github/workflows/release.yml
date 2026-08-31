@@ -542,23 +542,13 @@ jobs:
             --private-key "${{ secrets.MCP_DNS_PRIVATE_KEY }}"
           ./mcp-publisher publish
 
-      - name: Publish Homebrew formula
-        id: publish_homebrew
-        # continue-on-error lets the remaining release channels (Docker) and the
-        # already-created GitHub Release complete even if the tap publish fails,
-        # rather than aborting the job mid-way. The failure is NOT swallowed:
-        # REQUIRE_TOKEN makes a missing/expired token exit non-zero, and the
-        # "Fail the release if the Homebrew publish failed" step at the end of
-        # the job re-raises that outcome so the workflow result goes red. Before
-        # REQUIRE_TOKEN, a never-configured token made the script exit 0 and the
-        # formula never landed across every release, while the run stayed green.
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAG: ${{ steps.version.outputs.tag }}
-          REPO: ${{ github.repository }}
-          REQUIRE_TOKEN: "1"
-        run: bash scripts/release/update-brew-formula.sh
+      # Homebrew publishing moved to its own terminal `publish-homebrew` job
+      # (needs: verify-and-release). A tap failure there fails the workflow
+      # visibly WITHOUT failing verify-and-release, so the Conveyor desktop jobs
+      # (needs: [validate-release-tag, verify-and-release]) are not skipped and
+      # the macOS/Linux desktop distributions still ship. Keeping it here as a
+      # continue-on-error step plus an end-of-job re-raise would fail
+      # verify-and-release and skip Conveyor in conveyor mode.
 
       - name: Free Disk Space
         continue-on-error: true
@@ -685,19 +675,30 @@ jobs:
           MSG="$MSG build time, ensuring integrity verification."
           echo "$MSG" >> "$S"
 
-      - name: Fail the release if the Homebrew publish failed
-        # The Homebrew step is continue-on-error so it never aborts the other
-        # release channels or the already-created GitHub Release. Its outcome
-        # must still reach the workflow result, though — otherwise a stale tap
-        # (missing/expired token, or a clone/push failure) hides behind a green
-        # run, which is the exact regression REQUIRE_TOKEN exists to expose.
-        # Re-raise it here, after every other channel has published. Safe to
-        # re-run: the tap publish is idempotent and the other channels are
-        # guarded against duplicates.
-        if: steps.publish_homebrew.outcome == 'failure'
-        run: |
-          echo "::error::Homebrew formula publish failed; the kaeawc/homebrew-tap formula may be stale. See the 'Publish Homebrew formula' step above." >&2
-          exit 1
+  # --- Homebrew formula publish ------------------------------------------------
+  # A terminal job, not a step in verify-and-release: the tap publish depends on
+  # npm having published (it resolves the just-published tarball's sha256), so it
+  # needs verify-and-release — but its failure must NOT fail verify-and-release,
+  # or the Conveyor desktop jobs (needs: [validate-release-tag,
+  # verify-and-release]) would be skipped and the macOS/Linux distributions would
+  # be dropped in conveyor mode. As its own job the failure still turns the
+  # overall workflow red (surfaced), while REQUIRE_TOKEN keeps a missing/expired
+  # token from silently no-oping. Safe to re-run: the publish is idempotent.
+  publish-homebrew:
+    name: "Publish Homebrew formula"
+    if: github.event_name == 'workflow_dispatch' && needs.validate-release-tag.outputs.is_release_tag == 'true'
+    needs: [validate-release-tag, verify-and-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+      - name: Publish Homebrew formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ needs.validate-release-tag.outputs.tag }}
+          REPO: ${{ github.repository }}
+          REQUIRE_TOKEN: "1"
+        run: bash scripts/release/update-brew-formula.sh
 
   # --- Conveyor desktop publish (macOS + Linux) --------------------------------
   # Gated on the DESKTOP_PUBLISHER repo variable. When it is set to "conveyor", the macOS + Linux

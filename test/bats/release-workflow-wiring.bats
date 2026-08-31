@@ -463,24 +463,49 @@
   [ "$status" -eq 0 ]
   [ "$output" = "false" ]
 
-  local names publish npm mcp brew release
+  local names publish npm mcp release
   names="$(yq -r '.jobs."verify-and-release".steps[].name' "$workflow")"
   publish="$(printf '%s\n' "$names" \
     | grep -nxF 'Publish Android Libraries to Maven Central' | cut -d: -f1)"
   npm="$(printf '%s\n' "$names" | grep -nxF 'Publish to npm' | cut -d: -f1)"
   mcp="$(printf '%s\n' "$names" | grep -nxF 'Publish to MCP Registry' | cut -d: -f1)"
-  brew="$(printf '%s\n' "$names" | grep -nxF 'Publish Homebrew formula' | cut -d: -f1)"
   release="$(printf '%s\n' "$names" | grep -nxF 'Create GitHub Release' | cut -d: -f1)"
   [ -n "$publish" ]
   [ -n "$npm" ]
   [ -n "$mcp" ]
-  [ -n "$brew" ]
   [ -n "$release" ]
   [ "$release" -lt "$publish" ]
   [ "$publish" -lt "$npm" ]
   [ "$npm" -lt "$mcp" ]
-  [ "$mcp" -lt "$brew" ]
-  [ "$npm" -lt "$brew" ]
+}
+
+# Homebrew publishing is a terminal job, not a step in verify-and-release, so a
+# tap failure does not fail verify-and-release and therefore cannot skip the
+# Conveyor desktop jobs (which need verify-and-release). It still needs
+# verify-and-release so the npm tarball it hashes has already published, and its
+# own failure turns the workflow red.
+@test "release.yml publishes Homebrew as a dependent job, not inside verify-and-release" {
+  wiring_requires_yq
+  local workflow=".github/workflows/release.yml"
+
+  # Not a step in verify-and-release anymore.
+  run bash -c "yq -r '.jobs.\"verify-and-release\".steps[].name' '$workflow' \
+    | grep -Fxq 'Publish Homebrew formula'"
+  [ "$status" -ne 0 ]
+
+  # Exists as its own job depending on verify-and-release.
+  run yq -r '.jobs."publish-homebrew".needs | contains(["verify-and-release"])' "$workflow"
+  [ "$output" = "true" ]
+
+  # The job runs the publish script and requires the token (REQUIRE_TOKEN=1).
+  run yq -r '.jobs."publish-homebrew".steps[] | select(.run != null) | .run' "$workflow"
+  [[ "$output" == *"scripts/release/update-brew-formula.sh"* ]]
+  run bash -c "yq -r '.jobs.\"publish-homebrew\".steps[].env.REQUIRE_TOKEN' '$workflow' | grep -Fxq 1"
+  [ "$status" -eq 0 ]
+
+  # Conveyor must not depend on the Homebrew job, so a tap failure can't skip it.
+  run yq -r '.jobs."resolve-conveyor-version".needs | contains(["publish-homebrew"])' "$workflow"
+  [ "$output" = "false" ]
 }
 
 @test "release.yml preflight step calls the extracted preflight script (#4853)" {

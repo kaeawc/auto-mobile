@@ -28,10 +28,14 @@ on:
         type: string
         default: "v0.1.20260608"
       darling-components:
-        description: "Darling CMake COMPONENTS list (cli_dev = CLI + Xcode-tool frameworks)"
+        description: >-
+          Darling CMake COMPONENTS list. cli_dev (CLI + Xcode-tool frameworks)
+          alone fails to generate on current tags — its Quartz stub reexports
+          PDFKit, which only gui_stubs adds (upstream darlinghq/darling#1465) —
+          so gui_stubs rides along by default.
         required: false
         type: string
-        default: "cli_dev"
+        default: "cli_dev,gui_stubs"
       xcode-archive-url:
         description: >-
           OPTIONAL tar archive of YOUR OWN extracted Xcode.app or
@@ -62,7 +66,7 @@ jobs:
     timeout-minutes: 350
     env:
       DARLING_REF: ${{ inputs.darling-ref || 'v0.1.20260608' }}
-      DARLING_COMPONENTS: ${{ inputs.darling-components || 'cli_dev' }}
+      DARLING_COMPONENTS: ${{ inputs.darling-components || 'cli_dev,gui_stubs' }}
     steps:
       - name: "Checkout code"
         uses: actions/checkout@v6

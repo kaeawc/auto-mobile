@@ -123,10 +123,4 @@ test.concurrent.each([1, 2])("load %i", async () => {
     expect(matches(messages, MISSING_TIMEOUT)).toBe(false);
     expect(matches(messages, TIMEOUT_TOO_SMALL)).toBe(false);
   });
-
-  // AC4 is scoped: the rest of the suite is thousands of sub-100ms unit tests
-  // where a mandatory timeout literal would be noise. Only stress tests, whose
-  // runtime is inherently unbounded, carry the requirement. That scoping now
-  // lives in .oxlintrc.json's `test/stress/**` override and is asserted in
-  // oxlintConfigScoping.test.ts rather than against the rule in isolation.
 });

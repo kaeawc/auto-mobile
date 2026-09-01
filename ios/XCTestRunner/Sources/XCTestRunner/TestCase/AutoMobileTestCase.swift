@@ -186,7 +186,7 @@ open class AutoMobileTestCase: XCTestCase {
             "MCP_ENDPOINT",
         ]) {
             PerfTimer.log("makeConfiguration: using HTTP transport endpoint=\(endpoint)")
-            let normalizedEndpoint = normalizeEndpoint(endpoint)
+            let normalizedEndpoint = MCPEndpoint.normalize(endpoint)
             guard let endpointURL = URL(string: normalizedEndpoint) else {
                 throw AutoMobileTestCaseError.invalidEndpoint(normalizedEndpoint)
             }
@@ -248,17 +248,6 @@ open class AutoMobileTestCase: XCTestCase {
             return suffix.trimmingCharacters(in: CharacterSet(charactersIn: "]"))
         }
         return fullName
-    }
-
-    private func normalizeEndpoint(_ endpoint: String) -> String {
-        let trimmed = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.contains("/auto-mobile/streamable") || trimmed.contains("/auto-mobile/sse") {
-            return trimmed
-        }
-        if trimmed.hasSuffix("/auto-mobile") {
-            return "\(trimmed)/streamable"
-        }
-        return "\(trimmed)/auto-mobile/streamable"
     }
 
     private struct BootedDevicesResource: Decodable {
@@ -327,7 +316,7 @@ open class AutoMobileTestCase: XCTestCase {
             "AUTOMOBILE_MCP_HTTP_URL",
             "MCP_ENDPOINT",
         ]) {
-            let normalizedEndpoint = normalizeEndpoint(endpoint)
+            let normalizedEndpoint = MCPEndpoint.normalize(endpoint)
             guard let endpointURL = URL(string: normalizedEndpoint) else {
                 throw AutoMobileTestCaseError.invalidEndpoint(normalizedEndpoint)
             }

@@ -11,7 +11,7 @@ final class AutoMobileTestTimingClient {
             "AUTOMOBILE_MCP_HTTP_URL",
             "MCP_ENDPOINT",
         ]) {
-            let normalizedEndpoint = AutoMobileTestTimingClient.normalizeEndpoint(endpoint)
+            let normalizedEndpoint = MCPEndpoint.normalize(endpoint)
             guard let endpointURL = URL(string: normalizedEndpoint) else {
                 throw MCPClientError.invalidEndpoint(normalizedEndpoint)
             }
@@ -28,16 +28,5 @@ final class AutoMobileTestTimingClient {
     func readResource(uri: String, timeout: TimeInterval) throws -> String {
         let response = try mcpClient.readResource(uri: uri, timeout: timeout)
         return response.text
-    }
-
-    private static func normalizeEndpoint(_ endpoint: String) -> String {
-        let trimmed = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.contains("/auto-mobile/streamable") || trimmed.contains("/auto-mobile/sse") {
-            return trimmed
-        }
-        if trimmed.hasSuffix("/auto-mobile") {
-            return "\(trimmed)/streamable"
-        }
-        return "\(trimmed)/auto-mobile/streamable"
     }
 }

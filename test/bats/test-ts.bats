@@ -98,6 +98,19 @@ run_lane() {
   [[ "$output" == *".integration.test.ts"* ]]
 }
 
+@test "integration lane targets only requested integration paths" {
+  run_lane integration test/example.integration.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/example.integration.test.ts"* ]]
+  [[ "$output" != *" .integration.test.ts "* ]]
+}
+
+@test "integration lane rejects a requested unit-test path" {
+  run_lane integration test/example.test.ts
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"No integration test paths were selected."* ]]
+}
+
 @test "stress lane is explicit" {
   run_lane stress
   [ "$status" -eq 0 ]
@@ -168,6 +181,17 @@ run_lane() {
     PATH="$STUB_BIN:$PATH" \
     BUN_TEST_TIMING_BASE_REF=origin/main \
     TIMING_CHANGED_FILES='test/fakes/FakeTimer.ts\n' \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"measuring Bun-affected unit tests"* ]]
+  grep -q -- "--changed=origin/main" "$BUN_ARGS_FILE"
+}
+
+@test "timing gate selects Bun-affected unit tests for runtime changes" {
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    TIMING_CHANGED_FILES='package.json\n' \
     bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
   [ "$status" -eq 0 ]
   [[ "$output" == *"measuring Bun-affected unit tests"* ]]

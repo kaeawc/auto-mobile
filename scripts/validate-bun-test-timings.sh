@@ -24,13 +24,20 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
   changed_count=0
   affects_unit_tests=false
   for file in ${changed_files[@]+"${changed_files[@]}"}; do
-    if [[ "$file" == src/* ]]; then
-      affects_unit_tests=true
-    elif [[ "$file" == test/*.ts && "$file" != *.test.ts ]]; then
-      # Shared fakes, fixtures, and test harnesses can slow every importing
-      # unit test even though they are not test files themselves.
-      affects_unit_tests=true
-    fi
+    case "$file" in
+      src/*|package.json|bun.lock|bunfig.toml|scripts/test-ts.sh|scripts/validate-bun-test-timings.sh)
+        # Runtime inputs can change test loading, preloads, or scheduling for
+        # every unit test even when no test file itself changed.
+        affects_unit_tests=true
+        ;;
+      test/*.ts)
+        # Shared fakes, fixtures, and test harnesses can slow every importing
+        # unit test even though they are not test files themselves.
+        if [[ "$file" != *.test.ts ]]; then
+          affects_unit_tests=true
+        fi
+        ;;
+    esac
   done
 
   if [[ "$affects_unit_tests" == "true" ]]; then

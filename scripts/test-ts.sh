@@ -223,10 +223,58 @@ case "$mode" in
     if [[ "$runner_os" != "Windows" ]]; then
       integration_args+=(--no-orphans "--parallel=${integration_workers}")
     fi
-    run_test_command "${integration_args[@]}" ".integration.test.ts" "$@"
+    requested_paths=()
+    passthrough_args=()
+    for arg in "$@"; do
+      if [[ "$arg" == *.test.ts ]]; then
+        if [[ "$arg" == *.integration.test.ts ]]; then
+          requested_paths+=("$arg")
+        fi
+      else
+        passthrough_args+=("$arg")
+      fi
+    done
+    if [[ "${#requested_paths[@]}" -gt 0 ]]; then
+      run_test_command \
+        "${integration_args[@]}" \
+        "${requested_paths[@]+"${requested_paths[@]}"}" \
+        "${passthrough_args[@]+"${passthrough_args[@]}"}"
+    elif [[ "$#" -eq 0 || "${#passthrough_args[@]}" -eq "$#" ]]; then
+      run_test_command \
+        "${integration_args[@]}" \
+        ".integration.test.ts" \
+        "${passthrough_args[@]+"${passthrough_args[@]}"}"
+    else
+      echo "No integration test paths were selected." >&2
+      exit 2
+    fi
     ;;
   stress)
-    run_test_command bun test --timeout "$per_test_timeout_ms" test/stress "$@"
+    requested_paths=()
+    passthrough_args=()
+    for arg in "$@"; do
+      if [[ "$arg" == *.test.ts ]]; then
+        if [[ "$arg" == test/stress/* ]]; then
+          requested_paths+=("$arg")
+        fi
+      else
+        passthrough_args+=("$arg")
+      fi
+    done
+    if [[ "${#requested_paths[@]}" -gt 0 ]]; then
+      run_test_command \
+        bun test --timeout "$per_test_timeout_ms" \
+        "${requested_paths[@]+"${requested_paths[@]}"}" \
+        "${passthrough_args[@]+"${passthrough_args[@]}"}"
+    elif [[ "$#" -eq 0 || "${#passthrough_args[@]}" -eq "$#" ]]; then
+      run_test_command \
+        bun test --timeout "$per_test_timeout_ms" \
+        test/stress \
+        "${passthrough_args[@]+"${passthrough_args[@]}"}"
+    else
+      echo "No stress test paths were selected." >&2
+      exit 2
+    fi
     ;;
   coverage)
     run_test_command \

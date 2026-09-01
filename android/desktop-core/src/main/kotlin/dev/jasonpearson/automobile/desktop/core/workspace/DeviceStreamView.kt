@@ -116,9 +116,12 @@ fun DeviceStreamView(
     },
   screenRecordingSettingsLauncher: ScreenRecordingSettingsLauncher =
     MacScreenRecordingSettingsLauncher(),
-  // How long the armed control surface may keep running on the newest frame while the stream is
-  // not currently reporting Streaming (see the freshness gate below). Injectable for tests.
-  armedFrameRetentionMs: Long = ARMED_FRAME_RETENTION_MS,
+  // The grace period the armed control surface may keep running on the newest frame while the
+  // stream is not currently reporting Streaming (see the grace gate below). A suspend seam —
+  // mirroring NavigationFacet's resolveTimeout — so tests drive expiry, cancellation, and
+  // restart-on-source-swap ordering deterministically (e.g. awaiting a CompletableDeferred) with
+  // zero wall time. Production waits the real retention window.
+  armedFrameGraceWait: suspend () -> Unit = { delay(ARMED_FRAME_RETENTION_MS) },
 ) {
   // The pane's fixed per-mode preset when there's no controller: an armed (user-driven) pane wants
   // the sharpest High stream; unfocused farm mirrors stay on the cheap Low preset.
@@ -202,7 +205,8 @@ fun DeviceStreamView(
   // (its capture emits no frames while idle), so the very first source swap would disarm
   // immediately and recreate the Tap Targets flicker this gate exists to prevent. While Streaming
   // the window is continuously reset; once Streaming is lost the armed surface may keep using the
-  // newest frame for [armedFrameRetentionMs], then control disarms — preserving "stale pixels are
+  // newest frame until [armedFrameGraceWait] completes, then control disarms — preserving "stale
+  // pixels are
   // never clickable" (#5255). Keyed on [source] as well: a swap while the OLD source was already
   // mid-grace (same non-Streaming boolean, so no transition) restarts the window for the fresh
   // connection attempt rather than letting the old source's clock expire it. The restart cannot
@@ -214,7 +218,7 @@ fun DeviceStreamView(
     if (streamingNow) {
       armedGraceExpired = false
     } else {
-      delay(armedFrameRetentionMs)
+      armedFrameGraceWait()
       armedGraceExpired = true
     }
   }

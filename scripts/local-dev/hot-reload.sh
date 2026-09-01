@@ -108,14 +108,16 @@ IOS_NEEDS_RESTART=false
 IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=false
 
 # Desktop crash-relaunch backoff. If hotRun exits immediately (e.g. a hot-reload
-# config failure), relaunching every poll interval would hammer Gradle for the
-# whole watcher lifetime and repeatedly clobber the diagnostic log. Cap attempts
-# and back off exponentially; reset only once the app has stayed up a while.
+# config failure), relaunching every poll interval would hammer Gradle and
+# repeatedly clobber the diagnostic log. Back off exponentially up to a capped
+# delay, then keep retrying at that cap forever — never permanently give up, so a
+# subsequently-fixed error still recovers (source-change detection is gone; this
+# liveness check is the only relaunch path). Reset only once the app stays up.
 DESKTOP_RELAUNCH_ATTEMPTS=0
 DESKTOP_RELAUNCH_NEXT_TS=0
 DESKTOP_LAST_LAUNCH_TS=0
-DESKTOP_RELAUNCH_MAX=5
-DESKTOP_RELAUNCH_BACKOFF_CAP=300  # seconds
+DESKTOP_RELAUNCH_BACKOFF_CAP=300  # seconds (retry ceiling once backoff saturates)
+DESKTOP_RELAUNCH_SHIFT_CAP=16     # clamp the 2^n exponent so the shift can't overflow
 DESKTOP_RELAUNCH_STABLE_SECS=30   # uptime before a launch is deemed healthy
 
 usage() {
@@ -607,6 +609,16 @@ get_current_simulator() {
 unified_watch_loop() {
   local poll_interval="${1:-2}"
 
+  # Integer seconds base for the desktop backoff math. poll_interval may be
+  # fractional (e.g. --poll-interval 0.5, which `sleep` accepts); Bash arithmetic
+  # is integer-only and would abort the whole watcher under `set -e`. Floor to the
+  # integer part, minimum 1s.
+  local desktop_backoff_base="${poll_interval%%.*}"
+  case "${desktop_backoff_base}" in
+    '' | *[!0-9]*) desktop_backoff_base=1 ;;
+  esac
+  [[ ${desktop_backoff_base} -lt 1 ]] && desktop_backoff_base=1
+
   log_info "Starting unified watch loop (poll interval ${poll_interval}s)..."
   log_info "Watching: Desktop app=$(bool_str ${DESKTOP_APP_ENABLED}), Android=$(bool_str ${ANDROID_ENABLED}), iOS=$(bool_str ${IOS_ENABLED}), TypeScript=true"
   if [[ "${IOS_ENABLED}" == "true" ]]; then
@@ -654,7 +666,8 @@ unified_watch_loop() {
     # source change — doing so would kill the live-reload process for every keystroke
     # and reintroduce the rebuild-under-JVM NoClassDefFoundError trap. We only relaunch
     # if the app process has died (e.g. crashed or the reload daemon exited), with
-    # bounded exponential backoff so an immediately-exiting hotRun cannot spin.
+    # exponential backoff up to a capped delay — then keep retrying at that cap so a
+    # later-fixed error still recovers, rather than staying down for the session.
     if [[ "${DESKTOP_APP_ENABLED}" == "true" ]]; then
       local desktop_pid now_ts
       desktop_pid="$(cat "${DESKTOP_APP_PID_FILE}" 2>/dev/null || true)"
@@ -669,19 +682,15 @@ unified_watch_loop() {
           DESKTOP_RELAUNCH_ATTEMPTS=0
           DESKTOP_RELAUNCH_NEXT_TS=0
         fi
-      elif [[ ${DESKTOP_RELAUNCH_ATTEMPTS} -ge ${DESKTOP_RELAUNCH_MAX} ]]; then
-        : # Gave up after DESKTOP_RELAUNCH_MAX attempts; stay quiet until it recovers.
       elif [[ ${now_ts} -ge ${DESKTOP_RELAUNCH_NEXT_TS} ]]; then
         DESKTOP_RELAUNCH_ATTEMPTS=$(( DESKTOP_RELAUNCH_ATTEMPTS + 1 ))
-        local backoff=$(( POLL_INTERVAL * (1 << (DESKTOP_RELAUNCH_ATTEMPTS - 1)) ))
+        local backoff_shift=$(( DESKTOP_RELAUNCH_ATTEMPTS - 1 ))
+        [[ ${backoff_shift} -gt ${DESKTOP_RELAUNCH_SHIFT_CAP} ]] && backoff_shift=${DESKTOP_RELAUNCH_SHIFT_CAP}
+        local backoff=$(( desktop_backoff_base * (1 << backoff_shift) ))
         [[ ${backoff} -gt ${DESKTOP_RELAUNCH_BACKOFF_CAP} ]] && backoff=${DESKTOP_RELAUNCH_BACKOFF_CAP}
         DESKTOP_RELAUNCH_NEXT_TS=$(( now_ts + backoff ))
         DESKTOP_LAST_LAUNCH_TS=${now_ts}
-        if [[ ${DESKTOP_RELAUNCH_ATTEMPTS} -ge ${DESKTOP_RELAUNCH_MAX} ]]; then
-          log_warn "[Desktop App] Not running; final relaunch (${DESKTOP_RELAUNCH_ATTEMPTS}/${DESKTOP_RELAUNCH_MAX}). If it keeps exiting, see ${DESKTOP_APP_LOG}."
-        else
-          log_warn "[Desktop App] Process not running; relaunching (${DESKTOP_RELAUNCH_ATTEMPTS}/${DESKTOP_RELAUNCH_MAX}, next retry in >=${backoff}s)."
-        fi
+        log_warn "[Desktop App] Process not running; relaunching (attempt ${DESKTOP_RELAUNCH_ATTEMPTS}, next retry in >=${backoff}s). If it keeps exiting, see ${DESKTOP_APP_LOG}."
         # Preserve the log so a repeatedly-crashing hotRun keeps its diagnostics.
         run_desktop_app preserve_log
       fi

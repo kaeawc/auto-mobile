@@ -10,8 +10,31 @@ mkdir -p "$(dirname "$report_path")"
 if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
   rm -rf "$report_dir"
   mkdir -p "$report_dir"
-  changed_count=0
+  changed_files=()
   while IFS= read -r file; do
+    changed_files+=("$file")
+  done < <(
+    {
+      git diff --name-only --diff-filter=ACMR "${BUN_TEST_TIMING_BASE_REF}...HEAD"
+      git diff --name-only --diff-filter=ACMR
+      git ls-files --others --exclude-standard
+    } | sort -u
+  )
+
+  changed_count=0
+  source_changed=false
+  for file in ${changed_files[@]+"${changed_files[@]}"}; do
+    if [[ "$file" == src/* ]]; then
+      source_changed=true
+    fi
+  done
+
+  if [[ "$source_changed" == "true" ]]; then
+    echo "Source changes detected; measuring the complete unit suite."
+    AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir" bash scripts/test-ts.sh unit
+    changed_count=1
+  else
+    for file in ${changed_files[@]+"${changed_files[@]}"}; do
     case "$file" in
       test/*.test.ts)
         if [[ "$file" != *.integration.test.ts && "$file" != test/stress/* && -f "$file" ]]; then
@@ -25,13 +48,8 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
         fi
         ;;
     esac
-  done < <(
-    {
-      git diff --name-only --diff-filter=ACMR "${BUN_TEST_TIMING_BASE_REF}...HEAD"
-      git diff --name-only --diff-filter=ACMR
-      git ls-files --others --exclude-standard
-    } | sort -u
-  )
+    done
+  fi
 
   if [[ "$changed_count" -eq 0 ]]; then
     echo "No changed unit tests to validate against the ${max_ms}ms budget."

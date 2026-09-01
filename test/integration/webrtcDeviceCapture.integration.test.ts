@@ -692,11 +692,9 @@ async function launchFixture(signal?: AbortSignal): Promise<void> {
     return;
   }
   if (platform === "ios") {
-    await execFileAsync("xcrun", ["simctl", "launch", "booted", "com.apple.Preferences"], {
-      timeout: REAL_IO_TIMEOUT_MS,
-      killSignal: "SIGKILL",
-      signal,
-    });
+    // Simulator is already foregrounded by the workflow. Toggling appearance
+    // yields the required visible fixture without a Settings-app launch, which
+    // can wedge on macOS hosted runners.
     await execFileAsync("xcrun", ["simctl", "ui", "booted", "appearance", "light"], {
       timeout: REAL_IO_TIMEOUT_MS,
       killSignal: "SIGKILL",

@@ -30,8 +30,10 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
   done
 
   if [[ "$source_changed" == "true" ]]; then
-    echo "Source changes detected; measuring the complete unit suite."
-    AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir" bash scripts/test-ts.sh unit
+    echo "Source changes detected; measuring Bun-affected unit tests."
+    AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir" \
+      AUTOMOBILE_UNIT_TEST_BASE_REF="$BUN_TEST_TIMING_BASE_REF" \
+      bash scripts/test-ts.sh changed
     changed_count=1
   else
     for file in ${changed_files[@]+"${changed_files[@]}"}; do

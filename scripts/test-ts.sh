@@ -207,7 +207,16 @@ case "$mode" in
     ;;
   changed)
     changed_ref="${AUTOMOBILE_UNIT_TEST_BASE_REF:-origin/main}"
-    run_test_command "${unit_args[@]}" "--changed=${changed_ref}" "$@"
+    changed_args=("${unit_args[@]}")
+    if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
+      rm -rf "$AUTOMOBILE_UNIT_JUNIT_DIR"
+      mkdir -p "$AUTOMOBILE_UNIT_JUNIT_DIR"
+      changed_args+=(
+        --reporter junit
+        --reporter-outfile "$AUTOMOBILE_UNIT_JUNIT_DIR/changed.xml"
+      )
+    fi
+    run_test_command "${changed_args[@]}" "--changed=${changed_ref}" "$@"
     ;;
   integration)
     integration_args=(bun test --timeout "$per_test_timeout_ms")

@@ -43,7 +43,14 @@ internal constructor(lifecycleFactory: ((DaemonLifecyclePhase) -> Unit) -> Daemo
 
   internal val lifecycle: DaemonLifecycleEnsurer = lifecycleFactory(::onPhase)
 
+  // Latched by markInactive: a configured non-daemon transport (HTTP/STDIO) neither installs nor
+  // launches the local daemon, so ensureReady must be a no-op — otherwise the app-startup effect
+  // would run the real lifecycle anyway, installing Bun and starting/restarting an unused Unix
+  // daemon, and its phases would overwrite the Inactive state.
+  @Volatile private var inactive = false
+
   private fun onPhase(phase: DaemonLifecyclePhase) {
+    if (inactive) return
     _state.value =
       when (phase) {
         is DaemonLifecyclePhase.Completed -> DaemonBootstrapState.Ready(phase.restarted)
@@ -56,14 +63,17 @@ internal constructor(lifecycleFactory: ((DaemonLifecyclePhase) -> Unit) -> Daemo
    * Runs one lifecycle pass — detect the current daemon, or install Bun and start the pinned
    * package when none is reachable. Blocking (up to the daemon-startup budget); call on an IO
    * dispatcher. Progress and the terminal outcome land in [state] via the phase listener. Safe to
-   * call again to retry a failure.
+   * call again to retry a failure. A no-op for an [markInactive]-marked bootstrap (non-daemon
+   * transport) — the app must never install/start a local daemon it is not connected to.
    */
   fun ensureReady() {
+    if (inactive) return
     lifecycle.ensureVersionMatchedDaemon()
   }
 
   /** Marks bootstrap as not applicable for this run (non-daemon transport). */
   internal fun markInactive() {
+    inactive = true
     _state.value = DaemonBootstrapState.Inactive
   }
 

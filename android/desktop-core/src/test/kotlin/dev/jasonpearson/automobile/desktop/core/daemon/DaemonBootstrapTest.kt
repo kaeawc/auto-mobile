@@ -94,6 +94,25 @@ class DaemonBootstrapTest {
   }
 
   @Test
+  fun `a marked-inactive bootstrap never runs its lifecycle`() {
+    // A configured non-daemon transport (HTTP/STDIO) marks the bootstrap inactive while the real
+    // lifecycle stays installed; ensureReady must then be a no-op — never install Bun or
+    // start/restart a local daemon the app is not connected to — and Inactive must not be
+    // overwritten by phases.
+    val lifecycle =
+      ScriptedLifecycle(
+        listOf(DaemonLifecyclePhase.Probing, DaemonLifecyclePhase.Completed(restarted = false))
+      )
+    val bootstrap = bootstrapOf(lifecycle)
+
+    bootstrap.markInactive()
+    bootstrap.ensureReady()
+
+    assertEquals(0, lifecycle.passes)
+    assertEquals(DaemonBootstrapState.Inactive, bootstrap.state.value)
+  }
+
+  @Test
   fun `inactive bootstrap stays inactive and never touches the system`() {
     val bootstrap = DaemonBootstrap.inactive()
 

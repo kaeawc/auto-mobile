@@ -196,23 +196,26 @@ fun DeviceStreamView(
   }
   val state by source.state.collectAsState()
   val newestFrame = liveFrame ?: retainedFrame
-  // Freshness gate for CONTROL across transient non-Streaming windows (a quality-step
-  // re-subscribe, a brief relay drop before auto-reconnect): the armed surface may keep using the
-  // newest frame until it goes [armedFrameRetentionMs] without a successor, at which point control
-  // disarms — preserving "stale pixels are never clickable" (#5255) while no longer flickering the
-  // interactive surface (and its Tap Targets bar) away on every re-subscribe. The effect restarts
-  // on every decoded frame, so a healthy feed never expires. While the source itself reports
-  // Streaming the gate is bypassed below: an idle iOS capture emits no frames on a static screen,
-  // and that is healthy, not stale.
-  var armedFrameExpired by remember(column.deviceId) { mutableStateOf(false) }
-  LaunchedEffect(newestFrame) {
-    if (newestFrame == null) return@LaunchedEffect
-    armedFrameExpired = false
-    delay(armedFrameRetentionMs)
-    armedFrameExpired = true
+  // Grace window for CONTROL across transient non-Streaming windows (a quality-step re-subscribe,
+  // a brief relay drop before auto-reconnect): the clock starts when the stream LEAVES Streaming
+  // — not from the last frame's age. Aging frames would pre-expire on a healthy static iOS screen
+  // (its capture emits no frames while idle), so the very first source swap would disarm
+  // immediately and recreate the Tap Targets flicker this gate exists to prevent. While Streaming
+  // the window is continuously reset; once Streaming is lost the armed surface may keep using the
+  // newest frame for [armedFrameRetentionMs], then control disarms — preserving "stale pixels are
+  // never clickable" (#5255). A recreated source resets the collected state itself, so the swap
+  // lands here as a plain Streaming -> non-Streaming transition.
+  var armedGraceExpired by remember(column.deviceId) { mutableStateOf(false) }
+  val streamingNow = state is VideoStreamState.Streaming
+  LaunchedEffect(streamingNow) {
+    if (streamingNow) {
+      armedGraceExpired = false
+    } else {
+      delay(armedFrameRetentionMs)
+      armedGraceExpired = true
+    }
   }
-  val armedFrame =
-    if (state is VideoStreamState.Streaming || !armedFrameExpired) newestFrame else null
+  val armedFrame = if (streamingNow || !armedGraceExpired) newestFrame else null
   val droppedFrames by source.droppedFrames.collectAsState(initial = null)
   val controlSnapshot = control?.interactionSnapshot
   var settingsLaunchFailure by remember(column.deviceId) { mutableStateOf(false) }

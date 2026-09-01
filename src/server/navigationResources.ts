@@ -100,8 +100,17 @@ function scheduleNavigationGraphUpdate(): void {
 }
 
 function attachGraphUpdateListener(provider: NavigationGraphSummaryProvider): void {
-  if (updateListenerProvider?.setGraphUpdateListener) {
-    updateListenerProvider.setGraphUpdateListener(null);
+  // Detach only OUR callback from the previous provider. `setGraphUpdateListener(null)`
+  // removes every listener on the provider — on the global NavigationGraphManager that
+  // also wiped the daemon's stream-push listener, so live graph changes stopped emitting
+  // `navigation_update` frames and stream-driven clients (the desktop Navigation pane)
+  // never saw the device navigate. Fall back to clear-all only for legacy providers that
+  // predate removeGraphUpdateListener (their listener list is exclusively ours).
+  const previous = updateListenerProvider;
+  if (previous?.removeGraphUpdateListener) {
+    previous.removeGraphUpdateListener(scheduleNavigationGraphUpdate);
+  } else if (previous?.setGraphUpdateListener) {
+    previous.setGraphUpdateListener(null);
   }
 
   updateListenerProvider = provider;

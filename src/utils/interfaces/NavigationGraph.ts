@@ -327,6 +327,14 @@ export interface NavigationGraphSummaryProvider {
   exportGraphSummary(): Promise<NavigationGraphSummary>;
   exportGraphSummaryForApp?(appId: string | null): Promise<NavigationGraphSummary>;
   setGraphUpdateListener?(listener: (() => void) | null): void;
+  /**
+   * Remove exactly one previously registered listener. Callers that co-own a
+   * provider with other subsystems MUST use this rather than
+   * `setGraphUpdateListener(null)`, which removes EVERY listener — including
+   * other subsystems' (the daemon's stream-push listener was silently wiped
+   * this way, killing live `navigation_update` frames to desktop panes).
+   */
+  removeGraphUpdateListener?(listener: () => void): void;
 }
 
 /**

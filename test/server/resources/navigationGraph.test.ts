@@ -37,6 +37,22 @@ describe("MCP Navigation Graph Resource", () => {
     }
   });
 
+  test("re-registering the provider preserves other subsystems' graph listeners", () => {
+    // The daemon attaches its own stream-push listener to the same manager the resource
+    // layer listens on. A provider re-registration must detach only the resource layer's
+    // callback — clear-all here silently killed live navigation_update stream frames.
+    let daemonPushes = 0;
+    fakeGraph.setGraphUpdateListener(() => {
+      daemonPushes++;
+    });
+
+    // Re-register the same provider (what MCP server re-initialization does).
+    setNavigationGraphProvider(fakeGraph);
+
+    fakeGraph.setCurrentApp("com.example.app");
+    expect(daemonPushes).toBe(1);
+  });
+
   test("should include navigation graph resource in list", async () => {
     const { client } = fixture.getContext();
 

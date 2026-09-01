@@ -252,6 +252,9 @@ class DeviceStreamViewTest {
             enableDeviceControl = true,
             control = armedControlState(scope),
             sourceFactory = { _, _ -> source },
+            // Zero retention: disarm the moment the relay leaves Streaming, so this test pins the
+            // disarm rule itself rather than the transient-tolerance window.
+            armedFrameRetentionMs = 0L,
           )
         }
       }
@@ -269,6 +272,35 @@ class DeviceStreamViewTest {
       onNodeWithContentDescription("Live stream of Pixel 8").assertIsDisplayed()
       scope.cancel()
     }
+
+  @Test
+  fun `armed control survives a transient drop within the retention window`() = runComposeUiTest {
+    // A quality-step re-subscribe or momentary relay drop leaves Streaming briefly; while the
+    // newest frame is within the retention window the interactive surface (and its Tap Targets
+    // affordance) must stay mounted instead of flickering to the plain mirror and back.
+    val source =
+      FakeVideoStreamSource(refuseWith = "dropped", nowMs = { System.nanoTime() / 1_000_000L })
+    val scope = CoroutineScope(Dispatchers.Unconfined)
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          col(),
+          enableDeviceControl = true,
+          control = armedControlState(scope),
+          sourceFactory = { _, _ -> source },
+          armedFrameRetentionMs = 600_000L, // effectively never expires within this test
+        )
+      }
+    }
+    runOnUiThread { source.becomeStreaming() }
+    source.emitFrame()
+    waitUntilExactlyOneExists(hasTestTag(DEVICE_CONTROL_SURFACE_TEST_TAG))
+
+    runOnUiThread { source.becomeUnavailable("dropped") }
+    waitForIdle()
+    onAllNodesWithTag(DEVICE_CONTROL_SURFACE_TEST_TAG).assertCountEquals(1)
+    scope.cancel()
+  }
 
   @Test
   fun `an armed iOS pane still surfaces Screen Recording approval over the control view`() =
@@ -367,7 +399,7 @@ class DeviceStreamViewTest {
     }
     // Collapsed readout: persisted preset + live-vs-target fps (control pane targets 30fps). The
     // selector chips stay hidden so they cannot intercept a tap on the interactive surface.
-    onNodeWithText("Medium · 0 / 30 fps").assertIsDisplayed()
+    onNodeWithText("Medium · 0 fps").assertIsDisplayed()
     onAllNodesWithText("Auto").assertCountEquals(0)
   }
 
@@ -420,7 +452,7 @@ class DeviceStreamViewTest {
       val medium = sources.getValue(VideoStreamQuality.Medium)
 
       // Expand the collapsed overlay, then pick High.
-      onNodeWithText("Medium · 0 / 30 fps").performClick()
+      onNodeWithText("Medium · 0 fps").performClick()
       onNodeWithText("High").performClick()
 
       // A distinct High source is created and connects, the old Medium source is disposed, and the

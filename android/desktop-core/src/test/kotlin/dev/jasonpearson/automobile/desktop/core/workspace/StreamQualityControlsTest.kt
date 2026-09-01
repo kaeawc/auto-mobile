@@ -22,7 +22,6 @@ class StreamQualityControlsTest {
         StreamQualityControls(
           currentQuality = VideoStreamQuality.Medium,
           actualFps = 23.6f,
-          targetFps = 30,
           autoAdjustEnabled = true,
           expanded = false,
           onToggleExpanded = {},
@@ -33,7 +32,7 @@ class StreamQualityControlsTest {
     }
     // Readout: current preset + rounded actual over target. Selector chips are hidden until
     // expanded.
-    onNodeWithText("Medium · 24 / 30 fps").assertIsDisplayed()
+    onNodeWithText("Medium · 24 fps").assertIsDisplayed()
     onAllNodesWithText("Low").assertCountEquals(0)
     onAllNodesWithText("Auto").assertCountEquals(0)
   }
@@ -46,7 +45,6 @@ class StreamQualityControlsTest {
         StreamQualityControls(
           currentQuality = VideoStreamQuality.Medium,
           actualFps = 30f,
-          targetFps = 30,
           autoAdjustEnabled = true,
           expanded = false,
           onToggleExpanded = { toggled++ },
@@ -55,7 +53,7 @@ class StreamQualityControlsTest {
         )
       }
     }
-    onNodeWithText("Medium · 30 / 30 fps").performClick()
+    onNodeWithText("Medium · 30 fps").performClick()
     assertEquals(1, toggled)
   }
 
@@ -67,7 +65,6 @@ class StreamQualityControlsTest {
         StreamQualityControls(
           currentQuality = VideoStreamQuality.Medium,
           actualFps = 30f,
-          targetFps = 30,
           autoAdjustEnabled = true,
           expanded = true,
           onToggleExpanded = {},
@@ -90,7 +87,6 @@ class StreamQualityControlsTest {
         StreamQualityControls(
           currentQuality = VideoStreamQuality.Low,
           actualFps = 10f,
-          targetFps = 30,
           autoAdjustEnabled = true,
           expanded = true,
           onToggleExpanded = {},

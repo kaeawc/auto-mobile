@@ -394,9 +394,15 @@ export class FakeNavigationGraphManager
   setGraphUpdateListener(listener: (() => void) | null): void {
     if (listener === null) {
       this.graphUpdateListeners = [];
-    } else {
+    } else if (!this.graphUpdateListeners.includes(listener)) {
+      // Mirrors NavigationGraphManager: idempotent add.
       this.graphUpdateListeners.push(listener);
     }
+  }
+
+  // Mirrors NavigationGraphManager: remove exactly one listener.
+  removeGraphUpdateListener(listener: () => void): void {
+    this.graphUpdateListeners = this.graphUpdateListeners.filter((entry) => entry !== listener);
   }
 
   private emitGraphUpdated(): void {

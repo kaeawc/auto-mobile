@@ -90,8 +90,8 @@ ANDROID_ENABLED=false
 IOS_ENABLED=false
 HAVE_DEVICE=false
 
-# Track last hashes for change detection
-LAST_IDE_PLUGIN_HASH=""
+# Track last hashes for change detection. Desktop app has no hash: Compose Hot
+# Reload (hotRun --autoReload) watches and reloads its own source live.
 LAST_APK_HASH=""
 LAST_VIDEO_SERVER_HASH=""
 LAST_IOS_HASH=""
@@ -606,10 +606,7 @@ unified_watch_loop() {
     fi
   fi
 
-  # Initialize hashes
-  if [[ "${DESKTOP_APP_ENABLED}" == "true" ]]; then
-    LAST_IDE_PLUGIN_HASH="$(hash_ide_plugin_state)"
-  fi
+  # Initialize hashes (desktop app self-reloads via Compose Hot Reload; no hash)
   if [[ "${ANDROID_ENABLED}" == "true" ]]; then
     LAST_APK_HASH="$(hash_apk_watch_state)"
     LAST_VIDEO_SERVER_HASH="$(hash_video_server_watch_state)"
@@ -639,21 +636,19 @@ unified_watch_loop() {
       fi
     fi
 
-    # === 1. Check desktop app changes ===
+    # === 1. Desktop app ===
+    # The desktop app runs under Compose Hot Reload (`hotRun --autoReload`), which
+    # owns a Gradle daemon that recompiles desktop-core/desktop-app edits and
+    # reloads them into the SAME window. So the watcher must NOT rebuild/restart on
+    # source change — doing so would kill the live-reload process for every keystroke
+    # and reintroduce the rebuild-under-JVM NoClassDefFoundError trap. We only relaunch
+    # if the app process has died (e.g. crashed or the reload daemon exited).
     if [[ "${DESKTOP_APP_ENABLED}" == "true" ]]; then
-      local next_ide_hash
-      next_ide_hash="$(hash_ide_plugin_state)"
-      if [[ "${next_ide_hash}" != "${LAST_IDE_PLUGIN_HASH}" ]]; then
-        log_info "[Desktop App] Change detected. Rebuilding and restarting..."
-        LAST_IDE_PLUGIN_HASH="${next_ide_hash}"
-
-        if build_desktop_app; then
-          run_desktop_app
-        else
-          log_warn "[Desktop App] Build failed; waiting for next change."
-        fi
-
-        LAST_IDE_PLUGIN_HASH="$(hash_ide_plugin_state)"
+      local desktop_pid
+      desktop_pid="$(cat "${DESKTOP_APP_PID_FILE}" 2>/dev/null || true)"
+      if [[ -z "${desktop_pid}" ]] || ! kill -0 "${desktop_pid}" 2>/dev/null; then
+        log_warn "[Desktop App] Process not running; relaunching Compose Hot Reload..."
+        run_desktop_app
       fi
     fi
 

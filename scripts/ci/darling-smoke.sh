@@ -10,9 +10,11 @@
 # /Volumes/SystemRoot, Darling's mount of the host filesystem, so repo
 # scripts like xcodegen-drift-check.sh run unmodified.
 #
-# Each probe records pass/FAIL/n-a into a summary table (written to
-# $GITHUB_STEP_SUMMARY when set). Exit codes: 2 = darling not installed,
-# 1 = the boot probe or any real probe failed, 0 = all attempted probes passed.
+# Each probe records pass / FAIL / blocked-upstream (dyld: a framework this
+# Darling release does not implement yet, e.g. CryptoKit, Combine) / info /
+# n-a into a summary table (written to $GITHUB_STEP_SUMMARY when set).
+# Exit codes: 2 = darling not installed, 1 = the boot probe or a genuine
+# probe FAILed, 0 = nothing failed beyond upstream-blocked findings.
 
 set -euo pipefail
 
@@ -47,14 +49,34 @@ record() {
 }
 
 # Run one host-side command as a probe, capturing output to a per-probe log.
+# A dyld "Library not loaded" failure is classified as blocked-upstream with
+# the missing framework named (Darling grows frameworks release by release —
+# e.g. AVFAudio/LAContext landed in Feb 2026 — so these flip on their own),
+# and is not counted as a FAIL by fail_count.
 probe() {
     local name="$1"
     shift
     local log="${LOG_DIR}/probe-${name//[^A-Za-z0-9._-]/_}.log"
     if "$@" >"${log}" 2>&1; then
         record "${name}" "pass" "$(tail -n 1 "${log}" | cut -c1-120)"
+    elif grep -q 'Library not loaded:' "${log}"; then
+        local missing
+        missing="$(grep -m 1 'Library not loaded:' "${log}" | sed 's/.*Library not loaded: //' | cut -c1-100)"
+        record "${name}" "blocked-upstream" "dyld: missing ${missing}"
     else
         record "${name}" "FAIL" "see $(basename "${log}")"
+    fi
+}
+
+# Informational probe: records the outcome either way, never FAILs the run.
+probe_info() {
+    local name="$1"
+    shift
+    local log="${LOG_DIR}/probe-${name//[^A-Za-z0-9._-]/_}.log"
+    if "$@" >"${log}" 2>&1; then
+        record "${name}" "pass" "$(tail -n 1 "${log}" | cut -c1-120)"
+    else
+        record "${name}" "info" "$(tail -n 1 "${log}" | cut -c1-120)"
     fi
 }
 
@@ -168,17 +190,29 @@ for tool in clang swiftc xcrun xcodebuild otool nm plutil codesign file sqlite3;
     fi
 done
 
-if timeout "${DARLING_CMD_TIMEOUT}" darling shell /bin/bash -c 'command -v clang' </dev/null >/dev/null 2>&1; then
+# /usr/bin/clang and /usr/bin/swiftc in the guest are shims that forward to
+# /Library/Developer/DarlingCLT — which Darling populates by downloading
+# APPLE'S Command Line Tools (clt_install.py fetches them from
+# swdistcache.darlinghq.org after an interactive agreement to Apple's Xcode
+# license). Same EULA gate as darling-xcodebuild-probe.sh, so CI never
+# installs it; only compile when the real CLT is already present.
+if timeout "${DARLING_CMD_TIMEOUT}" darling shell /bin/bash -c \
+    'test -x /Library/Developer/DarlingCLT/usr/bin/clang' </dev/null >/dev/null 2>&1; then
     printf 'int main(void){__builtin_printf("hello-from-darling-clang\\n");return 0;}\n' >"${LOG_DIR}/hello.c"
     probe "clang compiles and runs C" dsh \
         "cd /Volumes/SystemRoot${LOG_DIR} && clang hello.c -o hello-c && ./hello-c"
-fi
-
-if timeout "${DARLING_CMD_TIMEOUT}" darling shell /bin/bash -c 'command -v swiftc' </dev/null >/dev/null 2>&1; then
     printf 'print("hello-from-darling-swift")\n' >"${LOG_DIR}/hello.swift"
     probe "swiftc compiles and runs Swift" dsh \
         "cd /Volumes/SystemRoot${LOG_DIR} && swiftc hello.swift -o hello-swift && ./hello-swift"
+else
+    record "clang/swiftc compile" "n/a" \
+        "DarlingCLT absent: guest compilers are Apple's CLT behind Apple's Xcode EULA; CI never installs it"
 fi
+
+# What the guest's xcodebuild/xcrun shims say without Apple's CLT installed —
+# informational: expected to point at the (EULA-gated) CLT installer.
+probe_info "xcodebuild -version (no Apple CLT)" dsh 'xcodebuild -version'
+probe_info "xcrun --show-sdk-path (no Apple CLT)" dsh 'xcrun --show-sdk-path'
 
 # ---- Tier 2: AutoMobile's real macOS CI tools, as Mach-O under Darling -----
 

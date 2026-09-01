@@ -125,6 +125,21 @@ extension DaemonManager {
         return true
     }
 
+    /// Convert a fractional-seconds timeout into the `timeval` for `SO_RCVTIMEO`. `Int(timeoutSeconds)`
+    /// alone truncates sub-second values to `{0, 0}`, which Darwin treats as "no timeout" — the receive
+    /// `read` would then block forever if the daemon accepts the connection but never answers. Carry the
+    /// fractional part into `tv_usec` and clamp to a 1 ms floor so the option is never disabled. Extracted
+    /// (like `setSocketPath`/`buildDaemonRequestLine`) so it is unit-testable without a socket.
+    static func receiveTimeout(forSeconds timeoutSeconds: TimeInterval) -> timeval {
+        let clamped = max(timeoutSeconds, 0.001)
+        let wholeSeconds = clamped.rounded(.down)
+        let microseconds = (clamped - wholeSeconds) * 1_000_000
+        return timeval(
+            tv_sec: Int(wholeSeconds),
+            tv_usec: suseconds_t(microseconds.rounded())
+        )
+    }
+
     private static func sendDaemonRequest(_ request: String, timeoutSeconds: TimeInterval) -> [String: Any]? {
         let socketFd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard socketFd >= 0 else {
@@ -151,8 +166,8 @@ extension DaemonManager {
             return nil
         }
 
-        // Set socket timeout
-        var tv = timeval(tv_sec: Int(timeoutSeconds), tv_usec: 0)
+        // Set socket receive timeout (carries sub-second precision; never {0,0}, which would disable it).
+        var tv = Self.receiveTimeout(forSeconds: timeoutSeconds)
         setsockopt(socketFd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
 
         guard let requestData = request.data(using: .utf8) else {

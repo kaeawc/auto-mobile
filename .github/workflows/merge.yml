@@ -385,8 +385,10 @@ jobs:
       - name: "Run BATS Unit Tests"
         shell: bash
         env:
-          AUTOMOBILE_BATS_MAX_FILE_SECONDS: "120"
-          AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "300"
+          # The macOS runner has three shared cores; shell-heavy files can be
+          # descheduled behind their parallel peers despite no real I/O.
+          AUTOMOBILE_BATS_MAX_FILE_SECONDS: "240"
+          AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "420"
         run: scripts/ci/run-bats.sh unit
 
   bats-integration-tests:
@@ -834,6 +836,9 @@ jobs:
         shell: bash
         env:
           BUN_TEST_TIMING_BASE_REF: HEAD^
+          # Source-affected selection and its isolated offender reruns must not
+          # inherit the short command wall limit used by a single unit shard.
+          AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
         run: bash scripts/validate-bun-test-timings.sh
 
   node-host-integration-tests:

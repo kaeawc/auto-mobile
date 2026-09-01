@@ -1,13 +1,30 @@
 package dev.jasonpearson.automobile.desktop.core.workspace
 
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
@@ -15,6 +32,7 @@ import dev.jasonpearson.automobile.desktop.core.update.ReleaseAsset
 import dev.jasonpearson.automobile.desktop.core.update.UpdateStatus
 import java.util.Base64
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -822,5 +840,78 @@ class WorkspaceShellUiTest {
     onNodeWithText("compare-body").assertExists()
     // Pane controls behind the compare scrim have left the accessibility tree.
     onNodeWithContentDescription("Close Pixel").assertDoesNotExist()
+  }
+
+  // #4846: the modal trap must block *keyboard* focus too, not only accessibility. Removing the
+  // background from the semantics tree (clearAndSetSemantics) hides it from screen readers but a
+  // deactivated focusGroup still leaves its descendants Tab-reachable — so these two tests pin the
+  // keyboard half of the trap the accessibility-only tests above cannot observe. The isolated
+  // background is intentionally absent from the queryable a11y tree, so focus is read through an
+  // onFocusChanged log rather than a semantics query.
+
+  @Test
+  fun `an open overlay traps Tab so it cannot reach the isolated background`() = runComposeUiTest {
+    val overlayFocus = FocusRequester()
+    val backgroundEverFocused = mutableListOf<Boolean>()
+    setContent {
+      MaterialTheme {
+        Box {
+          Column(Modifier.isolatedBehindOverlay(active = true)) {
+            BasicText(
+              "background",
+              Modifier.onFocusChanged { backgroundEverFocused.add(it.isFocused) }.focusable(),
+            )
+          }
+          // Stand-in overlay content: a focusable sibling outside the isolated subtree.
+          BasicText(
+            "overlay",
+            Modifier.testTag("overlay").focusRequester(overlayFocus).focusable(),
+          )
+        }
+      }
+    }
+    runOnIdle { overlayFocus.requestFocus() }
+    onNodeWithTag("overlay").assertIsFocused()
+    // Two Tab presses would wrap through every focusable if the trap leaked at the group boundary.
+    onRoot().performKeyInput { pressKey(Key.Tab) }
+    onRoot().performKeyInput { pressKey(Key.Tab) }
+    assertFalse(
+      "Tab reached a control behind the overlay: $backgroundEverFocused",
+      backgroundEverFocused.any { it },
+    )
+  }
+
+  @Test
+  fun `opening an overlay releases focus a background control already held`() = runComposeUiTest {
+    val backgroundFocus = FocusRequester()
+    var overlayOpen by mutableStateOf(false)
+    val backgroundFocusLog = mutableListOf<Boolean>()
+    setContent {
+      MaterialTheme {
+        Box {
+          Column(Modifier.isolatedBehindOverlay(active = overlayOpen)) {
+            BasicText(
+              "background",
+              Modifier.focusRequester(backgroundFocus)
+                .onFocusChanged { backgroundFocusLog.add(it.isFocused) }
+                .focusable(),
+            )
+          }
+        }
+      }
+    }
+    runOnIdle { backgroundFocus.requestFocus() }
+    runOnIdle {}
+    assertTrue(
+      "precondition: background should hold focus",
+      backgroundFocusLog.lastOrNull() == true,
+    )
+    // Opening the overlay must drop the focus the background was already holding.
+    overlayOpen = true
+    runOnIdle {}
+    assertFalse(
+      "background kept focus behind the overlay: $backgroundFocusLog",
+      backgroundFocusLog.lastOrNull() == true,
+    )
   }
 }

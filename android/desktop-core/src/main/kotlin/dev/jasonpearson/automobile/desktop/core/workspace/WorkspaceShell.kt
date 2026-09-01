@@ -41,6 +41,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -221,22 +222,42 @@ fun WorkspaceShell(
 
 /**
  * Makes the content this modifies inert to keyboard and screen-reader focus while [active] is true,
- * for the workspace behind a full-window overlay (issue #4846). Removing the subtree from the focus
- * tree ([focusProperties] `canFocus = false` on a [focusGroup]) keeps a Tab from landing on the
- * dimmed controls behind the scrim, and [clearAndSetSemantics] drops the whole subtree from the
- * accessibility tree so assistive tech can't traverse behind the overlay either. A no-op when
- * [active] is false, so the un-overlaid workspace keeps its normal focus order and semantics.
+ * for the workspace behind a full-window overlay (issue #4846). Three cooperating parts form a real
+ * modal focus trap:
+ * - `onEnter = { cancelFocusChange() }` on a [focusGroup] seals the subtree against Tab traversal.
+ *   `canFocus = false` alone is not enough: a deactivated focus group is skipped for focus
+ *   *itself*, but its independently-focusable descendants stay reachable, so a Tab would still land
+ *   on a dimmed control behind the scrim. Cancelling the focus change at the group boundary blocks
+ *   entry into the whole subtree.
+ * - Clearing focus when [active] flips true drops any focus a background control was *already*
+ *   holding when the overlay opened, so it can't keep receiving key input behind the scrim (the
+ *   trap above only blocks *entering* — it does not evict focus already inside).
+ * - [clearAndSetSemantics] drops the whole subtree from the accessibility tree so assistive tech
+ *   can't traverse behind the overlay either.
  *
- * Public (not private) so the app root can apply the same isolation to the whole [WorkspaceShell]
- * when it hosts a sibling overlay of its own (the ⌘K command palette), keeping every workspace
- * overlay modal through one mechanism.
+ * A no-op when [active] is false, so the un-overlaid workspace keeps its normal focus order and
+ * semantics. `@Composable` (and public) so the app root can apply the same trap — focus clearing
+ * included — to the whole [WorkspaceShell] when it hosts a sibling overlay of its own (the ⌘K
+ * command palette), keeping every workspace overlay modal through one mechanism.
  */
-fun Modifier.isolatedBehindOverlay(active: Boolean): Modifier =
-  if (active) {
-    focusProperties { canFocus = false }.focusGroup().clearAndSetSemantics {}
+@Composable
+fun Modifier.isolatedBehindOverlay(active: Boolean): Modifier {
+  val focusManager = LocalFocusManager.current
+  LaunchedEffect(active) {
+    // force = true so a control that captured focus is released too, not just plainly-focused ones.
+    if (active) focusManager.clearFocus(force = true)
+  }
+  return if (active) {
+    focusProperties {
+      canFocus = false
+      onEnter = { cancelFocusChange() }
+    }
+      .focusGroup()
+      .clearAndSetSemantics {}
   } else {
     this
   }
+}
 
 /**
  * Pick the two device columns to compare: the focused column plus the first other observed column.

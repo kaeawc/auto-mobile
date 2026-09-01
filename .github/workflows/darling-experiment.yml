@@ -1,12 +1,15 @@
 name: "Darling Experiment"
 
 # Experiment: how much of AutoMobile's macOS-only CI can run on a Linux
-# runner under Darling (https://docs.darlinghq.org)? Darling is a userspace
-# Darwin translation layer — since 2022 it needs no kernel module, so it can
-# run on GitHub-hosted VMs, but it must be built from source (no prebuilt
-# packages; the community Docker images predate the userspace rewrite).
+# runner under Darling (https://docs.darlinghq.org)? Follows the working
+# setup proven in kaeawc/spectra#452: Darling's releases ship prebuilt
+# Ubuntu 24.04 (noble) amd64 debs, and the minimal CLI package closure
+# installs in about a minute — no source build, no cache. Keep the runner
+# pinned to ubuntu-24.04 to match the debs. Darling has been
+# userspace-only (darlingserver) since 2022, so no kernel module is needed
+# on hosted runners.
 #
-# What this job proves or disproves per run (see scripts/ci/darling-smoke.sh):
+# What this job probes per run (see scripts/ci/darling-smoke.sh):
 #   - Darling boots and reports Darwin on a hosted runner
 #   - our pinned Mach-O CLI tools (XcodeGen, SwiftLint) run under it,
 #     including the real xcodegen-drift-check.sh gate
@@ -15,27 +18,20 @@ name: "Darling Experiment"
 # The optional dispatch input below lets a person supply their own archive
 # for at-your-own-risk experimentation (scripts/ci/darling-xcodebuild-probe.sh);
 # never wire that into default CI.
-#
-# The Darling build is cached keyed on (ref, components); the first run on a
-# fresh cache builds from source and can take several hours.
 
 on:
   workflow_dispatch:
     inputs:
-      darling-ref:
-        description: "darlinghq/darling git tag or branch to build"
+      darling-debs-url:
+        description: "URL of the darlinghq/darling release debs zip (noble/amd64)"
         required: false
         type: string
-        default: "v0.1.20260608"
-      darling-components:
-        description: >-
-          Darling CMake COMPONENTS list. cli_dev (CLI + Xcode-tool frameworks)
-          alone fails to generate on current tags — its Quartz stub reexports
-          PDFKit, which only gui_stubs adds (upstream darlinghq/darling#1465) —
-          so gui_stubs rides along by default.
+        default: "https://github.com/darlinghq/darling/releases/download/v0.1.20260608/debs_20260608.zip"
+      darling-debs-sha256:
+        description: "SHA256 of the debs zip (release assets are mutable; pin the bytes)"
         required: false
         type: string
-        default: "cli_dev,gui_stubs"
+        default: "27469ef3932da2e91dd7fb34b70e3628a3e54b7af9fb5480051f44af35eca1fd"
       xcode-archive-url:
         description: >-
           OPTIONAL tar archive of YOUR OWN extracted Xcode.app or
@@ -63,10 +59,10 @@ jobs:
     runs-on: ubuntu-24.04
     # Experimental by definition: report signal without blocking anything.
     continue-on-error: true
-    timeout-minutes: 350
+    timeout-minutes: 60
     env:
-      DARLING_REF: ${{ inputs.darling-ref || 'v0.1.20260608' }}
-      DARLING_COMPONENTS: ${{ inputs.darling-components || 'cli_dev,gui_stubs' }}
+      DARLING_DEBS_URL: ${{ inputs.darling-debs-url || 'https://github.com/darlinghq/darling/releases/download/v0.1.20260608/debs_20260608.zip' }}
+      DARLING_DEBS_SHA256: ${{ inputs.darling-debs-sha256 || '27469ef3932da2e91dd7fb34b70e3628a3e54b7af9fb5480051f44af35eca1fd' }}
     steps:
       - name: "Checkout code"
         uses: actions/checkout@v6
@@ -74,38 +70,8 @@ jobs:
           lfs: false
           persist-credentials: false
 
-      # Cache keys reject commas, so the components list needs slugifying first.
-      - name: "Compute cache key"
-        id: cache-key
-        run: echo "value=darling-${DARLING_REF}-${DARLING_COMPONENTS//[^A-Za-z0-9._]/-}-ubuntu-24.04-v1" >> "$GITHUB_OUTPUT"
-
-      - name: "Restore Darling build cache"
-        id: darling-cache
-        uses: actions/cache/restore@v5
-        with:
-          path: ${{ runner.temp }}/darling-install.tar.zst
-          key: ${{ steps.cache-key.outputs.value }}
-
-      - name: "Build Darling from source (cache miss)"
-        id: darling-build
-        if: steps.darling-cache.outputs.cache-hit != 'true'
-        run: |
-          ./scripts/ci/darling-build.sh \
-            --ref "$DARLING_REF" \
-            --components "$DARLING_COMPONENTS" \
-            --output "$RUNNER_TEMP/darling-install.tar.zst"
-
-      # Save even when a later probe step fails: losing a multi-hour build
-      # to a smoke failure would make iterating on the probes miserable.
-      - name: "Save Darling build cache"
-        if: always() && steps.darling-build.outcome == 'success'
-        uses: actions/cache/save@v5
-        with:
-          path: ${{ runner.temp }}/darling-install.tar.zst
-          key: ${{ steps.cache-key.outputs.value }}
-
-      - name: "Install Darling"
-        run: sudo ./scripts/ci/darling-install.sh "$RUNNER_TEMP/darling-install.tar.zst"
+      - name: "Install Darling from release debs"
+        run: ./scripts/ci/darling-install.sh "$DARLING_DEBS_URL" "$DARLING_DEBS_SHA256"
 
       - name: "Run Darling smoke probes"
         run: ./scripts/ci/darling-smoke.sh

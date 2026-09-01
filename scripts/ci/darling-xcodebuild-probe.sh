@@ -78,7 +78,7 @@ fi
 # The Darling prefix (default ~/.darling) is the virtual Darwin root and is
 # plain host directories, so stage the tree into it from the host side —
 # far faster than copying through emulated I/O. Boot once first so it exists.
-timeout 900 darling shell -c 'true'
+timeout 900 darling shell /bin/bash -c 'true' </dev/null
 PREFIX_DIR="${DPREFIX:-${HOME}/.darling}"
 dest="${PREFIX_DIR}${DEVELOPER_DEST}"
 echo "Staging $(basename "${DEVELOPER_SRC}") into ${dest}..."
@@ -91,7 +91,7 @@ run_step() {
     shift
     local log="${LOG_DIR}/xcodebuild-${name}.log"
     echo "=== ${name}: $* ==="
-    if timeout 900 darling shell -c "$*" >"${log}" 2>&1; then
+    if timeout 900 darling shell /bin/bash -c "$*" </dev/null >"${log}" 2>&1; then
         echo "ok ${name}"
         tail -n 5 "${log}"
     else

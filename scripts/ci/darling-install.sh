@@ -1,46 +1,40 @@
 #!/usr/bin/env bash
 #
-# Install a Darling tree staged by darling-build.sh onto this machine.
-# Must run as root (the workflow invokes it with sudo): the extraction
-# targets / and the darling launcher must be setuid root.
+# Install Darling from the prebuilt debs attached to a darlinghq/darling
+# GitHub release (working setup proven in kaeawc/spectra#452). The debs
+# target Ubuntu 24.04 (noble) amd64 — run this only on a matching machine.
+# Uses sudo for apt; do not run the whole script as root.
 #
-# Usage: sudo darling-install.sh <darling-install.tar.zst>
+# Only the minimal CLI dependency closure is installed: the full `darling`
+# metapackage drags in GUI, Python 2, Ruby, and Perl components the smoke
+# probes never touch.
+#
+# Usage: darling-install.sh <debs-zip-url> <sha256>
 
 set -euo pipefail
 
-TARBALL="${1:-}"
-if [[ -z "${TARBALL}" || ! -f "${TARBALL}" ]]; then
-    echo "Usage: sudo $0 <darling-install.tar.zst>" >&2
-    echo "Error: tarball not found: '${TARBALL}'" >&2
+DEBS_URL="${1:-}"
+DEBS_SHA256="${2:-}"
+if [[ -z "${DEBS_URL}" || -z "${DEBS_SHA256}" ]]; then
+    echo "Usage: $0 <debs-zip-url> <sha256>" >&2
     exit 2
 fi
 
-if [[ "$(id -u)" -ne 0 ]]; then
-    echo "Error: this script must run as root (sudo)." >&2
-    exit 2
-fi
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "${WORK_DIR}"' EXIT
 
-if ! command -v zstd >/dev/null 2>&1; then
-    apt-get install -y --no-install-recommends zstd
-fi
+echo "Downloading Darling debs..."
+curl -fsSL --retry 3 -o "${WORK_DIR}/darling-debs.zip" "${DEBS_URL}"
+# Release assets are mutable; verify the bytes rather than trusting the tag.
+echo "${DEBS_SHA256}  ${WORK_DIR}/darling-debs.zip" | sha256sum -c -
+unzip -q "${WORK_DIR}/darling-debs.zip" -d "${WORK_DIR}/debs"
 
-echo "Extracting ${TARBALL} to /..."
-tar -C / -xpf "${TARBALL}"
+sudo apt-get update -qq
+sudo apt-get install -y \
+    "${WORK_DIR}"/debs/debs_*/darling-core_*.deb \
+    "${WORK_DIR}"/debs/debs_*/darling-system_*.deb \
+    "${WORK_DIR}"/debs/debs_*/darling-cli-gui-common_*.deb \
+    "${WORK_DIR}"/debs/debs_*/darling-cli-python2-common_*.deb \
+    "${WORK_DIR}"/debs/debs_*/darling-cli_*.deb
 
-# `sudo make install` normally sets this; a DESTDIR-staged tarball cannot
-# carry setuid through non-root CI staging, so restore it explicitly. Without
-# it every `darling` invocation fails at startup.
-if [[ ! -x /usr/local/bin/darling ]]; then
-    echo "Error: /usr/local/bin/darling missing after extraction." >&2
-    exit 1
-fi
-chown root:root /usr/local/bin/darling
-chmod u+s /usr/local/bin/darling
-
-# Ubuntu 23.10+ restricts unprivileged user namespaces via AppArmor, which
-# darlingserver's userspace sandboxing relies on. Best-effort: the knobs do
-# not exist on every kernel.
-sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 2>/dev/null || true
-sysctl -w kernel.unprivileged_userns_clone=1 2>/dev/null || true
-
-echo "Darling installed: $(/usr/local/bin/darling version 2>/dev/null || echo 'version probe failed (may be fine before first prefix init)')"
+echo "Darling installed: $(command -v darling)"

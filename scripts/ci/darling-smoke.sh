@@ -58,14 +58,18 @@ probe() {
     fi
 }
 
-# Run a command line inside Darling's Darwin environment.
+# Run a command line inside Darling's Darwin environment. `darling shell`
+# treats its arguments as literal argv words (no shell evaluation), so hand
+# the line to the guest's bash explicitly; </dev/null guards against stdin
+# hangs. Darling maps the Linux cwd to the same path inside the prefix, so
+# relative paths work. (Both facts proven in kaeawc/spectra#452.)
 dsh() {
-    timeout "${DARLING_CMD_TIMEOUT}" darling shell -c "$1"
+    timeout "${DARLING_CMD_TIMEOUT}" darling shell /bin/bash -c "$1" </dev/null
 }
 
 check_uname_darwin() {
     local out
-    out="$(timeout "${DARLING_CMD_TIMEOUT}" darling shell -c 'uname -s')"
+    out="$(timeout "${DARLING_CMD_TIMEOUT}" darling shell /bin/bash -c 'uname -s' </dev/null)"
     echo "${out}"
     [[ "${out}" == *Darwin* ]]
 }
@@ -88,8 +92,10 @@ args=""
 for a in "$@"; do
     args+=" $(printf '%q' "$a")"
 done
-exec timeout "${DARLING_CMD_TIMEOUT:-900}" darling shell -c \
-    "cd $(printf '%q' "/Volumes/SystemRoot${PWD}") && exec $(printf '%q' "/Volumes/SystemRoot${real}")${args}"
+# darling shell maps the host cwd into the prefix, so only the absolute
+# path to the Mach-O binary needs the /Volumes/SystemRoot host-FS prefix.
+exec timeout "${DARLING_CMD_TIMEOUT:-900}" darling shell /bin/bash -c \
+    "exec $(printf '%q' "/Volumes/SystemRoot${real}")${args}" </dev/null
 SHIM
     chmod +x "${SHIM_DIR}/${name}"
 }
@@ -128,11 +134,12 @@ fail_count() {
 # ---- Tier 0: does Darwin boot at all? -------------------------------------
 
 boot_log="${LOG_DIR}/probe-boot.log"
-if timeout "${BOOT_TIMEOUT}" darling shell -c 'echo darling-boot-ok' >"${boot_log}" 2>&1 \
+if timeout "${BOOT_TIMEOUT}" darling shell /bin/bash -c 'echo darling-boot-ok' \
+    </dev/null >"${boot_log}" 2>&1 \
     && grep -q darling-boot-ok "${boot_log}"; then
     record "darling shell boot" "pass" "prefix initialized, darlingserver running"
 else
-    record "darling shell boot" "FAIL" "darling shell -c failed; see probe-boot.log"
+    record "darling shell boot" "FAIL" "darling shell failed; see probe-boot.log"
     summarize
     exit 1
 fi
@@ -145,13 +152,13 @@ probe "sw_vers" dsh 'sw_vers'
 hostfs_marker="${LOG_DIR}/hostfs-marker.txt"
 rm -f "${hostfs_marker}"
 probe "host FS write via /Volumes/SystemRoot" bash -c \
-    "timeout \"\${DARLING_CMD_TIMEOUT}\" darling shell -c 'echo from-darling > /Volumes/SystemRoot${hostfs_marker}' && grep -q from-darling '${hostfs_marker}'"
+    "timeout \"\${DARLING_CMD_TIMEOUT}\" darling shell /bin/bash -c 'echo from-darling > /Volumes/SystemRoot${hostfs_marker}' </dev/null && grep -q from-darling '${hostfs_marker}'"
 
 # ---- Tier 1: what toolchain does this COMPONENTS build ship? ---------------
 
-for tool in clang swiftc xcrun xcodebuild otool nm plutil; do
+for tool in clang swiftc xcrun xcodebuild otool nm plutil codesign file sqlite3; do
     tool_log="${LOG_DIR}/probe-which-${tool}.log"
-    if timeout "${DARLING_CMD_TIMEOUT}" darling shell -c "command -v ${tool}" >"${tool_log}" 2>&1; then
+    if timeout "${DARLING_CMD_TIMEOUT}" darling shell /bin/bash -c "command -v ${tool}" </dev/null >"${tool_log}" 2>&1; then
         record "darling ships ${tool}" "pass" "$(tail -n 1 "${tool_log}")"
     else
         # Absence is a finding, not a failure: Darling only bundles Apple's
@@ -161,13 +168,13 @@ for tool in clang swiftc xcrun xcodebuild otool nm plutil; do
     fi
 done
 
-if timeout "${DARLING_CMD_TIMEOUT}" darling shell -c 'command -v clang' >/dev/null 2>&1; then
+if timeout "${DARLING_CMD_TIMEOUT}" darling shell /bin/bash -c 'command -v clang' </dev/null >/dev/null 2>&1; then
     printf 'int main(void){__builtin_printf("hello-from-darling-clang\\n");return 0;}\n' >"${LOG_DIR}/hello.c"
     probe "clang compiles and runs C" dsh \
         "cd /Volumes/SystemRoot${LOG_DIR} && clang hello.c -o hello-c && ./hello-c"
 fi
 
-if timeout "${DARLING_CMD_TIMEOUT}" darling shell -c 'command -v swiftc' >/dev/null 2>&1; then
+if timeout "${DARLING_CMD_TIMEOUT}" darling shell /bin/bash -c 'command -v swiftc' </dev/null >/dev/null 2>&1; then
     printf 'print("hello-from-darling-swift")\n' >"${LOG_DIR}/hello.swift"
     probe "swiftc compiles and runs Swift" dsh \
         "cd /Volumes/SystemRoot${LOG_DIR} && swiftc hello.swift -o hello-swift && ./hello-swift"
@@ -224,7 +231,7 @@ else
 fi
 
 # Mach-O inspection of a real artifact, if this build bundles otool.
-if timeout "${DARLING_CMD_TIMEOUT}" darling shell -c 'command -v otool' >/dev/null 2>&1 \
+if timeout "${DARLING_CMD_TIMEOUT}" darling shell /bin/bash -c 'command -v otool' </dev/null >/dev/null 2>&1 \
     && [[ -x "${MACOS_BIN_DIR}/xcodegen" ]]; then
     probe "otool -L on xcodegen" dsh \
         "otool -L /Volumes/SystemRoot${MACOS_BIN_DIR}/xcodegen"

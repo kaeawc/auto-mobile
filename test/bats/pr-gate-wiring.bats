@@ -164,12 +164,14 @@ wiring_requires_yq() {
 }
 
 @test "PR WebRTC device jobs share path and opt-in gating" {
-  local job block
-  for job in android-device-webrtc ios-device-webrtc; do
-    block="$(job_block "$job")"
-    [[ "$block" == *"needs: detect-changes"* ]]
-    [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true'"* ]]
-  done
+  local block
+  block="$(job_block android-device-webrtc)"
+  [[ "$block" == *"needs: [detect-changes, build-android-control-proxy]"* ]]
+  [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true'"* ]]
+
+  block="$(job_block ios-device-webrtc)"
+  [[ "$block" == *"needs: detect-changes"* ]]
+  [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true'"* ]]
 }
 
 @test "WebRTC change detection covers publisher and device inputs" {

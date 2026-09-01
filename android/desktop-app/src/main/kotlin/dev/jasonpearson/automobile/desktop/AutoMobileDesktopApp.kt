@@ -422,15 +422,22 @@ fun AutoMobileDesktopApp(
       pickerViewModel.onAction(DevicePickerAction.SilentRefresh)
     }
   }
-  // A failed first load is otherwise a dead end (SilentRefresh only polls from Content): once the
-  // health poll sees the daemon reachable while the picker sits on Error, retry the load after a
-  // short settle. Gated on the daemon being up so a bootstrap failure (no daemon, install failed)
-  // is NOT hammered with repeated install attempts — that path stays on the explicit Retry button.
+  // A failed first load is otherwise a dead end (SilentRefresh only polls from Content): retry it
+  // automatically ONCE per disconnected -> connected transition of the daemon health poll — the
+  // "daemon was down, now it's back" recovery. Latching on the transition (not on the Error state)
+  // means a read that keeps failing WHILE the daemon stays connected (e.g. a malformed payload) is
+  // not retried in a Loading/Error flash loop every few seconds; that persistent case stays on the
+  // explicit Retry button, as does a bootstrap failure with no daemon at all.
   val daemonUp = daemonConnectionState is ConnectionState.Connected
-  val pickerFailed = pickerState is DevicePickerUiState.Error
-  LaunchedEffect(pickerViewModel, daemonUp, pickerFailed) {
-    if (daemonUp && pickerFailed) {
-      delay(GRID_REFRESH_POLL_MS)
+  var wasDaemonUp by remember(pickerViewModel) { mutableStateOf(daemonUp) }
+  LaunchedEffect(pickerViewModel, daemonUp) {
+    val cameUp = daemonUp && !wasDaemonUp
+    wasDaemonUp = daemonUp
+    if (!cameUp) return@LaunchedEffect
+    // Short settle so the freshly (re)started daemon finishes binding its resources.
+    delay(GRID_REFRESH_POLL_MS)
+    // Re-read the CURRENT picker state after the settle: only a still-failed picker reloads.
+    if (pickerState is DevicePickerUiState.Error) {
       pickerViewModel.onAction(DevicePickerAction.Refresh)
     }
   }

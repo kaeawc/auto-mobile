@@ -4,10 +4,7 @@ import type { ExecResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
-import {
-  FileAvdConfigReader,
-  type AvdConfigReader,
-} from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
+import { FileAvdConfigReader } from "../../../src/utils/android-cmdline-tools/AvdConfigReader";
 
 const result = (stdout = "", stderr = ""): ExecResult => ({
   stdout,

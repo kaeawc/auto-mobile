@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -36,9 +37,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -143,8 +146,13 @@ fun WorkspaceShell(
   // (Empty -> Content) retire the overlay so it can't linger (with its offline badge) over a live
   // workspace.
   if (state !is WorkspaceUiState.Empty && showOfflineBrowse) showOfflineBrowse = false
+  // A full-window overlay is open when any of the three scrimmed panels is showing. While one is,
+  // the workspace behind the scrim is made inert to keyboard/screen-reader focus (#4846) so a Tab
+  // or an assistive-tech swipe can't reach the visually-dimmed controls behind the overlay. Mirror
+  // the exact render conditions below so isolation tracks the overlays one-for-one.
+  val overlayActive = showHealthSheet || (showCompare && comparePair != null) || showOfflineBrowse
   Box(modifier.fillMaxSize()) {
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().isolatedBehindOverlay(overlayActive)) {
       TopBar(
         status = status,
         statusDetail = statusDetail,
@@ -210,6 +218,25 @@ fun WorkspaceShell(
     }
   }
 }
+
+/**
+ * Makes the content this modifies inert to keyboard and screen-reader focus while [active] is true,
+ * for the workspace behind a full-window overlay (issue #4846). Removing the subtree from the focus
+ * tree ([focusProperties] `canFocus = false` on a [focusGroup]) keeps a Tab from landing on the
+ * dimmed controls behind the scrim, and [clearAndSetSemantics] drops the whole subtree from the
+ * accessibility tree so assistive tech can't traverse behind the overlay either. A no-op when
+ * [active] is false, so the un-overlaid workspace keeps its normal focus order and semantics.
+ *
+ * Public (not private) so the app root can apply the same isolation to the whole [WorkspaceShell]
+ * when it hosts a sibling overlay of its own (the ⌘K command palette), keeping every workspace
+ * overlay modal through one mechanism.
+ */
+fun Modifier.isolatedBehindOverlay(active: Boolean): Modifier =
+  if (active) {
+    focusProperties { canFocus = false }.focusGroup().clearAndSetSemantics {}
+  } else {
+    this
+  }
 
 /**
  * Pick the two device columns to compare: the focused column plus the first other observed column.

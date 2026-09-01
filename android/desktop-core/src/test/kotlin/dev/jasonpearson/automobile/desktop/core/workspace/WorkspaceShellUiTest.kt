@@ -728,4 +728,99 @@ class WorkspaceShellUiTest {
     onNodeWithContentDescription("Browse navigation history").performClick()
     onNodeWithText("offline-browse-body").assertIsDisplayed()
   }
+
+  // #4846: full-window overlays must be modal to keyboard/screen-reader focus — the dimmed
+  // workspace behind the scrim must leave the accessibility/focus tree so a Tab or a screen-reader
+  // swipe cannot reach the visually-dimmed controls behind the overlay.
+
+  @Test
+  fun `opening the health sheet isolates the workspace background from accessibility`() =
+    runComposeUiTest {
+      setContent {
+        MaterialTheme {
+          WorkspaceShell(
+            state = WorkspaceUiState.Empty,
+            onAction = {},
+            onOpenPicker = {},
+            status = WorkspaceStatus.Green,
+            healthSheetContent = { Text("fake-health-body") },
+          )
+        }
+      }
+      // Background affordances are reachable before the overlay opens.
+      onNodeWithContentDescription("Open Devices").assertExists()
+      onNodeWithContentDescription("Open command palette").assertExists()
+
+      onNodeWithContentDescription("Status: Green").performClick()
+
+      // The overlay itself stays in the tree...
+      onNodeWithContentDescription("Health sheet").assertExists()
+      // ...but the dimmed workspace behind the scrim has left the accessibility tree.
+      onNodeWithContentDescription("Open Devices").assertDoesNotExist()
+      onNodeWithContentDescription("Open command palette").assertDoesNotExist()
+    }
+
+  @Test
+  fun `dismissing the health sheet restores the workspace background to accessibility`() =
+    runComposeUiTest {
+      setContent {
+        MaterialTheme {
+          WorkspaceShell(
+            state = WorkspaceUiState.Empty,
+            onAction = {},
+            onOpenPicker = {},
+            status = WorkspaceStatus.Green,
+            healthSheetContent = { Text("fake-health-body") },
+          )
+        }
+      }
+      onNodeWithContentDescription("Status: Green").performClick()
+      onNodeWithContentDescription("Open Devices").assertDoesNotExist()
+      // Closing the overlay must un-isolate the background so it is reachable again.
+      onNodeWithContentDescription("Close health sheet").performClick()
+      onNodeWithContentDescription("Open Devices").assertExists()
+    }
+
+  @Test
+  fun `opening the offline browse overlay isolates the workspace background`() = runComposeUiTest {
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = WorkspaceUiState.Empty,
+          onAction = {},
+          onOpenPicker = {},
+          offlineBrowseContent = { Text("offline-browse-body") },
+        )
+      }
+    }
+    onNodeWithContentDescription("Open Devices").assertExists()
+    onNodeWithContentDescription("Browse navigation history").performClick()
+    onNodeWithText("offline-browse-body").assertExists()
+    onNodeWithContentDescription("Open Devices").assertDoesNotExist()
+  }
+
+  @Test
+  fun `opening the compare overlay isolates the workspace background`() = runComposeUiTest {
+    val state =
+      WorkspaceUiState.Content(
+        columns = listOf(col("a", "Pixel"), col("b", "iPhone")),
+        focusedDeviceId = "a",
+      )
+    setContent {
+      MaterialTheme {
+        WorkspaceShell(
+          state = state,
+          onAction = {},
+          onOpenPicker = {},
+          compareContent = { _, _ -> Text("compare-body") },
+        )
+      }
+    }
+    // A background pane control is reachable before the overlay opens.
+    onNodeWithContentDescription("Close Pixel").assertExists()
+    onNodeWithContentDescription("Compare two devices").performClick()
+    onNodeWithText("compare-body").assertExists()
+    // Pane controls behind the compare scrim have left the accessibility tree.
+    onNodeWithContentDescription("Close Pixel").assertDoesNotExist()
+  }
 }

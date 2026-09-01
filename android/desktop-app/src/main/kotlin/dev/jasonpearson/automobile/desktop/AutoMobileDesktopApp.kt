@@ -61,6 +61,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.WorkspaceViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.buildWorkspaceCommands
 import dev.jasonpearson.automobile.desktop.core.workspace.deriveWorkspaceStatus
+import dev.jasonpearson.automobile.desktop.core.workspace.isolatedBehindOverlay
 import dev.jasonpearson.automobile.desktop.core.workspace.parseBootedDeviceSessionUuids
 import dev.jasonpearson.automobile.desktop.core.workspace.parseBootedLockStates
 import dev.jasonpearson.automobile.desktop.core.workspace.parseDeviceLockStates
@@ -471,6 +472,10 @@ fun AutoMobileDesktopApp(
                 onAction = workspaceViewModel::onAction,
                 onOpenPicker = workspaceViewModel::openPicker,
                 onOpenPalette = { paletteOpen = true },
+                // The ⌘K command palette is a sibling overlay hosted here (not inside the shell),
+                // so isolate the whole workspace behind it — matching how the shell isolates its
+                // own scrimmed panels — to keep the palette modal to keyboard/a11y focus (#4846).
+                modifier = Modifier.isolatedBehindOverlay(paletteOpen),
                 status = workspaceStatus.status,
                 statusDetail = workspaceStatus.detail,
                 updateStatus = updateStatus,

@@ -216,6 +216,15 @@ public final class AutoMobileDaemonClient: AutoMobileMCPClient, @unchecked Senda
 
         let waitResult = semaphore.wait(timeout: .now() + timeout)
         if waitResult == .timedOut {
+            // Drop the connection on timeout (same teardown as `resetSession`). The receive callback
+            // armed above stays live otherwise: a late daemon reply would append its bytes to the
+            // shared `buffer` and store the consumed line in this now-abandoned box, so the next
+            // `sendRequest` would wait for a line already removed (and could even see a prior
+            // response, since nothing correlates the reply id with the request). Cancelling and
+            // clearing forces a fresh connection + buffer for the next request.
+            connection.cancel()
+            self.connection = nil
+            buffer = Data()
             throw MCPClientError.requestFailed("Timed out waiting for daemon response")
         }
         if let error = resultBox.error {

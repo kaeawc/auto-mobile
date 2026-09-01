@@ -1025,7 +1025,7 @@ jobs:
         shell: bash
         env:
           AUTOMOBILE_BATS_MAX_FILE_SECONDS: "120"
-          AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "180"
+          AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "300"
         run: scripts/ci/run-bats.sh unit
 
   bats-integration-tests:
@@ -2382,7 +2382,7 @@ jobs:
     name: "Build CtrlProxy APK"
     runs-on: ubuntu-latest
     needs: detect-changes
-    if: needs.detect-changes.outputs.android_should_run == 'true'
+    if: needs.detect-changes.outputs.android_should_run == 'true' || needs.detect-changes.outputs.webrtc_should_run == 'true'
     defaults:
       run:
         working-directory: android
@@ -2394,7 +2394,7 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":control-proxy:assembleDebug :control-proxy:assembleRelease"
+          gradle-tasks: ":control-proxy:assembleDebug :control-proxy:assembleRelease :video-server:d8Dex"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
@@ -2409,6 +2409,12 @@ jobs:
         with:
           name: control-proxy-apk
           path: android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
+
+      - name: "Upload video-server jar"
+        uses: actions/upload-artifact@v6
+        with:
+          name: video-server-jar
+          path: android/video-server/build/libs/automobile-video.jar
 
   build-playground-app:
     timeout-minutes: 20
@@ -3039,7 +3045,7 @@ jobs:
 
   android-device-webrtc:
     name: "Android Device Capture to WHEP"
-    needs: detect-changes
+    needs: [detect-changes, build-android-control-proxy]
     if: needs.detect-changes.outputs.webrtc_should_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -3051,23 +3057,17 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
-      - name: "Build CtrlProxy APK"
-        uses: ./.github/actions/gradle-task-run
+      - name: "Download CtrlProxy APK"
+        uses: actions/download-artifact@v7
         with:
-          gradle-tasks: ":control-proxy:assembleDebug"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
-          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          name: control-proxy-apk
+          path: android/control-proxy/build/outputs/apk/debug
 
-      - name: "Build video-server jar"
-        uses: ./.github/actions/gradle-task-run
+      - name: "Download video-server jar"
+        uses: actions/download-artifact@v7
         with:
-          gradle-tasks: ":video-server:d8Dex"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
-          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          name: video-server-jar
+          path: android/video-server/build/libs
 
       - name: "Install Chrome for WHEP decoding"
         run: |

@@ -94,27 +94,51 @@ describe("#4308 device WebRTC integration workflow", () => {
     const pullRequest = workflow(PULL_REQUEST_WORKFLOW);
     const merge = workflow(MERGE_WORKFLOW);
 
+    expect(pullRequest.jobs?.["android-device-webrtc"]?.needs).toEqual([
+      "detect-changes",
+      "build-android-control-proxy",
+    ]);
+    expect(pullRequest.jobs?.["ios-device-webrtc"]?.needs).toBe("detect-changes");
     for (const jobId of DEVICE_JOB_IDS) {
-      expect(pullRequest.jobs?.[jobId]?.needs).toBe("detect-changes");
       expect(pullRequest.jobs?.[jobId]?.if).toBe(
         "needs.detect-changes.outputs.webrtc_should_run == 'true'",
       );
-      expect(merge.jobs?.[jobId]?.needs).toBeUndefined();
+      expect(merge.jobs?.[jobId]?.needs).toBe(
+        jobId === "android-device-webrtc" ? "build-android-control-proxy" : undefined,
+      );
       expect(merge.jobs?.[jobId]?.if).toBeUndefined();
     }
   });
 
-  test("builds the CtrlProxy APK before the Android emulator composite installs it", () => {
+  test("downloads existing Android products before the emulator composite installs them", () => {
     for (const path of [PULL_REQUEST_WORKFLOW, MERGE_WORKFLOW]) {
       const steps = jobSteps(path, "android-device-webrtc");
-      const buildIndex = steps.findIndex((step) => step.name === "Build CtrlProxy APK");
+      const apkIndex = steps.findIndex((step) => step.name === "Download CtrlProxy APK");
+      const jarIndex = steps.findIndex((step) => step.name === "Download video-server jar");
       const emulatorIndex = steps.findIndex(
         (step) => step.uses === "./.github/actions/android-emulator",
       );
 
-      expect(buildIndex).toBeGreaterThanOrEqual(0);
-      expect(steps[buildIndex]?.with?.["gradle-tasks"]).toContain(":control-proxy:assembleDebug");
-      expect(emulatorIndex).toBeGreaterThan(buildIndex);
+      expect(steps[apkIndex]?.uses).toBe("actions/download-artifact@v7");
+      expect(steps[apkIndex]?.with?.name).toBe("control-proxy-apk");
+      expect(steps[jarIndex]?.uses).toBe("actions/download-artifact@v7");
+      expect(steps[jarIndex]?.with?.name).toBe("video-server-jar");
+      expect(emulatorIndex).toBeGreaterThan(apkIndex);
+      expect(emulatorIndex).toBeGreaterThan(jarIndex);
+    }
+  });
+
+  test("publishes the Android products from the shared build job", () => {
+    for (const path of [PULL_REQUEST_WORKFLOW, MERGE_WORKFLOW]) {
+      const steps = jobSteps(path, "build-android-control-proxy");
+      const build = steps.find((step) => step.uses === "./.github/actions/gradle-task-run");
+      const apk = steps.find((step) => step.name === "Upload CtrlProxy APK");
+      const jar = steps.find((step) => step.name === "Upload video-server jar");
+
+      expect(build?.with?.["gradle-tasks"]).toContain(":video-server:d8Dex");
+      expect(apk?.with?.name).toBe("control-proxy-apk");
+      expect(jar?.with?.name).toBe("video-server-jar");
+      expect(jar?.with?.path).toBe("android/video-server/build/libs/automobile-video.jar");
     }
   });
 
@@ -162,10 +186,8 @@ describe("#4308 device WebRTC integration workflow", () => {
   test("uses the checkout's video-server jar for Android capture", () => {
     for (const path of [PULL_REQUEST_WORKFLOW, MERGE_WORKFLOW]) {
       const steps = jobSteps(path, "android-device-webrtc");
-      const build = steps.find((step) => step.name === "Build video-server jar");
       const emulator = steps.find((step) => step.uses === "./.github/actions/android-emulator");
 
-      expect(build?.with?.["gradle-tasks"]).toContain(":video-server:d8Dex");
       expect(emulator?.with?.script).toContain("AUTOMOBILE_VIDEO_SERVER_JAR");
       expect(emulator?.with?.script).toContain("AUTOMOBILE_REQUIRE_VIDEO_SERVER=1");
     }

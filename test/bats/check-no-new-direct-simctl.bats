@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 
-setup() {
+setup_file() {
   repo_dir="$(mktemp -d)"
+  state_file="${TMPDIR:-/tmp}/auto-mobile-simctl-bats-fixture"
   mkdir -p "$repo_dir/scripts/lib" "$repo_dir/src"
   cp "$BATS_TEST_DIRNAME/../../scripts/check-no-new-direct-simctl.sh" "$repo_dir/scripts/"
   cp "$BATS_TEST_DIRNAME/../../scripts/lib/vcs-diff.sh" "$repo_dir/scripts/lib/"
@@ -12,11 +13,25 @@ setup() {
   git -C "$repo_dir" add .
   git -C "$repo_dir" commit -qm baseline
   git -C "$repo_dir" commit --allow-empty -qm head
+  printf '%s\n' "$repo_dir" > "$state_file"
 }
 
-teardown() {
-  rm -rf "$repo_dir"
+setup() {
+  state_file="${TMPDIR:-/tmp}/auto-mobile-simctl-bats-fixture"
+  repo_dir="$(<"$state_file")"
+  git -C "$repo_dir" checkout -q --detach HEAD
+  git -C "$repo_dir" checkout -q -B bats-main HEAD
+  git -C "$repo_dir" reset --hard -q HEAD
+  git -C "$repo_dir" clean -fdq
   rm -rf "${remote_dir:-}" "${shallow_dir:-}"
+  unset remote_dir shallow_dir
+}
+
+teardown_file() {
+  state_file="${TMPDIR:-/tmp}/auto-mobile-simctl-bats-fixture"
+  repo_dir="$(<"$state_file")"
+  rm -rf "$repo_dir"
+  rm -f "$state_file"
 }
 
 @test "rejects a new argv-form xcrun execution" {

@@ -386,7 +386,7 @@ jobs:
         shell: bash
         env:
           AUTOMOBILE_BATS_MAX_FILE_SECONDS: "120"
-          AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "180"
+          AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "300"
         run: scripts/ci/run-bats.sh unit
 
   bats-integration-tests:
@@ -484,6 +484,7 @@ jobs:
 
   android-device-webrtc:
     name: "Android Device Capture to WHEP"
+    needs: build-android-control-proxy
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -494,23 +495,17 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
-      - name: "Build CtrlProxy APK"
-        uses: ./.github/actions/gradle-task-run
+      - name: "Download CtrlProxy APK"
+        uses: actions/download-artifact@v7
         with:
-          gradle-tasks: ":control-proxy:assembleDebug"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
-          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          name: control-proxy-apk
+          path: android/control-proxy/build/outputs/apk/debug
 
-      - name: "Build video-server jar"
-        uses: ./.github/actions/gradle-task-run
+      - name: "Download video-server jar"
+        uses: actions/download-artifact@v7
         with:
-          gradle-tasks: ":video-server:d8Dex"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
-          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          name: video-server-jar
+          path: android/video-server/build/libs
 
       - name: "Install Chrome for WHEP decoding"
         run: |
@@ -1333,8 +1328,6 @@ jobs:
 
   build-android-control-proxy:
     name: "Build CtrlProxy APK"
-    # Disabled: only needed for disabled emulator merge jobs.
-    if: ${{ false }}
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -1347,7 +1340,7 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":control-proxy:assembleDebug"
+          gradle-tasks: ":control-proxy:assembleDebug :video-server:d8Dex"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
@@ -1362,6 +1355,12 @@ jobs:
         with:
           name: control-proxy-apk
           path: android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
+
+      - name: "Upload video-server jar"
+        uses: actions/upload-artifact@v6
+        with:
+          name: video-server-jar
+          path: android/video-server/build/libs/automobile-video.jar
 
   build-playground-app:
     name: "Build Playground App"

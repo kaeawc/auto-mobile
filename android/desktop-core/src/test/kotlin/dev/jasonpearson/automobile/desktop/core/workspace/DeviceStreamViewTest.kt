@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
@@ -91,6 +92,34 @@ class DeviceStreamViewTest {
       onAllNodesWithContentDescription("Live stream of Pixel 8").fetchSemanticsNodes().isNotEmpty()
     }
     onNodeWithContentDescription("Live stream of Pixel 8").assertIsDisplayed()
+  }
+
+  @Test
+  fun `keeps the last frame on screen while a recreated source reconnects`() = runComposeUiTest {
+    // Arming the pane changes the source's remember keys (fps/preset), recreating the source. The
+    // fresh source has no frame yet — the pane must keep rendering the retained frame instead of
+    // flashing "Connecting to live mirror…" mid-interaction.
+    val sources = mutableListOf<FakeVideoStreamSource>()
+    val armed = androidx.compose.runtime.mutableStateOf(false)
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          col(),
+          enableDeviceControl = armed.value,
+          sourceFactory = { _, _ -> FakeVideoStreamSource().also { sources += it } },
+        )
+      }
+    }
+    waitUntil { sources.size == 1 && sources[0].connectedDeviceId != null }
+    sources[0].emitFrame(width = 1, height = 1)
+    waitUntil {
+      onAllNodesWithContentDescription("Live stream of Pixel 8").fetchSemanticsNodes().isNotEmpty()
+    }
+    armed.value = true
+    waitUntil { sources.size == 2 }
+    onNodeWithContentDescription("Live stream of Pixel 8").assertIsDisplayed()
+    assertTrue(onAllNodesWithText("Connecting to live mirror…").fetchSemanticsNodes().isEmpty())
+    assertTrue(onAllNodesWithText("Waiting for the first frame…").fetchSemanticsNodes().isEmpty())
   }
 
   @Test

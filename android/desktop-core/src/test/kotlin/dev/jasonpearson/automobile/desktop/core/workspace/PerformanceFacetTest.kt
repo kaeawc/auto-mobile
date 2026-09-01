@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.runComposeUiTest
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrap
 import dev.jasonpearson.automobile.desktop.core.daemon.FakeObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.PerformanceStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.datasource.DefaultDataSourceFactory
@@ -35,6 +36,7 @@ class PerformanceFacetTest {
     val client = FakeAutoMobileClient()
     return object : AutoMobileGraphProvider {
       override val autoMobileClient = client
+      override val daemonBootstrap = DaemonBootstrap.inactive()
       override val settingsProvider = FakeSettingsProvider()
       override val dataSourceFactory = DefaultDataSourceFactory(client)
       override val updateController = FakeUpdateController()

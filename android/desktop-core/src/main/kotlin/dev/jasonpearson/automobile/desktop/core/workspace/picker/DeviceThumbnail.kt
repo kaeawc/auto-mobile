@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.workspace.picker
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStream
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
+import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.util.Base64
 import kotlinx.coroutines.CancellationException
@@ -40,8 +42,13 @@ import org.jetbrains.skia.Image as SkiaImage
 
 private val LOG = LoggerFactory.getLogger("DeviceThumbnail")
 
-/** Height of a grid device thumbnail; the frame is aspect-fit centered on black inside it. */
-private val THUMBNAIL_HEIGHT = 132.dp
+/**
+ * Width:height ratio of a thumbnail with no screenshot yet (shut-down, booting, or capture still
+ * pending): a portrait-phone-ish stand-in so the staggered grid's placeholder cards stay compact.
+ * Once a screenshot decodes, the card adopts that bitmap's true ratio — a landscape tablet goes
+ * wide, a foldable goes square-ish — which is what gives the grid its masonry variety.
+ */
+internal const val PLACEHOLDER_THUMBNAIL_ASPECT = 0.62f
 
 // Backoff bounds for the screenshot capture retry (see captureScreenshotWithRetry).
 private const val SCREENSHOT_RETRY_INITIAL_MS = 1_000L
@@ -87,6 +94,16 @@ internal fun thumbnailPlaceholder(state: DeviceState, booting: Boolean): String?
     else -> null
   }
 
+/**
+ * Whether a stream frame is THIS card's thumbnail. The observation socket can deliver frames for
+ * other subscribed devices (and a `replay = 1` stream can hand a new collector another device's
+ * last frame), so a capture that accepts "any non-empty screenshot" attributes the fastest device's
+ * frame to whichever card asked — an Android home screen on an iPhone card. Only a frame stamped
+ * with this device's id qualifies; an unstamped frame is ambiguous and is skipped.
+ */
+internal fun isThumbnailFrameFor(deviceId: String, update: ScreenshotStreamUpdate): Boolean =
+  update.deviceId == deviceId && !update.screenshotBase64.isNullOrEmpty()
+
 /** A last-known screenshot for a device, rendered as the grid thumbnail. */
 interface DeviceThumbnailScreenshotSource {
   /** The most recent screenshot for [deviceId], or null when none can be captured. */
@@ -111,59 +128,61 @@ fun DeviceThumbnail(
   modifier: Modifier = Modifier,
   screenshotSource: DeviceThumbnailScreenshotSource? = ObservationScreenshotSource,
 ) {
-  Box(
-    modifier =
-      modifier.clip(RoundedCornerShape(4.dp)).background(Color.Black).semantics {
-        contentDescription = "Thumbnail ${device.name}"
-      },
-    contentAlignment = Alignment.Center,
-  ) {
-    val placeholder = thumbnailPlaceholder(device.state, booting)
+  val placeholder = thumbnailPlaceholder(device.state, booting)
+  // One still per boot, retried with backoff until the observation service yields one. The state
+  // is hoisted here (not in a screenshot-only child) because the CARD's aspect ratio derives from
+  // it; the placeholder reset below reproduces the old unmount-through-placeholder semantics, so a
+  // rebooted device captures a fresh still rather than keeping the previous boot's screen.
+  var screenshot by remember(device.id) { mutableStateOf<ImageBitmap?>(null) }
+  LaunchedEffect(placeholder) {
     if (placeholder != null) {
-      Text(placeholder, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
-    } else {
-      ScreenshotThumbnail(device.id, device.name, screenshotSource)
+      screenshot = null
     }
   }
-}
-
-@Composable
-private fun ScreenshotThumbnail(
-  deviceId: String,
-  deviceName: String,
-  screenshotSource: DeviceThumbnailScreenshotSource?,
-) {
-  // One still per card mount, retried with backoff until the observation service yields one. Keyed
-  // on deviceId: a rebooted device unmounts through the "Shutdown"/"Booting" placeholder, so a
-  // fresh boot captures a fresh still rather than showing the previous boot's screen.
-  var screenshot by remember(deviceId) { mutableStateOf<ImageBitmap?>(null) }
-  LaunchedEffect(deviceId, screenshotSource) {
-    if (screenshotSource != null && screenshot == null) {
-      screenshot = captureScreenshotWithRetry(deviceId, screenshotSource)
+  LaunchedEffect(device.id, screenshotSource, placeholder) {
+    if (placeholder == null && screenshotSource != null && screenshot == null) {
+      screenshot = captureScreenshotWithRetry(device.id, screenshotSource)
     }
   }
 
   val still = screenshot
-  if (still != null) {
-    Image(
-      bitmap = still,
-      contentDescription = "Screenshot of $deviceName",
-      modifier = Modifier.fillMaxSize(),
-      contentScale = ContentScale.Fit,
-    )
-  } else {
-    Text(
-      "No preview yet",
-      color = Color.White.copy(alpha = 0.5f),
-      fontSize = 11.sp,
-      textAlign = TextAlign.Center,
-      modifier = Modifier.padding(8.dp),
-    )
+  // Each card fits its own device: the decoded screenshot's ratio once available, a portrait
+  // stand-in until then. This is what lets the staggered grid pack disjoint card heights.
+  val aspect =
+    if (still != null && still.height > 0) still.width.toFloat() / still.height
+    else PLACEHOLDER_THUMBNAIL_ASPECT
+  Box(
+    modifier =
+      modifier
+        .aspectRatio(aspect)
+        .clip(RoundedCornerShape(4.dp))
+        .background(Color.Black)
+        .semantics {
+          contentDescription = "Thumbnail ${device.name}"
+        },
+    contentAlignment = Alignment.Center,
+  ) {
+    when {
+      placeholder != null ->
+        Text(placeholder, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+      still != null ->
+        Image(
+          bitmap = still,
+          contentDescription = "Screenshot of ${device.name}",
+          modifier = Modifier.fillMaxSize(),
+          contentScale = ContentScale.Fit,
+        )
+      else ->
+        Text(
+          "No preview yet",
+          color = Color.White.copy(alpha = 0.5f),
+          fontSize = 11.sp,
+          textAlign = TextAlign.Center,
+          modifier = Modifier.padding(8.dp),
+        )
+    }
   }
 }
-
-/** Fixed thumbnail height, exposed so the card lays out the row above/below it consistently. */
-internal val DeviceThumbnailHeight = THUMBNAIL_HEIGHT
 
 /**
  * Thumbnail still backed by a one-shot [ObservationStream] observation. Deliberately does NOT cache
@@ -186,7 +205,7 @@ object ObservationScreenshotSource : DeviceThumbnailScreenshotSource {
           stream.connect(deviceId)
           stream.requestObservation(deviceId)
           withTimeoutOrNull(CAPTURE_TIMEOUT_MS) {
-            stream.screenshotUpdates.first { !it.screenshotBase64.isNullOrEmpty() }.screenshotBase64
+            stream.screenshotUpdates.first { isThumbnailFrameFor(deviceId, it) }.screenshotBase64
           }
         }
       base64?.let {

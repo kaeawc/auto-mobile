@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.runComposeUiTest
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrap
 import dev.jasonpearson.automobile.desktop.core.datasource.DefaultDataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationAppSummary
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationDataSource
@@ -34,6 +35,7 @@ class OfflineNavigationBrowserTest {
     val client = FakeAutoMobileClient()
     return object : AutoMobileGraphProvider {
       override val autoMobileClient = client
+      override val daemonBootstrap = DaemonBootstrap.inactive()
       override val settingsProvider = FakeSettingsProvider()
       override val dataSourceFactory = DefaultDataSourceFactory(client)
       override val updateController = FakeUpdateController()
@@ -315,6 +317,7 @@ class OfflineNavigationBrowserTest {
     val graphProvider =
       object : AutoMobileGraphProvider {
         override val autoMobileClient = client
+        override val daemonBootstrap = DaemonBootstrap.inactive()
         override val settingsProvider = FakeSettingsProvider()
         override val dataSourceFactory = DefaultDataSourceFactory(client)
         override val updateController = FakeUpdateController()

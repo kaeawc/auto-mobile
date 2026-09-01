@@ -23,6 +23,18 @@ class McpDaemonClientHandshakeTest {
   }
 
   @Test
+  fun `normalizeClientVersion declares the base release for a Gradle SNAPSHOT dev build`() {
+    // A dev-run desktop stamps `<release>-SNAPSHOT`; the daemon gate compares releases and npm has
+    // no SNAPSHOT packages, so the base release is what can both match and be installed.
+    assertEquals("0.0.67", DaemonSocketPaths.normalizeClientVersion("0.0.67-SNAPSHOT"))
+    assertEquals("0.0.67", DaemonSocketPaths.normalizeClientVersion(" 0.0.67-snapshot "))
+    // A bare snapshot marker with no release is not a declarable version.
+    assertNull(DaemonSocketPaths.normalizeClientVersion("-SNAPSHOT"))
+    // Non-SNAPSHOT prereleases stay exact — they may exist as published packages.
+    assertEquals("0.0.68-rc.1", DaemonSocketPaths.normalizeClientVersion("0.0.68-rc.1"))
+  }
+
+  @Test
   fun `resolveClientVersion falls back after an unpinnable environment alias`() {
     assertEquals(
       "0.0.40",

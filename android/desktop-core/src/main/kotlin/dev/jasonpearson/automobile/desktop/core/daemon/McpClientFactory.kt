@@ -25,18 +25,29 @@ object McpClientFactory {
     }
   }
 
-  fun createPreferred(): AutoMobileClient {
+  /**
+   * Creates the app's preferred client. When [bootstrap] is provided and the Unix-socket daemon is
+   * selected, the client shares the bootstrap's lifecycle so its per-request preflights report
+   * their progress to the launch surfaces; non-daemon transports mark the bootstrap inactive.
+   */
+  fun createPreferred(bootstrap: DaemonBootstrap? = null): AutoMobileClient {
     val configuredHttp = createConfiguredHttp()
     if (configuredHttp != null) {
+      bootstrap?.markInactive()
       return configuredHttp
     }
 
     val configuredStdio = createConfiguredStdio()
     if (configuredStdio != null) {
+      bootstrap?.markInactive()
       return configuredStdio
     }
 
-    return McpDaemonClient()
+    return if (bootstrap != null) {
+      McpDaemonClient(DaemonSocketPaths.socketPath(), bootstrap.lifecycle)
+    } else {
+      McpDaemonClient()
+    }
   }
 
   fun createConfiguredHttp(): McpHttpClient? {

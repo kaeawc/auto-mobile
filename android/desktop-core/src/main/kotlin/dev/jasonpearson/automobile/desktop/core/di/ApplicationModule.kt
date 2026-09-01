@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.di
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrap
 import dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.platform.PackagedVersionSource
@@ -23,8 +24,16 @@ interface ApplicationModule {
 
     @Provides
     @SingleIn(AppScope::class)
-    fun provideAutoMobileClient(): AutoMobileClient {
-      return McpClientFactory.createPreferred()
+    fun provideDaemonBootstrap(): DaemonBootstrap {
+      return DaemonBootstrap.create()
+    }
+
+    @Provides
+    @SingleIn(AppScope::class)
+    fun provideAutoMobileClient(daemonBootstrap: DaemonBootstrap): AutoMobileClient {
+      // Shares the bootstrap's lifecycle with the daemon client so install/start progress from any
+      // trigger (startup bootstrap or a request preflight) reaches the launch surfaces.
+      return McpClientFactory.createPreferred(daemonBootstrap)
     }
 
     @Provides

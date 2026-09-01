@@ -168,6 +168,20 @@ fun DeviceStreamView(
       // NOT be reconnected; the first-frame deadline still catches a never-first-frame wedge.
       stallReconnectMs = if (column.platform == Platform.Android) LIVE_STALL_RECONNECT_MS else null,
     )
+  // Retain the newest frame ACROSS source swaps, keyed on the device. rememberLiveVideoFrame
+  // retains frames across relay drops WITHIN one source, but arming the pane (fps 10→30), a manual
+  // preset pick, or an auto-adjust step recreates the source — resetting that per-source state to
+  // null and flashing "Connecting to live mirror…" mid-interaction. The mirror keeps rendering this
+  // retained frame until the new subscription decodes its first frame, so a re-subscribe is
+  // seamless. Keyed on deviceId so one device never shows another device's last frame; control
+  // arming still requires a CURRENT frame + Streaming state (below), so stale pixels are never
+  // clickable.
+  var retainedFrame by remember(column.deviceId) { mutableStateOf<LiveVideoFrame?>(null) }
+  LaunchedEffect(liveFrame) {
+    if (liveFrame != null) {
+      retainedFrame = liveFrame
+    }
+  }
   val state by source.state.collectAsState()
   val droppedFrames by source.droppedFrames.collectAsState(initial = null)
   val controlSnapshot = control?.interactionSnapshot
@@ -190,6 +204,7 @@ fun DeviceStreamView(
       column = column,
       state = state,
       liveFrame = liveFrame,
+      retainedFrame = retainedFrame,
       control = control,
       controlSnapshot = controlSnapshot,
       enableDeviceControl = enableDeviceControl,
@@ -242,6 +257,10 @@ private fun DeviceStreamContent(
   column: DeviceColumn,
   state: VideoStreamState,
   liveFrame: LiveVideoFrame?,
+  // The last frame any PREVIOUS source for this device decoded — rendered by the plain mirror
+  // while a recreated source (arming / quality change) is still connecting, never by the armed
+  // control surface.
+  retainedFrame: LiveVideoFrame?,
   control: WorkspaceDeviceControlState?,
   controlSnapshot: DeviceFrameSnapshot?,
   enableDeviceControl: Boolean,
@@ -325,7 +344,7 @@ private fun DeviceStreamContent(
     )
   } else {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-      val bitmap = liveFrame?.bitmap
+      val bitmap = (liveFrame ?: retainedFrame)?.bitmap
       if (bitmap != null) {
         Image(
           bitmap = bitmap,

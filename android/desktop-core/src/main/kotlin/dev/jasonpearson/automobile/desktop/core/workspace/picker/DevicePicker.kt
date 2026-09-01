@@ -18,10 +18,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
+import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -40,6 +40,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrapState
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonLifecyclePhase
 import dev.jasonpearson.automobile.desktop.core.theme.PlatformIcons
 import dev.jasonpearson.automobile.desktop.core.workspace.Platform
 
@@ -58,38 +60,86 @@ fun DevicePicker(
   // Whether the "Close" affordance is offered. False when the grid is the app's home surface (no
   // observed workspace to return to); true when opened over an existing workspace ("Devices +").
   canClose: Boolean = true,
+  // Install/start progress of the shared daemon. The picker's first load can silently install Bun
+  // and start the daemon (up to the daemon-startup budget), so the Loading state narrates that
+  // work instead of sitting on "Loading devices…", and the Error state surfaces the bootstrap
+  // failure with its actionable message.
+  bootstrapState: DaemonBootstrapState = DaemonBootstrapState.Inactive,
   // The per-card device thumbnail. Hoisted (default = the screenshot [DeviceThumbnail]) so a test
   // can stub it and never open an observation socket while composing the grid. Thumbnails are
   // stills by design — a per-card live-video subscription would put a standing capture/decode cost
   // on every booted tile of a potentially huge grid.
   thumbnail: @Composable (device: PickerDevice, booting: Boolean) -> Unit = { device, booting ->
+    // Width-only sizing: the thumbnail derives its own height from the device's aspect ratio
+    // (screenshot ratio once captured, a portrait stand-in until then), which the staggered grid
+    // below packs masonry-style.
     DeviceThumbnail(
       device = device,
       booting = booting,
-      modifier = Modifier.fillMaxWidth().height(DeviceThumbnailHeight),
+      modifier = Modifier.fillMaxWidth(),
     )
   },
 ) {
   Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
     when (state) {
-      is DevicePickerUiState.Loading -> Centered("Loading devices…")
-      is DevicePickerUiState.Error ->
-        Centered("Couldn't load devices: ${state.message}") {
+      is DevicePickerUiState.Loading -> Centered(loadingMessage(bootstrapState))
+      is DevicePickerUiState.Error -> {
+        val bootstrapFailure = (bootstrapState as? DaemonBootstrapState.Failed)?.message
+        Centered(
+          message =
+            if (bootstrapFailure != null) "AutoMobile daemon isn't available"
+            else "Couldn't load devices",
+          detail = bootstrapFailure ?: state.message,
+        ) {
+          // Retry re-runs the whole chain: the load's preflight re-detects the daemon and, when
+          // none is reachable, re-attempts the install/start pipeline before reading devices.
           Button(onClick = { onAction(DevicePickerAction.Refresh) }) { Text("Retry") }
         }
+      }
       is DevicePickerUiState.Content -> Content(state, onAction, onClose, canClose, thumbnail)
     }
   }
 }
 
+/**
+ * Maps the daemon-bootstrap phase behind a Loading state to what the user is actually waiting on. A
+ * first launch on a machine without AutoMobile can spend most of a minute installing Bun and
+ * fetching the daemon package; that must read as setup progress, not a hung device list.
+ */
+internal fun loadingMessage(bootstrap: DaemonBootstrapState): String =
+  when (bootstrap) {
+    is DaemonBootstrapState.Working ->
+      when (val phase = bootstrap.phase) {
+        DaemonLifecyclePhase.InstallingRuntime -> "Installing the Bun runtime (one-time setup)…"
+        is DaemonLifecyclePhase.LaunchingDaemon ->
+          if (phase.action == "restart") "Updating the AutoMobile daemon to ${phase.version}…"
+          else "Starting AutoMobile ${phase.version}…"
+        DaemonLifecyclePhase.Verifying -> "Waiting for the AutoMobile daemon…"
+        else -> "Loading devices…"
+      }
+    else -> "Loading devices…"
+  }
+
 @Composable
-private fun Centered(message: String, extra: @Composable (() -> Unit)? = null) {
+private fun Centered(
+  message: String,
+  detail: String? = null,
+  extra: @Composable (() -> Unit)? = null,
+) {
   Column(
-    Modifier.fillMaxSize(),
+    Modifier.fillMaxSize().padding(horizontal = 48.dp),
     verticalArrangement = Arrangement.Center,
     horizontalAlignment = Alignment.CenterHorizontally,
   ) {
     Text(message, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    if (detail != null) {
+      Spacer(Modifier.height(8.dp))
+      Text(
+        detail,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        style = MaterialTheme.typography.bodySmall,
+      )
+    }
     if (extra != null) {
       Spacer(Modifier.height(12.dp))
       extra()
@@ -259,11 +309,14 @@ private fun DeviceGrid(
   thumbnail: @Composable (PickerDevice, Boolean) -> Unit,
 ) {
   val devices = filteredDevices(content.devices, content.filters)
-  LazyVerticalGrid(
-    columns = GridCells.Adaptive(220.dp),
+  // Masonry (Pinterest-style) packing: every card is column-width, but each card's HEIGHT follows
+  // its own device's aspect ratio, so the staggered grid packs disjoint heights instead of forcing
+  // one uniform row height.
+  LazyVerticalStaggeredGrid(
+    columns = StaggeredGridCells.Adaptive(220.dp),
     modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
     horizontalArrangement = Arrangement.spacedBy(12.dp),
-    verticalArrangement = Arrangement.spacedBy(12.dp),
+    verticalItemSpacing = 12.dp,
   ) {
     items(devices, key = { it.id }) { device ->
       DeviceCard(

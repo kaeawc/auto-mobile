@@ -626,6 +626,79 @@ class DesktopDaemonLifecycleTest {
     )
   }
 
+  @Test
+  fun `reports probing and completed phases when reusing a running daemon`() {
+    val phases = mutableListOf<DaemonLifecyclePhase>()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf("0.0.40")),
+        commandExecutor = FakeDaemonCommandExecutor(),
+        timer = FakeDaemonRetryTimer(),
+        phaseListener = phases::add,
+      )
+
+    lifecycle.ensureVersionMatchedDaemon()
+
+    assertEquals(
+      listOf(DaemonLifecyclePhase.Probing, DaemonLifecyclePhase.Completed(restarted = false)),
+      phases,
+    )
+  }
+
+  @Test
+  fun `reports install launch and verify phases across a cold start`() {
+    val phases = mutableListOf<DaemonLifecyclePhase>()
+    val installer = FakeDesktopBunInstaller()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { "0.0.40" },
+        socketChecker = FakeDaemonSocketChecker(listOf(false, false, false, true)),
+        pidFileReader = FakeDaemonPidFileReader(listOf(null, "0.0.40")),
+        commandExecutor = FakeDaemonCommandExecutor(),
+        timer = FakeDaemonRetryTimer(),
+        packageRunnerResolver = FakeDaemonPackageRunnerResolver(listOf(null, "bunx")),
+        bunInstaller = installer,
+        phaseListener = phases::add,
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Ready>(result)
+    assertEquals(1, installer.installCalls)
+    assertEquals(
+      listOf(
+        DaemonLifecyclePhase.Probing,
+        DaemonLifecyclePhase.InstallingRuntime,
+        DaemonLifecyclePhase.LaunchingDaemon(action = "start", version = "0.0.40"),
+        DaemonLifecyclePhase.Verifying,
+        DaemonLifecyclePhase.Completed(restarted = true),
+      ),
+      phases,
+    )
+  }
+
+  @Test
+  fun `reports a terminal failed phase with the failure message`() {
+    val phases = mutableListOf<DaemonLifecyclePhase>()
+    val lifecycle =
+      DesktopDaemonLifecycle(
+        expectedVersionProvider = { null },
+        socketChecker = FakeDaemonSocketChecker(listOf(false)),
+        pidFileReader = FakeDaemonPidFileReader(listOf(null)),
+        commandExecutor = FakeDaemonCommandExecutor(),
+        timer = FakeDaemonRetryTimer(),
+        phaseListener = phases::add,
+      )
+
+    val result = lifecycle.ensureVersionMatchedDaemon()
+
+    assertIs<DaemonLifecycleResult.Failure>(result)
+    assertEquals(DaemonLifecyclePhase.Probing, phases.first())
+    assertEquals(DaemonLifecyclePhase.Failed(result.message), phases.last())
+  }
+
   private class FakeDaemonSocketChecker(private val states: List<Boolean>) : DaemonSocketChecker {
     private var reads = 0
 

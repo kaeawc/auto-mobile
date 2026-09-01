@@ -68,6 +68,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.parseDeviceLockStates
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerAction
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerEffect
+import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.RealDeviceBootController
 import dev.jasonpearson.automobile.desktop.core.workspace.rememberWorkspaceDeviceControl
@@ -155,6 +156,15 @@ fun AutoMobileDesktopApp(
     }
   val pickerState by pickerViewModel.state.collectAsState()
   var pickerOpen by remember { mutableStateOf(false) }
+
+  // Daemon bootstrap as a first-class startup step: detect the current AutoMobile daemon, or
+  // install Bun + start the pinned package when none is reachable — instead of leaving that work
+  // to happen invisibly inside the picker's first resource read. The bootstrap shares its
+  // lifecycle with the daemon client (see ApplicationModule), so whichever trigger wins the
+  // lifecycle lock, its progress lands in bootstrapState for the launch surfaces to narrate.
+  val daemonBootstrap = graph.daemonBootstrap
+  val bootstrapState by daemonBootstrap.state.collectAsState()
+  LaunchedEffect(daemonBootstrap) { withContext(Dispatchers.IO) { daemonBootstrap.ensureReady() } }
   var paletteOpen by remember { mutableStateOf(false) }
   var showOnboarding by remember { mutableStateOf(!settings.hasSeenOnboarding) }
 
@@ -412,6 +422,18 @@ fun AutoMobileDesktopApp(
       pickerViewModel.onAction(DevicePickerAction.SilentRefresh)
     }
   }
+  // A failed first load is otherwise a dead end (SilentRefresh only polls from Content): once the
+  // health poll sees the daemon reachable while the picker sits on Error, retry the load after a
+  // short settle. Gated on the daemon being up so a bootstrap failure (no daemon, install failed)
+  // is NOT hammered with repeated install attempts — that path stays on the explicit Retry button.
+  val daemonUp = daemonConnectionState is ConnectionState.Connected
+  val pickerFailed = pickerState is DevicePickerUiState.Error
+  LaunchedEffect(pickerViewModel, daemonUp, pickerFailed) {
+    if (daemonUp && pickerFailed) {
+      delay(GRID_REFRESH_POLL_MS)
+      pickerViewModel.onAction(DevicePickerAction.Refresh)
+    }
+  }
 
   AutoMobileTheme(themeMode = settings.themeMode) {
     Surface(
@@ -447,6 +469,7 @@ fun AutoMobileDesktopApp(
               onClose = { pickerOpen = false },
               // Only offer Close when there is an observed workspace to return to.
               canClose = workspaceState is WorkspaceUiState.Content,
+              bootstrapState = bootstrapState,
             )
           else ->
             Box(Modifier.fillMaxSize()) {

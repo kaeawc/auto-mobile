@@ -66,7 +66,7 @@ run_lane() {
 }
 
 @test "local macOS detection retains per-test timeout headroom" {
-  run env \
+  run env -u RUNNER_OS \
     PATH="$STUB_BIN:$PATH" \
     TEST_TS_PRINT_CMD=1 \
     UNAME_S=Darwin \

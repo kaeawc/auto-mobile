@@ -12,7 +12,7 @@ readonly TEST_FILE="${AUTOMOBILE_MEDIAMTX_TEST_FILE:-test/integration/mediamtxWe
 # The werift loopback suite shares the opt-in gate: its DTLS/ICE handshake runs
 # over real UDP sockets, so it lives in this integration lane rather than the
 # default `bun test` run (macos real-I/O hang class, #5391).
-readonly LOOPBACK_TEST_FILE="test/features/webrtc/WebRtcPublisher.loopback.test.ts"
+readonly LOOPBACK_TEST_FILE="test/features/webrtc/WebRtcPublisher.loopback.integration.test.ts"
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cache_dir="${AUTOMOBILE_MEDIAMTX_CACHE_DIR:-${repo_root}/scratch/mediamtx}"

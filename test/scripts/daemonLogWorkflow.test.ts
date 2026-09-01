@@ -8,19 +8,12 @@ const CI_LOG_DIR = "${{ github.workspace }}/ci-logs/daemon-logs";
 const BENCHMARK_SCRIPT = "scripts/benchmark-startup.sh";
 
 describe("daemon log artifact wiring", () => {
-  test("installer jobs write directly into their artifact tree", () => {
+  test("removed development installer jobs leave no daemon-log artifact wiring", () => {
     const pullRequestJob = loadWorkflow(PULL_REQUEST_WORKFLOW).jobs?.["installer-development"];
     const mergeJob = loadWorkflow(MERGE_WORKFLOW).jobs?.["installer-development"];
 
-    expect(pullRequestJob?.env?.AUTOMOBILE_LOG_DIR).toBe(CI_LOG_DIR);
-    expect(mergeJob?.env?.AUTOMOBILE_LOG_DIR).toBe(CI_LOG_DIR);
-
-    for (const workflow of [PULL_REQUEST_WORKFLOW, MERGE_WORKFLOW]) {
-      const steps = loadJobSteps(workflow, "installer-development");
-      expect(steps.some((step) => step.run?.includes("resolve_automobile_log_dir"))).toBe(false);
-      expect(steps.some((step) => step.run?.includes("auto-mobile-log-dir.sh"))).toBe(false);
-      expect(stepNamed(steps, "Upload Logs")?.with?.path).toBe("ci-logs/");
-    }
+    expect(pullRequestJob).toBeUndefined();
+    expect(mergeJob).toBeUndefined();
   });
 
   test("XCTestRunner uploads the same explicit directory inherited by AutoMobile", () => {

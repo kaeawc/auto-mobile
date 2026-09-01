@@ -17,6 +17,7 @@ setup() {
 
 teardown() {
   rm -rf "$STUB_DIR" "$WORK_DIR"
+  rm -rf coverage
 }
 
 # Stub `bun` to emit a canned coverage log ($STUB_LOG) and exit non-zero,
@@ -24,6 +25,8 @@ teardown() {
 make_bun_stub() {
   cat > "$STUB_DIR/bun" <<EOF
 #!/usr/bin/env bash
+mkdir -p coverage
+printf 'TN:\n' > coverage/lcov.info
 cat "$STUB_LOG"
 exit 1
 EOF

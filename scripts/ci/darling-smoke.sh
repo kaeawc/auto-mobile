@@ -235,8 +235,16 @@ if curl -fsSL -o "${xcodegen_zip}" "${XCODEGEN_RELEASE_URL}" \
 
     probe "xcodegen --version (pinned ${XCODEGEN_VERSION})" bash -c \
         "v=\"\$(xcodegen --version)\"; echo \"\${v}\"; [[ \"\${v}\" == *\"${XCODEGEN_VERSION}\"* ]]"
-    probe "xcodegen-drift-check.sh --ctrl-proxy" \
-        bash "${PROJECT_ROOT}/scripts/ios/xcodegen-drift-check.sh" --ctrl-proxy
+    # The drift check cannot pass while xcodegen itself cannot load, and its
+    # version-parse discards the dyld stderr that probe() classifies on — so
+    # gate it on the version probe instead of re-failing for the same cause.
+    if [[ "${PROBE_RESULTS[$((${#PROBE_RESULTS[@]} - 1))]}" == "pass" ]]; then
+        probe "xcodegen-drift-check.sh --ctrl-proxy" \
+            bash "${PROJECT_ROOT}/scripts/ios/xcodegen-drift-check.sh" --ctrl-proxy
+    else
+        record "xcodegen-drift-check.sh --ctrl-proxy" "blocked-upstream" \
+            "skipped: xcodegen does not load under this Darling release (previous row)"
+    fi
 else
     record "xcodegen download" "FAIL" "could not fetch/verify pinned XcodeGen archive"
 fi

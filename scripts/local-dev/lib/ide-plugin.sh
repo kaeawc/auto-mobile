@@ -53,10 +53,16 @@ install_ide_plugin() {
 # desktop source changes (see hot-reload.sh). `--no-configuration-cache` is
 # required: the hot-reload tasks are not configuration-cache serializable and the
 # repo enables the configuration cache by default.
+# Pass "preserve_log" as $1 to append to the existing log instead of truncating it
+# (used by the watcher's crash-relaunch path so a hotRun that exits immediately does
+# not erase its own diagnostics on every retry).
 run_desktop_app() {
+  local preserve_log="${1:-}"
   stop_desktop_app
   mkdir -p "$(dirname "${DESKTOP_APP_LOG}")"
-  : > "${DESKTOP_APP_LOG}"
+  if [[ "${preserve_log}" != "preserve_log" ]]; then
+    : > "${DESKTOP_APP_LOG}"
+  fi
   log_info "Launching desktop app (Compose Hot Reload, --autoReload)..."
   (cd "${ANDROID_DIR}" && ./gradlew :desktop-app:hotRun --autoReload --no-configuration-cache --quiet) \
     >> "${DESKTOP_APP_LOG}" 2>&1 &
@@ -95,12 +101,19 @@ stop_desktop_app() {
   # or checkout hot-reloading under the same account has an identical bare
   # `compose.reload.argfile` / `MainKt` command line, and an unscoped pgrep would kill
   # its JVM too.
+  #
+  # `pgrep -f` treats its pattern as an extended regex, so the interpolated path must
+  # be escaped: an unescaped `.` would match any char (broadening into another
+  # checkout), and a literal `+`/`(`/`)` in the path would fail to match its own
+  # process. Escape every ERE metacharacter in ${ANDROID_DIR} to a literal.
+  local android_re
+  android_re=$(printf '%s' "${ANDROID_DIR}" | sed 's/[][(){}.^$*+?|\\]/\\&/g')
   local pids
   pids=$(
-    pgrep -f "${ANDROID_DIR}.*:desktop-app:hotRun" 2>/dev/null
-    pgrep -f "${ANDROID_DIR}.*:desktop-app:run" 2>/dev/null
-    pgrep -f "compose.reload.argfile=${ANDROID_DIR}" 2>/dev/null
-    pgrep -f "${ANDROID_DIR}.*dev.jasonpearson.automobile.desktop.MainKt" 2>/dev/null
+    pgrep -f "${android_re}.*:desktop-app:hotRun" 2>/dev/null
+    pgrep -f "${android_re}.*:desktop-app:run" 2>/dev/null
+    pgrep -f "compose\\.reload\\.argfile=${android_re}" 2>/dev/null
+    pgrep -f "${android_re}.*dev\\.jasonpearson\\.automobile\\.desktop\\.MainKt" 2>/dev/null
   ) || true
   if [[ -n "${pids}" ]]; then
     echo "${pids}" | xargs kill 2>/dev/null || true

@@ -570,14 +570,14 @@ export class TapOnElement extends BaseVisualChange {
     previousObservation: ObserveResult | null,
     currentObservation: ObserveResult,
     signal?: AbortSignal,
-  ): Promise<TapOnElementResult["effect"]> {
+  ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
     const immediateEffect = this.deriveTapEffect(previousObservation, currentObservation);
     if (
       this.device.platform !== "android" ||
       !previousObservation ||
       immediateEffect?.screenChanged === true
     ) {
-      return immediateEffect;
+      return { effect: immediateEffect, observation: currentObservation };
     }
 
     // A stable source tree can arrive before Android begins the activity
@@ -593,7 +593,10 @@ export class TapOnElement extends BaseVisualChange {
         signal,
       },
     );
-    return this.deriveTapEffect(previousObservation, effectObservation.observation);
+    return {
+      effect: this.deriveTapEffect(previousObservation, effectObservation.observation),
+      observation: effectObservation.observation,
+    };
   }
 
   private isElementTapTargetOffScreen(
@@ -1730,11 +1733,15 @@ export class TapOnElement extends BaseVisualChange {
       );
 
       if (result.success && result.observation && result.element) {
-        result.effect = await this.deriveTapEffectAfterPostTapObservation(
+        const postTapEffect = await this.deriveTapEffectAfterPostTapObservation(
           previousObserveResult,
           result.observation,
           signal,
         );
+        result.effect = postTapEffect.effect;
+        // The delayed observation established the reported effect, so it must
+        // also be the observation delivered to the caller and diff baseline.
+        result.observation = postTapEffect.observation;
         const selectedElements = await this.selectionStateTracker.finalize({
           action: options.action,
           selectionState: selectionCapture,

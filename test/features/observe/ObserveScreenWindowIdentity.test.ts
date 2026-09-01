@@ -375,8 +375,10 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
         updatedAt: now,
         receivedAt: now,
         fresh: true,
-        screenWidth: 1080,
-        screenHeight: 2400,
+        screenWidth: 2400,
+        screenHeight: 1080,
+        rotation: 1,
+        systemInsets: { top: 0, right: 63, bottom: 0, left: 0 },
         packageName: "com.android.settings",
         foregroundActivity: "com.android.settings/.SubSettings",
         hierarchy: {
@@ -419,6 +421,118 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(viewHierarchy.getCallCount()).toBe(2);
     expect(result.activeWindow?.activityName).toBe("com.android.settings.SubSettings");
     expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Connected devices");
+    expect(result.screenSize).toEqual({ width: 2400, height: 1080 });
+    expect(result.rotation).toBe(1);
+    expect(result.systemInsets).toEqual({ top: 0, right: 63, bottom: 0, left: 0 });
+  });
+
+  test("preserves the original hierarchy when the attribution recapture is unusable", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      {
+        ...calendarHierarchy(now),
+        packageName: "com.android.settings",
+        foregroundActivity: "com.android.settings/.homepage.SettingsHomepageActivity",
+        hierarchy: { node: { node: [{ text: "Settings home" }] } },
+      },
+      { error: "CtrlProxy timed out" },
+    ] as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        backStack: {
+          execute: async () => ({
+            depth: 1,
+            activities: [],
+            tasks: [],
+            currentActivity: { name: "com.android.settings.SubSettings", taskId: 7 },
+            source: "adb",
+          }),
+        } as any,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(result.activeWindow?.activityName).toBe(
+      "com.android.settings.homepage.SettingsHomepageActivity",
+    );
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Settings home");
+  });
+
+  test("requires a successful second back-stack read before relabeling the recaptured hierarchy", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      {
+        ...calendarHierarchy(now),
+        packageName: "com.android.settings",
+        foregroundActivity: "com.android.settings/.homepage.SettingsHomepageActivity",
+        hierarchy: { node: { node: [{ text: "Settings home" }] } },
+      },
+      {
+        ...calendarHierarchy(now),
+        packageName: "com.android.settings",
+        foregroundActivity: "com.android.settings/.SubSettings",
+        hierarchy: { node: { node: [{ text: "Connected devices" }] } },
+      },
+    ] as any);
+
+    let backStackCalls = 0;
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        backStack: {
+          execute: async () => {
+            backStackCalls++;
+            if (backStackCalls === 1) {
+              return {
+                depth: 1,
+                activities: [],
+                tasks: [],
+                currentActivity: { name: "com.android.settings.SubSettings", taskId: 7 },
+                source: "adb",
+              };
+            }
+            throw new Error("second dumpsys failed");
+          },
+        } as any,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(backStackCalls).toBe(2);
+    expect(result.activeWindow?.activityName).toBe(
+      "com.android.settings.homepage.SettingsHomepageActivity",
+    );
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Settings home");
   });
 
   test("uses the back-stack task owner for an activity outside its package namespace", async () => {

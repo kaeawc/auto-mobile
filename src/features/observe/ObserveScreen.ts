@@ -951,16 +951,43 @@ export class RealObserveScreen implements ObserveScreen {
     if (!hierarchy) {
       return false;
     }
+    if (hierarchy.packageName !== expected.packageName) {
+      return false;
+    }
+
+    // DeviceStateCollector deliberately treats a back-stack failure as
+    // best-effort and records it on its target. Keep the original result out of
+    // this confirmation read: a failed second query must not relabel the
+    // original hierarchy using its first (stale) back-stack value.
+    const recapturedState: ObserveResult = { ...result, backStack: undefined, errors: undefined };
+    await this.deviceStateCollector.collectBackStack(
+      recapturedState,
+      new NoOpPerformanceTracker(),
+      signal,
+    );
+    if (resolveBackStackActivityAttribution(recapturedState)?.activityName !== expected.activityName) {
+      return false;
+    }
+
     result.viewHierarchy = hierarchy;
     result.updatedAt = hierarchy.updatedAt ?? result.updatedAt;
+    if (hierarchy.screenWidth && hierarchy.screenHeight) {
+      result.screenSize = { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
+      if (hierarchy.rotation !== undefined) {
+        result.rotation = hierarchy.rotation;
+      }
+      if (hierarchy.systemInsets) {
+        result.systemInsets = hierarchy.systemInsets;
+      }
+      if (hierarchy.insets) {
+        result.insets = hierarchy.insets;
+      }
+    }
     result.focusedElement = this.viewHierarchy.findFocusedElement(hierarchy) ?? undefined;
     result.accessibilityFocusedElement =
       this.viewHierarchy.findAccessibilityFocusedElement(hierarchy) ?? undefined;
-    if (result.viewHierarchy?.packageName !== expected.packageName) {
-      return false;
-    }
-    await this.deviceStateCollector.collectBackStack(result, new NoOpPerformanceTracker(), signal);
-    return resolveBackStackActivityAttribution(result)?.activityName === expected.activityName;
+    result.backStack = recapturedState.backStack;
+    return true;
   }
 
   /**

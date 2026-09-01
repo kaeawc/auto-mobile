@@ -227,6 +227,22 @@ final class RecoveryConfigAndModelTests: XCTestCase {
         """
         XCTAssertEqual(PlanStepToolParser.toolNames(from: yaml), ["tapOn"])
     }
+
+    /// A nested block sequence inside a step (e.g. `textAny:` / `matchers:`) must not be counted as
+    /// its own step. Pre-fix, each nested `-` item appended a spurious "step" name and misaligned the
+    /// returned array against the plan's real steps.
+    func testPlanStepToolParserIgnoresNestedSequences() {
+        let yaml = """
+        steps:
+          - tool: observe
+            waitFor:
+              textAny:
+                - "Not Now"
+                - "Close"
+          - tool: tapOn
+        """
+        XCTAssertEqual(PlanStepToolParser.toolNames(from: yaml), ["observe", "tapOn"])
+    }
 }
 
 final class TachikomaPlanRecoveryHandlerTests: XCTestCase {

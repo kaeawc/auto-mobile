@@ -7,6 +7,9 @@ public enum PlanStepToolParser {
         var inSteps = false
         var stepsIndent = 0
         var awaitingToolForCurrentItem = false
+        // Indent of the first list item, which pins the step level. Deeper `-` lines are nested
+        // block sequences (e.g. `matchers:` / `textAny:`), not steps, and must not be counted.
+        var itemIndent: Int?
 
         for rawLine in yaml.split(whereSeparator: \.isNewline).map(String.init) {
             let line = stripComment(rawLine)
@@ -29,7 +32,8 @@ public enum PlanStepToolParser {
                 break
             }
 
-            if trimmed.hasPrefix("-") {
+            if trimmed.hasPrefix("-"), itemIndent == nil || indent == itemIndent {
+                itemIndent = indent
                 let remainder = trimmed.dropFirst().trimmingCharacters(in: .whitespaces)
                 if let tool = toolValue(String(remainder)) {
                     names.append(tool)

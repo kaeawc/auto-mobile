@@ -178,6 +178,14 @@ run_unit_shards() {
   return "$rc"
 }
 
+parallel_workers="$unit_workers"
+if [[ "$mode" == "coverage" ]]; then
+  # Bun's coverage reporter and Linux epoll-backed streams are not reliable
+  # when the full unit suite is executed in parallel. Keep coverage deterministic
+  # while the normal unit lane retains its parallel speed.
+  parallel_workers=1
+fi
+
 unit_args=(
   bun test
   --timeout "$per_test_timeout_ms"
@@ -186,7 +194,7 @@ unit_args=(
 )
 
 if [[ "$runner_os" != "Windows" ]]; then
-  unit_args+=(--isolate --no-orphans "--parallel=${unit_workers}")
+  unit_args+=(--isolate --no-orphans "--parallel=${parallel_workers}")
 fi
 
 case "$mode" in

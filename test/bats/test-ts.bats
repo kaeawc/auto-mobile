@@ -107,6 +107,7 @@ run_lane() {
 @test "coverage uses the unit selection" {
   run_lane coverage
   [ "$status" -eq 0 ]
+  [[ "$output" == *"--parallel=1"* ]]
   [[ "$output" == *"--isolate"* ]]
   [[ "$output" == *"--coverage"* ]]
   [[ "$output" == *"--coverage-reporter=lcov"* ]]

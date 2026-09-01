@@ -72,15 +72,16 @@ function mutatesRealTree(text: string): boolean {
   return COMMITTED_WRITE.test(text);
 }
 
-function hasSerialTag(text: string): boolean {
-  // `# bats file_tags=serial` or a comma list that includes `serial`.
-  return text
-    .split("\n")
-    .some(
-      (line) =>
-        /^#\s*bats\s+file_tags=/.test(line) &&
-        /(^|=|,)\s*serial\s*(,|$)/.test(line.replace(/^#\s*bats\s+file_tags=/, "=")),
-    );
+function hasFileTag(text: string, tag: string): boolean {
+  return text.split("\n").some(
+    (line) =>
+      /^#\s*bats\s+file_tags=/.test(line) &&
+      line
+        .replace(/^#\s*bats\s+file_tags=/, "")
+        .split(",")
+        .map((value) => value.trim())
+        .includes(tag),
+  );
 }
 
 describe("bats serial-pass tagging (scripts/ci/run-bats.sh)", () => {
@@ -93,7 +94,7 @@ describe("bats serial-pass tagging (scripts/ci/run-bats.sh)", () => {
   test("every real-tree-mutating bats file carries the `serial` tag", () => {
     const offenders = files
       .filter((f) => mutatesRealTree(f.text))
-      .filter((f) => !hasSerialTag(f.text))
+      .filter((f) => !hasFileTag(f.text, "serial"))
       .map((f) => f.name);
 
     expect(offenders).toEqual([]);
@@ -103,14 +104,14 @@ describe("bats serial-pass tagging (scripts/ci/run-bats.sh)", () => {
     const known = files.find((f) => f.name === "check-android-emulator-boundary.bats");
     expect(known).toBeDefined();
     expect(mutatesRealTree(known!.text)).toBe(true);
-    expect(hasSerialTag(known!.text)).toBe(true);
+    expect(hasFileTag(known!.text, "serial")).toBe(true);
   });
 
   test("the tag detector recognizes a root-level package.json mutator", () => {
     const known = files.find((f) => f.name === "check-stdlib-first.bats");
     expect(known).toBeDefined();
     expect(mutatesRealTree(known!.text)).toBe(true);
-    expect(hasSerialTag(known!.text)).toBe(true);
+    expect(hasFileTag(known!.text, "serial")).toBe(true);
   });
 
   test("a file that cds into a temp dir before writing is treated as hermetic", () => {
@@ -119,5 +120,24 @@ describe("bats serial-pass tagging (scripts/ci/run-bats.sh)", () => {
     const hermetic = files.find((f) => f.name === "docs-changed-since-last-deploy.bats");
     expect(hermetic).toBeDefined();
     expect(mutatesRealTree(hermetic!.text)).toBe(false);
+  });
+
+  test("real process, package, and host-tool files carry the orthogonal integration tag", () => {
+    const integrationFiles = [
+      "install-background-work.bats",
+      "install-fast-validation-deps.bats",
+      "npm-package-contents.bats",
+      "validate-markdown-bash.bats",
+      "validate-shell-portability.bats",
+    ];
+
+    for (const name of integrationFiles) {
+      const file = files.find((candidate) => candidate.name === name);
+      expect(file, name).toBeDefined();
+      expect(hasFileTag(file!.text, "integration"), name).toBe(true);
+    }
+
+    const serialIntegration = files.find((file) => file.name === "install-background-work.bats");
+    expect(hasFileTag(serialIntegration!.text, "serial")).toBe(true);
   });
 });

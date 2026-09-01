@@ -10,7 +10,8 @@ import type { DaemonRequest } from "../../src/daemon/types";
 
 // DaemonClient.connect() stats the socket path (existsSync), which does not hold for a
 // Unix-domain path on Windows — the same reason the other DaemonClient socket suites skip
-// there. The gate itself is covered on all platforms by socketServerHandshake.test.ts.
+// there. The gate itself is covered on all platforms by
+// socketServerHandshake.integration.test.ts.
 const isWindows = platform() === "win32";
 
 /**

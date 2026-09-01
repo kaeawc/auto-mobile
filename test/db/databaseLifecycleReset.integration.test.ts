@@ -14,7 +14,7 @@ import { runExclusiveResetTest } from "./resetTestSerialLock";
  * construction*: a partial reset (forgetting one axis) is the exact regression
  * class #2796 fixed and #2900 wants to make structurally impossible.
  *
- * `databaseReset.test.ts` proves each axis resets in isolation. This file adds
+ * `databaseReset.integration.test.ts` proves each axis resets in isolation. This file adds
  * the complementary "reset as a SET" assertion: a single failed-then-healthy
  * boot flow across ONE close must cold-start on EVERY axis at once (path
  * re-resolved, migrations re-armed and re-run, cached failure cleared). Dropping

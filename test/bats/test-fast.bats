@@ -2,7 +2,7 @@
 #
 # Pins the worker-count math of scripts/test-fast.sh (issue #5033) without
 # spawning the real suite: the script honors TEST_FAST_PRINT_CMD=1 to print the
-# resolved `bun test --parallel=N ...` invocation instead of exec'ing it. CPU
+# resolved isolated-shard invocation instead of exec'ing it. CPU
 # detection is mocked by shadowing `nproc`/`sysctl` on PATH.
 
 SCRIPT="scripts/test-fast.sh"
@@ -25,7 +25,7 @@ _mock_nproc() {
   run env PATH="$dir:$PATH" TEST_FAST_PRINT_CMD=1 bash "$SCRIPT"
   rm -rf "$dir"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--parallel=14"* ]]
+  [[ "$output" == *"--shards=14"* ]]
 }
 
 @test "clamps to at least 1 worker on a 2-core machine" {
@@ -34,7 +34,7 @@ _mock_nproc() {
   run env PATH="$dir:$PATH" TEST_FAST_PRINT_CMD=1 bash "$SCRIPT"
   rm -rf "$dir"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--parallel=1"* ]]
+  [[ "$output" == *"--shards=1"* ]]
 }
 
 @test "clamps to at least 1 worker on a single-core machine" {
@@ -43,7 +43,7 @@ _mock_nproc() {
   run env PATH="$dir:$PATH" TEST_FAST_PRINT_CMD=1 bash "$SCRIPT"
   rm -rf "$dir"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--parallel=1"* ]]
+  [[ "$output" == *"--shards=1"* ]]
 }
 
 @test "passes through extra arguments to bun test" {
@@ -73,5 +73,5 @@ _mock_nproc() {
   run env PATH="$dir:$PATH" TEST_FAST_PRINT_CMD=1 bash "$SCRIPT"
   rm -rf "$dir"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"--parallel=8"* ]]
+  [[ "$output" == *"--shards=8"* ]]
 }

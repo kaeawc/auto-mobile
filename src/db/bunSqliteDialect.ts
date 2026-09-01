@@ -403,7 +403,7 @@ export class BunSqliteConnectionState {
       // plain Error here. Keep the original error text inline too: the
       // `#beforeQuery` migration gate above runs inside this try, so its
       // "startup migrations failed" throw is caught and rewrapped here — and
-      // databaseLazyPath.test.ts asserts that text via `.message`. The inline
+      // databaseLazyPath.integration.test.ts asserts that text via `.message`. The inline
       // `${error}` is BigInt-safe (unlike JSON.stringify) since it goes
       // through toString().
       throw new Error(`Query failed: ${error}\nSQL: ${sql}\nParameters: ${params}`, {

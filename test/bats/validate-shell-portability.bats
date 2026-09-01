@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 #
 # Tests for scripts/shellcheck/validate_shell_portability.sh — the portability
 # footgun lint. Each rule must flag its bad pattern and the current tree must

@@ -25,7 +25,7 @@ job_block() {
     $0 ~ "^  " j ":[[:space:]]*$" { cap = 1; next }
     cap && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { exit }
     cap { print }
-  ' "$WF"
+  ' "${2:-$WF}"
 }
 
 wiring_requires_yq() {
@@ -40,11 +40,12 @@ wiring_requires_yq() {
 @test "required gate jobs exist with stable context names" {
   wiring_requires_yq
   local job expected
-  for job in ios-build-gate codeql-gate shell-tests-gate runtime-graph-gate; do
+  for job in ios-build-gate codeql-gate shell-tests-gate node-tests-gate runtime-graph-gate; do
     case "$job" in
       ios-build-gate) expected="iOS Build" ;;
       codeql-gate) expected="CodeQL" ;;
       shell-tests-gate) expected="Shell Tests" ;;
+      node-tests-gate) expected="Node Tests" ;;
       runtime-graph-gate) expected="Pinned Runtime Graph Gate" ;;
     esac
     run yq -r ".jobs.\"${job}\".name" "$WF"
@@ -57,7 +58,7 @@ wiring_requires_yq() {
   # A required check that never posts hangs as "Expected"; always() guarantees a
   # success/failure/skipped conclusion in every path.
   wiring_requires_yq
-  for job in ios-build-gate codeql-gate shell-tests-gate runtime-graph-gate; do
+  for job in ios-build-gate codeql-gate shell-tests-gate node-tests-gate runtime-graph-gate; do
     run yq -r ".jobs.\"${job}\".if" "$WF"
     [ "$status" -eq 0 ]
     [[ "$output" == "always() &&"* ]]
@@ -86,7 +87,7 @@ wiring_requires_yq() {
   # never `exit 1`s is a permanent false-green. Pin the failure semantics so
   # weakening the loop (e.g. exit 1 -> exit 0) fails this guard.
   wiring_requires_yq
-  for job in ios-build-gate codeql-gate shell-tests-gate runtime-graph-gate; do
+  for job in ios-build-gate codeql-gate shell-tests-gate node-tests-gate runtime-graph-gate; do
     run yq -r "
       .jobs.\"${job}\".steps[]
       | select(.name == \"Check results\")
@@ -104,10 +105,101 @@ wiring_requires_yq() {
   [[ "$block" == *"needs.codeql-node.result"* ]]
 }
 
-@test "shell-tests-gate rolls up bats-tests" {
+@test "shell-tests-gate rolls up unit and integration BATS jobs" {
   block="$(job_block shell-tests-gate)"
   [[ "$block" == *"- bats-tests"* ]]
   [[ "$block" == *"needs.bats-tests.result"* ]]
+  [[ "$block" == *"- bats-integration-tests"* ]]
+  [[ "$block" == *"needs.bats-integration-tests.result"* ]]
+}
+
+@test "node-tests-gate rolls up complete unit and host integration matrices" {
+  block="$(job_block node-tests-gate)"
+  [[ "$block" == *"- node-unit-tests"* ]]
+  [[ "$block" == *"needs.node-unit-tests.result"* ]]
+  [[ "$block" == *"- node-host-integration-tests"* ]]
+  [[ "$block" == *"needs.node-host-integration-tests.result"* ]]
+}
+
+@test "fast and integration jobs invoke their canonical lanes" {
+  local unit host bats_unit bats_integration
+  unit="$(job_block node-unit-tests)"
+  host="$(job_block node-host-integration-tests)"
+  bats_unit="$(job_block bats-tests)"
+  bats_integration="$(job_block bats-integration-tests)"
+
+  [[ "$unit" == *"bash scripts/test-ts.sh unit"* ]]
+  [[ "$host" == *"bash scripts/test-ts.sh integration"* ]]
+  [[ "$bats_unit" == *"scripts/ci/run-bats.sh unit"* ]]
+  [[ "$bats_integration" == *"scripts/ci/run-bats.sh integration"* ]]
+  [[ "$bats_unit" != *"AUTOMOBILE_BATS_SERIAL_ONLY"* ]]
+}
+
+@test "merge workflow preserves the same four lane boundaries" {
+  local workflow=".github/workflows/merge.yml"
+  [[ "$(job_block node-unit-tests "$workflow")" == *"bash scripts/test-ts.sh unit"* ]]
+  [[ "$(job_block node-host-integration-tests "$workflow")" == *"bash scripts/test-ts.sh integration"* ]]
+  [[ "$(job_block bats-tests "$workflow")" == *"scripts/ci/run-bats.sh unit"* ]]
+  [[ "$(job_block bats-integration-tests "$workflow")" == *"scripts/ci/run-bats.sh integration"* ]]
+}
+
+@test "development installer jobs are removed from PR and merge workflows" {
+  [[ -z "$(job_block installer-development "$WF")" ]]
+  [[ -z "$(job_block installer-development ".github/workflows/merge.yml")" ]]
+}
+
+@test "WebRTC device jobs are folded into PR and merge workflows" {
+  local workflow android ios
+  for workflow in "$WF" ".github/workflows/merge.yml"; do
+    android="$(job_block android-device-webrtc "$workflow")"
+    ios="$(job_block ios-device-webrtc "$workflow")"
+    [[ -n "$android" ]]
+    [[ -n "$ios" ]]
+    [[ "$android" == *"AUTOMOBILE_WEBRTC_DEVICE_PLATFORM=android"* ]]
+    [[ "$android" == *"bun run test:integration:webrtc-device"* ]]
+    [[ "$ios" == *"AUTOMOBILE_WEBRTC_DEVICE_PLATFORM: ios"* ]]
+    [[ "$ios" == *"bun run test:integration:webrtc-device"* ]]
+  done
+  [[ ! -e ".github/workflows/webrtc-device-integration.yml" ]]
+}
+
+@test "PR WebRTC device jobs share path and opt-in gating" {
+  local job block
+  for job in android-device-webrtc ios-device-webrtc; do
+    block="$(job_block "$job")"
+    [[ "$block" == *"needs: detect-changes"* ]]
+    [[ "$block" == *"if: needs.detect-changes.outputs.webrtc_should_run == 'true'"* ]]
+  done
+}
+
+@test "WebRTC change detection covers publisher and device inputs" {
+  wiring_requires_yq
+  run yq -r '
+    .jobs."detect-changes".steps[]
+    | select(.id == "filter-webrtc")
+    | (.with.filters | from_yaml | .webrtc[])
+  ' "$WF"
+  [ "$status" -eq 0 ]
+  local path
+  for path in \
+    "src/features/webrtc/**" \
+    "src/features/screen-stream/**" \
+    "android/video-server/**" \
+    "ios/screen-capture/**" \
+    "test/integration/webrtcDeviceCapture.integration.test.ts" \
+    ".github/workflows/pull_request.yml" \
+    ".github/workflows/merge.yml"; do
+    [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
+  done
+}
+
+@test "webrtc-gate rolls up publisher and device coverage" {
+  local block
+  block="$(job_block webrtc-gate)"
+  for job in webrtc-integration-test android-device-webrtc ios-device-webrtc; do
+    [[ "$block" == *"- $job"* ]]
+    [[ "$block" == *"needs.$job.result"* ]]
+  done
 }
 
 @test "runtime-graph-gate rolls up runtime-graph-verification (#5421)" {

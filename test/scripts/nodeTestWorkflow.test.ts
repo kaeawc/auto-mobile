@@ -6,7 +6,10 @@ const WORKFLOWS = [".github/workflows/pull_request.yml", ".github/workflows/merg
 describe("Node test workflow isolation", () => {
   for (const workflow of WORKFLOWS) {
     test(`${workflow} prevents unit tests from starting a real adb daemon`, () => {
-      const runTests = stepNamed(loadJobSteps(workflow, "mcp-build-and-test"), "Run Tests");
+      const runTests = stepNamed(
+        loadJobSteps(workflow, "node-unit-tests"),
+        "Run complete unit lane",
+      );
 
       expect(runTests).toBeDefined();
       expect(runTests?.env?.AUTOMOBILE_TEST_MODE).toBe("true");

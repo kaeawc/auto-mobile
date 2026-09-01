@@ -31,7 +31,7 @@ import ts from "typescript";
 describe("turbo test inputs cover native sources a guard reads (issue #4351)", () => {
   const ROOT = join(import.meta.dir, "..", "..");
   const GUARD_PATH = "test/lint/turboTestInputsCoverNativeSources.test.ts";
-  const CACHED_TASKS = ["test", "test:coverage"] as const;
+  const CACHED_TASKS = ["test", "test:unit", "test:coverage"] as const;
 
   /**
    * Native trees that a TS test reads off disk. Each must gate both cached tasks
@@ -62,7 +62,11 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
   interface TurboConfig {
     readonly tasks: Record<
       string,
-      { readonly inputs?: readonly string[]; readonly description?: string }
+      {
+        readonly inputs?: readonly string[];
+        readonly description?: string;
+        readonly env?: readonly string[];
+      }
     >;
   }
 
@@ -379,6 +383,30 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     });
   }
 
+  test("test tasks forward runner controls through Turbo strict env mode", () => {
+    const tasks = loadTurbo().tasks;
+    const expectedByTask = {
+      test: ["AUTOMOBILE_UNIT_TEST_WORKERS"],
+      "test:unit": ["AUTOMOBILE_UNIT_TEST_WORKERS"],
+      "test:changed": ["AUTOMOBILE_UNIT_TEST_WORKERS"],
+      "test:integration": ["AUTOMOBILE_INTEGRATION_TEST_WORKERS"],
+      "test:stress": [],
+      "test:all": ["AUTOMOBILE_UNIT_TEST_WORKERS", "AUTOMOBILE_INTEGRATION_TEST_WORKERS"],
+      "test:coverage": ["AUTOMOBILE_UNIT_TEST_WORKERS"],
+    } as const;
+
+    for (const [taskName, workerControls] of Object.entries(expectedByTask)) {
+      const env = tasks[taskName]?.env ?? [];
+      expect(env, taskName).toEqual(
+        expect.arrayContaining([
+          "AUTOMOBILE_TEST_TIMEOUT_MS",
+          "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS",
+          ...workerControls,
+        ]),
+      );
+    }
+  });
+
   /**
    * `android/`/`ios/` path literals referenced by any test that resolve to a real
    * file or directory on disk. Comment or docstring mentions count too — the
@@ -558,11 +586,13 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
       "plan contract reads a YAML fixture; no native source tree is read",
     ],
   ]);
+  // One immutable scan feeds all assertions. Keeping repository I/O out of
+  // individual test bodies preserves the unit timing contract.
+  const referencedNativePathsSnapshot = referencedNativePaths();
 
   test("every native path a test references is a declared input or a documented not-read exemption", () => {
     const inputs = loadTurbo().tasks.test?.inputs ?? [];
-    const referenced = referencedNativePaths();
-    const uncovered = [...referenced.entries()]
+    const uncovered = [...referencedNativePathsSnapshot.entries()]
       .filter(([path]) => !coveredBy(inputs, path) && !NOT_READ_EXEMPTIONS.has(path))
       .map(([path, tests]) => `${path} (referenced by ${[...tests].join(", ")})`);
     expect(
@@ -583,14 +613,15 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
   test("the scan never attributes a native path to its own owner file", () => {
     // Belt to the normalization above: whatever the platform separator, the owner exclusion must
     // hold — the guard's own comments deliberately contain scan-pattern examples.
-    for (const [path, tests] of referencedNativePaths()) {
+    for (const [path, tests] of referencedNativePathsSnapshot) {
       expect([...tests], `${path} attributed to the scanner itself`).not.toContain(GUARD_PATH);
     }
   });
 
   test("no not-read exemption is stale", () => {
-    const referenced = referencedNativePaths();
-    const stale = [...NOT_READ_EXEMPTIONS.keys()].filter((path) => !referenced.has(path));
+    const stale = [...NOT_READ_EXEMPTIONS.keys()].filter(
+      (path) => !referencedNativePathsSnapshot.has(path),
+    );
     expect(
       stale,
       `NOT_READ_EXEMPTIONS entries no longer referenced by any test — prune them: ${stale.join(", ")}`,

@@ -11,20 +11,23 @@ set -euo pipefail
 
 log_file="${1:-ci-logs/ts-coverage.log}"
 mkdir -p "$(dirname "${log_file}")"
+rm -rf coverage
 
 set +e
-bun test --isolate --coverage --coverage-reporter=lcov --coverage-dir=coverage > "${log_file}" 2>&1
+bash scripts/test-ts.sh coverage > "${log_file}" 2>&1
 status=$?
 set -e
 
 if [[ "${status}" -eq 0 ]]; then
   tail -n 80 "${log_file}"
+  bash scripts/ci/verify-ts-coverage-output.sh coverage
   exit 0
 fi
 
 if rg -q 'error: An internal error occurred \(WriteFailed\)' "${log_file}" && rg -q '(^|[^0-9])0 fail' "${log_file}"; then
   echo "::warning::Bun coverage ended with WriteFailed after tests passed; continuing to verify coverage output"
   tail -n 80 "${log_file}"
+  bash scripts/ci/verify-ts-coverage-output.sh coverage
   exit 0
 fi
 

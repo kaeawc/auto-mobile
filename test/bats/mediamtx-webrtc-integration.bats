@@ -5,7 +5,7 @@
 
 SCRIPT="scripts/webrtc/run-mediamtx-publisher-integration.sh"
 TEST_FILE="test/integration/mediamtxWebRtcPublisher.integration.test.ts"
-LOOPBACK_TEST_FILE="test/features/webrtc/WebRtcPublisher.loopback.test.ts"
+LOOPBACK_TEST_FILE="test/features/webrtc/WebRtcPublisher.loopback.integration.test.ts"
 
 setup() {
   TEST_DIR="$(mktemp -d)"

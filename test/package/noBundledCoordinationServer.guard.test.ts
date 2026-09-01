@@ -3,6 +3,10 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+// Repository enumeration is immutable during this suite. Keep the subprocess
+// outside the assertion body so the guard remains in the fast unit lane.
+const versionedFileSnapshot = versionedFiles();
+
 /**
  * Guard: the hand-rolled WebRTC reference coordination server is retired
  * (issue #4291).
@@ -20,14 +24,14 @@ import { join } from "node:path";
  */
 describe("bundled coordination server is retired (issue #4291)", () => {
   const REMOVED_DIR = "examples/webrtc-coordination-server";
-  const THIS_TEST_PATH = "test/integration/noBundledCoordinationServer.guard.test.ts";
+  const THIS_TEST_PATH = "test/package/noBundledCoordinationServer.guard.test.ts";
 
   test("the reference coordination server directory is gone", () => {
     expect(existsSync(join(process.cwd(), REMOVED_DIR))).toBe(false);
   });
 
   test("no tracked file references the removed directory", () => {
-    const offenders = versionedFiles()
+    const offenders = versionedFileSnapshot
       .filter((file) => file !== THIS_TEST_PATH)
       .filter((file) => readFileSync(file, "utf8").includes("webrtc-coordination-server"));
     expect(
@@ -48,7 +52,7 @@ function versionedFiles(): string[] {
           "-l",
           "--",
           "webrtc-coordination-server",
-          ":!test/integration/noBundledCoordinationServer.guard.test.ts",
+          ":!test/package/noBundledCoordinationServer.guard.test.ts",
         ],
         { cwd: process.cwd(), encoding: "utf8" },
       );

@@ -37,7 +37,7 @@ const deviceIntegrationTimeoutMs = 360_000;
 // Mirrors QualityPreset.MEDIUM.fps in android/video-server, which is the quality
 // PersistentEncoderH264Source publishes with. The host now also defaults the
 // `--fps` override to WEBRTC_ANDROID_FPS_DEFAULT (30), which matches this preset
-// default. Pinned by test/integration/webrtcDeviceCaptureLatency.test.ts so the
+// default. Pinned by test/parity/webrtcDeviceCaptureLatency.test.ts so the
 // two cannot drift.
 const ANDROID_VIDEO_SERVER_MEDIUM_FPS = 30;
 

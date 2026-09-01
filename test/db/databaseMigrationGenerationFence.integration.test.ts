@@ -26,7 +26,8 @@ import { createFileBackedDbHarness } from "./withFileBackedDb";
  * The globals are module-scoped and not exported, so each assertion drives the
  * fence through observable behavior (`getMigrationsError()` / query gating)
  * rather than reading internals. A fresh module instance per case isolates the
- * lazy globals, matching databaseReset.test.ts / databaseMigrationFailure.test.ts.
+ * lazy globals, matching databaseReset.integration.test.ts /
+ * databaseMigrationFailure.integration.test.ts.
  */
 describe("closeDatabase fences stale in-flight migration completions (issue #2898)", () => {
   // Shared harness: fresh module import, tracked temp dirs cleaned with the
@@ -269,7 +270,7 @@ export async function down(db) {
     // awaiting gen-1 first would deadlock on the lock gen-0 still holds. The fence
     // proof is unchanged: gen-0's stale FAILURE completion must not corrupt gen-1's
     // globals. The dedicated lock-safety proof (a gen-0 migration that WRITES) lives
-    // in databaseMigrationLockReopen.test.ts.
+    // in databaseMigrationLockReopen.integration.test.ts.
     const unhandled: unknown[] = [];
     const onUnhandled = (reason: unknown): void => {
       unhandled.push(reason);

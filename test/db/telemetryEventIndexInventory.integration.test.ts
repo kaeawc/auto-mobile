@@ -19,7 +19,7 @@ import { runMigrations } from "../../src/db/migrator";
  *     via the left-prefix rule, so the single-column device index was pure
  *     per-insert write amplification.
  *
- * `dropRedundantDeviceIndexes.test.ts` proves that *one migration* is correct.
+ * `dropRedundantDeviceIndexes.integration.test.ts` proves that *one migration* is correct.
  * It does NOT stop a *future* migration from silently re-adding an
  * `idx_<table>_device` index (re-introducing the exact write amplification
  * #2893 removed), dropping the `timestamp` index the retention cutoff scan

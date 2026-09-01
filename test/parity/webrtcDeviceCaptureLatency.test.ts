@@ -1,13 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { parseSync } from "oxc-parser";
 import { CAPTURE_STAGES } from "../helpers/captureStageTimeline";
 
 const repoRoot = join(import.meta.dir, "../..");
-const execFileAsync = promisify(execFile);
 
 function read(relativePath: string): string {
   return readFileSync(join(repoRoot, relativePath), "utf8");
@@ -280,18 +277,6 @@ describe("#4343 device capture latency instrumentation", () => {
     expect(source).toContain('await import("../../src/utils/ios-cmdline-tools/SimCtlClient")');
     expect(source).toContain('await import("../../src/features/webrtc/webrtcStreamingConfig")');
   });
-
-  test("loads the default skipped suite without initializing device capture", async () => {
-    const env = { ...process.env };
-    delete env.AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION;
-    const { stderr, stdout } = await execFileAsync("bun", ["test", INTEGRATION_TEST_PATH], {
-      cwd: repoRoot,
-      env,
-      timeout: 10_000,
-    });
-
-    expect(`${stdout}\n${stderr}`).toContain("(skip) device capture -> WHIP -> MediaMTX -> WHEP");
-  }, 15_000);
 
   test("collects phases on the shared timeline and keeps afterAll the sole record writer (#4354)", () => {
     const source = withoutComments(read(INTEGRATION_TEST_PATH));

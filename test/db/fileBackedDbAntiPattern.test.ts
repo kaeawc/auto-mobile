@@ -106,7 +106,7 @@ describe("findFileBackedDbAntiPatterns detector (issue #3081)", () => {
 
     test("does NOT flag a generic `while (cond)` poll even with a lock code and rm nearby", () => {
       // A generic poll condition is not retry/attempt/backoff-shaped, so the
-      // structural conjunction must not fire — this guards tempDbDir.test.ts (the
+      // structural conjunction must not fire — this guards tempDbDir.integration.test.ts (the
       // bounded remover's own test, which holds the quoted lock codes) from a
       // false positive if it ever grows a real-fs poll + cleanup case.
       const source = [
@@ -275,7 +275,7 @@ describe("test/db is free of file-backed DB anti-patterns (issue #3081)", () => 
   test("the guard actually scans the DB tree (suites + helpers, non-empty)", () => {
     // A guard that scans nothing is a false sense of security.
     expect(scanned.length).toBeGreaterThan(10);
-    expect(scanned).toContain("withFileBackedDb.test.ts");
+    expect(scanned).toContain("withFileBackedDb.integration.test.ts");
     // Non-test helpers are in scope too — the sibling-helper blind spot is closed.
     expect(scanned).toContain("tempDbDir.ts");
     expect(scanned).toContain("freshDatabaseModule.ts");

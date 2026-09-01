@@ -323,6 +323,7 @@ jobs:
           scripts/conventions/validate-stdlib-first.sh
 
   bats-tests:
+    timeout-minutes: 10
     name: "BATS Shell Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     strategy:
@@ -381,19 +382,63 @@ jobs:
 
       - wait: install-bats
 
-      # The parallel BATS runner intermittently exits 1 after reporting every
-      # test as passed on hosted Ubuntu runners. Match the stable PR-CI mode;
-      # the 10-minute job budget has ample headroom for the serial pass.
-      - name: "Run BATS Tests"
+      - name: "Run BATS Unit Tests"
         shell: bash
         env:
-          AUTOMOBILE_BATS_SERIAL_ONLY: "true"
-        run: scripts/ci/run-bats.sh
+          AUTOMOBILE_BATS_MAX_FILE_SECONDS: "120"
+          AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "180"
+        run: scripts/ci/run-bats.sh unit
 
-  # Always exercise the real WHIP publisher contract post-merge on main:
-  # FFmpeg H.264 -> WebRtcPublisher -> MediaMTX -> headless-Chrome WHEP decode.
-  # On PRs this runs only when WebRTC is in play (pull_request.yml); here it is
-  # unconditional so the publisher contract is verified on every merge.
+  bats-integration-tests:
+    timeout-minutes: 10
+    name: "BATS Integration Tests (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Install BATS"
+        shell: bash
+        run: |
+          if command -v bats &>/dev/null; then
+            echo "bats already installed: $(bats --version)"
+          elif command -v brew &>/dev/null; then
+            brew install bats-core
+          else
+            git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            sudo /tmp/bats-core/install.sh /usr/local
+          fi
+          if command -v shellcheck &>/dev/null; then
+            echo "shellcheck already installed"
+          elif command -v brew &>/dev/null; then
+            brew install shellcheck
+          else
+            echo "shellcheck missing and no package manager to install it" >&2
+            exit 1
+          fi
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      - name: "Run BATS Integration Tests"
+        shell: bash
+        run: scripts/ci/run-bats.sh integration
+
+  # Always exercise the real publisher contract and Android/iOS capture-to-WHEP
+  # paths post-merge. PRs run these only when WebRTC is in play; here they are
+  # unconditional backstops.
   webrtc-integration-test:
     name: "WebRTC Publisher Integration (MediaMTX)"
     runs-on: ubuntu-latest
@@ -436,6 +481,196 @@ jobs:
       - name: "Run MediaMTX WebRTC publisher integration test"
         shell: bash
         run: bun run test:integration:webrtc-mediamtx
+
+  android-device-webrtc:
+    name: "Android Device Capture to WHEP"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Build CtrlProxy APK"
+        uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":control-proxy:assembleDebug"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Build video-server jar"
+        uses: ./.github/actions/gradle-task-run
+        with:
+          gradle-tasks: ":video-server:d8Dex"
+          gradle-project-directory: "android"
+          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          reuse-configuration-cache: true
+          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - name: "Install Chrome for WHEP decoding"
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes google-chrome-stable || sudo apt-get install --yes chromium-browser
+
+      - uses: ./.github/actions/android-emulator
+        with:
+          script: |
+            cd "$GITHUB_WORKSPACE"
+            AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION=1 \
+            AUTOMOBILE_WEBRTC_DEVICE_PLATFORM=android \
+            AUTOMOBILE_ANDROID_H264_DEVICE_ID=emulator-5554 \
+            AUTOMOBILE_VIDEO_SERVER_JAR="$GITHUB_WORKSPACE/android/video-server/build/libs/automobile-video.jar" \
+            AUTOMOBILE_REQUIRE_VIDEO_SERVER=1 \
+              bun run test:integration:webrtc-device
+          working-directory: "./android/"
+          accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
+
+      - name: "Explain WebRTC device results"
+        if: always()
+        continue-on-error: true
+        run: bash scripts/webrtc/explain-device-results.sh android
+
+      - name: "Upload WebRTC device artifacts"
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-webrtc-device-artifacts-${{ github.run_attempt }}
+          path: scratch/webrtc-device-integration/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  ios-device-webrtc:
+    name: "iOS Device Capture to WHEP"
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Ensure iOS Simulator runtime"
+        uses: ./.github/actions/ensure-ios-simulator-runtime
+
+      - name: "Build iOS capture prerequisites"
+        run: |
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+          test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" || brew install --cask google-chrome
+          (cd ios/screen-capture && swift build)
+
+      - name: "Boot and activate iOS Simulator"
+        run: |
+          result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000)"
+          simulator_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
+          if [[ -z "${simulator_udid}" || "${simulator_udid}" == "null" ]]; then
+            echo "::error::AutoMobile product boot returned no deviceId." >&2
+            exit 1
+          fi
+          if pgrep -x Simulator >/dev/null; then
+            killall Simulator
+            for _ in {1..30}; do
+              pgrep -x Simulator >/dev/null || break
+              sleep 1
+            done
+            if pgrep -x Simulator >/dev/null; then
+              echo "::error::Simulator.app did not exit before activation." >&2
+              exit 1
+            fi
+          fi
+          open -a Simulator --args -CurrentDeviceUDID "${simulator_udid}"
+          helper_path="${GITHUB_WORKSPACE}/ios/screen-capture/.build/debug/screen-capture-helper"
+          simulator_name="$(xcrun simctl list devices --json | jq -r --arg udid "${simulator_udid}" \
+            '[.devices[][] | select(.udid == $udid) | .name] | first // empty')"
+          if [[ -z "${simulator_name}" ]]; then
+            echo "::error::Could not resolve the selected Simulator name." >&2
+            exit 1
+          fi
+          simulator_window_ready=0
+          for _ in {1..30}; do
+            simulator_windows="$("${helper_path}" --list-simulators 2>/dev/null || true)"
+            if printf '%s' "${simulator_windows}" | jq -e --arg name "${simulator_name}" \
+              '.windows | map(select((.title // "") | ascii_downcase | contains($name | ascii_downcase))) | length == 1' \
+              >/dev/null; then
+              simulator_window_ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [[ "${simulator_window_ready}" != "1" ]]; then
+            echo "::error::Selected Simulator window did not become discoverable by ScreenCaptureKit." >&2
+            exit 1
+          fi
+
+      - name: "Run iOS device capture integration"
+        env:
+          AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION: "1"
+          AUTOMOBILE_WEBRTC_DEVICE_PLATFORM: ios
+          AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER: ${{ github.workspace }}/ios/screen-capture/.build/debug/screen-capture-helper
+          AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS: "15000"
+        run: |
+          set -uo pipefail
+
+          reap_before_retry() {
+            pkill -f "index.js --daemon-mode" 2>/dev/null || true
+            pkill -x mediamtx 2>/dev/null || true
+            pkill -f "remote-debugging-port=9222" 2>/dev/null || true
+            sleep 2
+            pkill -KILL -x mediamtx 2>/dev/null || true
+            pkill -KILL -f "index.js --daemon-mode" 2>/dev/null || true
+            for _ in $(seq 1 15); do
+              lsof -nP -iTCP:8889 -sTCP:LISTEN >/dev/null 2>&1 || return 0
+              sleep 1
+            done
+            echo "::error::Port 8889 still bound after cleanup; skipping retry to avoid a guaranteed conflict." >&2
+            return 1
+          }
+
+          attempts=2
+          for attempt in $(seq 1 "${attempts}"); do
+            echo "::group::iOS device capture integration (attempt ${attempt}/${attempts})"
+            bun run test:integration:webrtc-device && rc=0 || rc=$?
+            echo "::endgroup::"
+            if [ "${rc}" -eq 0 ]; then
+              if [ "${attempt}" -gt 1 ]; then
+                echo "iOS device capture passed on retry (transient macos-26 ScreenCaptureKit flake)."
+              fi
+              exit 0
+            fi
+            echo "iOS device capture attempt ${attempt} failed (exit ${rc})."
+            if [ "${attempt}" -lt "${attempts}" ]; then
+              echo "Reaping MediaMTX / daemon / Chrome before one retry."
+              reap_before_retry || exit 1
+            fi
+          done
+          echo "iOS device capture failed after ${attempts} attempts."
+          exit 1
+
+      - name: "Explain WebRTC device results"
+        if: always()
+        continue-on-error: true
+        run: bash scripts/webrtc/explain-device-results.sh ios
+
+      - name: "Upload WebRTC device artifacts"
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: ios-webrtc-device-artifacts-${{ github.run_attempt }}
+          path: scratch/webrtc-device-integration/
+          if-no-files-found: ignore
+          retention-days: 7
 
   validate-mkdocs-nav:
     name: "Validate MkDocs Navigation"
@@ -564,88 +799,81 @@ jobs:
           echo "Uninstaller exit code: ${UNINSTALL_EXIT_CODE:-0}"
           exit 1
 
-  installer-development:
-    name: "Installer Development (${{ matrix.os }})"
-    # Disabled: very slow and not required for release/docs publishing.
-    if: ${{ false }}
+  node-unit-tests:
+    name: "Node Unit Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
-    env:
-      # Keep this disabled-job definition aligned with the PR installer lane.
-      AUTOMOBILE_LOG_DIR: "${{ github.workspace }}/ci-logs/daemon-logs"
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          fetch-depth: 2
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      - name: "Run complete unit lane"
+        shell: bash
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+          AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
+          fi
+          bash scripts/test-ts.sh unit
+
+      - name: "Enforce 100ms budget for merged unit tests"
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          BUN_TEST_TIMING_BASE_REF: HEAD^
+        run: bash scripts/validate-bun-test-timings.sh
+
+  node-host-integration-tests:
+    name: "Node Host Integration Tests (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
 
-      - name: "Build source CLI for installer diagnostics"
-        uses: ./.github/actions/setup-auto-mobile-npm-package
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
         with:
-          install-global: "false"
+          bun-version: 1.3.14
 
-      - name: "Run Installer (development)"
-        id: run-installer-development
+      - name: "Install Bun dependencies"
         shell: bash
-        continue-on-error: true
+        run: scripts/ci/install-bun-deps.sh
+
+      - name: "Run host integration lane"
+        shell: bash
         env:
-          # Keep this disabled-job definition aligned with the PR installer lane.
-          AUTOMOBILE_INSTALL_SKIP_FFMPEG: "true"
-          AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "30000"
-          AUTOMOBILE_STARTUP_BENCHMARK: "1"
-          AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT: "${{ github.workspace }}/ci-logs/installer-daemon-startup.json"
-          AUTOMOBILE_STARTUP_BENCHMARK_LABEL: "installer-development-${{ matrix.os }}"
-          AUTOMOBILE_CLI_PATH: "${{ github.workspace }}/dist/src/index.js"
+          AUTOMOBILE_TEST_MODE: "true"
+          AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "900"
         run: |
-          set -uo pipefail
-          mkdir -p ci-logs
-          set +e
-          bash ./scripts/install.sh --contributor --preset development --non-interactive 2>&1 | tee ci-logs/installer.log
-          install_status=${PIPESTATUS[0]}
-          set -e
-          : > ci-logs/ctrl-proxy-cache-state.txt
-          for cache_path in "${TMPDIR:-/tmp}"/auto-mobile-prefetch-* "${HOME}/.automobile/ctrl-proxy-ios"; do
-            [[ -e "${cache_path}" ]] || continue
-            printf '%s\n' "=== ${cache_path} ===" >> ci-logs/ctrl-proxy-cache-state.txt
-            find "${cache_path}" -maxdepth 2 -mindepth 0 -print >> ci-logs/ctrl-proxy-cache-state.txt 2>&1 || true
-          done
-          echo "INSTALL_EXIT_CODE=${install_status}" >> "$GITHUB_ENV"
-          echo "install_exit_code=${install_status}" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: "Verify runtime dependencies"
-        if: steps.run-installer-development.outputs.install_exit_code == '0'
-        run: ./scripts/ci/verify-runtime-deps.sh
-
-      - name: "Build from source"
-        if: steps.run-installer-development.outputs.install_exit_code == '0'
-        shell: bash
-        run: |
-          export PATH="${HOME}/.bun/bin:${PATH}"
-          bun install --frozen-lockfile
-          bunx turbo run build --output-logs=errors-only
-
-      - name: "Daemon lifecycle (start → health → doctor → stop)"
-        if: steps.run-installer-development.outputs.install_exit_code == '0'
-        run: ./scripts/ci/daemon-lifecycle.sh
-
-      - name: "Upload Logs"
-        if: steps.run-installer-development.outputs.install_exit_code != '0' || failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: installer-development-${{ matrix.os }}-logs
-          path: ci-logs/
-          retention-days: 7
-
-      - name: "Fail on error"
-        if: steps.run-installer-development.outputs.install_exit_code != '0'
-        shell: bash
-        run: |
-          echo "Installer exit code: ${{ steps.run-installer-development.outputs.install_exit_code }}"
-          exit 1
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
+          fi
+          bash scripts/test-ts.sh integration
 
   mcp-build-and-test:
     name: "Node TypeScript Build and Test (${{ matrix.os }})"
@@ -696,27 +924,6 @@ jobs:
           set -euo pipefail
           mkdir -p ci-logs
           turbo run build --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-build-${{ matrix.os }}.log"
-
-      - name: "Run Tests"
-        shell: bash
-        env:
-          # Unit tests use injected fakes; real ADB coverage belongs to the
-          # dedicated device-integration jobs. Never start an adb daemon here.
-          AUTOMOBILE_TEST_MODE: "true"
-          TURBO_TELEMETRY_DISABLED: "1"
-          TURBO_NO_UPDATE_NOTIFIER: "1"
-          DO_NOT_TRACK: "1"
-          NO_COLOR: "1"
-        run: |
-          set -euo pipefail
-          mkdir -p ci-logs
-          # Bun 1.3.14 regresses per-file isolation on Windows; keep that
-          # platform's suite in one global while other platforms stay isolated.
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            bun run test:windows 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
-          else
-            turbo run test --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
-          fi
 
       - name: "Upload Build/Test Logs"
         if: failure()

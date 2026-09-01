@@ -7,11 +7,11 @@ import { createExecResult } from "../../src/utils/execResult";
 import {
   ADB_INTEGRATION_COMMAND_TIMEOUT_MS,
   createAdbIntegrationCommandRunner,
-} from "./adbIntegrationCommandRunner";
+} from "../integration/adbIntegrationCommandRunner";
 
 const FAST_TEST_TIMEOUT_MS = 100;
 const ANDROID_H264_INTEGRATION_TEST_PATH = new URL(
-  "./androidH264SourceDevice.integration.test.ts",
+  "../integration/androidH264SourceDevice.integration.test.ts",
   import.meta.url,
 );
 

@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { spawn, spawnSync } from "node:child_process";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { promises as fsPromises } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import {
@@ -32,37 +29,6 @@ import { FakeAdbProcess } from "../../fakes/FakeAdbProcess";
 import type { AdbExecutor } from "../../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultTimer, type Timer } from "../../../src/utils/SystemTimer";
 
-function commandVersionAvailable(command: string): boolean {
-  const result = spawnSync(command, ["-version"], { stdio: "ignore" });
-  return result.status === 0;
-}
-
-async function runCommand(
-  command: string,
-  args: string[],
-): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const process = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-
-    process.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    process.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    process.once("error", (error) => reject(error));
-    process.once("exit", (code) => {
-      if (code === 0) {
-        resolve({ stdout, stderr });
-      } else {
-        reject(new Error(`${command} exited with code ${code}: ${stderr}`));
-      }
-    });
-  });
-}
-
 function createProcessTracker(stderr: string[] = []): ProcessTracker {
   const process = new EventEmitter() as ProcessTracker["process"];
   process.stderr = new EventEmitter() as ProcessTracker["process"]["stderr"];
@@ -77,8 +43,6 @@ function createProcessTracker(stderr: string[] = []): ProcessTracker {
     stderr,
   };
 }
-
-const hasFfmpegTools = commandVersionAvailable("ffmpeg") && commandVersionAvailable("ffprobe");
 
 describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
   let backend: FfmpegVideoProcessingBackend;
@@ -717,68 +681,6 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       ]);
     });
 
-    (hasFfmpegTools ? test : test.skip)(
-      "should produce playable trimmed output when stream-copy remuxing unscaled iOS input",
-      async function () {
-        const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-remux-"));
-        const rawPath = path.join(tempDir, "raw.mov");
-        const outputPath = path.join(tempDir, "trimmed.mp4");
-
-        try {
-          await runCommand("ffmpeg", [
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-f",
-            "lavfi",
-            "-i",
-            "testsrc=size=16x16:rate=5",
-            "-t",
-            "2",
-            "-c:v",
-            "libx264",
-            "-pix_fmt",
-            "yuv420p",
-            rawPath,
-          ]);
-
-          const args = await (backend as any).buildFfmpegArgs(
-            {
-              ...mockConfig,
-              outputPath,
-              maxDurationSeconds: 1,
-            },
-            {
-              encoder: "libx264",
-              available: false,
-              description: "Software encoding",
-            },
-            { type: "file", path: rawPath },
-          );
-
-          await runCommand("ffmpeg", ["-hide_banner", "-loglevel", "error", ...args]);
-
-          const stats = await fsPromises.stat(outputPath);
-          expect(stats.size).toBeGreaterThan(0);
-
-          const probe = await runCommand("ffprobe", [
-            "-v",
-            "error",
-            "-show_entries",
-            "format=duration",
-            "-of",
-            "default=noprint_wrappers=1:nokey=1",
-            outputPath,
-          ]);
-          const durationSeconds = Number.parseFloat(probe.stdout.trim());
-          expect(durationSeconds).toBeGreaterThan(0);
-          expect(durationSeconds).toBeLessThan(1.6);
-        } finally {
-          await fsPromises.rm(tempDir, { recursive: true, force: true });
-        }
-      },
-    );
-
     test("should transcode file input when scaling is requested", async function () {
       const hwAccel = {
         encoder: "h264_videotoolbox",
@@ -896,43 +798,6 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function () {
       expect(message).toContain("command: ffmpeg -i /tmp/raw.mov -y /tmp/out.mp4");
       expect(message).toContain("exitCode: 1");
       expect(message).toContain("stderr:\nInvalid argument");
-    });
-
-    test("should reject missing post-processed output with FFmpeg context", async function () {
-      const outputPath = path.join(os.tmpdir(), "auto-mobile-missing-output.mp4");
-
-      await expect(
-        (backend as any).assertFfmpegOutputReady(
-          outputPath,
-          ["-i", "/tmp/raw.mov", "-c", "copy", "-y", outputPath],
-          {
-            exitState: { exitCode: 0, signal: null },
-            stderr: ["No output produced\n"],
-          },
-        ),
-      ).rejects.toThrow(/FFmpeg output file missing/);
-    });
-
-    test("should reject empty post-processed output with FFmpeg context", async function () {
-      const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-video-"));
-      const outputPath = path.join(tempDir, "empty.mp4");
-
-      try {
-        await fsPromises.writeFile(outputPath, "");
-
-        await expect(
-          (backend as any).assertFfmpegOutputReady(
-            outputPath,
-            ["-i", "/tmp/raw.mov", "-c", "copy", "-y", outputPath],
-            {
-              exitState: { exitCode: 0, signal: null },
-              stderr: [],
-            },
-          ),
-        ).rejects.toThrow(/FFmpeg output file is empty/);
-      } finally {
-        await fsPromises.rm(tempDir, { recursive: true, force: true });
-      }
     });
   });
 

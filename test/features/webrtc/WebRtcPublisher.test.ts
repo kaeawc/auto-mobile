@@ -71,7 +71,7 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 
 /**
  * Unit tests for publisher wiring that can be asserted without a real peer
- * connection. The full media path is covered by WebRtcPublisher.loopback.test.ts
+ * connection. The full media path is covered by WebRtcPublisher.loopback.integration.test.ts
  * and the coordination-server e2e test.
  */
 describe("WebRtcPublisher WHIP endpoint", () => {

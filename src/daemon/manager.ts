@@ -1649,7 +1649,7 @@ export class DaemonManager implements DaemonManagerLike {
    * fail merely because a healthy daemon was slow to accept (backlog / first accept
    * after restart), so cleaning up there would unlink a LIVE daemon's socket and
    * break every later client (issue #5878, guarded by
-   * `daemonManagerReadiness.test.ts` "recovers on a later retry without removing a
+   * `daemonManagerReadiness.integration.test.ts` "recovers on a later retry without removing a
    * live daemon's socket"). Callers running a capped probe pass `false`.
    */
   private async probeObservedSocket(

@@ -157,14 +157,17 @@ fun AutoMobileDesktopApp(
   val pickerState by pickerViewModel.state.collectAsState()
   var pickerOpen by remember { mutableStateOf(false) }
 
-  // Daemon bootstrap as a first-class startup step: detect the current AutoMobile daemon, or
-  // install Bun + start the pinned package when none is reachable — instead of leaving that work
-  // to happen invisibly inside the picker's first resource read. The bootstrap shares its
-  // lifecycle with the daemon client (see ApplicationModule), so whichever trigger wins the
-  // lifecycle lock, its progress lands in bootstrapState for the launch surfaces to narrate.
+  // Observable daemon-bootstrap progress for the launch surfaces. The startup lifecycle pass —
+  // detect the current AutoMobile daemon, or install Bun + start the pinned package when none is
+  // reachable — is triggered exactly ONCE, by the picker view model's init load through the daemon
+  // client's request preflight; the bootstrap shares that client's lifecycle (see
+  // ApplicationModule), so its phases land here regardless of the trigger. Deliberately NO second
+  // explicit ensureReady() pass at startup: the lifecycle lock would only serialize it behind the
+  // picker's, and after a FAILED first pass (offline Bun install, dead npm fetch) the queued
+  // duplicate would repeat the whole failed pipeline for a second full startup timeout before the
+  // user ever sees a stable Retry.
   val daemonBootstrap = graph.daemonBootstrap
   val bootstrapState by daemonBootstrap.state.collectAsState()
-  LaunchedEffect(daemonBootstrap) { withContext(Dispatchers.IO) { daemonBootstrap.ensureReady() } }
   var paletteOpen by remember { mutableStateOf(false) }
   var showOnboarding by remember { mutableStateOf(!settings.hasSeenOnboarding) }
 
@@ -436,8 +439,10 @@ fun AutoMobileDesktopApp(
     if (!cameUp) return@LaunchedEffect
     // Short settle so the freshly (re)started daemon finishes binding its resources.
     delay(GRID_REFRESH_POLL_MS)
-    // Re-read the CURRENT picker state after the settle: only a still-failed picker reloads.
-    if (pickerState is DevicePickerUiState.Error) {
+    // Read the live state flow after the settle — explicitly, not through the composition's
+    // delegated property — so only a picker that is STILL failed reloads; a Retry the user
+    // pressed during the settle (now Loading/Content) is never overlapped by a second refresh.
+    if (pickerViewModel.state.value is DevicePickerUiState.Error) {
       pickerViewModel.onAction(DevicePickerAction.Refresh)
     }
   }

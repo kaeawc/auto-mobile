@@ -32,9 +32,12 @@ sealed interface DaemonBootstrapState {
 
 /**
  * Owns the app-wide [DesktopDaemonLifecycle] and exposes its progress as [state]. One instance
- * lives on the DI graph: the same lifecycle is attached to the shared [McpDaemonClient] (so
- * per-request preflights report through it) and run once at startup via [ensureReady] (so the first
- * launch installs/starts the daemon before the user has to trigger a request).
+ * lives on the DI graph, and the same lifecycle is attached to the shared [McpDaemonClient], so
+ * per-request preflights report through it — the picker's first load is what runs the startup
+ * install/start pass. [ensureReady] exists for explicit triggers (e.g. a future recovery
+ * affordance); the app deliberately does NOT also call it at startup, since a second queued pass
+ * behind the lifecycle lock would repeat a failed install/start pipeline for another full startup
+ * timeout.
  */
 class DaemonBootstrap
 internal constructor(lifecycleFactory: ((DaemonLifecyclePhase) -> Unit) -> DaemonLifecycleEnsurer) {

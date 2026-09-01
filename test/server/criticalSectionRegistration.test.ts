@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
-import { createMcpServer } from "../../src/server/index";
+import { registerMcpTools } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
 /**
@@ -22,7 +22,7 @@ describe("criticalSection / barrier registration + plan-only discovery gate", ()
   });
 
   test("stdio mode registers neither criticalSection nor barrier at all", () => {
-    createMcpServer({ daemonMode: false });
+    registerMcpTools(false);
 
     // Sanity: non-gated tools are present, so registration actually ran.
     expect(ToolRegistry.getTool("observe")).toBeDefined();
@@ -35,7 +35,7 @@ describe("criticalSection / barrier registration + plan-only discovery gate", ()
   });
 
   test("daemon mode registers them plan-only: hidden from discovery, resolvable for plans", () => {
-    createMcpServer({ daemonMode: true });
+    registerMcpTools(true);
 
     // Hidden from normal MCP discovery (getTool honors the plan-only gate)...
     expect(ToolRegistry.getTool("criticalSection")).toBeUndefined();

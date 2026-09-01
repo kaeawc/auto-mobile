@@ -42,6 +42,7 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
 
   if [[ "$affects_unit_tests" == "true" ]]; then
     source_report_dir="${BUN_TEST_TIMING_REPORT_DIR:-}"
+    reused_unit_reports=false
     if [[ -n "$source_report_dir" ]]; then
       has_source_report=false
       for source_report in "$source_report_dir"/*.xml; do
@@ -59,6 +60,7 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
       # same hundreds of tests a second time.
       echo "Source changes detected; measuring complete unit-lane reports."
       report_dir="$source_report_dir"
+      reused_unit_reports=true
     else
       echo "Source changes detected; measuring Bun-affected unit tests."
       AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir" \
@@ -124,7 +126,11 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
       ' "$report_dir"/*.xml | sort
     )
     if [[ "$isolated_count" -gt 0 ]]; then
-      rm -f "$report_dir"/*.xml
+      if [[ "$reused_unit_reports" == "true" ]]; then
+        rm -f "$report_dir"/shard-*.xml
+      else
+        rm -f "$report_dir/changed.xml"
+      fi
     fi
     changed_count=1
   else

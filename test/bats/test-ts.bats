@@ -193,6 +193,23 @@ run_lane() {
   [ ! -s "$BUN_ARGS_FILE" ]
 }
 
+@test "timing gate retains isolated reports after rechecking a unit-lane outlier" {
+  report_dir="$BATS_TEST_TMPDIR/unit-timing-reports"
+  mkdir -p "$report_dir"
+  printf '<testsuite file="test/example.test.ts"><testcase name="slow" time="0.200" /></testsuite>\n' \
+    > "$report_dir/shard-0.xml"
+
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    BUN_TEST_TIMING_REPORT_DIR="$report_dir" \
+    TIMING_CHANGED_FILES='src/example.ts\n' \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 0 ]
+  [ ! -e "$report_dir/shard-0.xml" ]
+  [ -s "$report_dir/isolation-0.xml" ]
+}
+
 @test "timing gate selects Bun-affected unit tests for shared test support changes" {
   run env \
     PATH="$STUB_BIN:$PATH" \

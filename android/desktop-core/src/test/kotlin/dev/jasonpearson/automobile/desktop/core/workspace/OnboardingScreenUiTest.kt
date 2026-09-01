@@ -36,10 +36,11 @@ class OnboardingScreenUiTest {
     runComposeUiTest {
       setContent { MaterialTheme { OnboardingScreen(onGetStarted = {}) } }
       // Storage docks into both Android and iOS panes as of #5020, so the inspect copy names
-      // storage as a capability of every pane. It must NOT platform-gate storage (e.g. "storage
-      // on Android"), which would under-promise on iOS (#4721 item 1, premise superseded).
-      onNodeWithText("storage tools", substring = true, ignoreCase = true).assertIsDisplayed()
-      onNodeWithText("storage on Android", substring = true, ignoreCase = true).assertDoesNotExist()
+      // storage as a capability of every pane and carries no platform qualifier (#4721 item 1,
+      // premise superseded). Pin the exact approved line so any Android-gating of the copy
+      // (e.g. "storage on Android", "each Android pane", "Android storage tools") fails here.
+      onNodeWithText("Inspect per device — dock the logs and storage tools into each pane")
+        .assertIsDisplayed()
     }
 
   @Test

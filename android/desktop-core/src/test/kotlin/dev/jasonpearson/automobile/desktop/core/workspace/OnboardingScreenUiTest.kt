@@ -32,13 +32,14 @@ class OnboardingScreenUiTest {
   }
 
   @Test
-  fun `qualifies storage as Android-only so the inspect copy doesn't over-promise on iOS`() =
+  fun `describes storage platform-neutrally so the inspect copy doesn't under-promise on iOS`() =
     runComposeUiTest {
       setContent { MaterialTheme { OnboardingScreen(onGetStarted = {}) } }
-      // Storage tooling is Android-only (#4708): WorkspaceFacet routes Tool.Storage to a
-      // placeholder on iOS. The inspect capability copy must platform-qualify storage rather
-      // than naming it as universally available (#4721).
-      onNodeWithText("storage on Android", substring = true, ignoreCase = true).assertIsDisplayed()
+      // Storage docks into both Android and iOS panes as of #5020, so the inspect copy names
+      // storage as a capability of every pane. It must NOT platform-gate storage (e.g. "storage
+      // on Android"), which would under-promise on iOS (#4721 item 1, premise superseded).
+      onNodeWithText("storage tools", substring = true, ignoreCase = true).assertIsDisplayed()
+      onNodeWithText("storage on Android", substring = true, ignoreCase = true).assertDoesNotExist()
     }
 
   @Test

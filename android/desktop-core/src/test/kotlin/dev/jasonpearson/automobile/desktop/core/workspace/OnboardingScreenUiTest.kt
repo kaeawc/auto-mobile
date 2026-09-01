@@ -32,6 +32,18 @@ class OnboardingScreenUiTest {
   }
 
   @Test
+  fun `describes storage platform-neutrally so the inspect copy doesn't under-promise on iOS`() =
+    runComposeUiTest {
+      setContent { MaterialTheme { OnboardingScreen(onGetStarted = {}) } }
+      // Storage docks into both Android and iOS panes as of #5020, so the inspect copy names
+      // storage as a capability of every pane and carries no platform qualifier (#4721 item 1,
+      // premise superseded). Pin the exact approved line so any Android-gating of the copy
+      // (e.g. "storage on Android", "each Android pane", "Android storage tools") fails here.
+      onNodeWithText("Inspect per device — dock the logs and storage tools into each pane")
+        .assertIsDisplayed()
+    }
+
+  @Test
   fun `carries no AI or assistant framing`() = runComposeUiTest {
     setContent { MaterialTheme { OnboardingScreen(onGetStarted = {}) } }
     // The onboarding must stay free of AI/LLM/assistant connotations (explicit product

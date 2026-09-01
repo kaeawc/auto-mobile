@@ -30,6 +30,9 @@ private data class Capability(val icon: String, val text: String)
 private val CAPABILITIES =
   listOf(
     Capability("🖥", "Observe devices — pick booted devices and open them as side-by-side panes"),
+    // Storage docks into both Android and iOS panes as of #5020 (iOS key-value mutation routing
+    // through WorkspaceFacet -> StorageFacet), so this copy stays platform-neutral — qualifying
+    // storage as Android-only would now under-promise on iOS (#4721 item 1, premise superseded).
     Capability("🧭", "Inspect per device — dock the logs and storage tools into each pane"),
     Capability("⧉", "Compare devices — open the same tool across devices for a like-for-like view"),
   )

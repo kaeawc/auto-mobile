@@ -16,7 +16,12 @@ enum SimulatorDetection {
 
         do {
             try process.run()
-            PerfTimer.log("hasBootedSimulator: waiting for simctl to complete")
+            // Drain the pipe before reaping: `readDataToEndOfFile` blocks until the child closes the
+            // write end at exit, so reading first lets the child write freely. Waiting first would
+            // deadlock if simctl's output exceeded the ~64 KB pipe buffer (child blocks on write while
+            // we block in `waitUntilExit`), on a synchronous path with no timeout.
+            PerfTimer.log("hasBootedSimulator: reading simctl output")
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
 
             guard process.terminationStatus == 0 else {
@@ -24,7 +29,6 @@ enum SimulatorDetection {
                 return false
             }
 
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
             PerfTimer.log("hasBootedSimulator: parsing \(data.count) bytes of JSON")
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let devices = json["devices"] as? [String: [[String: Any]]]

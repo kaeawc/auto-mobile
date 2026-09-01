@@ -439,12 +439,16 @@ open class AutoMobileTestCase: XCTestCase {
             return false
         }
 
+        // Drain the pipe before reaping. `simctl list devices --json` (no `booted` filter) lists every
+        // device across all runtimes and can exceed the ~64 KB pipe buffer; waiting first would then
+        // deadlock (child blocks on write while we block in `waitUntilExit`). Reading to EOF first lets
+        // the child write freely, and the wait afterwards just reaps the finished process.
+        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             return false
         }
 
-        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
         guard let json = try? JSONSerialization.jsonObject(with: data, options: []),
               let payload = json as? [String: Any],
               let devices = payload["devices"] as? [String: Any]

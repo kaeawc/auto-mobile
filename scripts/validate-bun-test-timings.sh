@@ -41,11 +41,12 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
   done
 
   if [[ "$affects_unit_tests" == "true" ]]; then
-    # The budget measures test work, not CPU contention from unrelated tests.
-    # Keep Bun's source-affected selection, but serialize its execution.
+    # Keep source-affected selection bounded when broad source changes select
+    # hundreds of tests. Isolated reruns below remain the enforcement source,
+    # so parallel selection only identifies provisional offenders.
     echo "Source changes detected; measuring Bun-affected unit tests."
     AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir" \
-      AUTOMOBILE_UNIT_TEST_WORKERS=1 \
+      AUTOMOBILE_UNIT_TEST_WORKERS=3 \
       AUTOMOBILE_UNIT_TEST_BASE_REF="$BUN_TEST_TIMING_BASE_REF" \
       bash scripts/test-ts.sh changed
     # Bun reports a test's elapsed time while every source-affected file shares

@@ -89,9 +89,19 @@ stop_desktop_app() {
   rm -f "${DESKTOP_APP_PID_FILE}"
   # Also kill any orphaned desktop-app Gradle processes: the launcher (hotRun/run),
   # the Compose Hot Reload JVM (identified by its -Dcompose.reload.argfile), and the
-  # app main class.
+  # app main class. Every one of these carries THIS checkout's ${ANDROID_DIR} in its
+  # argv (Gradle wrapper classpath, the reload argfile path, or the app classpath), so
+  # every pattern is scoped to that path. Never match machine-wide: another workspace
+  # or checkout hot-reloading under the same account has an identical bare
+  # `compose.reload.argfile` / `MainKt` command line, and an unscoped pgrep would kill
+  # its JVM too.
   local pids
-  pids=$(pgrep -f "desktop-app:hotRun" 2>/dev/null; pgrep -f "desktop-app:run" 2>/dev/null; pgrep -f "compose.reload.argfile" 2>/dev/null; pgrep -f "dev.jasonpearson.automobile.desktop.MainKt" 2>/dev/null) || true
+  pids=$(
+    pgrep -f "${ANDROID_DIR}.*:desktop-app:hotRun" 2>/dev/null
+    pgrep -f "${ANDROID_DIR}.*:desktop-app:run" 2>/dev/null
+    pgrep -f "compose.reload.argfile=${ANDROID_DIR}" 2>/dev/null
+    pgrep -f "${ANDROID_DIR}.*dev.jasonpearson.automobile.desktop.MainKt" 2>/dev/null
+  ) || true
   if [[ -n "${pids}" ]]; then
     echo "${pids}" | xargs kill 2>/dev/null || true
   fi

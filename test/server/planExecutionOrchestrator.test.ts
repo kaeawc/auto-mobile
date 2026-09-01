@@ -46,6 +46,7 @@ import {
   VideoRecorder,
 } from "../../src/server/planExecutionOrchestrator";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import { PlanSchemaValidator } from "../../src/utils/plan/PlanSchemaValidator";
 
 const buildVideoRecorder = (
   filePath: string = "/tmp/fake-recording.mp4",
@@ -94,6 +95,10 @@ const baseRequest = {
 const baseDeps = () => ({
   timer: new FakeTimer(),
   videoRecorder: buildVideoRecorder(),
+  createSchemaValidator: () => ({
+    loadSchema: async () => undefined,
+    validateYaml: () => ({ valid: true }),
+  }),
 });
 
 describe("PlanExecutionOrchestrator", () => {
@@ -192,7 +197,7 @@ describe("PlanExecutionOrchestrator", () => {
         device: iosDevice,
         request: { ...baseRequest, planContent: "not: a: valid: plan:\n  - missing" },
       },
-      baseDeps(),
+      { ...baseDeps(), createSchemaValidator: () => new PlanSchemaValidator() },
     );
     const result = await orchestrator.execute();
 

@@ -1,5 +1,5 @@
 import Ajv2020 from "ajv/dist/2020";
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "fs";
 import { DefaultElementFinder } from "../../src/features/utility/ElementFinder";
 import type { ObserveResult, ViewHierarchyResult } from "../../src/models";
@@ -218,7 +218,11 @@ describe("observeSchema rich waitFor predicates", () => {
 });
 
 describe("published observe waitFor input schema", () => {
-  const validatePublishedObserveInput = (input: unknown) => {
+  let validatePublishedObserveInput = (_input: unknown): { valid: boolean } => {
+    throw new Error("Published observe schema validator was not initialized");
+  };
+
+  beforeAll(() => {
     (ToolRegistry as any).tools.clear();
     registerObserveTools();
     const observeTool = ToolRegistry.getToolDefinitions().find((tool) => tool.name === "observe");
@@ -226,11 +230,14 @@ describe("published observe waitFor input schema", () => {
 
     const ajv = new Ajv2020({ strict: false, allErrors: true });
     const validate = ajv.compile(observeTool!.inputSchema);
-    return {
+    validatePublishedObserveInput = (input: unknown) => ({
       valid: validate(input),
-      errors: validate.errors,
-    };
-  };
+    });
+  });
+
+  afterAll(() => {
+    ToolRegistry.clearTools();
+  });
 
   const collectTextMatchDescriptions = (schema: unknown): string[] => {
     if (schema === null || typeof schema !== "object") {

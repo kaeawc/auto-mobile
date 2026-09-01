@@ -239,6 +239,11 @@ main() {
   mkdir -p "$(dirname "$joblog")"
   rm -f "$joblog"
   classify_files "$bats_dir" "$lane" "$parallel_list" "$serial_list"
+  if [[ ! -s "$parallel_list" && ! -s "$serial_list" ]]; then
+    log "ERROR: no BATS files selected for ${lane} lane in ${bats_dir}"
+    rm -rf "$temp_dir"
+    return 1
+  fi
 
   local file_budget=""
   if [[ "$lane" == "unit" ]]; then

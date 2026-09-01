@@ -407,6 +407,14 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     }
   });
 
+  test("integration caching includes scripts and workflows its tests read from disk", () => {
+    const inputs = loadTurbo().tasks["test:integration"]?.inputs ?? [];
+
+    expect(inputs).toEqual(
+      expect.arrayContaining(["scripts/**", ".github/workflows/**", "turbo.json"]),
+    );
+  });
+
   /**
    * `android/`/`ios/` path literals referenced by any test that resolve to a real
    * file or directory on disk. Comment or docstring mentions count too — the

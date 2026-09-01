@@ -111,8 +111,16 @@
       "passThroughEnv": ["CI", "GITHUB_ACTIONS", "DEBUG_ADB_EXEC"]
     },
     "test:integration": {
-      "description": "Run host real-I/O tests selected by the *.integration.test.ts contract.",
-      "inputs": ["src/**", "test/**", "scripts/test-ts.sh", "package.json", "bunfig.toml"],
+      "description": "Run host real-I/O tests selected by the *.integration.test.ts contract. Integration tests read shell scripts and workflow definitions directly, so those inputs and turbo.json must invalidate cached results.",
+      "inputs": [
+        "src/**",
+        "test/**",
+        "scripts/**",
+        "package.json",
+        "bunfig.toml",
+        ".github/workflows/**",
+        "turbo.json"
+      ],
       "outputs": [],
       "outputLogs": "new-only",
       "env": [

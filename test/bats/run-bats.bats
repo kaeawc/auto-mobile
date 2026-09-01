@@ -81,6 +81,28 @@ run_runner() {
   ! grep -q "^bats:$FIXTURES/serial.bats$" "$ARGS_FILE"
 }
 
+@test "fails closed when a lane selects no BATS files" {
+  rm "$FIXTURES/integration.bats" "$FIXTURES/integration-serial.bats"
+
+  run_runner integration
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no BATS files selected for integration lane"* ]]
+  ! grep -q '^bats:' "$ARGS_FILE"
+}
+
+@test "fails closed when the BATS directory is missing" {
+  run env \
+    HOME="$FAKE_HOME" \
+    PATH="$STUB_BIN:$PATH" \
+    AUTOMOBILE_BATS_JOBLOG="$FIXTURES/joblog.tsv" \
+    bash "$SCRIPT" unit "$FIXTURES/missing"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no BATS files selected for unit lane"* ]]
+  ! grep -q '^bats:' "$ARGS_FILE"
+}
+
 @test "parallel and serial failures propagate" {
   printf '@test "fail" { false; }\n' > "$FIXTURES/parallel-fail.bats"
   printf '# bats file_tags=serial\n@test "fail" { false; }\n' > "$FIXTURES/serial-fail.bats"

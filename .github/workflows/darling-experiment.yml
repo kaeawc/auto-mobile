@@ -74,12 +74,17 @@ jobs:
           lfs: false
           persist-credentials: false
 
+      # Cache keys reject commas, so the components list needs slugifying first.
+      - name: "Compute cache key"
+        id: cache-key
+        run: echo "value=darling-${DARLING_REF}-${DARLING_COMPONENTS//[^A-Za-z0-9._]/-}-ubuntu-24.04-v1" >> "$GITHUB_OUTPUT"
+
       - name: "Restore Darling build cache"
         id: darling-cache
         uses: actions/cache/restore@v5
         with:
           path: ${{ runner.temp }}/darling-install.tar.zst
-          key: darling-${{ env.DARLING_REF }}-${{ env.DARLING_COMPONENTS }}-ubuntu-24.04-v1
+          key: ${{ steps.cache-key.outputs.value }}
 
       - name: "Build Darling from source (cache miss)"
         id: darling-build
@@ -97,7 +102,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: ${{ runner.temp }}/darling-install.tar.zst
-          key: darling-${{ env.DARLING_REF }}-${{ env.DARLING_COMPONENTS }}-ubuntu-24.04-v1
+          key: ${{ steps.cache-key.outputs.value }}
 
       - name: "Install Darling"
         run: sudo ./scripts/ci/darling-install.sh "$RUNNER_TEMP/darling-install.tar.zst"

@@ -1301,6 +1301,17 @@ jobs:
           fi
           bash scripts/test-ts.sh integration
 
+      - name: "Run stress lane"
+        shell: bash
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+          AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "300"
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
+          fi
+          bash scripts/test-ts.sh stress
+
   mcp-build-and-test:
     name: "Node TypeScript Build and Test (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}

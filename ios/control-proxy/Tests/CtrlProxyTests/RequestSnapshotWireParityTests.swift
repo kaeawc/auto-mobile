@@ -7,7 +7,7 @@ import XCTest
 /// Field-name wire-parity backstop for the TS client ↔ Swift runner (issue #2954,
 /// checklist item 3 of #2857).
 ///
-/// The command-name tripwire (`test/features/observe/ios/ctrlProxyWireParity.test.ts`)
+/// The command-name tripwire (`test/features/observe/ios/ctrlProxyWireParity.integration.test.ts`)
 /// catches a renamed `type` discriminator but not a renamed field *inside* a command
 /// payload. This suite is the Swift half of a two-sided guard around the shared JSON
 /// snapshot fixture `test/fixtures/ios-ctrlproxy-request-snapshots.json`:

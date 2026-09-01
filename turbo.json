@@ -34,7 +34,7 @@
       "passThroughEnv": ["CI", "GITHUB_ACTIONS"]
     },
     "test": {
-      "description": "Run the hermetic Bun unit suite. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach (registrationTeardownGuard, ctrlProxyProtocol, ctrlProxyWireParity, webrtcDeviceCaptureLatency, pinchGoldenVectorParity, coordinateMappingGoldenVectorParity); without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test:coverage's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.test.ts (issue #4351).",
+      "description": "Run the hermetic Bun unit suite. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach (registrationTeardownGuard, ctrlProxyProtocol, webrtcDeviceCaptureLatency, pinchGoldenVectorParity, coordinateMappingGoldenVectorParity); without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test:coverage's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.integration.test.ts (issue #4351).",
       "inputs": [
         "src/**",
         "test/**",
@@ -65,7 +65,7 @@
       "passThroughEnv": ["CI", "GITHUB_ACTIONS", "DEBUG_ADB_EXEC"]
     },
     "test:unit": {
-      "description": "Explicit alias of the hermetic Bun unit suite; native inputs mirror test and test:coverage for test/lint/turboTestInputsCoverNativeSources.test.ts.",
+      "description": "Explicit alias of the hermetic Bun unit suite; native inputs mirror test and test:coverage for test/lint/turboTestInputsCoverNativeSources.integration.test.ts.",
       "inputs": [
         "src/**",
         "test/**",
@@ -111,7 +111,7 @@
       "passThroughEnv": ["CI", "GITHUB_ACTIONS", "DEBUG_ADB_EXEC"]
     },
     "test:integration": {
-      "description": "Run host real-I/O tests selected by the *.integration.test.ts contract. Integration tests read shell scripts and workflow definitions directly, so those inputs and turbo.json must invalidate cached results.",
+      "description": "Run host real-I/O and repository-contract tests selected by the *.integration.test.ts contract. Integration tests read shell scripts, workflow definitions, and native source trees directly, so those inputs and turbo.json must invalidate cached results. Keep the native inputs in sync with test/lint/turboTestInputsCoverNativeSources.integration.test.ts (issue #4351).",
       "inputs": [
         "src/**",
         "test/**",
@@ -119,7 +119,17 @@
         "package.json",
         "bunfig.toml",
         ".github/workflows/**",
-        "turbo.json"
+        "turbo.json",
+        "android/auto-mobile-sdk/src/main/kotlin/**",
+        "android/control-proxy/src/main/kotlin/**",
+        "android/control-proxy/src/test/kotlin/**",
+        "android/desktop-core/**",
+        "android/desktop-core/src/test/kotlin/**",
+        "android/protocol/src/main/kotlin/**",
+        "android/video-server/src/main/kotlin/**",
+        "ios/auto-mobile-sdk/Sources/**",
+        "ios/control-proxy/Sources/**",
+        "ios/control-proxy/Tests/**"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -197,7 +207,7 @@
       "passThroughEnv": ["CI", "GITHUB_ACTIONS"]
     },
     "test:coverage": {
-      "description": "Run the hermetic unit lane with coverage reporting to coverage/. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach; without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.test.ts (issue #4351).",
+      "description": "Run the hermetic unit lane with coverage reporting to coverage/. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach; without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.integration.test.ts (issue #4351).",
       "inputs": [
         "src/**",
         "test/**",

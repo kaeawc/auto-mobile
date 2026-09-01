@@ -1,4 +1,13 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  spyOn,
+  test,
+} from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,7 +29,10 @@ import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsReposi
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { DeviceConnectionLostNotifier } from "../../../src/features/observe/DeviceConnectionLostNotifier";
 import { PortManager } from "../../../src/utils/PortManager";
-import { installInMemoryNavManager } from "../../helpers/navigationTestHarness";
+import {
+  installInMemoryNavManager,
+  type InMemoryNavManagerHarness,
+} from "../../helpers/navigationTestHarness";
 import type { HierarchySyncDiagnostics } from "../../../src/features/observe/android/types";
 import { DefaultRetryExecutor } from "../../../src/utils/retry/RetryExecutor";
 import { FakeLogger } from "../../fakes/FakeLogger";
@@ -38,6 +50,7 @@ describe("AndroidCtrlProxyClient", function () {
   let testDevice: BootedDevice;
   let fakeTimer: FakeTimer;
   let fakeAdbFactory: FakeAdbClientFactory;
+  let navHarness: InMemoryNavManagerHarness;
   const serverPort: number = 8765;
 
   class FakeCtrlProxyForwardLease {
@@ -351,8 +364,6 @@ describe("AndroidCtrlProxyClient", function () {
   };
 
   const startSdkNavigationHierarchyInterleaving = async () => {
-    NavigationGraphManager.resetInstance();
-    const navHarness = await installInMemoryNavManager();
     const navManager = navHarness.manager;
     const testTimer = new FakeTimer();
     testTimer.enableAutoAdvance();
@@ -1363,6 +1374,19 @@ describe("AndroidCtrlProxyClient", function () {
   });
 
   describe("getLatestHierarchy", function () {
+    beforeAll(async () => {
+      navHarness = await installInMemoryNavManager();
+    });
+
+    beforeEach(async () => {
+      await navHarness.manager.setCurrentApp("com.example.app");
+      await navHarness.manager.clearCurrentGraph();
+    });
+
+    afterAll(async () => {
+      await navHarness.dispose();
+    });
+
     test("should return hierarchy data when WebSocket receives fresh data", async function () {
       const mockHierarchyData = {
         updatedAt: 1750934583218,
@@ -1649,8 +1673,6 @@ describe("AndroidCtrlProxyClient", function () {
     });
 
     test("should seed navigation graph from hierarchy updates", async function () {
-      NavigationGraphManager.resetInstance();
-      const navHarness = await installInMemoryNavManager();
       const navManager = navHarness.manager;
 
       const testTimer = new FakeTimer();
@@ -1705,12 +1727,11 @@ describe("AndroidCtrlProxyClient", function () {
         expect(navManager.getCurrentScreen()).toBeNull();
       } finally {
         await testClient.close();
-        await navHarness.dispose();
       }
     });
 
     test("should preserve SDK screen names when hierarchy updates follow navigation events", async function () {
-      const { navHarness, navManager, resultPromise, testClient, testTimer } =
+      const { navManager, resultPromise, testClient, testTimer } =
         await startSdkNavigationHierarchyInterleaving();
 
       try {
@@ -1720,7 +1741,6 @@ describe("AndroidCtrlProxyClient", function () {
         expect(navManager.getCurrentScreen()).toBe("SdkHome");
       } finally {
         await testClient.close();
-        await navHarness.dispose();
       }
     });
 
@@ -1732,8 +1752,6 @@ describe("AndroidCtrlProxyClient", function () {
       // must NOT feed the following hierarchy_update to the detector. Spying on the
       // public detector's onHierarchyUpdate (rather than a private field) keeps the
       // test off internal state while still catching a regression of the skip.
-      NavigationGraphManager.resetInstance();
-      const navHarness = await installInMemoryNavManager();
 
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
@@ -1798,7 +1816,6 @@ describe("AndroidCtrlProxyClient", function () {
       } finally {
         onHierarchyUpdateSpy.mockRestore();
         await testClient.close();
-        await navHarness.dispose();
       }
     });
 
@@ -1807,8 +1824,6 @@ describe("AndroidCtrlProxyClient", function () {
       // NOT in sdkNavigationAppIds, so shouldUseHierarchyNavigation returns true and
       // the detector IS invoked. This proves the assertion above discriminates the
       // skip rather than always passing.
-      NavigationGraphManager.resetInstance();
-      const navHarness = await installInMemoryNavManager();
 
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
@@ -1854,7 +1869,6 @@ describe("AndroidCtrlProxyClient", function () {
       } finally {
         onHierarchyUpdateSpy.mockRestore();
         await testClient.close();
-        await navHarness.dispose();
       }
     });
 
@@ -1863,8 +1877,6 @@ describe("AndroidCtrlProxyClient", function () {
       // path must kick off build-context resolution — otherwise every reach records
       // under the default/legacy build. Asserting requestPackageInfo is consulted
       // proves ensureBuildContext ran on this path.
-      NavigationGraphManager.resetInstance();
-      const navHarness = await installInMemoryNavManager();
 
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
@@ -1910,15 +1922,12 @@ describe("AndroidCtrlProxyClient", function () {
       } finally {
         pkgInfoSpy.mockRestore();
         await testClient.close();
-        await navHarness.dispose();
       }
     });
 
     test("does not apply a build context built from a failed package-info result (#4984)", async function () {
       // A transient package-info failure must NOT be persisted as version 0 — defer
       // instead, so a later event retries. setBuildContext must not be called.
-      NavigationGraphManager.resetInstance();
-      const navHarness = await installInMemoryNavManager();
       const setCtxSpy = spyOn(navHarness.manager, "setBuildContext");
 
       const testTimer = new FakeTimer();
@@ -1964,13 +1973,10 @@ describe("AndroidCtrlProxyClient", function () {
         pkgInfoSpy.mockRestore();
         setCtxSpy.mockRestore();
         await testClient.close();
-        await navHarness.dispose();
       }
     });
 
     test("releaseSessionBinding clears the binding and cached detector for the released session (#4984)", async function () {
-      NavigationGraphManager.resetInstance();
-      const navHarness = await installInMemoryNavManager();
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory } = createCapturingWebSocketFactory(testTimer);
@@ -1999,7 +2005,6 @@ describe("AndroidCtrlProxyClient", function () {
         expect(testClient.getBoundSessionId()).toBe("session-B");
       } finally {
         await testClient.close();
-        await navHarness.dispose();
       }
     });
 
@@ -2008,8 +2013,6 @@ describe("AndroidCtrlProxyClient", function () {
       // must NOT call requestPackageInfo (a WS send + RequestManager timeout timer)
       // synchronously inside the WS message handler, or it reorders the barrier-tracked
       // nav write vs the socket-close cache invalidation on differently-scheduled runners.
-      NavigationGraphManager.resetInstance();
-      const navHarness = await installInMemoryNavManager();
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
@@ -2073,13 +2076,10 @@ describe("AndroidCtrlProxyClient", function () {
       } finally {
         pkgInfoSpy.mockRestore();
         await testClient.close();
-        await navHarness.dispose();
       }
     });
 
     test("serializes navigation graph writes when WebSocket frames arrive back-to-back", async function () {
-      NavigationGraphManager.resetInstance();
-      const navHarness = await installInMemoryNavManager();
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
@@ -2162,7 +2162,6 @@ describe("AndroidCtrlProxyClient", function () {
       } finally {
         recordNavigationEventSpy.mockRestore();
         await testClient.close();
-        await navHarness.dispose();
       }
     });
 
@@ -2170,8 +2169,6 @@ describe("AndroidCtrlProxyClient", function () {
       // While the WS has no client, a package_event has zero listeners, so an app can be
       // replaced unobserved. onConnectionClosed must invalidate cached contexts so the
       // next event after reconnect re-resolves the hash instead of using the stale build.
-      NavigationGraphManager.resetInstance();
-      const navHarness = await installInMemoryNavManager();
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
@@ -2245,7 +2242,6 @@ describe("AndroidCtrlProxyClient", function () {
       } finally {
         pkgSpy.mockRestore();
         await testClient.close();
-        await navHarness.dispose();
       }
     });
 
@@ -2258,7 +2254,7 @@ describe("AndroidCtrlProxyClient", function () {
       // concurrent hierarchy path.
       const barrier = getDbWriteBarrier();
       const trackExistingSpy = spyOn(barrier, "trackExisting");
-      const { navHarness, navManager, resultPromise, testClient, testTimer } =
+      const { navManager, resultPromise, testClient, testTimer } =
         await startSdkNavigationHierarchyInterleaving();
 
       try {
@@ -2275,7 +2271,6 @@ describe("AndroidCtrlProxyClient", function () {
       } finally {
         trackExistingSpy.mockRestore();
         await testClient.close();
-        await navHarness.dispose();
         resetDbWriteBarrier();
       }
     });

@@ -174,17 +174,17 @@ describe("PinchOn vision fallback", () => {
     const analyzer = new FakeVisionAnalyzer();
 
     const pinchOn = createPinchOn(capturer, analyzer);
-    // No container = screen pinch, no vision lookup needed
-    const result = await pinchOn.execute({ direction: "in" });
-
-    // May succeed or fail for other reasons, but vision should not be called on error-free path
-    // The key is analyzer is only called on container-not-found
-    if (!result.success) {
-      // If it failed for another reason (not container lookup), analyzer should not be called
-      // unless the failure happened in the catch block with vision enabled
+    // No container = screen pinch, so resolution must not touch the vision path.
+    const observedInteractionSpy = spyOn(pinchOn, "observedInteraction").mockResolvedValue({
+      success: true,
+    } as never);
+    try {
+      await pinchOn.execute({ direction: "in", autoTarget: false });
+      expect(capturer.getCallCount()).toBe(0);
+      expect(analyzer.getCalls()).toHaveLength(0);
+    } finally {
+      observedInteractionSpy.mockRestore();
     }
-    // Vision should only be called when container is specified
-    expect(capturer.getCallCount()).toBe(0);
   });
 
   test("passes correct search criteria for container", async () => {

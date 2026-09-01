@@ -124,7 +124,7 @@ function classifyObservationAction(
  * one-way door. #5872 shipped the first three; #5886 extends both the default and
  * the opt-out to every remaining observation-producing action tool, together.
  * Membership is bound to the advertised opt-out by an anti-divergence test
- * (test/server/tools/schema.test.ts) so the two can never diverge in CI.
+ * (test/server/tools/schema.integration.test.ts) so the two can never diverge in CI.
  * `observe` is not here — it owns the projection at the payload top level, not
  * under `.observation`.
  */

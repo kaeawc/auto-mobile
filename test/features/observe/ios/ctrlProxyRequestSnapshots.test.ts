@@ -2,7 +2,7 @@
  * Field-name wire-parity backstop for the iOS control-proxy TS client ↔ Swift runner
  * (issue #2954, checklist item 3 of #2857).
  *
- * The command-name tripwire (`ctrlProxyWireParity.test.ts`) catches a dropped/renamed
+ * The command-name tripwire (`ctrlProxyWireParity.integration.test.ts`) catches a dropped/renamed
  * `type` discriminator but NOT a renamed field *inside* a command payload: renaming
  * `disableAllFiltering` on the TS side compiles cleanly and only fails at runtime
  * on-device, when the Swift payload struct (`Models.swift`) decodes the wrong field.

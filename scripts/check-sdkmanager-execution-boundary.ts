@@ -4,7 +4,7 @@ import { join, relative } from "node:path";
 import ts from "typescript";
 
 // The single home of the sdkmanager execution-boundary guard (issue #4052, hardened in
-// #4339 and #4341). Both the fast-validate check and test/lint/sdkManagerExecutionBoundary.test.ts
+// #4339 and #4341). Both the fast-validate check and test/lint/sdkManagerExecutionBoundary.integration.test.ts
 // import `directlyExecutesSdkManager` from here so there is exactly one detector.
 export const SOURCE_ROOT = "src";
 export const OWNER = "src/utils/android-cmdline-tools/SdkManagerClient.ts";

@@ -18,7 +18,7 @@ import ts from "typescript";
  * This guard makes the coupling explicit and self-policing:
  *
  *  1. Every native source tree a test reads is a declared `inputs` glob on both
- *     the `test` and `test:coverage` tasks, so touching it busts the cache.
+ *     every cached test task, so touching it busts the cache.
  *  2. `turbo.json` itself is an input of both, so editing one task's input list
  *     can never leave the other replaying a stale hash.
  *  3. Each task's `description` names this file, so the "why is a directory no TS
@@ -30,8 +30,8 @@ import ts from "typescript";
  */
 describe("turbo test inputs cover native sources a guard reads (issue #4351)", () => {
   const ROOT = join(import.meta.dir, "..", "..");
-  const GUARD_PATH = "test/lint/turboTestInputsCoverNativeSources.test.ts";
-  const CACHED_TASKS = ["test", "test:unit", "test:coverage"] as const;
+  const GUARD_PATH = "test/lint/turboTestInputsCoverNativeSources.integration.test.ts";
+  const CACHED_TASKS = ["test", "test:unit", "test:integration", "test:coverage"] as const;
 
   /**
    * Native trees that a TS test reads off disk. Each must gate both cached tasks
@@ -614,7 +614,7 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // Deterministic reproduction of the Windows CI failure shape: path.join on win32 yields
     // `ROOT\test\lint\...`, and without normalization `rel === GUARD_PATH` is false, so the
     // scanner reads its own source and self-flags the join-segment example in its comments.
-    const winAbs = `${ROOT}\\test\\lint\\turboTestInputsCoverNativeSources.test.ts`;
+    const winAbs = `${ROOT}\\test\\lint\\turboTestInputsCoverNativeSources.integration.test.ts`;
     expect(repoRelative(winAbs)).toBe(GUARD_PATH);
   });
 

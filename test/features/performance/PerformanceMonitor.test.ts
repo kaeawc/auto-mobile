@@ -23,22 +23,9 @@ import { ExecResult } from "../../../src/models";
  * Helper to advance time and wait for async callbacks to complete.
  */
 async function advanceTimeAndWait(timer: FakeTimer, ms: number): Promise<void> {
-  // Advance in TICK_INTERVAL_MS steps, draining between each, so every interval
-  // tick fires AND its async body settles before the next tick — exactly how a
-  // real 500ms interval behaves. Advancing the whole span at once would fire all
-  // catch-up ticks synchronously, and the monitor's `pending` concurrency guard
-  // (which deliberately drops overlapping ticks) would swallow every tick but the
-  // first, hiding later collections.
-  const step = PerformanceMonitor.TICK_INTERVAL_MS;
-  let remaining = ms;
-  do {
-    const chunk = Math.min(step, remaining) || remaining;
-    timer.advanceTime(chunk);
-    for (let i = 0; i < 4; i += 1) {
-      await new Promise((resolve) => setImmediate(resolve));
-    }
-    remaining -= chunk;
-  } while (remaining > 0);
+  // Yield once after each due fake-time event, preserving the production
+  // interval's async ordering without repeated real scheduler turns.
+  await timer.advanceTimeAsync(ms);
 }
 
 /**

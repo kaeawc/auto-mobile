@@ -160,4 +160,16 @@ run_lane() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"measuring Bun-affected unit tests"* ]]
   grep -q -- "--changed=origin/main" "$BUN_ARGS_FILE"
+  grep -q -- "--parallel=1" "$BUN_ARGS_FILE"
+}
+
+@test "timing gate selects Bun-affected unit tests for shared test support changes" {
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    BUN_TEST_TIMING_BASE_REF=origin/main \
+    TIMING_CHANGED_FILES='test/fakes/FakeTimer.ts\n' \
+    bash "$TIMING_SCRIPT" "$BATS_TEST_TMPDIR/timings.xml"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"measuring Bun-affected unit tests"* ]]
+  grep -q -- "--changed=origin/main" "$BUN_ARGS_FILE"
 }

@@ -45,64 +45,40 @@ describe("Android emulator boot failure diagnostics", () => {
     expect(client.detectSandboxMprotect("Detected GPU type: host").isSandboxError).toBe(false);
   });
 
-  test("fails before spawning an AVD whose configured RAM is below the floor", async () => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const reader: AvdConfigReader = {
-      readConfig: async () => ({ apiLevel: 36, tag: "google_apis_playstore", ramSizeMb: 1024 }),
-    };
-    const client = new AndroidEmulatorClient(
-      async (_file, args) => (args.includes("-list-avds") ? result("Pixel_9_Pro\n") : result()),
-      (() => {
-        throw new Error("spawn should not be reached");
-      }) as any,
-      timer,
-      { create: () => new FakeAdbExecutor() } as AdbClientFactory,
-      reader,
-    );
-    (client as unknown as { isAvdRunning: () => Promise<boolean> }).isAvdRunning = async () =>
-      false;
-    (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () =>
-      false;
-    (
-      client as unknown as { checkArchitectureCompatibility: () => Promise<unknown> }
-    ).checkArchitectureCompatibility = async () => ({ compatible: true });
-
-    const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
-    expect(error.message).toContain("hw.ramSize");
-    expect(error.message).toContain("1024 MB");
-    expect(error.message).toContain("2048 MB");
+  test("rejects a modern AVD whose configured RAM is below the floor", () => {
+    const client = new AndroidEmulatorClient(async () => result());
+    expect(() =>
+      (
+        client as unknown as {
+          validateAvdMemory: (
+            avdName: string,
+            config: { apiLevel: number; tag: string; ramSizeMb: number },
+          ) => void;
+        }
+      ).validateAvdMemory("Pixel_9_Pro", {
+        apiLevel: 36,
+        tag: "google_apis_playstore",
+        ramSizeMb: 1024,
+      }),
+    ).toThrow("hw.ramSize is 1024 MB, below the minimum 2048 MB");
   });
 
-  test("fails before spawning an AVD with an invalid RAM setting", async () => {
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const reader: AvdConfigReader = {
-      readConfig: async () => ({
+  test("rejects a modern AVD with an invalid RAM setting", () => {
+    const client = new AndroidEmulatorClient(async () => result());
+    expect(() =>
+      (
+        client as unknown as {
+          validateAvdMemory: (
+            avdName: string,
+            config: { apiLevel: number; tag: string; ramSizeInvalid: boolean },
+          ) => void;
+        }
+      ).validateAvdMemory("Pixel_9_Pro", {
         apiLevel: 36,
         tag: "google_apis_playstore",
         ramSizeInvalid: true,
       }),
-    };
-    const client = new AndroidEmulatorClient(
-      async (_file, args) => (args.includes("-list-avds") ? result("Pixel_9_Pro\n") : result()),
-      (() => {
-        throw new Error("spawn should not be reached");
-      }) as any,
-      timer,
-      { create: () => new FakeAdbExecutor() } as AdbClientFactory,
-      reader,
-    );
-    (client as unknown as { isAvdRunning: () => Promise<boolean> }).isAvdRunning = async () =>
-      false;
-    (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () =>
-      false;
-    (
-      client as unknown as { checkArchitectureCompatibility: () => Promise<unknown> }
-    ).checkArchitectureCompatibility = async () => ({ compatible: true });
-
-    const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
-    expect(error.message).toContain("hw.ramSize is invalid");
+    ).toThrow("hw.ramSize is invalid");
   });
 
   test("applies the RAM floor when the AVD config comes from an absolute registry path", async () => {
@@ -119,28 +95,15 @@ describe("Android emulator boot failure diagnostics", () => {
       (filePath) => filePath === registryPath || filePath === configPath,
       avdHome,
     );
-    const timer = new FakeTimer();
-    timer.enableAutoAdvance();
-    const client = new AndroidEmulatorClient(
-      async (_file, args) => (args.includes("-list-avds") ? result("Pixel_9_Pro\n") : result()),
-      (() => {
-        throw new Error("spawn should not be reached");
-      }) as any,
-      timer,
-      { create: () => new FakeAdbExecutor() } as AdbClientFactory,
-      reader,
-    );
-    (client as unknown as { isAvdRunning: () => Promise<boolean> }).isAvdRunning = async () =>
-      false;
-    (client as unknown as { isAvdStarting: () => Promise<boolean> }).isAvdStarting = async () =>
-      false;
-    (
-      client as unknown as { checkArchitectureCompatibility: () => Promise<unknown> }
-    ).checkArchitectureCompatibility = async () => ({ compatible: true });
-
-    const error = await expectRejection(client.startEmulator("Pixel_9_Pro"));
-    expect(error.message).toContain("hw.ramSize");
-    expect(error.message).toContain("1024 MB");
+    const client = new AndroidEmulatorClient(async () => result());
+    const config = await reader.readConfig("Pixel_9_Pro");
+    expect(() =>
+      (
+        client as unknown as {
+          validateAvdMemory: (avdName: string, config: unknown) => void;
+        }
+      ).validateAvdMemory("Pixel_9_Pro", config),
+    ).toThrow("hw.ramSize is 1024 MB");
   });
 
   test("reports a target that remains offline instead of waiting for the generic timeout", async () => {

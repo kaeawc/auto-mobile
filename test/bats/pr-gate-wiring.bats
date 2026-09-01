@@ -121,7 +121,7 @@ wiring_requires_yq() {
   [[ "$block" == *"needs.node-host-integration-tests.result"* ]]
 }
 
-@test "fast and integration jobs invoke their canonical lanes" {
+@test "unit, integration, and stress jobs invoke their canonical lanes" {
   local unit host bats_unit bats_integration
   unit="$(job_block node-unit-tests)"
   host="$(job_block node-host-integration-tests)"
@@ -130,6 +130,7 @@ wiring_requires_yq() {
 
   [[ "$unit" == *"bash scripts/test-ts.sh unit"* ]]
   [[ "$host" == *"bash scripts/test-ts.sh integration"* ]]
+  [[ "$host" == *"bash scripts/test-ts.sh stress"* ]]
   [[ "$bats_unit" == *"scripts/ci/run-bats.sh unit"* ]]
   [[ "$bats_integration" == *"scripts/ci/run-bats.sh integration"* ]]
   [[ "$bats_unit" != *"AUTOMOBILE_BATS_SERIAL_ONLY"* ]]
@@ -139,6 +140,7 @@ wiring_requires_yq() {
   local workflow=".github/workflows/merge.yml"
   [[ "$(job_block node-unit-tests "$workflow")" == *"bash scripts/test-ts.sh unit"* ]]
   [[ "$(job_block node-host-integration-tests "$workflow")" == *"bash scripts/test-ts.sh integration"* ]]
+  [[ "$(job_block node-host-integration-tests "$workflow")" == *"bash scripts/test-ts.sh stress"* ]]
   [[ "$(job_block bats-tests "$workflow")" == *"scripts/ci/run-bats.sh unit"* ]]
   [[ "$(job_block bats-integration-tests "$workflow")" == *"scripts/ci/run-bats.sh integration"* ]]
 }

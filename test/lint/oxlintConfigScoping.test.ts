@@ -13,6 +13,9 @@ import { join } from "node:path";
 // configuration contract and reflects exactly what oxlint will enforce.
 
 const ROOT = join(import.meta.dir, "..", "..");
+// `oxlint --print-config` normally completes in milliseconds, but it can be
+// delayed by the concurrent unit shards on a two-core CI host.
+const CONFIG_READ_HOOK_TIMEOUT_MS = 20_000;
 
 interface ResolvedOverride {
   files: string[];
@@ -33,7 +36,7 @@ beforeAll(() => {
     throw new Error(`oxlint --print-config failed: ${result.stderr.toString()}`);
   }
   config = JSON.parse(result.stdout.toString()) as ResolvedConfig;
-});
+}, CONFIG_READ_HOOK_TIMEOUT_MS);
 
 // Return the `files` of the SINGLE override that gates `rule`, asserting the
 // rule resolves through exactly one override. Using the first match alone would

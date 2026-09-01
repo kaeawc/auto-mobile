@@ -1,0 +1,117 @@
+name: "Darling Experiment"
+
+# Experiment: how much of AutoMobile's macOS-only CI can run on a Linux
+# runner under Darling (https://docs.darlinghq.org)? Darling is a userspace
+# Darwin translation layer — since 2022 it needs no kernel module, so it can
+# run on GitHub-hosted VMs, but it must be built from source (no prebuilt
+# packages; the community Docker images predate the userspace rewrite).
+#
+# What this job proves or disproves per run (see scripts/ci/darling-smoke.sh):
+#   - Darling boots and reports Darwin on a hosted runner
+#   - our pinned Mach-O CLI tools (XcodeGen, SwiftLint) run under it,
+#     including the real xcodegen-drift-check.sh gate
+# It deliberately does NOT install Xcode: xcodebuild ships only with Apple's
+# Xcode/CLT, which Apple licenses for use on Apple-branded hardware only.
+# The optional dispatch input below lets a person supply their own archive
+# for at-your-own-risk experimentation (scripts/ci/darling-xcodebuild-probe.sh);
+# never wire that into default CI.
+#
+# The Darling build is cached keyed on (ref, components); the first run on a
+# fresh cache builds from source and can take several hours.
+
+on:
+  workflow_dispatch:
+    inputs:
+      darling-ref:
+        description: "darlinghq/darling git tag or branch to build"
+        required: false
+        type: string
+        default: "v0.1.20260608"
+      darling-components:
+        description: "Darling CMake COMPONENTS list (cli_dev = CLI + Xcode-tool frameworks)"
+        required: false
+        type: string
+        default: "cli_dev"
+      xcode-archive-url:
+        description: >-
+          OPTIONAL tar archive of YOUR OWN extracted Xcode.app or
+          CommandLineTools to attempt xcodebuild with. Apple's EULA restricts
+          these tools to Apple hardware; supplying this is your call and your
+          responsibility. Leave empty to skip (default).
+        required: false
+        type: string
+        default: ""
+  pull_request:
+    paths:
+      - ".github/workflows/darling-experiment.yml"
+      - "scripts/ci/darling-*.sh"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: darling-experiment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  darling-smoke:
+    name: "Darling smoke (experimental)"
+    runs-on: ubuntu-24.04
+    # Experimental by definition: report signal without blocking anything.
+    continue-on-error: true
+    timeout-minutes: 350
+    env:
+      DARLING_REF: ${{ inputs.darling-ref || 'v0.1.20260608' }}
+      DARLING_COMPONENTS: ${{ inputs.darling-components || 'cli_dev' }}
+    steps:
+      - name: "Checkout code"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          persist-credentials: false
+
+      - name: "Restore Darling build cache"
+        id: darling-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ runner.temp }}/darling-install.tar.zst
+          key: darling-${{ env.DARLING_REF }}-${{ env.DARLING_COMPONENTS }}-ubuntu-24.04-v1
+
+      - name: "Build Darling from source (cache miss)"
+        id: darling-build
+        if: steps.darling-cache.outputs.cache-hit != 'true'
+        run: |
+          ./scripts/ci/darling-build.sh \
+            --ref "$DARLING_REF" \
+            --components "$DARLING_COMPONENTS" \
+            --output "$RUNNER_TEMP/darling-install.tar.zst"
+
+      # Save even when a later probe step fails: losing a multi-hour build
+      # to a smoke failure would make iterating on the probes miserable.
+      - name: "Save Darling build cache"
+        if: always() && steps.darling-build.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ runner.temp }}/darling-install.tar.zst
+          key: darling-${{ env.DARLING_REF }}-${{ env.DARLING_COMPONENTS }}-ubuntu-24.04-v1
+
+      - name: "Install Darling"
+        run: sudo ./scripts/ci/darling-install.sh "$RUNNER_TEMP/darling-install.tar.zst"
+
+      - name: "Run Darling smoke probes"
+        run: ./scripts/ci/darling-smoke.sh
+
+      - name: "Attempt xcodebuild (self-supplied Xcode; see licensing note)"
+        if: github.event_name == 'workflow_dispatch' && inputs.xcode-archive-url != ''
+        env:
+          DARLING_XCODE_ARCHIVE_URL: ${{ inputs.xcode-archive-url }}
+        run: ./scripts/ci/darling-xcodebuild-probe.sh
+
+      - name: "Upload probe logs"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: darling-experiment-logs
+          path: scratch/darling/
+          if-no-files-found: ignore
+          retention-days: 14

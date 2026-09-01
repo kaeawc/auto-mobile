@@ -2030,9 +2030,16 @@ export class NavigationGraphManager implements NavigationGraphService {
   public setGraphUpdateListener(listener: (() => void | Promise<void>) | null): void {
     if (listener === null) {
       this.graphUpdateListeners = [];
-    } else {
+    } else if (!this.graphUpdateListeners.includes(listener)) {
+      // Idempotent add: a subsystem re-registering the same callback (e.g. the
+      // resource layer re-attaching on provider swap) must not double-notify.
       this.graphUpdateListeners.push(listener);
     }
+  }
+
+  /** Remove exactly one listener, leaving other subsystems' listeners attached. */
+  public removeGraphUpdateListener(listener: () => void | Promise<void>): void {
+    this.graphUpdateListeners = this.graphUpdateListeners.filter((entry) => entry !== listener);
   }
 
   /**

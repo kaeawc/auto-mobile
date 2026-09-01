@@ -38,6 +38,7 @@ import dev.jasonpearson.automobile.desktop.core.video.VideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
 import dev.jasonpearson.automobile.desktop.domain.DeviceFrameSnapshot
 import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
+import kotlinx.coroutines.delay
 
 /**
  * Live device mirror for a workspace pane's stream area: subscribes to the daemon's video-stream
@@ -70,6 +71,14 @@ import dev.jasonpearson.automobile.desktop.domain.DeviceScreenControlMode
 // subscriber's hint fixes the shared per-device encode.
 private const val CONTROL_PANE_FPS = 30
 private const val MIRROR_PANE_FPS = 10
+
+/**
+ * How long the armed control surface survives on retained pixels while the stream is between
+ * Streaming states (re-subscribe, brief drop). Long enough to cover a quality-step reconnect, short
+ * enough that a genuinely dead relay disarms before the on-screen UI can meaningfully drift from
+ * the device.
+ */
+private const val ARMED_FRAME_RETENTION_MS = 3_000L
 
 /** Test tag on the armed interactive-video surface, so tests can pin which branch rendered. */
 internal const val DEVICE_CONTROL_SURFACE_TEST_TAG = "device-control-surface"
@@ -107,6 +116,12 @@ fun DeviceStreamView(
     },
   screenRecordingSettingsLauncher: ScreenRecordingSettingsLauncher =
     MacScreenRecordingSettingsLauncher(),
+  // The grace period the armed control surface may keep running on the newest frame while the
+  // stream is not currently reporting Streaming (see the grace gate below). A suspend seam —
+  // mirroring NavigationFacet's resolveTimeout — so tests drive expiry, cancellation, and
+  // restart-on-source-swap ordering deterministically (e.g. awaiting a CompletableDeferred) with
+  // zero wall time. Production waits the real retention window.
+  armedFrameGraceWait: suspend () -> Unit = { delay(ARMED_FRAME_RETENTION_MS) },
 ) {
   // The pane's fixed per-mode preset when there's no controller: an armed (user-driven) pane wants
   // the sharpest High stream; unfocused farm mirrors stay on the cheap Low preset.
@@ -168,7 +183,46 @@ fun DeviceStreamView(
       // NOT be reconnected; the first-frame deadline still catches a never-first-frame wedge.
       stallReconnectMs = if (column.platform == Platform.Android) LIVE_STALL_RECONNECT_MS else null,
     )
+  // Retain the newest frame ACROSS source swaps, keyed on the device. rememberLiveVideoFrame
+  // retains frames across relay drops WITHIN one source, but arming the pane (fps 10→30), a manual
+  // preset pick, or an auto-adjust step recreates the source — resetting that per-source state to
+  // null and flashing "Connecting to live mirror…" mid-interaction. The mirror keeps rendering this
+  // retained frame until the new subscription decodes its first frame, so a re-subscribe is
+  // seamless. Keyed on deviceId so one device never shows another device's last frame; control
+  // arming still requires a CURRENT frame + Streaming state (below), so stale pixels are never
+  // clickable.
+  var retainedFrame by remember(column.deviceId) { mutableStateOf<LiveVideoFrame?>(null) }
+  LaunchedEffect(liveFrame) {
+    if (liveFrame != null) {
+      retainedFrame = liveFrame
+    }
+  }
   val state by source.state.collectAsState()
+  val newestFrame = liveFrame ?: retainedFrame
+  // Grace window for CONTROL across transient non-Streaming windows (a quality-step re-subscribe,
+  // a brief relay drop before auto-reconnect): the clock starts when the stream LEAVES Streaming
+  // — not from the last frame's age. Aging frames would pre-expire on a healthy static iOS screen
+  // (its capture emits no frames while idle), so the very first source swap would disarm
+  // immediately and recreate the Tap Targets flicker this gate exists to prevent. While Streaming
+  // the window is continuously reset; once Streaming is lost the armed surface may keep using the
+  // newest frame until [armedFrameGraceWait] completes, then control disarms — preserving "stale
+  // pixels are
+  // never clickable" (#5255). Keyed on [source] as well: a swap while the OLD source was already
+  // mid-grace (same non-Streaming boolean, so no transition) restarts the window for the fresh
+  // connection attempt rather than letting the old source's clock expire it. The restart cannot
+  // re-arm already-expired pixels — the effect body only CLEARS the flag under Streaming, so an
+  // expired verdict carries across the swap until the new source actually streams.
+  var armedGraceExpired by remember(column.deviceId) { mutableStateOf(false) }
+  val streamingNow = state is VideoStreamState.Streaming
+  LaunchedEffect(source, streamingNow) {
+    if (streamingNow) {
+      armedGraceExpired = false
+    } else {
+      armedFrameGraceWait()
+      armedGraceExpired = true
+    }
+  }
+  val armedFrame = if (streamingNow || !armedGraceExpired) newestFrame else null
   val droppedFrames by source.droppedFrames.collectAsState(initial = null)
   val controlSnapshot = control?.interactionSnapshot
   var settingsLaunchFailure by remember(column.deviceId) { mutableStateOf(false) }
@@ -189,7 +243,8 @@ fun DeviceStreamView(
     DeviceStreamContent(
       column = column,
       state = state,
-      liveFrame = liveFrame,
+      displayFrame = newestFrame,
+      armedFrame = armedFrame,
       control = control,
       controlSnapshot = controlSnapshot,
       enableDeviceControl = enableDeviceControl,
@@ -210,7 +265,6 @@ fun DeviceStreamView(
       StreamQualityControls(
         currentQuality = currentQuality,
         actualFps = actualFps,
-        targetFps = qualityController.targetFps,
         autoAdjustEnabled = autoAdjust,
         expanded = overlayExpanded,
         onToggleExpanded = { overlayExpanded = !overlayExpanded },
@@ -241,7 +295,12 @@ fun DeviceStreamView(
 private fun DeviceStreamContent(
   column: DeviceColumn,
   state: VideoStreamState,
-  liveFrame: LiveVideoFrame?,
+  // The newest frame ANY source for this device decoded — what the plain mirror renders, so a
+  // re-subscribing source never blanks the pane back to a connect hint.
+  displayFrame: LiveVideoFrame?,
+  // [displayFrame] gated by the control-freshness rule (Streaming, or within the retention
+  // window): the only pixels the armed interactive surface may run on. Null disarms control.
+  armedFrame: LiveVideoFrame?,
   control: WorkspaceDeviceControlState?,
   controlSnapshot: DeviceFrameSnapshot?,
   enableDeviceControl: Boolean,
@@ -269,17 +328,15 @@ private fun DeviceStreamContent(
       },
     )
   } else if (
-    enableDeviceControl &&
-      control != null &&
-      controlSnapshot != null &&
-      liveFrame != null &&
-      state is VideoStreamState.Streaming
+    enableDeviceControl && control != null && controlSnapshot != null && armedFrame != null
   ) {
     // Armed WITH live video: the pane's pixels are ALWAYS the live H.264 mirror — never the
-    // observation screenshot. The armed surface requires a decoded frame AND a currently-Streaming
-    // relay: before the first frame the pane shows the status hint, and once the relay drops the
-    // last frame is still RENDERED (mirror branch below) but control DISARMS — a retained-but-stale
-    // frame must not stay clickable while untagged taps land on a device whose UI may have moved.
+    // observation screenshot. The armed surface requires [armedFrame]: a decoded frame from a
+    // Streaming relay, or a retained frame within the control-freshness window (so a quality-step
+    // re-subscribe or a momentary drop does not flicker the interactive surface away). Once the
+    // window lapses with no frame, control DISARMS while the mirror below keeps the last pixels —
+    // a genuinely-stale frame must not stay clickable while untagged taps land on a device whose
+    // UI may have moved (#5255).
     // Clicks map through the in-memory observation snapshot (its real device dimensions);
     // video and observation cover the same screen at the same aspect ratio, so a click normalized
     // against the displayed video maps to the same device pixel. DeviceScreenView already renders
@@ -291,7 +348,7 @@ private fun DeviceStreamContent(
       // Passing them here is what made the pane visibly "switch over to screenshots" whenever the
       // relay dropped a frame source; the retained live frame now covers those windows.
       screenshotData = null,
-      liveFrame = liveFrame.bitmap,
+      liveFrame = armedFrame.bitmap,
       screenWidth = renderSnapshot?.deviceWidth ?: 0,
       screenHeight = renderSnapshot?.deviceHeight ?: 0,
       rotation = renderSnapshot?.rotation ?: 0,
@@ -325,7 +382,7 @@ private fun DeviceStreamContent(
     )
   } else {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-      val bitmap = liveFrame?.bitmap
+      val bitmap = displayFrame?.bitmap
       if (bitmap != null) {
         Image(
           bitmap = bitmap,

@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.KeyShortcut
@@ -16,8 +17,11 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.LocalWindowExceptionHandlerFactory
 import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowExceptionHandler
+import androidx.compose.ui.window.WindowExceptionHandlerFactory
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
@@ -25,6 +29,7 @@ import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.connection.DaemonConnectionMonitor
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import dev.jasonpearson.automobile.desktop.core.platform.uncaughtUiErrorMessage
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.workspace.isCommandPaletteShortcut
 import dev.jasonpearson.automobile.desktop.di.AutoMobileGraph
@@ -32,6 +37,7 @@ import dev.zacsweers.metro.createGraphFactory
 import java.io.RandomAccessFile
 import java.nio.channels.FileLock
 import java.nio.file.Path
+import javax.swing.JOptionPane
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -70,6 +76,7 @@ private fun acquireSingleInstanceLock(): Boolean {
   }
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 fun main() {
   // Must run before any AWT toolkit initialization so the app name is picked up.
   System.setProperty("apple.awt.application.name", "AutoMobile")
@@ -139,97 +146,122 @@ fun main() {
     // not a Boolean, so repeat presses each register even while the palette is already open.
     var openPaletteRequest by remember { mutableStateOf(0) }
 
-    Window(
-      onCloseRequest = { isWindowVisible = false },
-      title = "AutoMobile",
-      state = windowState,
-      visible = isWindowVisible,
-      onPreviewKeyEvent = { event ->
-        if (
-          event.type == KeyEventType.KeyDown &&
-            isCommandPaletteShortcut(event.key, event.isMetaPressed, event.isCtrlPressed)
-        ) {
-          openPaletteRequest++
-          true
-        } else {
-          false
+    // Last-resort handler for uncaught exceptions on the UI thread. Compose Desktop's default
+    // shows a bare Swing dialog containing only the throwable's toString() (a NoClassDefFoundError
+    // renders as an unreadable slash-form class path) and logs nothing. Ours logs the full stack
+    // and shows a readable message with a restart hint for the rebuilt-jar case. The dialog stays
+    // native (JOptionPane) on purpose: this surface exists precisely for "composition is broken",
+    // so it must not depend on Compose rendering. See uncaughtUiErrorMessage.
+    val uiExceptionHandlerFactory = remember {
+      WindowExceptionHandlerFactory { window ->
+        WindowExceptionHandler { throwable ->
+          LOG.error("Uncaught UI exception: ${throwable.message}", throwable)
+          JOptionPane.showMessageDialog(
+            window,
+            uncaughtUiErrorMessage(throwable),
+            "AutoMobile",
+            JOptionPane.ERROR_MESSAGE,
+          )
         }
-      },
+      }
+    }
+
+    CompositionLocalProvider(
+      LocalWindowExceptionHandlerFactory provides uiExceptionHandlerFactory
     ) {
-      CompositionLocalProvider(LocalAutoMobileGraph provides graph) {
-        MenuBar {
-          Menu("File", mnemonic = 'F') {
-            Item(
-              "Settings",
-              onClick = { menuBarActions.showSettings = true },
-              shortcut = platformShortcut(Key.Comma),
-            )
-            Separator()
-            Item(
-              "Quit",
-              onClick = { exitApplication() },
-              shortcut = platformShortcut(Key.Q),
-            )
+      Window(
+        onCloseRequest = { isWindowVisible = false },
+        title = "AutoMobile",
+        state = windowState,
+        visible = isWindowVisible,
+        onPreviewKeyEvent = { event ->
+          if (
+            event.type == KeyEventType.KeyDown &&
+              isCommandPaletteShortcut(event.key, event.isMetaPressed, event.isCtrlPressed)
+          ) {
+            openPaletteRequest++
+            true
+          } else {
+            false
           }
-          Menu("View", mnemonic = 'V') {
-            Item(
-              "Toggle Left Pane",
-              onClick = { menuBarActions.showLeftPane = !menuBarActions.showLeftPane },
-              shortcut = platformShortcut(Key.Zero),
-            )
-            Item(
-              "Toggle Right Pane",
-              onClick = { menuBarActions.showRightPane = !menuBarActions.showRightPane },
-              shortcut = platformShortcut(Key.Zero, shift = true),
-            )
-            Item(
-              "Toggle Bottom Pane",
-              onClick = { menuBarActions.showBottomPane = !menuBarActions.showBottomPane },
-              shortcut = platformShortcut(Key.Y, shift = true),
-            )
+        },
+      ) {
+        CompositionLocalProvider(LocalAutoMobileGraph provides graph) {
+          MenuBar {
+            Menu("File", mnemonic = 'F') {
+              Item(
+                "Settings",
+                onClick = { menuBarActions.showSettings = true },
+                shortcut = platformShortcut(Key.Comma),
+              )
+              Separator()
+              Item(
+                "Quit",
+                onClick = { exitApplication() },
+                shortcut = platformShortcut(Key.Q),
+              )
+            }
+            Menu("View", mnemonic = 'V') {
+              Item(
+                "Toggle Left Pane",
+                onClick = { menuBarActions.showLeftPane = !menuBarActions.showLeftPane },
+                shortcut = platformShortcut(Key.Zero),
+              )
+              Item(
+                "Toggle Right Pane",
+                onClick = { menuBarActions.showRightPane = !menuBarActions.showRightPane },
+                shortcut = platformShortcut(Key.Zero, shift = true),
+              )
+              Item(
+                "Toggle Bottom Pane",
+                onClick = { menuBarActions.showBottomPane = !menuBarActions.showBottomPane },
+                shortcut = platformShortcut(Key.Y, shift = true),
+              )
+            }
+            Menu("Tools", mnemonic = 'T') {
+              Item(
+                "Command Palette",
+                onClick = { menuBarActions.showCommandPalette = true },
+                shortcut = platformShortcut(Key.P, shift = true),
+              )
+              Item(
+                "Global Search",
+                onClick = { menuBarActions.showGlobalSearch = true },
+                shortcut = platformShortcut(Key.F, shift = true),
+              )
+              Item(
+                // ⌘K/Ctrl+K is handled by the window-level onPreviewKeyEvent below (opens the
+                // command
+                // palette). No shortcut here — a duplicate Key.K accelerator on this (currently
+                // inert)
+                // item would race the window handler. Re-wiring this menu item + restoring its
+                // shortcut is tracked in #4670.
+                "Quick Jump",
+                onClick = { menuBarActions.showQuickJump = true },
+              )
+              Separator()
+              Item(
+                "Take Screenshot",
+                onClick = { menuBarActions.onTakeScreenshot?.invoke() },
+                shortcut = platformShortcut(Key.S, shift = true),
+              )
+            }
+            Menu("Help", mnemonic = 'H') {
+              Item(
+                "Keyboard Shortcuts",
+                onClick = { menuBarActions.showCheatSheet = true },
+                shortcut = platformShortcut(Key.Slash),
+              )
+              Separator()
+              Item("About AutoMobile", onClick = { /* TODO: show about dialog */ })
+            }
           }
-          Menu("Tools", mnemonic = 'T') {
-            Item(
-              "Command Palette",
-              onClick = { menuBarActions.showCommandPalette = true },
-              shortcut = platformShortcut(Key.P, shift = true),
-            )
-            Item(
-              "Global Search",
-              onClick = { menuBarActions.showGlobalSearch = true },
-              shortcut = platformShortcut(Key.F, shift = true),
-            )
-            Item(
-              // ⌘K/Ctrl+K is handled by the window-level onPreviewKeyEvent below (opens the command
-              // palette). No shortcut here — a duplicate Key.K accelerator on this (currently
-              // inert)
-              // item would race the window handler. Re-wiring this menu item + restoring its
-              // shortcut is tracked in #4670.
-              "Quick Jump",
-              onClick = { menuBarActions.showQuickJump = true },
-            )
-            Separator()
-            Item(
-              "Take Screenshot",
-              onClick = { menuBarActions.onTakeScreenshot?.invoke() },
-              shortcut = platformShortcut(Key.S, shift = true),
-            )
-          }
-          Menu("Help", mnemonic = 'H') {
-            Item(
-              "Keyboard Shortcuts",
-              onClick = { menuBarActions.showCheatSheet = true },
-              shortcut = platformShortcut(Key.Slash),
-            )
-            Separator()
-            Item("About AutoMobile", onClick = { /* TODO: show about dialog */ })
-          }
+          AutoMobileDesktopApp(
+            menuBarActions = menuBarActions,
+            openPaletteRequest = openPaletteRequest,
+            daemonConnectionState = daemonState,
+          )
         }
-        AutoMobileDesktopApp(
-          menuBarActions = menuBarActions,
-          openPaletteRequest = openPaletteRequest,
-          daemonConnectionState = daemonState,
-        )
       }
     }
   }

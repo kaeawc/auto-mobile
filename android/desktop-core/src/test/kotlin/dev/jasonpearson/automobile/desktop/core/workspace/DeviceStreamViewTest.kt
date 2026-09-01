@@ -20,11 +20,14 @@ import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.video.FakeVideoStreamSource
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamQuality
 import dev.jasonpearson.automobile.desktop.core.video.VideoStreamState
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 @OptIn(ExperimentalTestApi::class)
@@ -91,6 +94,34 @@ class DeviceStreamViewTest {
       onAllNodesWithContentDescription("Live stream of Pixel 8").fetchSemanticsNodes().isNotEmpty()
     }
     onNodeWithContentDescription("Live stream of Pixel 8").assertIsDisplayed()
+  }
+
+  @Test
+  fun `keeps the last frame on screen while a recreated source reconnects`() = runComposeUiTest {
+    // Arming the pane changes the source's remember keys (fps/preset), recreating the source. The
+    // fresh source has no frame yet — the pane must keep rendering the retained frame instead of
+    // flashing "Connecting to live mirror…" mid-interaction.
+    val sources = mutableListOf<FakeVideoStreamSource>()
+    val armed = androidx.compose.runtime.mutableStateOf(false)
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          col(),
+          enableDeviceControl = armed.value,
+          sourceFactory = { _, _ -> FakeVideoStreamSource().also { sources += it } },
+        )
+      }
+    }
+    waitUntil { sources.size == 1 && sources[0].connectedDeviceId != null }
+    sources[0].emitFrame(width = 1, height = 1)
+    waitUntil {
+      onAllNodesWithContentDescription("Live stream of Pixel 8").fetchSemanticsNodes().isNotEmpty()
+    }
+    armed.value = true
+    waitUntil { sources.size == 2 }
+    onNodeWithContentDescription("Live stream of Pixel 8").assertIsDisplayed()
+    assertTrue(onAllNodesWithText("Connecting to live mirror…").fetchSemanticsNodes().isEmpty())
+    assertTrue(onAllNodesWithText("Waiting for the first frame…").fetchSemanticsNodes().isEmpty())
   }
 
   @Test
@@ -223,6 +254,9 @@ class DeviceStreamViewTest {
             enableDeviceControl = true,
             control = armedControlState(scope),
             sourceFactory = { _, _ -> source },
+            // Immediate expiry: disarm the moment the relay leaves Streaming, so this test pins
+            // the disarm rule itself rather than the transient-tolerance window.
+            armedFrameGraceWait = {},
           )
         }
       }
@@ -238,6 +272,137 @@ class DeviceStreamViewTest {
         onAllNodesWithTag(DEVICE_CONTROL_SURFACE_TEST_TAG).fetchSemanticsNodes().isEmpty()
       }
       onNodeWithContentDescription("Live stream of Pixel 8").assertIsDisplayed()
+      scope.cancel()
+    }
+
+  @Test
+  fun `armed control survives a transient drop within the retention window`() = runComposeUiTest {
+    // A quality-step re-subscribe or momentary relay drop leaves Streaming briefly; while the
+    // newest frame is within the retention window the interactive surface (and its Tap Targets
+    // affordance) must stay mounted instead of flickering to the plain mirror and back.
+    val source =
+      FakeVideoStreamSource(refuseWith = "dropped", nowMs = { System.nanoTime() / 1_000_000L })
+    val scope = CoroutineScope(Dispatchers.Unconfined)
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          col(),
+          enableDeviceControl = true,
+          control = armedControlState(scope),
+          sourceFactory = { _, _ -> source },
+          armedFrameGraceWait = { awaitCancellation() }, // grace never expires on its own
+        )
+      }
+    }
+    runOnUiThread { source.becomeStreaming() }
+    source.emitFrame()
+    waitUntilExactlyOneExists(hasTestTag(DEVICE_CONTROL_SURFACE_TEST_TAG))
+
+    runOnUiThread { source.becomeUnavailable("dropped") }
+    waitForIdle()
+    onAllNodesWithTag(DEVICE_CONTROL_SURFACE_TEST_TAG).assertCountEquals(1)
+    scope.cancel()
+  }
+
+  @Test
+  fun `grace expiry and source-swap restart are driven deterministically`() = runComposeUiTest {
+    // Drives the shipped grace window through the injected suspend seam (no wall time, no 0/huge
+    // extremes): each grace pass awaits its own gate, so the test controls exactly when a window
+    // expires and proves a source swap CANCELS the old source's window and starts a fresh one.
+    val gates = mutableListOf<CompletableDeferred<Unit>>()
+    val sources = mutableListOf<FakeVideoStreamSource>()
+    val scope = CoroutineScope(Dispatchers.Unconfined)
+    val armed = mutableStateOf(false)
+    setContent {
+      MaterialTheme {
+        DeviceStreamView(
+          col(),
+          enableDeviceControl = armed.value,
+          control = armedControlState(scope),
+          sourceFactory = { _, _ ->
+            FakeVideoStreamSource(nowMs = { System.nanoTime() / 1_000_000L }).also { sources += it }
+          },
+          armedFrameGraceWait = { CompletableDeferred<Unit>().also { gates += it }.await() },
+        )
+      }
+    }
+    // Mirror-mode source streams a frame; arming swaps to a fresh source. The initial non-Streaming
+    // states open early gates; note how many exist before the drop we care about.
+    waitUntil { sources.size == 1 && sources[0].connectedDeviceId != null }
+    sources[0].emitFrame(width = 1, height = 1)
+    // Wait for the frame to be collected (it becomes the retained frame) before swapping sources.
+    waitUntil {
+      onAllNodesWithContentDescription("Live stream of Pixel 8").fetchSemanticsNodes().isNotEmpty()
+    }
+    armed.value = true
+    waitUntil { sources.size == 2 && sources[1].connectedDeviceId != null }
+    waitUntilExactlyOneExists(hasTestTag(DEVICE_CONTROL_SURFACE_TEST_TAG))
+    val gatesBeforeDrop = gates.size
+
+    // Drop the stream: a grace window opens (new gate) and control stays armed while it runs.
+    runOnUiThread { sources[1].becomeUnavailable("dropped") }
+    waitUntil { gates.size == gatesBeforeDrop + 1 }
+    onAllNodesWithTag(DEVICE_CONTROL_SURFACE_TEST_TAG).assertCountEquals(1)
+    val droppedSourceGate = gates.last()
+
+    // Swap sources mid-grace (disarm/rearm recreates it): the old window's gate is cancelled and a
+    // fresh one opens for the new source's non-Streaming state.
+    armed.value = false
+    waitUntil { sources.size == 3 }
+    runOnUiThread { sources[2].becomeUnavailable("still down") }
+    armed.value = true
+    waitUntil { sources.size == 4 }
+    runOnUiThread { sources[3].becomeUnavailable("still down") }
+    waitUntil { gates.size > gatesBeforeDrop + 1 }
+
+    // The old window's waiter died with the swap: completing ITS gate must not disarm anything.
+    droppedSourceGate.complete(Unit)
+    waitForIdle()
+    onAllNodesWithTag(DEVICE_CONTROL_SURFACE_TEST_TAG).assertCountEquals(1)
+
+    // Completing the CURRENT window's gate is what disarms — deterministic boundary crossing.
+    val currentGate = gates.last()
+    currentGate.complete(Unit)
+    waitUntil {
+      onAllNodesWithTag(DEVICE_CONTROL_SURFACE_TEST_TAG).fetchSemanticsNodes().isEmpty()
+    }
+    onNodeWithContentDescription("Live stream of Pixel 8").assertIsDisplayed()
+    scope.cancel()
+  }
+
+  @Test
+  fun `a source swap does not leave control disarmed once the new source streams`() =
+    runComposeUiTest {
+      // Recreating the source (arming, quality step) must not strand the pane disarmed: the fresh
+      // source reports Streaming before its first frame decodes, and the armed surface may run on
+      // the retained frame under that Streaming state. Guards the grace effect's keying across
+      // source swaps (CodeRabbit).
+      val sources = mutableListOf<FakeVideoStreamSource>()
+      val scope = CoroutineScope(Dispatchers.Unconfined)
+      val armed = mutableStateOf(false)
+      setContent {
+        MaterialTheme {
+          DeviceStreamView(
+            col(),
+            enableDeviceControl = armed.value,
+            control = armedControlState(scope),
+            sourceFactory = { _, _ -> FakeVideoStreamSource().also { sources += it } },
+            armedFrameGraceWait = {}, // any grace comes from Streaming state, never the window
+          )
+        }
+      }
+      waitUntil { sources.size == 1 && sources[0].connectedDeviceId != null }
+      sources[0].emitFrame(width = 1, height = 1)
+      waitUntil {
+        onAllNodesWithContentDescription("Live stream of Pixel 8")
+          .fetchSemanticsNodes()
+          .isNotEmpty()
+      }
+
+      // Arming swaps the source; the new fake connects straight to Streaming with no frame yet.
+      armed.value = true
+      waitUntil { sources.size == 2 && sources[1].connectedDeviceId != null }
+      waitUntilExactlyOneExists(hasTestTag(DEVICE_CONTROL_SURFACE_TEST_TAG))
       scope.cancel()
     }
 
@@ -338,7 +503,7 @@ class DeviceStreamViewTest {
     }
     // Collapsed readout: persisted preset + live-vs-target fps (control pane targets 30fps). The
     // selector chips stay hidden so they cannot intercept a tap on the interactive surface.
-    onNodeWithText("Medium · 0 / 30 fps").assertIsDisplayed()
+    onNodeWithText("Medium · 0 fps").assertIsDisplayed()
     onAllNodesWithText("Auto").assertCountEquals(0)
   }
 
@@ -391,7 +556,7 @@ class DeviceStreamViewTest {
       val medium = sources.getValue(VideoStreamQuality.Medium)
 
       // Expand the collapsed overlay, then pick High.
-      onNodeWithText("Medium · 0 / 30 fps").performClick()
+      onNodeWithText("Medium · 0 fps").performClick()
       onNodeWithText("High").performClick()
 
       // A distinct High source is created and connects, the old Medium source is disposed, and the

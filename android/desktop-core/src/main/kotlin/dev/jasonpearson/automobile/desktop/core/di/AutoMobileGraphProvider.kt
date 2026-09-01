@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.di
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrap
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.platform.AppVersionProvider
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
@@ -15,6 +16,9 @@ import dev.jasonpearson.automobile.desktop.core.update.UpdateController
 interface AutoMobileGraphProvider {
   /** The default MCP client for communicating with the AutoMobile daemon. */
   val autoMobileClient: AutoMobileClient
+
+  /** Observable install/start progress of the shared daemon (drives the launch surfaces). */
+  val daemonBootstrap: DaemonBootstrap
 
   /** Application settings provider. */
   val settingsProvider: SettingsProvider

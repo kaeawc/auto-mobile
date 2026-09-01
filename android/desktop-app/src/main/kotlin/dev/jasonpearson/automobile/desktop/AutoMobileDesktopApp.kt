@@ -68,6 +68,7 @@ import dev.jasonpearson.automobile.desktop.core.workspace.parseDeviceLockStates
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePicker
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerAction
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerEffect
+import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerUiState
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.DevicePickerViewModel
 import dev.jasonpearson.automobile.desktop.core.workspace.picker.RealDeviceBootController
 import dev.jasonpearson.automobile.desktop.core.workspace.rememberWorkspaceDeviceControl
@@ -155,6 +156,18 @@ fun AutoMobileDesktopApp(
     }
   val pickerState by pickerViewModel.state.collectAsState()
   var pickerOpen by remember { mutableStateOf(false) }
+
+  // Observable daemon-bootstrap progress for the launch surfaces. The startup lifecycle pass —
+  // detect the current AutoMobile daemon, or install Bun + start the pinned package when none is
+  // reachable — is triggered exactly ONCE, by the picker view model's init load through the daemon
+  // client's request preflight; the bootstrap shares that client's lifecycle (see
+  // ApplicationModule), so its phases land here regardless of the trigger. Deliberately NO second
+  // explicit ensureReady() pass at startup: the lifecycle lock would only serialize it behind the
+  // picker's, and after a FAILED first pass (offline Bun install, dead npm fetch) the queued
+  // duplicate would repeat the whole failed pipeline for a second full startup timeout before the
+  // user ever sees a stable Retry.
+  val daemonBootstrap = graph.daemonBootstrap
+  val bootstrapState by daemonBootstrap.state.collectAsState()
   var paletteOpen by remember { mutableStateOf(false) }
   var showOnboarding by remember { mutableStateOf(!settings.hasSeenOnboarding) }
 
@@ -412,6 +425,27 @@ fun AutoMobileDesktopApp(
       pickerViewModel.onAction(DevicePickerAction.SilentRefresh)
     }
   }
+  // A failed first load is otherwise a dead end (SilentRefresh only polls from Content): retry it
+  // automatically ONCE per disconnected -> connected transition of the daemon health poll — the
+  // "daemon was down, now it's back" recovery. Latching on the transition (not on the Error state)
+  // means a read that keeps failing WHILE the daemon stays connected (e.g. a malformed payload) is
+  // not retried in a Loading/Error flash loop every few seconds; that persistent case stays on the
+  // explicit Retry button, as does a bootstrap failure with no daemon at all.
+  val daemonUp = daemonConnectionState is ConnectionState.Connected
+  var wasDaemonUp by remember(pickerViewModel) { mutableStateOf(daemonUp) }
+  LaunchedEffect(pickerViewModel, daemonUp) {
+    val cameUp = daemonUp && !wasDaemonUp
+    wasDaemonUp = daemonUp
+    if (!cameUp) return@LaunchedEffect
+    // Short settle so the freshly (re)started daemon finishes binding its resources.
+    delay(GRID_REFRESH_POLL_MS)
+    // Read the live state flow after the settle — explicitly, not through the composition's
+    // delegated property — so only a picker that is STILL failed reloads; a Retry the user
+    // pressed during the settle (now Loading/Content) is never overlapped by a second refresh.
+    if (pickerViewModel.state.value is DevicePickerUiState.Error) {
+      pickerViewModel.onAction(DevicePickerAction.Refresh)
+    }
+  }
 
   AutoMobileTheme(themeMode = settings.themeMode) {
     Surface(
@@ -447,6 +481,7 @@ fun AutoMobileDesktopApp(
               onClose = { pickerOpen = false },
               // Only offer Close when there is an observed workspace to return to.
               canClose = workspaceState is WorkspaceUiState.Content,
+              bootstrapState = bootstrapState,
             )
           else ->
             Box(Modifier.fillMaxSize()) {

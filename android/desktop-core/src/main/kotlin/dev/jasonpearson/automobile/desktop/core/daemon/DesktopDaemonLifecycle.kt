@@ -454,6 +454,33 @@ internal sealed interface DaemonLifecycleResult {
   data class Failure(val message: String) : DaemonLifecycleResult
 }
 
+/**
+ * Coarse progress phases of a daemon lifecycle pass, reported through the lifecycle's
+ * `phaseListener` so the UI can narrate a slow first launch (installing Bun, fetching the daemon
+ * package) instead of sitting on a generic spinner. Terminal phases mirror [DaemonLifecycleResult];
+ * the listener sees every pass, including per-request preflights that resolve instantly to
+ * [Completed].
+ */
+sealed interface DaemonLifecyclePhase {
+  /** Reading the pid file and probing the daemon socket. */
+  data object Probing : DaemonLifecyclePhase
+
+  /** Downloading and running the Bun installer (first launch on a machine without Bun). */
+  data object InstallingRuntime : DaemonLifecyclePhase
+
+  /** Running `bunx @kaeawc/auto-mobile@<version> --daemon <action>` (fetches the package). */
+  data class LaunchingDaemon(val action: String, val version: String) : DaemonLifecyclePhase
+
+  /** Daemon command succeeded; polling the socket until it serves the expected version. */
+  data object Verifying : DaemonLifecyclePhase
+
+  /** The pass resolved with a ready daemon. */
+  data class Completed(val restarted: Boolean) : DaemonLifecyclePhase
+
+  /** The pass resolved without a usable daemon. */
+  data class Failed(val message: String) : DaemonLifecyclePhase
+}
+
 internal interface DaemonLifecycleEnsurer {
   fun ensureVersionMatchedDaemon(): DaemonLifecycleResult
 }
@@ -473,118 +500,138 @@ internal class DesktopDaemonLifecycle(
     SystemDaemonPackageRunnerResolver(),
   private val bunInstaller: DesktopBunInstaller = SystemDesktopBunInstaller(),
   private val verificationAttempts: Int = DEFAULT_VERIFICATION_ATTEMPTS,
+  /**
+   * Observes [DaemonLifecyclePhase] transitions of every pass. Invoked under [lifecycleLock], so
+   * implementations must be non-blocking (e.g. a `StateFlow.value` write).
+   */
+  private val phaseListener: (DaemonLifecyclePhase) -> Unit = {},
 ) : DaemonLifecycleEnsurer {
   override fun ensureVersionMatchedDaemon(): DaemonLifecycleResult =
     synchronized(lifecycleLock) {
-      val expectedVersion =
-        expectedVersionProvider()
-          ?: return DaemonLifecycleResult.Failure(
-            "Cannot verify the AutoMobile daemon version because this desktop build has no version. " +
-              "Rebuild or reinstall the desktop application, then try again."
-          )
-      val currentDaemon =
-        when (val readResult = readPidStateWithRetry()) {
-          is DaemonPidReadResult.Present -> readResult.state
-          DaemonPidReadResult.Absent -> null
-          DaemonPidReadResult.Unreadable ->
-            return DaemonLifecycleResult.Failure(
-              "Could not read the AutoMobile daemon state. Wait a moment for startup to finish, then retry."
-            )
+      phaseListener(DaemonLifecyclePhase.Probing)
+      val result = ensureLocked()
+      phaseListener(
+        when (result) {
+          is DaemonLifecycleResult.Ready -> DaemonLifecyclePhase.Completed(result.restarted)
+          is DaemonLifecycleResult.Failure -> DaemonLifecyclePhase.Failed(result.message)
         }
-      val currentVersion = currentDaemon?.version
-      val daemonAvailable = socketIsReady(currentVersion, expectedVersion)
-      if (daemonAvailable && versionsMatch(currentVersion, expectedVersion)) {
-        return DaemonLifecycleResult.Ready(restarted = false)
-      }
+      )
+      result
+    }
 
-      if (declaresFullVersion(expectedVersion)) {
-        return DaemonLifecycleResult.Failure(
-          "AutoMobile desktop source build $expectedVersion cannot start a matching published daemon. " +
-            "Start the daemon from the same checkout, then try again."
+  private fun ensureLocked(): DaemonLifecycleResult {
+    val expectedVersion =
+      expectedVersionProvider()
+        ?: return DaemonLifecycleResult.Failure(
+          "Cannot verify the AutoMobile daemon version because this desktop build has no version. " +
+            "Rebuild or reinstall the desktop application, then try again."
         )
+    val currentDaemon =
+      when (val readResult = readPidStateWithRetry()) {
+        is DaemonPidReadResult.Present -> readResult.state
+        DaemonPidReadResult.Absent -> null
+        DaemonPidReadResult.Unreadable ->
+          return DaemonLifecycleResult.Failure(
+            "Could not read the AutoMobile daemon state. Wait a moment for startup to finish, then retry."
+          )
       }
+    val currentVersion = currentDaemon?.version
+    val daemonAvailable = socketIsReady(currentVersion, expectedVersion)
+    if (daemonAvailable && versionsMatch(currentVersion, expectedVersion)) {
+      return DaemonLifecycleResult.Ready(restarted = false)
+    }
 
-      val action = if (daemonAvailable) "restart" else "start"
-      val osName = System.getProperty("os.name", "")
-      var runner = packageRunnerResolver.resolve(osName)
-      if (runner == null) {
-        val installResult = bunInstaller.install(osName)
-        if (installResult.cancelled) {
-          return DaemonLifecycleResult.Failure("Bun installation was cancelled.")
-        }
-        if (installResult.timedOut) {
-          return DaemonLifecycleResult.Failure(
-            "Timed out while installing Bun. Check your network connection and retry."
-          )
-        }
-        if (installResult.exitCode != 0) {
-          val detail = installResult.output.trim().takeIf { it.isNotEmpty() }
-          return DaemonLifecycleResult.Failure(
-            buildString {
-              append("Could not install Bun automatically")
-              detail?.let { append(": $it") }
-              append(". Install Bun manually, then try again.")
-            }
-          )
-        }
-        runner = packageRunnerResolver.resolve(osName)
-        if (runner == null) {
-          return DaemonLifecycleResult.Failure(
-            "Bun installed, but bunx could not be found. Restart AutoMobile and try again."
-          )
-        }
-      }
-      val commandResult =
-        try {
-          val command =
-            packageDaemonCommand(
-              runner,
-              expectedVersion,
-              action,
-              currentDaemon?.launchArguments.orEmpty(),
-              osName,
-            )
-          commandExecutor.execute(command)
-        } catch (error: Exception) {
-          return DaemonLifecycleResult.Failure(
-            "Could not $action AutoMobile $expectedVersion: ${error.message ?: error.javaClass.simpleName}. " +
-              "Install Bun so bunx is available, then try again."
-          )
-        }
-      if (commandResult.cancelled) {
-        return DaemonLifecycleResult.Failure("AutoMobile daemon startup was cancelled.")
-      }
-      if (commandResult.exitCode != 0) {
-        if (commandResult.timedOut) {
-          return DaemonLifecycleResult.Failure(
-            "Timed out while trying to $action AutoMobile $expectedVersion. " +
-              "Check the daemon logs and retry."
-          )
-        }
-        val detail =
-          commandResult.output.trim().takeIf { it.isNotEmpty() }
-            ?: "Install @kaeawc/auto-mobile@$expectedVersion and try again."
-        return DaemonLifecycleResult.Failure(
-          "Could not $action AutoMobile $expectedVersion (exit code ${commandResult.exitCode}). $detail"
-        )
-      }
-
-      var actualVersion: String? = null
-      repeat(verificationAttempts.coerceAtLeast(1)) { attempt ->
-        actualVersion = (pidFileReader.read() as? DaemonPidReadResult.Present)?.state?.version
-        if (socketChecker.isReady() && versionsMatch(actualVersion, expectedVersion)) {
-          return DaemonLifecycleResult.Ready(restarted = true)
-        }
-        if (attempt + 1 < verificationAttempts.coerceAtLeast(1)) {
-          timer.sleep(VERIFICATION_RETRY_DELAY_MS)
-        }
-      }
+    if (declaresFullVersion(expectedVersion)) {
       return DaemonLifecycleResult.Failure(
-        "AutoMobile daemon version mismatch: desktop requires $expectedVersion, but the daemon " +
-          "reports ${actualVersion ?: "no version"}. Stop the existing daemon and retry so " +
-          "@kaeawc/auto-mobile@$expectedVersion can start."
+        "AutoMobile desktop source build $expectedVersion cannot start a matching published daemon. " +
+          "Start the daemon from the same checkout, then try again."
       )
     }
+
+    val action = if (daemonAvailable) "restart" else "start"
+    val osName = System.getProperty("os.name", "")
+    var runner = packageRunnerResolver.resolve(osName)
+    if (runner == null) {
+      phaseListener(DaemonLifecyclePhase.InstallingRuntime)
+      val installResult = bunInstaller.install(osName)
+      if (installResult.cancelled) {
+        return DaemonLifecycleResult.Failure("Bun installation was cancelled.")
+      }
+      if (installResult.timedOut) {
+        return DaemonLifecycleResult.Failure(
+          "Timed out while installing Bun. Check your network connection and retry."
+        )
+      }
+      if (installResult.exitCode != 0) {
+        val detail = installResult.output.trim().takeIf { it.isNotEmpty() }
+        return DaemonLifecycleResult.Failure(
+          buildString {
+            append("Could not install Bun automatically")
+            detail?.let { append(": $it") }
+            append(". Install Bun manually, then try again.")
+          }
+        )
+      }
+      runner = packageRunnerResolver.resolve(osName)
+      if (runner == null) {
+        return DaemonLifecycleResult.Failure(
+          "Bun installed, but bunx could not be found. Restart AutoMobile and try again."
+        )
+      }
+    }
+    phaseListener(DaemonLifecyclePhase.LaunchingDaemon(action, expectedVersion))
+    val commandResult =
+      try {
+        val command =
+          packageDaemonCommand(
+            runner,
+            expectedVersion,
+            action,
+            currentDaemon?.launchArguments.orEmpty(),
+            osName,
+          )
+        commandExecutor.execute(command)
+      } catch (error: Exception) {
+        return DaemonLifecycleResult.Failure(
+          "Could not $action AutoMobile $expectedVersion: ${error.message ?: error.javaClass.simpleName}. " +
+            "Install Bun so bunx is available, then try again."
+        )
+      }
+    if (commandResult.cancelled) {
+      return DaemonLifecycleResult.Failure("AutoMobile daemon startup was cancelled.")
+    }
+    if (commandResult.exitCode != 0) {
+      if (commandResult.timedOut) {
+        return DaemonLifecycleResult.Failure(
+          "Timed out while trying to $action AutoMobile $expectedVersion. " +
+            "Check the daemon logs and retry."
+        )
+      }
+      val detail =
+        commandResult.output.trim().takeIf { it.isNotEmpty() }
+          ?: "Install @kaeawc/auto-mobile@$expectedVersion and try again."
+      return DaemonLifecycleResult.Failure(
+        "Could not $action AutoMobile $expectedVersion (exit code ${commandResult.exitCode}). $detail"
+      )
+    }
+
+    phaseListener(DaemonLifecyclePhase.Verifying)
+    var actualVersion: String? = null
+    repeat(verificationAttempts.coerceAtLeast(1)) { attempt ->
+      actualVersion = (pidFileReader.read() as? DaemonPidReadResult.Present)?.state?.version
+      if (socketChecker.isReady() && versionsMatch(actualVersion, expectedVersion)) {
+        return DaemonLifecycleResult.Ready(restarted = true)
+      }
+      if (attempt + 1 < verificationAttempts.coerceAtLeast(1)) {
+        timer.sleep(VERIFICATION_RETRY_DELAY_MS)
+      }
+    }
+    return DaemonLifecycleResult.Failure(
+      "AutoMobile daemon version mismatch: desktop requires $expectedVersion, but the daemon " +
+        "reports ${actualVersion ?: "no version"}. Stop the existing daemon and retry so " +
+        "@kaeawc/auto-mobile@$expectedVersion can start."
+    )
+  }
 
   private fun packageDaemonCommand(
     runner: String,

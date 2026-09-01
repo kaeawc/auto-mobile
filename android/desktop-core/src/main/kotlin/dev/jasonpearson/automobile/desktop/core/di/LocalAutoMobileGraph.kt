@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.di
 
 import androidx.compose.runtime.staticCompositionLocalOf
+import dev.jasonpearson.automobile.desktop.core.daemon.DaemonBootstrap
 import dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory
 import dev.jasonpearson.automobile.desktop.core.datasource.DefaultDataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.platform.PackagedVersionSource
@@ -19,10 +20,12 @@ import dev.jasonpearson.automobile.desktop.core.update.RealUpdateController
  */
 val LocalAutoMobileGraph =
   staticCompositionLocalOf<AutoMobileGraphProvider> {
-    val client = McpClientFactory.createPreferred()
+    val bootstrap = DaemonBootstrap.create()
+    val client = McpClientFactory.createPreferred(bootstrap)
     val versionProvider = RuntimeAppVersionProvider(PackagedVersionSource())
     object : AutoMobileGraphProvider {
       override val autoMobileClient = client
+      override val daemonBootstrap = bootstrap
       override val settingsProvider = FakeSettingsProvider()
       override val dataSourceFactory = DefaultDataSourceFactory(client)
       override val appVersionProvider = versionProvider

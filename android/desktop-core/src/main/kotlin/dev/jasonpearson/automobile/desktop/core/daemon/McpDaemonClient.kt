@@ -1142,8 +1142,23 @@ object DaemonSocketPaths {
     if (trimmed.isEmpty() || ignoredVersions.contains(trimmed.lowercase())) {
       return null
     }
+    // A Gradle dev build stamps `<release>-SNAPSHOT` (e.g. `0.0.67-SNAPSHOT`). The daemon's
+    // handshake gate compares release strings, and `-SNAPSHOT` is a semver prerelease — not `+`
+    // build metadata — so an unstripped SNAPSHOT can never match the published daemon it tracks
+    // (`0.0.67-SNAPSHOT` != `0.0.67`), and `bunx @kaeawc/auto-mobile@0.0.67-SNAPSHOT` names a
+    // package that does not exist on npm. Declare the base release instead so a dev-run desktop
+    // connects to the current installed daemon, and can install the real package when none runs.
+    val snapshotBase =
+      trimmed
+        .takeIf { it.endsWith(SNAPSHOT_SUFFIX, ignoreCase = true) }
+        ?.dropLast(SNAPSHOT_SUFFIX.length)
+    if (snapshotBase != null) {
+      return snapshotBase.takeIf { it.isNotEmpty() }
+    }
     return trimmed
   }
+
+  private const val SNAPSHOT_SUFFIX = "-SNAPSHOT"
 
   internal fun releaseVersion(version: String): String = version.substringBefore('+')
 

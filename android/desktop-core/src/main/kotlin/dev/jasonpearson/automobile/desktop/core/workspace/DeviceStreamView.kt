@@ -203,11 +203,14 @@ fun DeviceStreamView(
   // immediately and recreate the Tap Targets flicker this gate exists to prevent. While Streaming
   // the window is continuously reset; once Streaming is lost the armed surface may keep using the
   // newest frame for [armedFrameRetentionMs], then control disarms — preserving "stale pixels are
-  // never clickable" (#5255). A recreated source resets the collected state itself, so the swap
-  // lands here as a plain Streaming -> non-Streaming transition.
+  // never clickable" (#5255). Keyed on [source] as well: a swap while the OLD source was already
+  // mid-grace (same non-Streaming boolean, so no transition) restarts the window for the fresh
+  // connection attempt rather than letting the old source's clock expire it. The restart cannot
+  // re-arm already-expired pixels — the effect body only CLEARS the flag under Streaming, so an
+  // expired verdict carries across the swap until the new source actually streams.
   var armedGraceExpired by remember(column.deviceId) { mutableStateOf(false) }
   val streamingNow = state is VideoStreamState.Streaming
-  LaunchedEffect(streamingNow) {
+  LaunchedEffect(source, streamingNow) {
     if (streamingNow) {
       armedGraceExpired = false
     } else {

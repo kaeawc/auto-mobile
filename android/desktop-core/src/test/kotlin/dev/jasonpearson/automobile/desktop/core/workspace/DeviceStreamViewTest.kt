@@ -303,6 +303,42 @@ class DeviceStreamViewTest {
   }
 
   @Test
+  fun `a source swap does not leave control disarmed once the new source streams`() =
+    runComposeUiTest {
+      // Recreating the source (arming, quality step) must not strand the pane disarmed: the fresh
+      // source reports Streaming before its first frame decodes, and the armed surface may run on
+      // the retained frame under that Streaming state. Guards the grace effect's keying across
+      // source swaps (CodeRabbit).
+      val sources = mutableListOf<FakeVideoStreamSource>()
+      val scope = CoroutineScope(Dispatchers.Unconfined)
+      val armed = mutableStateOf(false)
+      setContent {
+        MaterialTheme {
+          DeviceStreamView(
+            col(),
+            enableDeviceControl = armed.value,
+            control = armedControlState(scope),
+            sourceFactory = { _, _ -> FakeVideoStreamSource().also { sources += it } },
+            armedFrameRetentionMs = 0L, // any grace comes from Streaming state, never the window
+          )
+        }
+      }
+      waitUntil { sources.size == 1 && sources[0].connectedDeviceId != null }
+      sources[0].emitFrame(width = 1, height = 1)
+      waitUntil {
+        onAllNodesWithContentDescription("Live stream of Pixel 8")
+          .fetchSemanticsNodes()
+          .isNotEmpty()
+      }
+
+      // Arming swaps the source; the new fake connects straight to Streaming with no frame yet.
+      armed.value = true
+      waitUntil { sources.size == 2 && sources[1].connectedDeviceId != null }
+      waitUntilExactlyOneExists(hasTestTag(DEVICE_CONTROL_SURFACE_TEST_TAG))
+      scope.cancel()
+    }
+
+  @Test
   fun `an armed iOS pane still surfaces Screen Recording approval over the control view`() =
     runComposeUiTest {
       // Regression: a refused iOS relay (PermissionRequired) must win even when device control is

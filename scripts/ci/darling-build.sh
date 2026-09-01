@@ -117,9 +117,11 @@ echo "Cloning darlinghq/darling at ${REF} (shallow, with submodules)..."
 git clone --depth 1 --branch "${REF}" --recurse-submodules --shallow-submodules \
     https://github.com/darlinghq/darling.git "${SRC_DIR}"
 
+# No CMAKE_BUILD_TYPE on purpose: Darling curates its own per-target flags,
+# and Release's -DNDEBUG trips objc4's "#error mismatch in debug-ness macros"
+# guard. Upstream docs configure with a bare `cmake ..` for the same reason.
 echo "Configuring (COMPONENTS=${COMPONENTS})..."
 cmake -S "${SRC_DIR}" -B "${SRC_DIR}/build" -GNinja \
-    -DCMAKE_BUILD_TYPE=Release \
     -DCOMPONENTS="${COMPONENTS}"
 
 echo "Building with $(nproc) jobs..."

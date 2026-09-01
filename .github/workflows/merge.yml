@@ -825,6 +825,7 @@ jobs:
         env:
           AUTOMOBILE_TEST_MODE: "true"
           AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+          AUTOMOBILE_UNIT_JUNIT_DIR: scratch/timing-unit-reports
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
@@ -836,9 +837,7 @@ jobs:
         shell: bash
         env:
           BUN_TEST_TIMING_BASE_REF: HEAD^
-          # Source-affected selection and its isolated offender reruns must not
-          # inherit the short command wall limit used by a single unit shard.
-          AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+          BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
         run: bash scripts/validate-bun-test-timings.sh
 
   node-host-integration-tests:

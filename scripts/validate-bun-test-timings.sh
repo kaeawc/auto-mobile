@@ -41,21 +41,35 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
   done
 
   if [[ "$affects_unit_tests" == "true" ]]; then
-    # Keep source-affected selection bounded when broad source changes select
-    # hundreds of tests. Isolated reruns below remain the enforcement source,
-    # so parallel selection only identifies provisional offenders.
-    echo "Source changes detected; measuring Bun-affected unit tests."
-    AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir" \
-      AUTOMOBILE_UNIT_TEST_WORKERS=3 \
-      AUTOMOBILE_UNIT_TEST_BASE_REF="$BUN_TEST_TIMING_BASE_REF" \
-      bash scripts/test-ts.sh changed
-    # Bun reports a test's elapsed time while every source-affected file shares
-    # one runtime. Its occasional GC/module-load pauses are charged to whichever
-    # test happens to be active, even though the test itself is fast in the
-    # isolated unit-lane environment. Re-run only provisional offenders, one
-    # test per fresh process, before enforcing the per-test budget; the initial
-    # changed run still executes every dependency-affected test and fails on
-    # behavior.
+    source_report_dir="${BUN_TEST_TIMING_REPORT_DIR:-}"
+    if [[ -n "$source_report_dir" ]]; then
+      has_source_report=false
+      for source_report in "$source_report_dir"/*.xml; do
+        if [[ -f "$source_report" ]]; then
+          has_source_report=true
+          break
+        fi
+      done
+      if [[ "$has_source_report" != "true" ]]; then
+        echo "No unit-lane JUnit reports found in ${source_report_dir}." >&2
+        exit 1
+      fi
+      # The complete unit lane already ran in isolated shards. Reuse its
+      # reports rather than asking Bun's broad --changed graph walk to run the
+      # same hundreds of tests a second time.
+      echo "Source changes detected; measuring complete unit-lane reports."
+      report_dir="$source_report_dir"
+    else
+      echo "Source changes detected; measuring Bun-affected unit tests."
+      AUTOMOBILE_UNIT_JUNIT_DIR="$report_dir" \
+        AUTOMOBILE_UNIT_TEST_WORKERS=3 \
+        AUTOMOBILE_UNIT_TEST_BASE_REF="$BUN_TEST_TIMING_BASE_REF" \
+        bash scripts/test-ts.sh changed
+    fi
+    # A parallel shard can charge occasional GC/module-load pauses to whichever
+    # test happens to be active. Re-run only provisional offenders, one test
+    # per fresh process, before enforcing the per-test budget; the complete
+    # unit lane has already exercised every dependency-affected test.
     isolated_count=0
     while IFS=$'\t' read -r file test_name; do
       if [[ -z "$file" || -z "$test_name" ]]; then
@@ -107,10 +121,10 @@ if [[ -n "${BUN_TEST_TIMING_BASE_REF:-}" ]]; then
           print parts[1] "\t" parts[2]
         }
       }
-      ' "$report_dir/changed.xml" | sort
+      ' "$report_dir"/*.xml | sort
     )
     if [[ "$isolated_count" -gt 0 ]]; then
-      rm "$report_dir/changed.xml"
+      rm -f "$report_dir"/*.xml
     fi
     changed_count=1
   else

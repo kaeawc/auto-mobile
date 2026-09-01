@@ -11,6 +11,7 @@
 #   build_desktop_app()               - Run gradlew :desktop-app:build -x test
 #   run_desktop_app()                 - Launch desktop-app via gradlew :desktop-app:hotRun --autoReload
 #   stop_desktop_app()                - Kill running desktop-app process (launcher + hot-reload JVM)
+#   hash_desktop_gradle_state()       - Hash of the two desktop build.gradle.kts (restart-on-config)
 
 # Desktop app paths
 ANDROID_DIR="${PROJECT_ROOT}/android"
@@ -120,7 +121,24 @@ stop_desktop_app() {
   fi
 }
 
-# Note: the desktop app no longer needs source-watch/hash helpers here. Compose
-# Hot Reload (hotRun --autoReload) watches desktop-core/desktop-app source itself
-# and reloads changes into the running window, so the unified watcher only checks
-# process liveness (see hot-reload.sh) rather than diffing file hashes.
+# Desktop app SOURCE edits are handled by Compose Hot Reload (hotRun --autoReload),
+# so the watcher does not diff source hashes. The two Gradle BUILD SCRIPTS are the
+# exception: Compose Hot Reload reloads source into the running window but does not
+# reconfigure an already-created Gradle project model, so a change to a build script
+# (new dependency, plugin, or compiler option) needs a full desktop-app restart or
+# later compilation runs against stale configuration. The watcher hashes just these
+# two files and restarts on change (see hot-reload.sh).
+DESKTOP_GRADLE_BUILD_FILES=(
+  "${ANDROID_DIR}/desktop-core/build.gradle.kts"
+  "${ANDROID_DIR}/desktop-app/build.gradle.kts"
+)
+
+# Hash of the desktop Gradle build scripts' timestamps (for restart-on-config-change)
+hash_desktop_gradle_state() {
+  local file
+  for file in "${DESKTOP_GRADLE_BUILD_FILES[@]}"; do
+    if [[ -f "${file}" ]]; then
+      stat_entry "${file}" 2>/dev/null || true
+    fi
+  done | sort | hash_stream
+}

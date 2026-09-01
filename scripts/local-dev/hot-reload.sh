@@ -90,8 +90,10 @@ ANDROID_ENABLED=false
 IOS_ENABLED=false
 HAVE_DEVICE=false
 
-# Track last hashes for change detection. Desktop app has no hash: Compose Hot
-# Reload (hotRun --autoReload) watches and reloads its own source live.
+# Track last hashes for change detection. Desktop app SOURCE has no hash: Compose
+# Hot Reload (hotRun --autoReload) watches and reloads it live. Only the desktop
+# Gradle build scripts are hashed, since hotRun won't reconfigure on their change.
+LAST_DESKTOP_GRADLE_HASH=""
 LAST_APK_HASH=""
 LAST_VIDEO_SERVER_HASH=""
 LAST_IOS_HASH=""
@@ -612,10 +614,13 @@ unified_watch_loop() {
   # Integer seconds base for the desktop backoff math. poll_interval may be
   # fractional (e.g. --poll-interval 0.5, which `sleep` accepts); Bash arithmetic
   # is integer-only and would abort the whole watcher under `set -e`. Floor to the
-  # integer part, minimum 1s.
+  # integer part, minimum 1s. Force base-10 so a zero-padded value like `08` or
+  # `010` is not misread as (invalid or surprising) octal in later arithmetic — do
+  # the 10# conversion before any arithmetic context touches the raw string.
   local desktop_backoff_base="${poll_interval%%.*}"
   case "${desktop_backoff_base}" in
     '' | *[!0-9]*) desktop_backoff_base=1 ;;
+    *) desktop_backoff_base=$(( 10#${desktop_backoff_base} )) ;;
   esac
   [[ ${desktop_backoff_base} -lt 1 ]] && desktop_backoff_base=1
 
@@ -629,7 +634,11 @@ unified_watch_loop() {
     fi
   fi
 
-  # Initialize hashes (desktop app self-reloads via Compose Hot Reload; no hash)
+  # Initialize hashes (desktop source self-reloads via Compose Hot Reload; only the
+  # desktop Gradle build scripts are hashed).
+  if [[ "${DESKTOP_APP_ENABLED}" == "true" ]]; then
+    LAST_DESKTOP_GRADLE_HASH="$(hash_desktop_gradle_state)"
+  fi
   if [[ "${ANDROID_ENABLED}" == "true" ]]; then
     LAST_APK_HASH="$(hash_apk_watch_state)"
     LAST_VIDEO_SERVER_HASH="$(hash_video_server_watch_state)"
@@ -668,8 +677,24 @@ unified_watch_loop() {
     # if the app process has died (e.g. crashed or the reload daemon exited), with
     # exponential backoff up to a capped delay — then keep retrying at that cap so a
     # later-fixed error still recovers, rather than staying down for the session.
+    # The one source-driven exception is a change to a desktop build.gradle.kts:
+    # Compose Hot Reload won't reconfigure an existing Gradle model, so we fully
+    # restart the app (a clean stop+relaunch, NOT a rebuild into the live JVM, so the
+    # NoClassDefFoundError trap does not return).
     if [[ "${DESKTOP_APP_ENABLED}" == "true" ]]; then
-      local desktop_pid now_ts
+      local desktop_pid now_ts next_desktop_gradle_hash
+      next_desktop_gradle_hash="$(hash_desktop_gradle_state)"
+      if [[ "${next_desktop_gradle_hash}" != "${LAST_DESKTOP_GRADLE_HASH}" ]]; then
+        log_info "[Desktop App] Gradle build script changed; restarting to apply new configuration..."
+        LAST_DESKTOP_GRADLE_HASH="${next_desktop_gradle_hash}"
+        DESKTOP_RELAUNCH_ATTEMPTS=0
+        DESKTOP_RELAUNCH_NEXT_TS=0
+        DESKTOP_LAST_LAUNCH_TS=$(date +%s)
+        run_desktop_app
+        LAST_DESKTOP_GRADLE_HASH="$(hash_desktop_gradle_state)"
+      fi
+      # Liveness/backoff. After a build-script restart just above, the app is freshly
+      # alive with ATTEMPTS=0, so this is a no-op that tick.
       desktop_pid="$(cat "${DESKTOP_APP_PID_FILE}" 2>/dev/null || true)"
       now_ts=$(date +%s)
       if [[ -n "${desktop_pid}" ]] && kill -0 "${desktop_pid}" 2>/dev/null; then

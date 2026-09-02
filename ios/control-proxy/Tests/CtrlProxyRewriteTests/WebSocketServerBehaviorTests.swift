@@ -102,6 +102,26 @@ final class WebSocketServerBehaviorTests: XCTestCase {
         XCTAssertEqual(captured.values, [payload])
     }
 
+    /// Broadcasts route only to connections that completed the RFC 6455 upgrade —
+    /// never to HTTP-only probes that share the accept path (#5830). Drives the live
+    /// loop (no `broadcastSink`) via the upgraded-responder seam.
+    func testBroadcastSendsOnlyToUpgradedResponders() {
+        let server = makeTestServer()
+        let upgraded = CapturingResponder()
+        server.registerUpgradedResponderForTesting(upgraded, id: 7)
+
+        server.broadcast(Data("PUSH".utf8))
+        XCTAssertEqual(upgraded.captured, [Data("PUSH".utf8)], "broadcast must reach upgraded responders")
+
+        // After disconnect the responder leaves the broadcast-eligible set.
+        server.clientDidDisconnect(7)
+        server.broadcast(Data("AGAIN".utf8))
+        XCTAssertEqual(
+            upgraded.captured, [Data("PUSH".utf8)],
+            "a disconnected responder must receive no further broadcasts"
+        )
+    }
+
     func testBroadcastHierarchyUpdateStampsFrameContext() {
         let captured = ValueBox<Data>()
         let server = makeTestServer(frameToken: "epoch:1:abc", broadcastSink: { captured.append($0) })

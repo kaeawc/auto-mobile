@@ -67,6 +67,10 @@ final class HierarchyModelParityTests: XCTestCase {
         "source": "safeAreaInsets",
         "units": "points",
         "safeArea": { "top": 59, "right": 0, "bottom": 34, "left": 0 },
+        "displayCutoutInfo": {
+          "classification": "dynamic_island",
+          "bounds": [ { "left": 128, "top": 11, "right": 247, "bottom": 48 } ]
+        },
         "systemChrome": {
           "visibility": "visible",
           "statusBar": "shown",

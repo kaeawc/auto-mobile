@@ -16,10 +16,10 @@ with brute force:
    4-nested loop over `delta ∈ [-tol...tol]⁴` = `(2·2+1)⁴ = 625` dictionary probes
    **per query**, run against both the className index and the bounds-only index
    (~1250 probes/query). Cost grows as `tol⁴`. (Historical note: #3634 moved this
-   from padded *insertion* — inserting every node at all 625 shifted keys — to
-   padded *lookup*; it's the same brute force relocated to query time.)
+   from padded _insertion_ — inserting every node at all 625 shifted keys — to
+   padded _lookup_; it's the same brute force relocated to query time.)
 
-2. **`enclosingMatch` — containment.** Smallest-area SDK node that *encloses* the
+2. **`enclosingMatch` — containment.** Smallest-area SDK node that _encloses_ the
    query box (±tol margin). Implemented as a linear `O(n)` scan over an
    area-sorted list, first-container-wins (cached per bounds).
 
@@ -36,7 +36,7 @@ intersect) and the document-order tie-break is recoverable as `min(id)`.
   smallest area. Replaces the `O(n)` scan with `O(log n + k)`. Give the trees a
   set-flavored API: `func ids(containing: ClosedRange<Int>) -> Set<NodeID>`.
 
-- **±tol match (1) → per-coordinate range indices.** Interval *intersection* is the
+- **±tol match (1) → per-coordinate range indices.** Interval _intersection_ is the
   wrong semantic here (we want endpoint-proximity, not overlap). Keep 4 sorted
   arrays (one per coordinate); binary-search the `[q-tol, q+tol]` window on each →
   4 candidate ID sets → intersect. **4 binary searches instead of 625 probes, and
@@ -48,20 +48,20 @@ intersect) and the document-order tie-break is recoverable as `min(id)`.
 The rewrite's contract is byte-identical output vs the oracle. The current matchers
 carry specific tie-breaks:
 
-| Path | Current tie-break | Reproducible under set-intersection? |
-|---|---|---|
-| exact dict lookup | first-inserted wins (`if lookup[key]==nil`) = document pre-order | ✅ `min(NodeID)` |
-| `enclosingMatch` | smallest area, then document order (stable sort) | ✅ well-defined; reproduce exactly |
-| `probeToleranceMatch` | **first hit in delta-loop order** (`dl,dt,dr,db` ascending) | ❌ loop-order artifact, not a geometric criterion |
+| Path                  | Current tie-break                                                | Reproducible under set-intersection?              |
+| --------------------- | ---------------------------------------------------------------- | ------------------------------------------------- |
+| exact dict lookup     | first-inserted wins (`if lookup[key]==nil`) = document pre-order | ✅ `min(NodeID)`                                  |
+| `enclosingMatch`      | smallest area, then document order (stable sort)                 | ✅ well-defined; reproduce exactly                |
+| `probeToleranceMatch` | **first hit in delta-loop order** (`dl,dt,dr,db` ascending)      | ❌ loop-order artifact, not a geometric criterion |
 
 - **Containment rewrite is parity-preserving.** Smallest-area + document-order is a
   clean criterion; the interval-tree version reproduces it exactly and the
   merge-parity test stays green. Safe to land opportunistically.
 
 - **±tol rewrite is an intentional behavior change.** The current code returns the
-  *first delta-tuple that hits*, which is neither "closest" nor "smallest" — a node
+  _first delta-tuple that hits_, which is neither "closest" nor "smallest" — a node
   at delta `(-2,0,0,0)` beats a closer one at `(0,0,0,+1)` purely by loop order.
-  A set-intersection returns a *set*; matching the old artifact byte-for-byte isn't
+  A set-intersection returns a _set_; matching the old artifact byte-for-byte isn't
   meaningful. **Decision (owner, this session): upgrade the tie-break to the
   more-correct "nearest bounds by L∞ distance, then document order," accepting a
   scoped, reviewed behavior change** on this path. Parity-first still holds: we do
@@ -73,12 +73,13 @@ carry specific tie-breaks:
 Do not rely on the hand-written merge fixture alone. Capture a **golden-replay
 corpus**: record a batch of real `(xcuitest, sdk)` hierarchy pairs once from the
 live runner, snapshot current merge output, then refactor and diff. This quantifies
-whether the ±tol tie-break change touches *any* real frame, and gives the
+whether the ±tol tie-break change touches _any_ real frame, and gives the
 containment rewrite a far stronger regression net than a synthetic fixture.
 
 ## Sequencing
 
 Land after the concurrency phases. Order within Phase 8:
+
 1. Containment → interval trees (parity-preserving; verify with existing gate + corpus).
 2. ±tol → coordinate range-intersection with the new tie-break (regenerate the
    affected golden; validate against the replay corpus; document the diff).

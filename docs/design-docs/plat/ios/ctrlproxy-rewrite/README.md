@@ -56,20 +56,20 @@ Critical path (the rewrite's actual goal — concurrency correctness + parity):
    scenarios as iOS UI tests.
 
 **8. Post-concurrency fixups (NEW).** Pure, off-critical-path improvements that we
-deliberately defer so the concurrency migration lands *parity-first*. Each is
+deliberately defer so the concurrency migration lands _parity-first_. Each is
 captured as a note below and only acted on once the critical path is done (or, if a
 note is parity-preserving and self-contained, opportunistically — but never at the
 cost of parity discipline).
 
 ## Deferred-fixup index
 
-| Note | Area | Parity risk | Status |
-|---|---|---|---|
-| [hierarchy-merger-geometry](fixup-hierarchy-merger-geometry.md) | `HierarchyMerger` bounds matching | Mixed (containment: none; ±tol: intentional behavior change, approved) | Designed, deferred to Phase 8 |
-| dead API: `ElementLocator.getCachedElement` | ElementLocator | None (drop/internalize) | ✅ Resolved — dropped when porting `ElementLocator` (Phase 4F); not carried into the rewrite |
-| `Timer` protocol shadows `Foundation.Timer` | PerfProvider/scheduling | None (rename) | ✅ Resolved — renamed to `ProxyTimer` when porting the timer seam (Phase 4A) |
-| `GesturePerformer` keyboard-focus / keyboard-visibility polling | GesturePerformer | None (parity-preserving keep) | Noted (uncovered porting `GesturePerformer`, Phase 4G); `tapAndAwaitKeyboardFocus` / `waitForKeyboardVisibility` spin `RunLoop.current.run(until:)` on `Date()`-based deadlines, blocking the main actor for up to their timeout. Ported verbatim; replace with a non-blocking wait in Phase 8 |
-| PerfProvider is an over-elaborate interval accumulator | PerfProvider | None (external timing data stays equivalent) | Noted (porting `PerfProvider`, Phase 5). The whole `MutablePerfEntry` tree + `@TaskLocal` scope + pooled flush is an elaborate way to compute the handful of intervals actually reported. Ported faithfully to keep the emitted `perfTiming` byte-identical; replace with `os_signpost` / direct interval math in Phase 8 (external API/data equivalent, per Paul: "direct rewrite then refactor"). The reference singleton was already dropped in the port (injected `any PerfTracking`; see [STATUS.md](STATUS.md) §6) — do not restore it for parity |
+| Note                                                            | Area                              | Parity risk                                                            | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------------------------------------------------- | --------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [hierarchy-merger-geometry](fixup-hierarchy-merger-geometry.md) | `HierarchyMerger` bounds matching | Mixed (containment: none; ±tol: intentional behavior change, approved) | Designed, deferred to Phase 8                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| dead API: `ElementLocator.getCachedElement`                     | ElementLocator                    | None (drop/internalize)                                                | ✅ Resolved — dropped when porting `ElementLocator` (Phase 4F); not carried into the rewrite                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `Timer` protocol shadows `Foundation.Timer`                     | PerfProvider/scheduling           | None (rename)                                                          | ✅ Resolved — renamed to `ProxyTimer` when porting the timer seam (Phase 4A)                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `GesturePerformer` keyboard-focus / keyboard-visibility polling | GesturePerformer                  | None (parity-preserving keep)                                          | Noted (uncovered porting `GesturePerformer`, Phase 4G); `tapAndAwaitKeyboardFocus` / `waitForKeyboardVisibility` spin `RunLoop.current.run(until:)` on `Date()`-based deadlines, blocking the main actor for up to their timeout. Ported verbatim; replace with a non-blocking wait in Phase 8                                                                                                                                                                                                                                                          |
+| PerfProvider is an over-elaborate interval accumulator          | PerfProvider                      | None (external timing data stays equivalent)                           | Noted (porting `PerfProvider`, Phase 5). The whole `MutablePerfEntry` tree + `@TaskLocal` scope + pooled flush is an elaborate way to compute the handful of intervals actually reported. Ported faithfully to keep the emitted `perfTiming` byte-identical; replace with `os_signpost` / direct interval math in Phase 8 (external API/data equivalent, per Paul: "direct rewrite then refactor"). The reference singleton was already dropped in the port (injected `any PerfTracking`; see [STATUS.md](STATUS.md) §6) — do not restore it for parity |
 
 Append new entries here as they're uncovered.
 
@@ -79,8 +79,9 @@ Captured while answering "where does ctrl-proxy fit, and what else needs a Swift
 (evidence: a subsystem survey of `ios/*` + the TS integration). Not full roadmaps — pointers.
 
 **ctrl-proxy structure — two simplifications evaluated and rejected (don't re-litigate):**
-- The server runs *inside the XCUITest runner* (`CtrlProxyUITests-Runner.app` → `testRunService`),
-  not in `CtrlProxyApp` (that app is only the required UI-test *host*; blank VC). Cross-app
+
+- The server runs _inside the XCUITest runner_ (`CtrlProxyUITests-Runner.app` → `testRunService`),
+  not in `CtrlProxyApp` (that app is only the required UI-test _host_; blank VC). Cross-app
   hierarchy reads + gesture injection come from `XCUIApplication`/`XCUIElement`, a privilege
   `testmanagerd` grants **only** to a UI-test process — no entitlement grants it, so it can never
   be a packaged/App-Store app. `control-proxy.ipa` is just a zip of `Build/Products/`.
@@ -95,13 +96,14 @@ Captured while answering "where does ctrl-proxy fit, and what else needs a Swift
   source of truth.
 
 **Other native-Swift components needing their own Swift-6 pass (ranked, separate from this rewrite):**
+
 - **`ios/auto-mobile-sdk`** (in-app instrumentation SDK; ctrl-proxy links it for wire models) — **largest
-  need.** It is architecturally the *pre-rewrite ctrl-proxy state*: ~44 `@unchecked Sendable` + NSLock,
+  need.** It is architecturally the _pre-rewrite ctrl-proxy state_: ~44 `@unchecked Sendable` + NSLock,
   ~20 mutable singletons, real flagged races (signal-handler globals; the `AutoMobileURLProtocol`
   Sendable error already in STATUS §5). **CI builds it macOS-only**, so its iOS UIKit `@MainActor`
   surface is unchecked → true error count exceeds what a host build shows. Hard blocker: **iOS 15 floor
   rules out both `Mutex` and `OSAllocatedUnfairLock`** — decide raise-floor vs. `os_unfair_lock`/actor
-  first. Likely warrants the same parallel-target + parity-oracle playbook. First step: an *iOS-platform*
+  first. Likely warrants the same parallel-target + parity-oracle playbook. First step: an _iOS-platform_
   strict build to measure the real surface.
 - **`ios/XCTestRunner`** (standalone MCP-client XCTest wrapper — the iOS analog of the Android JUnit
   runner; NOT an XCUITest harness, no `XCUIApplication`; no code coupling to ctrl-proxy) — **moderate,

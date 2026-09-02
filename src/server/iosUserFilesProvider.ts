@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, promises as nodeFs } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BootedDevice, ExecResult } from "../models";
 import { ActionableError } from "../models";
@@ -23,13 +23,13 @@ import type {
 
 export const IOS_FILES_FIXTURE_BUNDLE_ID = "dev.jasonpearson.automobile.files-fixture-provider";
 const MANAGED_DIRECTORY = "automobile";
-const PICKER_MARKER_RELATIVE_PATH = join(
+const PICKER_MARKER_RELATIVE_PATH = posix.join(
   "Library",
   "Application Support",
   "AutoMobile",
   "picker-visibility.json",
 );
-const STAGING_IDENTITIES_RELATIVE_PATH = join(
+const STAGING_IDENTITIES_RELATIVE_PATH = posix.join(
   "Library",
   "Application Support",
   "AutoMobile",
@@ -180,7 +180,7 @@ export class XcodebuildIosFilesFixtureInstaller implements IosFilesFixtureInstal
         ],
         { timeoutMs: 180_000, signal },
       );
-      const appPath = join(
+      const appPath = posix.join(
         derivedData,
         "Build",
         "Products",
@@ -263,14 +263,14 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
           "Confirm the provider app is installed.",
       );
     }
-    if (!isAbsolute(dataRoot)) {
+    if (!posix.isAbsolute(dataRoot)) {
       throw new ActionableError(
         `The managed iOS Files fixture provider did not return an absolute data container path on ${device.deviceId}.`,
       );
     }
     return {
       dataRoot,
-      managedRoot: join(dataRoot, "Documents", MANAGED_DIRECTORY),
+      managedRoot: posix.join(dataRoot, "Documents", MANAGED_DIRECTORY),
     };
   }
 
@@ -296,7 +296,7 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
     const safeNamespace = normalizeUserFilesNamespace(namespace);
     const namespaceRoot = containedPath(resolution.managedRoot, safeNamespace);
     const identityRoot = containedPath(
-      join(resolution.dataRoot, STAGING_IDENTITIES_RELATIVE_PATH),
+      posix.join(resolution.dataRoot, STAGING_IDENTITIES_RELATIVE_PATH),
       safeNamespace,
     );
     await this.assertDirectoryChain(resolution.dataRoot, namespaceRoot);
@@ -315,7 +315,7 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
     const safeDestination = normalizeAppFileRelativePath(destinationPath);
     const namespaceRoot = containedPath(resolution.managedRoot, safeNamespace);
     const destination = containedPath(namespaceRoot, safeDestination);
-    const parent = dirname(destination);
+    const parent = posix.dirname(destination);
     await this.assertDirectoryChain(resolution.dataRoot, parent);
     await this.fileSystem.mkdir(parent);
     await this.assertDirectoryChain(resolution.dataRoot, parent);
@@ -323,7 +323,7 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
     const sourceBytes = await this.fileSystem.readFileBuffer(sourcePath);
     const sourceHash = sha256(sourceBytes);
     const identityPath = containedPath(
-      join(resolution.dataRoot, STAGING_IDENTITIES_RELATIVE_PATH, safeNamespace),
+      posix.join(resolution.dataRoot, STAGING_IDENTITIES_RELATIVE_PATH, safeNamespace),
       `${safeDestination}.json`,
     );
     const existingGeneration = await this.reusableGeneration(
@@ -333,9 +333,9 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
       sourceHash,
     );
     const generation = existingGeneration ?? this.generationFactory();
-    const stageDirectory = await this.fileSystem.mkdtemp(join(parent, ".automobile-stage-"));
+    const stageDirectory = await this.fileSystem.mkdtemp(posix.join(parent, ".automobile-stage-"));
     try {
-      const stagedCopy = join(stageDirectory, "fixture");
+      const stagedCopy = posix.join(stageDirectory, "fixture");
       await this.fileSystem.copyFile(sourcePath, stagedCopy);
       await this.fileSystem.rename(stagedCopy, destination);
     } finally {
@@ -380,13 +380,13 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
     identityPath: string,
     identity: StagingIdentity,
   ): Promise<void> {
-    const parent = dirname(identityPath);
+    const parent = posix.dirname(identityPath);
     await this.assertDirectoryChain(dataRoot, parent);
     await this.fileSystem.mkdir(parent);
     await this.assertDirectoryChain(dataRoot, parent);
-    const temporaryDirectory = await this.fileSystem.mkdtemp(join(parent, ".automobile-identity-"));
+    const temporaryDirectory = await this.fileSystem.mkdtemp(posix.join(parent, ".automobile-identity-"));
     try {
-      const temporaryPath = join(temporaryDirectory, "identity.json");
+      const temporaryPath = posix.join(temporaryDirectory, "identity.json");
       await this.fileSystem.writeFileBuffer(temporaryPath, Buffer.from(JSON.stringify(identity)));
       await this.fileSystem.rename(temporaryPath, identityPath);
     } finally {
@@ -395,15 +395,15 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
   }
 
   private async assertDirectoryChain(root: string, target: string): Promise<void> {
-    const relativeTarget = relative(root, target);
-    if (relativeTarget.startsWith("..") || isAbsolute(relativeTarget)) {
+    const relativeTarget = posix.relative(root, target);
+    if (relativeTarget.startsWith("..") || posix.isAbsolute(relativeTarget)) {
       throw new ActionableError("Refusing to stage an iOS Files fixture outside its managed root.");
     }
-    const segments = relativeTarget.split(/[\\/]/).filter(Boolean);
+    const segments = relativeTarget.split("/").filter(Boolean);
     let current = root;
     await this.assertDirectoryOrMissing(current);
     for (const segment of segments) {
-      current = join(current, segment);
+      current = posix.join(current, segment);
       await this.assertDirectoryOrMissing(current);
     }
   }
@@ -461,7 +461,7 @@ export class MarkerDocumentPickerVisibilityVerifier implements DocumentPickerVis
 
   async verify(request: DocumentPickerVisibilityRequest): Promise<PutAppFileWriteEffect> {
     try {
-      const markerPath = join(request.resolution.dataRoot, PICKER_MARKER_RELATIVE_PATH);
+      const markerPath = posix.join(request.resolution.dataRoot, PICKER_MARKER_RELATIVE_PATH);
       const marker = JSON.parse(
         (await this.fileSystem.readFileBuffer(markerPath)).toString("utf8"),
       ) as Partial<PickerVisibilityMarker>;
@@ -572,12 +572,12 @@ function assertSimulator(device: BootedDevice): void {
 }
 
 function containedPath(root: string, safeRelativePath: string): string {
-  const candidate = join(root, safeRelativePath);
-  const relativeCandidate = relative(root, candidate);
+  const candidate = posix.join(root, safeRelativePath);
+  const relativeCandidate = posix.relative(root, candidate);
   if (
     relativeCandidate.length === 0 ||
     relativeCandidate.startsWith("..") ||
-    isAbsolute(relativeCandidate)
+    posix.isAbsolute(relativeCandidate)
   ) {
     throw new ActionableError("Refusing to stage an iOS Files fixture outside its managed root.");
   }

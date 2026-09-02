@@ -13,6 +13,9 @@
 }
 
 @test "npm package includes the buildable iOS Files fixture provider" {
+  run bun run build
+  [ "$status" -eq 0 ]
+
   run env "npm_config_cache=${BATS_TEST_TMPDIR}/npm-cache" npm pack --dry-run --json
 
   [ "$status" -eq 0 ]

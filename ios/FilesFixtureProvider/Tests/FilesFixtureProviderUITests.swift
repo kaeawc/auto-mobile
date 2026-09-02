@@ -10,9 +10,9 @@ final class FilesFixtureProviderUITests: XCTestCase {
         XCTAssertTrue(openPicker.waitForExistence(timeout: 5))
         openPicker.tap()
 
-        let fixture = app.cells.matching(
-            NSPredicate(format: "identifier BEGINSWITH %@", "issue-5807-fixture,")
-        ).firstMatch
+        // Files presents the extension separately from the item title in icon mode.
+        // Tapping the visible title targets the selectable document item on both layouts.
+        let fixture = app.staticTexts["issue-5807-fixture"]
         XCTAssertTrue(fixture.waitForExistence(timeout: 10), app.debugDescription)
         fixture.tap()
 

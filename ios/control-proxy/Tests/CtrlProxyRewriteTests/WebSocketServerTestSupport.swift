@@ -22,6 +22,10 @@ struct FakePerfTracking: PerfTracking {
     func withScope<T>(_ body: nonisolated(nonsending) () async throws -> T) async rethrows -> T {
         try await body()
     }
+
+    func withScope<T>(_ body: () throws -> T) rethrows -> T {
+        try body()
+    }
 }
 
 struct FakeFrameContextRecording: FrameContextRecording {

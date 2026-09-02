@@ -20,4 +20,12 @@ protocol PerfTracking: Sendable {
     /// requirement cannot be `rethrows`, so the concrete `PerfProvider.withScope`'s
     /// `rethrows` witnesses this `throws` requirement).
     func withScope<T>(_ body: nonisolated(nonsending) () async throws -> T) async throws -> T
+
+    /// Synchronous variant of `withScope`, for entry points that bind a scope around a
+    /// synchronous instrumented call with no `await` to cross — the background
+    /// `HierarchyDebouncer` poll runs `getViewHierarchy` synchronously on the main actor.
+    /// Without a bound scope those background hierarchy timings no-op and never reach the
+    /// shared pool, so the next response's pooled flush drops them (the reference pooled
+    /// them; see `PerfProvider`'s "relied on and preserved" contract).
+    func withScope<T>(_ body: () throws -> T) throws -> T
 }

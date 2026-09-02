@@ -58,7 +58,7 @@ public final class CtrlProxy {
             let elementLocator = ElementLocator()
         #endif
         let gesturePerformer = GesturePerformer(elementLocator: elementLocator)
-        let hierarchyDebouncer = HierarchyDebouncer(hierarchyExtractor: elementLocator)
+        let hierarchyDebouncer = HierarchyDebouncer(hierarchyExtractor: elementLocator, perf: perf)
         let commandHandler = CommandHandler(
             elementLocator: elementLocator,
             gesturePerformer: gesturePerformer,

@@ -55,6 +55,11 @@ final class HierarchyDebouncer: HierarchyDebouncing {
     // MARK: - Dependencies
 
     private let hierarchyExtractor: any HierarchyExtracting
+    /// Perf tracker used to bind a fresh scope around each background extraction, so the
+    /// instrumented `getViewHierarchy` roots reach `PerfProvider`'s shared pool and are
+    /// reported by the next response's flush (the reference's relied-on pooled-flush of
+    /// background hierarchy timings).
+    private let perf: any PerfTracking
     private let timer: any ProxyTimer
     /// Base (fast) poll interval; the interval used immediately after any change.
     private var pollIntervalMs: Int64
@@ -82,10 +87,12 @@ final class HierarchyDebouncer: HierarchyDebouncing {
 
     init(
         hierarchyExtractor: any HierarchyExtracting,
+        perf: any PerfTracking,
         timer: any ProxyTimer = SystemTimer(),
         pollIntervalMs: Int64 = HierarchyDebouncer.defaultPollIntervalMs
     ) {
         self.hierarchyExtractor = hierarchyExtractor
+        self.perf = perf
         self.timer = timer
         self.pollIntervalMs = pollIntervalMs
         effectivePollIntervalMs = pollIntervalMs
@@ -162,7 +169,12 @@ final class HierarchyDebouncer: HierarchyDebouncing {
     private func captureInitialState() {
         do {
             let startTime = timer.now()
-            let hierarchy = try hierarchyExtractor.getViewHierarchy(disableAllFiltering: false)
+            // Bind a fresh perf scope so the instrumented extraction's completed root lands in
+            // the shared pool; the reference relied on this pooled flush of background hierarchy
+            // timings into the next response's perfTiming (without a scope the perf calls no-op).
+            let hierarchy = try perf.withScope {
+                try hierarchyExtractor.getViewHierarchy(disableAllFiltering: false)
+            }
             let extractionTime = timer.now() - startTime
             let hash = StructuralHasher.computeHash(hierarchy)
 
@@ -207,7 +219,12 @@ final class HierarchyDebouncer: HierarchyDebouncing {
         let startTime = timer.now()
 
         do {
-            let hierarchy = try hierarchyExtractor.getViewHierarchy(disableAllFiltering: false)
+            // Bind a fresh perf scope so the instrumented extraction's completed root is pooled
+            // for the next response's perfTiming (see captureInitialState) instead of no-oping
+            // outside any scope.
+            let hierarchy = try perf.withScope {
+                try hierarchyExtractor.getViewHierarchy(disableAllFiltering: false)
+            }
             let extractionTime = timer.now() - startTime
             let newHash = StructuralHasher.computeHash(hierarchy)
 

@@ -405,7 +405,9 @@ integration parity tests):
 - The **`withScope` wiring**: `WebSocketServer.handleMessage` brackets the command path in
   `perf.withScope`, so perf calls accumulate on the wire (proven by the integration test). The
   background hierarchy-polling path runs inside the `@MainActor` `HierarchyDebouncer` (its own
-  task) and does not open perf blocks in production, so it needs no separate scope. ✅
+  task); it brackets each instrumented `getViewHierarchy` extraction in a fresh synchronous
+  `perf.withScope`, so those background roots reach the shared pool and the next response's
+  flush reports them (the reference's relied-on pooled-flush of polling timings). ✅
 - The **integration `perfTiming` parity test** (the Phase-5-review obligation): drives real
   requests through `WebSocketServer.handleMessage` in both modules and diffs the `perfTiming`
   tree (`request_hierarchy` and `set_text`). ✅

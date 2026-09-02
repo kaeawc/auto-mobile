@@ -37,6 +37,12 @@ const STAGING_IDENTITIES_RELATIVE_PATH = posix.join(
   "AutoMobile",
   "staging-identities",
 );
+const STAGING_TEMPORARY_RELATIVE_PATH = posix.join(
+  "Library",
+  "Application Support",
+  "AutoMobile",
+  "staging",
+);
 
 export interface IosFilesFixtureContainerResolution {
   dataRoot: string;
@@ -94,6 +100,7 @@ export interface IosFilesFixtureInstaller {
 }
 
 interface IosFilesFixtureInstallerFileSystem {
+  exists(path: string): boolean;
   mkdtemp(prefix: string): Promise<string>;
   rm(path: string): Promise<void>;
 }
@@ -115,28 +122,39 @@ const nodeIosFilesFixtureFileSystem: IosFilesFixtureFileSystem = {
   },
 };
 
-function defaultFixtureProjectPath(): string {
+const nodeIosFilesFixtureInstallerFileSystem: IosFilesFixtureInstallerFileSystem = {
+  exists: existsSync,
+  mkdtemp: async (prefix) => nodeFs.mkdtemp(prefix),
+  rm: async (path) => {
+    await nodeFs.rm(path, { recursive: true, force: true });
+  },
+};
+
+function defaultFixtureProjectPath(fileSystem: Pick<IosFilesFixtureInstallerFileSystem, "exists">): string {
   const moduleDirectory = dirname(fileURLToPath(import.meta.url));
   const candidates = [
     resolve(moduleDirectory, "../../ios/FilesFixtureProvider/FilesFixtureProvider.xcodeproj"),
     resolve(moduleDirectory, "../ios/FilesFixtureProvider/FilesFixtureProvider.xcodeproj"),
   ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0]!;
+  return candidates.find((candidate) => fileSystem.exists(candidate)) ?? candidates[0]!;
 }
 
 export class XcodebuildIosFilesFixtureInstaller implements IosFilesFixtureInstaller {
   private readonly installations = new Map<string, Promise<void>>();
+  private readonly projectPath: string;
 
   constructor(
     private readonly container: IosFilesFixtureContainer,
     private readonly simctlFactory: (device: BootedDevice) => IosFilesFixtureSimctl,
     private readonly xcodebuild: Xcodebuild,
-    private readonly projectPath: string = defaultFixtureProjectPath(),
-    private readonly fileSystem: IosFilesFixtureInstallerFileSystem = nodeIosFilesFixtureFileSystem,
-  ) {}
+    projectPath: string | undefined = undefined,
+    private readonly fileSystem: IosFilesFixtureInstallerFileSystem = nodeIosFilesFixtureInstallerFileSystem,
+  ) {
+    this.projectPath = projectPath ?? defaultFixtureProjectPath(fileSystem);
+  }
 
   async isInstallable(): Promise<boolean> {
-    return existsSync(this.projectPath) && (await this.xcodebuild.isAvailable());
+    return this.fileSystem.exists(this.projectPath) && (await this.xcodebuild.isAvailable());
   }
 
   async ensureInstalled(device: BootedDevice, signal?: AbortSignal): Promise<void> {
@@ -335,7 +353,16 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
       sourceHash,
     );
     const generation = existingGeneration ?? this.idGenerator.next();
-    const stageDirectory = await this.fileSystem.mkdtemp(posix.join(parent, ".automobile-stage-"));
+    const stagingRoot = posix.join(
+      resolution.dataRoot,
+      STAGING_TEMPORARY_RELATIVE_PATH,
+    );
+    await this.assertDirectoryChain(resolution.dataRoot, stagingRoot);
+    await this.fileSystem.mkdir(stagingRoot);
+    await this.assertDirectoryChain(resolution.dataRoot, stagingRoot);
+    const stageDirectory = await this.fileSystem.mkdtemp(
+      posix.join(stagingRoot, ".automobile-stage-"),
+    );
     try {
       const stagedCopy = posix.join(stageDirectory, "fixture");
       await this.fileSystem.copyFile(sourcePath, stagedCopy);

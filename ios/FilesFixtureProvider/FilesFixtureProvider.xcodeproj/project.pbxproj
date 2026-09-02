@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 60;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -166,6 +166,7 @@
 				};
 			};
 			buildConfigurationList = 7FB5B85987284034CC42DFFC /* Build configuration list for PBXProject "FilesFixtureProvider" */;
+			compatibilityVersion = "Xcode 15.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -174,7 +175,6 @@
 			);
 			mainGroup = 1F053B70EDB2CDD416232FE6;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			productRefGroup = 4E75DCF0C79870FF0E91FB60 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";

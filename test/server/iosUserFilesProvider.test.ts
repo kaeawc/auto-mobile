@@ -160,6 +160,7 @@ describe("iOS user_files provider (#5807)", () => {
       },
       "ios/FilesFixtureProvider/FilesFixtureProvider.xcodeproj",
       {
+        exists: () => true,
         mkdtemp: async () => "/tmp/fixture-provider-build",
         rm: async (path) => {
           removed.push(path);
@@ -372,6 +373,19 @@ describe("iOS user_files provider (#5807)", () => {
     await expect(
       fileSystem.readText("/sim/provider-data/Documents/automobile/run-42/foo.json/bar"),
     ).resolves.toBe("fixture");
+  });
+
+  test("stages temporary copies outside the document-picker-visible namespace", async () => {
+    const fileSystem = new MemoryFixtureFileSystem();
+    const container = resolvedContainer(fileSystem);
+    const resolution = await container.resolve(simulator);
+    await fileSystem.writeFile("/host/fixture.txt", "fixture");
+
+    await container.putFile(resolution, "run-42", "fixture.txt", "/host/fixture.txt");
+
+    expect(fileSystem.removed).toContain(
+      "/sim/provider-data/Library/Application Support/AutoMobile/staging/.automobile-stage-fake",
+    );
   });
 
   test("accepts safe namespace and destination names that begin with two dots", async () => {

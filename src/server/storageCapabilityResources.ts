@@ -4,6 +4,7 @@ import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { serverConfig } from "../utils/ServerConfig";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
+import { getAbortSignal } from "../utils/AbortContext";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { XcodebuildClient } from "../utils/ios-cmdline-tools/XcodebuildClient";
 import {
@@ -112,7 +113,10 @@ export async function resolveStorageCapabilityContextForDevice(
   }
   return {
     ...context,
-    iosUserFilesProviderAvailable: await iosUserFilesAvailabilityProbe.isAvailable(device),
+    iosUserFilesProviderAvailable: await iosUserFilesAvailabilityProbe.isAvailable(
+      device,
+      getAbortSignal(),
+    ),
   };
 }
 

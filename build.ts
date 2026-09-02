@@ -101,11 +101,15 @@ if (existsSync(vendorSource)) {
 // release asset.
 const filesFixtureProviderSource = join(import.meta.dir, "ios", "FilesFixtureProvider");
 const filesFixtureProviderDest = join(import.meta.dir, "dist", "ios", "FilesFixtureProvider");
-if (existsSync(filesFixtureProviderSource)) {
-  mkdirSync(filesFixtureProviderDest, { recursive: true });
-  cpSync(filesFixtureProviderSource, filesFixtureProviderDest, { recursive: true });
-  console.log("✓ Copied iOS Files fixture provider sources");
+if (!existsSync(filesFixtureProviderSource)) {
+  throw new Error(
+    `Missing iOS Files fixture provider sources at ${filesFixtureProviderSource}; ` +
+      "putAppFile user_files requires them in dist/.",
+  );
 }
+mkdirSync(filesFixtureProviderDest, { recursive: true });
+cpSync(filesFixtureProviderSource, filesFixtureProviderDest, { recursive: true });
+console.log("✓ Copied iOS Files fixture provider sources");
 
 // Copy schemas for runtime validation (PlanSchemaValidator reads from disk)
 const schemasSource = join(import.meta.dir, "schemas");

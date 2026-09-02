@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { runWithAbortSignal } from "../../src/utils/AbortContext";
 import {
   registerStorageCapabilityResources,
   resolveDeviceType,
@@ -167,20 +168,22 @@ describe("storageCapabilityResources", () => {
 
   test("probes the managed Files fixture provider only for iOS Simulators", async () => {
     const probed: string[] = [];
+    let receivedSignal: AbortSignal | undefined;
     const probe = {
-      isAvailable: async (device: BootedDevice) => {
+      isAvailable: async (device: BootedDevice, signal?: AbortSignal) => {
         probed.push(device.deviceId);
+        receivedSignal = signal;
         return true;
       },
     };
 
-    const simulatorContext = await resolveStorageCapabilityContextForDevice(
-      iosSimulator,
-      undefined,
-      probe,
+    const controller = new AbortController();
+    const simulatorContext = await runWithAbortSignal(controller.signal, () =>
+      resolveStorageCapabilityContextForDevice(iosSimulator, undefined, probe),
     );
     expect(simulatorContext.iosUserFilesProviderAvailable).toBe(true);
     expect(probed).toEqual([iosSimulator.deviceId]);
+    expect(receivedSignal).toBe(controller.signal);
 
     const physicalContext = await resolveStorageCapabilityContextForDevice(
       iosPhysical,

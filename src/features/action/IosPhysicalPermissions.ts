@@ -12,7 +12,7 @@ import {
 // Every AutoMobile permission name that maps to a resettable iOS
 // `XCUIProtectedResource` (Xcode 26.3 header). Keep in lock-step with the
 // authoritative Swift list in
-// `ios/control-proxy/Sources/CtrlProxy/GesturePerformer.swift`
+// `ios/control-proxy/Sources/CtrlProxyRewrite/GesturePerformer.swift`
 // (`allResettablePrivacyResourceNames`); the direct Swift runner `all`
 // expansion must reset the same set. `local-network` maps to
 // `XCUIProtectedResourceLocalNetwork` which is iOS 15.4+, so the runner

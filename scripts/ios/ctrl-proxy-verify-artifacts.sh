@@ -54,10 +54,14 @@ fi
 
 echo -e "${BLUE}Checking artifacts...${NC}"
 
-# Required artifacts
+# Required artifacts. The embedded xctest bundle is checked explicitly: an archive can
+# carry both app directories yet omit CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest,
+# in which case xctestrunner-integration-tests.sh trusts this verifier and only fails later
+# during launch. Mirrors IOSCtrlProxyBuilder.verifyPlatformArtifacts() (issue #5834 review).
 REQUIRED_ARTIFACTS=(
     "${SIM_DIR}/CtrlProxyApp.app"
     "${SIM_DIR}/CtrlProxyUITests-Runner.app"
+    "${SIM_DIR}/CtrlProxyUITests-Runner.app/PlugIns/CtrlProxyUITests.xctest"
 )
 
 ALL_FOUND=true

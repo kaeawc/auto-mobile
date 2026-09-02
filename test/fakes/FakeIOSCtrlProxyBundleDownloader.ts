@@ -64,7 +64,6 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
     );
     await fs.mkdir(path.dirname(xctestBinary), { recursive: true });
     await fs.writeFile(xctestBinary, "fake CtrlProxy code");
-    await fs.mkdir(path.join(productsDir, "CtrlProxyTests.xctest"), { recursive: true });
 
     if (this.includeDeviceProducts) {
       const deviceDir = path.join(extractionRoot, "Build", "Products", "Debug-iphoneos");
@@ -91,7 +90,6 @@ export class FakeIOSCtrlProxyBundleDownloader implements CtrlProxyIosBundleDownl
       );
       await fs.mkdir(path.dirname(deviceXctestBinary), { recursive: true });
       await fs.writeFile(deviceXctestBinary, "fake device CtrlProxy code");
-      await fs.mkdir(path.join(deviceDir, "CtrlProxyTests.xctest"), { recursive: true });
     }
   }
 }

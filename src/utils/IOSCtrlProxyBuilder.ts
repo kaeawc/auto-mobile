@@ -1200,7 +1200,10 @@ export class IOSCtrlProxyBuilder {
     const requiredPaths = [
       path.join(buildDir, "CtrlProxyApp.app"),
       path.join(buildDir, "CtrlProxyUITests-Runner.app"),
-      path.join(buildDir, "CtrlProxyTests.xctest"),
+      // The reference `CtrlProxyTests` unit-test target was retired in Phase 7E, so the
+      // re-cut archive no longer carries a top-level CtrlProxyTests.xctest. The sole test
+      // bundle is now CtrlProxyUITests.xctest, embedded in the runner app's PlugIns dir.
+      path.join(buildDir, "CtrlProxyUITests-Runner.app", "PlugIns", "CtrlProxyUITests.xctest"),
     ];
 
     for (const requiredPath of requiredPaths) {

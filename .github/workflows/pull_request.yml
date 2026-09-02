@@ -2004,12 +2004,16 @@ jobs:
             exit 1
           fi
           XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
+          # The Swift-6 rewrite retired the CtrlProxyTests bundle and did not carry over
+          # PrivacyResourceMappingTests; the rotation gesture-orientation assertion moved to the
+          # SPM-only, `#if os(iOS)` CtrlProxyRewriteTests, which has no simulator xctestrun vehicle
+          # yet (porting the richer tests onto the rewrite's sim setup is the follow-up tracked in
+          # Tests/CtrlProxyUITests/CtrlProxyUITests.swift). Only the ported hierarchy integration
+          # test survives in the on-simulator CtrlProxyUITests bundle, now in HierarchyIntegrationTests.
           xcodebuild test-without-building \
             -xctestrun "${XCTESTRUN}" \
             -destination "id=${SIMULATOR_UDID}" \
-            -only-testing:CtrlProxyUITests/PrivacyResourceMappingTests \
-            -only-testing:CtrlProxyTests/RotationChangeGenerationTests/testGestureOrientationKeepsLandscapeSceneWhenDeviceIsFaceUp \
-            -only-testing:CtrlProxyUITests/CtrlProxyUITests/testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree
+            -only-testing:CtrlProxyUITests/HierarchyIntegrationTests/testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree
 
       # Bring the daemon to ready and warm CtrlProxy on the freshly-booted sim
       # BEFORE any simulator workflow that opens an in-process session — including

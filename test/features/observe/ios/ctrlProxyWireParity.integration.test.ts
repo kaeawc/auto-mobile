@@ -2,7 +2,7 @@
  * Cross-language wire-parity tripwire for the iOS control-proxy TS client ↔ Swift runner.
  *
  * The Swift runner locks its inbound command set with the `RequestType` enum
- * (`ios/control-proxy/Sources/CtrlProxy/Models.swift`), but before #2857 nothing on
+ * (`ios/control-proxy/Sources/CtrlProxyRewrite/Models/RequestType.swift`), but before #2857 nothing on
  * the TS side asserted that the command `type` strings the iOS client *emits* stay a
  * subset of those rawValues. A new/renamed TS command compiled cleanly and only
  * failed at runtime on-device as an "Unknown command type: <type>" error — the exact
@@ -11,7 +11,7 @@
  * This is the iOS analog of Android's `ctrlProxyProtocol.test.ts` KNOWN_REQUEST_TYPES
  * guard (#2835). Two independent guarantees:
  *   1. `IOS_KNOWN_REQUEST_TYPES` equals the `RequestType` rawValues read live from
- *      `Models.swift` — a case renamed/added/removed on the runner fails here.
+ *      `RequestType.swift` — a case renamed/added/removed on the runner fails here.
  *   2. Every command `type`/`messageType` the iOS client can emit (scanned from
  *      source) is a member of `IOS_KNOWN_REQUEST_TYPES` — adding a TS command without
  *      a matching runner rawValue fails here.
@@ -31,11 +31,14 @@ const REPO_ROOT = resolve(import.meta.dir, "../../../..");
 const IOS_OBSERVE_DIR = resolve(REPO_ROOT, "src/features/observe/ios");
 const SHARED_OBSERVE_DIR = resolve(REPO_ROOT, "src/features/observe/shared");
 const IOS_CLIENT_ENTRY = resolve(IOS_OBSERVE_DIR, "IOSCtrlProxyClient.ts");
-const MODELS_SWIFT = resolve(REPO_ROOT, "ios/control-proxy/Sources/CtrlProxy/Models.swift");
+const REQUEST_TYPE_SWIFT = resolve(
+  REPO_ROOT,
+  "ios/control-proxy/Sources/CtrlProxyRewrite/Models/RequestType.swift",
+);
 
 /**
  * Swift `RequestType` rawValues, transcribed by hand. The test below reads the real
- * enum out of Models.swift and asserts it equals this list, so the transcription
+ * enum out of RequestType.swift and asserts it equals this list, so the transcription
  * can't rot independently — but it makes the contract legible in one place.
  */
 const SWIFT_REQUEST_TYPES = [
@@ -151,10 +154,12 @@ function extractEmittedTypes(
 }
 
 function readSwiftRequestTypeRawValues(): string[] {
-  const source = readFileSync(MODELS_SWIFT, "utf8");
-  const block = source.match(/public enum RequestType: String, CaseIterable \{([\s\S]*?)\n\}/);
+  const source = readFileSync(REQUEST_TYPE_SWIFT, "utf8");
+  // `[^{]*` tolerates extra conformances after `CaseIterable` (the rewrite adds `, Sendable`)
+  // up to the opening brace; the enum body is captured non-greedily to its first `\n}`.
+  const block = source.match(/public enum RequestType: String, CaseIterable[^{]*\{([\s\S]*?)\n\}/);
   if (!block) {
-    throw new Error("Could not locate `enum RequestType` in Models.swift");
+    throw new Error("Could not locate `enum RequestType` in RequestType.swift");
   }
   return [...block[1].matchAll(new RegExp(`case\\s+\\w+\\s*=\\s*"(${COMMAND_TOKEN})"`, "g"))].map(
     (m) => m[1],
@@ -173,9 +178,9 @@ describe("iOS control-proxy — RequestType contract coverage", () => {
   // Authoritative cross-language guard: read the real rawValues out of the Swift enum
   // and assert they equal ours. Unlike the hand-transcribed list, this fails when a
   // case is renamed/added/removed on the runner — the drift the module exists to
-  // prevent. Skipped only if Models.swift is unreachable (never in CI).
-  test.skipIf(!existsSync(MODELS_SWIFT))(
-    "IOS_KNOWN_REQUEST_TYPES matches the RequestType rawValues read from Models.swift",
+  // prevent. Skipped only if RequestType.swift is unreachable (never in CI).
+  test.skipIf(!existsSync(REQUEST_TYPE_SWIFT))(
+    "IOS_KNOWN_REQUEST_TYPES matches the RequestType rawValues read from RequestType.swift",
     () => {
       const rawValues = readSwiftRequestTypeRawValues();
       expect(rawValues.length).toBeGreaterThan(0);

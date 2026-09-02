@@ -37,7 +37,7 @@ export const SCALE_REPORTING_SWIFT_TEST_PATH = join(
   "ios",
   "control-proxy",
   "Tests",
-  "CtrlProxyTests",
+  "CtrlProxyRewriteTests",
   "ElementLocatorTests.swift",
 );
 

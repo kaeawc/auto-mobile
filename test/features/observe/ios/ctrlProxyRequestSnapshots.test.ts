@@ -5,7 +5,8 @@
  * The command-name tripwire (`ctrlProxyWireParity.integration.test.ts`) catches a dropped/renamed
  * `type` discriminator but NOT a renamed field *inside* a command payload: renaming
  * `disableAllFiltering` on the TS side compiles cleanly and only fails at runtime
- * on-device, when the Swift payload struct (`Models.swift`) decodes the wrong field.
+ * on-device, when the typed Swift payload struct (under
+ * `ios/control-proxy/Sources/CtrlProxyRewrite/Models/`) decodes the wrong field.
  *
  * This suite is one half of a two-sided guard around a shared JSON snapshot fixture,
  * `test/fixtures/ios-ctrlproxy-request-snapshots.json`:
@@ -14,7 +15,7 @@
  *      method is invoked against a fake `DelegateContext` and the exact JSON written to
  *      the WebSocket is compared with the committed fixture. A TS-side field rename
  *      diverges from the fixture and fails here, forcing a fixture update.
- *   2. (Swift) `RequestSnapshotWireParityTests.swift` decodes each snapshot through the
+ *   2. (Swift) `WireDecodeParityTests.swift` decodes each snapshot through the
  *      real `WebSocketRequest` wire path and asserts every fixture field lands on a
  *      same-named property of the typed payload struct with the same value. A fixture
  *      update that the Swift structs can't decode — or a Swift-side field rename —
@@ -26,7 +27,7 @@
  * To regenerate the fixture after an INTENTIONAL wire change:
  *   AUTOMOBILE_UPDATE_IOS_WIRE_SNAPSHOTS=1 bun test test/features/observe/ios/ctrlProxyRequestSnapshots.test.ts
  * then re-run the Swift suite (`cd ios/control-proxy && swift test`) — an intentional
- * change must update Models.swift (or the Swift test) in the same commit.
+ * change must update the `Models/` payload structs (or the Swift test) in the same commit.
  *
  * `set_network_mock_rules` is the one semi-transcribed entry: it is emitted by the
  * private `IOSCtrlProxyClient.syncNetworkMockRulesToDevice()` (not a delegate we can

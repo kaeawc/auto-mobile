@@ -33,19 +33,44 @@ public final class CtrlProxy {
     private let server: WebSocketServer
     private let coordinatorBox: WeakCoordinator
 
+    /// Set by `stop()` so a client-presence callback that was queued onto the main actor while
+    /// `stop()` was holding it (blocked inside the synchronous `server.stop()`) cannot restart
+    /// the samplers on a torn-down service once teardown completes (#5834 review). Cleared by
+    /// `start()` so a stopped instance can be restarted.
+    private var isStopped = false
+
+    /// Whether the device samplers are currently active. Maintained by `startSamplers()` /
+    /// `stopSamplers()`; exposed read-only so the lifecycle regression test can observe that a
+    /// post-`stop()` presence callback does not resurrect them.
+    private(set) var samplersActive = false
+
     #if canImport(XCTest) && os(iOS)
         private var application: XCUIApplication?
     #endif
 
-    /// Creates the service with the specified port.
-    ///
-    /// The reference also injected a `Timer`; that seam is dropped here because the rewrite's
-    /// `ProxyTimer`/`SystemTimer` are internal (a public init cannot expose them) and the
-    /// coordinator has no unit tests that need to substitute one — `HierarchyDebouncer`
-    /// defaults its own `SystemTimer`.
-    public init(
+    /// Creates the service with the specified port. Production entry point: the public API keeps
+    /// the internal `ProxyTimer`/`SystemTimer` seam hidden (a public init cannot expose them), so
+    /// this convenience initializer supplies the real `SystemTimer` and delegates to the internal
+    /// designated initializer below — which does expose the timer seam, to the in-module lifecycle
+    /// test (`CtrlProxyLifecycleTests`) that substitutes a `FakeProxyTimer`.
+    public convenience init(
         port: UInt16 = defaultPort,
         storageInspector: (any StorageInspecting)? = DefaultStorageInspecting()
+    ) {
+        self.init(port: port, storageInspector: storageInspector, hierarchyPollTimer: SystemTimer())
+    }
+
+    /// Designated initializer. `hierarchyPollTimer` is injected so tests can drive the
+    /// `HierarchyDebouncer` with a `FakeProxyTimer` and stay deterministic. It is `internal`
+    /// (not `public`) because `ProxyTimer` is a non-public seam — the reason the reference's
+    /// `Timer` injection was dropped from the public API — so production callers reach the
+    /// service through the two-argument convenience initializer above, which supplies the real
+    /// `SystemTimer`. `hierarchyPollTimer` has no default, which keeps this initializer
+    /// unambiguous against that convenience one.
+    init(
+        port: UInt16 = defaultPort,
+        storageInspector: (any StorageInspecting)? = DefaultStorageInspecting(),
+        hierarchyPollTimer: any ProxyTimer
     ) {
         let perf = PerfProvider()
         let frameContext = FrameContext()
@@ -58,7 +83,11 @@ public final class CtrlProxy {
             let elementLocator = ElementLocator()
         #endif
         let gesturePerformer = GesturePerformer(elementLocator: elementLocator)
-        let hierarchyDebouncer = HierarchyDebouncer(hierarchyExtractor: elementLocator, perf: perf)
+        let hierarchyDebouncer = HierarchyDebouncer(
+            hierarchyExtractor: elementLocator,
+            perf: perf,
+            timer: hierarchyPollTimer
+        )
         let commandHandler = CommandHandler(
             elementLocator: elementLocator,
             gesturePerformer: gesturePerformer,
@@ -93,12 +122,7 @@ public final class CtrlProxy {
             drainLogEvents: { OSLogReaderHolder.shared.drain() },
             onClientPresenceChanged: { [coordinatorBox] hasClients in
                 Task { @MainActor in
-                    guard let coordinator = coordinatorBox.coordinator else { return }
-                    if hasClients {
-                        coordinator.startSamplers()
-                    } else {
-                        coordinator.stopSamplers()
-                    }
+                    coordinatorBox.coordinator?.applyClientPresence(hasClients)
                 }
             }
         )
@@ -149,15 +173,31 @@ public final class CtrlProxy {
         server.broadcastHierarchyUpdate(enriched)
     }
 
+    /// Applies a client-presence transition to the device samplers. The presence seam routes
+    /// through here (rather than calling start/stop inline) so the `isStopped` guard in
+    /// `startSamplers()` also covers a presence-`true` callback that raced `stop()`. Sampler
+    /// stop is idempotent, so the `false` path needs no guard.
+    func applyClientPresence(_ hasClients: Bool) {
+        if hasClients {
+            startSamplers()
+        } else {
+            stopSamplers()
+        }
+    }
+
     /// Starts the device-side samplers when the first client connects. All three starts are
     /// idempotent. Cross-platform: `DisplayLinkFPSMonitor` / `OSLogReaderHolder` no-op where
-    /// their platform APIs are unavailable.
+    /// their platform APIs are unavailable. No-ops after `stop()` (`isStopped`) so a
+    /// presence-`true` callback that was queued while `stop()` held the main actor cannot
+    /// resurrect sampling on a torn-down service.
     private func startSamplers() {
+        guard !isStopped else { return }
         hierarchyDebouncer.start()
         OSLogReaderHolder.shared.start()
         fpsMonitor.startMonitoring { [weak self] snapshot in
             self?.server.broadcastPerformanceUpdate(snapshot)
         }
+        samplersActive = true
         print("[CtrlProxy] Device samplers active (hierarchy debouncer, OSLog reader, FPS monitor)")
     }
 
@@ -166,6 +206,7 @@ public final class CtrlProxy {
         OSLogReaderHolder.shared.stop()
         fpsMonitor.stopMonitoring()
         hierarchyDebouncer.stop()
+        samplersActive = false
         print("[CtrlProxy] Device samplers paused (no clients connected)")
     }
 
@@ -188,6 +229,7 @@ public final class CtrlProxy {
         /// gated on client presence via the server's presence seam (wired in `init`), so an
         /// idle session with no client places no continuous load on the app under test (#5477).
         public func start(bundleId: String? = nil) throws {
+            isStopped = false
             let targetBundleId = bundleId ?? Self.defaultBundleId
             let app = XCUIApplication(bundleIdentifier: targetBundleId)
             app.activate()
@@ -205,16 +247,21 @@ public final class CtrlProxy {
         }
     #else
         public func start(bundleId _: String? = nil) throws {
+            isStopped = false
             try server.start()
             print("[CtrlProxy] Service started (non-iOS mode - limited functionality)")
         }
     #endif
 
-    /// Stops the service. Closing connections during teardown re-enters the presence seam,
-    /// which hops to the main actor to call `stopSamplers()` again — harmless, since sampler
-    /// stop is idempotent (so the reference's "clear the hook first" guard is unnecessary now
-    /// that the hook is an immutable closure).
+    /// Stops the service. Sets `isStopped` first so any presence-`true` callback that was queued
+    /// onto the main actor while this call blocks inside the synchronous `server.stop()` cannot
+    /// restart the samplers once teardown completes (`startSamplers()` guards on it). Closing
+    /// connections during teardown also re-enters the presence seam with `false`, calling
+    /// `stopSamplers()` again — harmless, since sampler stop is idempotent. Together the
+    /// immutable presence closure and this guard replace the reference's "clear the hook first"
+    /// teardown step.
     public func stop() {
+        isStopped = true
         stopSamplers()
         server.stop()
         print("[CtrlProxy] Service stopped")

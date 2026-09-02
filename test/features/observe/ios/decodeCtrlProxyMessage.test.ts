@@ -455,9 +455,13 @@ describe("decodeCtrlProxyMessage", () => {
  */
 function parseSwiftResponseTypeRawValues(swiftSource: string): string[] {
   const lines = swiftSource.split("\n");
-  const startIdx = lines.findIndex((line) => /enum\s+ResponseType\s*:\s*String\s*\{/.test(line));
+  // Tolerate extra protocol conformances after `String` (e.g. `String, Sendable`), which the
+  // rewrite's `ResponseType.swift` declares — `[^{]*` spans them up to the opening brace.
+  const startIdx = lines.findIndex((line) =>
+    /enum\s+ResponseType\s*:\s*String\b[^{]*\{/.test(line),
+  );
   if (startIdx < 0) {
-    throw new Error("Could not locate `enum ResponseType: String` in Models.swift");
+    throw new Error("Could not locate `enum ResponseType: String` in ResponseType.swift");
   }
   const rawValues: string[] = [];
   for (let i = startIdx + 1; i < lines.length; i++) {
@@ -487,7 +491,10 @@ function isExplicitlyDecoded(rawValue: string): boolean {
 
 describe("decodeCtrlProxyMessage ↔ Swift ResponseType parity (ADD-3 / item 4)", () => {
   const swiftSource = readFileSync(
-    join(import.meta.dir, "../../../../ios/control-proxy/Sources/CtrlProxy/Models.swift"),
+    join(
+      import.meta.dir,
+      "../../../../ios/control-proxy/Sources/CtrlProxyRewrite/Models/ResponseType.swift",
+    ),
     "utf8",
   );
   const rawValues = parseSwiftResponseTypeRawValues(swiftSource);

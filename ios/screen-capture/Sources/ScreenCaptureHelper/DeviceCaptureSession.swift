@@ -12,7 +12,13 @@ import ScreenCaptureCore
 /// `H264VideoEncoder` stage the Simulator path uses, emitting Annex-B
 /// encoded-video records. AVFoundation accepts 420v directly with no color
 /// conversion, so the encode input is the lowest-CPU form.
-final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+///
+/// `@unchecked Sendable`: `_pipeline` is guarded by `stateLock`, while `observers`
+/// and `stopping` are confined to the main queue (install/remove and `stop()` all
+/// run there) and every other field is `let`. This lets the AVFoundation delegate
+/// and NotificationCenter callbacks capture `self` under Swift-6 strict concurrency,
+/// matching the package's lock-confined-`Sendable` idiom (see `ForceKeyFrameLatch`).
+final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let writer: FrameWriter

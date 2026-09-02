@@ -36,7 +36,12 @@ enum H264EncoderError: Error, CustomStringConvertible {
 /// and `EnableHardwareAcceleratedVideoEncoder` WITHOUT the `Require...` key so a
 /// hosted runner with no free HW encoder falls back to software (the `-allow_sw
 /// 1` semantic) rather than failing to start.
-final class H264VideoEncoder {
+///
+/// `@unchecked Sendable`: all mutable state (`session`, `inFlightFrames`,
+/// `formatParameterSets`, `nalUnitHeaderLength`) is guarded by `lock`, so the
+/// `@Sendable` VideoToolbox completion callback can capture `self`. The callback
+/// runs on VideoToolbox's own thread; `encode()`/`stop()` run on the capture queue.
+final class H264VideoEncoder: @unchecked Sendable {
     /// Target seconds between IDRs; matches the TS ffmpeg GOP
     /// (`IOS_KEYFRAME_INTERVAL_SECONDS`).
     static let keyFrameIntervalSeconds = 2
@@ -56,6 +61,11 @@ final class H264VideoEncoder {
     private var inFlightFrames = 0
     private var formatParameterSets: [Data] = []
     private var nalUnitHeaderLength = 4
+    /// Shared memory pool backing VideoToolbox's compressed-output slabs. Passing its
+    /// allocator as the `compressedDataAllocator` (the DATA allocator, distinct from the
+    /// structure allocator that builds the small session object) recycles the per-frame
+    /// compressed `CMBlockBuffer`s instead of malloc/free-ing a fresh slab every frame.
+    private let memoryPool = CMMemoryPoolCreate(options: nil)
 
     let width: Int
     let height: Int
@@ -109,7 +119,7 @@ final class H264VideoEncoder {
             codecType: kCMVideoCodecType_H264,
             encoderSpecification: encoderSpecification as CFDictionary,
             imageBufferAttributes: nil,
-            compressedDataAllocator: nil,
+            compressedDataAllocator: CMMemoryPoolGetAllocator(memoryPool),
             outputCallback: nil,
             refcon: nil,
             compressionSessionOut: &created
@@ -123,7 +133,11 @@ final class H264VideoEncoder {
             VTCompressionSessionInvalidate(session)
             throw H264EncoderError.sessionPrepareFailed(status: prepareStatus)
         }
+        // Publish `session` under the same lock `encode()`/`stop()` take, so the
+        // frame path never observes a half-assigned session.
+        lock.lock()
         self.session = session
+        lock.unlock()
     }
 
     private func applyConfiguration(to session: VTCompressionSession) {
@@ -177,9 +191,14 @@ final class H264VideoEncoder {
     /// before encode (encoder behind) so the caller can skip its bookkeeping.
     @discardableResult
     func encode(pixelBuffer: CVPixelBuffer, presentationTime: CMTime) -> Bool {
-        guard let session = session else { return false }
-
         lock.lock()
+        // Snapshot `session` under the same lock that guards the in-flight count and
+        // that `stop()` takes to nil it, so an in-flight encode can never read a
+        // session being torn down (previously `session` was read unlocked).
+        guard let session = session else {
+            lock.unlock()
+            return false
+        }
         let behind = EncoderDropPolicy.shouldDropBeforeEncode(
             inFlightFrames: inFlightFrames,
             maxInFlightFrames: H264VideoEncoder.maxInFlightFrames
@@ -263,10 +282,19 @@ final class H264VideoEncoder {
 
     /// Invalidate the session (orderly shutdown / reconfiguration teardown).
     func stop() {
+        // Take the session out under the lock so a concurrent `encode()` either
+        // sees it (and completes) or sees nil (and drops) — never a dangling session.
+        lock.lock()
+        let session = self.session
+        self.session = nil
+        lock.unlock()
         guard let session = session else { return }
         VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: .invalid)
         VTCompressionSessionInvalidate(session)
-        self.session = nil
+        // Release the pooled compressed-output slabs now that the session that fed the
+        // pool is gone (an encoder is single-use: EncodePipeline builds a fresh one on
+        // resize).
+        CMMemoryPoolInvalidate(memoryPool)
     }
 
     // MARK: - Parameter sets
@@ -330,6 +358,12 @@ final class H264VideoEncoder {
         return true
     }
 
+    /// A NON-owning `Data` view of the sample's compressed bytes, valid only while
+    /// `sampleBuffer` is alive. `handleEncodedFrame` consumes it synchronously on the
+    /// VideoToolbox callback (building an owned Annex-B record) before returning, so the
+    /// `bytesNoCopy` view avoids copying the whole compressed frame out just to rebuild
+    /// it as Annex-B. `CMBlockBufferGetDataPointer` returns the pointer for VideoToolbox's
+    /// single contiguous compressed block (the pre-existing contiguity assumption).
     private static func contiguousData(from sampleBuffer: CMSampleBuffer) -> Data? {
         guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return nil }
         var length = 0
@@ -339,7 +373,7 @@ final class H264VideoEncoder {
             totalLengthOut: &length, dataPointerOut: &pointer
         )
         guard status == noErr, let pointer = pointer, length > 0 else { return nil }
-        return Data(bytes: pointer, count: length)
+        return Data(bytesNoCopy: UnsafeMutableRawPointer(pointer), count: length, deallocator: .none)
     }
 
     private static func presentationTimestampMs(_ sampleBuffer: CMSampleBuffer) -> UInt32 {

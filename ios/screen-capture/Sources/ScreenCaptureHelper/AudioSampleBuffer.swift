@@ -44,8 +44,12 @@ func pcm16leAudio(sampleBuffer: CMSampleBuffer) -> Data? {
             bytesPerSample: MemoryLayout<Float>.size,
             availableBytes: availableBytes
         ) else { return nil }
+        // Wrap the retained block buffer's float samples without copying (deallocator
+        // .none): `encodeFloat32LE` reads them synchronously and returns an owned PCM16
+        // buffer, so `blockBuffer` outlives this view. Avoids a throwaway copy of the
+        // raw floats purely to adapt to the `Data` parameter.
         return AudioPcm16Encoder.encodeFloat32LE(
-            Data(bytes: input, count: count)
+            Data(bytesNoCopy: input, count: count, deallocator: .none)
         )
     }
     return nil

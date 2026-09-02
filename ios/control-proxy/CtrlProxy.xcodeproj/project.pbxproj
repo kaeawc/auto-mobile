@@ -722,13 +722,6 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
-		"TEMP_D4CE6FB7-AFE3-4951-94BB-2463138A35DD" /* .claude */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = .claude;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXHeadersBuildPhase section */

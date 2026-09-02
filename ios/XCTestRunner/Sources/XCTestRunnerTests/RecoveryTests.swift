@@ -1,6 +1,7 @@
 import XCTest
 import Tachikoma
 @testable import XCTestRunner
+import XCTestRunnerTestSupport
 
 // Unit tests for AI-assisted failure recovery. All tests are hermetic: the model is faked
 // (`StubModelResponder`) so nothing here touches the network or needs an API key.
@@ -226,6 +227,22 @@ final class RecoveryConfigAndModelTests: XCTestCase {
         """
         XCTAssertEqual(PlanStepToolParser.toolNames(from: yaml), ["tapOn"])
     }
+
+    /// A nested block sequence inside a step (e.g. `textAny:` / `matchers:`) must not be counted as
+    /// its own step. Pre-fix, each nested `-` item appended a spurious "step" name and misaligned the
+    /// returned array against the plan's real steps.
+    func testPlanStepToolParserIgnoresNestedSequences() {
+        let yaml = """
+        steps:
+          - tool: observe
+            waitFor:
+              textAny:
+                - "Not Now"
+                - "Close"
+          - tool: tapOn
+        """
+        XCTAssertEqual(PlanStepToolParser.toolNames(from: yaml), ["observe", "tapOn"])
+    }
 }
 
 final class TachikomaPlanRecoveryHandlerTests: XCTestCase {
@@ -416,7 +433,7 @@ private struct SilentLogger: AutoMobileLogger {
     func error(_: String) {}
 }
 
-private final class SpyRecoveryHandler: PlanRecoveryHandler {
+private final class SpyRecoveryHandler: PlanRecoveryHandler, @unchecked Sendable {
     private let outcome: RecoveryOutcome
     private(set) var receivedContexts: [FailedStepContext] = []
 
@@ -430,7 +447,7 @@ private final class SpyRecoveryHandler: PlanRecoveryHandler {
     }
 }
 
-private final class RecoveryMCPClient: AutoMobileMCPClient {
+private final class RecoveryMCPClient: AutoMobileMCPClient, @unchecked Sendable {
     struct Call {
         let name: String
         let arguments: [String: Any]
@@ -475,7 +492,7 @@ private final class RecoveryMCPClient: AutoMobileMCPClient {
 }
 
 /// Fake `ModelResponding` that replays a fixed script of responses (or repeats one forever).
-private final class StubModelResponder: ModelResponding {
+private final class StubModelResponder: ModelResponding, @unchecked Sendable {
     private var scripted: [ModelResponse]
     private let repeated: ModelResponse?
 
@@ -513,7 +530,7 @@ private final class StubModelResponder: ModelResponding {
 
 /// Fake `ModelResponding` that never returns — models a hung provider call. Paired with a fake
 /// bridge in tests so the handler's timeout path is exercised without any real wait.
-private final class NeverReturningModelResponder: ModelResponding {
+private final class NeverReturningModelResponder: ModelResponding, @unchecked Sendable {
     func respond(_: ModelRequest) async throws -> ModelResponse {
         // Suspend forever without spinning; the fake bridge times out before this can complete.
         await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
@@ -524,7 +541,7 @@ private final class NeverReturningModelResponder: ModelResponding {
 /// Fake `AsyncCallBridging` that always reports a timeout, deterministically and instantly.
 private struct TimeoutAsyncCallBridge: AsyncCallBridging {
     let timeoutSeconds: TimeInterval
-    func run<T>(timeout _: TimeInterval, _: @escaping () async throws -> T) throws -> T {
+    func run<T: Sendable>(timeout _: TimeInterval, _: @escaping @Sendable () async throws -> T) throws -> T {
         throw RecoveryTimeoutError(timeoutSeconds: timeoutSeconds)
     }
 }

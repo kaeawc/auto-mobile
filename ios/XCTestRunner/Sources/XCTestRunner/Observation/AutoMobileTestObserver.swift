@@ -1,13 +1,18 @@
 import Foundation
+import os
 import XCTest
 
-/// XCTestObservation integration for collecting timing data and test results
-public class AutoMobileTestObserver: NSObject, XCTestObservation {
-    private static let registrationLock = NSLock()
-    private static var sharedObserver: AutoMobileTestObserver?
-
+/// XCTestObservation integration for collecting timing data and test results.
+///
+/// Concurrency: XCTestObservation callbacks arrive on parallel XCTest worker threads (NOT the main
+/// thread), so this is `nonisolated` — NOT `@MainActor`. All mutable state is lock-confined
+/// (`OSAllocatedUnfairLock`, replacing the reference's two `NSLock`s and its mutable `static var`):
+/// the shared-observer registration and the per-observer timing state each live behind a lock, keeping
+/// the single locked write path (issue #3629). `@unchecked Sendable` because it is a non-final NSObject
+/// subclass; all mutable state is behind the locks.
+public class AutoMobileTestObserver: NSObject, XCTestObservation, @unchecked Sendable {
     /// Timing data for test cases
-    public struct TimingData {
+    public struct TimingData: Sendable {
         public let testName: String
         public let duration: TimeInterval
         public let startTime: Date
@@ -15,13 +20,13 @@ public class AutoMobileTestObserver: NSObject, XCTestObservation {
         public let passed: Bool
     }
 
-    /// Collected timing data
-    private var timingData: [TimingData] = []
+    private struct TimingState: Sendable {
+        var timingData: [TimingData] = []
+        var testStartTimes: [ObjectIdentifier: Date] = [:]
+    }
 
-    /// Current test start times keyed by test instance
-    private var testStartTimes: [ObjectIdentifier: Date] = [:]
-
-    private let timingLock = NSLock()
+    private static let registration = OSAllocatedUnfairLock<AutoMobileTestObserver?>(initialState: nil)
+    private let timing = OSAllocatedUnfairLock<TimingState>(initialState: TimingState())
 
     /// Register this observer with the test observation center
     public static func register() -> AutoMobileTestObserver {
@@ -29,41 +34,38 @@ public class AutoMobileTestObserver: NSObject, XCTestObservation {
     }
 
     public static func registerIfNeeded() -> AutoMobileTestObserver {
-        registrationLock.lock()
-        defer { registrationLock.unlock() }
-
-        if let existing = sharedObserver {
-            return existing
+        return registration.withLock { existing in
+            if let existing = existing {
+                return existing
+            }
+            let observer = AutoMobileTestObserver()
+            XCTestObservationCenter.shared.addTestObserver(observer)
+            existing = observer
+            return observer
         }
-
-        let observer = AutoMobileTestObserver()
-        XCTestObservationCenter.shared.addTestObserver(observer)
-        sharedObserver = observer
-        return observer
     }
 
     /// Called when a test case starts
     public func testCaseWillStart(_ testCase: XCTestCase) {
-        timingLock.lock()
-        testStartTimes[ObjectIdentifier(testCase)] = Date()
-        timingLock.unlock()
+        // Derive the Sendable key/timestamp outside the (Sendable) withLock body — a non-Sendable
+        // `XCTestCase` cannot be captured into it.
+        let key = ObjectIdentifier(testCase)
+        let startTime = Date()
+        timing.withLock { $0.testStartTimes[key] = startTime }
         print("Test case starting: \(testCase.name)")
     }
 
     /// Called when a test case finishes
     public func testCaseDidFinish(_ testCase: XCTestCase) {
-        timingLock.lock()
         let key = ObjectIdentifier(testCase)
-        guard let startTime = testStartTimes.removeValue(forKey: key) else {
-            timingLock.unlock()
+        guard let startTime = timing.withLock({ $0.testStartTimes.removeValue(forKey: key) }) else {
             return
         }
-        timingLock.unlock()
 
         let endTime = Date()
         let duration = endTime.timeIntervalSince(startTime)
 
-        let timing = TimingData(
+        let timingData = TimingData(
             testName: testCase.name,
             duration: duration,
             startTime: startTime,
@@ -71,17 +73,15 @@ public class AutoMobileTestObserver: NSObject, XCTestObservation {
             passed: testCase.testRun?.totalFailureCount == 0
         )
 
-        recordTiming(timing)
+        recordTiming(timingData)
 
-        print("Test case finished: \(testCase.name) - Duration: \(duration)s - Passed: \(timing.passed)")
+        print("Test case finished: \(testCase.name) - Duration: \(duration)s - Passed: \(timingData.passed)")
     }
 
     /// Append a timing entry under the lock. Single write path so all mutations
     /// of `timingData` stay synchronized (issue #3629).
     func recordTiming(_ timing: TimingData) {
-        timingLock.lock()
-        timingData.append(timing)
-        timingLock.unlock()
+        self.timing.withLock { $0.timingData.append(timing) }
     }
 
     /// Called when a test suite starts
@@ -97,10 +97,7 @@ public class AutoMobileTestObserver: NSObject, XCTestObservation {
 
     /// Gets all collected timing data
     public func getTimingData() -> [TimingData] {
-        timingLock.lock()
-        let data = timingData
-        timingLock.unlock()
-        return data
+        return timing.withLock { $0.timingData }
     }
 
     /// Exports timing data to JSON
@@ -140,7 +137,8 @@ public class AutoMobileTestObserver: NSObject, XCTestObservation {
     }
 }
 
-/// Make TimingData Encodable for JSON export
+/// Make TimingData Encodable for JSON export. Frozen export shape: `testName, duration, startTime,
+/// endTime, passed` with ISO8601 timestamps.
 extension AutoMobileTestObserver.TimingData: Encodable {
     enum CodingKeys: String, CodingKey {
         case testName, duration, startTime, endTime, passed

@@ -1,15 +1,14 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.3
 import PackageDescription
 
-// AI-assisted failure recovery (see AutoMobileRecovery.swift / TachikomaPlanRecoveryHandler.swift)
-// depends on Tachikoma, which requires Swift tools 6.0 and iOS 17 / macOS 14. The existing runner
-// code keeps compiling in the Swift 5 language mode via `.swiftLanguageMode(.v5)` on each target, so
-// consuming a Swift 6 package does not force a strict-concurrency migration of this module.
+// XCTestRunner is a Swift-6 strict-concurrency package (language mode v6 by default under
+// swift-tools-version 6.3). It depends on Tachikoma for AI-assisted failure recovery
+// (see AutoMobileRecovery.swift / TachikomaPlanRecoveryHandler.swift), which requires iOS 17 / macOS 15.
 let package = Package(
     name: "XCTestRunner",
     platforms: [
         .iOS(.v17),
-        .macOS(.v14),
+        .macOS(.v15),
     ],
     products: [
         .library(
@@ -26,19 +25,19 @@ let package = Package(
             name: "XCTestRunner",
             dependencies: [
                 .product(name: "Tachikoma", package: "Tachikoma"),
-            ],
-            swiftSettings: [
-                .swiftLanguageMode(.v5),
             ]
+        ),
+        // Shared test doubles. NOT a dependency of the `.library` product, so the shipped module stays
+        // fake-free and Sendable-clean.
+        .target(
+            name: "XCTestRunnerTestSupport",
+            dependencies: ["XCTestRunner"]
         ),
         .testTarget(
             name: "XCTestRunnerTests",
-            dependencies: ["XCTestRunner"],
+            dependencies: ["XCTestRunner", "XCTestRunnerTestSupport"],
             resources: [
                 .process("Resources"),
-            ],
-            swiftSettings: [
-                .swiftLanguageMode(.v5),
             ]
         ),
     ]

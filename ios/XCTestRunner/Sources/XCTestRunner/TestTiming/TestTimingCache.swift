@@ -1,59 +1,20 @@
 import Foundation
 
-struct TestTimingStatusCounts: Codable {
-    let passed: Int
-    let failed: Int
-    let skipped: Int
-
-    init(passed: Int = 0, failed: Int = 0, skipped: Int = 0) {
-        self.passed = passed
-        self.failed = failed
-        self.skipped = skipped
-    }
-}
-
-struct TestTimingEntry: Codable {
-    let testClass: String
-    let testMethod: String
-    let averageDurationMs: Int
-    let sampleSize: Int
-    let lastRun: String?
-    let lastRunTimestampMs: Int?
-    let successRate: Double?
-    let failureRate: Double?
-    let stdDevDurationMs: Int?
-    let statusCounts: TestTimingStatusCounts?
-}
-
-struct TestTimingSummary: Codable {
-    let testTimings: [TestTimingEntry]
-    let generatedAt: String?
-    let totalTests: Int
-    let totalSamples: Int
-
-    init(
-        testTimings: [TestTimingEntry] = [],
-        generatedAt: String? = nil,
-        totalTests: Int = 0,
-        totalSamples: Int = 0
-    ) {
-        self.testTimings = testTimings
-        self.generatedAt = generatedAt
-        self.totalTests = totalTests
-        self.totalSamples = totalSamples
-    }
-}
-
-struct TestTimingKey: Hashable {
-    let testClass: String
-    let testMethod: String
-}
-
-final class TestTimingCache {
+/// Prefetches and caches per-test timing data from the daemon so `AutoMobileTestCase` can order a
+/// suite fastest/slowest-first. Best-effort: any fetch/parse failure logs and leaves the cache empty.
+///
+/// Concurrency (closes race #1): the reference double-checked `loaded` and then read `timingMap`/
+/// `summary` — and ran `clear()` — with NO lock, a data race under parallel XCTest workers. Here a
+/// single `NSLock` guards `loaded`/`timingMap`/`summary` for EVERY access (prefetch, reads, clear).
+/// The lock is held across the one-time daemon fetch (as the reference's `loadLock` was) so the fetch
+/// happens exactly once; `NSLock` is used (not an unfair lock) because it is held across that I/O.
+/// `@unchecked Sendable`: all mutable state is lock-guarded and `jsonDecoder` is an immutable,
+/// used-only-under-lock decoder.
+final class TestTimingCache: @unchecked Sendable {
     static let shared = TestTimingCache()
 
     private let jsonDecoder = JSONDecoder()
-    private let loadLock = NSLock()
+    private let lock = NSLock()
     private var loaded = false
     private var timingMap: [TestTimingKey: TestTimingEntry] = [:]
     private var summary: TestTimingSummary?
@@ -61,44 +22,50 @@ final class TestTimingCache {
     private init() {}
 
     func prefetchIfEnabled() {
-        guard isEnabled() else {
-            return
-        }
-
-        if loaded {
-            return
-        }
-
-        loadLock.lock()
-        defer { loadLock.unlock() }
-
-        if loaded {
-            return
-        }
-
-        loadFromDaemon()
-        loaded = true
+        lock.lock()
+        defer { lock.unlock() }
+        prefetchLocked()
     }
 
     func getTiming(testClass: String, testMethod: String) -> TestTimingEntry? {
-        prefetchIfEnabled()
+        lock.lock()
+        defer { lock.unlock() }
+        prefetchLocked()
         return timingMap[TestTimingKey(testClass: testClass, testMethod: testMethod)]
     }
 
     func hasTimings() -> Bool {
-        prefetchIfEnabled()
+        lock.lock()
+        defer { lock.unlock() }
+        prefetchLocked()
         return !timingMap.isEmpty
     }
 
     func getSummary() -> TestTimingSummary? {
-        prefetchIfEnabled()
+        lock.lock()
+        defer { lock.unlock() }
+        prefetchLocked()
         return summary
     }
 
     func clear() {
+        lock.lock()
+        defer { lock.unlock() }
         timingMap = [:]
         summary = nil
         loaded = false
+    }
+
+    /// Assumes `lock` is held. Fetches once; subsequent calls are no-ops.
+    private func prefetchLocked() {
+        guard isEnabled() else {
+            return
+        }
+        if loaded {
+            return
+        }
+        loadFromDaemon()
+        loaded = true
     }
 
     private func isEnabled() -> Bool {
@@ -222,80 +189,5 @@ final class TestTimingCache {
 
     private var config: TimingConfig {
         return TimingConfig()
-    }
-}
-
-private struct TimingConfig {
-    private let defaults = UserDefaults.standard
-    private let environment = ProcessInfo.processInfo.environment
-
-    func stringValue(forKey key: String) -> String? {
-        if let value = defaults.object(forKey: key) {
-            if let stringValue = value as? String {
-                return stringValue
-            }
-            return String(describing: value)
-        }
-        return environment[key]
-    }
-
-    func intValue(forKey key: String, defaultValue: Int) -> Int {
-        if let value = stringValue(forKey: key), let parsed = Int(value) {
-            return parsed
-        }
-        return defaultValue
-    }
-
-    func boolValue(forKey key: String, defaultValue: Bool) -> Bool {
-        guard let value = stringValue(forKey: key)?.lowercased() else {
-            return defaultValue
-        }
-        if ["1", "true", "yes", "y"].contains(value) {
-            return true
-        }
-        if ["0", "false", "no", "n"].contains(value) {
-            return false
-        }
-        return defaultValue
-    }
-}
-
-private final class AutoMobileTestTimingClient {
-    private let mcpClient: AutoMobileMCPClient
-
-    init(environment: AutoMobileEnvironment) throws {
-        if let endpoint = environment.firstNonEmpty([
-            "AUTOMOBILE_MCP_URL",
-            "AUTOMOBILE_MCP_HTTP_URL",
-            "MCP_ENDPOINT",
-        ]) {
-            let normalizedEndpoint = AutoMobileTestTimingClient.normalizeEndpoint(endpoint)
-            guard let endpointURL = URL(string: normalizedEndpoint) else {
-                throw MCPClientError.invalidEndpoint(normalizedEndpoint)
-            }
-            mcpClient = try StreamableHTTPMCPClient(endpoint: endpointURL)
-        } else {
-            let socketPath = environment.firstNonEmpty([
-                "AUTOMOBILE_DAEMON_SOCKET_PATH",
-                "AUTO_MOBILE_DAEMON_SOCKET_PATH",
-            ]) ?? AutoMobileDaemonSocket.defaultPath
-            mcpClient = AutoMobileDaemonClient(socketPath: socketPath)
-        }
-    }
-
-    func readResource(uri: String, timeout: TimeInterval) throws -> String {
-        let response = try mcpClient.readResource(uri: uri, timeout: timeout)
-        return response.text
-    }
-
-    private static func normalizeEndpoint(_ endpoint: String) -> String {
-        let trimmed = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.contains("/auto-mobile/streamable") || trimmed.contains("/auto-mobile/sse") {
-            return trimmed
-        }
-        if trimmed.hasSuffix("/auto-mobile") {
-            return "\(trimmed)/streamable"
-        }
-        return "\(trimmed)/auto-mobile/streamable"
     }
 }

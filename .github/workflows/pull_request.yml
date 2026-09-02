@@ -2096,10 +2096,15 @@ jobs:
         with:
           lfs: false
 
-      - name: "Select Xcode 26.0"
+      # The root manifest declares swift-tools-version 6.3 (XCTestRunner's
+      # strict-concurrency floor), which requires the Swift 6.3 toolchain that
+      # ships with Xcode 26.5. Xcode 26.0 ships Swift 6.2 and cannot even parse
+      # a 6.3 manifest, so this floor-guarantee job builds on 26.5 to match the
+      # published SDK's toolchain floor and every other Swift-package job here.
+      - name: "Select Xcode 26.5"
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "26.0"
+          xcode-version: "26.5"
 
       - name: "Build root Package.swift"
         run: swift build -c release 2>&1

@@ -593,17 +593,17 @@ final class AutoMobileVersionTests: XCTestCase {
     }
 }
 
-private final class FakeDaemonSubcommandLauncher: DaemonManager.DaemonSubcommandLauncher {
+private final class FakeDaemonSubcommandLauncher: DaemonSubcommandLauncher {
     struct Invocation: Equatable {
         let executable: String
         let arguments: [String]
         let timeoutSeconds: TimeInterval
     }
 
-    private let result: DaemonManager.DaemonSubcommandOutcome
+    private let result: DaemonSubcommandOutcome
     private(set) var invocations: [Invocation] = []
 
-    init(result: DaemonManager.DaemonSubcommandOutcome) {
+    init(result: DaemonSubcommandOutcome) {
         self.result = result
     }
 
@@ -612,7 +612,7 @@ private final class FakeDaemonSubcommandLauncher: DaemonManager.DaemonSubcommand
         arguments: [String],
         environment _: [String: String],
         timeoutSeconds: TimeInterval
-    ) -> DaemonManager.DaemonSubcommandOutcome {
+    ) -> DaemonSubcommandOutcome {
         invocations.append(.init(
             executable: executable,
             arguments: arguments,
@@ -671,7 +671,7 @@ private final class FakeDaemonRuntime: DaemonRuntime {
         repoRoot: String?,
         timeoutSeconds _: TimeInterval
     )
-        -> DaemonManager.DaemonSubcommandOutcome
+        -> DaemonSubcommandOutcome
     {
         subcommands.append(.init(name: subcommand, repoRoot: repoRoot))
         daemonBuildId = buildIdAfterRestart

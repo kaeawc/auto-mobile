@@ -8,27 +8,13 @@ private let _moduleLoadLog: Void = {
     fputs(line, stderr)
 }()
 
-public enum AutoMobileTestCaseError: Error, CustomStringConvertible {
-    case missingPlanPath
-    case invalidEndpoint(String)
-    case executorUnavailable
-    case devicePoolUnavailable(String)
-
-    public var description: String {
-        switch self {
-        case .missingPlanPath:
-            return "Missing AutoMobile test plan path."
-        case let .invalidEndpoint(endpoint):
-            return "Invalid MCP endpoint: \(endpoint)"
-        case .executorUnavailable:
-            return "AutoMobile plan executor is unavailable."
-        case let .devicePoolUnavailable(details):
-            return "Device pool unavailable: \(details)"
-        }
-    }
-}
-
 /// Base XCTestCase for executing AutoMobile YAML automation plans via MCP.
+///
+/// Concurrency: `nonisolated` — NOT `@MainActor`. `defaultTestSuite` overrides a `nonisolated`
+/// XCTestCase member (a `@MainActor` override would be rejected), and the execute path is synchronous
+/// and semaphore-blocking (hopping it onto the main actor would risk blocking it). The one piece of
+/// global mutable state — the once-only device-pool check — is `nonisolated(unsafe)` guarded by an
+/// `NSLock` held across its daemon I/O (an unfair lock must not be held across I/O).
 open class AutoMobileTestCase: XCTestCase {
     override open class var defaultTestSuite: XCTestSuite {
         // Ensure module load logging is triggered
@@ -135,7 +121,9 @@ open class AutoMobileTestCase: XCTestCase {
     private var executor: AutoMobilePlanExecutor?
     private let environment = AutoMobileEnvironment()
     private static let devicePoolCheckLock = NSLock()
-    private static var devicePoolCheckCompleted = false
+    // Guarded exclusively by `devicePoolCheckLock` (held across the daemon I/O below), so
+    // `nonisolated(unsafe)` is sound and avoids holding an unfair lock across I/O.
+    private nonisolated(unsafe) static var devicePoolCheckCompleted = false
 
     override open func setUpWithError() throws {
         PerfTimer.log("setUpWithError START for \(name)")
@@ -198,7 +186,7 @@ open class AutoMobileTestCase: XCTestCase {
             "MCP_ENDPOINT",
         ]) {
             PerfTimer.log("makeConfiguration: using HTTP transport endpoint=\(endpoint)")
-            let normalizedEndpoint = normalizeEndpoint(endpoint)
+            let normalizedEndpoint = MCPEndpoint.normalize(endpoint)
             guard let endpointURL = URL(string: normalizedEndpoint) else {
                 throw AutoMobileTestCaseError.invalidEndpoint(normalizedEndpoint)
             }
@@ -260,17 +248,6 @@ open class AutoMobileTestCase: XCTestCase {
             return suffix.trimmingCharacters(in: CharacterSet(charactersIn: "]"))
         }
         return fullName
-    }
-
-    private func normalizeEndpoint(_ endpoint: String) -> String {
-        let trimmed = endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.contains("/auto-mobile/streamable") || trimmed.contains("/auto-mobile/sse") {
-            return trimmed
-        }
-        if trimmed.hasSuffix("/auto-mobile") {
-            return "\(trimmed)/streamable"
-        }
-        return "\(trimmed)/auto-mobile/streamable"
     }
 
     private struct BootedDevicesResource: Decodable {
@@ -339,7 +316,7 @@ open class AutoMobileTestCase: XCTestCase {
             "AUTOMOBILE_MCP_HTTP_URL",
             "MCP_ENDPOINT",
         ]) {
-            let normalizedEndpoint = normalizeEndpoint(endpoint)
+            let normalizedEndpoint = MCPEndpoint.normalize(endpoint)
             guard let endpointURL = URL(string: normalizedEndpoint) else {
                 throw AutoMobileTestCaseError.invalidEndpoint(normalizedEndpoint)
             }
@@ -451,12 +428,16 @@ open class AutoMobileTestCase: XCTestCase {
             return false
         }
 
+        // Drain the pipe before reaping. `simctl list devices --json` (no `booted` filter) lists every
+        // device across all runtimes and can exceed the ~64 KB pipe buffer; waiting first would then
+        // deadlock (child blocks on write while we block in `waitUntilExit`). Reading to EOF first lets
+        // the child write freely, and the wait afterwards just reaps the finished process.
+        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             return false
         }
 
-        let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
         guard let json = try? JSONSerialization.jsonObject(with: data, options: []),
               let payload = json as? [String: Any],
               let devices = payload["devices"] as? [String: Any]

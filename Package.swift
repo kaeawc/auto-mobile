@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.3
 import PackageDescription
 
 // This root manifest is the published SPM entry point (consumers add the repo URL and pick the
@@ -10,7 +10,7 @@ let package = Package(
     name: "auto-mobile",
     platforms: [
         .iOS(.v17),
-        .macOS(.v14),
+        .macOS(.v15),
     ],
     products: [
         .library(
@@ -37,8 +37,7 @@ let package = Package(
         .target(
             name: "XCTestRunner",
             dependencies: [.product(name: "Tachikoma", package: "Tachikoma")],
-            path: "ios/XCTestRunner/Sources/XCTestRunner",
-            swiftSettings: [.swiftLanguageMode(.v5)]
+            path: "ios/XCTestRunner/Sources/XCTestRunner"
         ),
     ]
 )

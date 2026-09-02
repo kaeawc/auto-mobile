@@ -39,7 +39,7 @@ For a Swift package manifest, use the released package:
 .package(url: "https://github.com/kaeawc/auto-mobile.git", from: "0.0.67")
 ```
 
-`from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6, macOS 14, and iOS 17.
+`from:` resolves the newest compatible AutoMobile release; it is not an exact pin. The package requires Swift 6, macOS 15, and iOS 17.
 
 </details>
 

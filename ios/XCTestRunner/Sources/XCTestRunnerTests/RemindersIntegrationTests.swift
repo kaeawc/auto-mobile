@@ -1,7 +1,8 @@
 import XCTest
 @testable import XCTestRunner
+import XCTestRunnerTestSupport
 
-private final class LaunchPlanContractMCPClient: AutoMobileMCPClient {
+private final class LaunchPlanContractMCPClient: AutoMobileMCPClient, @unchecked Sendable {
     struct ToolCall {
         let name: String
         let arguments: [String: Any]

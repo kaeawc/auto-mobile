@@ -8,32 +8,12 @@ import Tachikoma
 // tool set, execute each requested tool over the shared `AutoMobileMCPClient`, feed results back, and
 // repeat up to the `maxToolCalls` budget. After the agent finishes we observe the device ourselves
 // (outside the budget) to verify it is in a queryable state — the same success signal Android uses.
-
-// MARK: - Model seam (for testability)
-
-/// Narrow seam over the Tachikoma model call so the recovery loop can be unit-tested with a fake model
-/// (no network, no API key). The production implementation is `TachikomaModelResponder`.
-public protocol ModelResponding {
-    func respond(_ request: ModelRequest) async throws -> ModelResponse
-}
-
-/// Resolves a Tachikoma model by name (Anthropic/OpenAI/Google — keys read from the environment by
-/// Tachikoma itself) and forwards the request to it.
-public struct TachikomaModelResponder: ModelResponding {
-    private let modelName: String
-
-    public init(modelName: String) {
-        self.modelName = modelName
-    }
-
-    public func respond(_ request: ModelRequest) async throws -> ModelResponse {
-        let model = try await ModelProvider.shared.getModel(modelName: modelName)
-        return try await model.getResponse(request: request)
-    }
-}
-
-// MARK: - Handler
-
+//
+// Concurrency: every stored dependency is an immutable `let` over a `Sendable` seam (the model call is
+// abstracted by `ModelResponding`; the sync↔async bound by `AsyncCallBridging`), so the handler is
+// cleanly `Sendable` and the recovery loop mutates only locals. The single async model call crosses to
+// a `Task` through `AsyncCallBridging.run`, whose operation is `@Sendable` and returns the `Sendable`
+// `ModelResponse`.
 public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
     private let mcpClient: AutoMobileMCPClient
     private let configProvider: RecoveryConfigProviding
@@ -41,7 +21,7 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
     private let timeoutSeconds: TimeInterval
     private let timer: AutoMobileTimer
     private let logger: AutoMobileLogger
-    private let responderFactory: (RecoveryModelConfig) -> ModelResponding
+    private let responderFactory: @Sendable (RecoveryModelConfig) -> ModelResponding
     private let asyncBridge: AsyncCallBridging
 
     public convenience init(
@@ -51,7 +31,7 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         timeoutSeconds: TimeInterval = 120,
         timer: AutoMobileTimer = SystemTimer(),
         logger: AutoMobileLogger = StdoutLogger(),
-        responderFactory: @escaping (RecoveryModelConfig) -> ModelResponding = { config in
+        responderFactory: @escaping @Sendable (RecoveryModelConfig) -> ModelResponding = { config in
             TachikomaModelResponder(modelName: config.modelName)
         }
     ) {
@@ -76,7 +56,7 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
         timeoutSeconds: TimeInterval,
         timer: AutoMobileTimer,
         logger: AutoMobileLogger,
-        responderFactory: @escaping (RecoveryModelConfig) -> ModelResponding,
+        responderFactory: @escaping @Sendable (RecoveryModelConfig) -> ModelResponding,
         asyncBridge: AsyncCallBridging
     ) {
         self.mcpClient = mcpClient
@@ -416,65 +396,4 @@ public final class TachikomaPlanRecoveryHandler: PlanRecoveryHandler {
     private func elapsedMs(since start: TimeInterval) -> Int {
         Int((timer.now() - start) * 1000)
     }
-
-}
-
-// MARK: - Async bridge seam (for testability + bounded blocking)
-
-/// Bridges a single async call to the synchronous XCTest executor thread with a **bound**. The
-/// recovery loop drives the model call synchronously (matching how the executor already drives
-/// `AutoMobileMCPClient`), but a hung model call must fail the recovery attempt rather than wedge
-/// the runner forever (issue #5644). A seam so the handler's timeout handling is unit-testable with
-/// a fake, and the production bound is testable directly with a tiny timeout.
-protocol AsyncCallBridging {
-    /// Runs `operation` and blocks the caller until it completes or `timeout` seconds elapse.
-    /// Throws `RecoveryTimeoutError` on timeout; rethrows any error `operation` throws.
-    func run<T>(timeout: TimeInterval, _ operation: @escaping () async throws -> T) throws -> T
-}
-
-/// Thrown when a bridged async call does not complete within its timeout.
-struct RecoveryTimeoutError: Error, CustomStringConvertible, Equatable {
-    let timeoutSeconds: TimeInterval
-    var description: String { "Recovery model call timed out after \(timeoutSeconds)s" }
-}
-
-/// Production bridge: runs the async work on the cooperative pool and blocks the executor thread on a
-/// **bounded** semaphore wait. Blocking the executor thread is safe (it is the XCTest thread, not a
-/// cooperative-pool thread); the timeout guarantees the wait cannot block indefinitely. On timeout the
-/// spawned `Task` is left to finish on its own — it can no longer affect the abandoned recovery attempt.
-struct SemaphoreAsyncCallBridge: AsyncCallBridging {
-    func run<T>(timeout: TimeInterval, _ operation: @escaping () async throws -> T) throws -> T {
-        let box = ResultBox<T>()
-        let semaphore = DispatchSemaphore(value: 0)
-        let task = Task {
-            do {
-                box.result = .success(try await operation())
-            } catch {
-                box.result = .failure(error)
-            }
-            semaphore.signal()
-        }
-        if semaphore.wait(timeout: .now() + timeout) == .timedOut {
-            // Cancel the abandoned work so a cancellation-aware provider can release its network
-            // request and drop its retained state promptly, rather than one orphaned task per
-            // timed-out recovery accumulating for the lifetime of the XCTest process.
-            task.cancel()
-            throw RecoveryTimeoutError(timeoutSeconds: timeout)
-        }
-        switch box.result {
-        case let .success(value):
-            return value
-        case let .failure(error):
-            throw error
-        case .none:
-            throw MCPClientError.requestFailed("Recovery model call produced no result")
-        }
-    }
-}
-
-/// Mutable, thread-crossing result holder for `SemaphoreAsyncCallBridge`. `@unchecked Sendable`
-/// because access is serialized by the semaphore (the write happens-before `signal()`; the read
-/// happens-after a successful `wait()`), and on timeout the box is never read again.
-private final class ResultBox<T>: @unchecked Sendable {
-    var result: Result<T, Error>?
 }

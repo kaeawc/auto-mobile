@@ -3,7 +3,7 @@ import Foundation
 import XCTest
 
 final class XCTestObservationIntegrationTests: XCTestCase {
-    private func timing(_ name: String, duration: TimeInterval = 1, passed: Bool = true) -> AutoMobileTestObserver.TimingData {
+    private static func timing(_ name: String, duration: TimeInterval = 1, passed: Bool = true) -> AutoMobileTestObserver.TimingData {
         let start = Date(timeIntervalSince1970: 0)
         return AutoMobileTestObserver.TimingData(
             testName: name,
@@ -16,17 +16,17 @@ final class XCTestObservationIntegrationTests: XCTestCase {
 
     func testRecordAndGetTimingData() {
         let observer = AutoMobileTestObserver()
-        observer.recordTiming(timing("a"))
-        observer.recordTiming(timing("b"))
+        observer.recordTiming(Self.timing("a"))
+        observer.recordTiming(Self.timing("b"))
         let data = observer.getTimingData()
         XCTAssertEqual(data.map(\.testName), ["a", "b"])
     }
 
     func testExportTimingDataWritesJSONArray() throws {
         let observer = AutoMobileTestObserver()
-        observer.recordTiming(timing("a"))
-        observer.recordTiming(timing("b"))
-        observer.recordTiming(timing("c"))
+        observer.recordTiming(Self.timing("a"))
+        observer.recordTiming(Self.timing("b"))
+        observer.recordTiming(Self.timing("c"))
 
         let path = NSTemporaryDirectory() + "am-timing-\(UUID().uuidString).json"
         defer { try? FileManager.default.removeItem(atPath: path) }
@@ -45,7 +45,7 @@ final class XCTestObservationIntegrationTests: XCTestCase {
         let observer = AutoMobileTestObserver()
 
         DispatchQueue.concurrentPerform(iterations: 2_000) { i in
-            observer.recordTiming(timing("t\(i)"))
+            observer.recordTiming(Self.timing("t\(i)"))
             _ = observer.getTimingData() // snapshot read concurrent with appends
         }
 

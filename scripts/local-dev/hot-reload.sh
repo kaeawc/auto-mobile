@@ -90,8 +90,10 @@ ANDROID_ENABLED=false
 IOS_ENABLED=false
 HAVE_DEVICE=false
 
-# Track last hashes for change detection
-LAST_IDE_PLUGIN_HASH=""
+# Track last hashes for change detection. Desktop app SOURCE has no hash: Compose
+# Hot Reload (hotRun --autoReload) watches and reloads it live. Only the desktop
+# Gradle build scripts are hashed, since hotRun won't reconfigure on their change.
+LAST_DESKTOP_GRADLE_HASH=""
 LAST_APK_HASH=""
 LAST_VIDEO_SERVER_HASH=""
 LAST_IOS_HASH=""
@@ -106,6 +108,19 @@ VIDEO_SERVER_NEEDS_INSTALL=false
 ANDROID_VIDEO_SERVER_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=false
 IOS_NEEDS_RESTART=false
 IOS_NEEDS_DAEMON_RELOAD_AFTER_HANDOFF=false
+
+# Desktop crash-relaunch backoff. If hotRun exits immediately (e.g. a hot-reload
+# config failure), relaunching every poll interval would hammer Gradle and
+# repeatedly clobber the diagnostic log. Back off exponentially up to a capped
+# delay, then keep retrying at that cap forever — never permanently give up, so a
+# subsequently-fixed error still recovers (source-change detection is gone; this
+# liveness check is the only relaunch path). Reset only once the app stays up.
+DESKTOP_RELAUNCH_ATTEMPTS=0
+DESKTOP_RELAUNCH_NEXT_TS=0
+DESKTOP_LAST_LAUNCH_TS=0
+DESKTOP_RELAUNCH_BACKOFF_CAP=300  # seconds (retry ceiling once backoff saturates)
+DESKTOP_RELAUNCH_SHIFT_CAP=16     # clamp the 2^n exponent so the shift can't overflow
+DESKTOP_RELAUNCH_STABLE_SECS=30   # uptime before a launch is deemed healthy
 
 usage() {
   cat << EOF
@@ -596,6 +611,19 @@ get_current_simulator() {
 unified_watch_loop() {
   local poll_interval="${1:-2}"
 
+  # Integer seconds base for the desktop backoff math. poll_interval may be
+  # fractional (e.g. --poll-interval 0.5, which `sleep` accepts); Bash arithmetic
+  # is integer-only and would abort the whole watcher under `set -e`. Floor to the
+  # integer part, minimum 1s. Force base-10 so a zero-padded value like `08` or
+  # `010` is not misread as (invalid or surprising) octal in later arithmetic — do
+  # the 10# conversion before any arithmetic context touches the raw string.
+  local desktop_backoff_base="${poll_interval%%.*}"
+  case "${desktop_backoff_base}" in
+    '' | *[!0-9]*) desktop_backoff_base=1 ;;
+    *) desktop_backoff_base=$(( 10#${desktop_backoff_base} )) ;;
+  esac
+  [[ ${desktop_backoff_base} -lt 1 ]] && desktop_backoff_base=1
+
   log_info "Starting unified watch loop (poll interval ${poll_interval}s)..."
   log_info "Watching: Desktop app=$(bool_str ${DESKTOP_APP_ENABLED}), Android=$(bool_str ${ANDROID_ENABLED}), iOS=$(bool_str ${IOS_ENABLED}), TypeScript=true"
   if [[ "${IOS_ENABLED}" == "true" ]]; then
@@ -606,9 +634,10 @@ unified_watch_loop() {
     fi
   fi
 
-  # Initialize hashes
+  # Initialize hashes (desktop source self-reloads via Compose Hot Reload; only the
+  # desktop Gradle build scripts are hashed).
   if [[ "${DESKTOP_APP_ENABLED}" == "true" ]]; then
-    LAST_IDE_PLUGIN_HASH="$(hash_ide_plugin_state)"
+    LAST_DESKTOP_GRADLE_HASH="$(hash_desktop_gradle_state)"
   fi
   if [[ "${ANDROID_ENABLED}" == "true" ]]; then
     LAST_APK_HASH="$(hash_apk_watch_state)"
@@ -639,21 +668,56 @@ unified_watch_loop() {
       fi
     fi
 
-    # === 1. Check desktop app changes ===
+    # === 1. Desktop app ===
+    # The desktop app runs under Compose Hot Reload (`hotRun --autoReload`), which
+    # owns a Gradle daemon that recompiles desktop-core/desktop-app edits and
+    # reloads them into the SAME window. So the watcher must NOT rebuild/restart on
+    # source change — doing so would kill the live-reload process for every keystroke
+    # and reintroduce the rebuild-under-JVM NoClassDefFoundError trap. We only relaunch
+    # if the app process has died (e.g. crashed or the reload daemon exited), with
+    # exponential backoff up to a capped delay — then keep retrying at that cap so a
+    # later-fixed error still recovers, rather than staying down for the session.
+    # The one source-driven exception is a change to a desktop build.gradle.kts:
+    # Compose Hot Reload won't reconfigure an existing Gradle model, so we fully
+    # restart the app (a clean stop+relaunch, NOT a rebuild into the live JVM, so the
+    # NoClassDefFoundError trap does not return).
     if [[ "${DESKTOP_APP_ENABLED}" == "true" ]]; then
-      local next_ide_hash
-      next_ide_hash="$(hash_ide_plugin_state)"
-      if [[ "${next_ide_hash}" != "${LAST_IDE_PLUGIN_HASH}" ]]; then
-        log_info "[Desktop App] Change detected. Rebuilding and restarting..."
-        LAST_IDE_PLUGIN_HASH="${next_ide_hash}"
-
-        if build_desktop_app; then
-          run_desktop_app
-        else
-          log_warn "[Desktop App] Build failed; waiting for next change."
+      local desktop_pid now_ts next_desktop_gradle_hash
+      next_desktop_gradle_hash="$(hash_desktop_gradle_state)"
+      if [[ "${next_desktop_gradle_hash}" != "${LAST_DESKTOP_GRADLE_HASH}" ]]; then
+        log_info "[Desktop App] Gradle build script changed; restarting to apply new configuration..."
+        LAST_DESKTOP_GRADLE_HASH="${next_desktop_gradle_hash}"
+        DESKTOP_RELAUNCH_ATTEMPTS=0
+        DESKTOP_RELAUNCH_NEXT_TS=0
+        DESKTOP_LAST_LAUNCH_TS=$(date +%s)
+        run_desktop_app
+        LAST_DESKTOP_GRADLE_HASH="$(hash_desktop_gradle_state)"
+      fi
+      # Liveness/backoff. After a build-script restart just above, the app is freshly
+      # alive with ATTEMPTS=0, so this is a no-op that tick.
+      desktop_pid="$(cat "${DESKTOP_APP_PID_FILE}" 2>/dev/null || true)"
+      now_ts=$(date +%s)
+      if [[ -n "${desktop_pid}" ]] && kill -0 "${desktop_pid}" 2>/dev/null; then
+        # Alive — clear backoff only once it has stayed up long enough to be healthy.
+        # A crash-looping launcher is briefly "alive" between relaunches while Gradle
+        # spins up, so resetting on the first live poll would defeat the backoff.
+        if [[ ${DESKTOP_RELAUNCH_ATTEMPTS} -gt 0 ]] &&
+          [[ $(( now_ts - DESKTOP_LAST_LAUNCH_TS )) -ge ${DESKTOP_RELAUNCH_STABLE_SECS} ]]; then
+          log_info "[Desktop App] Stable again; clearing relaunch backoff."
+          DESKTOP_RELAUNCH_ATTEMPTS=0
+          DESKTOP_RELAUNCH_NEXT_TS=0
         fi
-
-        LAST_IDE_PLUGIN_HASH="$(hash_ide_plugin_state)"
+      elif [[ ${now_ts} -ge ${DESKTOP_RELAUNCH_NEXT_TS} ]]; then
+        DESKTOP_RELAUNCH_ATTEMPTS=$(( DESKTOP_RELAUNCH_ATTEMPTS + 1 ))
+        local backoff_shift=$(( DESKTOP_RELAUNCH_ATTEMPTS - 1 ))
+        [[ ${backoff_shift} -gt ${DESKTOP_RELAUNCH_SHIFT_CAP} ]] && backoff_shift=${DESKTOP_RELAUNCH_SHIFT_CAP}
+        local backoff=$(( desktop_backoff_base * (1 << backoff_shift) ))
+        [[ ${backoff} -gt ${DESKTOP_RELAUNCH_BACKOFF_CAP} ]] && backoff=${DESKTOP_RELAUNCH_BACKOFF_CAP}
+        DESKTOP_RELAUNCH_NEXT_TS=$(( now_ts + backoff ))
+        DESKTOP_LAST_LAUNCH_TS=${now_ts}
+        log_warn "[Desktop App] Process not running; relaunching (attempt ${DESKTOP_RELAUNCH_ATTEMPTS}, next retry in >=${backoff}s). If it keeps exiting, see ${DESKTOP_APP_LOG}."
+        # Preserve the log so a repeatedly-crashing hotRun keeps its diagnostics.
+        run_desktop_app preserve_log
       fi
     fi
 

@@ -9,15 +9,12 @@
 #
 # Functions:
 #   build_desktop_app()               - Run gradlew :desktop-app:build -x test
-#   run_desktop_app()                 - Launch desktop-app via gradlew :desktop-app:run
-#   stop_desktop_app()                - Kill running desktop-app process
-#   list_ide_plugin_watch_files()     - Files to watch for changes (desktop-core + desktop-app)
-#   hash_ide_plugin_state()           - Hash of watched file timestamps
+#   run_desktop_app()                 - Launch desktop-app via gradlew :desktop-app:hotRun --autoReload
+#   stop_desktop_app()                - Kill running desktop-app process (launcher + hot-reload JVM)
+#   hash_desktop_gradle_state()       - Hash of the two desktop build.gradle.kts (restart-on-config)
 
 # Desktop app paths
 ANDROID_DIR="${PROJECT_ROOT}/android"
-DESKTOP_CORE_DIR="${ANDROID_DIR}/desktop-core"
-DESKTOP_APP_DIR="${ANDROID_DIR}/desktop-app"
 
 # Runtime state
 DESKTOP_APP_PID=""
@@ -46,17 +43,34 @@ install_ide_plugin() {
   return 0
 }
 
-# Launch the desktop app in the background, logging to a file
+# Launch the desktop app in the background via Compose Hot Reload, logging to a file.
+#
+# `hotRun --autoReload` launches a separate Gradle daemon that continuously
+# recompiles and reloads desktop-core/desktop-app source into the SAME running
+# window — no rebuild-and-restart cycle. This avoids the plain `:desktop-app:run`
+# trap where a rebuild overwrites the running JVM's exploded classes and the next
+# lazy class load throws NoClassDefFoundError. Because Compose Hot Reload owns
+# desktop reloading, the unified watcher must NOT also rebuild/restart the app on
+# desktop source changes (see hot-reload.sh). `--no-configuration-cache` is
+# required: the hot-reload tasks are not configuration-cache serializable and the
+# repo enables the configuration cache by default.
+# Pass "preserve_log" as $1 to append to the existing log instead of truncating it
+# (used by the watcher's crash-relaunch path so a hotRun that exits immediately does
+# not erase its own diagnostics on every retry).
 run_desktop_app() {
+  local preserve_log="${1:-}"
   stop_desktop_app
   mkdir -p "$(dirname "${DESKTOP_APP_LOG}")"
-  : > "${DESKTOP_APP_LOG}"
-  log_info "Launching desktop app..."
-  (cd "${ANDROID_DIR}" && ./gradlew :desktop-app:run --quiet) >> "${DESKTOP_APP_LOG}" 2>&1 &
+  if [[ "${preserve_log}" != "preserve_log" ]]; then
+    : > "${DESKTOP_APP_LOG}"
+  fi
+  log_info "Launching desktop app (Compose Hot Reload, --autoReload)..."
+  (cd "${ANDROID_DIR}" && ./gradlew :desktop-app:hotRun --autoReload --no-configuration-cache --quiet) \
+    >> "${DESKTOP_APP_LOG}" 2>&1 &
   DESKTOP_APP_PID=$!
   echo "${DESKTOP_APP_PID}" > "${DESKTOP_APP_PID_FILE}"
   disown "${DESKTOP_APP_PID}"
-  log_info "Desktop app running (PID ${DESKTOP_APP_PID})."
+  log_info "Desktop app running (PID ${DESKTOP_APP_PID}); source edits reload live."
   log_info "Desktop app logs: tail -f ${DESKTOP_APP_LOG}"
 }
 
@@ -80,42 +94,49 @@ stop_desktop_app() {
     DESKTOP_APP_PID=""
   fi
   rm -f "${DESKTOP_APP_PID_FILE}"
-  # Also kill any orphaned desktop-app Gradle run processes
+  # Also kill any orphaned desktop-app Gradle processes: the launcher (hotRun/run),
+  # the Compose Hot Reload JVM (identified by its -Dcompose.reload.argfile), and the
+  # app main class. Every one of these carries THIS checkout's ${ANDROID_DIR} in its
+  # argv (Gradle wrapper classpath, the reload argfile path, or the app classpath), so
+  # every pattern is scoped to that path. Never match machine-wide: another workspace
+  # or checkout hot-reloading under the same account has an identical bare
+  # `compose.reload.argfile` / `MainKt` command line, and an unscoped pgrep would kill
+  # its JVM too.
+  #
+  # `pgrep -f` treats its pattern as an extended regex, so the interpolated path must
+  # be escaped: an unescaped `.` would match any char (broadening into another
+  # checkout), and a literal `+`/`(`/`)` in the path would fail to match its own
+  # process. Escape every ERE metacharacter in ${ANDROID_DIR} to a literal.
+  local android_re
+  android_re=$(printf '%s' "${ANDROID_DIR}" | sed 's/[][(){}.^$*+?|\\]/\\&/g')
   local pids
-  pids=$(pgrep -f "desktop-app:run" 2>/dev/null; pgrep -f "dev.jasonpearson.automobile.desktop.MainKt" 2>/dev/null) || true
+  pids=$(
+    pgrep -f "${android_re}.*:desktop-app:hotRun" 2>/dev/null
+    pgrep -f "${android_re}.*:desktop-app:run" 2>/dev/null
+    pgrep -f "compose\\.reload\\.argfile=${android_re}" 2>/dev/null
+    pgrep -f "${android_re}.*dev\\.jasonpearson\\.automobile\\.desktop\\.MainKt" 2>/dev/null
+  ) || true
   if [[ -n "${pids}" ]]; then
     echo "${pids}" | xargs kill 2>/dev/null || true
   fi
 }
 
-# List all files to watch for changes (desktop-core + desktop-app source)
-list_ide_plugin_watch_files() {
-  local watch_dirs=(
-    "${DESKTOP_CORE_DIR}/src"
-    "${DESKTOP_APP_DIR}/src"
-  )
-  local extra_files=(
-    "${DESKTOP_CORE_DIR}/build.gradle.kts"
-    "${DESKTOP_APP_DIR}/build.gradle.kts"
-  )
+# Desktop app SOURCE edits are handled by Compose Hot Reload (hotRun --autoReload),
+# so the watcher does not diff source hashes. The two Gradle BUILD SCRIPTS are the
+# exception: Compose Hot Reload reloads source into the running window but does not
+# reconfigure an already-created Gradle project model, so a change to a build script
+# (new dependency, plugin, or compiler option) needs a full desktop-app restart or
+# later compilation runs against stale configuration. The watcher hashes just these
+# two files and restarts on change (see hot-reload.sh).
+DESKTOP_GRADLE_BUILD_FILES=(
+  "${ANDROID_DIR}/desktop-core/build.gradle.kts"
+  "${ANDROID_DIR}/desktop-app/build.gradle.kts"
+)
 
-  # Use ripgrep if available, otherwise find
-  if command -v rg >/dev/null 2>&1; then
-    rg --files "${watch_dirs[@]}" -g '!**/build/**' 2>/dev/null || true
-  else
-    find "${watch_dirs[@]}" -type f ! -path "*/build/*" 2>/dev/null || true
-  fi
-
-  for file in "${extra_files[@]}"; do
-    if [[ -f "${file}" ]]; then
-      echo "${file}"
-    fi
-  done
-}
-
-# Compute hash of all watched file timestamps
-hash_ide_plugin_state() {
-  list_ide_plugin_watch_files | while read -r file; do
+# Hash of the desktop Gradle build scripts' timestamps (for restart-on-config-change)
+hash_desktop_gradle_state() {
+  local file
+  for file in "${DESKTOP_GRADLE_BUILD_FILES[@]}"; do
     if [[ -f "${file}" ]]; then
       stat_entry "${file}" 2>/dev/null || true
     fi

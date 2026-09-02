@@ -4,6 +4,7 @@ import type { BootedDevice, ExecResult } from "../../src/models";
 import type { AppFileStats } from "../../src/server/appFileService";
 import {
   IOS_FILES_FIXTURE_BUNDLE_ID,
+  IOS_FILES_FIXTURE_CONTAINER_TIMEOUT_MS,
   IosUserFilesProvider,
   MarkerDocumentPickerVisibilityVerifier,
   SimctlIosFilesFixtureContainer,
@@ -97,10 +98,12 @@ describe("iOS user_files provider (#5807)", () => {
   test("resolves the installed managed app through simctl metadata and rejects missing providers", async () => {
     const fileSystem = new MemoryFixtureFileSystem();
     const commands: string[][] = [];
+    const timeouts: Array<number | undefined> = [];
     const available = new SimctlIosFilesFixtureContainer(
       () => ({
-        executeCommandArgs: async (args) => {
+        executeCommandArgs: async (args, timeoutMs) => {
           commands.push(args);
+          timeouts.push(timeoutMs);
           return result("/sim/provider-data\n");
         },
       }),
@@ -114,6 +117,7 @@ describe("iOS user_files provider (#5807)", () => {
     expect(commands).toEqual([
       ["get_app_container", simulator.deviceId, IOS_FILES_FIXTURE_BUNDLE_ID, "data"],
     ]);
+    expect(timeouts).toEqual([IOS_FILES_FIXTURE_CONTAINER_TIMEOUT_MS]);
 
     const missing = new SimctlIosFilesFixtureContainer(
       () => ({
@@ -289,7 +293,7 @@ describe("iOS user_files provider (#5807)", () => {
     const container = new SimctlIosFilesFixtureContainer(
       () => ({ executeCommandArgs: async () => result("/sim/provider-data") }),
       fileSystem,
-      () => generations.shift()!,
+      { next: () => generations.shift()! },
     );
     const resolution = await container.resolve(simulator);
     await fileSystem.writeFile("/host/fixture.txt", "fixture");
@@ -351,6 +355,36 @@ describe("iOS user_files provider (#5807)", () => {
         byteCount: 7,
       }),
     ).resolves.toMatchObject({ status: "unavailable" });
+  });
+
+  test("keeps staging identities collision-free for nested logical destinations", async () => {
+    const fileSystem = new MemoryFixtureFileSystem();
+    const container = resolvedContainer(fileSystem);
+    const resolution = await container.resolve(simulator);
+    await fileSystem.writeFile("/host/fixture.txt", "fixture");
+
+    await container.putFile(resolution, "run-42", "foo", "/host/fixture.txt");
+    await container.putFile(resolution, "run-42", "foo.json/bar", "/host/fixture.txt");
+
+    await expect(
+      fileSystem.readText("/sim/provider-data/Documents/automobile/run-42/foo"),
+    ).resolves.toBe("fixture");
+    await expect(
+      fileSystem.readText("/sim/provider-data/Documents/automobile/run-42/foo.json/bar"),
+    ).resolves.toBe("fixture");
+  });
+
+  test("accepts safe namespace and destination names that begin with two dots", async () => {
+    const fileSystem = new MemoryFixtureFileSystem();
+    const container = resolvedContainer(fileSystem);
+    const resolution = await container.resolve(simulator);
+    await fileSystem.writeFile("/host/fixture.txt", "fixture");
+
+    await container.putFile(resolution, "..fixtures", "..fixture.txt", "/host/fixture.txt");
+
+    await expect(
+      fileSystem.readText("/sim/provider-data/Documents/automobile/..fixtures/..fixture.txt"),
+    ).resolves.toBe("fixture");
   });
 });
 

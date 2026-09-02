@@ -297,7 +297,7 @@ function userFilesDomain(ctx: StorageCapabilityContext): DomainCapability {
   return {
     domain: "user_files",
     portable: false,
-    platformScope: "android",
+    platformScope: "cross-platform",
     note: "Android user-visible shared storage. putAppFile writes bounded Downloads fixture namespaces; a listing/read surface is not yet exposed.",
     operations: [
       unavailableOperation(

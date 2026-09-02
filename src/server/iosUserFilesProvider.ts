@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { existsSync, promises as nodeFs } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, posix, resolve } from "node:path";
@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { BootedDevice, ExecResult } from "../models";
 import { ActionableError } from "../models";
 import { errorMessage } from "../utils/describeUnknownError";
+import { defaultIdGenerator, type IdGenerator } from "../utils/IdGenerator";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { logger } from "../utils/logger";
@@ -22,6 +23,7 @@ import type {
 } from "./appFileService";
 
 export const IOS_FILES_FIXTURE_BUNDLE_ID = "dev.jasonpearson.automobile.files-fixture-provider";
+export const IOS_FILES_FIXTURE_CONTAINER_TIMEOUT_MS = 15_000;
 const MANAGED_DIRECTORY = "automobile";
 const PICKER_MARKER_RELATIVE_PATH = posix.join(
   "Library",
@@ -221,7 +223,7 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
   constructor(
     private readonly simctlFactory: (device: BootedDevice) => IosFilesFixtureSimctl,
     private readonly fileSystem: IosFilesFixtureFileSystem = nodeIosFilesFixtureFileSystem,
-    private readonly generationFactory: () => string = randomUUID,
+    private readonly idGenerator: IdGenerator = defaultIdGenerator,
   ) {}
 
   async resolve(
@@ -233,7 +235,7 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
     try {
       result = await this.simctlFactory(device).executeCommandArgs(
         ["get_app_container", device.deviceId, IOS_FILES_FIXTURE_BUNDLE_ID, "data"],
-        undefined,
+        IOS_FILES_FIXTURE_CONTAINER_TIMEOUT_MS,
         signal,
       );
     } catch (error) {
@@ -324,7 +326,7 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
     const sourceHash = sha256(sourceBytes);
     const identityPath = containedPath(
       posix.join(resolution.dataRoot, STAGING_IDENTITIES_RELATIVE_PATH, safeNamespace),
-      `${safeDestination}.json`,
+      stagingIdentityFileName(safeDestination),
     );
     const existingGeneration = await this.reusableGeneration(
       destination,
@@ -332,7 +334,7 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
       sourceBytes.byteLength,
       sourceHash,
     );
-    const generation = existingGeneration ?? this.generationFactory();
+    const generation = existingGeneration ?? this.idGenerator.next();
     const stageDirectory = await this.fileSystem.mkdtemp(posix.join(parent, ".automobile-stage-"));
     try {
       const stagedCopy = posix.join(stageDirectory, "fixture");
@@ -396,7 +398,7 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
 
   private async assertDirectoryChain(root: string, target: string): Promise<void> {
     const relativeTarget = posix.relative(root, target);
-    if (relativeTarget.startsWith("..") || posix.isAbsolute(relativeTarget)) {
+    if (isOutsideRoot(relativeTarget)) {
       throw new ActionableError("Refusing to stage an iOS Files fixture outside its managed root.");
     }
     const segments = relativeTarget.split("/").filter(Boolean);
@@ -576,8 +578,7 @@ function containedPath(root: string, safeRelativePath: string): string {
   const relativeCandidate = posix.relative(root, candidate);
   if (
     relativeCandidate.length === 0 ||
-    relativeCandidate.startsWith("..") ||
-    posix.isAbsolute(relativeCandidate)
+    isOutsideRoot(relativeCandidate)
   ) {
     throw new ActionableError("Refusing to stage an iOS Files fixture outside its managed root.");
   }
@@ -594,4 +595,12 @@ function unavailablePickerEffect(): PutAppFileWriteEffect {
 
 function sha256(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function stagingIdentityFileName(destinationPath: string): string {
+  return `${createHash("sha256").update(destinationPath).digest("hex")}.json`;
+}
+
+function isOutsideRoot(relativePath: string): boolean {
+  return relativePath === ".." || relativePath.startsWith("../") || posix.isAbsolute(relativePath);
 }

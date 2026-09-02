@@ -2,7 +2,7 @@ name: FilesFixtureProvider
 options:
   bundleIdPrefix: dev.jasonpearson.automobile
   deploymentTarget:
-    iOS: "17.0"
+    iOS: "15.0"
   xcodeVersion: "15.0"
 
 settings:

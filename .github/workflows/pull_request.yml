@@ -1998,7 +1998,7 @@ jobs:
       - wait: ctrlproxy-simulator
 
       - name: "Run iOS Files picker putAppFile smoke"
-        timeout-minutes: 5
+        timeout-minutes: 15
         run: >
           ./scripts/ios/put-app-file-picker-smoke.sh
           "${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}"

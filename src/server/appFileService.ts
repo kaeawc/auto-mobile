@@ -214,12 +214,17 @@ export function createAppFileServiceForTesting(
     fileSystem: deps.fileSystem ?? defaultDependencies.fileSystem,
     deviceResolver: deps.deviceResolver ?? defaultDependencies.deviceResolver,
   };
-  const iosFilesFixture = resolveIosFilesFixtureDependencies(deps, resolvedDeps.simctlFactory);
+  const idGenerator = deps.idGenerator ?? defaultIdGenerator;
+  const iosFilesFixture = resolveIosFilesFixtureDependencies(
+    deps,
+    resolvedDeps.simctlFactory,
+    idGenerator,
+  );
   return new DefaultAppFileService(
     deps.providers ??
       createDefaultProviders(
         resolvedDeps,
-        deps.idGenerator ?? defaultIdGenerator,
+        idGenerator,
         deps.sharedStorageService ?? getSharedStorageService(),
         deps.iosSimulatorMediaClient ??
           new SimctlIosSimulatorMediaClient(resolvedDeps.simctlFactory),
@@ -235,9 +240,11 @@ export function createAppFileServiceForTesting(
 function resolveIosFilesFixtureDependencies(
   deps: AppFileServiceDependencies,
   simctlFactory: (device: BootedDevice) => SimCtlClient,
+  idGenerator: IdGenerator,
 ): { container: IosFilesFixtureContainer; installer: IosFilesFixtureInstaller } {
   const container =
-    deps.iosFilesFixtureContainer ?? new SimctlIosFilesFixtureContainer(simctlFactory);
+    deps.iosFilesFixtureContainer ??
+    new SimctlIosFilesFixtureContainer(simctlFactory, undefined, idGenerator);
   const installer =
     deps.iosFilesFixtureInstaller ??
     createDefaultIosFilesFixtureInstaller(container, simctlFactory);
@@ -253,6 +260,8 @@ function createDefaultProviders(
   ),
   iosFilesFixtureContainer: IosFilesFixtureContainer = new SimctlIosFilesFixtureContainer(
     deps.simctlFactory,
+    undefined,
+    idGenerator,
   ),
   documentPickerVisibilityVerifier: DocumentPickerVisibilityVerifier = new MarkerDocumentPickerVisibilityVerifier(),
   iosFilesFixtureInstaller: IosFilesFixtureInstaller = createDefaultIosFilesFixtureInstaller(

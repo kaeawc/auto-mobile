@@ -147,6 +147,9 @@ describe("AC2: platform-qualified domains", () => {
       ctx({ platform: "android", activeUserProfile: true }),
     );
     // Staging into shared storage is backed by putAppFile user_files providers.
+    expect(report.domains.find((d) => d.domain === "user_files")?.platformScope).toBe(
+      "cross-platform",
+    );
     expect(isStorageOperationAvailable(report, "user_files", "write")).toBe(true);
     // No AutoMobile listing/read surface exists for shared storage yet.
     expect(findOperationCapability(report, "user_files", "list")?.state).toBe("unavailable");

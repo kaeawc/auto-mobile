@@ -17,7 +17,7 @@ import { FakeTimer } from "../fakes/FakeTimer";
 // cross-process PRIMARY-KEY collision can only be reproduced with two real OS
 // processes; in-process the lock's guarantee is proven compositionally:
 // - the primitive provides mutual exclusion (test/utils/fileLock.test.ts,
-//   test/db/migrationLock.test.ts), and
+//   test/db/migrationLock.integration.test.ts), and
 // - `runMigrations` is gated by it (the serialization test below, which FAILS
 //   if the lock is removed).
 

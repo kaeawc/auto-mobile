@@ -6,7 +6,7 @@ import type { ProxiedToolDefinition } from "./daemonMcpProxy";
  *
  * `schemas/tool-definitions.json` is generated from the live {@link
  * ToolRegistry} (`scripts/generate-tool-definitions.ts`) and kept byte-for-byte
- * in sync with it by `test/server/toolRegistration.test.ts` ("committed
+ * in sync with it by `test/server/toolRegistration.integration.test.ts` ("committed
  * tool-definitions.json matches the live schemas in both directions").
  *
  * It is generated with `includeUnavailable: true`, so it is a strict SUPERSET of

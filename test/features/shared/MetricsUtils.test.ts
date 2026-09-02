@@ -278,5 +278,5 @@ describe("MetricsUtils", () => {
   // were lockstep restatements of the source values. Each constant's *effect* is
   // covered behaviorally instead: WEIGHT_BOUNDS by adjustWeight, DEFAULT_TTL by
   // cleanupStaleBaselines' default, and DEFAULT_EMA_ALPHA by the default-alpha
-  // updateBaseline test in MemoryBaselineManager.test.ts.)
+  // updateBaseline test in MemoryBaselineManager.integration.test.ts.)
 });

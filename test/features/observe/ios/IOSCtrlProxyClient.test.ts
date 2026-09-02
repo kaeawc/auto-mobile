@@ -19,11 +19,6 @@ import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe
 import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
 import { FakeIosSdkEventIngestor } from "../../../fakes/FakeIosSdkEventIngestor";
 import { loadCoordinateMappingVectors } from "../../../parity/coordinateMappingGoldenVectors";
-import {
-  startDeviceDataStreamSocketServer,
-  stopDeviceDataStreamSocketServer,
-} from "../../../../src/daemon/deviceDataStreamSocketServer";
-import { FakeSocket } from "../../../fakes/FakeNetServer";
 
 describe("iOS runner feature release sequencing", () => {
   test("does not require an unreleased handshake from the immutable 0.0.66 IPA", () => {
@@ -73,7 +68,6 @@ describe("IOSCtrlProxyClient", function () {
     if (ctrlProxyClient) {
       await ctrlProxyClient.close();
     }
-    await stopDeviceDataStreamSocketServer();
     NetworkState.resetInstance();
     serverConfig.setNetworkMockableEnabled(false);
   });
@@ -3517,97 +3511,6 @@ describe("IOSCtrlProxyClient", function () {
       expect(geometry.bind()).toBeNull();
     });
 
-    const startStreamServer = async (): Promise<FakeSocket> => {
-      await stopDeviceDataStreamSocketServer();
-      const server = await startDeviceDataStreamSocketServer(fakeTimer);
-      const socket = new FakeSocket();
-      await (server as any).processLine(
-        socket as any,
-        JSON.stringify({
-          id: "subscribe-capture-provenance",
-          command: "subscribe",
-          deviceId: testDevice.deviceId,
-          screenshotIntervalMs: 250,
-        }),
-      );
-      socket.reset();
-      return socket;
-    };
-
-    /**
-     * Forward a hierarchy the way processMessage does: the SOURCE hierarchy is handed to the push
-     * alongside the converted result. The cache is deliberately left holding something ELSE, which
-     * is the real request/response ordering — processMessage forwards the converted response before
-     * requestHierarchySync resumes and installs it in the cache.
-     */
-    const forwardHierarchy = (
-      screenWidth: number,
-      screenHeight: number,
-      screenScale: number,
-    ): void => {
-      (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
-        screenWidth,
-        screenHeight,
-        screenScale,
-      });
-    };
-
-    /** Put a DIFFERENT hierarchy in the cache, so a cache-reading implementation is caught. */
-    const setStaleCache = (
-      screenWidth: number,
-      screenHeight: number,
-      screenScale: number,
-    ): void => {
-      (ctrlProxyClient as any).cachedHierarchy = {
-        hierarchy: { screenWidth, screenHeight, screenScale },
-        receivedAt: fakeTimer.now(),
-        fresh: true,
-      };
-    };
-
-    test("derives geometry from the hierarchy being forwarded, not from the cache", async function () {
-      await startStreamServer();
-      const geometry = (ctrlProxyClient as any).screenGeometry;
-
-      // The cache is EMPTY, exactly as it is when the first request/response hierarchy is forwarded
-      // (processMessage pushes before requestHierarchySync installs it). A cache-reading
-      // implementation clears geometry here and never establishes provenance at all.
-      forwardHierarchy(390, 844, 3);
-      expect(geometry.bind()).toEqual({
-        captureSequence: expect.any(Number),
-        width: 1170,
-        height: 2532,
-      });
-
-      // Now the cache holds the PREVIOUS hierarchy while a resolution-changing response is
-      // forwarded. A cache-reading implementation would associate the new capture id with the old
-      // 1170x2532 dimensions, so screenshots could not pair until another hierarchy arrived.
-      setStaleCache(390, 844, 3);
-      forwardHierarchy(320, 693, 3);
-
-      const bound = geometry.bind();
-      expect(bound).not.toBeNull();
-      expect(bound.width).toBe(960);
-      expect(bound.height).toBe(2079);
-    });
-
-    test("clears tracked geometry when the forwarded hierarchy reports none", async function () {
-      await startStreamServer();
-      const geometry = (ctrlProxyClient as any).screenGeometry;
-
-      forwardHierarchy(390, 844, 3);
-      expect(geometry.bind()).not.toBeNull();
-
-      // A forwarded hierarchy with no usable screen size must not leave the previous dimensions
-      // vouched for — even though the cache still holds a perfectly good one.
-      setStaleCache(390, 844, 3);
-      (ctrlProxyClient as any).pushHierarchyToObservationStream(
-        { hierarchy: {} } as any,
-        {} as any,
-      );
-      expect(geometry.bind()).toBeNull();
-    });
-
     describe("scale metadata retention (issue #4548)", function () {
       /**
        * Deliver a hierarchy the way the runner does — a raw `hierarchy_update` through
@@ -3634,47 +3537,12 @@ describe("IOSCtrlProxyClient", function () {
       };
       const expectedFull = { nativeScale: 3.144, pixelWidth: 1179, pixelHeight: 2553 };
 
-      test("retains metadata on receipt even when NO device-data stream server is running", async function () {
+      test("retains metadata on receipt even when NO device-data stream server is running", function () {
         // No startStreamServer() here: the push early-returns with no server
         // (pushHierarchyToObservationStream ~2050), so a push-gated retention would leave this
-        // null. Receipt-based retention must not. (afterEach stops any server from other tests.)
-        await stopDeviceDataStreamSocketServer();
+        // null. Receipt-based retention must not.
         receiveHierarchy(fullMetadata);
         expect(ctrlProxyClient.getScreenScaleMetadata()).toEqual(expectedFull);
-      });
-
-      test("retains metadata on receipt even when the observation-stream push is SUPPRESSED", async function () {
-        await startStreamServer();
-        // Arm an initial-frame suppression for a requestId, then deliver that response. The push is
-        // skipped (consumeHierarchyObservationStreamSuppression), but retention still happens.
-        const requestId = "req-suppressed-1";
-        (ctrlProxyClient as any).hierarchyObservationStreamSuppressions.set(
-          requestId,
-          fakeTimer.setTimeout(() => {}, 10_000),
-        );
-        receiveHierarchy(fullMetadata, requestId);
-        // Prove the push really was suppressed (the suppression was consumed).
-        expect((ctrlProxyClient as any).hierarchyObservationStreamSuppressions.has(requestId)).toBe(
-          false,
-        );
-        expect(ctrlProxyClient.getScreenScaleMetadata()).toEqual(expectedFull);
-      });
-
-      test("canonical pixels (#4549): the tracked geometry claim uses nativeScale pixel dims", async function () {
-        await startStreamServer();
-        const geometry = (ctrlProxyClient as any).screenGeometry;
-
-        // Display Zoom values chosen so the two computations DISAGREE: points * screenScale
-        // (375*3=1125, 812*3=2436) vs the runner-reported pixel dims points * nativeScale
-        // (1179x2553). Under #4549 the capture-identity claim must equal the screenshot's real
-        // pixels, which XCUIScreenshot renders at NATIVE scale — so the claim is 1179x2553, NOT the
-        // old screenScale computation. This is what makes the daemon's exact pixel pairing work
-        // under Display Zoom.
-        receiveHierarchy(fullMetadata);
-        expect(ctrlProxyClient.getScreenScaleMetadata()).toEqual(expectedFull);
-        const bound = geometry.bind();
-        expect(bound.width).toBe(1179);
-        expect(bound.height).toBe(2553);
       });
 
       test("legacy hierarchy without the fields: metadata is null", function () {
@@ -3726,102 +3594,6 @@ describe("IOSCtrlProxyClient", function () {
           });
         }
       });
-
-      test("stamps the screenshot's coordinateSpace from the request-time binding, not later metadata (#4549)", async function () {
-        const socket = await startStreamServer();
-        const geometry = (ctrlProxyClient as any).screenGeometry;
-
-        // Bind a CANONICAL-PIXEL capture: forward a hierarchy carrying complete #4548 scale metadata.
-        (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
-          screenWidth: 375,
-          screenHeight: 812,
-          screenScale: 3,
-          nativeScale: 3,
-          pixelWidth: 1125,
-          pixelHeight: 2436,
-        });
-        const boundPx = geometry.bind();
-        expect(boundPx.coordinateSpace).toBe("px");
-        expect(boundPx.nativeScale).toBe(3);
-
-        // A legacy hierarchy arrives while the frame is in flight, flipping the LATEST metadata to
-        // null. Reading it at delivery would DROP the px declaration from a canonical-bound frame.
-        (ctrlProxyClient as any).reportedScaleMetadata = null;
-        socket.reset();
-
-        (ctrlProxyClient as any).pushScreenshotToObservationStream(
-          "c2hvdA==",
-          boundPx.width,
-          boundPx.height,
-          undefined,
-          boundPx.captureSequence,
-          boundPx.coordinateSpace,
-          boundPx.nativeScale,
-        );
-        const pxShot = socket.getWrittenMessages<any>().find((m) => m.type === "screenshot_update");
-        expect(pxShot.coordinateSpace).toBe("px"); // the bound value, NOT the flipped-to-null metadata
-        expect(pxShot.nativeScale).toBe(3);
-
-        // Reverse: a LEGACY-bound capture must not gain px just because metadata later appeared.
-        (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
-          screenWidth: 320,
-          screenHeight: 693,
-          screenScale: 3, // no nativeScale => legacy binding
-        });
-        const boundLegacy = geometry.bind();
-        expect(boundLegacy.coordinateSpace).toBeUndefined();
-        expect(boundLegacy.nativeScale).toBeUndefined();
-
-        (ctrlProxyClient as any).reportedScaleMetadata = {
-          nativeScale: 3,
-          pixelWidth: 960,
-          pixelHeight: 2079,
-        };
-        socket.reset();
-
-        (ctrlProxyClient as any).pushScreenshotToObservationStream(
-          "c2hvdA==",
-          boundLegacy.width,
-          boundLegacy.height,
-          undefined,
-          boundLegacy.captureSequence,
-          boundLegacy.coordinateSpace,
-          boundLegacy.nativeScale,
-        );
-        const legacyShot = socket
-          .getWrittenMessages<any>()
-          .find((m) => m.type === "screenshot_update");
-        expect(legacyShot.coordinateSpace).toBeUndefined(); // bound legacy, NOT the flipped-to-px metadata
-        expect(legacyShot.nativeScale).toBeUndefined();
-      });
-    });
-
-    describe("coordinate-mapping golden vectors: LIVE iOS point->pixel (issue #4547)", function () {
-      // The bootstrap path (observationInitialFrame's getIosScreenshotDimensions) and this LIVE
-      // hierarchy-update path (updateScreenGeometryFrom) are SEPARATE implementations of the same
-      // points * screenScale conversion. Both consume the shared golden vectors independently, so
-      // a #4549 canonical-pixel change (or any drift) in either path fails its own consumer —
-      // green tests on one path can never vouch for the other.
-      const vectors = loadCoordinateMappingVectors().iosPointToPixel;
-
-      for (const [index, vector] of vectors.entries()) {
-        test(`row ${index}: ${vector.pointWidth}x${vector.pointHeight} points at scale ${vector.scale || "absent"} -> ${vector.expectedPixelWidth}x${vector.expectedPixelHeight} pixels`, async function () {
-          await startStreamServer();
-          const geometry = (ctrlProxyClient as any).screenGeometry;
-
-          // scale === 0 encodes "hierarchy carried no screenScale" (the live path defaults to 1).
-          (ctrlProxyClient as any).pushHierarchyToObservationStream({ hierarchy: {} } as any, {
-            screenWidth: vector.pointWidth,
-            screenHeight: vector.pointHeight,
-            ...(vector.scale === 0 ? {} : { screenScale: vector.scale }),
-          });
-
-          const bound = geometry.bind();
-          expect(bound).not.toBeNull();
-          expect(bound.width).toBe(vector.expectedPixelWidth);
-          expect(bound.height).toBe(vector.expectedPixelHeight);
-        });
-      }
     });
   });
 

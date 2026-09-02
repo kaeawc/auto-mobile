@@ -282,7 +282,7 @@ describe("finalizeToolResponse", () => {
 
       // A representative sample of the newly-covered tools all skeletonize by
       // default (the full roster is bound to the opt-out by the anti-divergence
-      // test in test/server/tools/schema.test.ts).
+      // test in test/server/tools/schema.integration.test.ts).
       test.each(["dragAndDrop", "pressButton", "rotate", "homeScreen", "terminateApp"])(
         "%s defaults its observation to the compact skeleton",
         (toolName) => {

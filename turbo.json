@@ -34,7 +34,7 @@
       "passThroughEnv": ["CI", "GITHUB_ACTIONS"]
     },
     "test": {
-      "description": "Run Bun test suite. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach (registrationTeardownGuard, ctrlProxyProtocol, ctrlProxyWireParity, webrtcDeviceCaptureLatency, pinchGoldenVectorParity, coordinateMappingGoldenVectorParity); without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test:coverage's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.test.ts (issue #4351).",
+      "description": "Run the hermetic Bun unit suite. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach (registrationTeardownGuard, ctrlProxyProtocol, webrtcDeviceCaptureLatency, pinchGoldenVectorParity, coordinateMappingGoldenVectorParity); without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test:coverage's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.integration.test.ts (issue #4351).",
       "inputs": [
         "src/**",
         "test/**",
@@ -56,7 +56,117 @@
       ],
       "outputs": [],
       "outputLogs": "new-only",
-      "env": ["AUTOMOBILE_TEST_MODE"],
+      "env": [
+        "AUTOMOBILE_TEST_MODE",
+        "AUTOMOBILE_UNIT_TEST_WORKERS",
+        "AUTOMOBILE_TEST_TIMEOUT_MS",
+        "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
+      ],
+      "passThroughEnv": ["CI", "GITHUB_ACTIONS", "DEBUG_ADB_EXEC"]
+    },
+    "test:unit": {
+      "description": "Explicit alias of the hermetic Bun unit suite; native inputs mirror test and test:coverage for test/lint/turboTestInputsCoverNativeSources.integration.test.ts.",
+      "inputs": [
+        "src/**",
+        "test/**",
+        "schemas/**",
+        "scripts/**",
+        "package.json",
+        "bunfig.toml",
+        ".github/workflows/**",
+        "turbo.json",
+        "android/auto-mobile-sdk/src/main/kotlin/**",
+        "android/control-proxy/src/main/kotlin/**",
+        "android/control-proxy/src/test/kotlin/**",
+        "android/desktop-core/src/test/kotlin/**",
+        "android/protocol/src/main/kotlin/**",
+        "android/video-server/src/main/kotlin/**",
+        "ios/auto-mobile-sdk/Sources/**",
+        "ios/control-proxy/Sources/**",
+        "ios/control-proxy/Tests/**"
+      ],
+      "outputs": [],
+      "outputLogs": "new-only",
+      "env": [
+        "AUTOMOBILE_TEST_MODE",
+        "AUTOMOBILE_UNIT_TEST_WORKERS",
+        "AUTOMOBILE_TEST_TIMEOUT_MS",
+        "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
+      ],
+      "passThroughEnv": ["CI", "GITHUB_ACTIONS", "DEBUG_ADB_EXEC"]
+    },
+    "test:changed": {
+      "description": "Run Bun unit tests affected by local or base-ref changes; never cache git-worktree-sensitive selection.",
+      "inputs": ["src/**", "test/**", "scripts/test-ts.sh", "package.json", "bunfig.toml"],
+      "outputs": [],
+      "outputLogs": "new-only",
+      "cache": false,
+      "env": [
+        "AUTOMOBILE_TEST_MODE",
+        "AUTOMOBILE_UNIT_TEST_BASE_REF",
+        "AUTOMOBILE_UNIT_TEST_WORKERS",
+        "AUTOMOBILE_TEST_TIMEOUT_MS",
+        "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
+      ],
+      "passThroughEnv": ["CI", "GITHUB_ACTIONS", "DEBUG_ADB_EXEC"]
+    },
+    "test:integration": {
+      "description": "Run host real-I/O and repository-contract tests selected by the *.integration.test.ts contract. Integration tests read shell scripts, workflow definitions, and native source trees directly, so those inputs and turbo.json must invalidate cached results. Keep the native inputs in sync with test/lint/turboTestInputsCoverNativeSources.integration.test.ts (issue #4351).",
+      "inputs": [
+        "src/**",
+        "test/**",
+        "scripts/**",
+        "package.json",
+        "bunfig.toml",
+        ".github/workflows/**",
+        "turbo.json",
+        "android/auto-mobile-sdk/src/main/kotlin/**",
+        "android/control-proxy/src/main/kotlin/**",
+        "android/control-proxy/src/test/kotlin/**",
+        "android/desktop-core/**",
+        "android/desktop-core/src/test/kotlin/**",
+        "android/protocol/src/main/kotlin/**",
+        "android/video-server/src/main/kotlin/**",
+        "ios/auto-mobile-sdk/Sources/**",
+        "ios/control-proxy/Sources/**",
+        "ios/control-proxy/Tests/**"
+      ],
+      "outputs": [],
+      "outputLogs": "new-only",
+      "env": [
+        "AUTOMOBILE_TEST_MODE",
+        "AUTOMOBILE_INTEGRATION_TEST_WORKERS",
+        "AUTOMOBILE_TEST_TIMEOUT_MS",
+        "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
+      ],
+      "passThroughEnv": ["CI", "GITHUB_ACTIONS", "DEBUG_ADB_EXEC"]
+    },
+    "test:stress": {
+      "description": "Run explicit stress tests separately from unit and integration feedback.",
+      "inputs": ["src/**", "test/stress/**", "scripts/test-ts.sh", "package.json", "bunfig.toml"],
+      "outputs": [],
+      "outputLogs": "new-only",
+      "cache": false,
+      "env": [
+        "AUTOMOBILE_TEST_MODE",
+        "AUTOMOBILE_TEST_TIMEOUT_MS",
+        "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
+      ],
+      "passThroughEnv": ["CI", "GITHUB_ACTIONS", "DEBUG_ADB_EXEC"]
+    },
+    "test:all": {
+      "description": "Run unit, host integration, and stress lanes in sequence.",
+      "inputs": ["src/**", "test/**", "scripts/**", "package.json", "bunfig.toml", "turbo.json"],
+      "outputs": [],
+      "outputLogs": "new-only",
+      "cache": false,
+      "env": [
+        "AUTOMOBILE_TEST_MODE",
+        "AUTOMOBILE_UNIT_TEST_WORKERS",
+        "AUTOMOBILE_INTEGRATION_TEST_WORKERS",
+        "AUTOMOBILE_TEST_TIMEOUT_MS",
+        "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
+      ],
       "passThroughEnv": ["CI", "GITHUB_ACTIONS", "DEBUG_ADB_EXEC"]
     },
     "check:android-emulator-boundary": {
@@ -97,7 +207,7 @@
       "passThroughEnv": ["CI", "GITHUB_ACTIONS"]
     },
     "test:coverage": {
-      "description": "Run tests with coverage reporting to coverage/. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach; without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.test.ts (issue #4351).",
+      "description": "Run the hermetic unit lane with coverage reporting to coverage/. The android/** and ios/** globs below are read off disk by cross-language source-scan guards no TS import can reach; without them a Kotlin/Swift-only diff replays a cached result and the guard never runs. turbo.json is an input so editing test's list cannot leave this hash stale. Do not narrow or drop these without updating test/lint/turboTestInputsCoverNativeSources.integration.test.ts (issue #4351).",
       "inputs": [
         "src/**",
         "test/**",
@@ -118,7 +228,12 @@
       ],
       "outputs": ["coverage/**"],
       "outputLogs": "new-only",
-      "env": ["AUTOMOBILE_TEST_MODE"],
+      "env": [
+        "AUTOMOBILE_TEST_MODE",
+        "AUTOMOBILE_UNIT_TEST_WORKERS",
+        "AUTOMOBILE_TEST_TIMEOUT_MS",
+        "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS"
+      ],
       "passThroughEnv": ["CI", "GITHUB_ACTIONS"]
     }
   }

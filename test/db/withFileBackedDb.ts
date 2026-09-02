@@ -102,7 +102,7 @@ export interface FileBackedDbHarnessDeps {
    * Import a fresh `database.ts` module. Defaults to {@link importFreshDatabaseModule}.
    * Typed as the full {@link FreshDatabaseModule} (the only real module); a fake
    * that implements just the narrow {@link LifecycleDatabaseModule} contract casts
-   * at this single injection site (see `withFileBackedDb.test.ts`).
+   * at this single injection site (see `withFileBackedDb.integration.test.ts`).
    */
   importDatabaseModule?: () => Promise<FreshDatabaseModule>;
   /** The environment object to snapshot/restore. Defaults to `process.env`. */

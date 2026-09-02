@@ -18,7 +18,7 @@ import ts from "typescript";
  * This guard makes the coupling explicit and self-policing:
  *
  *  1. Every native source tree a test reads is a declared `inputs` glob on both
- *     the `test` and `test:coverage` tasks, so touching it busts the cache.
+ *     every cached test task, so touching it busts the cache.
  *  2. `turbo.json` itself is an input of both, so editing one task's input list
  *     can never leave the other replaying a stale hash.
  *  3. Each task's `description` names this file, so the "why is a directory no TS
@@ -30,8 +30,8 @@ import ts from "typescript";
  */
 describe("turbo test inputs cover native sources a guard reads (issue #4351)", () => {
   const ROOT = join(import.meta.dir, "..", "..");
-  const GUARD_PATH = "test/lint/turboTestInputsCoverNativeSources.test.ts";
-  const CACHED_TASKS = ["test", "test:coverage"] as const;
+  const GUARD_PATH = "test/lint/turboTestInputsCoverNativeSources.integration.test.ts";
+  const CACHED_TASKS = ["test", "test:unit", "test:integration", "test:coverage"] as const;
 
   /**
    * Native trees that a TS test reads off disk. Each must gate both cached tasks
@@ -62,7 +62,11 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
   interface TurboConfig {
     readonly tasks: Record<
       string,
-      { readonly inputs?: readonly string[]; readonly description?: string }
+      {
+        readonly inputs?: readonly string[];
+        readonly description?: string;
+        readonly env?: readonly string[];
+      }
     >;
   }
 
@@ -379,6 +383,38 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     });
   }
 
+  test("test tasks forward runner controls through Turbo strict env mode", () => {
+    const tasks = loadTurbo().tasks;
+    const expectedByTask = {
+      test: ["AUTOMOBILE_UNIT_TEST_WORKERS"],
+      "test:unit": ["AUTOMOBILE_UNIT_TEST_WORKERS"],
+      "test:changed": ["AUTOMOBILE_UNIT_TEST_WORKERS"],
+      "test:integration": ["AUTOMOBILE_INTEGRATION_TEST_WORKERS"],
+      "test:stress": [],
+      "test:all": ["AUTOMOBILE_UNIT_TEST_WORKERS", "AUTOMOBILE_INTEGRATION_TEST_WORKERS"],
+      "test:coverage": ["AUTOMOBILE_UNIT_TEST_WORKERS"],
+    } as const;
+
+    for (const [taskName, workerControls] of Object.entries(expectedByTask)) {
+      const env = tasks[taskName]?.env ?? [];
+      expect(env, taskName).toEqual(
+        expect.arrayContaining([
+          "AUTOMOBILE_TEST_TIMEOUT_MS",
+          "AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS",
+          ...workerControls,
+        ]),
+      );
+    }
+  });
+
+  test("integration caching includes scripts and workflows its tests read from disk", () => {
+    const inputs = loadTurbo().tasks["test:integration"]?.inputs ?? [];
+
+    expect(inputs).toEqual(
+      expect.arrayContaining(["scripts/**", ".github/workflows/**", "turbo.json"]),
+    );
+  });
+
   /**
    * `android/`/`ios/` path literals referenced by any test that resolve to a real
    * file or directory on disk. Comment or docstring mentions count too — the
@@ -558,11 +594,13 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
       "plan contract reads a YAML fixture; no native source tree is read",
     ],
   ]);
+  // One immutable scan feeds all assertions. Keeping repository I/O out of
+  // individual test bodies preserves the unit timing contract.
+  const referencedNativePathsSnapshot = referencedNativePaths();
 
   test("every native path a test references is a declared input or a documented not-read exemption", () => {
     const inputs = loadTurbo().tasks.test?.inputs ?? [];
-    const referenced = referencedNativePaths();
-    const uncovered = [...referenced.entries()]
+    const uncovered = [...referencedNativePathsSnapshot.entries()]
       .filter(([path]) => !coveredBy(inputs, path) && !NOT_READ_EXEMPTIONS.has(path))
       .map(([path, tests]) => `${path} (referenced by ${[...tests].join(", ")})`);
     expect(
@@ -576,21 +614,22 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     // Deterministic reproduction of the Windows CI failure shape: path.join on win32 yields
     // `ROOT\test\lint\...`, and without normalization `rel === GUARD_PATH` is false, so the
     // scanner reads its own source and self-flags the join-segment example in its comments.
-    const winAbs = `${ROOT}\\test\\lint\\turboTestInputsCoverNativeSources.test.ts`;
+    const winAbs = `${ROOT}\\test\\lint\\turboTestInputsCoverNativeSources.integration.test.ts`;
     expect(repoRelative(winAbs)).toBe(GUARD_PATH);
   });
 
   test("the scan never attributes a native path to its own owner file", () => {
     // Belt to the normalization above: whatever the platform separator, the owner exclusion must
     // hold — the guard's own comments deliberately contain scan-pattern examples.
-    for (const [path, tests] of referencedNativePaths()) {
+    for (const [path, tests] of referencedNativePathsSnapshot) {
       expect([...tests], `${path} attributed to the scanner itself`).not.toContain(GUARD_PATH);
     }
   });
 
   test("no not-read exemption is stale", () => {
-    const referenced = referencedNativePaths();
-    const stale = [...NOT_READ_EXEMPTIONS.keys()].filter((path) => !referenced.has(path));
+    const stale = [...NOT_READ_EXEMPTIONS.keys()].filter(
+      (path) => !referencedNativePathsSnapshot.has(path),
+    );
     expect(
       stale,
       `NOT_READ_EXEMPTIONS entries no longer referenced by any test — prune them: ${stale.join(", ")}`,

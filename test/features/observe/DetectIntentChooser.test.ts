@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { DetectIntentChooser } from "../../../src/features/observe/DetectIntentChooser";
 import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 
@@ -244,16 +244,25 @@ describe("DetectIntentChooser", () => {
         },
       ];
 
-      for (const viewHierarchy of testCases) {
-        fakeObserveScreen.setObserveResult({
-          ...mockObserveResult,
-          viewHierarchy,
-        });
-        fakeDeepLinkManager.setDefaultIntentChooserDetected(true);
+      let currentHierarchy = testCases[0]!;
+      const observedInteractionSpy = spyOn(
+        detectIntentChooser,
+        "observedInteraction",
+      ).mockImplementation(async (block) => {
+        const result = await block({ ...mockObserveResult, viewHierarchy: currentHierarchy });
+        return result;
+      });
+      try {
+        for (const viewHierarchy of testCases) {
+          currentHierarchy = viewHierarchy;
+          fakeDeepLinkManager.setDefaultIntentChooserDetected(true);
 
-        const result = await detectIntentChooser.execute();
-        expect(result.success).toBe(true);
-        expect(result.detected).toBe(true);
+          const result = await detectIntentChooser.execute();
+          expect(result.success).toBe(true);
+          expect(result.detected).toBe(true);
+        }
+      } finally {
+        observedInteractionSpy.mockRestore();
       }
     });
 
@@ -289,16 +298,24 @@ describe("DetectIntentChooser", () => {
         },
       ];
 
-      for (const viewHierarchy of testCases) {
-        fakeObserveScreen.setObserveResult({
-          ...mockObserveResult,
-          viewHierarchy,
-        });
-        fakeDeepLinkManager.setDefaultIntentChooserDetected(false);
+      let currentHierarchy = testCases[0]!;
+      const observedInteractionSpy = spyOn(
+        detectIntentChooser,
+        "observedInteraction",
+      ).mockImplementation(async (block) => {
+        return block({ ...mockObserveResult, viewHierarchy: currentHierarchy });
+      });
+      try {
+        for (const viewHierarchy of testCases) {
+          currentHierarchy = viewHierarchy;
+          fakeDeepLinkManager.setDefaultIntentChooserDetected(false);
 
-        const result = await detectIntentChooser.execute();
-        expect(result.success).toBe(true);
-        expect(result.detected).toBe(false);
+          const result = await detectIntentChooser.execute();
+          expect(result.success).toBe(true);
+          expect(result.detected).toBe(false);
+        }
+      } finally {
+        observedInteractionSpy.mockRestore();
       }
     });
   });

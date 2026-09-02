@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 #
 # The macOS ScreenCaptureKit helper ships only as a signed GitHub Release asset.
 # The npm tarball must never include its Swift source or a copied build tree.

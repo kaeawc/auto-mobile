@@ -20,7 +20,7 @@ import { indexOfNamed, indexOfWaitOn, loadJobSteps, stepNamed } from "../helpers
 const JOB_ID = "bats-tests";
 const INSTALL_STEP = "Install BATS";
 const INSTALL_ID = "install-bats";
-const CONSUMER_STEP = "Run BATS Tests";
+const CONSUMER_STEP = "Run BATS Unit Tests";
 
 const WORKFLOWS = [
   { label: "pull_request.yml", path: ".github/workflows/pull_request.yml" },

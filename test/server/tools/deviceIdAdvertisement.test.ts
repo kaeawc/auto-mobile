@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { createMcpServer } from "../../../src/server";
+import { registerMcpTools } from "../../../src/server";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 
 type AdvertisedTool = ReturnType<typeof ToolRegistry.getToolDefinitions>[number];
@@ -26,7 +26,7 @@ describe("advertised deviceId schema", () => {
   });
 
   test("hides executor-injected deviceId while keeping agent-facing deviceId", () => {
-    createMcpServer();
+    registerMcpTools(false);
 
     const definitions = ToolRegistry.getToolDefinitions();
 
@@ -53,7 +53,7 @@ describe("advertised deviceId schema", () => {
   });
 
   test("keeps executor-injected deviceId accepted by runtime validation", () => {
-    createMcpServer();
+    registerMcpTools(false);
 
     const observeTool = ToolRegistry.getTool("observe");
     expect(observeTool, "observe should be registered").toBeDefined();

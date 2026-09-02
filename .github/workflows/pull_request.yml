@@ -451,9 +451,9 @@ jobs:
             echo "should_run=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # The MediaMTX-backed WebRTC publisher integration test (#4290) exercises
-      # the real WHIP publisher contract. It is heavy (browser + SFU + FFmpeg),
-      # so it runs only when WebRTC is actually in play — see webrtc_should_run.
+      # The MediaMTX publisher and real Android/iOS capture jobs are heavy
+      # (devices + browser + SFU + FFmpeg), so they run only when WebRTC is
+      # actually in play — see webrtc_should_run.
       - name: "Check for WebRTC publisher changes"
         id: filter-webrtc
         uses: dorny/paths-filter@v3
@@ -461,30 +461,38 @@ jobs:
           filters: |
             webrtc:
               - 'src/features/webrtc/**'
+              - 'src/features/screen-stream/**'
               - 'src/server/webrtcStreamManager.ts'
               - 'src/daemon/webrtc*'
+              - 'src/daemon/videoStreamSocket*'
+              - 'src/daemon/videoStreamFraming.ts'
+              - 'src/daemon/daemonFiles.ts'
+              - 'src/daemon/socketServer/**'
               - 'examples/mediamtx/**'
               - 'test/integration/mediamtxWebRtcPublisher.integration.test.ts'
+              - 'test/integration/webrtcDeviceCapture.integration.test.ts'
+              - 'test/helpers/captureStageTimeline.ts'
               - 'test/bats/mediamtx-webrtc-integration.bats'
               - 'scripts/webrtc/**'
               # Native encoder sources decide the on-the-wire H.264 profile the
               # publisher must accept. A profile change here (e.g. Baseline ->
               # Main) is exactly the #4877 class of regression this job guards, so
               # exercise it when the native encoders change (issue #4884).
-              - 'android/video-server/**/VideoEncoder.kt'
+              - 'android/video-server/**'
               - 'ios/screen-capture/**'
               # This workflow controls WebRTC-job gating, so a change to it must
               # exercise the job rather than being silently skipped.
               - '.github/workflows/pull_request.yml'
+              - '.github/workflows/merge.yml'
 
-      # Run the WebRTC integration test when the publisher surface is touched, OR
+      # Run the WebRTC integration jobs when the streaming surface is touched, OR
       # when a human explicitly opts in by labelling the PR `webrtc` or mentioning
       # `webrtc` in the title/body (case-insensitive). The explicit signals are an
       # intentional override, so unlike the native gates this deliberately does NOT
       # exclude docs_only — a docs PR that says `webrtc` opts in on purpose. Title
       # and body are passed via env, never interpolated into the script, so a
       # crafted PR title cannot inject shell.
-      - name: "Decide if the WebRTC integration test should run"
+      - name: "Decide if WebRTC integration jobs should run"
         id: webrtc_should_run
         env:
           PATH_MATCH: ${{ steps.filter-webrtc.outputs.webrtc }}
@@ -1013,14 +1021,63 @@ jobs:
 
       - wait: install-bats
 
-      # BATS' cross-file parallel runner can exit nonzero after every test passes
-      # on hosted Linux/macOS runners. Keep the fast local default, but use the
-      # stable serial mode here; the 10-minute job budget has ample headroom.
-      - name: "Run BATS Tests"
+      - name: "Run BATS Unit Tests"
         shell: bash
         env:
-          AUTOMOBILE_BATS_SERIAL_ONLY: "true"
-        run: scripts/ci/run-bats.sh
+          # The macOS runner has three shared cores; shell-heavy files can be
+          # descheduled behind their parallel peers despite no real I/O.
+          AUTOMOBILE_BATS_MAX_FILE_SECONDS: "240"
+          AUTOMOBILE_BATS_UNIT_BUDGET_SECONDS: "420"
+        run: scripts/ci/run-bats.sh unit
+
+  bats-integration-tests:
+    timeout-minutes: 10
+    name: "BATS Integration Tests (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    needs: detect-changes
+    if: needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Install BATS"
+        shell: bash
+        run: |
+          if command -v bats &>/dev/null; then
+            echo "bats already installed: $(bats --version)"
+          elif command -v brew &>/dev/null; then
+            brew install bats-core
+          else
+            git clone --depth 1 --branch v1.14.0 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            sudo /tmp/bats-core/install.sh /usr/local
+          fi
+          if command -v shellcheck &>/dev/null; then
+            echo "shellcheck already installed"
+          elif command -v brew &>/dev/null; then
+            brew install shellcheck
+          else
+            echo "shellcheck missing and no package manager to install it" >&2
+            exit 1
+          fi
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      - name: "Run BATS Integration Tests"
+        shell: bash
+        run: scripts/ci/run-bats.sh integration
 
   installer-minimal:
     timeout-minutes: 20
@@ -1089,101 +1146,6 @@ jobs:
         run: |
           echo "Installer exit code: ${INSTALL_EXIT_CODE:-0}"
           echo "Uninstaller exit code: ${UNINSTALL_EXIT_CODE:-0}"
-          exit 1
-
-  installer-development:
-    timeout-minutes: 30
-    name: "Installer Development (${{ matrix.os }})"
-    runs-on: ${{ matrix.os }}
-    needs: detect-changes
-    env:
-      RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}
-      # Keep daemon logs in the artifact tree instead of rediscovering the
-      # runtime's platform-specific default after a failure.
-      AUTOMOBILE_LOG_DIR: "${{ github.workspace }}/ci-logs/daemon-logs"
-      # ffmpeg is a large, slow install (it has timed out this job) and video
-      # recording is not exercised here — skip it.
-      AUTOMOBILE_INSTALL_SKIP_FFMPEG: "true"
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    steps:
-      - name: "Skip installer validation"
-        if: env.RUN_INSTALLER != 'true'
-        run: echo "Skipping installer validation for documentation-only changes"
-
-      - name: "Git Checkout"
-        if: env.RUN_INSTALLER == 'true'
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Build source CLI for installer diagnostics"
-        if: env.RUN_INSTALLER == 'true'
-        uses: ./.github/actions/setup-auto-mobile-npm-package
-        with:
-          install-global: "false"
-
-      - name: "Run Installer (development)"
-        id: run-installer-development
-        if: env.RUN_INSTALLER == 'true'
-        shell: bash
-        continue-on-error: true
-        env:
-          # Pin the installer benchmark to the standard 30s daemon startup budget.
-          AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS: "30000"
-          AUTOMOBILE_STARTUP_BENCHMARK: "1"
-          AUTOMOBILE_STARTUP_BENCHMARK_OUTPUT: "${{ github.workspace }}/ci-logs/installer-daemon-startup.json"
-          AUTOMOBILE_STARTUP_BENCHMARK_LABEL: "installer-development-${{ matrix.os }}"
-          AUTOMOBILE_CLI_PATH: "${{ github.workspace }}/dist/src/index.js"
-        run: |
-          set -uo pipefail
-          mkdir -p ci-logs
-          set +e
-          bash ./scripts/install.sh --contributor --preset development --non-interactive 2>&1 | tee ci-logs/installer.log
-          install_status=${PIPESTATUS[0]}
-          set -e
-          : > ci-logs/ctrl-proxy-cache-state.txt
-          for cache_path in "${TMPDIR:-/tmp}"/auto-mobile-prefetch-* "${HOME}/.automobile/ctrl-proxy-ios"; do
-            [[ -e "${cache_path}" ]] || continue
-            printf '%s\n' "=== ${cache_path} ===" >> ci-logs/ctrl-proxy-cache-state.txt
-            find "${cache_path}" -maxdepth 2 -mindepth 0 -print >> ci-logs/ctrl-proxy-cache-state.txt 2>&1 || true
-          done
-          echo "INSTALL_EXIT_CODE=${install_status}" >> "$GITHUB_ENV"
-          echo "install_exit_code=${install_status}" >> "$GITHUB_OUTPUT"
-          exit 0
-
-      - name: "Verify runtime dependencies"
-        if: env.RUN_INSTALLER == 'true' && steps.run-installer-development.outputs.install_exit_code == '0'
-        run: ./scripts/ci/verify-runtime-deps.sh
-
-      - name: "Build from source"
-        if: env.RUN_INSTALLER == 'true' && steps.run-installer-development.outputs.install_exit_code == '0'
-        shell: bash
-        run: |
-          export PATH="${HOME}/.bun/bin:${PATH}"
-          bun install --frozen-lockfile
-          bunx turbo run build --output-logs=errors-only
-
-      - name: "Daemon lifecycle (start → health → doctor → stop)"
-        if: env.RUN_INSTALLER == 'true' && steps.run-installer-development.outputs.install_exit_code == '0'
-        run: ./scripts/ci/daemon-lifecycle.sh
-
-      - name: "Upload Logs"
-        if: env.RUN_INSTALLER == 'true' && (steps.run-installer-development.outputs.install_exit_code != '0' || failure())
-        continue-on-error: true
-        uses: actions/upload-artifact@v6
-        with:
-          name: installer-development-${{ matrix.os }}-logs
-          path: ci-logs/
-          retention-days: 7
-
-      - name: "Fail on error"
-        if: env.RUN_INSTALLER == 'true' && steps.run-installer-development.outputs.install_exit_code != '0'
-        shell: bash
-        run: |
-          echo "Installer exit code: ${{ steps.run-installer-development.outputs.install_exit_code }}"
           exit 1
 
   # =============================================================================
@@ -1260,6 +1222,99 @@ jobs:
   # =============================================================================
   # Node TypeScript Build and Test (Skip for docs-only changes)
   # =============================================================================
+
+  node-unit-tests:
+    timeout-minutes: 15
+    name: "Node Unit Tests (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+          fetch-depth: 0
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      - name: "Run complete unit lane"
+        shell: bash
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+          AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "720"
+          AUTOMOBILE_UNIT_JUNIT_DIR: scratch/timing-unit-reports
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
+          fi
+          bash scripts/test-ts.sh unit
+
+      - name: "Enforce 100ms budget for changed unit tests"
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          BUN_TEST_TIMING_BASE_REF: ${{ github.event.pull_request.base.sha }}
+          BUN_TEST_TIMING_REPORT_DIR: scratch/timing-unit-reports
+        run: bash scripts/validate-bun-test-timings.sh
+
+  node-host-integration-tests:
+    timeout-minutes: 20
+    name: "Node Host Integration Tests (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Setup Bun"
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: "Install Bun dependencies"
+        shell: bash
+        run: scripts/ci/install-bun-deps.sh
+
+      - name: "Run host integration lane"
+        shell: bash
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+          AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "900"
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
+          fi
+          bash scripts/test-ts.sh integration
+
+      - name: "Run stress lane"
+        shell: bash
+        env:
+          AUTOMOBILE_TEST_MODE: "true"
+          AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS: "300"
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            unset AUTOMOBILE_TEST_WALL_TIMEOUT_SECONDS
+          fi
+          bash scripts/test-ts.sh stress
 
   mcp-build-and-test:
     name: "Node TypeScript Build and Test (${{ matrix.os }})"
@@ -1369,62 +1424,6 @@ jobs:
           set -euo pipefail
           mkdir -p ci-logs
           turbo run build --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-build-${{ matrix.os }}.log"
-
-      - name: "Run Tests"
-        if: env.RUN_MCP_BUILD_TEST == 'true'
-        shell: bash
-        env:
-          # Unit tests use injected fakes; real ADB coverage belongs to the
-          # dedicated device-integration jobs. Never start an adb daemon here.
-          AUTOMOBILE_TEST_MODE: "true"
-          TURBO_TELEMETRY_DISABLED: "1"
-          TURBO_NO_UPDATE_NOTIFIER: "1"
-          DO_NOT_TRACK: "1"
-          NO_COLOR: "1"
-        run: |
-          set -euo pipefail
-          mkdir -p ci-logs
-          # Bun 1.3.14 regresses per-file isolation on Windows; keep that
-          # platform's suite in one global while other platforms stay isolated.
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            bun run test:windows 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
-          else
-            # macOS-only (this job's matrix is macos + windows; the ubuntu Node TS
-            # suite is a SEPARATE job that keeps the tight 5s ceiling). The hosted
-            # macos runner is markedly slower / more contended than the Linux lane,
-            # so this ~13k-test --isolate suite intermittently trips bun's default
-            # 5s per-test / 10s hook ceiling by a hair (observed 5002/5004ms on
-            # fully-faked tests; a 10052ms beforeEach/afterEach hook) — a pure
-            # runner-contention flake, macos-only (ubuntu + windows had zero). Raise
-            # bun's timeout to give that headroom; --timeout covers BOTH the test and
-            # hook budgets (verified). Bypass turbo like the Windows branch so the
-            # flag applies directly (macos then always runs, which also keeps the
-            # native-source-scan guard tests from ever replaying a cached result).
-            #
-            # bun's --timeout ONLY bounds individual test()/hook bodies. It cannot
-            # bound a hang OUTSIDE that scope: module-level/describe-body evaluation,
-            # a leaked real socket/child that keeps the process alive at teardown, or
-            # a real-timer/real-socket poll that never settles. Several files in this
-            # suite do real I/O (unix-socket daemon servers, a werift WebRTC loopback,
-            # real child spawns) rather than injected fakes, so one of them can wedge
-            # the whole run. Before this bound such a wedge rode the 25-minute JOB
-            # timeout to a silent CANCELLED (run 32156898919: bun hung mid-suite for
-            # ~24m, GitHub dropped the streamed log, no actionable signal). Wrap the
-            # invocation in a portable wall-clock watchdog (macos has no GNU
-            # `timeout`; this helper kills the whole process group and returns 124 on
-            # expiry) sized well above a healthy run (~6m observed) but far below the
-            # job timeout, so a hang fails FAST and RED with the tee'd log preserved
-            # for the "Upload Build/Test Logs" step to capture (issue: macos test hang).
-            # shellcheck source=scripts/ios/run_with_timeout.sh
-            source scripts/ios/run_with_timeout.sh
-            test_status=0
-            run_with_timeout 720 bun test --isolate --timeout 20000 2>&1 \
-              | tee "ci-logs/bun-test-${{ matrix.os }}.log" || test_status=$?
-            if [[ "$test_status" -eq 124 ]]; then
-              echo "::error::macOS bun test suite exceeded the 12-minute wall-clock ceiling and was aborted (a test is hanging on real I/O — a real socket/child/timer, not an injected fake). Inspect the last ::group:: in the uploaded ci-logs/bun-test-macos-latest.log to find the file that ran last."
-            fi
-            exit "$test_status"
-          fi
 
       - name: "Run Bun image runtime smoke"
         if: env.RUN_MCP_BUILD_TEST == 'true' && (matrix.os == 'macos-latest' || matrix.os == 'windows-latest')
@@ -2398,7 +2397,7 @@ jobs:
     name: "Build CtrlProxy APK"
     runs-on: ubuntu-latest
     needs: detect-changes
-    if: needs.detect-changes.outputs.android_should_run == 'true'
+    if: needs.detect-changes.outputs.android_should_run == 'true' || needs.detect-changes.outputs.webrtc_should_run == 'true'
     defaults:
       run:
         working-directory: android
@@ -2410,7 +2409,7 @@ jobs:
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":control-proxy:assembleDebug :control-proxy:assembleRelease"
+          gradle-tasks: ":control-proxy:assembleDebug :control-proxy:assembleRelease :video-server:d8Dex"
           gradle-project-directory: "android"
           gradle-home-directory: "~/.gradle/${{ github.job }}"
           reuse-configuration-cache: true
@@ -2425,6 +2424,12 @@ jobs:
         with:
           name: control-proxy-apk
           path: android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
+
+      - name: "Upload video-server jar"
+        uses: actions/upload-artifact@v6
+        with:
+          name: video-server-jar
+          path: android/video-server/build/libs/automobile-video.jar
 
   build-playground-app:
     timeout-minutes: 20
@@ -2998,10 +3003,9 @@ jobs:
   # declared in exactly one place (add a new iOS *build* job to ios-build-gate,
   # not here).
   # =============================================================================
-  # WebRTC publisher integration test (#4290 / #4328)
-  # Real WHIP publisher contract: FFmpeg H.264 -> WebRtcPublisher -> MediaMTX ->
-  # headless-Chrome WHEP decode. Heavy (browser + SFU + FFmpeg + UDP), so it runs
-  # only when WebRTC is in play (webrtc_should_run). Reported through the stable
+  # WebRTC integration coverage (#4290 / #4328)
+  # The publisher contract and Android/iOS capture-to-WHEP paths run only when
+  # WebRTC is in play (webrtc_should_run). They report through the stable
   # "WebRTC" gate below; advisory until that gate is added to the ruleset.
   # =============================================================================
   webrtc-integration-test:
@@ -3053,6 +3057,194 @@ jobs:
       - name: "Run MediaMTX WebRTC publisher integration test"
         shell: bash
         run: bun run test:integration:webrtc-mediamtx
+
+  android-device-webrtc:
+    name: "Android Device Capture to WHEP"
+    needs: [detect-changes, build-android-control-proxy]
+    if: needs.detect-changes.outputs.webrtc_should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Download CtrlProxy APK"
+        uses: actions/download-artifact@v7
+        with:
+          name: control-proxy-apk
+          path: android/control-proxy/build/outputs/apk/debug
+
+      - name: "Download video-server jar"
+        uses: actions/download-artifact@v7
+        with:
+          name: video-server-jar
+          path: android/video-server/build/libs
+
+      - name: "Install Chrome for WHEP decoding"
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes google-chrome-stable || sudo apt-get install --yes chromium-browser
+
+      - uses: ./.github/actions/android-emulator
+        with:
+          script: |
+            cd "$GITHUB_WORKSPACE"
+            AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION=1 \
+            AUTOMOBILE_WEBRTC_DEVICE_PLATFORM=android \
+            AUTOMOBILE_ANDROID_H264_DEVICE_ID=emulator-5554 \
+            AUTOMOBILE_VIDEO_SERVER_JAR="$GITHUB_WORKSPACE/android/video-server/build/libs/automobile-video.jar" \
+            AUTOMOBILE_REQUIRE_VIDEO_SERVER=1 \
+              bun run test:integration:webrtc-device
+          working-directory: "./android/"
+          accessibility-apk-path: control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
+
+      - name: "Explain WebRTC device results"
+        if: always()
+        continue-on-error: true
+        run: bash scripts/webrtc/explain-device-results.sh android
+
+      - name: "Upload WebRTC device artifacts"
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: android-webrtc-device-artifacts-${{ github.run_attempt }}
+          path: scratch/webrtc-device-integration/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  ios-device-webrtc:
+    name: "iOS Device Capture to WHEP"
+    needs: detect-changes
+    if: needs.detect-changes.outputs.webrtc_should_run == 'true'
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Ensure iOS Simulator runtime"
+        uses: ./.github/actions/ensure-ios-simulator-runtime
+
+      - name: "Build iOS capture prerequisites"
+        run: |
+          brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+          test -x "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" || brew install --cask google-chrome
+          (cd ios/screen-capture && swift build)
+
+      - name: "Boot and activate iOS Simulator"
+        run: |
+          result="$(bun run src/index.ts --boot-device --platform ios --create-if-missing --timeout-ms 600000)"
+          simulator_udid="$(printf '%s' "${result}" | jq -r '.deviceId')"
+          if [[ -z "${simulator_udid}" || "${simulator_udid}" == "null" ]]; then
+            echo "::error::AutoMobile product boot returned no deviceId." >&2
+            exit 1
+          fi
+          if pgrep -x Simulator >/dev/null; then
+            killall Simulator
+            for _ in {1..30}; do
+              pgrep -x Simulator >/dev/null || break
+              sleep 1
+            done
+            if pgrep -x Simulator >/dev/null; then
+              echo "::error::Simulator.app did not exit before activation." >&2
+              exit 1
+            fi
+          fi
+          open -a Simulator --args -CurrentDeviceUDID "${simulator_udid}"
+          helper_path="${GITHUB_WORKSPACE}/ios/screen-capture/.build/debug/screen-capture-helper"
+          simulator_name="$(xcrun simctl list devices --json | jq -r --arg udid "${simulator_udid}" \
+            '[.devices[][] | select(.udid == $udid) | .name] | first // empty')"
+          if [[ -z "${simulator_name}" ]]; then
+            echo "::error::Could not resolve the selected Simulator name." >&2
+            exit 1
+          fi
+          simulator_window_ready=0
+          for _ in {1..30}; do
+            simulator_windows="$("${helper_path}" --list-simulators 2>/dev/null || true)"
+            if printf '%s' "${simulator_windows}" | jq -e --arg name "${simulator_name}" \
+              '.windows | map(select((.title // "") | ascii_downcase | contains($name | ascii_downcase))) | length == 1' \
+              >/dev/null; then
+              simulator_window_ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [[ "${simulator_window_ready}" != "1" ]]; then
+            echo "::error::Selected Simulator window did not become discoverable by ScreenCaptureKit." >&2
+            exit 1
+          fi
+
+      - name: "Run iOS device capture integration"
+        env:
+          AUTOMOBILE_WEBRTC_DEVICE_INTEGRATION: "1"
+          AUTOMOBILE_WEBRTC_DEVICE_PLATFORM: ios
+          AUTOMOBILE_IOS_SCREEN_CAPTURE_HELPER: ${{ github.workspace }}/ios/screen-capture/.build/debug/screen-capture-helper
+          AUTOMOBILE_IOS_SIMULATOR_WINDOW_TIMEOUT_MS: "15000"
+        run: |
+          set -uo pipefail
+
+          reap_before_retry() {
+            pkill -f "index.js --daemon-mode" 2>/dev/null || true
+            pkill -x mediamtx 2>/dev/null || true
+            pkill -f "remote-debugging-port=9222" 2>/dev/null || true
+            sleep 2
+            pkill -KILL -x mediamtx 2>/dev/null || true
+            pkill -KILL -f "index.js --daemon-mode" 2>/dev/null || true
+            for _ in $(seq 1 15); do
+              lsof -nP -iTCP:8889 -sTCP:LISTEN >/dev/null 2>&1 || return 0
+              sleep 1
+            done
+            echo "::error::Port 8889 still bound after cleanup; skipping retry to avoid a guaranteed conflict." >&2
+            return 1
+          }
+
+          attempts=2
+          for attempt in $(seq 1 "${attempts}"); do
+            echo "::group::iOS device capture integration (attempt ${attempt}/${attempts})"
+            bun run test:integration:webrtc-device && rc=0 || rc=$?
+            echo "::endgroup::"
+            if [ "${rc}" -eq 0 ]; then
+              if [ "${attempt}" -gt 1 ]; then
+                echo "iOS device capture passed on retry (transient macos-26 ScreenCaptureKit flake)."
+              fi
+              exit 0
+            fi
+            echo "iOS device capture attempt ${attempt} failed (exit ${rc})."
+            if [ "${attempt}" -lt "${attempts}" ]; then
+              echo "Reaping MediaMTX / daemon / Chrome before one retry."
+              reap_before_retry || exit 1
+            fi
+          done
+          echo "iOS device capture failed after ${attempts} attempts."
+          exit 1
+
+      - name: "Explain WebRTC device results"
+        if: always()
+        continue-on-error: true
+        run: bash scripts/webrtc/explain-device-results.sh ios
+
+      - name: "Upload WebRTC device artifacts"
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: ios-webrtc-device-artifacts-${{ github.run_attempt }}
+          path: scratch/webrtc-device-integration/
+          if-no-files-found: ignore
+          retention-days: 7
 
   ios-gate:
     timeout-minutes: 10
@@ -3229,6 +3421,7 @@ jobs:
     needs:
       - detect-changes
       - bats-tests
+      - bats-integration-tests
     # Roll-up only reads needs.*.result — it needs no token scopes.
     permissions: {}
     runs-on: ubuntu-latest
@@ -3238,6 +3431,7 @@ jobs:
           declare -A results=(
             [detect-changes]="${{ needs.detect-changes.result }}"
             [bats-tests]="${{ needs.bats-tests.result }}"
+            [bats-integration-tests]="${{ needs.bats-integration-tests.result }}"
           )
           fail=
           for name in "${!results[@]}"; do
@@ -3252,9 +3446,39 @@ jobs:
             exit 1
           fi
 
-  # Stable roll-up of the WebRTC integration test so it can be promoted to a
-  # required check. The test is conditional (webrtc_should_run); when it is gated
-  # out its result is "skipped" (not failure), so this gate passes and does not
+  node-tests-gate:
+    timeout-minutes: 10
+    name: "Node Tests"
+    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
+    needs:
+      - detect-changes
+      - node-unit-tests
+      - node-host-integration-tests
+    permissions: {}
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Check results"
+        run: |
+          declare -A results=(
+            [detect-changes]="${{ needs.detect-changes.result }}"
+            [node-unit-tests]="${{ needs.node-unit-tests.result }}"
+            [node-host-integration-tests]="${{ needs.node-host-integration-tests.result }}"
+          )
+          fail=
+          for name in "${!results[@]}"; do
+            r="${results[$name]}"
+            if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
+              echo "::error::Node Tests gate dependency ${name} = ${r}"
+              fail=1
+            fi
+          done
+          if [[ -n "$fail" ]]; then
+            exit 1
+          fi
+
+  # Stable roll-up of all WebRTC integration jobs so they can be promoted to a
+  # required check. The jobs are conditional (webrtc_should_run); when gated out
+  # their results are "skipped" (not failure), so this gate passes and does not
   # wedge non-WebRTC PRs. NOTE: advisory until "WebRTC" is added to the green-main
   # ruleset's required checks — a manual repo-settings step.
   webrtc-gate:
@@ -3264,6 +3488,8 @@ jobs:
     needs:
       - detect-changes
       - webrtc-integration-test
+      - android-device-webrtc
+      - ios-device-webrtc
     # Roll-up only reads needs.*.result — it needs no token scopes.
     permissions: {}
     runs-on: ubuntu-latest
@@ -3273,6 +3499,8 @@ jobs:
           declare -A results=(
             [detect-changes]="${{ needs.detect-changes.result }}"
             [webrtc-integration-test]="${{ needs.webrtc-integration-test.result }}"
+            [android-device-webrtc]="${{ needs.android-device-webrtc.result }}"
+            [ios-device-webrtc]="${{ needs.ios-device-webrtc.result }}"
           )
           fail=
           for name in "${!results[@]}"; do

@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 #
 # Tests for scripts/shellcheck/validate_markdown_bash.sh — the gate that
 # shellcheck-lints fenced ```bash blocks embedded in `.claude/commands/*.md` and

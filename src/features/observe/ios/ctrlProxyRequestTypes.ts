@@ -11,7 +11,7 @@
  *
  * This list is the authoritative device contract the TS iOS client mirrors — the
  * iOS analog of Android's `KNOWN_REQUEST_TYPES` (#2835). It is transcribed by hand
- * from the Swift `RequestType` enum; `ctrlProxyWireParity.test.ts` reads the actual
+ * from the Swift `RequestType` enum; `ctrlProxyWireParity.integration.test.ts` reads the actual
  * rawValues out of `Models.swift` and fails if this list drifts from them, and also
  * fails if any command string the iOS client can emit is not a member of this set.
  *

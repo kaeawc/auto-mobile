@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+# bats file_tags=integration
 #
 # Tests for scripts/ci/install-fast-validation-deps.sh
 #

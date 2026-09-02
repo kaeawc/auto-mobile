@@ -1,129 +1,157 @@
 #!/usr/bin/env bats
-#
-# Tests for scripts/ci/run-bats.sh — the CI BATS runner that runs the suite in
-# two passes: a cross-file-parallel pass (everything but `serial`-tagged files)
-# and a serial pass (the `serial`-tagged files).
 
 setup() {
   REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   SCRIPT="$REPO_ROOT/scripts/ci/run-bats.sh"
-
-  # Isolated PATH shim so the script exec's our fake `bats` (which appends each
-  # invocation's args) instead of the real one, and finds a fake `parallel` so
-  # it never tries to install anything.
   STUB_BIN="$(mktemp -d)"
+  FIXTURES="$(mktemp -d)"
   ARGS_FILE="$(mktemp)"
   FAKE_HOME="$(mktemp -d)"
 
-  # The runner calls bats twice; record every invocation on its own line.
   cat > "$STUB_BIN/bats" <<EOF
 #!/usr/bin/env bash
-printf '%s\n' "\$*" >> "$ARGS_FILE"
+printf 'bats:%s\n' "\$1" >> "$ARGS_FILE"
+case "\$1" in
+  *fail*) exit 1 ;;
+esac
 EOF
-  chmod +x "$STUB_BIN/bats"
 
-  # GNU parallel identifies itself via `--version`; the runner probes for that
-  # string, so the stub must emit it or the runner would try to install.
-  cat > "$STUB_BIN/parallel" <<'EOF'
+  cat > "$STUB_BIN/parallel" <<EOF
 #!/usr/bin/env bash
-if [[ "$1" == "--version" ]]; then
+if [[ "\${1:-}" == "--version" ]]; then
   echo "GNU parallel 20230101"
   exit 0
 fi
-exit 0
+printf 'parallel:%s\n' "\$*" >> "$ARGS_FILE"
+joblog=""
+args=("\$@")
+for ((i = 0; i < \${#args[@]}; i += 1)); do
+  if [[ "\${args[\$i]}" == "--joblog" ]]; then
+    joblog="\${args[\$((i + 1))]}"
+  fi
+done
+if [[ -n "\$joblog" ]]; then
+  printf 'Seq Host Starttime JobRuntime Send Receive Exitval Signal Command\n' > "\$joblog"
+  printf '1 : 0 2.000 0 0 0 0 bats %s\n' "$FIXTURES/unit.bats" >> "\$joblog"
+fi
+rc=0
+while IFS= read -r -d '' file; do
+  "$STUB_BIN/bats" "\$file" || rc=1
+done
+exit "\$rc"
 EOF
-  chmod +x "$STUB_BIN/parallel"
+  chmod +x "$STUB_BIN/bats" "$STUB_BIN/parallel"
+
+  printf '@test "unit" { true; }\n' > "$FIXTURES/unit.bats"
+  printf '# bats file_tags=serial\n@test "serial" { true; }\n' > "$FIXTURES/serial.bats"
+  printf '# bats file_tags=integration\n@test "integration" { true; }\n' \
+    > "$FIXTURES/integration.bats"
+  printf '# bats file_tags=serial,integration\n@test "both" { true; }\n' \
+    > "$FIXTURES/integration-serial.bats"
 }
 
 teardown() {
-  rm -rf "$STUB_BIN" "$FAKE_HOME"
+  rm -rf "$STUB_BIN" "$FIXTURES" "$FAKE_HOME"
   rm -f "$ARGS_FILE"
 }
 
 run_runner() {
-  run env AUTOMOBILE_BATS_SERIAL_ONLY=false HOME="$FAKE_HOME" PATH="$STUB_BIN:$PATH" bash "$SCRIPT" "${1:-test/bats}"
+  run env \
+    HOME="$FAKE_HOME" \
+    PATH="$STUB_BIN:$PATH" \
+    AUTOMOBILE_BATS_JOBLOG="$FIXTURES/joblog.tsv" \
+    bash "$SCRIPT" "$@" "$FIXTURES"
 }
 
-# The parallel pass is the invocation carrying --jobs; the serial pass is the
-# one without it.
-parallel_pass_args() { grep -- '--jobs' "$ARGS_FILE"; }
-serial_pass_args() { grep -v -- '--jobs' "$ARGS_FILE"; }
-
-@test "the parallel pass runs cross-file-parallel and excludes serial-tagged files" {
-  run_runner
+@test "unit lane executes every non-integration file exactly once" {
+  run_runner unit
   [ "$status" -eq 0 ]
-
-  local args
-  args="$(parallel_pass_args)"
-  [[ "$args" == *"--jobs "* ]]
-  [[ "$args" == *"--no-parallelize-within-files"* ]]
-  [[ "$args" == *"--filter-tags !serial"* ]]
-  [[ "$args" == *"test/bats"* ]]
+  [ "$(grep -c "^bats:$FIXTURES/unit.bats$" "$ARGS_FILE")" -eq 1 ]
+  [ "$(grep -c "^bats:$FIXTURES/serial.bats$" "$ARGS_FILE")" -eq 1 ]
+  ! grep -q "^bats:$FIXTURES/integration.bats$" "$ARGS_FILE"
+  ! grep -q "^bats:$FIXTURES/integration-serial.bats$" "$ARGS_FILE"
 }
 
-@test "the serial pass runs only serial-tagged files without --jobs" {
-  run_runner
+@test "integration lane executes tagged files exactly once" {
+  run_runner integration
   [ "$status" -eq 0 ]
-
-  local args
-  args="$(serial_pass_args)"
-  [[ "$args" == *"--filter-tags serial"* ]]
-  [[ "$args" != *"--jobs"* ]]
-  [[ "$args" == *"test/bats"* ]]
+  [ "$(grep -c "^bats:$FIXTURES/integration.bats$" "$ARGS_FILE")" -eq 1 ]
+  [ "$(grep -c "^bats:$FIXTURES/integration-serial.bats$" "$ARGS_FILE")" -eq 1 ]
+  ! grep -q "^bats:$FIXTURES/unit.bats$" "$ARGS_FILE"
+  ! grep -q "^bats:$FIXTURES/serial.bats$" "$ARGS_FILE"
 }
 
-@test "passes a positive integer job count to --jobs" {
-  run_runner
+@test "fails closed when a lane selects no BATS files" {
+  rm "$FIXTURES/integration.bats" "$FIXTURES/integration-serial.bats"
+
+  run_runner integration
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no BATS files selected for integration lane"* ]]
+  ! grep -q '^bats:' "$ARGS_FILE"
+}
+
+@test "fails closed when the BATS directory is missing" {
+  run env \
+    HOME="$FAKE_HOME" \
+    PATH="$STUB_BIN:$PATH" \
+    AUTOMOBILE_BATS_JOBLOG="$FIXTURES/joblog.tsv" \
+    bash "$SCRIPT" unit "$FIXTURES/missing"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"no BATS files selected for unit lane"* ]]
+  ! grep -q '^bats:' "$ARGS_FILE"
+}
+
+@test "parallel and serial failures propagate" {
+  printf '@test "fail" { false; }\n' > "$FIXTURES/parallel-fail.bats"
+  printf '# bats file_tags=serial\n@test "fail" { false; }\n' > "$FIXTURES/serial-fail.bats"
+  run_runner unit
+  [ "$status" -ne 0 ]
+  grep -q "^bats:$FIXTURES/parallel-fail.bats$" "$ARGS_FILE"
+  grep -q "^bats:$FIXTURES/serial-fail.bats$" "$ARGS_FILE"
+}
+
+@test "job count override reaches GNU Parallel" {
+  run env \
+    HOME="$FAKE_HOME" \
+    PATH="$STUB_BIN:$PATH" \
+    AUTOMOBILE_BATS_JOBS=7 \
+    AUTOMOBILE_BATS_JOBLOG="$FIXTURES/joblog.tsv" \
+    bash "$SCRIPT" unit "$FIXTURES"
   [ "$status" -eq 0 ]
-
-  local jobs
-  jobs="$(sed -nE 's/.*--jobs ([0-9]+).*/\1/p' "$ARGS_FILE")"
-  [ -n "$jobs" ]
-  [ "$jobs" -ge 1 ]
+  grep -q "parallel:.*--jobs 7" "$ARGS_FILE"
 }
 
-@test "acknowledges the GNU parallel citation to keep logs clean" {
-  run_runner
-  [ "$status" -eq 0 ]
-  [ -f "$FAKE_HOME/.parallel/will-cite" ]
+@test "unit file budget fails with an actionable classification message" {
+  run env \
+    HOME="$FAKE_HOME" \
+    PATH="$STUB_BIN:$PATH" \
+    AUTOMOBILE_BATS_MAX_FILE_SECONDS=1 \
+    AUTOMOBILE_BATS_JOBLOG="$FIXTURES/joblog.tsv" \
+    bash "$SCRIPT" unit "$FIXTURES"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"tag genuine real-I/O coverage as integration"* ]]
 }
 
-@test "defaults the target directory to test/bats when no argument is given" {
-  run env HOME="$FAKE_HOME" PATH="$STUB_BIN:$PATH" bash "$SCRIPT"
-  [ "$status" -eq 0 ]
-  [[ "$(cat "$ARGS_FILE")" == *"test/bats"* ]]
+@test "rejects an invalid lane" {
+  run_runner nope
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Usage:"* ]]
 }
 
-@test "serial-only mode runs one stable pass without GNU parallel" {
-  run env AUTOMOBILE_BATS_SERIAL_ONLY=true HOME="$FAKE_HOME" PATH="$STUB_BIN:$PATH" bash "$SCRIPT"
-
-  [ "$status" -eq 0 ]
-  local expected_count actual_count
-  expected_count="$(find test/bats -type f -name '*.bats' | wc -l | tr -d ' ')"
-  actual_count="$(wc -l < "$ARGS_FILE" | tr -d ' ')"
-  [ "$actual_count" -eq "$expected_count" ]
-  ! grep -vE '^test/bats/.+\.bats$' "$ARGS_FILE"
-  [ ! -e "$FAKE_HOME/.parallel/will-cite" ]
-}
-
-# is_gnu_parallel must accept only GNU parallel, not the unrelated moreutils
-# `parallel` (which is also named `parallel` but breaks `bats --jobs`). Source
-# the script (main() is guarded) and probe the function directly.
 @test "is_gnu_parallel accepts GNU parallel" {
   PATH="$STUB_BIN:$PATH" source "$SCRIPT"
   PATH="$STUB_BIN:$PATH" run is_gnu_parallel
   [ "$status" -eq 0 ]
 }
 
-@test "is_gnu_parallel rejects a non-GNU (moreutils-style) parallel" {
-  # moreutils parallel does not understand --version and errors instead.
+@test "is_gnu_parallel rejects a non-GNU parallel" {
   cat > "$STUB_BIN/parallel" <<'EOF'
 #!/usr/bin/env bash
-echo "parallel: invalid option -- '-'" >&2
 exit 1
 EOF
   chmod +x "$STUB_BIN/parallel"
-
   source "$SCRIPT"
   PATH="$STUB_BIN:/usr/bin:/bin" run is_gnu_parallel
   [ "$status" -ne 0 ]

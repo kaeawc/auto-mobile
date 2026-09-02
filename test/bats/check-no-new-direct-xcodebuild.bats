@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
 
-setup() {
+setup_file() {
   repo_dir="$(mktemp -d)"
+  state_file="${TMPDIR:-/tmp}/auto-mobile-xcodebuild-bats-fixture"
   mkdir -p "$repo_dir/scripts/lib" "$repo_dir/src/utils/ios-cmdline-tools"
   cp "$BATS_TEST_DIRNAME/../../scripts/check-no-new-direct-xcodebuild.sh" "$repo_dir/scripts/"
   cp "$BATS_TEST_DIRNAME/../../scripts/check-no-new-direct-xcodebuild.ts" "$repo_dir/scripts/"
@@ -15,10 +16,22 @@ setup() {
   git -C "$repo_dir" add .
   git -C "$repo_dir" commit -qm baseline
   git -C "$repo_dir" commit --allow-empty -qm head
+  printf '%s\n' "$repo_dir" > "$state_file"
 }
 
-teardown() {
+setup() {
+  state_file="${TMPDIR:-/tmp}/auto-mobile-xcodebuild-bats-fixture"
+  repo_dir="$(<"$state_file")"
+  git -C "$repo_dir" checkout -q --detach HEAD
+  git -C "$repo_dir" reset --hard -q HEAD
+  git -C "$repo_dir" clean -fdq
+}
+
+teardown_file() {
+  state_file="${TMPDIR:-/tmp}/auto-mobile-xcodebuild-bats-fixture"
+  repo_dir="$(<"$state_file")"
   rm -rf "$repo_dir"
+  rm -f "$state_file"
 }
 
 @test "rejects a new direct argv-form xcodebuild execution" {

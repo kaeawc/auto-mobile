@@ -29,8 +29,8 @@ if ! [[ "$iterations" =~ ^[0-9]+$ ]] || [[ "$iterations" -lt 1 ]]; then
 fi
 
 suites=(
-  "test/db/databaseLazyPath.test.ts"
-  "test/db/dbWriteBarrierResetOnClose.test.ts"
+  "test/db/databaseLazyPath.integration.test.ts"
+  "test/db/dbWriteBarrierResetOnClose.integration.test.ts"
 )
 
 echo "Stressing DB lifecycle suites ${iterations}x: ${suites[*]}"

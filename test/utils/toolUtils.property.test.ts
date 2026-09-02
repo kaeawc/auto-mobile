@@ -57,17 +57,9 @@ describe("getStructuredField (property-based)", () => {
 
   test("never leaks an inherited prototype key", () => {
     // `toString`/`hasOwnProperty` exist on the prototype but are not own keys.
-    const protoKey = fc.constantFrom("toString", "hasOwnProperty", "constructor", "valueOf");
-    fc.assert(
-      fc.property(
-        payloadObject.filter((p) => Object.keys(p).length === 0),
-        protoKey,
-        (empty, key) => {
-          return getStructuredField(asResponse(empty), key) === undefined;
-        },
-      ),
-      RUN_OPTIONS,
-    );
+    for (const key of ["toString", "hasOwnProperty", "constructor", "valueOf"]) {
+      expect(getStructuredField(asResponse({}), key)).toBeUndefined();
+    }
   });
 
   test("agrees with reading the field off getStructuredPayload", () => {

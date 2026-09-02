@@ -1,8 +1,9 @@
 /**
  * Cross-file serialization lock for the DB-reset test suites (issue #2942).
  *
- * The three reset suites — `databaseReset.test.ts`, `databaseLazyPath.test.ts`,
- * `databaseLifecycleReset.test.ts` (and relatedly `dbWriteBarrierResetOnClose`) —
+ * The three reset suites — `databaseReset.integration.test.ts`,
+ * `databaseLazyPath.integration.test.ts`,
+ * `databaseLifecycleReset.integration.test.ts` (and relatedly `dbWriteBarrierResetOnClose`) —
  * each mutate the PROCESS-GLOBAL `process.env.AUTOMOBILE_DB_DIR` /
  * `AUTOMOBILE_DB_PATH` / `AUTOMOBILE_MIGRATIONS_DIR` and then `await` a fresh
  * `database.ts` module import (a `?query`-string cache-bust). The `?query` bust
@@ -13,7 +14,7 @@
  * letting a test in another reset file run its own env mutation + fresh-module
  * resolution during that window. The victim then resolves its DB path against a
  * half-mutated env belonging to the other file — the intermittent
- * `databaseReset.test.ts:135`-style flake seen during the PR #2930 review.
+ * `databaseReset.integration.test.ts:135`-style flake seen during the PR #2930 review.
  *
  * The `createFileBackedDbHarness()` per-test env snapshot/restore is correct but
  * insufficient: restoration happens in `afterEach`, AFTER the interleaving window

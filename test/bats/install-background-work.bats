@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# bats file_tags=serial
+# bats file_tags=serial,integration
 # Spawns real (sometimes SIGTERM-ignoring, CPU-spinning) helper processes and
 # asserts they are reaped within a bounded time. Under parallel CPU
 # oversubscription the reap misses its deadline and the test flakes, so

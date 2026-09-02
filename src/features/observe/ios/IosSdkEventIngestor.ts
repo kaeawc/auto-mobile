@@ -77,6 +77,11 @@ export interface IosSdkEventIngestorDeps {
   failureRecorder?: FailureRecorderService;
   /** Whether navigation screenshots are enabled; defaults to server config. */
   navigationScreenshotsEnabled?: () => boolean;
+  /** Resolves the persisted node ID used to construct a screenshot resource URI. */
+  findNavigationNodeId?: (
+    applicationId: string,
+    destination: string,
+  ) => Promise<number | undefined>;
 }
 
 export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
@@ -86,6 +91,10 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
   private readonly telemetryRecorderOverride?: IosTelemetryRecorder;
   private readonly failureRecorderOverride?: FailureRecorderService;
   private readonly navigationScreenshotsEnabled: () => boolean;
+  private readonly findNavigationNodeIdOverride?: (
+    applicationId: string,
+    destination: string,
+  ) => Promise<number | undefined>;
 
   constructor(deps: IosSdkEventIngestorDeps) {
     this.deviceId = deps.deviceId;
@@ -95,6 +104,7 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     this.failureRecorderOverride = deps.failureRecorder;
     this.navigationScreenshotsEnabled =
       deps.navigationScreenshotsEnabled ?? (() => serverConfig.isNavigationScreenshotsEnabled());
+    this.findNavigationNodeIdOverride = deps.findNavigationNodeId;
   }
 
   /**
@@ -193,19 +203,12 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
                       path,
                     );
                     try {
-                      const { getDatabase } = await import("../../../db");
-                      const db = getDatabase();
-                      const node = await db
-                        .selectFrom("navigation_nodes")
-                        .select(["id"])
-                        .where("app_id", "=", applicationId)
-                        .where("screen_name", "=", destination)
-                        .executeTakeFirst();
-                      if (node) {
+                      const nodeId = await this.findNavigationNodeId(applicationId, destination);
+                      if (nodeId !== undefined) {
                         // Scope by applicationId (in scope) so a cross-app client
                         // resolves this node's screenshot under the named app, not
                         // the daemon's current foreground app (#5851 / #5534).
-                        screenshotUri = buildNavigationNodeScreenshotUri(node.id, applicationId);
+                        screenshotUri = buildNavigationNodeScreenshotUri(nodeId, applicationId);
                       }
                     } catch {
                       /* non-fatal */
@@ -379,6 +382,23 @@ export class DefaultIosSdkEventIngestor implements IosSdkEventIngestor {
     } catch {
       // Non-fatal
     }
+  }
+
+  private async findNavigationNodeId(
+    applicationId: string,
+    destination: string,
+  ): Promise<number | undefined> {
+    if (this.findNavigationNodeIdOverride) {
+      return this.findNavigationNodeIdOverride(applicationId, destination);
+    }
+    const { getDatabase } = await import("../../../db");
+    const node = await getDatabase()
+      .selectFrom("navigation_nodes")
+      .select(["id"])
+      .where("app_id", "=", applicationId)
+      .where("screen_name", "=", destination)
+      .executeTakeFirst();
+    return node?.id;
   }
 
   /** Capture and store a screenshot for an iOS navigation event. Returns the stored path or null. */

@@ -33,7 +33,8 @@ import { runExclusiveResetTest } from "./resetTestSerialLock";
  * last exceptions: `TelemetryRecorder`, `FailureAnalyticsRepository` and
  * `SessionManager` were the three construction-captured consumers, and PR #2925
  * converted them to resolve per write, so every consumer now observes the identity
- * swap. `test/db/dbWriteBarrierReopenConsumers.test.ts` is the per-consumer proof.
+ * swap. `test/db/dbWriteBarrierReopenConsumers.integration.test.ts` is the
+ * per-consumer proof.
  *
  * These assertions are about `getDbWriteBarrier()` **identity** and
  * `isDraining()` across the `getDatabase()`/`closeDatabase()` lifecycle — they

@@ -86,10 +86,6 @@ describe("auto-mobile/no-accumulator-foreach", () => {
     expect(messages).toEqual([]);
   });
 
-  // NOTE: "does not apply outside src/" moved to oxlintConfigScoping.test.ts.
-  // Scoping is now a property of .oxlintrc.json's `files` overrides, not the
-  // rule, so it is asserted against the config rather than the rule in isolation.
-
   // Regression guard for the suppression-budget leak this rule exists to avoid:
   // the forEach ban must NOT live in no-restricted-syntax, whose per-file
   // suppression count is shared with the setTimeout/structuredContent bans (main

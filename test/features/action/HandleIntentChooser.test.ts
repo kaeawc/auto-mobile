@@ -80,6 +80,11 @@ describe("HandleIntentChooser", () => {
     (handleIntentChooser as any).observeScreen = fakeObserveScreen;
     (handleIntentChooser as any).window = fakeWindow;
     (handleIntentChooser as any).awaitIdle = fakeAwaitIdle;
+    // These cases exercise chooser routing. BaseVisualChange's observation and
+    // settle contract is covered independently, so invoke the feature block
+    // directly with the configured fake observation.
+    (handleIntentChooser as any).observedInteraction = async (block: any) =>
+      block(await fakeObserveScreen.getMostRecentCachedObserveResult());
   });
 
   describe("constructor", () => {

@@ -7,11 +7,13 @@ import { createExecResult } from "../../src/utils/execResult";
 import {
   ADB_INTEGRATION_COMMAND_TIMEOUT_MS,
   createAdbIntegrationCommandRunner,
-} from "./adbIntegrationCommandRunner";
+} from "../integration/adbIntegrationCommandRunner";
 
-const FAST_TEST_TIMEOUT_MS = 100;
+// These are hermetic assertions, but cold macOS runners can spend over 100ms
+// scheduling module initialization before the injected executor is invoked.
+const ASSERTION_TIMEOUT_MS = 250;
 const ANDROID_H264_INTEGRATION_TEST_PATH = new URL(
-  "./androidH264SourceDevice.integration.test.ts",
+  "../integration/androidH264SourceDevice.integration.test.ts",
   import.meta.url,
 );
 
@@ -59,7 +61,7 @@ describe("createAdbIntegrationCommandRunner", () => {
         },
       ]);
     },
-    FAST_TEST_TIMEOUT_MS,
+    ASSERTION_TIMEOUT_MS,
   );
 
   test(
@@ -81,7 +83,7 @@ describe("createAdbIntegrationCommandRunner", () => {
           "timed out waiting for ADB server",
       );
     },
-    FAST_TEST_TIMEOUT_MS,
+    ASSERTION_TIMEOUT_MS,
   );
 
   test(
@@ -90,7 +92,7 @@ describe("createAdbIntegrationCommandRunner", () => {
       expect(androidH264DirectAdbExecutionCalls).toEqual([]);
       expect(androidH264IntegrationTestSource).toContain("}, ADB_SETUP_HOOK_TIMEOUT_MS)");
     },
-    FAST_TEST_TIMEOUT_MS,
+    ASSERTION_TIMEOUT_MS,
   );
 
   test(
@@ -107,6 +109,6 @@ describe("createAdbIntegrationCommandRunner", () => {
         'executor.executeCommand("adb", ["wait-for-device"])',
       ]);
     },
-    FAST_TEST_TIMEOUT_MS,
+    ASSERTION_TIMEOUT_MS,
   );
 });

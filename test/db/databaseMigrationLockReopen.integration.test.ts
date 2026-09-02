@@ -24,7 +24,7 @@ import { createFileBackedDbHarness } from "./withFileBackedDb";
  * in-flight run to WAIT for, while a different (or absent) token is the genuine
  * recycled-pid leak to reclaim.
  *
- * Unlike `databaseMigrationGenerationFence.test.ts` (whose gen-0 migration throws
+ * Unlike `databaseMigrationGenerationFence.integration.test.ts` (whose gen-0 migration throws
  * WITHOUT writing, so a stolen-lock concurrent run is benign), this gen-0
  * migration WRITES to the shared DB file, so a stolen lock would corrupt it.
  * A fresh module instance per case isolates the lazy globals.

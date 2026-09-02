@@ -95,7 +95,7 @@ const RULE_EXEMPTIONS: Readonly<Record<string, ReadonlySet<FileBackedDbAntiPatte
   "withFileBackedDb.ts": new Set(["unfunneled-mkdtemp"]),
   // The harness's OWN unit test injects fake `mkdtemp`s and drives the real
   // `openLifecycleTestDb` — it is the reference consumer, not an unfunneled suite.
-  "withFileBackedDb.test.ts": new Set(["unfunneled-mkdtemp"]),
+  "withFileBackedDb.integration.test.ts": new Set(["unfunneled-mkdtemp"]),
 };
 
 // A raw cache-busted dynamic import whose specifier targets `database`/`database.ts`
@@ -115,7 +115,7 @@ const QUOTED_TRANSIENT_LOCK_CODE = /["'](?:EBUSY|EPERM|ENOTEMPTY)["']/;
 // A manual *retry* loop specifically — a `for (let attempt …)` header, or a
 // `while (…)` whose condition is retry/attempt/backoff-shaped. A generic
 // `while (cond)` poll does NOT count: keying the structural rule on any `while`
-// would leave it one edit away from false-positiving on `tempDbDir.test.ts` (the
+// would leave it one edit away from false-positiving on `tempDbDir.integration.test.ts` (the
 // bounded remover's own test), which already holds the quoted lock codes and
 // could grow a real `rm` + poll case.
 const MANUAL_RETRY_LOOP =

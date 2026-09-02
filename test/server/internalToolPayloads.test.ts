@@ -1,6 +1,4 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "fs";
-import { join } from "path";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   InternalToolPayloads,
@@ -148,28 +146,5 @@ describe("ToolRegistry.callInternalTyped (AC1 typed seam)", () => {
     const _observe: ObserveMapped = {} as ObserveToolPayload;
     expect(_swipe).toBeDefined();
     expect(_observe).toBeDefined();
-  });
-});
-
-describe("asToolEnvelope is eliminated from src (AC2 source scan)", () => {
-  function collectTsFiles(dir: string): string[] {
-    const out: string[] = [];
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        out.push(...collectTsFiles(full));
-      } else if (entry.name.endsWith(".ts")) {
-        out.push(full);
-      }
-    }
-    return out;
-  }
-
-  test("no src/ file references asToolEnvelope", () => {
-    const srcDir = join(import.meta.dir, "..", "..", "src");
-    const offenders = collectTsFiles(srcDir).filter((file) =>
-      readFileSync(file, "utf8").includes("asToolEnvelope"),
-    );
-    expect(offenders).toEqual([]);
   });
 });

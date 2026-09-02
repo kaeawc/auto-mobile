@@ -2,6 +2,10 @@
 import Foundation
 import XCTest
 
+// Test fixtures fail-fast on malformed setup data, so force-unwrap is idiomatic here
+// (blanket-allowed for force_unwrapping in test targets — see .swiftlint.yml).
+// swiftlint:disable force_unwrapping
+
 /// Behavior tests for the async `SdkHierarchyClient` (Phase 3). The reference client
 /// could only be driven against a live socket, so these are rewrite-only tests over the
 /// injectable `HTTPRequesting` seam that pin the reference's documented contract: the

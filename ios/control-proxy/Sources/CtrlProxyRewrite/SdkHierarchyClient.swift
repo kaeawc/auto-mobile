@@ -20,7 +20,7 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, Sendable {
 
     public convenience init(port: UInt16 = 8766) {
         // Hardcoded localhost URL with an integer port always parses.
-        let baseURL = URL(string: "http://localhost:\(port)")!
+        let baseURL = URL(string: "http://localhost:\(port)")!  // swiftlint:disable:this force_unwrapping
 
         let dataConfig = URLSessionConfiguration.default
         dataConfig.timeoutIntervalForRequest = 2

@@ -1,8 +1,8 @@
 # CtrlProxy Swift-6 rewrite — status & resume guide
 
 **This is the authoritative "where we are / how to continue" doc.** A fresh session
-can be given minimal guidance — e.g. *"we just finished Phase 2; read
-`docs/design-docs/plat/ios/ctrlproxy-rewrite/STATUS.md` and proceed into Phase 3"* —
+can be given minimal guidance — e.g. _"we just finished Phase 2; read
+`docs/design-docs/plat/ios/ctrlproxy-rewrite/STATUS.md` and proceed into Phase 3"_ —
 and orient entirely from here. See [README.md](README.md) for the fixup-note index
 and the amended phase plan.
 
@@ -53,7 +53,7 @@ loopback timing flake — unrelated to the rewrite; passes in isolation.)
 
 **cwd hazard (bit us again in Phase 4):** run `swift` with an explicit
 `--package-path ios/control-proxy` (or `cd` in first). From the repo root, `swift test`
-resolves a *different* package (e.g. `ios/auto-mobile-sdk`, which has its own unrelated
+resolves a _different_ package (e.g. `ios/auto-mobile-sdk`, which has its own unrelated
 pre-existing Swift-6 `URLProtocol: Sendable` error) and the failure looks like a rewrite
 regression when it is not.
 
@@ -84,21 +84,21 @@ wire fixture is `test/fixtures/ios-ctrlproxy-request-snapshots.json`.
 
 ## 5. Status by phase
 
-| Phase | What | Commit(s) | State |
-|---|---|---|---|
-| 0 | Scaffold targets + Models (request half) + no-op `CtrlProxy` + decode-parity gate | `50579ab03` | ✅ |
-| 1 | Pure/stateless core | `8aba998ca` `e683e6453` `e7589dd40` `499da2805` | ✅ |
-| 2 | Networking core (queue-confinement) | `0a56900dc` `004e54279` `bae5cadaa` `84430e00d` | ✅ core |
-| 3 | Off-main SDK layer (cache lock-confined + transactional; SDK/DB clients async; OSLogReader) | `f705e31ca` `d291db66c` `54ec41e39` `8ba273873` `1d8c08ba1` (+ de-flake `be92b2628`) | ✅ |
-| 4 | `@MainActor` UI (ElementLocator, GesturePerformer, HierarchyDebouncer, DisplayLinkFPSMonitor, VoiceOver) | `a0646e713` `f715fc90a` `8c634c77a` `957916c1f` `400a3a42e` `d209ad95c` `e1f4c4d86` `2b1373016` | ✅ |
-| 5 | PerfProvider (TaskLocal call-tree + confined pool) | `11d8e192a` | ✅ |
-| 6 | CommandHandler (Sendable POD router, `handle` async) + async serial dispatch + `CtrlProxy` coordinator | `5ce6c75bd` `333e236f8` `089e4e0da` `1fb695e35` `d49358121` | ✅ |
-| 7A | Wire rewrite into XcodeGen + first green iOS-sim compile (host-hidden `ElementLocator` init fixed) | `12e7c80a1` | ✅ |
-| 7B | iOS strict-concurrency warning cleanup (`DeviceRotation`/`DefaultVoiceOverToggle`/runner) — 0 warnings + runtime-validated on sim | — | ✅ |
-| 7C | Point the production runner at the rewrite (repurpose `CtrlProxyUITests` target → compiles `Sources/CtrlProxyRewrite`; zero TS/script churn) | — | ✅ (middle route) |
-| 7D | On-device validation — full observe→gesture→hierarchy loop (`HierarchyIntegrationTests`) green on the **iOS 26.5** sim; `testServiceStarts` green | — | ✅ (use 26.5, not the 27.0-beta runtime) |
-| 7E | Retire the reference (KEEP wire tests re-anchored reference-free; behavioral parity dropped; reference impl + targets + harness removed) | `739dfb0d6` `bbddf06c7` `af5841806` | ✅ |
-| 8 | Post-concurrency fixups (see README index) | — | ◻️ |
+| Phase | What                                                                                                                                              | Commit(s)                                                                                       | State                                    |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| 0     | Scaffold targets + Models (request half) + no-op `CtrlProxy` + decode-parity gate                                                                 | `50579ab03`                                                                                     | ✅                                       |
+| 1     | Pure/stateless core                                                                                                                               | `8aba998ca` `e683e6453` `e7589dd40` `499da2805`                                                 | ✅                                       |
+| 2     | Networking core (queue-confinement)                                                                                                               | `0a56900dc` `004e54279` `bae5cadaa` `84430e00d`                                                 | ✅ core                                  |
+| 3     | Off-main SDK layer (cache lock-confined + transactional; SDK/DB clients async; OSLogReader)                                                       | `f705e31ca` `d291db66c` `54ec41e39` `8ba273873` `1d8c08ba1` (+ de-flake `be92b2628`)            | ✅                                       |
+| 4     | `@MainActor` UI (ElementLocator, GesturePerformer, HierarchyDebouncer, DisplayLinkFPSMonitor, VoiceOver)                                          | `a0646e713` `f715fc90a` `8c634c77a` `957916c1f` `400a3a42e` `d209ad95c` `e1f4c4d86` `2b1373016` | ✅                                       |
+| 5     | PerfProvider (TaskLocal call-tree + confined pool)                                                                                                | `11d8e192a`                                                                                     | ✅                                       |
+| 6     | CommandHandler (Sendable POD router, `handle` async) + async serial dispatch + `CtrlProxy` coordinator                                            | `5ce6c75bd` `333e236f8` `089e4e0da` `1fb695e35` `d49358121`                                     | ✅                                       |
+| 7A    | Wire rewrite into XcodeGen + first green iOS-sim compile (host-hidden `ElementLocator` init fixed)                                                | `12e7c80a1`                                                                                     | ✅                                       |
+| 7B    | iOS strict-concurrency warning cleanup (`DeviceRotation`/`DefaultVoiceOverToggle`/runner) — 0 warnings + runtime-validated on sim                 | —                                                                                               | ✅                                       |
+| 7C    | Point the production runner at the rewrite (repurpose `CtrlProxyUITests` target → compiles `Sources/CtrlProxyRewrite`; zero TS/script churn)      | —                                                                                               | ✅ (middle route)                        |
+| 7D    | On-device validation — full observe→gesture→hierarchy loop (`HierarchyIntegrationTests`) green on the **iOS 26.5** sim; `testServiceStarts` green | —                                                                                               | ✅ (use 26.5, not the 27.0-beta runtime) |
+| 7E    | Retire the reference (KEEP wire tests re-anchored reference-free; behavioral parity dropped; reference impl + targets + harness removed)          | `739dfb0d6` `bbddf06c7` `af5841806`                                                             | ✅                                       |
+| 8     | Post-concurrency fixups (see README index)                                                                                                        | —                                                                                               | ◻️                                       |
 
 **Ported so far** (all one-type-per-file, `Sendable`, differentially verified unless
 noted): the full inbound + response-envelope wire models (`Models/`, incl. `Models/Sdk/`),
@@ -157,7 +157,7 @@ lock. Verified by a differential parity harness (per-module driver + neither-imp
 sorted-key encoded-byte diff) over a 15-script corpus, plus unit tests for the
 load-bearing `@TaskLocal` nesting across a real off-main→`@MainActor` executor hop,
 `track`/`trackAsync`, and out-of-scope no-op behavior. **Engine-level parity only** — it
-does not prove production *emits* `perfTiming`; that integration test is a Phase-6
+does not prove production _emits_ `perfTiming`; that integration test is a Phase-6
 obligation (see §8). 227 rewrite tests (from 216), all green; full package 533 + 227 green.
 
 **Phase 6 added** (`CommandHandler` router + async serial dispatch + `CtrlProxy`
@@ -178,7 +178,7 @@ filling the production seams (`onSdkEventBatch`/`drainLogEvents`/`onClientPresen
 via a late-bound weak box); **6F** two parity layers (46-command routing parity +
 the §8 integration `perfTiming` parity through `WebSocketServer.handleMessage`); **6G** an
 adversarial multi-lens review that caught one real `perfTiming` wire divergence — for
-gestures routed through `performContextCheckedGesture` the reference's *thread-local* perf
+gestures routed through `performContextCheckedGesture` the reference's _thread-local_ perf
 splits the gesture-nested `track` onto the main thread's empty stack (a separate root under a
 synthetic `total`), so the rewrite now runs the gesture inside a **fresh `perf.withScope`** to
 reproduce that split (a plain `MainActor.run` had nested it via the propagated task-local).
@@ -187,7 +187,7 @@ its iOS (`canImport(XCTest) && os(iOS)`) branch is not host-compiled — full co
 Phase 7 (Xcode).
 
 **Phase 7A added** (wire rewrite into XcodeGen + first green iOS-simulator compile). An
-*additive* `CtrlProxyRewriteUITests` `bundle.ui-testing` target compiles `Sources/CtrlProxyRewrite`
+_additive_ `CtrlProxyRewriteUITests` `bundle.ui-testing` target compiles `Sources/CtrlProxyRewrite`
 directly (so XCUITest is visible to the `@MainActor` UI domain), pinned to the SPM `.v6` contract
 via per-target settings (`SWIFT_VERSION = 6.0`, `SWIFT_STRICT_CONCURRENCY = complete`,
 `IPHONEOS_DEPLOYMENT_TARGET = 17.0` — the rewrite's `OSAllocatedUnfairLock` floor; the project
@@ -206,21 +206,22 @@ reference host build green).
 **Phase 7B added** (iOS strict-concurrency warning cleanup — applied + runtime-validated). The 7A
 iOS compile was green but carried **~149 non-fatal Swift-6 strict-concurrency warnings** in the
 iOS-only bodies that no gate catches (SPM never compiles them on the macOS host; Xcode keeps
-SDK-inferred main-actor-isolation violations *non-promotable* even under
+SDK-inferred main-actor-isolation violations _non-promotable_ even under
 `SWIFT_TREAT_WARNINGS_AS_ERRORS = YES`) — genuine concurrency-model gaps (nonisolated code touching
 `@MainActor` UIKit/XCUITest APIs). Now **0 source warnings** (only the benign "AppIntents metadata
 skipped" build note remains). All `DeviceRotation` callers (`ElementLocator`/`GesturePerformer`) are
 already `@MainActor`, and the `capture {}` operation closures already compiled clean via region-based
 isolation, so the fix was localized:
+
 - `DeviceRotation`: `currentGestureInterfaceOrientation()` → `@MainActor` (all callers `@MainActor`,
   hop-free, behavior-identical). `XCUIDeviceRotationSampler.currentRotation()` reads
-  `XCUIDevice.shared.orientation` through the *host-compiled* nonisolated `RotationSampling` protocol →
+  `XCUIDevice.shared.orientation` through the _host-compiled_ nonisolated `RotationSampling` protocol →
   wrapped in `MainActor.assumeIsolated` (call-graph-provably main-thread; avoids a host-protocol ripple).
   `DeviceOrientationChangeSignal.init`/`startObserving`/`deinit` touch `UIDevice.current` from a
   nonisolated `RotationChangeSignaling` conformance → `assumeIsolated` (init/startObserving provably
   main via `startMonitoring()` from `@MainActor` `ElementLocator.init`; **`deinit` is unreachable dead
   code** — process-lifetime `static let` — the `assumeIsolated` documents the contract a nonisolated
-  `deinit` can't express). `startObserving` assigns `observer` *inside* the closure — the returned
+  `deinit` can't express). `startObserving` assigns `observer` _inside_ the closure — the returned
   `any NSObjectProtocol` is not `Sendable` and can't cross back out of the `@MainActor` region.
 - `VoiceOverToggling.setVoiceOver` → `@MainActor` (the default impl drives XCUITest); the async
   `Sendable` `CommandHandler.handleSetVoiceOverState` now `await`s it (consistent with §6 — the handler
@@ -255,6 +256,7 @@ green (0 errors, 0 source warnings) and the **production** identifier
 
 **Phase 7D added** (on-device validation — **complete**; reference kept). The rewrite's `@MainActor`
 UI domain is now validated end-to-end on a simulator:
+
 - `testServiceStarts` green on iPhone 17 — the `@MainActor` coordinator init path (incl.
   `DeviceRotation` signal-init `assumeIsolated`) + server start→stop.
 - The reference's rich integration test (`testHierarchyIncludesTypedTextInputsMissingFromSnapshotTree`)
@@ -267,7 +269,7 @@ UI domain is now validated end-to-end on a simulator:
 
 **Runtime caveat (durable):** validate on the **iOS 26.5** runtime, not the **iOS 27.0 beta** — on
 27.0-beta the host app fails to reach its fixture VC (XCUITest "Unable to monitor event loop"; the app
-stays on a launch-screen-like tree; xcodebuild *teardown* then hangs ~10 min though the test body runs
+stays on a launch-screen-like tree; xcodebuild _teardown_ then hangs ~10 min though the test body runs
 in ~13 s). Not a rewrite bug (the rewrite's `getViewHierarchy` faithfully extracts whatever rendered —
 a diagnostic run returned a real 15-node tree even on the beta). The ported test is `XCTSkipUnless`-
 guarded on the fixture appearing, so it hard-asserts on 26.5 and skips (not red-fails) on 27.0-beta.
@@ -300,7 +302,7 @@ green (0/0); production runner smoke green on the 26.5 sim.
   confinement, not a lock. (`WebSocketServer`, `WebSocketConnection`, `NWByteChannel`,
   `OSLogReader` — the last **must** be queue-confined, not lock-confined, because
   `OSLogStore` is not `Sendable` and so cannot live in an `OSAllocatedUnfairLock<State:
-  Sendable>` in this toolchain.)
+Sendable>` in this toolchain.)
 - **Lock-confined Sendable collections** where a synchronous cross-thread path can't
   `await` (broadcast; or a write on the network queue): `OSAllocatedUnfairLock<State>` →
   genuinely `Sendable`, no `@unchecked`. (`SdkEventBuffer`, `ConnectionRegistry`, the
@@ -311,7 +313,7 @@ green (0/0); production runner smoke green on the 26.5 sim.
   runs synchronously and in-order on the connection's serial queue; an `actor` is reachable
   from that sync closure only via a detached `Task`, which would **reorder** cache updates
   across rapid POSTs (caching a stale hierarchy) and move JSON decode off the serial queue —
-  a *new* ordering hazard, the opposite of this rewrite's goal. A lock-confined cache keeps
+  a _new_ ordering hazard, the opposite of this rewrite's goal. A lock-confined cache keeps
   that path synchronous and ordered, needs no `@unchecked`, and still closes race #2 via a
   single-`withLock` transactional `reconcile`. The read path (Phase 6 `CommandHandler`, a
   `Sendable` POD) calls it synchronously — no `await`.
@@ -319,20 +321,20 @@ green (0/0); production runner smoke green on the 26.5 sim.
   blocking SDK HTTP/DB calls freeze XCUITest and starve `/health` (#5374). It `await`s
   `@MainActor` UI collaborators and off-main SDK actors.
 - **`handle -> Any` is replaced by `-> any WebSocketResponsePayload`** (`Sendable &
-  Encodable`). `encodeResponse` keeps the `WebSocketResponse`/`HierarchyUpdateResponse`
+Encodable`). `encodeResponse` keeps the `WebSocketResponse`/`HierarchyUpdateResponse`
   downcasts for `perfTiming` injection; everything else encodes straight through.
 - **Coders are fresh-per-call** (`.sortedKeys`) — closes the reference's shared-mutable
   `JSONEncoder` smell; byte-identical since the config matches.
 - **`ObjCExceptionCatcher` survives** into the `@MainActor` phases — Swift still can't
-  catch XCUITest `NSException`s; it just moves *inside* the `@MainActor` block.
+  catch XCUITest `NSException`s; it just moves _inside_ the `@MainActor` block.
 - **PerfProvider active call-tree = `@TaskLocal`, not thread-local (resolves §9.3;
-  approved by Paul).** The reference kept the open-entry stack per *thread* so an
+  approved by Paul).** The reference kept the open-entry stack per _thread_ so an
   operation on one thread never nested under an in-flight operation on another (#3635).
   But the rewrite made `ElementLocator` `@MainActor`, so one hierarchy request now spans
-  the command queue *and* the main actor within a single task; a thread-local would split
+  the command queue _and_ the main actor within a single task; a thread-local would split
   the tree at that executor boundary (`getViewHierarchy` would land as a separate root). A
-  `@TaskLocal` propagates across the `await` into the `@MainActor` collaborator *within the
-  same task*, reproducing the reference's single-threaded tree shape — proven byte-identical
+  `@TaskLocal` propagates across the `await` into the `@MainActor` collaborator _within the
+  same task_, reproducing the reference's single-threaded tree shape — proven byte-identical
   by the parity corpus and by the off-main→`@MainActor`-hop unit test. Bound per operation by
   `withScope` (sync + `nonisolated(nonsending)` async overloads); outside any scope the
   imperative calls are safe no-ops (perf timing is diagnostic, not wire-critical). The scope
@@ -346,7 +348,7 @@ green (0/0); production runner smoke green on the 26.5 sim.
   polling timings report together. The reference singleton (`nonisolated(unsafe) static` +
   double-checked `NSLock`) is dropped — collaborators inject `any PerfTracking` and the
   Phase-6 coordinator owns the one instance, so the task-local needs no per-instance key. A
-  completed root is snapshotted to an immutable `PerfTiming` *before* it enters the pool
+  completed root is snapshotted to an immutable `PerfTiming` _before_ it enters the pool
   (the reference converted lazily at flush; eager is behaviorally identical since a root and
   its children are fully timed by the time the root completes) so no mutable node is stored
   behind the lock.
@@ -363,7 +365,7 @@ green (0/0); production runner smoke green on the 26.5 sim.
   gesture together in one `DispatchQueue.main.sync` (atomic). The rewrite runs them in one
   `MainActor.run` (same atomicity, no suspension between the generation read and the gesture) —
   `MainActor.run`, not a blocking `main.sync`, because the perf task-local must reach the gesture.
-  **But** the reference's perf is *thread-local*: `performIfCurrent` hops the gesture onto the
+  **But** the reference's perf is _thread-local_: `performIfCurrent` hops the gesture onto the
   main thread, where that stack is empty, so a gesture-nested `track` (`setText.byResourceId`,
   `pressButton`, …) opens as its OWN root and `flushPerfTiming` wraps the two roots under a
   synthetic `total`. A plain `MainActor.run` would keep the propagated task-local scope and nest
@@ -383,21 +385,22 @@ green (0/0); production runner smoke green on the 26.5 sim.
 
 ## 7. Race ledger
 
-| # | Race | Closed by | State |
-|---|---|---|---|
-| 3 | `WebSocketServer.listener` unsynchronized (self-stop vs external stop) | queue-confinement | ✅ (Phase 2) |
-| 4 | `onClientPresenceChanged` torn closure | immutable init-injected `@Sendable` | ✅ (Phase 2) |
-| 2 | `SdkHierarchyCache` lost-update / dropped-event TOCTOU | lock-confined + transactional `reconcile` (read→compare→clear in one `withLock`) | ✅ (Phase 3) |
-| 1 | `getViewHierarchy` non-atomic multi-hop capture | `@MainActor` single-transaction (+ the rotation-capture epoch, race-free A→B→A detection) | ✅ (Phase 4F) |
-| — | OSLogReader overlap (concurrent polls on a global queue; fresh store per poll) | serial-queue confinement + single reused `OSLogStore` | ✅ (Phase 3) |
-| — | DisplayLink orphan | `@MainActor` monitor owns the `CADisplayLink` lifecycle | ✅ (Phase 4E) |
-| — | FrameContext shared encoder | lock-confined `Sendable` + fresh-per-call coder | ✅ (Phase 4B) |
-| — | Perf call-tree mis-nest / cross-scope `end()` pop (#3635) — the reference used thread-local to prevent it; the rewrite's `@MainActor` `ElementLocator` reintroduces an executor hop within one request | `@TaskLocal` call-tree bound per operation by `withScope` (propagates across the hop, same task) | ✅ (Phase 5) |
+| #   | Race                                                                                                                                                                                                   | Closed by                                                                                        | State         |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ | ------------- |
+| 3   | `WebSocketServer.listener` unsynchronized (self-stop vs external stop)                                                                                                                                 | queue-confinement                                                                                | ✅ (Phase 2)  |
+| 4   | `onClientPresenceChanged` torn closure                                                                                                                                                                 | immutable init-injected `@Sendable`                                                              | ✅ (Phase 2)  |
+| 2   | `SdkHierarchyCache` lost-update / dropped-event TOCTOU                                                                                                                                                 | lock-confined + transactional `reconcile` (read→compare→clear in one `withLock`)                 | ✅ (Phase 3)  |
+| 1   | `getViewHierarchy` non-atomic multi-hop capture                                                                                                                                                        | `@MainActor` single-transaction (+ the rotation-capture epoch, race-free A→B→A detection)        | ✅ (Phase 4F) |
+| —   | OSLogReader overlap (concurrent polls on a global queue; fresh store per poll)                                                                                                                         | serial-queue confinement + single reused `OSLogStore`                                            | ✅ (Phase 3)  |
+| —   | DisplayLink orphan                                                                                                                                                                                     | `@MainActor` monitor owns the `CADisplayLink` lifecycle                                          | ✅ (Phase 4E) |
+| —   | FrameContext shared encoder                                                                                                                                                                            | lock-confined `Sendable` + fresh-per-call coder                                                  | ✅ (Phase 4B) |
+| —   | Perf call-tree mis-nest / cross-scope `end()` pop (#3635) — the reference used thread-local to prevent it; the rewrite's `@MainActor` `ElementLocator` reintroduces an executor hop within one request | `@TaskLocal` call-tree bound per operation by `withScope` (propagates across the hop, same task) | ✅ (Phase 5)  |
 
 ## 8. Seams left open (to fill in later phases)
 
 **Filled in Phase 6** (all wired by the `CtrlProxy` coordinator, verified by the routing +
 integration parity tests):
+
 - `WebSocketConnection` production hooks: `onSdkEventBatch` → `SdkHierarchyExtractor.extractIfPresent`
   (+ main-actor re-broadcast); `drainLogEvents` → `OSLogReaderHolder.shared.drain`. ✅
 - `WebSocketServer.CommandHandling` → the `CommandHandler` router; `PerfTracking` → the Phase-5
@@ -414,6 +417,7 @@ integration parity tests):
 - `WebSocketResponsePayload` conformance for the DB + handler-built envelopes. ✅
 
 **Still open (Phase 7 / later):**
+
 - `broadcastPerformanceUpdate` landed in Phase 4E. Still deferred from Phase 2: a `127.0.0.1`
   loopback smoke test and more connection scenarios (frames/ping/close/fragmentation/HTTP) on
   the scripted-`ByteChannel` harness (`ReferenceConnectionDriver`/`RewriteConnectionDriver`/
@@ -437,7 +441,7 @@ invocations here need `dangerouslyDisableSandbox` (temp/DerivedData/CoreSimulato
 Simulator,id=<26.5-device-udid>' -only-testing:CtrlProxyUITests/HierarchyIntegrationTests` (never run
 `testRunService` — it waits forever). **Pin the iOS 26.5 runtime, not 27.0-beta:** `name=iPhone 17`
 alone is ambiguous (a device exists on both runtimes) and picks 27.0, where the fixture won't render
-and xcodebuild *teardown* hangs ~10 min. Use the 26.5 device UDID (`xcrun simctl list devices`), where
+and xcodebuild _teardown_ hangs ~10 min. Use the 26.5 device UDID (`xcrun simctl list devices`), where
 the loop passes cleanly in ~7 s.
 
 Suggested order:
@@ -460,7 +464,7 @@ Suggested order:
    = 17 `Reference*.swift` (`import CtrlProxy`) + 17 `Rewrite*.swift` + `*ParityTests` diffing them
    (~80 differential tests) + ~155 rewrite-only tests (survive untouched). Hybrid plan (Paul):
    - **Golden-re-anchor (KEEP), wire-contract / Codable domains** → assert `Rewrite*` output against a
-     golden captured from the *current* rewrite (valid: parity is green, so rewrite output == reference
+     golden captured from the _current_ rewrite (valid: parity is green, so rewrite output == reference
      output == frozen-contract output): **WireDecode** (already fixture-anchored — just drop the
      reference-comparison half; the `assertWireSubset` vs `ios-ctrlproxy-request-snapshots.json` IS the
      golden), **ResponseModel**, **SdkDatabaseModel**, **HierarchyModel**, **PerformanceWire**. Small
@@ -479,7 +483,7 @@ Suggested order:
      artifact checks in `scripts/ios/ctrl-proxy-{build-for-testing,verify-artifacts,create-ipa}.sh`.
    - **Validate**: SPM `-warnings-as-errors` (surviving rewrite-only + golden tests green) + a
      `build-for-testing` on the sim. Then fold in the deferred Phase-2 loopback/connection scenarios.
-   Deliberately last and irreversible-ish (git keeps the deleted differential tests in history).
+     Deliberately last and irreversible-ish (git keeps the deleted differential tests in history).
 6. **Then Phase 8 fixups** (README index): the `os_signpost`/direct-interval PerfProvider
    simplification, the `HierarchyMerger` geometry-key improvement, the keyboard-focus RunLoop
    de-blocking — all off the critical path, validated against golden-replay corpora.

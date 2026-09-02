@@ -9,7 +9,7 @@ import ScreenCaptureCore
 /// exercise the session's lifecycle paths (start/stop/reconfigure/fatal-error)
 /// without a real Simulator window or Screen Recording permission (issue #4771).
 /// The signatures match `SCStream`'s exactly so it conforms without adapters.
-protocol CaptureStream: AnyObject {
+protocol CaptureStream: AnyObject, Sendable {
     func addStreamOutput(
         _ output: SCStreamOutput,
         type: SCStreamOutputType,
@@ -21,13 +21,31 @@ protocol CaptureStream: AnyObject {
     func updateConfiguration(_ configuration: SCStreamConfiguration) async throws
 }
 
+// SCStream's start/stop/updateConfiguration each hop to ScreenCaptureKit's own
+// queue and are safe to drive from the session's unstructured start/reconfigure
+// tasks, so the seam is `Sendable`. `@retroactive` because the conformance is added
+// to an SDK type this package does not own.
+extension SCStream: @retroactive @unchecked Sendable {}
 extension SCStream: CaptureStream {}
+
+// SCWindow is an immutable snapshot of window metadata (id, frame, owning app) that
+// `main.swift` resolves on the main actor and hands to the nonisolated `start`, so it
+// is safe to send. `@retroactive` because the conformance is added to an SDK type this
+// package does not own.
+extension SCWindow: @retroactive @unchecked Sendable {}
 
 /// Streams BGRA frames from a single iOS Simulator window via ScreenCaptureKit.
 /// The frame rate is configurable (5–60); 5 is the default for typical MCP
 /// automation workloads. Size changes (e.g. device rotation) trigger a stream
 /// reconfiguration so frames don't get cropped.
-final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate {
+///
+/// `@unchecked Sendable`: every mutable frame-path field (`_pipeline`, `_stream`,
+/// `_configuredPixelWidth/Height`, `_reconfiguring`) is `stateLock`-guarded, and
+/// `fps`, `audioEnabled`, `windowID`, `configuredPixelFormat`, and
+/// `startCaptureDeadlineSeconds` are set once in `start()` before frames flow, then
+/// read-only. This lets the ScreenCaptureKit callbacks and the reconfigure task
+/// capture `self` under Swift-6 strict concurrency.
+final class SimulatorCaptureSession: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     /// Builds the concrete stream for a resolved window. Injected so tests can
     /// substitute a fake `CaptureStream`; the default wires the real `SCStream`.
     typealias StreamFactory = (SCContentFilter, SCStreamConfiguration, SCStreamDelegate) -> CaptureStream

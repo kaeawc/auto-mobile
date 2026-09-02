@@ -51,7 +51,13 @@ You can use our interactive installer to step through all host platform requirem
 curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/refs/heads/main/scripts/install.sh | bash
 ```
 
-or follow the [installation guide](docs/index.md#install).
+Prefer Homebrew for the CLI:
+
+```bash title="Homebrew (click to copy)"
+brew install kaeawc/tap/auto-mobile
+```
+
+or follow the [installation guide](docs/index.md#install) — including the [Homebrew guide](docs/install/homebrew.md).
 
 ## Documentation
 

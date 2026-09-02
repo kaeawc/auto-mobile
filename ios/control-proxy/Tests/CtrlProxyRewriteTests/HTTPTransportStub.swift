@@ -2,6 +2,10 @@
 import Foundation
 import os
 
+// Test fixtures fail-fast on malformed setup data, so force-unwrap is idiomatic here
+// (blanket-allowed for force_unwrapping in test targets — see .swiftlint.yml).
+// swiftlint:disable force_unwrapping
+
 /// A scripted outcome for `StubHTTPTransport`. `Sendable` (no `any Error`) so the stub
 /// stays lock-confined-`Sendable` with no escape hatch.
 enum StubOutcome: Sendable {

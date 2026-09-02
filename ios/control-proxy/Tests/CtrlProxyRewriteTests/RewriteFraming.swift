@@ -64,6 +64,8 @@ enum RewriteFraming {
         isFinal: Bool,
         payload: Data,
         inProgressOpcode: UInt8?
+        // Module-agnostic parity tuple mirroring the framing result's five fields.
+        // swiftlint:disable:next large_tuple
     ) -> (tag: String, data: Data?, reason: String?, buffer: Data, inProgress: UInt8?) {
         var buf = buffer
         var inProg = inProgressOpcode

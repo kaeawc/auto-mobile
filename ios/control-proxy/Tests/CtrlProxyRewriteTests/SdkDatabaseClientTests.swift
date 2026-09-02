@@ -2,6 +2,10 @@
 import Foundation
 import XCTest
 
+// Test fixtures fail-fast on malformed setup data, so force-unwrap is idiomatic here
+// (blanket-allowed for force_unwrapping in test targets — see .swiftlint.yml).
+// swiftlint:disable force_unwrapping
+
 /// Behavior tests for the async `SdkDatabaseClient` (Phase 3). Rewrite-only tests over
 /// the `HTTPRequesting` seam that pin the reference's error mapping: a non-2xx status →
 /// `SdkDatabaseError.unavailable` (carrying the SDK's `{"error":…}` payload when present,

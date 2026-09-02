@@ -16,7 +16,7 @@ public final class SdkDatabaseClient: SdkDatabaseFetching, Sendable {
 
     public convenience init(port: UInt16 = 8766) {
         // Hardcoded localhost URL with an integer port always parses.
-        let baseURL = URL(string: "http://localhost:\(port)")!
+        let baseURL = URL(string: "http://localhost:\(port)")!  // swiftlint:disable:this force_unwrapping
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 2
         config.timeoutIntervalForResource = 5

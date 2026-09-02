@@ -60,6 +60,11 @@ final class WebSocketServer: @unchecked Sendable {
     // Lock-confined synchronized collections (read from broadcast/presence off `queue`).
     private let connections = ConnectionRegistry<WebSocketConnection>()
     private let upgradedClientIds = OSAllocatedUnfairLock<Set<Int>>(initialState: [])
+    /// Only connections that completed the RFC 6455 upgrade. HTTP probes (`/health`,
+    /// `/sdk-events`) share the accept path but must never receive framed WebSocket
+    /// broadcasts (#5830). A responder registry (not the id set) so tests can pin the
+    /// routing invariant with a fake responder.
+    private let upgradedConnections = ConnectionRegistry<any WebSocketResponding>()
 
     init(
         port: UInt16 = 8765,
@@ -139,6 +144,7 @@ final class WebSocketServer: @unchecked Sendable {
 
     private func onqueue_stop() {
         dispatchPrecondition(condition: .onQueue(queue))
+        _ = upgradedConnections.removeAll()
         connections.removeAll().forEach { $0.close() }
         listener?.cancel()
         listener = nil
@@ -170,8 +176,13 @@ final class WebSocketServer: @unchecked Sendable {
     }
 
     /// Records a completed upgrade, firing the presence hook only on the zero →
-    /// non-zero transition. Lock-confined, so callable from any thread.
+    /// non-zero transition. Lock-confined, so callable from any thread. Also promotes
+    /// the connection into the broadcast-eligible set so only upgraded clients — never
+    /// HTTP probes — receive framed broadcasts (#5830).
     func clientDidUpgrade(_ id: Int) {
+        if let connection = connections.value(forId: id) {
+            upgradedConnections.set(connection, forId: id)
+        }
         let wasEmpty = upgradedClientIds.withLock { ids -> Bool in
             let wasEmpty = ids.isEmpty
             ids.insert(id)
@@ -186,6 +197,7 @@ final class WebSocketServer: @unchecked Sendable {
     /// transition. A never-upgraded (HTTP-only) connection is a no-op here, so
     /// `/health` probes never toggle presence.
     func clientDidDisconnect(_ id: Int) {
+        upgradedConnections.removeValue(forId: id)
         let (wasPresent, nowEmpty) = upgradedClientIds.withLock { ids -> (Bool, Bool) in
             let wasPresent = !ids.isEmpty
             ids.remove(id)
@@ -302,15 +314,23 @@ final class WebSocketServer: @unchecked Sendable {
 
     // MARK: - Broadcast
 
-    /// Broadcast a message to all connected clients.
+    /// Broadcast a message to every upgraded WebSocket client. Never routes to
+    /// HTTP-only connections (`/health`, `/sdk-events` probes), which share the
+    /// accept path but never complete the RFC 6455 upgrade (#5830).
     func broadcast(_ data: Data) {
         if let broadcastSink {
             broadcastSink(data)
             return
         }
-        for connection in connections.values() {
+        for connection in upgradedConnections.values() {
             connection.send(data)
         }
+    }
+
+    /// Test seam for pinning the broadcast-routing invariant without opening a real
+    /// socket. Production upgrades are registered by `clientDidUpgrade` (#5830).
+    func registerUpgradedResponderForTesting(_ responder: any WebSocketResponding, id: Int) {
+        upgradedConnections.set(responder, forId: id)
     }
 
     /// Broadcast a hierarchy update push (requestId: nil), stamping the frameContext.

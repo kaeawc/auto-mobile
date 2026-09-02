@@ -5,6 +5,7 @@ public struct ObservationInsetsInfo: Codable, Sendable {
     public let source: String
     public let units: String
     public let safeArea: EdgeInsetsInfo?
+    public let displayCutoutInfo: DisplayCutoutInfo?
     public let systemChrome: SystemChromeInfo?
 
     public init(
@@ -12,12 +13,14 @@ public struct ObservationInsetsInfo: Codable, Sendable {
         source: String,
         units: String,
         safeArea: EdgeInsetsInfo?,
+        displayCutoutInfo: DisplayCutoutInfo?,
         systemChrome: SystemChromeInfo?
     ) {
         self.available = available
         self.source = source
         self.units = units
         self.safeArea = safeArea
+        self.displayCutoutInfo = displayCutoutInfo
         self.systemChrome = systemChrome
     }
 
@@ -26,6 +29,7 @@ public struct ObservationInsetsInfo: Codable, Sendable {
         source: "unavailable",
         units: "unknown",
         safeArea: nil,
+        displayCutoutInfo: .unknown,
         systemChrome: nil
     )
 }

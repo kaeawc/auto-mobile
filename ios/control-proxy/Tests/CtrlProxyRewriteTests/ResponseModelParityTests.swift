@@ -20,6 +20,10 @@ final class ResponseModelParityTests: XCTestCase {
         let encoded = RewriteResponses.connectedEventEncoded(id: 42)
         guard let object = JSONGolden.object(encoded) else { return }
         XCTAssertEqual(object["supportedCommands"] as? [String], commands)
+        // The handshake also advertises optional runner features (RunnerFeature.allCases,
+        // sorted); the daemon reads it to gate feature use, so `display_cutout_info` is a
+        // load-bearing wire identifier (#5787).
+        XCTAssertEqual(object["supportedFeatures"] as? [String], ["display_cutout_info"])
     }
 
     // MARK: - WebSocketResponse / HierarchyUpdate Codable round-trip

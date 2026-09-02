@@ -14,6 +14,7 @@ public struct SdkViewHierarchy: Codable, Sendable {
     public let screenWidth: Int
     public let screenHeight: Int
     public let safeAreaInsets: SdkEdgeInsets?
+    public let displayCutoutInfo: SdkDisplayCutoutInfo?
     public let systemChrome: SdkSystemChrome?
     public let root: SdkViewNode?
 
@@ -24,6 +25,7 @@ public struct SdkViewHierarchy: Codable, Sendable {
         screenWidth: Int,
         screenHeight: Int,
         safeAreaInsets: SdkEdgeInsets? = nil,
+        displayCutoutInfo: SdkDisplayCutoutInfo? = nil,
         systemChrome: SdkSystemChrome? = nil,
         root: SdkViewNode?
     ) {
@@ -33,6 +35,7 @@ public struct SdkViewHierarchy: Codable, Sendable {
         self.screenWidth = screenWidth
         self.screenHeight = screenHeight
         self.safeAreaInsets = safeAreaInsets
+        self.displayCutoutInfo = displayCutoutInfo
         self.systemChrome = systemChrome
         self.root = root
     }

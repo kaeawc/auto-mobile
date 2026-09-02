@@ -41,6 +41,14 @@ public enum HierarchyMerger {
         let safeArea = sdk.safeAreaInsets.map {
             EdgeInsetsInfo(top: $0.top, right: $0.right, bottom: $0.bottom, left: $0.left)
         }
+        let displayCutoutInfo = sdk.displayCutoutInfo.map {
+            DisplayCutoutInfo(
+                classification: $0.classification,
+                bounds: $0.bounds?.map {
+                    ElementBounds(left: $0.left, top: $0.top, right: $0.right, bottom: $0.bottom)
+                }
+            )
+        } ?? xcuitest.insets.displayCutoutInfo
         let systemChrome = sdk.systemChrome.map {
             SystemChromeInfo(
                 visibility: $0.visibility,
@@ -56,6 +64,7 @@ public enum HierarchyMerger {
                     source: "ios-sdk-safe-area",
                     units: "points",
                     safeArea: safeArea,
+                    displayCutoutInfo: displayCutoutInfo,
                     systemChrome: systemChrome
                 )
             } else if let systemChrome {
@@ -64,6 +73,7 @@ public enum HierarchyMerger {
                     source: xcuitest.insets.source,
                     units: xcuitest.insets.units,
                     safeArea: xcuitest.insets.safeArea,
+                    displayCutoutInfo: displayCutoutInfo,
                     systemChrome: systemChrome
                 )
             } else {

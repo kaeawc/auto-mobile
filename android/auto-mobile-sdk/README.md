@@ -42,6 +42,20 @@ for details.
 
 ## Usage
 
+### Navigation-only initialization
+
+Use navigation-only initialization when the host needs navigation event delivery but not the SDK's
+inspection, diagnostics, network, interaction, or performance integrations:
+
+```kotlin
+AutoMobileSDK.initialize(
+    NavigationConfiguration(applicationContext)
+)
+```
+
+This mode only creates the bounded navigation-delivery pipeline. Call `AutoMobileSDK.shutdown()`
+to stop delivery and release its resources before initializing the full SDK.
+
 ### Navigation3 Integration
 
 For apps using androidx.navigation3, add tracking calls in your `NavDisplay` entry providers:

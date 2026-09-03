@@ -178,12 +178,51 @@ run_lane() {
 }
 
 @test "Bun runtime option values are not classified as positional test targets" {
-  for option in --config --env-file --cwd; do
+  for option in --config --env-file; do
     run_lane unit "$option" bunfig.toml test/scripts/testLaneClassification.test.ts
     [ "$status" -eq 0 ]
     [[ "$output" == *"$option bunfig.toml"* ]]
     [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
   done
+}
+
+@test "optional Bun flags do not consume following test targets" {
+  for option in --parallel --changed --inspect; do
+    run_lane unit "$option" test/contracts/runAll.integration.test.ts
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"No unit test paths were selected."* ]]
+  done
+}
+
+@test "optional Bun flags classify normalized test target spellings" {
+  run_lane unit --changed ./test/contracts/runAll.integration.test.ts
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"No unit test paths were selected."* ]]
+
+  run_lane unit --changed test
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Unit test targets cannot include other lanes."* ]]
+
+  link="$BATS_TEST_TMPDIR/auto-mobile-link"
+  ln -s "$PWD" "$link"
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    TEST_TS_PRINT_CMD=1 \
+    bash "$link/$SCRIPT" unit --changed "$link/test/contracts/runAll.integration.test.ts"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"No unit test paths were selected."* ]]
+}
+
+@test "optional Bun flags preserve unambiguous split values" {
+  run_lane unit --parallel 2 test/scripts/testLaneClassification.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--parallel 2"* ]]
+}
+
+@test "rejects a cwd override that would invalidate lane classification" {
+  run_lane unit --cwd test scripts/testLaneClassification.test.ts
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--cwd is not supported"* ]]
 }
 
 @test "rejects an unclassified positional Bun pattern" {

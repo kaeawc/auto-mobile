@@ -733,8 +733,8 @@ public final class dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes {
   public final void initialize(android.content.Context);
   public final boolean isInitialized();
   public final void uninstall();
-  public static final void access$broadcastCrash(dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes, java.lang.Thread, java.lang.Throwable);
   public static final java.lang.Thread$UncaughtExceptionHandler access$getOriginalHandler$p();
+  public static final void access$broadcastCrash(dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes, java.lang.Thread, java.lang.Throwable);
 }
 Compiled from "DatabaseDriver.kt"
 public final class dev.jasonpearson.automobile.sdk.database.ColumnInfo {

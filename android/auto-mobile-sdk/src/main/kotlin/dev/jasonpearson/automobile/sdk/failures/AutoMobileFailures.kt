@@ -95,6 +95,8 @@ object AutoMobileFailures {
     message: String? = null,
     currentScreen: String? = null,
   ) {
+    if (!AutoMobileSDK.isTrackingEnabled) return
+
     val ctx = context
     if (ctx == null) {
       AutoMobileSDK.logger.w(TAG) {

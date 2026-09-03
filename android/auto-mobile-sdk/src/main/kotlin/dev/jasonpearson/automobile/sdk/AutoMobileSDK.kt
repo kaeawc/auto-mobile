@@ -360,7 +360,7 @@ object AutoMobileSDK {
    *
    * Call [shutdown] to detach all hooks and return the SDK to its pre-initialization state.
    *
-   * @param enabled Whether navigation tracking should be enabled
+   * @param enabled Whether event capture and tracking should be enabled
    */
   fun setEnabled(enabled: Boolean) {
     _isEnabled = enabled

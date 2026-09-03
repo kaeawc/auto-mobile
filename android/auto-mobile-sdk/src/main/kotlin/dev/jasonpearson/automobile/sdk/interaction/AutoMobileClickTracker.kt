@@ -161,7 +161,7 @@ internal object AutoMobileClickTracker {
     }
 
     private fun emitTapEvent(x: Float, y: Float, durationMs: Long) {
-      if (!isInitialized) return
+      if (!isInitialized || !AutoMobileSDK.isTrackingEnabled) return
       val now = System.currentTimeMillis()
       if (now - lastTapProcessedAt < TAP_DEBOUNCE_MS) return
       lastTapProcessedAt = now

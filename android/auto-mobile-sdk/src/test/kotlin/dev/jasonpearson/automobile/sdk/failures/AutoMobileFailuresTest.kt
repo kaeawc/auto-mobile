@@ -1,25 +1,27 @@
 package dev.jasonpearson.automobile.sdk.failures
 
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 
 @RunWith(RobolectricTestRunner::class)
 class AutoMobileFailuresTest {
 
   @Before
   fun setup() {
-    // Clear events before each test
-    AutoMobileFailures.clearEvents()
+    AutoMobileFailures.reset()
+    AutoMobileSDK.setEnabled(true)
   }
 
   @After
   fun tearDown() {
-    // Clean up after each test
-    AutoMobileFailures.clearEvents()
+    AutoMobileFailures.reset()
+    AutoMobileSDK.setEnabled(true)
   }
 
   @Test
@@ -61,6 +63,16 @@ class AutoMobileFailuresTest {
   fun `recordHandledException with screen should not crash when context not initialized`() {
     val exception = RuntimeException("Test exception")
     AutoMobileFailures.recordHandledException(exception, "Custom message", "TestScreen")
+
+    assertEquals(0, AutoMobileFailures.getEventCount())
+  }
+
+  @Test
+  fun `recordHandledException does not capture while the SDK is disabled`() {
+    AutoMobileFailures.initialize(RuntimeEnvironment.getApplication())
+    AutoMobileSDK.setEnabled(false)
+
+    AutoMobileFailures.recordHandledException(RuntimeException("Test exception"))
 
     assertEquals(0, AutoMobileFailures.getEventCount())
   }

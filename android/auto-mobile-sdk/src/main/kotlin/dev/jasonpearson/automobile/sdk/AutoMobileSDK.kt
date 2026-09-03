@@ -297,6 +297,7 @@ object AutoMobileSDK {
       navigationOnlyMode = true
       val appContext = configuration.context.applicationContext
       context = appContext
+      capabilityRegistry.markNavigationInitialized()
 
       val counter = DefaultDropCounter()
       dropCounter = counter
@@ -672,6 +673,7 @@ object AutoMobileSDK {
     listeners.clear()
     runtimeContextListeners.clear()
     _isEnabled = true
+    capabilityRegistry.markNavigationShutdown()
     context = null
     navigationOnlyMode = false
   }

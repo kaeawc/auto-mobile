@@ -3,14 +3,19 @@ package dev.jasonpearson.automobile.sdk
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.database.DatabaseError
 import dev.jasonpearson.automobile.sdk.database.DatabaseInspector
+import dev.jasonpearson.automobile.sdk.storage.DataStoreAdapter
+import dev.jasonpearson.automobile.sdk.storage.DataStoreEntry
+import dev.jasonpearson.automobile.sdk.storage.DataStoreInspector
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesError
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -35,6 +40,7 @@ class AutoMobileSDKNavigationInitializationTest {
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
     AutoMobileCrashes.uninstall()
     DatabaseInspector.reset()
+    DataStoreInspector.reset()
     SharedPreferencesInspector.reset()
     originalHandler = Thread.UncaughtExceptionHandler { _, _ -> }
     Thread.setDefaultUncaughtExceptionHandler(originalHandler)
@@ -44,6 +50,7 @@ class AutoMobileSDKNavigationInitializationTest {
   fun tearDown() {
     AutoMobileSDK.shutdown()
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
+    DataStoreInspector.reset()
     Thread.setDefaultUncaughtExceptionHandler(originalHandler)
   }
 
@@ -54,6 +61,9 @@ class AutoMobileSDKNavigationInitializationTest {
     assertNotNull(AutoMobileSDK.getEventBuffer())
     assertSame(originalHandler, Thread.getDefaultUncaughtExceptionHandler())
     assertFalse(AutoMobileCrashes.isInitialized())
+    val capabilities = AutoMobileSDK.capabilities.capabilities.associateBy { it.id }
+    assertEquals(SdkCapabilityState.SUPPORTED, capabilities.getValue("events.navigation").state)
+    assertEquals(SdkCapabilityState.UNSUPPORTED, capabilities.getValue("network.capture").state)
     try {
       DatabaseInspector.getDriver()
       fail("DatabaseInspector should not be initialized")
@@ -133,6 +143,20 @@ class AutoMobileSDKNavigationInitializationTest {
   }
 
   @Test
+  fun `navigation shutdown preserves host-owned DataStore registrations`() {
+    val registration = DataStoreInspector.registerAdapter("host", EmptyDataStoreAdapter)
+
+    try {
+      AutoMobileSDK.initialize(NavigationConfiguration(context))
+      AutoMobileSDK.shutdown()
+
+      assertEquals(setOf("host"), DataStoreInspector.registeredAdapterNames())
+    } finally {
+      registration.unregister()
+    }
+  }
+
+  @Test
   fun `navigation initialization failure is contained and releases partial state`() {
     AutoMobileSDK.initialize(NavigationConfiguration(ThrowingApplicationContext(context)))
 
@@ -165,5 +189,11 @@ class AutoMobileSDKNavigationInitializationTest {
     override fun sendBroadcast(intent: Intent) {
       error("Broadcast unavailable")
     }
+  }
+
+  private object EmptyDataStoreAdapter : DataStoreAdapter {
+    override suspend fun storeNames(): List<String> = emptyList()
+
+    override suspend fun read(storeName: String): List<DataStoreEntry> = emptyList()
   }
 }

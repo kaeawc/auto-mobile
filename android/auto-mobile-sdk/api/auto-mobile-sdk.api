@@ -605,6 +605,8 @@ public final class dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityReg
   public static final int $stable;
   public dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityRegistry();
   public final void markInitialized();
+  public final void markNavigationInitialized();
+  public final void markNavigationShutdown();
   public final void markLifecycleReady();
   public final void markShutdown();
   public final void setEnabled(boolean);

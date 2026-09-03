@@ -829,6 +829,7 @@ export const NAVIGATION_RELEVANT_TOOLS = new Set([
   "dragAndDrop",
   "pressButton",
   "inputText",
+  "sendKeys",
   "clearText",
   "imeAction",
 ]);

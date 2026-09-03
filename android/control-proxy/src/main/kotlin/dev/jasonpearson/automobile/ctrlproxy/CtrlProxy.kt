@@ -1980,6 +1980,9 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
     performSetText(requestId, text, resourceId, dismissKeyboard)
   }
 
+  override fun requestInsertText(requestId: String?, text: String) =
+    performInsertText(requestId, text)
+
   override fun requestImeAction(requestId: String?, action: String) =
     performImeAction(requestId, action)
 
@@ -4157,6 +4160,112 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
   }
 
   /**
+   * Insert text at the focused field's current selection using accessibility actions.
+   *
+   * Android exposes replacement through ACTION_SET_TEXT but no separate insert primitive. Build
+   * the new value from the node's UTF-16 selection range, then restore the caret immediately after
+   * the inserted text. This matches ordinary typing: a collapsed selection inserts at the caret,
+   * while a non-empty selection is replaced.
+   */
+  private fun performInsertText(requestId: String?, text: String) {
+    val startTime = System.currentTimeMillis()
+    perfProvider.serial("performInsertText")
+
+    try {
+      val targetNode = findFocusedEditableNode(rootInActiveWindow)
+      if (targetNode == null) {
+        perfProvider.end()
+        launchRequestScope(requestId) {
+          broadcastInsertTextResult(
+            requestId,
+            false,
+            "No focused editable node found",
+            System.currentTimeMillis() - startTime,
+          )
+        }
+        return
+      }
+
+      val currentText = targetNode.text?.toString().orEmpty()
+      val rawStart = targetNode.textSelectionStart
+      val rawEnd = targetNode.textSelectionEnd
+      val hasValidSelection = rawStart >= 0 && rawEnd >= 0
+      val selectionStart =
+        (if (hasValidSelection) minOf(rawStart, rawEnd) else currentText.length)
+          .coerceIn(0, currentText.length)
+      val selectionEnd =
+        (if (hasValidSelection) maxOf(rawStart, rawEnd) else currentText.length)
+          .coerceIn(selectionStart, currentText.length)
+      val updatedText =
+        currentText.substring(0, selectionStart) + text + currentText.substring(selectionEnd)
+      val updatedCaret = selectionStart + text.length
+
+      val setTextArguments =
+        android.os.Bundle().apply {
+          putCharSequence(
+            android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
+            updatedText,
+          )
+        }
+      val setTextSucceeded =
+        targetNode.performAction(
+          android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT,
+          setTextArguments,
+        )
+      val selectionSucceeded =
+        if (setTextSucceeded) {
+          val selectionArguments =
+            android.os.Bundle().apply {
+              putInt(
+                android.view.accessibility.AccessibilityNodeInfo
+                  .ACTION_ARGUMENT_SELECTION_START_INT,
+                updatedCaret,
+              )
+              putInt(
+                android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT,
+                updatedCaret,
+              )
+            }
+          targetNode.performAction(
+            android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_SELECTION,
+            selectionArguments,
+          )
+        } else {
+          false
+        }
+      targetNode.recycle()
+      perfProvider.end()
+
+      val success = setTextSucceeded && selectionSucceeded
+      val error =
+        when {
+          !setTextSucceeded -> "ACTION_SET_TEXT returned false"
+          !selectionSucceeded -> "ACTION_SET_SELECTION returned false"
+          else -> null
+        }
+      kotlinx.coroutines.runBlocking {
+        broadcastInsertTextResult(
+          requestId,
+          success,
+          error,
+          System.currentTimeMillis() - startTime,
+        )
+      }
+    } catch (e: Exception) {
+      perfProvider.end()
+      Log.e(TAG, "Error inserting text", e)
+      kotlinx.coroutines.runBlocking {
+        broadcastInsertTextResult(
+          requestId,
+          false,
+          e.message,
+          System.currentTimeMillis() - startTime,
+        )
+      }
+    }
+  }
+
+  /**
    * Perform IME action using AccessibilityService. This properly handles focus movement
    * (next/previous) and keyboard actions (done/go/search/send).
    */
@@ -5751,6 +5860,31 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         }
       }
       Log.d(TAG, "Broadcasted set text result to ${webSocketServer.getConnectionCount()} clients")
+    }
+  }
+
+  /** Broadcast insert text result to WebSocket clients. */
+  private suspend fun broadcastInsertTextResult(
+    requestId: String?,
+    success: Boolean,
+    error: String?,
+    totalTimeMs: Long,
+  ) {
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+      Log.d(TAG, "WebSocket server not running, skipping insert text result broadcast")
+      return
+    }
+
+    resultBroadcaster.guard(requestId, "insert_text_result") {
+      webSocketServer.broadcastWithPerfSync { perfTiming ->
+        webSocketFrameJson("insert_text_result", requestId = requestId, perfTiming = perfTiming) {
+          put("success", success)
+          put("totalTimeMs", totalTimeMs)
+          if (error != null) {
+            put("error", error)
+          }
+        }
+      }
     }
   }
 

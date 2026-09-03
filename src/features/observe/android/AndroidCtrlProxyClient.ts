@@ -325,6 +325,10 @@ interface WsSetTextResultMessage extends WsRequestBase {
   type: "set_text_result";
 }
 
+interface WsInsertTextResultMessage extends WsRequestBase {
+  type: "insert_text_result";
+}
+
 interface WsImeActionResultMessage extends WsRequestBase {
   type: "ime_action_result";
   action: string;
@@ -789,6 +793,7 @@ type WebSocketMessage =
   | WsDragResultMessage
   | WsPinchResultMessage
   | WsSetTextResultMessage
+  | WsInsertTextResultMessage
   | WsImeActionResultMessage
   | WsSelectAllResultMessage
   | WsActionResultMessage
@@ -913,6 +918,12 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
   ): Promise<A11yPinchResult>;
 
   requestSetText(text: string, options?: SetTextOptions): Promise<A11ySetTextResult>;
+
+  requestInsertText(
+    text: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<A11ySetTextResult>;
 
   requestClearText(
     resourceId?: string,
@@ -2203,6 +2214,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   async requestSetText(text: string, options?: SetTextOptions): Promise<A11ySetTextResult> {
     return this.text.requestSetText(text, options);
+  }
+
+  async requestInsertText(
+    text: string,
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+  ): Promise<A11ySetTextResult> {
+    return this.text.requestInsertText(text, timeoutMs, perf);
   }
 
   async requestClearText(
@@ -3728,6 +3747,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       // Handle set text result
       if (message.type === "set_text_result" && message.requestId) {
+        this.requestManager.resolve<A11ySetTextResult>(message.requestId, {
+          success: message.success,
+          totalTimeMs: message.totalTimeMs,
+          error: message.error,
+          perfTiming: message.perfTiming,
+        });
+      }
+
+      if (message.type === "insert_text_result" && message.requestId) {
         this.requestManager.resolve<A11ySetTextResult>(message.requestId, {
           success: message.success,
           totalTimeMs: message.totalTimeMs,

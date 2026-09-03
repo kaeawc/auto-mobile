@@ -88,6 +88,7 @@ export function decodeCtrlProxyMessage(message: WebSocketMessage): DecodedCtrlPr
     case "append_text_result":
     case "clear_text_result":
     case "select_all_result":
+    case "press_key_result":
     case "press_button_result":
     case "press_home_result":
     case "press_back_result":

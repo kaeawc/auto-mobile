@@ -185,6 +185,13 @@ export interface RequestSetTextMessage {
   frameContext?: string;
 }
 
+/** `@SerialName("request_insert_text")` → `RequestInsertText` */
+export interface RequestInsertTextMessage {
+  type: "request_insert_text";
+  requestId: string;
+  text: string;
+}
+
 /** `@SerialName("request_ime_action")` → `RequestImeAction` */
 export interface RequestImeActionMessage {
   type: "request_ime_action";
@@ -599,6 +606,7 @@ export type CtrlProxyRequest =
   | RequestGestureMoveMessage
   | RequestGestureEndMessage
   | RequestSetTextMessage
+  | RequestInsertTextMessage
   | RequestImeActionMessage
   | RequestSelectAllMessage
   | RequestActionMessage
@@ -669,6 +677,7 @@ const REQUEST_TYPE_REGISTRY: Record<CtrlProxyRequestType, true> = {
   request_gesture_move: true,
   request_gesture_end: true,
   request_set_text: true,
+  request_insert_text: true,
   request_ime_action: true,
   request_select_all: true,
   request_action: true,

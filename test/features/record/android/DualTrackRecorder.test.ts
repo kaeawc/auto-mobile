@@ -183,7 +183,7 @@ describe("DualTrackRecorder", () => {
     expect(steps[0].params.button).toBe("back");
   });
 
-  test("inputText from A11y with no gesture match → inputText step", async () => {
+  test("inputText from A11y records a sendKeys replacement", async () => {
     await recorder.start();
 
     fakeA11y.emit({
@@ -196,8 +196,18 @@ describe("DualTrackRecorder", () => {
     const { steps } = await recorder.stop();
 
     expect(steps).toHaveLength(1);
-    expect(steps[0].tool).toBe("inputText");
-    expect(steps[0].params.text).toBe("hello@example.com");
+    expect(steps[0]).toEqual({
+      tool: "sendKeys",
+      params: {
+        commands: [
+          {
+            action: "type",
+            text: "hello@example.com",
+            operation: "replace",
+          },
+        ],
+      },
+    });
   });
 
   test("consecutive inputText events on same element are coalesced", async () => {
@@ -214,7 +224,7 @@ describe("DualTrackRecorder", () => {
     const { steps } = await recorder.stop();
     // Should be coalesced into a single step with the last text
     expect(steps).toHaveLength(1);
-    expect(steps[0].params.text).toBe("hel");
+    expect(steps[0].params.commands[0].text).toBe("hel");
   });
 
   test("buffered A11y event is rejected when gesture does not hit element bounds", async () => {
@@ -275,11 +285,11 @@ describe("DualTrackRecorder", () => {
 
     const { steps } = await recorder.stop();
     expect(steps).toHaveLength(3);
-    expect(steps[0].tool).toBe("inputText");
-    expect(steps[0].params.text).toBe("hello");
+    expect(steps[0].tool).toBe("sendKeys");
+    expect(steps[0].params.commands[0].text).toBe("hello");
     expect(steps[1].tool).toBe("pressButton");
-    expect(steps[2].tool).toBe("inputText");
-    expect(steps[2].params.text).toBe("world");
+    expect(steps[2].tool).toBe("sendKeys");
+    expect(steps[2].params.commands[0].text).toBe("world");
   });
 
   test("windowChange A11y events are not emitted as steps", async () => {

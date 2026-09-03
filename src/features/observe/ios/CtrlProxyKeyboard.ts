@@ -3,7 +3,12 @@
  */
 
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
-import type { DelegateContext, CtrlProxyKeyboardResult } from "./types";
+import type { InputKeyModifier, InputKeyName } from "../../action/InputKey";
+import type {
+  DelegateContext,
+  CtrlProxyKeyboardResult,
+  CtrlProxyPressKeyResult,
+} from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
 export class CtrlProxyKeyboard {
@@ -44,6 +49,23 @@ export class CtrlProxyKeyboard {
         totalTimeMs: timeout,
         error: `Keyboard timed out after ${timeout}ms`,
       }),
+    });
+  }
+
+  async requestPressKey(
+    key: InputKeyName,
+    modifiers: InputKeyModifier[],
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker,
+  ): Promise<CtrlProxyPressKeyResult> {
+    return sendCommand<CtrlProxyPressKeyResult>(this.context, {
+      idPrefix: "pressKey",
+      responseType: "press_key",
+      messageType: "request_press_key",
+      params: { key, modifiers },
+      timeoutMs,
+      perf,
+      errorLabel: "Press key",
     });
   }
 }

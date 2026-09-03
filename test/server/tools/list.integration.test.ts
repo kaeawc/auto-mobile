@@ -86,7 +86,10 @@ describe("MCP Tools List", () => {
       const toolNames = result.tools.map((tool) => tool.name);
       expect(toolNames).toContain("observe");
       expect(toolNames).toContain("tapOn");
-      expect(toolNames).toContain("inputText");
+      expect(toolNames).toContain("sendKeys");
+      expect(toolNames).not.toContain("inputText");
+      expect(toolNames).not.toContain("clearText");
+      expect(toolNames).not.toContain("imeAction");
       expect(toolNames).not.toContain("clipboard");
       expect(toolNames).not.toContain("openLink");
       expect(toolNames).not.toContain("provisionDevice");

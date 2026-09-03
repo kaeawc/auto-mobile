@@ -7,6 +7,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -38,7 +39,7 @@ class SdkEventBufferTest {
       initialDelay: Long,
       period: Long,
       unit: TimeUnit,
-    ) =
+    ): ScheduledFuture<*> =
       super.scheduleAtFixedRate(
         {
           timerStarted.countDown()

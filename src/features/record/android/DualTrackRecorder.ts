@@ -53,6 +53,7 @@ export class DualTrackRecorder {
   /** Reference to the real AndroidCtrlProxyClient when not in test mode */
   private activeA11y: AndroidCtrlProxyClient | null = null;
   private stopped = false;
+  private recordWithSupportedSendKeys: boolean;
 
   get stepCount(): number {
     return this.steps.length;
@@ -68,7 +69,9 @@ export class DualTrackRecorder {
     private readonly timer: Timer = defaultTimer,
     /** Override the release-gated recorded text tool in tests. */
     private readonly recordWithSendKeys: boolean = isSendKeysReleased(),
-  ) {}
+  ) {
+    this.recordWithSupportedSendKeys = recordWithSendKeys;
+  }
 
   async start(): Promise<void> {
     // In real mode (no test override), obtain the AndroidCtrlProxyClient directly
@@ -83,6 +86,11 @@ export class DualTrackRecorder {
     const connected = await a11y.ensureConnected();
     if (!connected) {
       throw new Error("[DualTrackRecorder] Unable to connect to the accessibility service.");
+    }
+    if (this.recordWithSendKeys && a11y.getSupportedCommands) {
+      const supportedCommands = await a11y.getSupportedCommands();
+      this.recordWithSupportedSendKeys =
+        supportedCommands?.includes("request_insert_text") ?? false;
     }
 
     // Notify Kotlin service that recording is starting (enables interaction event emission)
@@ -255,7 +263,7 @@ export class DualTrackRecorder {
   }
 
   private buildRecordedTextStep(text: string): PlanStep {
-    if (!this.recordWithSendKeys) {
+    if (!this.recordWithSupportedSendKeys) {
       return { tool: "inputText", params: { text } };
     }
     return {

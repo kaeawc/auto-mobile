@@ -23,7 +23,7 @@ class SetTextAcknowledgementOrderTest {
     val body = functionBody(source, "private fun performSetText(")
     val action = body.indexOf("targetNode.performAction(")
     val acknowledgement = body.indexOf("broadcastSetTextResult(", startIndex = action)
-    val hierarchy = body.indexOf("hierarchyDebouncer.extractAfterQuiescence(", startIndex = action)
+    val refresh = body.indexOf("refreshHierarchyAfterTextInput()", startIndex = action)
 
     assertTrue("performSetText must call ACTION_SET_TEXT", action >= 0)
     assertTrue(
@@ -32,11 +32,16 @@ class SetTextAcknowledgementOrderTest {
     )
     assertTrue(
       "performSetText must post-process the hierarchy after ACTION_SET_TEXT",
-      hierarchy > action,
+      refresh > action,
     )
     assertTrue(
       "set_text_result must acknowledge a successful ACTION_SET_TEXT before hierarchy postprocessing",
-      acknowledgement < hierarchy,
+      acknowledgement < refresh,
+    )
+    val refreshBody = functionBody(source, "private fun refreshHierarchyAfterTextInput()")
+    assertTrue(
+      "text hierarchy refresh must wait for quiescence",
+      "hierarchyDebouncer.extractAfterQuiescence(" in refreshBody,
     )
 
     val broadcaster = functionBody(source, "private suspend fun broadcastSetTextResult(")
@@ -90,6 +95,21 @@ class SetTextAcknowledgementOrderTest {
     assertTrue(
       "insert_text_result must serialize partial-application state",
       partialGuard >= 0 && partialField > partialGuard,
+    )
+  }
+
+  @Test
+  fun `performInsertText acknowledges before asynchronously refreshing successful text mutations`() {
+    val source = KotlinSourceScan.maskLiteralsAndComments(readCtrlProxySource())
+    val body = functionBody(source, "private fun performInsertText(")
+    val setText = body.indexOf("targetNode.performAction(")
+    val acknowledgement = body.indexOf("broadcastInsertTextResult(", startIndex = setText)
+    val refresh = body.indexOf("refreshHierarchyAfterTextInput()", startIndex = acknowledgement)
+
+    assertTrue("performInsertText must call ACTION_SET_TEXT", setText >= 0)
+    assertTrue(
+      "insert_text_result must acknowledge the text mutation before hierarchy postprocessing",
+      acknowledgement > setText && refresh > acknowledgement,
     )
   }
 

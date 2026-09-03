@@ -79,6 +79,7 @@ export async function clearTextWithKeyEvents(
   adb: AdbExecutor,
   count: number,
   signal?: AbortSignal,
+  onDelete?: () => void,
 ): Promise<void> {
   signal?.throwIfAborted();
   await adb.executeCommand("shell input keyevent KEYCODE_MOVE_END");
@@ -86,6 +87,7 @@ export async function clearTextWithKeyEvents(
 
   for (let index = 0; index < count; index++) {
     await adb.executeCommand("shell input keyevent KEYCODE_DEL");
+    onDelete?.();
     signal?.throwIfAborted();
   }
 }

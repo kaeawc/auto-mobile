@@ -4126,35 +4126,36 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
         )
       }
 
-      // Trigger a hierarchy refresh after successful text input
-      // This ensures the next observe will get the updated text
-      if (success) {
-        serviceScope.launch {
-          try {
-            // Wait for UI to settle (no accessibility events for 50ms), then extract hierarchy.
-            // This best-effort follow-up must not delay the set_text_result acknowledgement.
-            val freshHierarchy =
-              hierarchyDebouncer.extractAfterQuiescence(
-                quiescenceMs = 50L,
-                maxWaitMs = 500L,
-                pollIntervalMs = 10L,
-              )
-            if (freshHierarchy != null) {
-              broadcastHierarchyUpdate(freshHierarchy, sync = true)
-            }
-          } catch (e: CancellationException) {
-            throw e
-          } catch (e: Exception) {
-            Log.w(TAG, "Failed to refresh hierarchy after text input", e)
-          }
-        }
-      }
+      if (success) refreshHierarchyAfterTextInput()
     } catch (e: Exception) {
       perfProvider.end()
       val errorTime = System.currentTimeMillis()
       Log.e(TAG, "Error performing set text", e)
       kotlinx.coroutines.runBlocking {
         broadcastSetTextResult(requestId, false, e.message, errorTime - startTime)
+      }
+    }
+  }
+
+  /**
+   * Publishes the settled text state after a successful text mutation without delaying its result.
+   */
+  private fun refreshHierarchyAfterTextInput() {
+    serviceScope.launch {
+      try {
+        val freshHierarchy =
+          hierarchyDebouncer.extractAfterQuiescence(
+            quiescenceMs = 50L,
+            maxWaitMs = 500L,
+            pollIntervalMs = 10L,
+          )
+        if (freshHierarchy != null) {
+          broadcastHierarchyUpdate(freshHierarchy, sync = true)
+        }
+      } catch (e: CancellationException) {
+        throw e
+      } catch (e: Exception) {
+        Log.w(TAG, "Failed to refresh hierarchy after text input", e)
       }
     }
   }
@@ -4300,6 +4301,7 @@ class CtrlProxy : AccessibilityService(), CtrlProxyActions {
           partialApplication,
         )
       }
+      if (setTextSucceeded) refreshHierarchyAfterTextInput()
     } catch (e: Exception) {
       perfProvider.end()
       Log.e(TAG, "Error inserting text", e)

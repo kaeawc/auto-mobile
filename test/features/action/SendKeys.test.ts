@@ -136,7 +136,7 @@ describe("SendKeys", () => {
       { text: "First name" },
     );
 
-    expect(calls).toEqual(["focus", "timestamp", "type:secret", "key:tab"]);
+    expect(calls).toEqual(["focus", "type:secret", "key:tab", "timestamp"]);
     expect(result.success).toBe(false);
     expect(result.completedCommands).toBe(1);
     expect(result.failedIndex).toBe(1);
@@ -301,6 +301,41 @@ describe("DefaultSendKeysCommandExecutor", () => {
     });
     expect(adb.getExecutedCommands()).toContain("shell input keyevent KEYCODE_A");
     expect(adb.getExecutedCommands()).toContain("shell input keyevent KEYCODE_B");
+  });
+
+  test("marks a replacement clear failure after a delete as partially applied", async () => {
+    const adb = new FakeAdbExecutor();
+    const executeCommand = adb.executeCommand.bind(adb);
+    let deleteCount = 0;
+    adb.executeCommand = async (command, ...options) => {
+      if (command === "shell input keyevent KEYCODE_DEL" && ++deleteCount === 2) {
+        throw new Error("delete rejected");
+      }
+      return executeCommand(command, ...options);
+    };
+    const executor = new DefaultSendKeysCommandExecutor(
+      androidDevice,
+      createAdbFactory(adb),
+      createObserver(focusedAndroidObservation("old")),
+      { textClient: createTextClient().client },
+    );
+
+    const result = await executor.type({
+      action: "type",
+      text: "replacement",
+      operation: "replace",
+      mode: "eventOnly",
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      partialApplication: true,
+      error: "delete rejected",
+    });
+    expect(adb.getExecutedCommands()).toEqual([
+      "shell input keyevent KEYCODE_MOVE_END",
+      "shell input keyevent KEYCODE_DEL",
+    ]);
   });
 
   test("accepts focused custom editable controls that expose text actions", async () => {
@@ -488,5 +523,30 @@ describe("DefaultSendKeysCommandExecutor", () => {
       resolvedMode: "xcuiTypeText",
     });
     expect(calls).toEqual(["clear", "insert:replacement"]);
+  });
+
+  test("does not insert an iOS replacement after cancellation during clear", async () => {
+    const controller = new AbortController();
+    const { client, calls } = createTextClient();
+    client.clear = async () => {
+      calls.push("clear");
+      controller.abort();
+      return { success: true };
+    };
+    const executor = new DefaultSendKeysCommandExecutor(
+      iosDevice,
+      createAdbFactory(new FakeAdbExecutor()),
+      createObserver(),
+      { textClient: client },
+    );
+
+    await expect(
+      executor.type(
+        { action: "type", text: "replacement", operation: "replace" },
+        controller.signal,
+      ),
+    ).rejects.toThrow();
+
+    expect(calls).toEqual(["clear"]);
   });
 });

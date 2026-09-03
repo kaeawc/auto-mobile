@@ -88,8 +88,7 @@ brew install kaeawc/tap/auto-mobile
 
 Installs the `auto-mobile` command-line tool and keeps it current through
 `brew upgrade`. On recent Homebrew, run `brew trust kaeawc/tap` first if the
-tap is reported untrusted. See the [Homebrew guide](install/homebrew.md) for
-upgrade, uninstall, and details.
+tap is reported untrusted.
 
 </details>
 

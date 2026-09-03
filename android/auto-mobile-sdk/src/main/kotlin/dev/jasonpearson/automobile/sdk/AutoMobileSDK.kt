@@ -419,10 +419,10 @@ object AutoMobileSDK {
   fun setEnabled(enabled: Boolean) {
     _isEnabled = enabled
     eventBuffer?.isEnabled = enabled
+    capabilityRegistry.setEnabled(enabled)
     if (context != null && !navigationOnlyMode) {
       RecompositionTracker.setEnabled(enabled)
       FrameMetricsCollector.setEnabled(enabled)
-      capabilityRegistry.setEnabled(enabled)
     }
   }
 

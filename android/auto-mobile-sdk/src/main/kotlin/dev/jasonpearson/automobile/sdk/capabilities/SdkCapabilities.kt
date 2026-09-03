@@ -52,6 +52,8 @@ internal class SdkCapabilityRegistry {
   private var initialized = false
   private var navigationOnly = false
   private var enabled = true
+  private var initializedBeforeNavigation = false
+  private var enabledBeforeNavigation = true
   private var policy = SdkCapturePolicy()
 
   init {
@@ -68,6 +70,8 @@ internal class SdkCapabilityRegistry {
   /** Marks only navigation event delivery as active. */
   fun markNavigationInitialized() {
     synchronized(lock) {
+      initializedBeforeNavigation = initialized
+      enabledBeforeNavigation = enabled
       initialized = true
       navigationOnly = true
     }
@@ -76,8 +80,9 @@ internal class SdkCapabilityRegistry {
   /** Restores the pre-navigation initialization state without clearing host registrations. */
   fun markNavigationShutdown() {
     synchronized(lock) {
-      initialized = false
+      initialized = initializedBeforeNavigation
       navigationOnly = false
+      enabled = enabledBeforeNavigation
     }
   }
 

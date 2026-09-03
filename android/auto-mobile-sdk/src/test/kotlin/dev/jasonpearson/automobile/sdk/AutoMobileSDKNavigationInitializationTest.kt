@@ -157,6 +157,16 @@ class AutoMobileSDKNavigationInitializationTest {
   }
 
   @Test
+  fun `disabling navigation-only tracking updates its capability state`() {
+    AutoMobileSDK.initialize(NavigationConfiguration(context))
+
+    AutoMobileSDK.setEnabled(false)
+
+    val capabilities = AutoMobileSDK.capabilities.capabilities.associateBy { it.id }
+    assertEquals(SdkCapabilityState.DISABLED, capabilities.getValue("events.navigation").state)
+  }
+
+  @Test
   fun `navigation initialization failure is contained and releases partial state`() {
     AutoMobileSDK.initialize(NavigationConfiguration(ThrowingApplicationContext(context)))
 

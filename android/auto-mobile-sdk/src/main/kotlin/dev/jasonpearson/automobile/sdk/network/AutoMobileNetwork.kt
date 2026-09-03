@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.sdk.network
 
 import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import java.util.UUID
@@ -149,6 +150,7 @@ private constructor(
  * OkHttp is a `compileOnly` dependency -- consumers must include OkHttp themselves.
  */
 object AutoMobileNetwork {
+  private const val TAG = "AutoMobileNetwork"
 
   @Volatile private var buffer: SdkEventBuffer? = null
   @Volatile private var applicationId: String? = null
@@ -224,40 +226,47 @@ object AutoMobileNetwork {
     captureBodies: Boolean = false,
   ) {
     val buf = buffer ?: return
-    val policy = capturePolicyProvider?.invoke()
-    val headersEnabled = captureHeaders && (policy?.captureHeaders ?: true)
-    val bodiesEnabled = captureBodies && (policy?.captureBodies ?: true)
-    val parsedUrl =
-      if (record.host == null || record.path == null) {
-        try {
-          java.net.URL(record.url)
-        } catch (_: Exception) {
-          null
-        }
-      } else null
-    val host = record.host ?: parsedUrl?.host
-    val path = record.path ?: parsedUrl?.path
-    buf.add(
-      SdkNetworkRequestEvent(
-        timestamp = System.currentTimeMillis(),
-        applicationId = applicationId,
-        url = record.url,
-        method = record.method,
-        statusCode = record.statusCode,
-        durationMs = record.durationMs,
-        protocol = record.protocol,
-        requestBodySize = record.requestBodySize,
-        responseBodySize = record.responseBodySize,
-        host = host,
-        path = path,
-        error = record.error,
-        requestHeaders = if (headersEnabled) record.requestHeaders else null,
-        responseHeaders = if (headersEnabled) record.responseHeaders else null,
-        requestBody = if (bodiesEnabled) record.requestBody else null,
-        responseBody = if (bodiesEnabled) record.responseBody else null,
-        contentType = record.contentType,
+    try {
+      val policy = capturePolicyProvider?.invoke()
+      val headersEnabled = captureHeaders && (policy?.captureHeaders ?: true)
+      val bodiesEnabled = captureBodies && (policy?.captureBodies ?: true)
+      val parsedUrl =
+        if (record.host == null || record.path == null) {
+          try {
+            java.net.URL(record.url)
+          } catch (_: Exception) {
+            null
+          }
+        } else null
+      val host = record.host ?: parsedUrl?.host
+      val path = record.path ?: parsedUrl?.path
+      buf.add(
+        SdkNetworkRequestEvent(
+          timestamp = System.currentTimeMillis(),
+          applicationId = applicationId,
+          url = record.url,
+          method = record.method,
+          statusCode = record.statusCode,
+          durationMs = record.durationMs,
+          protocol = record.protocol,
+          requestBodySize = record.requestBodySize,
+          responseBodySize = record.responseBodySize,
+          host = host,
+          path = path,
+          error = record.error,
+          requestHeaders = if (headersEnabled) record.requestHeaders else null,
+          responseHeaders = if (headersEnabled) record.responseHeaders else null,
+          requestBody = if (bodiesEnabled) record.requestBody else null,
+          responseBody = if (bodiesEnabled) record.responseBody else null,
+          contentType = record.contentType,
+        )
       )
-    )
+    } catch (error: Exception) {
+      // Custom loggers are user supplied, so logging must not break host transport behavior either.
+      runCatching {
+        AutoMobileSDK.logger.w(TAG, error) { "Network observation failed; dropping event" }
+      }
+    }
   }
 
   /**
@@ -317,7 +326,37 @@ object AutoMobileNetwork {
     connectionId: String = UUID.randomUUID().toString().take(8),
   ): okhttp3.WebSocket {
     val buf = buffer ?: return webSocket
-    return AutoMobileWebSocket(webSocket, url, buf, applicationId, controller, connectionId)
+    val gatedController = controller?.let { candidate ->
+      WebSocketSendController { type, size ->
+        if (!networkControlMutationsEnabled()) {
+          true
+        } else {
+          try {
+            candidate.allow(type, size)
+          } catch (error: Exception) {
+            logObservationFailure(error)
+            true
+          }
+        }
+      }
+    }
+    return AutoMobileWebSocket(webSocket, url, buf, applicationId, gatedController, connectionId)
+  }
+
+  private fun networkControlMutationsEnabled(): Boolean =
+    try {
+      capturePolicyProvider?.invoke()?.allowMutations == true &&
+        networkControlProvider?.invoke() == true
+    } catch (error: Exception) {
+      logObservationFailure(error)
+      false
+    }
+
+  private fun logObservationFailure(error: Exception) {
+    // Custom loggers are user supplied, so logging must not break host transport behavior either.
+    runCatching {
+      AutoMobileSDK.logger.w(TAG, error) { "Network observation failed; continuing host transport" }
+    }
   }
 
   /** Reset internal state. Visible for testing only. */

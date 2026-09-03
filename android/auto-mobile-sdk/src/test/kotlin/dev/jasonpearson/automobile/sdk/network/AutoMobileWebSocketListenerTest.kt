@@ -4,11 +4,16 @@ import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
 import dev.jasonpearson.automobile.protocol.WebSocketFrameDirection
 import dev.jasonpearson.automobile.protocol.WebSocketFrameType
+import dev.jasonpearson.automobile.sdk.events.DropCounter
+import dev.jasonpearson.automobile.sdk.events.DropReason
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertSame
+import okhttp3.Protocol
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
@@ -40,6 +45,24 @@ class AutoMobileWebSocketListenerTest {
 
   private fun drainDelivery() {
     bufferExecutor!!.submit {}.get(1, TimeUnit.SECONDS)
+  }
+
+  private fun throwingBuffer(): SdkEventBuffer {
+    val buffer =
+      SdkEventBuffer(
+        onFlush = {},
+        dropCounter =
+          object : DropCounter {
+            override fun increment(reason: DropReason, count: Int): Nothing =
+              throw IllegalStateException("recording failed")
+
+            override fun snapshot(): Map<DropReason, Long> = emptyMap()
+
+            override fun reset() = Unit
+          },
+      )
+    buffer.shutdown()
+    return buffer
   }
 
   /** Minimal no-op WebSocket for testing callbacks */
@@ -184,13 +207,75 @@ class AutoMobileWebSocketListenerTest {
     assertEquals("com.example.app", event.applicationId)
   }
 
+  @Test
+  fun `recording failures do not skip any delegate callback`() {
+    val buffer = throwingBuffer()
+    val delegate = RecordingDelegate()
+    val listener =
+      AutoMobileWebSocketListener(
+        delegate,
+        "wss://x",
+        buffer,
+      )
+    val response =
+      Response.Builder()
+        .request(fakeWebSocket.request())
+        .protocol(Protocol.HTTP_1_1)
+        .code(200)
+        .message("OK")
+        .build()
+    val failure = IllegalStateException("host failure")
+
+    listener.onOpen(fakeWebSocket, response)
+    listener.onMessage(fakeWebSocket, "text")
+    listener.onMessage(fakeWebSocket, "binary".encodeUtf8())
+    listener.onClosing(fakeWebSocket, 1000, "bye")
+    listener.onClosed(fakeWebSocket, 1000, "bye")
+    listener.onFailure(fakeWebSocket, failure, response)
+
+    assertEquals(1, delegate.openCalls)
+    assertEquals(listOf("text"), delegate.textMessages)
+    assertEquals(listOf("binary".encodeUtf8()), delegate.binaryMessages)
+    assertEquals(listOf(1000 to "bye"), delegate.closingCalls)
+    assertEquals(listOf(1000 to "bye"), delegate.closedCalls)
+    assertSame(failure, delegate.failures.single())
+  }
+
+  @Test
+  fun `delegate failures remain unchanged when recording fails`() {
+    val buffer = throwingBuffer()
+    val delegateFailure = IllegalStateException("delegate failed")
+    val listener =
+      AutoMobileWebSocketListener(
+        object : WebSocketListener() {
+          override fun onMessage(webSocket: WebSocket, text: String) {
+            throw delegateFailure
+          }
+        },
+        "wss://x",
+        buffer,
+      )
+
+    val thrown =
+      assertFailsWith<IllegalStateException> {
+        listener.onMessage(fakeWebSocket, "text")
+      }
+
+    assertSame(delegateFailure, thrown)
+  }
+
   /** Recording delegate that tracks all callback invocations */
   private class RecordingDelegate : WebSocketListener() {
+    var openCalls = 0
     val textMessages = mutableListOf<String>()
     val binaryMessages = mutableListOf<okio.ByteString>()
     val closingCalls = mutableListOf<Pair<Int, String>>()
     val closedCalls = mutableListOf<Pair<Int, String>>()
     val failures = mutableListOf<Throwable>()
+
+    override fun onOpen(webSocket: WebSocket, response: Response) {
+      openCalls++
+    }
 
     override fun onMessage(webSocket: WebSocket, text: String) {
       textMessages.add(text)

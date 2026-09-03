@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.sdk.network
 import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
 import dev.jasonpearson.automobile.protocol.WebSocketFrameDirection
 import dev.jasonpearson.automobile.protocol.WebSocketFrameType
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import java.util.UUID
 import okhttp3.Request
@@ -15,9 +16,20 @@ internal class AutoMobileWebSocket(
   private val url: String,
   private val buffer: SdkEventBuffer,
   private val applicationId: String?,
-  private val controller: WebSocketSendController?,
+  controller: WebSocketSendController?,
   private val connectionId: String = UUID.randomUUID().toString().take(8),
 ) : WebSocket {
+  private val controller = controller?.let { delegate ->
+    WebSocketSendController { type, size ->
+      try {
+        delegate.allow(type, size)
+      } catch (error: Exception) {
+        logObservationFailure(error)
+        true
+      }
+    }
+  }
+
   override fun request(): Request = delegate.request()
 
   override fun queueSize(): Long = delegate.queueSize()
@@ -46,9 +58,13 @@ internal class AutoMobileWebSocket(
   override fun cancel() = delegate.cancel()
 
   private fun send(type: WebSocketFrameType, size: Long, action: () -> Boolean): Boolean {
-    val success = controller?.allow(type, size) != false && action()
+    val success = controllerAllows(type, size) && action()
     recordFrame(WebSocketFrameDirection.SENT, type, size, success)
     return success
+  }
+
+  private fun controllerAllows(type: WebSocketFrameType, size: Long): Boolean {
+    return controller?.allow(type, size) ?: true
   }
 
   private fun recordFrame(
@@ -57,17 +73,36 @@ internal class AutoMobileWebSocket(
     size: Long,
     success: Boolean,
   ) {
-    buffer.add(
-      SdkWebSocketFrameEvent(
-        timestamp = System.currentTimeMillis(),
-        applicationId = applicationId,
-        connectionId = connectionId,
-        url = url,
-        direction = direction,
-        frameType = type,
-        payloadSize = size,
-        success = success,
+    observe {
+      buffer.add(
+        SdkWebSocketFrameEvent(
+          timestamp = System.currentTimeMillis(),
+          applicationId = applicationId,
+          connectionId = connectionId,
+          url = url,
+          direction = direction,
+          frameType = type,
+          payloadSize = size,
+          success = success,
+        )
       )
-    )
+    }
+  }
+
+  private fun observe(block: () -> Unit) {
+    try {
+      block()
+    } catch (error: Exception) {
+      logObservationFailure(error)
+    }
+  }
+
+  private fun logObservationFailure(error: Exception) {
+    // Custom loggers are user supplied, so logging must not break host transport behavior either.
+    runCatching {
+      AutoMobileSDK.logger.w("AutoMobileWebSocket", error) {
+        "WebSocket observation failed; continuing transport"
+      }
+    }
   }
 }

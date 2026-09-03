@@ -8,7 +8,12 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import okhttp3.Request
+import okhttp3.WebSocket
+import okio.ByteString
 import org.junit.After
 import org.junit.Test
 
@@ -173,6 +178,64 @@ class AutoMobileNetworkTest {
     val event = flushed[0][0] as SdkNetworkRequestEvent
     assertNull(event.requestHeaders)
     assertNull(event.requestBody)
+  }
+
+  @Test
+  fun `recordRequest swallows capture policy failures`() {
+    val (buffer, flushed) = collectingBuffer()
+    AutoMobileNetwork.initialize("com.example", buffer)
+    AutoMobileNetwork.setCapturePolicyProvider { throw IllegalStateException("policy failed") }
+
+    AutoMobileNetwork.recordRequest(
+      NetworkRequestRecord(
+        url = "https://api.example.com/users",
+        method = "GET",
+      )
+    )
+
+    assertEquals(emptyList(), flushed)
+  }
+
+  @Test
+  fun `WebSocket controller requires an enabled network control policy`() {
+    val (buffer, _) = collectingBuffer()
+    var sends = 0
+    val delegate =
+      object : WebSocket {
+        override fun request(): Request = Request.Builder().url("https://example.com").build()
+
+        override fun queueSize(): Long = 0
+
+        override fun send(text: String): Boolean {
+          sends++
+          return true
+        }
+
+        override fun send(bytes: ByteString): Boolean {
+          sends++
+          return true
+        }
+
+        override fun close(code: Int, reason: String?): Boolean = true
+
+        override fun cancel() = Unit
+      }
+    val controller = WebSocketSendController { _, _ -> false }
+    AutoMobileNetwork.initialize("com.example", buffer)
+    AutoMobileNetwork.setCapturePolicyProvider { SdkCapturePolicy() }
+    AutoMobileNetwork.setNetworkControlProvider { true }
+
+    assertTrue(
+      AutoMobileNetwork.wrapWebSocket(delegate, "wss://example.com", controller).send("one")
+    )
+    assertEquals(1, sends)
+
+    AutoMobileNetwork.setCapturePolicyProvider { SdkCapturePolicy(allowMutations = true) }
+
+    assertFalse(
+      AutoMobileNetwork.wrapWebSocket(delegate, "wss://example.com", controller).send("two")
+    )
+    assertEquals(1, sends)
   }
 
   @Test

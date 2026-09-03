@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.sdk.network
 
 import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import java.net.ConnectException
@@ -44,6 +45,8 @@ internal class AutoMobileNetworkInterceptor(
 ) : Interceptor {
 
   companion object {
+    private const val TAG = "AutoMobileNetwork"
+
     /** Default max body capture size: 32KB */
     const val MAX_BODY_BYTES = 32L * 1024
 
@@ -67,60 +70,68 @@ internal class AutoMobileNetworkInterceptor(
   override fun intercept(chain: Interceptor.Chain): Response {
     val request = chain.request()
     val startMs = System.currentTimeMillis()
-    val policy = policyProvider?.invoke()
+    val policy = policyProvider?.let { observeOrNull { it() } }
     val headersEnabled = captureHeaders && (policy?.captureHeaders ?: true)
     val bodiesEnabled = captureBodies && (policy?.captureBodies ?: true)
-    val mutationsEnabled = policy?.allowMutations ?: true
+    val mutationsEnabled = policy?.allowMutations == true
     val networkControlEnabled =
-      if (policy == null) true else networkControlProvider?.invoke() == true
+      mutationsEnabled && observeOrNull { networkControlProvider?.invoke() } == true
 
     // Capture request headers — include OkHttp defaults that will be added later
-    val reqHeaders =
-      if (headersEnabled) {
-        val headers = request.headers.toHeaderMap().toMutableMap()
-        if ("Host" !in headers) headers["Host"] = request.url.host
-        if ("User-Agent" !in headers) headers["User-Agent"] = "okhttp/${okhttp3.OkHttp.VERSION}"
-        headers
-      } else null
+    val reqHeaders = observeOrNull {
+      if (!headersEnabled) return@observeOrNull null
+      val headers = request.headers.toHeaderMap().toMutableMap()
+      if ("Host" !in headers) headers["Host"] = request.url.host
+      if ("User-Agent" !in headers) headers["User-Agent"] = "okhttp/${okhttp3.OkHttp.VERSION}"
+      headers
+    }
 
     // Capture request body
-    val reqBody =
-      if (bodiesEnabled && request.body != null) {
-        captureRequestBody(request)
-      } else null
+    val reqBody = observeOrNull {
+      if (bodiesEnabled && request.body != null) captureRequestBody(request) else null
+    }
 
     // --- Mock rule enforcement ---
     val mockRule =
       if (mutationsEnabled && networkControlEnabled) {
-        ruleStore?.findMatchingRule(request.url.host, request.url.encodedPath, request.method)
+        observeOrNull {
+          ruleStore?.findMatchingRule(request.url.host, request.url.encodedPath, request.method)
+        }
       } else null
     if (mockRule != null) {
       val durationMs = System.currentTimeMillis() - startMs
-      buffer.add(
-        SdkNetworkRequestEvent(
-          timestamp = startMs,
-          applicationId = applicationId,
-          url = request.url.toString(),
-          method = request.method,
-          statusCode = mockRule.statusCode,
-          durationMs = durationMs,
-          requestBodySize = request.body?.contentLength() ?: -1,
-          responseBodySize = mockRule.responseBody.length.toLong(),
-          host = request.url.host,
-          path = request.url.encodedPath,
-          error = "mocked:${mockRule.mockId}",
-          requestHeaders = reqHeaders,
-          requestBody = reqBody,
-          responseBody = if (bodiesEnabled) mockRule.responseBody else null,
-          contentType = mockRule.contentType,
+      observe {
+        buffer.add(
+          SdkNetworkRequestEvent(
+            timestamp = startMs,
+            applicationId = applicationId,
+            url = request.url.toString(),
+            method = request.method,
+            statusCode = mockRule.statusCode,
+            durationMs = durationMs,
+            requestBodySize = request.body?.contentLength() ?: -1,
+            responseBodySize = mockRule.responseBody.length.toLong(),
+            host = request.url.host,
+            path = request.url.encodedPath,
+            error = "mocked:${mockRule.mockId}",
+            requestHeaders = reqHeaders,
+            requestBody = reqBody,
+            responseBody = if (bodiesEnabled) mockRule.responseBody else null,
+            contentType = mockRule.contentType,
+          )
         )
-      )
-      return buildMockResponse(request, mockRule)
+      }
+      observeOrNull { buildMockResponse(request, mockRule) }
+        ?.let {
+          return it
+        }
     }
 
     // --- Error simulation enforcement ---
     val errorSim =
-      if (mutationsEnabled && networkControlEnabled) ruleStore?.getErrorSimulation() else null
+      if (mutationsEnabled && networkControlEnabled) {
+        observeOrNull { ruleStore?.getErrorSimulation() }
+      } else null
     if (errorSim != null) {
       val durationMs = System.currentTimeMillis() - startMs
       return handleErrorSimulation(request, errorSim, startMs, durationMs, reqHeaders, reqBody)
@@ -132,68 +143,60 @@ internal class AutoMobileNetworkInterceptor(
       response = chain.proceed(request)
     } catch (e: Exception) {
       val durationMs = System.currentTimeMillis() - startMs
+      observe {
+        buffer.add(
+          SdkNetworkRequestEvent(
+            timestamp = startMs,
+            applicationId = applicationId,
+            url = request.url.toString(),
+            method = request.method,
+            statusCode = 0,
+            durationMs = durationMs,
+            requestBodySize = request.body?.contentLength() ?: -1,
+            responseBodySize = -1,
+            host = request.url.host,
+            path = request.url.encodedPath,
+            error = e.message,
+            requestHeaders = reqHeaders,
+            requestBody = reqBody,
+          )
+        )
+      }
+      throw e
+    }
+
+    observe {
+      val durationMs = System.currentTimeMillis() - startMs
+      val responseContentType = response.header("Content-Type")
+      val finalReqHeaders =
+        if (headersEnabled) response.request.headers.toHeaderMap() else reqHeaders
+      val respHeaders = if (headersEnabled) response.headers.toHeaderMap() else null
+      val respBody =
+        if (bodiesEnabled && isTextContentType(responseContentType)) {
+          response.peekBody(maxBodyBytes).string()
+        } else null
+
       buffer.add(
         SdkNetworkRequestEvent(
           timestamp = startMs,
           applicationId = applicationId,
           url = request.url.toString(),
           method = request.method,
-          statusCode = 0,
+          statusCode = response.code,
           durationMs = durationMs,
           requestBodySize = request.body?.contentLength() ?: -1,
-          responseBodySize = -1,
+          responseBodySize = response.body?.contentLength() ?: -1,
+          protocol = response.protocol.toString(),
           host = request.url.host,
           path = request.url.encodedPath,
-          error = e.message,
-          requestHeaders = reqHeaders,
+          requestHeaders = finalReqHeaders,
+          responseHeaders = respHeaders,
           requestBody = reqBody,
+          responseBody = respBody,
+          contentType = responseContentType,
         )
       )
-      throw e
     }
-
-    val durationMs = System.currentTimeMillis() - startMs
-    val responseContentType = response.header("Content-Type")
-
-    val finalReqHeaders =
-      if (headersEnabled) {
-        response.request.headers.toHeaderMap()
-      } else reqHeaders
-
-    val respHeaders =
-      if (headersEnabled) {
-        response.headers.toHeaderMap()
-      } else null
-
-    val respBody =
-      if (bodiesEnabled && isTextContentType(responseContentType)) {
-        try {
-          response.peekBody(maxBodyBytes).string()
-        } catch (_: Exception) {
-          null
-        }
-      } else null
-
-    buffer.add(
-      SdkNetworkRequestEvent(
-        timestamp = startMs,
-        applicationId = applicationId,
-        url = request.url.toString(),
-        method = request.method,
-        statusCode = response.code,
-        durationMs = durationMs,
-        requestBodySize = request.body?.contentLength() ?: -1,
-        responseBodySize = response.body?.contentLength() ?: -1,
-        protocol = response.protocol.toString(),
-        host = request.url.host,
-        path = request.url.encodedPath,
-        requestHeaders = finalReqHeaders,
-        responseHeaders = respHeaders,
-        requestBody = reqBody,
-        responseBody = respBody,
-        contentType = responseContentType,
-      )
-    )
 
     return response
   }
@@ -233,23 +236,25 @@ internal class AutoMobileNetworkInterceptor(
     val errorMsg = "simulated:${sim.errorType}"
     when (sim.errorType) {
       "http500" -> {
-        buffer.add(
-          SdkNetworkRequestEvent(
-            timestamp = startMs,
-            applicationId = applicationId,
-            url = request.url.toString(),
-            method = request.method,
-            statusCode = 500,
-            durationMs = durationMs,
-            requestBodySize = request.body?.contentLength() ?: -1,
-            responseBodySize = 0,
-            host = request.url.host,
-            path = request.url.encodedPath,
-            error = errorMsg,
-            requestHeaders = reqHeaders,
-            requestBody = reqBody,
+        observe {
+          buffer.add(
+            SdkNetworkRequestEvent(
+              timestamp = startMs,
+              applicationId = applicationId,
+              url = request.url.toString(),
+              method = request.method,
+              statusCode = 500,
+              durationMs = durationMs,
+              requestBodySize = request.body?.contentLength() ?: -1,
+              responseBodySize = 0,
+              host = request.url.host,
+              path = request.url.encodedPath,
+              error = errorMsg,
+              requestHeaders = reqHeaders,
+              requestBody = reqBody,
+            )
           )
-        )
+        }
         return Response.Builder()
           .request(request)
           .protocol(Protocol.HTTP_1_1)
@@ -259,23 +264,25 @@ internal class AutoMobileNetworkInterceptor(
           .build()
       }
       else -> {
-        buffer.add(
-          SdkNetworkRequestEvent(
-            timestamp = startMs,
-            applicationId = applicationId,
-            url = request.url.toString(),
-            method = request.method,
-            statusCode = 0,
-            durationMs = durationMs,
-            requestBodySize = request.body?.contentLength() ?: -1,
-            responseBodySize = -1,
-            host = request.url.host,
-            path = request.url.encodedPath,
-            error = errorMsg,
-            requestHeaders = reqHeaders,
-            requestBody = reqBody,
+        observe {
+          buffer.add(
+            SdkNetworkRequestEvent(
+              timestamp = startMs,
+              applicationId = applicationId,
+              url = request.url.toString(),
+              method = request.method,
+              statusCode = 0,
+              durationMs = durationMs,
+              requestBodySize = request.body?.contentLength() ?: -1,
+              responseBodySize = -1,
+              host = request.url.host,
+              path = request.url.encodedPath,
+              error = errorMsg,
+              requestHeaders = reqHeaders,
+              requestBody = reqBody,
+            )
           )
-        )
+        }
         throw when (sim.errorType) {
           "timeout" -> SocketTimeoutException("Simulated timeout (AutoMobile)")
           "connectionRefused" -> ConnectException("Simulated connection refused (AutoMobile)")
@@ -298,6 +305,29 @@ internal class AutoMobileNetworkInterceptor(
       buffer.readUtf8(bytes)
     } catch (_: Exception) {
       null
+    }
+  }
+
+  private fun observe(block: () -> Unit) {
+    try {
+      block()
+    } catch (error: Exception) {
+      logObservationFailure(error)
+    }
+  }
+
+  private fun <T> observeOrNull(block: () -> T): T? =
+    try {
+      block()
+    } catch (error: Exception) {
+      logObservationFailure(error)
+      null
+    }
+
+  private fun logObservationFailure(error: Exception) {
+    // Custom loggers are user supplied, so logging must not break host transport behavior either.
+    runCatching {
+      AutoMobileSDK.logger.w(TAG, error) { "Network observation failed; continuing host transport" }
     }
   }
 

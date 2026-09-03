@@ -239,11 +239,17 @@ describe("iOS doctor checks", () => {
         "executeCommand",
       ).mockResolvedValue(createExecResult(""));
       try {
-        await expect(checkXcrunAvailable()).resolves.toMatchObject({ status: "pass" });
-        expect(executeCommand).toHaveBeenCalledWith("xcrun", ["--version"], {
-          timeoutMs: 5000,
-          killSignal: "SIGKILL",
-        });
+        const result = await checkXcrunAvailable();
+        if (process.platform === "darwin") {
+          expect(result.status).toBe("pass");
+          expect(executeCommand).toHaveBeenCalledWith("xcrun", ["--version"], {
+            timeoutMs: 5000,
+            killSignal: "SIGKILL",
+          });
+        } else {
+          expect(result.status).toBe("skip");
+          expect(executeCommand).not.toHaveBeenCalled();
+        }
       } finally {
         executeCommand.mockRestore();
       }

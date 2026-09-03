@@ -153,6 +153,7 @@ internal class SdkEventBuffer(
       }
     }
     executor.shutdown()
+    awaitExecutorTermination()
   }
 
   /** Snapshot and queue pending events from the periodic executor. */
@@ -201,6 +202,21 @@ internal class SdkEventBuffer(
     oldestBatch.removeAt(0)
     if (oldestBatch.isEmpty()) {
       pendingBatches.removeFirst()
+    }
+  }
+
+  /** Preserve shutdown delivery completion without running delivery on the caller thread. */
+  private fun awaitExecutorTermination() {
+    var wasInterrupted = false
+    while (true) {
+      try {
+        if (executor.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS)) break
+      } catch (_: InterruptedException) {
+        wasInterrupted = true
+      }
+    }
+    if (wasInterrupted) {
+      Thread.currentThread().interrupt()
     }
   }
 

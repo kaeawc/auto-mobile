@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import org.junit.Test
 
@@ -254,9 +255,27 @@ class SdkEventBufferTest {
       assertTrue(deliveryStarted.await(1, TimeUnit.SECONDS), "Capacity delivery should be queued")
 
       buffer.add(makeEvent(3))
-      buffer.shutdown()
+      val shutdownReturned = CountDownLatch(1)
+      val shutdownCaller =
+        Thread(
+          {
+            buffer.shutdown()
+            shutdownReturned.countDown()
+          },
+          "SDK host shutdown",
+        )
+      shutdownCaller.start()
+      assertFalse(
+        shutdownReturned.await(100, TimeUnit.MILLISECONDS),
+        "Shutdown should wait for queued delivery",
+      )
       releaseDelivery.countDown()
 
+      assertTrue(
+        shutdownReturned.await(1, TimeUnit.SECONDS),
+        "Shutdown should complete after delivery",
+      )
+      shutdownCaller.join(1_000)
       assertTrue(
         executor.awaitTermination(1, TimeUnit.SECONDS),
         "Shutdown should drain both batches",

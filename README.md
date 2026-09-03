@@ -57,7 +57,7 @@ Prefer Homebrew for the CLI:
 brew install kaeawc/tap/auto-mobile
 ```
 
-or follow the [installation guide](docs/index.md#install) — including the [Homebrew guide](docs/install/homebrew.md).
+or follow the [installation guide](docs/index.md#install).
 
 ## Documentation
 

@@ -193,6 +193,48 @@ describe("ToolRegistry autolock session enforcement", () => {
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
   });
 
+  test("rejects an unknown session UUID before it can access an owned device", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    await pool.initializeWithDevices([androidA, androidB]);
+    await pool.bindOrReuseDeviceSession("owner-session", androidA.deviceId, "android");
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    let handlerCalls = 0;
+    ToolRegistry.registerDeviceAware(
+      "unknownSessionUuid",
+      "unknownSessionUuid",
+      schema,
+      async () => {
+        handlerCalls += 1;
+        return { success: true };
+      },
+    );
+    const tool = ToolRegistry.getTool("unknownSessionUuid")!;
+
+    for (const sessionUuid of ["banana", "00000000-0000-4000-8000-000000000000"]) {
+      await expect(
+        tool.handler({
+          platform: "android",
+          deviceId: androidA.deviceId,
+          sessionUuid,
+        }),
+      ).rejects.toThrow("not an active daemon session");
+      expect(daemonSessionManager.getSession(sessionUuid)).toBeNull();
+    }
+    expect(handlerCalls).toBe(0);
+    expect(pool.getDevice(androidA.deviceId)?.sessionId).toBe("owner-session");
+  });
+
   test("resolves the MCP autolock session when the provided deviceId belongs to it", async () => {
     setAutolock(true);
     fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);

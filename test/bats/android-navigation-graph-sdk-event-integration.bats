@@ -55,7 +55,8 @@ exit 1
 '
   make_mock auto-mobile '
 if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] &&
-    [ "$4" = "getAndroid" ] && [ "$5" = "--deviceId" ] && [ "$6" = "emulator-5554" ]; then
+    [ "$4" = "getAndroid" ] && [ "$5" = "--deviceId" ] && [ "$6" = "emulator-5554" ] &&
+    [ "$7" = "--automation-ready-timeout-ms" ] && [ "$8" = "120000" ]; then
   printf "{\"sessionUuid\":\"\"}\n"
   exit 0
 fi
@@ -115,7 +116,8 @@ exit 1
   make_mock auto-mobile '
 printf "%s\n" "$*" >> "$AUTO_MOBILE_LOG"
 if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] &&
-    [ "$4" = "getAndroid" ] && [ "$5" = "--deviceId" ] && [ "$6" = "emulator-5554" ]; then
+    [ "$4" = "getAndroid" ] && [ "$5" = "--deviceId" ] && [ "$6" = "emulator-5554" ] &&
+    [ "$7" = "--automation-ready-timeout-ms" ] && [ "$8" = "120000" ]; then
   printf "{\"sessionUuid\":\"52150000-0000-4000-8000-000000000000\"}\n"
   exit 0
 fi
@@ -169,7 +171,7 @@ exit 1
   first_observe_line="$(grep -n -- "observe --platform android --deviceId emulator-5554" "$AUTO_MOBILE_LOG" | head -n 1 | cut -d: -f1)"
   [ "$root_line" -lt "$wait_for_device_line" ]
   [ "$launch_line" -lt "$first_observe_line" ]
-  grep -q -- "getAndroid --deviceId emulator-5554" "$AUTO_MOBILE_LOG"
+  grep -q -- "getAndroid --deviceId emulator-5554 --automation-ready-timeout-ms 120000" "$AUTO_MOBILE_LOG"
   # Regression for issue #4579: scope the graph read to the fixture package so a
   # concurrent hierarchy push cannot redirect the query to another app's graph.
   grep -q -- "getNavigationGraph --platform android --deviceId emulator-5554 --appId dev.jasonpearson.automobile.playground" "$AUTO_MOBILE_LOG"
@@ -228,7 +230,8 @@ case "$6" in
     ;;
 esac
 if [ "$1" = "--debug" ] && [ "$2" = "--embedded-sdk" ] && [ "$3" = "--cli" ] &&
-    [ "$4" = "getAndroid" ] && [ "$5" = "--deviceId" ] && [ "$6" = "emulator-5554" ]; then
+    [ "$4" = "getAndroid" ] && [ "$5" = "--deviceId" ] && [ "$6" = "emulator-5554" ] &&
+    [ "$7" = "--automation-ready-timeout-ms" ] && [ "$8" = "120000" ]; then
   printf "{\"sessionUuid\":\"52150000-0000-4000-8000-000000000000\"}\n"
   exit 0
 fi

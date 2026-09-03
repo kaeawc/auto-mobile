@@ -17,6 +17,7 @@ session_uuid=""
 timestamp_ms="$(($(date +%s) * 1000))"
 destination="Issue5215SdkNavigation-${timestamp_ms}"
 graph=""
+automation_ready_timeout_ms="120000"
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -62,7 +63,11 @@ fi
 
 # Acquire the booted emulator before issuing session-scoped calls. A caller must
 # not fabricate a UUID to access a device it has not acquired.
-session_result="$(auto-mobile --debug --embedded-sdk --cli getAndroid --deviceId "$device_id")"
+# CtrlProxy can take longer than the product's 30-second steady-state health
+# budget immediately after this CI job installs its APK. This is a bounded,
+# getAndroid-specific preparation allowance, not a global timeout override.
+session_result="$(auto-mobile --debug --embedded-sdk --cli getAndroid --deviceId "$device_id" \
+  --automation-ready-timeout-ms "$automation_ready_timeout_ms")"
 if ! session_uuid="$(
   jq -er '
     (

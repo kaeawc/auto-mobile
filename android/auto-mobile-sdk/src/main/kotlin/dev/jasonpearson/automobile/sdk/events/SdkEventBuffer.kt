@@ -95,7 +95,7 @@ internal class SdkEventBuffer(
       if (buffer.size >= maxPendingEvents) {
         when (backPressureStrategy) {
           BackPressureStrategy.DROP_OLDEST -> {
-            buffer.removeFirst()
+            buffer.removeAt(0)
             dropCounter?.increment(DropReason.BUFFER_OVERFLOW)
           }
           BackPressureStrategy.IGNORE_NEWEST -> {

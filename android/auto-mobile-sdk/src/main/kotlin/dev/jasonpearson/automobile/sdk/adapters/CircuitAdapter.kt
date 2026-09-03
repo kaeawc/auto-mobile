@@ -11,6 +11,7 @@ import com.slack.circuitx.navigation.intercepting.NavigationEventListener
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.NavigationEvent
 import dev.jasonpearson.automobile.sdk.NavigationSource
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Adapter for Circuit navigation library by Slack.
@@ -28,17 +29,17 @@ import dev.jasonpearson.automobile.sdk.NavigationSource
  * ```
  */
 object CircuitAdapter : NavigationFrameworkAdapter {
-  private var isActive = false
+  private val active = AtomicBoolean(false)
 
   override fun start() {
-    isActive = true
+    active.set(true)
   }
 
   override fun stop() {
-    isActive = false
+    active.set(false)
   }
 
-  override fun isActive(): Boolean = isActive
+  override fun isActive(): Boolean = active.get()
 
   /**
    * Creates a listener for CircuitX
@@ -60,7 +61,7 @@ object CircuitAdapter : NavigationFrameworkAdapter {
     val currentExtractMetadata = rememberUpdatedState(extractMetadata)
 
     return remember {
-      if (!isActive) start()
+      start()
 
       CircuitNavigationEventListener(currentExtractArguments, currentExtractMetadata)
     }
@@ -75,11 +76,17 @@ object CircuitAdapter : NavigationFrameworkAdapter {
       navigationContext: NavigationContext,
     ) {
       val screen = navStack?.active ?: return
-      CircuitAdapter.trackScreen(
-        screen = screen,
-        arguments = extractArguments.value(screen),
-        metadata = extractMetadata.value(screen),
-      )
+      try {
+        CircuitAdapter.trackScreen(
+          screen = screen,
+          arguments = extractArguments.value(screen),
+          metadata = extractMetadata.value(screen),
+        )
+      } catch (error: Exception) {
+        AutoMobileSDK.logger.e("CircuitAdapter", error) {
+          "Failed to extract or dispatch Circuit navigation event"
+        }
+      }
     }
   }
 
@@ -114,7 +121,7 @@ object CircuitAdapter : NavigationFrameworkAdapter {
     arguments: Map<String, Any?> = emptyMap(),
     metadata: Map<String, String> = emptyMap(),
   ) {
-    if (!isActive) return
+    if (!active.get()) return
 
     AutoMobileSDK.notifyNavigationEvent(
       NavigationEvent(

@@ -99,8 +99,9 @@ object AutoMobileSDK {
   @Volatile private var dropCounter: DropCounter? = null
   private val capabilityRegistry = SdkCapabilityRegistry()
   private val lifecycleLock = Any()
+  @Volatile private var navigationOnlyMode = false
   private var mainThreadTeardownPending = false
-  private var pendingInitialization: Pair<Context, AutoMobileConfiguration>? = null
+  private var pendingInitialization: (() -> Unit)? = null
 
   const val ACTION_NAVIGATION_EVENT = "dev.jasonpearson.automobile.sdk.NAVIGATION_EVENT"
   const val EXTRA_DESTINATION = "destination"
@@ -137,15 +138,17 @@ object AutoMobileSDK {
   fun initialize(context: Context, configuration: AutoMobileConfiguration) {
     synchronized(lifecycleLock) {
       if (mainThreadTeardownPending) {
-        pendingInitialization = context.applicationContext to configuration
+        val appContext = context.applicationContext
+        pendingInitialization = { initialize(appContext, configuration) }
         return
       }
       try {
-        if (this.context != null) {
+        if (this.context != null || navigationOnlyMode) {
           logger.d(TAG) { "AutoMobileSDK already initialized" }
           return
         }
 
+        navigationOnlyMode = false
         this.context = context.applicationContext
         this.configuration = configuration
         capabilityRegistry.markInitialized()
@@ -268,6 +271,55 @@ object AutoMobileSDK {
   }
 
   /**
+   * Initializes navigation event delivery without activating the broad SDK integrations.
+   *
+   * This mode does not initialize SDK inspection, diagnostics, network, interaction, or performance
+   * subsystems. Calling it while either SDK mode is active is a no-op; call [shutdown] before
+   * switching modes.
+   */
+  fun initialize(configuration: NavigationConfiguration) {
+    synchronized(lifecycleLock) {
+      if (mainThreadTeardownPending) {
+        pendingInitialization = { initialize(configuration) }
+        return
+      }
+      if (context != null || navigationOnlyMode) {
+        logger.d(TAG) { "AutoMobileSDK already initialized" }
+        return
+      }
+
+      initializeNavigationOnly(configuration)
+    }
+  }
+
+  private fun initializeNavigationOnly(configuration: NavigationConfiguration) {
+    try {
+      navigationOnlyMode = true
+      val appContext = configuration.context.applicationContext
+      context = appContext
+
+      val counter = DefaultDropCounter()
+      dropCounter = counter
+      SdkEventBroadcaster.dropCounter = counter
+
+      eventBuffer =
+        SdkEventBuffer(
+            onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
+            dropCounter = counter,
+          )
+          .also {
+            it.isEnabled = _isEnabled
+            it.start()
+          }
+    } catch (error: Exception) {
+      logger.e(TAG, error) {
+        "Navigation-only initialization failed; disabling navigation delivery"
+      }
+      shutdown()
+    }
+  }
+
+  /**
    * Adds a navigation listener to receive navigation events.
    *
    * @param listener The listener to add
@@ -322,25 +374,26 @@ object AutoMobileSDK {
       }
     }
 
-    addBreadcrumb(event.destination, BreadcrumbCategory.NAVIGATION, event.metadata)
-
     // Route navigation events through the shared event buffer so they are
     // batched and broadcast on the buffer's background thread instead of
     // blocking the caller (which is often the main thread).
-    val buf = eventBuffer ?: return
-    val ctx = context ?: return
-    val timestamp = System.currentTimeMillis()
-
-    buf.add(
-      SdkNavigationEvent(
-        timestamp = timestamp,
-        applicationId = ctx.packageName,
-        destination = event.destination,
-        source = event.source.toProtocolType(),
-        arguments = event.arguments.mapValues { it.value?.toString() ?: "null" },
-        metadata = event.metadata,
+    try {
+      addBreadcrumb(event.destination, BreadcrumbCategory.NAVIGATION, event.metadata)
+      val buf = eventBuffer ?: return
+      val ctx = context ?: return
+      buf.add(
+        SdkNavigationEvent(
+          timestamp = System.currentTimeMillis(),
+          applicationId = ctx.packageName,
+          destination = event.destination,
+          source = event.source.toProtocolType(),
+          arguments = event.arguments.mapValues { it.value?.toString() ?: "null" },
+          metadata = event.metadata,
+        )
       )
-    )
+    } catch (error: Exception) {
+      logger.e(TAG, error) { "Failed to dispatch navigation event" }
+    }
   }
 
   /** Convert SDK NavigationSource to protocol NavigationSourceType. */
@@ -365,9 +418,11 @@ object AutoMobileSDK {
   fun setEnabled(enabled: Boolean) {
     _isEnabled = enabled
     eventBuffer?.isEnabled = enabled
-    RecompositionTracker.setEnabled(enabled)
-    FrameMetricsCollector.setEnabled(enabled)
-    capabilityRegistry.setEnabled(enabled)
+    if (context != null && !navigationOnlyMode) {
+      RecompositionTracker.setEnabled(enabled)
+      FrameMetricsCollector.setEnabled(enabled)
+      capabilityRegistry.setEnabled(enabled)
+    }
   }
 
   /** Returns the versioned capability and policy snapshot for this SDK integration. */
@@ -430,7 +485,9 @@ object AutoMobileSDK {
   /** Sets the current screen or route used by future diagnostics and lifecycle events. */
   fun setCurrentScreen(screen: String?) {
     sdkContext?.currentScreen = screen?.take(MAX_CONTEXT_VALUE_LENGTH)
-    AutoMobileCrashes.currentScreenProvider = { sdkContext?.snapshot()?.currentScreen }
+    if (context != null && !navigationOnlyMode) {
+      AutoMobileCrashes.currentScreenProvider = { sdkContext?.snapshot()?.currentScreen }
+    }
     notifyRuntimeContextChanged(if (screen == null) "screen_cleared" else "screen_changed")
   }
 
@@ -446,7 +503,7 @@ object AutoMobileSDK {
     schemaVersion: String = "1",
     fields: Map<String, String> = emptyMap(),
   ) {
-    if (!_isEnabled || name.isBlank()) return
+    if (!_isEnabled || name.isBlank() || context == null || navigationOnlyMode) return
     val buf = eventBuffer ?: return
     val ctx = context ?: return
     val snapshot = sdkContext?.snapshot()
@@ -533,6 +590,11 @@ object AutoMobileSDK {
    */
   fun shutdown() {
     synchronized(lifecycleLock) {
+      if (navigationOnlyMode) {
+        shutdownNavigationOnly()
+        return
+      }
+
       pendingInitialization = null
       // Cancel any pending main-thread init work so a fast init→shutdown
       // sequence doesn't re-register hooks after shutdown completes.
@@ -598,7 +660,20 @@ object AutoMobileSDK {
       capabilityRegistry.markShutdown()
       configuration = null
       context = null
+      navigationOnlyMode = false
     }
+  }
+
+  private fun shutdownNavigationOnly() {
+    eventBuffer?.shutdown()
+    eventBuffer = null
+    dropCounter = null
+    SdkEventBroadcaster.reset()
+    listeners.clear()
+    runtimeContextListeners.clear()
+    _isEnabled = true
+    context = null
+    navigationOnlyMode = false
   }
 
   private fun completeMainThreadTeardown() {
@@ -606,7 +681,7 @@ object AutoMobileSDK {
       mainThreadTeardownPending = false
       val nextInitialization = pendingInitialization ?: return
       pendingInitialization = null
-      initialize(nextInitialization.first, nextInitialization.second)
+      nextInitialization()
     }
   }
 

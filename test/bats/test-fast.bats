@@ -49,11 +49,11 @@ _mock_nproc() {
 @test "passes through extra arguments to bun test" {
   local dir
   dir="$(_mock_nproc 8)"
-  run env PATH="$dir:$PATH" TEST_FAST_PRINT_CMD=1 bash "$SCRIPT" test/features/foo.test.ts
+  run env PATH="$dir:$PATH" TEST_FAST_PRINT_CMD=1 bash "$SCRIPT" test/scripts/testLaneClassification.test.ts
   rm -rf "$dir"
   [ "$status" -eq 0 ]
   [[ "$output" == *"--parallel=6"* ]]
-  [[ "$output" == *"test/features/foo.test.ts"* ]]
+  [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
 }
 
 @test "falls back to sysctl when nproc is unavailable" {

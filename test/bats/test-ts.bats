@@ -99,16 +99,145 @@ run_lane() {
 }
 
 @test "integration lane targets only requested integration paths" {
-  run_lane integration test/example.integration.test.ts
+  run_lane integration test/contracts/runAll.integration.test.ts
   [ "$status" -eq 0 ]
-  [[ "$output" == *"test/example.integration.test.ts"* ]]
+  [[ "$output" == *"test/contracts/runAll.integration.test.ts"* ]]
   [[ "$output" != *" .integration.test.ts "* ]]
 }
 
 @test "integration lane rejects a requested unit-test path" {
-  run_lane integration test/example.test.ts
+  run_lane integration test/scripts/testLaneClassification.test.ts
   [ "$status" -eq 2 ]
   [[ "$output" == *"No integration test paths were selected."* ]]
+}
+
+@test "unit lanes reject cross-lane test targets" {
+  for lane in unit changed coverage; do
+    run_lane "$lane" test/contracts/runAll.integration.test.ts
+    [ "$status" -eq 2 ]
+    [[ "$output" == *"No unit test paths were selected."* ]]
+  done
+}
+
+@test "all partitions a targeted test path and skips empty lanes" {
+  run_lane all test/scripts/testLaneClassification.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
+  [[ "$output" != *"No integration test paths were selected."* ]]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
+}
+
+@test "all partitions targeted directories into their matching lane" {
+  run_lane all test/scripts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
+  [[ "$output" == *"test/scripts/xcodegenDriftCheck.integration.test.ts"* ]]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 2 ]
+}
+
+@test "test-option values are not classified as positional test targets" {
+  run_lane all --test-name-pattern test/scripts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--test-name-pattern test/scripts"* ]]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 3 ]
+}
+
+@test "equals-form options are not classified as positional test targets" {
+  run_lane unit --test-name-pattern=integration.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--test-name-pattern=integration.test.ts"* ]]
+}
+
+@test "preload option values are not classified as positional test targets" {
+  for option in --preload --require -r; do
+    run_lane unit "$option" test/fakes/FakeTimer.ts
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$option test/fakes/FakeTimer.ts"* ]]
+  done
+}
+
+@test "split-form bail counts are not classified as positional test targets" {
+  run_lane unit --bail 2 test/scripts/testLaneClassification.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--bail 2"* ]]
+  [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
+}
+
+@test "bare bail does not consume a positional test target" {
+  run_lane unit --bail test/scripts/testLaneClassification.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--bail"* ]]
+  [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
+}
+
+@test "bare bail reprocesses a following value-bearing option" {
+  run_lane unit --bail --test-name-pattern "lane classification" test/scripts/testLaneClassification.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--test-name-pattern lane\\ classification"* ]]
+  [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
+}
+
+@test "Bun runtime option values are not classified as positional test targets" {
+  for option in --config --env-file --cwd; do
+    run_lane unit "$option" bunfig.toml test/scripts/testLaneClassification.test.ts
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$option bunfig.toml"* ]]
+    [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
+  done
+}
+
+@test "rejects an unclassified positional Bun pattern" {
+  run_lane unit oxlintConfigScoping
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"No test files found for target"* ]]
+}
+
+@test "canonicalizes absolute test paths before assigning their lane" {
+  run_lane all "$BATS_TEST_DIRNAME/../stress/memory-leak.stress.test.ts"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/stress/memory-leak.stress.test.ts"* ]]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
+}
+
+@test "accepts explicit targets when invoked through a symlinked checkout path" {
+  link="$BATS_TEST_TMPDIR/auto-mobile-link"
+  ln -s "$PWD" "$link"
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    TEST_TS_PRINT_CMD=1 \
+    bash "$link/$SCRIPT" unit "$link/test/scripts/testLaneClassification.test.ts"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
+}
+
+@test "classifies a symlinked test file by its resolved target" {
+  link="test/.lane-classification-${BATS_TEST_NUMBER}.test.ts"
+  ln -s "stress/memory-leak.stress.test.ts" "$link"
+  run_lane unit "$link"
+  rm -f "$link"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"No unit test paths were selected."* ]]
+}
+
+@test "single-lane modes reject a mixed-lane target list" {
+  run_lane unit test/scripts/testLaneClassification.test.ts test/contracts/runAll.integration.test.ts
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Unit test targets cannot include other lanes."* ]]
+
+  run_lane integration test/contracts/runAll.integration.test.ts test/scripts/testLaneClassification.test.ts
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Integration test targets cannot include other lanes."* ]]
+
+  run_lane stress test/stress/memory-leak.stress.test.ts test/scripts/testLaneClassification.test.ts
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Stress test targets cannot include other lanes."* ]]
+}
+
+@test "targeting a stale test path fails before invoking Bun" {
+  run_lane unit test/scripts/removed-test.test.ts
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"No test files found for target"* ]]
+  [ ! -s "$BUN_ARGS_FILE" ]
 }
 
 @test "stress lane is explicit" {

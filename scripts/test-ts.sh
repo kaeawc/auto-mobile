@@ -13,7 +13,7 @@
 # their dedicated package scripts and workflows.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT"
 
 mode="${1:-unit}"
@@ -87,6 +87,113 @@ run_test_command() {
 
   "$@"
 }
+
+lane_for_test_path() {
+  local path="$1"
+  case "$path" in
+    test/stress/*) printf '%s\n' "stress" ;;
+    *.integration.test.ts) printf '%s\n' "integration" ;;
+    *) printf '%s\n' "unit" ;;
+  esac
+}
+
+add_test_path_to_lane() {
+  local path="$1"
+  case "$(lane_for_test_path "$path")" in
+    unit) unit_test_paths+=("$path") ;;
+    integration) integration_test_paths+=("$path") ;;
+    stress) stress_test_paths+=("$path") ;;
+  esac
+}
+
+add_test_target() {
+  local requested_target="$1"
+  local absolute_target
+  local target
+  local test_path
+  local found=0
+  local is_file_target=0
+
+  if [[ -f "$requested_target" ]]; then
+    is_file_target=1
+    absolute_target="$(cd "$(dirname "$requested_target")" && pwd -P)/$(basename "$requested_target")"
+    while [[ -L "$absolute_target" ]]; do
+      local target_directory
+      local link_target
+      target_directory="$(cd "$(dirname "$absolute_target")" && pwd -P)"
+      link_target="$(readlink "$absolute_target")"
+      if [[ "$link_target" == /* ]]; then
+        absolute_target="$link_target"
+      else
+        absolute_target="$target_directory/$link_target"
+      fi
+      absolute_target="$(cd "$(dirname "$absolute_target")" && pwd -P)/$(basename "$absolute_target")"
+    done
+  elif [[ -d "$requested_target" ]]; then
+    absolute_target="$(cd "$requested_target" && pwd -P)"
+  else
+    echo "No test files found for target: $requested_target" >&2
+    exit 2
+  fi
+
+  if [[ "$absolute_target" == "$ROOT/test" ]]; then
+    target="test"
+  elif [[ "$absolute_target" == "$ROOT/test/"* ]]; then
+    target="${absolute_target#"$ROOT"/}"
+  else
+    echo "Test target must be inside test/: $requested_target" >&2
+    exit 2
+  fi
+
+  if [[ "$is_file_target" -eq 1 ]]; then
+    if [[ "$target" != *.test.ts ]]; then
+      echo "Test target is not a Bun test file: $requested_target" >&2
+      exit 2
+    fi
+    add_test_path_to_lane "$target"
+    return
+  fi
+
+  while IFS= read -r test_path; do
+    found=1
+    add_test_path_to_lane "$test_path"
+  done < <(find "$target" -type f -name '*.test.ts' -print | sort)
+  if [[ "$found" -eq 1 ]]; then
+    return
+  fi
+
+  echo "No test files found for target: $requested_target" >&2
+  exit 2
+}
+
+unit_test_paths=()
+integration_test_paths=()
+stress_test_paths=()
+passthrough_args=()
+has_test_targets=0
+args=("$@")
+for ((arg_index = 0; arg_index < ${#args[@]}; arg_index += 1)); do
+  arg="${args[$arg_index]}"
+  if [[ "$arg" == --bail ]]; then
+    passthrough_args+=("$arg")
+    next_arg="${args[$((arg_index + 1))]:-}"
+    if [[ "$next_arg" =~ ^[0-9]+$ ]]; then
+      passthrough_args+=("$next_arg")
+      arg_index=$((arg_index + 1))
+    fi
+  elif [[ "$arg" == --timeout || "$arg" == --rerun-each || "$arg" == --retry || "$arg" == --seed || "$arg" == --coverage-reporter || "$arg" == --coverage-dir || "$arg" == --test-name-pattern || "$arg" == "-t" || "$arg" == --reporter || "$arg" == --reporter-outfile || "$arg" == --max-concurrency || "$arg" == --path-ignore-patterns || "$arg" == --changed || "$arg" == --parallel || "$arg" == --parallel-delay || "$arg" == --shard || "$arg" == --preload || "$arg" == --require || "$arg" == "-r" || "$arg" == --import || "$arg" == --inspect || "$arg" == --inspect-wait || "$arg" == --inspect-brk || "$arg" == --cpu-prof-name || "$arg" == --cpu-prof-dir || "$arg" == --cpu-prof-interval || "$arg" == --heap-prof-name || "$arg" == --heap-prof-dir || "$arg" == --install || "$arg" == "--eval" || "$arg" == "-e" || "$arg" == --print || "$arg" == "-p" || "$arg" == --port || "$arg" == --conditions || "$arg" == --fetch-preconnect || "$arg" == --max-http-header-size || "$arg" == --dns-result-order || "$arg" == --unhandled-rejections || "$arg" == --console-depth || "$arg" == --user-agent || "$arg" == --cron-title || "$arg" == --cron-period || "$arg" == --elide-lines || "$arg" == "--filter" || "$arg" == "-F" || "$arg" == --shell || "$arg" == --env-file || "$arg" == --cwd || "$arg" == --config || "$arg" == "-c" ]]; then
+    passthrough_args+=("$arg")
+    if [[ "$arg_index" -lt $((${#args[@]} - 1)) ]]; then
+      arg_index=$((arg_index + 1))
+      passthrough_args+=("${args[$arg_index]}")
+    fi
+  elif [[ "$arg" == -* ]]; then
+    passthrough_args+=("$arg")
+  else
+    has_test_targets=1
+    add_test_target "$arg"
+  fi
+done
 
 run_unit_shards() {
   local shard_root="$ROOT/scratch/test-ts-unit-shards"
@@ -199,13 +306,29 @@ fi
 
 case "$mode" in
   unit)
-    if [[ "$#" -eq 0 && "$runner_os" != "Windows" ]]; then
+    if [[ "${#unit_test_paths[@]}" -gt 0 && ( "${#integration_test_paths[@]}" -gt 0 || "${#stress_test_paths[@]}" -gt 0 ) ]]; then
+      echo "Unit test targets cannot include other lanes." >&2
+      exit 2
+    elif [[ "${#unit_test_paths[@]}" -eq 0 && "$has_test_targets" -eq 1 ]]; then
+      echo "No unit test paths were selected." >&2
+      exit 2
+    elif [[ "${#unit_test_paths[@]}" -eq 0 && "${#passthrough_args[@]}" -eq 0 && "$runner_os" != "Windows" ]]; then
       run_unit_shards
     else
-      run_test_command "${unit_args[@]}" "$@"
+      run_test_command \
+        "${unit_args[@]}" \
+        "${unit_test_paths[@]+"${unit_test_paths[@]}"}" \
+        "${passthrough_args[@]+"${passthrough_args[@]}"}"
     fi
     ;;
   changed)
+    if [[ "${#unit_test_paths[@]}" -gt 0 && ( "${#integration_test_paths[@]}" -gt 0 || "${#stress_test_paths[@]}" -gt 0 ) ]]; then
+      echo "Unit test targets cannot include other lanes." >&2
+      exit 2
+    elif [[ "${#unit_test_paths[@]}" -eq 0 && "$has_test_targets" -eq 1 ]]; then
+      echo "No unit test paths were selected." >&2
+      exit 2
+    fi
     changed_ref="${AUTOMOBILE_UNIT_TEST_BASE_REF:-origin/main}"
     changed_args=("${unit_args[@]}")
     if [[ -n "${AUTOMOBILE_UNIT_JUNIT_DIR:-}" ]]; then
@@ -216,30 +339,26 @@ case "$mode" in
         --reporter-outfile "$AUTOMOBILE_UNIT_JUNIT_DIR/changed.xml"
       )
     fi
-    run_test_command "${changed_args[@]}" "--changed=${changed_ref}" "$@"
+    run_test_command \
+      "${changed_args[@]}" \
+      "--changed=${changed_ref}" \
+      "${unit_test_paths[@]+"${unit_test_paths[@]}"}" \
+      "${passthrough_args[@]+"${passthrough_args[@]}"}"
     ;;
   integration)
     integration_args=(bun test --timeout "$per_test_timeout_ms")
     if [[ "$runner_os" != "Windows" ]]; then
       integration_args+=(--no-orphans "--parallel=${integration_workers}")
     fi
-    requested_paths=()
-    passthrough_args=()
-    for arg in "$@"; do
-      if [[ "$arg" == *.test.ts ]]; then
-        if [[ "$arg" == *.integration.test.ts ]]; then
-          requested_paths+=("$arg")
-        fi
-      else
-        passthrough_args+=("$arg")
-      fi
-    done
-    if [[ "${#requested_paths[@]}" -gt 0 ]]; then
+    if [[ "${#integration_test_paths[@]}" -gt 0 && ( "${#unit_test_paths[@]}" -gt 0 || "${#stress_test_paths[@]}" -gt 0 ) ]]; then
+      echo "Integration test targets cannot include other lanes." >&2
+      exit 2
+    elif [[ "${#integration_test_paths[@]}" -gt 0 ]]; then
       run_test_command \
         "${integration_args[@]}" \
-        "${requested_paths[@]+"${requested_paths[@]}"}" \
+        "${integration_test_paths[@]+"${integration_test_paths[@]}"}" \
         "${passthrough_args[@]+"${passthrough_args[@]}"}"
-    elif [[ "$#" -eq 0 || "${#passthrough_args[@]}" -eq "$#" ]]; then
+    elif [[ "$has_test_targets" -eq 0 ]]; then
       run_test_command \
         "${integration_args[@]}" \
         ".integration.test.ts" \
@@ -250,23 +369,15 @@ case "$mode" in
     fi
     ;;
   stress)
-    requested_paths=()
-    passthrough_args=()
-    for arg in "$@"; do
-      if [[ "$arg" == *.test.ts ]]; then
-        if [[ "$arg" == test/stress/* ]]; then
-          requested_paths+=("$arg")
-        fi
-      else
-        passthrough_args+=("$arg")
-      fi
-    done
-    if [[ "${#requested_paths[@]}" -gt 0 ]]; then
+    if [[ "${#stress_test_paths[@]}" -gt 0 && ( "${#unit_test_paths[@]}" -gt 0 || "${#integration_test_paths[@]}" -gt 0 ) ]]; then
+      echo "Stress test targets cannot include other lanes." >&2
+      exit 2
+    elif [[ "${#stress_test_paths[@]}" -gt 0 ]]; then
       run_test_command \
         bun test --timeout "$per_test_timeout_ms" \
-        "${requested_paths[@]+"${requested_paths[@]}"}" \
+        "${stress_test_paths[@]+"${stress_test_paths[@]}"}" \
         "${passthrough_args[@]+"${passthrough_args[@]}"}"
-    elif [[ "$#" -eq 0 || "${#passthrough_args[@]}" -eq "$#" ]]; then
+    elif [[ "$has_test_targets" -eq 0 ]]; then
       run_test_command \
         bun test --timeout "$per_test_timeout_ms" \
         test/stress \
@@ -277,17 +388,31 @@ case "$mode" in
     fi
     ;;
   coverage)
+    if [[ "${#unit_test_paths[@]}" -gt 0 && ( "${#integration_test_paths[@]}" -gt 0 || "${#stress_test_paths[@]}" -gt 0 ) ]]; then
+      echo "Unit test targets cannot include other lanes." >&2
+      exit 2
+    elif [[ "${#unit_test_paths[@]}" -eq 0 && "$has_test_targets" -eq 1 ]]; then
+      echo "No unit test paths were selected." >&2
+      exit 2
+    fi
     run_test_command \
       "${unit_args[@]}" \
       --coverage \
       --coverage-reporter=lcov \
       --coverage-dir=coverage \
-      "$@"
+      "${unit_test_paths[@]+"${unit_test_paths[@]}"}" \
+      "${passthrough_args[@]+"${passthrough_args[@]}"}"
     ;;
   all)
-    "$0" unit "$@"
-    "$0" integration "$@"
-    "$0" stress "$@"
+    if [[ "$has_test_targets" -eq 0 || "${#unit_test_paths[@]}" -gt 0 ]]; then
+      "$0" unit "${unit_test_paths[@]+"${unit_test_paths[@]}"}" "${passthrough_args[@]+"${passthrough_args[@]}"}"
+    fi
+    if [[ "$has_test_targets" -eq 0 || "${#integration_test_paths[@]}" -gt 0 ]]; then
+      "$0" integration "${integration_test_paths[@]+"${integration_test_paths[@]}"}" "${passthrough_args[@]+"${passthrough_args[@]}"}"
+    fi
+    if [[ "$has_test_targets" -eq 0 || "${#stress_test_paths[@]}" -gt 0 ]]; then
+      "$0" stress "${stress_test_paths[@]+"${stress_test_paths[@]}"}" "${passthrough_args[@]+"${passthrough_args[@]}"}"
+    fi
     ;;
   *)
     echo "Usage: scripts/test-ts.sh {unit|changed|integration|stress|coverage|all} [bun-test-args...]" >&2

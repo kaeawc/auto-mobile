@@ -407,11 +407,17 @@ describe("turbo test inputs cover native sources a guard reads (issue #4351)", (
     }
   });
 
-  test("integration caching includes scripts and workflows its tests read from disk", () => {
+  test("integration caching includes scripts, lint config, and workflows its tests read from disk", () => {
     const inputs = loadTurbo().tasks["test:integration"]?.inputs ?? [];
 
     expect(inputs).toEqual(
-      expect.arrayContaining(["scripts/**", ".github/workflows/**", "turbo.json"]),
+      expect.arrayContaining([
+        "scripts/**",
+        ".oxlintrc.json",
+        "oxlint-plugins/**",
+        ".github/workflows/**",
+        "turbo.json",
+      ]),
     );
   });
 

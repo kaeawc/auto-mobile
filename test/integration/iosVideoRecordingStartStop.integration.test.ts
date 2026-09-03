@@ -109,8 +109,12 @@ async function acquireVideoRecordingSession(deviceId: string): Promise<string> {
   if (!text) {
     throw new Error(`getApple response did not contain text JSON: ${JSON.stringify(response)}`);
   }
-  const session = JSON.parse(text) as { sessionUuid?: unknown };
-  if (typeof session.sessionUuid !== "string" || session.sessionUuid.length === 0) {
+  const session = JSON.parse(text) as { sessionUuid?: unknown } | null;
+  if (
+    !session ||
+    typeof session.sessionUuid !== "string" ||
+    session.sessionUuid.trim().length === 0
+  ) {
     throw new Error(`getApple did not return a session UUID: ${JSON.stringify(response)}`);
   }
   return session.sessionUuid;

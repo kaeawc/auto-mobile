@@ -2523,11 +2523,13 @@ describe("DaemonMcpProxy", () => {
       const client = new ScriptedDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },
       });
+      const timer = new FakeTimer();
       const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
       const proxy = new DaemonMcpProxy({
         clientFactory: () => client,
         daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
+        timer,
       });
 
       try {

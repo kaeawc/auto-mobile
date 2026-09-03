@@ -656,6 +656,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         daemonMode &&
         providedSessionUuid &&
         !isDeviceSessionAcquisitionTool(name) &&
+        name !== "setActiveDevice" &&
         name !== SET_TOOL_ENABLED_TOOL_NAME
       ) {
         // Plain tools can strip or ignore sessionUuid themselves. Admit it here so

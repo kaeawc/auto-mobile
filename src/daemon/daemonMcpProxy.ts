@@ -2237,6 +2237,7 @@ export class DaemonMcpProxy {
   ): void {
     if (
       name === "executePlan" ||
+      name === "setActiveDevice" ||
       name === SET_TOOL_ENABLED_TOOL_NAME ||
       this.isRecoverableDaemonSessionError(error) ||
       this.isUnadmittedDaemonSessionError(error) ||

@@ -2672,6 +2672,15 @@ describe("SessionManager", () => {
       } finally {
         gracefullyRestarted.stopCleanupTimer();
       }
+      persisted.release_reason = "explicit-release";
+      const ordinarilyReleased = new SessionManager(fakeTimer, persistence);
+      try {
+        await expect(
+          ordinarilyReleased.admitIssuedSessionForAutomation("restarted-session"),
+        ).resolves.toBeUndefined();
+      } finally {
+        ordinarilyReleased.stopCleanupTimer();
+      }
     } finally {
       restarted.stopCleanupTimer();
     }

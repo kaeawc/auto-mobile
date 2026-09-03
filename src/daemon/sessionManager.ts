@@ -670,10 +670,7 @@ export class SessionManager {
     return await assignment;
   }
 
-  /**
-   * Admit an identity already issued by this daemon, or return `undefined` for
-   * an identity that was live when the daemon restarted and may be recreated.
-   */
+  /** Admit an identity already issued by this daemon, including a nonterminal persisted one. */
   async admitIssuedSessionForAutomation(
     sessionId: string,
     execution?: SessionExecutionMetadata,
@@ -690,8 +687,8 @@ export class SessionManager {
 
     const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
     if (
-      (persisted?.status === "expired" && persisted.release_reason === "daemon-restart") ||
-      (persisted?.status === "released" && persisted.release_reason === "daemon-shutdown")
+      persisted &&
+      (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason))
     ) {
       return undefined;
     }

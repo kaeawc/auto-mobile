@@ -246,13 +246,14 @@ describe("deriveTapEffect", () => {
     };
     const { tap } = createTapOnElement("android", waitForCondition);
 
-    const effect = await (tap as any).deriveTapEffectAfterPostTapObservation(stale, stale);
+    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(stale, stale);
 
     expect(waitCalls).toBe(1);
-    expect(effect).toEqual({
+    expect(postTap.effect).toEqual({
       screenChanged: true,
       basis: "activeWindow changed",
     });
+    expect(postTap.observation).toEqual(destination);
   });
 
   test("does not wait when the initial Android observation shows a change", async () => {
@@ -286,12 +287,13 @@ describe("deriveTapEffect", () => {
     };
     const { tap } = createTapOnElement("android", waitForCondition);
 
-    const effect = await (tap as any).deriveTapEffectAfterPostTapObservation(stale, destination);
+    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(stale, destination);
 
-    expect(effect).toEqual({
+    expect(postTap.effect).toEqual({
       screenChanged: true,
       basis: "activeWindow changed",
     });
+    expect(postTap.observation).toBe(destination);
     expect(waitCalls).toBe(0);
   });
 
@@ -319,15 +321,16 @@ describe("deriveTapEffect", () => {
     };
     const { tap } = createTapOnElement("ios", waitForCondition);
 
-    const effect = await (tap as any).deriveTapEffectAfterPostTapObservation(
+    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(
       observation,
       observation,
     );
 
-    expect(effect).toEqual({
+    expect(postTap.effect).toEqual({
       screenChanged: false,
       basis: "activeWindow unchanged",
     });
+    expect(postTap.observation).toBe(observation);
     expect(waitCalls).toBe(0);
   });
 });

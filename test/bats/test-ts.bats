@@ -194,6 +194,25 @@ run_lane() {
   done
 }
 
+@test "optional Bun flags classify normalized test target spellings" {
+  run_lane unit --changed ./test/contracts/runAll.integration.test.ts
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"No unit test paths were selected."* ]]
+
+  run_lane unit --changed test
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"Unit test targets cannot include other lanes."* ]]
+
+  link="$BATS_TEST_TMPDIR/auto-mobile-link"
+  ln -s "$PWD" "$link"
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    TEST_TS_PRINT_CMD=1 \
+    bash "$link/$SCRIPT" unit --changed "$link/test/contracts/runAll.integration.test.ts"
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"No unit test paths were selected."* ]]
+}
+
 @test "optional Bun flags preserve unambiguous split values" {
   run_lane unit --parallel 2 test/scripts/testLaneClassification.test.ts
   [ "$status" -eq 0 ]

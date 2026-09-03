@@ -106,9 +106,49 @@ add_test_path_to_lane() {
   esac
 }
 
-add_test_target() {
+canonical_file_target() {
+  local target="$1"
+  local target_directory
+  local link_target
+
+  target="$(cd "$(dirname "$target")" && pwd -P)/$(basename "$target")"
+  while [[ -L "$target" ]]; do
+    target_directory="$(cd "$(dirname "$target")" && pwd -P)"
+    link_target="$(readlink "$target")"
+    if [[ "$link_target" == /* ]]; then
+      target="$link_target"
+    else
+      target="$target_directory/$link_target"
+    fi
+    target="$(cd "$(dirname "$target")" && pwd -P)/$(basename "$target")"
+  done
+  printf '%s\n' "$target"
+}
+
+canonical_test_target() {
   local requested_target="$1"
   local absolute_target
+
+  if [[ -f "$requested_target" ]]; then
+    absolute_target="$(canonical_file_target "$requested_target")"
+  elif [[ -d "$requested_target" ]]; then
+    absolute_target="$(cd "$requested_target" && pwd -P)"
+  else
+    printf '%s\n' "__missing__"
+    return
+  fi
+
+  if [[ "$absolute_target" == "$ROOT/test" ]]; then
+    printf '%s\n' "test"
+  elif [[ "$absolute_target" == "$ROOT/test/"* ]]; then
+    printf '%s\n' "${absolute_target#"$ROOT"/}"
+  else
+    printf '%s\n' "__outside_test__"
+  fi
+}
+
+add_test_target() {
+  local requested_target="$1"
   local target
   local test_path
   local found=0
@@ -116,34 +156,19 @@ add_test_target() {
 
   if [[ -f "$requested_target" ]]; then
     is_file_target=1
-    absolute_target="$(cd "$(dirname "$requested_target")" && pwd -P)/$(basename "$requested_target")"
-    while [[ -L "$absolute_target" ]]; do
-      local target_directory
-      local link_target
-      target_directory="$(cd "$(dirname "$absolute_target")" && pwd -P)"
-      link_target="$(readlink "$absolute_target")"
-      if [[ "$link_target" == /* ]]; then
-        absolute_target="$link_target"
-      else
-        absolute_target="$target_directory/$link_target"
-      fi
-      absolute_target="$(cd "$(dirname "$absolute_target")" && pwd -P)/$(basename "$absolute_target")"
-    done
-  elif [[ -d "$requested_target" ]]; then
-    absolute_target="$(cd "$requested_target" && pwd -P)"
-  else
-    echo "No test files found for target: $requested_target" >&2
-    exit 2
   fi
 
-  if [[ "$absolute_target" == "$ROOT/test" ]]; then
-    target="test"
-  elif [[ "$absolute_target" == "$ROOT/test/"* ]]; then
-    target="${absolute_target#"$ROOT"/}"
-  else
-    echo "Test target must be inside test/: $requested_target" >&2
-    exit 2
-  fi
+  target="$(canonical_test_target "$requested_target")"
+  case "$target" in
+    __missing__)
+      echo "No test files found for target: $requested_target" >&2
+      exit 2
+      ;;
+    __outside_test__)
+      echo "Test target must be inside test/: $requested_target" >&2
+      exit 2
+      ;;
+  esac
 
   if [[ "$is_file_target" -eq 1 ]]; then
     if [[ "$target" != *.test.ts ]]; then
@@ -187,7 +212,10 @@ for ((arg_index = 0; arg_index < ${#args[@]}; arg_index += 1)); do
   elif [[ "$arg" == --changed || "$arg" == --inspect || "$arg" == --inspect-wait || "$arg" == --inspect-brk ]]; then
     passthrough_args+=("$arg")
     next_arg="${args[$((arg_index + 1))]:-}"
-    if [[ -n "$next_arg" && "$next_arg" != -* && "$next_arg" != test/* && "$next_arg" != "$ROOT"/test/* ]]; then
+    next_target="$(canonical_test_target "$next_arg")"
+    if [[ "$next_target" == "test" || "$next_target" == test/* || ( "$next_target" == "__missing__" && ( "$next_arg" == test || "$next_arg" == test/* || "$next_arg" == ./test || "$next_arg" == ./test/* || "$next_arg" == "$ROOT"/test || "$next_arg" == "$ROOT"/test/* ) ) ]]; then
+      :
+    elif [[ -n "$next_arg" && "$next_arg" != -* ]]; then
       passthrough_args+=("$next_arg")
       arg_index=$((arg_index + 1))
     fi

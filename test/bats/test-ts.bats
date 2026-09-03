@@ -138,6 +138,22 @@ run_lane() {
   [ "$(grep -c '^bun test' <<< "$output")" -eq 3 ]
 }
 
+@test "absolute test paths use their canonical lane" {
+  repo_root="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  run_lane all "$repo_root/test/stress/memory-leak.stress.test.ts"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/stress/memory-leak.stress.test.ts"* ]]
+  [[ "$output" != *"path-ignore-patterns"* ]]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
+}
+
+@test "quoted glob test targets expand and retain their lane" {
+  run_lane integration 'test/contracts/*.integration.test.ts'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/contracts/runAll.integration.test.ts"* ]]
+  [[ "$output" != *"*.integration.test.ts"* ]]
+}
+
 @test "a Bun option value is not classified as a test target" {
   run_lane integration --test-name-pattern test/scripts
   [ "$status" -eq 0 ]

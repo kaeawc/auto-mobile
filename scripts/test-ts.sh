@@ -97,6 +97,18 @@ lane_for_test_path() {
   esac
 }
 
+normalize_test_target() {
+  local target="${1#./}"
+  printf '%s\n' "${target#"$ROOT/"}"
+}
+
+has_glob_pattern() {
+  case "$1" in
+    *"?"* | *"*"* | *"["*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 add_test_path_to_lane() {
   local path="$1"
   case "$(lane_for_test_path "$path")" in
@@ -107,27 +119,41 @@ add_test_path_to_lane() {
 }
 
 add_test_target() {
-  local target="${1#./}"
-  local test_path
+  local target
+  local test_path match
   local found=0
+  local matched_paths=()
 
-  if [[ -f "$target" ]]; then
-    if [[ "$target" != *.test.ts ]]; then
-      echo "Test target is not a Bun test file: $1" >&2
-      exit 2
-    fi
-    add_test_path_to_lane "$target"
-    return
+  target="$(normalize_test_target "$1")"
+
+  if has_glob_pattern "$target"; then
+    while IFS= read -r match; do
+      matched_paths+=("$match")
+    done < <(compgen -G "$target" || true)
+  else
+    matched_paths=("$target")
   fi
 
-  if [[ -d "$target" ]]; then
-    while IFS= read -r test_path; do
+  for match in "${matched_paths[@]}"; do
+    if [[ -f "$match" ]]; then
+      if [[ "$match" != *.test.ts ]]; then
+        continue
+      fi
       found=1
-      add_test_path_to_lane "$test_path"
-    done < <(find "$target" -type f -name '*.test.ts' -print | sort)
-    if [[ "$found" -eq 1 ]]; then
-      return
+      add_test_path_to_lane "$match"
+      continue
     fi
+
+    if [[ -d "$match" ]]; then
+      while IFS= read -r test_path; do
+        found=1
+        add_test_path_to_lane "$test_path"
+      done < <(find "$match" -type f -name '*.test.ts' -print | sort)
+    fi
+  done
+
+  if [[ "$found" -eq 1 ]]; then
+    return
   fi
 
   echo "No test files found for target: $1" >&2
@@ -135,8 +161,9 @@ add_test_target() {
 }
 
 is_test_target() {
-  local target="${1#./}"
-  [[ "$target" == "test" || "$target" == test/* || "$target" == *.test.ts ]]
+  local target
+  target="$(normalize_test_target "$1")"
+  [[ "$target" == "test" || "$target" == test/* || "$target" == *.test.ts ]] || has_glob_pattern "$target"
 }
 
 test_option_takes_value() {

@@ -655,12 +655,13 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       if (
         daemonMode &&
         providedSessionUuid &&
+        !tool.requiresDevice &&
         !isDeviceSessionAcquisitionTool(name) &&
         name !== "setActiveDevice" &&
         name !== SET_TOOL_ENABLED_TOOL_NAME
       ) {
-        // Plain tools can strip or ignore sessionUuid themselves. Admit it here so
-        // an unissued UUID cannot be treated as a successful proxy binding.
+        // Plain tools can strip or ignore sessionUuid themselves. Device-aware
+        // tools carry their admitted identity into execution in ToolRegistry.
         await DaemonState.getInstance()
           .getSessionManager()
           .admitIssuedSessionForAutomation(providedSessionUuid, {
@@ -698,18 +699,25 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       ) {
         ToolRegistry.notifyToolListChanged();
       }
+      const daemonSessionManager = DaemonState.getInstance().isInitialized()
+        ? DaemonState.getInstance().getSessionManager()
+        : undefined;
+      const sessionForBinding =
+        daemonSessionManager && providedSessionUuid
+          ? daemonSessionManager.getSessionForNewExecution(providedSessionUuid, {
+              executionId: execution.id,
+              startTime: execution.startTime,
+            })
+          : undefined;
       if (
         !isDeviceSessionAcquisitionTool(name) &&
         name !== SET_TOOL_ENABLED_TOOL_NAME &&
         !result?.isError &&
         providedSessionUuid &&
-        (DaemonState.getInstance().isInitialized()
-          ? DaemonState.getInstance()
-              .getSessionManager()
-              .getSessionForNewExecution(providedSessionUuid, {
-                executionId: execution.id,
-                startTime: execution.startTime,
-              }) !== null
+        (daemonSessionManager
+          ? sessionForBinding !== null &&
+            sessionForBinding !== undefined &&
+            daemonSessionManager.isAdmittedForAutomation(sessionForBinding)
           : resolveDirectSessionDevice(providedSessionUuid) !== undefined) &&
         sessionToolBinding.bind(sessionId, providedSessionUuid)
       ) {

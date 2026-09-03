@@ -158,10 +158,25 @@ stress_test_paths=()
 passthrough_args=()
 has_test_targets=0
 expect_option_value=0
+expect_bail_count=0
 for arg in "$@"; do
-  if [[ "$expect_option_value" -eq 1 ]]; then
+  if [[ "$expect_bail_count" -eq 1 && "$arg" =~ ^[0-9]+$ ]]; then
+    passthrough_args+=("$arg")
+    expect_bail_count=0
+  elif [[ "$expect_option_value" -eq 1 ]]; then
     passthrough_args+=("$arg")
     expect_option_value=0
+  elif [[ "$expect_bail_count" -eq 1 ]]; then
+    expect_bail_count=0
+    if [[ "$arg" == -* ]]; then
+      passthrough_args+=("$arg")
+    else
+      has_test_targets=1
+      add_test_target "$arg"
+    fi
+  elif [[ "$arg" == --bail ]]; then
+    passthrough_args+=("$arg")
+    expect_bail_count=1
   elif [[ "$arg" == --timeout || "$arg" == --rerun-each || "$arg" == --retry || "$arg" == --seed || "$arg" == --coverage-reporter || "$arg" == --coverage-dir || "$arg" == --test-name-pattern || "$arg" == "-t" || "$arg" == --reporter || "$arg" == --reporter-outfile || "$arg" == --max-concurrency || "$arg" == --path-ignore-patterns || "$arg" == --changed || "$arg" == --parallel || "$arg" == --parallel-delay || "$arg" == --shard || "$arg" == --preload || "$arg" == --require || "$arg" == "-r" ]]; then
     passthrough_args+=("$arg")
     expect_option_value=1

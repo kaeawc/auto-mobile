@@ -334,7 +334,6 @@ scripts/local-dev/hot-reload.sh: note: This function is invoked in an 'if' condi
 scripts/local-dev/hot-reload.sh: note: This function is invoked in an 'if' condition so set -e will be disabled. Invoke separately if failures should cause the script to exit. [SC2310]
 scripts/local-dev/hot-reload.sh: note: This function is invoked in an 'if' condition so set -e will be disabled. Invoke separately if failures should cause the script to exit. [SC2310]
 scripts/local-dev/hot-reload.sh: note: This function is invoked in an 'if' condition so set -e will be disabled. Invoke separately if failures should cause the script to exit. [SC2310]
-scripts/local-dev/hot-reload.sh: note: This function is invoked in an 'if' condition so set -e will be disabled. Invoke separately if failures should cause the script to exit. [SC2310]
 scripts/local-dev/probe-android-locale.sh: note: This function is invoked in an 'if' condition so set -e will be disabled. Invoke separately if failures should cause the script to exit. [SC2310]
 scripts/local-dev/probe-android-locale.sh: note: This function is invoked in an 'if' condition so set -e will be disabled. Invoke separately if failures should cause the script to exit. [SC2310]
 scripts/local-dev/probe-android-locale.sh: note: This function is invoked in an 'if' condition so set -e will be disabled. Invoke separately if failures should cause the script to exit. [SC2310]

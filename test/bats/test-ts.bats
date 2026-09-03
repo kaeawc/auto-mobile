@@ -156,6 +156,20 @@ run_lane() {
   done
 }
 
+@test "split-form bail counts are not classified as positional test targets" {
+  run_lane unit --bail 2 test/scripts/testLaneClassification.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--bail 2"* ]]
+  [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
+}
+
+@test "bare bail does not consume a positional test target" {
+  run_lane unit --bail test/scripts/testLaneClassification.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--bail"* ]]
+  [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
+}
+
 @test "rejects an unclassified positional Bun pattern" {
   run_lane unit oxlintConfigScoping
   [ "$status" -eq 2 ]

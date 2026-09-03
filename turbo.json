@@ -118,6 +118,8 @@
         "scripts/**",
         "package.json",
         "bunfig.toml",
+        ".oxlintrc.json",
+        "oxlint-plugins/**",
         ".github/workflows/**",
         "turbo.json",
         "android/auto-mobile-sdk/src/main/kotlin/**",

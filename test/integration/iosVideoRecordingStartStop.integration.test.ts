@@ -4,7 +4,6 @@ import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { defaultIdGenerator } from "../../src/utils/IdGenerator";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 
 const execFileAsync = promisify(execFile);
@@ -104,6 +103,19 @@ async function runVideoRecordingCli(
   );
 }
 
+async function acquireVideoRecordingSession(deviceId: string): Promise<string> {
+  const response = await runLocalCli(["getApple", "--deviceId", deviceId]);
+  const text = response.content?.find((item) => item.type === "text")?.text;
+  if (!text) {
+    throw new Error(`getApple response did not contain text JSON: ${JSON.stringify(response)}`);
+  }
+  const session = JSON.parse(text) as { sessionUuid?: unknown };
+  if (typeof session.sessionUuid !== "string" || session.sessionUuid.length === 0) {
+    throw new Error(`getApple did not return a session UUID: ${JSON.stringify(response)}`);
+  }
+  return session.sessionUuid;
+}
+
 async function bindVideoRecordingSession(sessionUuid: string, deviceId: string): Promise<void> {
   await runLocalCli([
     "--session-uuid",
@@ -181,7 +193,7 @@ describeIntegration("iOS videoRecording start-stop integration", () => {
         if (!deviceId) {
           throw new Error("AUTOMOBILE_IOS_VIDEO_RECORDING_DEVICE_ID is required");
         }
-        sessionUuid = defaultIdGenerator.next();
+        sessionUuid = await acquireVideoRecordingSession(deviceId);
         await bindVideoRecordingSession(sessionUuid, deviceId);
 
         startPayload = await runVideoRecordingCli(sessionUuid, [

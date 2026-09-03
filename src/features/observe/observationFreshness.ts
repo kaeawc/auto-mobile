@@ -77,6 +77,12 @@ export interface FreshnessInputs {
    * never verified against the foreground app no matter how recently captured.
    */
   windowIdentityMismatch?: { observed: string; foreground: string };
+  /**
+   * The hierarchy contains only status-bar content while a non-system app is resumed. This is a
+   * device-side wrong-window capture even when System UI would normally be a legitimate
+   * accessibility window.
+   */
+  statusBarOnlyHierarchy?: { foreground: string };
   /** Age budget; defaults to {@link maxObservationAgeMs}. */
   maxAgeMs?: number;
 }
@@ -153,6 +159,36 @@ function resolveAgeMs(
   return ageBasis !== undefined ? Math.max(0, now - ageBasis) : undefined;
 }
 
+function computeWrongWindowFreshness(
+  inputs: FreshnessInputs,
+  ageMs: number | undefined,
+): FreshnessVerdict | undefined {
+  if (inputs.windowIdentityMismatch) {
+    const { observed, foreground } = inputs.windowIdentityMismatch;
+    return {
+      requestedAfter: inputs.requestedAfter,
+      actualTimestamp: inputs.actualTimestamp,
+      ageMs,
+      verified: false,
+      isFresh: false,
+      warning: `Observed hierarchy is from ${observed}, but the device's current top resumed activity is ${foreground}. This is a stale wrong-window capture; it was not verified against the foreground app. The runner is serving a stale window; call pressButton { platform: "android", button: "home" } (or relaunch the target app) and observe again.`,
+    };
+  }
+
+  if (inputs.statusBarOnlyHierarchy) {
+    return {
+      requestedAfter: inputs.requestedAfter,
+      actualTimestamp: inputs.actualTimestamp,
+      ageMs,
+      verified: false,
+      isFresh: false,
+      warning: `Observed hierarchy contains only Android status-bar content while the device's current top resumed activity is ${inputs.statusBarOnlyHierarchy.foreground}. This is a stale wrong-window capture; it was not verified against the foreground app. The runner is serving a stale window; call pressButton { platform: "android", button: "home" } (or relaunch the target app) and observe again.`,
+    };
+  }
+
+  return undefined;
+}
+
 /**
  * Compute the freshness verdict.
  *
@@ -162,7 +198,6 @@ function resolveAgeMs(
  */
 export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
   const { requestedAfter, actualTimestamp, hostAgeBasisMs, now, verified, unavailable } = inputs;
-  const windowIdentityMismatch = inputs.windowIdentityMismatch;
   const maxAgeMs = inputs.maxAgeMs ?? maxObservationAgeMs();
 
   const ageMs = resolveAgeMs(hostAgeBasisMs, actualTimestamp, now);
@@ -178,19 +213,11 @@ export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
     };
   }
 
-  // The tree belongs to a different app than the one currently resumed on the
-  // device (issue #5867). This dominates every other signal — a wrong-window
-  // capture is unfresh at any age, and `verified` is retracted to false so a
+  // A wrong-window capture is unfresh at any age, and `verified` is retracted to false so a
   // consumer reading that field alone is not green-lit onto a phantom.
-  if (windowIdentityMismatch) {
-    return {
-      requestedAfter,
-      actualTimestamp,
-      ageMs,
-      verified: false,
-      isFresh: false,
-      warning: `Observed hierarchy is from ${windowIdentityMismatch.observed}, but the device's current top resumed activity is ${windowIdentityMismatch.foreground}. This is a stale wrong-window capture; it was not verified against the foreground app. The runner is serving a stale window; call pressButton { platform: "android", button: "home" } (or relaunch the target app) and observe again.`,
-    };
+  const wrongWindowFreshness = computeWrongWindowFreshness(inputs, ageMs);
+  if (wrongWindowFreshness) {
+    return wrongWindowFreshness;
   }
 
   // Caller supplied an explicit constraint: answer exactly that question.

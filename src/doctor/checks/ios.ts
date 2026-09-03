@@ -371,7 +371,10 @@ export function createIosObserveRoundTripInspector(
 const createIosDoctorDependencies = (): IosDoctorDependencies => ({
   platform: () => process.platform,
   execFile: (file, args) =>
-    hostCommandExecutor.executeCommand(file, args, { timeoutMs: DOCTOR_EXEC_TIMEOUT_MS }),
+    hostCommandExecutor.executeCommand(file, args, {
+      timeoutMs: DOCTOR_EXEC_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    }),
   xcodebuild: new XcodebuildClient(),
   fileExists: existsSync,
   readDir: async (path) => fs.readdir(path),

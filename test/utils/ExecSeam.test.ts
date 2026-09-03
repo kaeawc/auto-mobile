@@ -60,10 +60,16 @@ describe("runExecSeam", function () {
       };
       await runExecSeam(
         invoke,
-        { timeoutMs: 1234, maxBuffer: 42, cwd: "/tmp" },
+        { timeoutMs: 1234, maxBuffer: 42, cwd: "/tmp", killSignal: "SIGKILL" },
         { command: "cmd" },
       );
-      expect(seen).toEqual({ timeout: 1234, maxBuffer: 42, cwd: "/tmp" });
+      expect(seen).toEqual({
+        timeout: 1234,
+        maxBuffer: 42,
+        cwd: "/tmp",
+        signal: undefined,
+        killSignal: "SIGKILL",
+      });
     },
     FAST_TEST_TIMEOUT_MS,
   );
@@ -169,6 +175,28 @@ describe("argv exec seam", function () {
   );
 
   test(
+    "force-kills a child that ignores SIGTERM within the timeout budget",
+    async function () {
+      const ignoresSigterm: ExecFileAsync = async (_file, _args, options) => {
+        if (options?.killSignal === "SIGKILL") {
+          throw new Error("child process was force-killed");
+        }
+        throw new Error("child ignored SIGTERM and remained running");
+      };
+
+      const startedAt = performance.now();
+      await expect(
+        new DefaultHostCommandExecutor(ignoresSigterm).executeCommand("wedged-tool", [], {
+          timeoutMs: 5,
+          killSignal: "SIGKILL",
+        }),
+      ).rejects.toThrow("child process was force-killed");
+      expect(performance.now() - startedAt).toBeLessThan(FAST_TEST_TIMEOUT_MS);
+    },
+    FAST_TEST_TIMEOUT_MS,
+  );
+
+  test(
     "trackable command execution shares option mapping and result coercion",
     async function () {
       const child = { kill: () => true } as ChildProcess;
@@ -185,7 +213,13 @@ describe("argv exec seam", function () {
       ).executeCommandWithChild("adb", ["shell", "true"], { timeoutMs: 1234, maxBuffer: 42 });
 
       expect(started.child).toBe(child);
-      expect(seen).toEqual({ timeout: 1234, maxBuffer: 42, cwd: undefined, signal: undefined });
+      expect(seen).toEqual({
+        timeout: 1234,
+        maxBuffer: 42,
+        cwd: undefined,
+        signal: undefined,
+        killSignal: undefined,
+      });
       await expect(started.result).resolves.toMatchObject({
         stdout: "tracked-out",
         stderr: "tracked-err",

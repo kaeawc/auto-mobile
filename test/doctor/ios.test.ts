@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type { IosDoctorDependencies } from "../../src/doctor/checks/ios";
 import {
   checkAppleDeveloperAccount,
@@ -26,6 +26,7 @@ import type {
   IosRunnerInspectorHooks,
 } from "../../src/doctor/checks/ios";
 import type { ExecResult } from "../../src/models";
+import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
 import type { SecurityClient } from "../../src/utils/ios-cmdline-tools/SecurityClient";
 import { FakeLogger } from "../fakes/FakeLogger";
 
@@ -230,6 +231,28 @@ describe("iOS doctor checks", () => {
 
       expect(result.status).toBe("fail");
       expect(result.message).toContain("xcrun not functional");
+    });
+
+    test("force-kills a wedged xcrun process when using default dependencies", async () => {
+      const executeCommand = spyOn(
+        DefaultHostCommandExecutor.prototype,
+        "executeCommand",
+      ).mockResolvedValue(createExecResult(""));
+      try {
+        const result = await checkXcrunAvailable();
+        if (process.platform === "darwin") {
+          expect(result.status).toBe("pass");
+          expect(executeCommand).toHaveBeenCalledWith("xcrun", ["--version"], {
+            timeoutMs: 5000,
+            killSignal: "SIGKILL",
+          });
+        } else {
+          expect(result.status).toBe("skip");
+          expect(executeCommand).not.toHaveBeenCalled();
+        }
+      } finally {
+        executeCommand.mockRestore();
+      }
     });
 
     test("skips when not on darwin", async () => {

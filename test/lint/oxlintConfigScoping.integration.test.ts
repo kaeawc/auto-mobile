@@ -1,4 +1,6 @@
 import { beforeAll, describe, expect, test } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // The custom rules' file-scoping used to be enforced (and tested) through
@@ -38,50 +40,78 @@ beforeAll(() => {
   config = JSON.parse(result.stdout.toString()) as ResolvedConfig;
 }, CONFIG_READ_HOOK_TIMEOUT_MS);
 
-// Return the `files` of the SINGLE override that gates `rule`, asserting the
+// Return the SINGLE override that gates `rule`, asserting the
 // rule resolves through exactly one override. Using the first match alone would
 // miss a later, broader override that also enables the rule (widening its
 // scope), so uniqueness is part of the guarantee.
-function filesScopingRule(rule: string): string[] | undefined {
+function scopedRuleOverride(rule: string): ResolvedOverride | undefined {
   const matches = config.overrides.filter((override) =>
     override.rules ? Object.prototype.hasOwnProperty.call(override.rules, rule) : false,
   );
   expect(matches.length, `${rule} must be gated by exactly one override`).toBe(1);
-  return matches[0]?.files;
+  return matches[0];
+}
+
+function expectScopedRule(rule: string, files: string[], severity: string): void {
+  const override = scopedRuleOverride(rule);
+  expect(override?.files).toEqual(files);
+  expect(override?.rules?.[rule]).toBe(severity);
 }
 
 describe(".oxlintrc.json rule scoping (via oxlint --print-config)", () => {
   test("catch-convention and no-unknown-cast are scoped to src/**", () => {
     for (const rule of ["auto-mobile/catch-convention", "auto-mobile/no-unknown-cast"]) {
-      expect(filesScopingRule(rule)).toEqual(["src/**/*.ts"]);
+      expectScopedRule(rule, ["src/**/*.ts"], "warn");
     }
   });
 
   test("no-accumulator-foreach is scoped to src/** (not the whole tree)", () => {
-    expect(filesScopingRule("auto-mobile/no-accumulator-foreach")).toEqual(["src/**/*.ts"]);
+    expectScopedRule("auto-mobile/no-accumulator-foreach", ["src/**/*.ts"], "deny");
   });
 
   test("stress-explicit-timeout is scoped to test/stress/**", () => {
-    expect(filesScopingRule("auto-mobile/stress-explicit-timeout")).toEqual([
-      "test/stress/**/*.ts",
-    ]);
+    expectScopedRule("auto-mobile/stress-explicit-timeout", ["test/stress/**/*.ts"], "deny");
   });
 
   test("no-bare-expect is scoped to test/**", () => {
-    expect(filesScopingRule("auto-mobile/no-bare-expect")).toEqual(["test/**/*.ts"]);
+    expectScopedRule("auto-mobile/no-bare-expect", ["test/**/*.ts"], "deny");
   });
 
   test("no-explicit-any is scoped to the two correctness-sensitive navigation files", () => {
-    expect(filesScopingRule("typescript/no-explicit-any")).toEqual([
-      "src/features/navigation/ScreenFingerprint.ts",
-      "src/features/navigation/ExploreElementExtraction.ts",
-    ]);
+    expectScopedRule(
+      "typescript/no-explicit-any",
+      [
+        "src/features/navigation/ScreenFingerprint.ts",
+        "src/features/navigation/ExploreElementExtraction.ts",
+      ],
+      "deny",
+    );
   });
 
   test("the raw-timer guard applies globally, with SystemTimer.ts exempted", () => {
-    // no-raw-timer is enabled at the top level (so tests/scripts are covered) and
-    // only turned OFF in the SystemTimer.ts override — that override is the sole
-    // place it appears in the resolved overrides.
-    expect(filesScopingRule("auto-mobile/no-raw-timer")).toEqual(["**/SystemTimer.ts"]);
+    // `--print-config` omits top-level JavaScript-plugin rules, so run oxlint
+    // against a temporary source file to prove the global rule is active.
+    expectScopedRule("auto-mobile/no-raw-timer", ["**/SystemTimer.ts"], "allow");
+  });
+
+  test("the raw-timer guard is active outside its SystemTimer.ts exemption", async () => {
+    const temporaryDirectory = await mkdtemp(join(tmpdir(), "auto-mobile-oxlint-"));
+    const sourcePath = join(temporaryDirectory, "raw-timer.ts");
+    try {
+      await writeFile(sourcePath, "setTimeout(() => {}, 1);\n");
+      const result = Bun.spawnSync({
+        cmd: [
+          join(ROOT, "node_modules", ".bin", "oxlint"),
+          "--config",
+          ".oxlintrc.json",
+          sourcePath,
+        ],
+        cwd: ROOT,
+      });
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout.toString()).toContain("auto-mobile(no-raw-timer)");
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
   });
 });

@@ -148,6 +148,14 @@ run_lane() {
   [[ "$output" == *"--test-name-pattern=integration.test.ts"* ]]
 }
 
+@test "preload option values are not classified as positional test targets" {
+  for option in --preload --require -r; do
+    run_lane unit "$option" test/fakes/FakeTimer.ts
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"$option test/fakes/FakeTimer.ts"* ]]
+  done
+}
+
 @test "rejects an unclassified positional Bun pattern" {
   run_lane unit oxlintConfigScoping
   [ "$status" -eq 2 ]
@@ -159,6 +167,17 @@ run_lane() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"test/stress/memory-leak.stress.test.ts"* ]]
   [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
+}
+
+@test "accepts explicit targets when invoked through a symlinked checkout path" {
+  link="$BATS_TEST_TMPDIR/auto-mobile-link"
+  ln -s "$PWD" "$link"
+  run env \
+    PATH="$STUB_BIN:$PATH" \
+    TEST_TS_PRINT_CMD=1 \
+    bash "$link/$SCRIPT" unit "$link/test/scripts/testLaneClassification.test.ts"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/scripts/testLaneClassification.test.ts"* ]]
 }
 
 @test "targeting a stale test path fails before invoking Bun" {

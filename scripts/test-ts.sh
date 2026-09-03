@@ -13,7 +13,7 @@
 # their dedicated package scripts and workflows.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$ROOT"
 
 mode="${1:-unit}"
@@ -162,7 +162,7 @@ for arg in "$@"; do
   if [[ "$expect_option_value" -eq 1 ]]; then
     passthrough_args+=("$arg")
     expect_option_value=0
-  elif [[ "$arg" == --timeout || "$arg" == --rerun-each || "$arg" == --retry || "$arg" == --seed || "$arg" == --coverage-reporter || "$arg" == --coverage-dir || "$arg" == --test-name-pattern || "$arg" == "-t" || "$arg" == --reporter || "$arg" == --reporter-outfile || "$arg" == --max-concurrency || "$arg" == --path-ignore-patterns || "$arg" == --changed || "$arg" == --parallel || "$arg" == --parallel-delay || "$arg" == --shard ]]; then
+  elif [[ "$arg" == --timeout || "$arg" == --rerun-each || "$arg" == --retry || "$arg" == --seed || "$arg" == --coverage-reporter || "$arg" == --coverage-dir || "$arg" == --test-name-pattern || "$arg" == "-t" || "$arg" == --reporter || "$arg" == --reporter-outfile || "$arg" == --max-concurrency || "$arg" == --path-ignore-patterns || "$arg" == --changed || "$arg" == --parallel || "$arg" == --parallel-delay || "$arg" == --shard || "$arg" == --preload || "$arg" == --require || "$arg" == "-r" ]]; then
     passthrough_args+=("$arg")
     expect_option_value=1
   elif [[ "$arg" == -* ]]; then

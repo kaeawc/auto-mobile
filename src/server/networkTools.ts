@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+import { validateHeaderName, validateHeaderValue } from "node:http";
 import { ToolRegistry } from "./toolRegistry";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
@@ -14,6 +15,7 @@ import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { BootedDevice } from "../utils/deviceUtils";
 import { logger } from "../utils/logger";
+import { errorMessage } from "../utils/describeUnknownError";
 import {
   LATEST_RELEASE_VERSION,
   RELEASE_CHECKSUM_REGISTRY,
@@ -81,6 +83,19 @@ const mockNetworkSchema = addDeviceTargetingToSchema(
 );
 
 type MockNetworkArgs = z.infer<typeof mockNetworkSchema>;
+
+function assertValidResponseHeaders(responseHeaders: Record<string, string> | undefined): void {
+  if (responseHeaders === undefined) {return;}
+
+  for (const [name, value] of Object.entries(responseHeaders)) {
+    try {
+      validateHeaderName(name);
+      validateHeaderValue(name, value);
+    } catch (error) {
+      throw new ActionableError(`Invalid mock response header '${name}': ${errorMessage(error)}`);
+    }
+  }
+}
 
 // --- clearMockNetwork tool ---
 
@@ -341,6 +356,7 @@ export function registerNetworkTools(): void {
       } catch {
         throw new ActionableError(`Invalid path regex: ${args.path}`);
       }
+      assertValidResponseHeaders(args.responseHeaders);
 
       const mock = state.addMock({
         host: args.host,

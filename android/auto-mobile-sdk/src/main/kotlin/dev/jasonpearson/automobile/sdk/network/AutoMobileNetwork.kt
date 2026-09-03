@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CancellationException
 import okhttp3.Interceptor
 import okhttp3.WebSocketListener
 
@@ -333,6 +334,8 @@ object AutoMobileNetwork {
         } else {
           try {
             candidate.allow(type, size)
+          } catch (error: CancellationException) {
+            throw error
           } catch (error: Exception) {
             logObservationFailure(error)
             true

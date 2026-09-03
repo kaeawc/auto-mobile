@@ -6,6 +6,7 @@ import dev.jasonpearson.automobile.protocol.WebSocketFrameType
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import okhttp3.Request
 import okhttp3.WebSocket
 import okio.ByteString
@@ -23,6 +24,8 @@ internal class AutoMobileWebSocket(
     WebSocketSendController { type, size ->
       try {
         delegate.allow(type, size)
+      } catch (error: CancellationException) {
+        throw error
       } catch (error: Exception) {
         logObservationFailure(error)
         true

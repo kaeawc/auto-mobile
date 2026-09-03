@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.protocol.WebSocketFrameType
 import dev.jasonpearson.automobile.sdk.events.DropCounter
 import dev.jasonpearson.automobile.sdk.events.DropReason
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
+import java.util.concurrent.CancellationException
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -216,6 +217,25 @@ class AutoMobileWebSocketTest {
 
     assertTrue(webSocket.send("sent"))
     assertEquals(listOf("sent"), delegate.textSends)
+  }
+
+  @Test
+  fun `controller cancellation leaves send uninvoked`() {
+    val (buffer, _) = collectingBuffer()
+    val cancellation = CancellationException("controller cancelled")
+    val delegate = FakeWebSocket(sendResult = true)
+    val webSocket =
+      AutoMobileWebSocket(
+        delegate,
+        "wss://x",
+        buffer,
+        applicationId = null,
+        controller = WebSocketSendController { _, _ -> throw cancellation },
+        connectionId = "c1",
+      )
+
+    assertSame(cancellation, assertFailsWith<CancellationException> { webSocket.send("sent") })
+    assertTrue(delegate.textSends.isEmpty())
   }
 
   @Test

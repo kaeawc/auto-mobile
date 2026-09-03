@@ -71,8 +71,9 @@ internal class AutoMobileNetworkInterceptor(
     val request = chain.request()
     val startMs = System.currentTimeMillis()
     val policy = policyProvider?.let { observeOrNull { it() } }
-    val headersEnabled = captureHeaders && (policy?.captureHeaders ?: true)
-    val bodiesEnabled = captureBodies && (policy?.captureBodies ?: true)
+    val policyUnavailable = policyProvider != null && policy == null
+    val headersEnabled = captureHeaders && !policyUnavailable && (policy?.captureHeaders ?: true)
+    val bodiesEnabled = captureBodies && !policyUnavailable && (policy?.captureBodies ?: true)
     val mutationsEnabled = policy?.allowMutations == true
     val networkControlEnabled =
       mutationsEnabled && observeOrNull { networkControlProvider?.invoke() } == true
@@ -100,31 +101,31 @@ internal class AutoMobileNetworkInterceptor(
       } else null
     if (mockRule != null) {
       val durationMs = System.currentTimeMillis() - startMs
-      observe {
-        buffer.add(
-          SdkNetworkRequestEvent(
-            timestamp = startMs,
-            applicationId = applicationId,
-            url = request.url.toString(),
-            method = request.method,
-            statusCode = mockRule.statusCode,
-            durationMs = durationMs,
-            requestBodySize = request.body?.contentLength() ?: -1,
-            responseBodySize = mockRule.responseBody.length.toLong(),
-            host = request.url.host,
-            path = request.url.encodedPath,
-            error = "mocked:${mockRule.mockId}",
-            requestHeaders = reqHeaders,
-            requestBody = reqBody,
-            responseBody = if (bodiesEnabled) mockRule.responseBody else null,
-            contentType = mockRule.contentType,
+      val mockedResponse = observeOrNull { buildMockResponse(request, mockRule) }
+      if (mockedResponse != null) {
+        observe {
+          buffer.add(
+            SdkNetworkRequestEvent(
+              timestamp = startMs,
+              applicationId = applicationId,
+              url = request.url.toString(),
+              method = request.method,
+              statusCode = mockRule.statusCode,
+              durationMs = durationMs,
+              requestBodySize = request.body?.contentLength() ?: -1,
+              responseBodySize = mockRule.responseBody.length.toLong(),
+              host = request.url.host,
+              path = request.url.encodedPath,
+              error = "mocked:${mockRule.mockId}",
+              requestHeaders = reqHeaders,
+              requestBody = reqBody,
+              responseBody = if (bodiesEnabled) mockRule.responseBody else null,
+              contentType = mockRule.contentType,
+            )
           )
-        )
-      }
-      observeOrNull { buildMockResponse(request, mockRule) }
-        ?.let {
-          return it
         }
+        return mockedResponse
+      }
     }
 
     // --- Error simulation enforcement ---

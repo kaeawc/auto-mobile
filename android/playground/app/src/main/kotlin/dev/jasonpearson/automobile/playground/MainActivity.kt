@@ -14,6 +14,9 @@ import dev.jasonpearson.automobile.playground.navigation.AppNavigation
 import dev.jasonpearson.automobile.playground.navigation.DeepLinkManager
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.EnableComposeObservableApi
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityDescriptor
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapabilityState
+import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import dev.jasonpearson.automobile.sdk.database.DatabaseInspector
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector
 import dev.jasonpearson.automobile.storage.AnalyticsTracker
@@ -37,6 +40,11 @@ class MainActivity : ComponentActivity() {
 
     // Initialize AutoMobile SDK for navigation tracking
     AutoMobileSDK.initialize(applicationContext)
+    // The playground installs the SDK network-control receiver, so opt in to its debug mocks.
+    AutoMobileSDK.registerCapability(
+      SdkCapabilityDescriptor("network.control", SdkCapabilityState.SUPPORTED)
+    )
+    AutoMobileSDK.updateCapturePolicy(SdkCapturePolicy(allowMutations = true))
     // Enable storage and database inspection in debug builds
     SharedPreferencesInspector.setEnabled(true)
     DatabaseInspector.setEnabled(true)

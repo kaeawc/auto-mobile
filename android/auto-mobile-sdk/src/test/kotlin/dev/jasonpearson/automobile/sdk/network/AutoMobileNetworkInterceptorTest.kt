@@ -780,6 +780,59 @@ class AutoMobileNetworkInterceptorTest {
     assertEquals(204, response.code)
   }
 
+  @Test
+  fun `policy lookup failure disables sensitive capture`() {
+    val (buffer, flushed) = collectingBuffer()
+    val request =
+      Request.Builder()
+        .url("https://api.example.com/users")
+        .header("Authorization", "Bearer token")
+        .post("secret".toRequestBody("text/plain".toMediaType()))
+        .build()
+    val interceptor =
+      AutoMobileNetworkInterceptor(
+        buffer,
+        captureHeaders = true,
+        captureBodies = true,
+        policyProvider = { throw IllegalStateException("policy failed") },
+      )
+
+    interceptor.intercept(fakeChain(request = request))
+    drainDelivery()
+
+    val event = flushed.single().single() as SdkNetworkRequestEvent
+    assertNull(event.requestHeaders)
+    assertNull(event.responseHeaders)
+    assertNull(event.requestBody)
+    assertNull(event.responseBody)
+  }
+
+  @Test
+  fun `invalid mock response falls through without recording a mock event`() {
+    val (buffer, flushed) = collectingBuffer()
+    var proceedCalls = 0
+    val mockRule =
+      NetworkMockRuleStore.MatchedMockRule(
+        mockId = "mock-1",
+        statusCode = 503,
+        responseHeaders = mapOf("X-Invalid" to "line\nbreak"),
+        responseBody = "mocked",
+        contentType = "text/plain",
+      )
+    val interceptor = mutationEnabledInterceptor(buffer, fakeRuleMatcher(matchResult = mockRule))
+
+    val response =
+      interceptor.intercept(
+        FakeInterceptorChain(responseCode = 204, onProceed = { proceedCalls++ })
+      )
+    drainDelivery()
+
+    assertEquals(1, proceedCalls)
+    assertEquals(204, response.code)
+    assertEquals(1, flushed.flatten().size)
+    assertNull((flushed.single().single() as SdkNetworkRequestEvent).error)
+  }
+
   // --- Default behavior tests ---
 
   @Test

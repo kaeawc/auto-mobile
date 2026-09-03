@@ -4,12 +4,15 @@ import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.sdk.capabilities.SdkCapturePolicy
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
+import java.util.concurrent.CancellationException
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import okhttp3.Request
 import okhttp3.WebSocket
@@ -235,6 +238,20 @@ class AutoMobileNetworkTest {
     assertFalse(
       AutoMobileNetwork.wrapWebSocket(delegate, "wss://example.com", controller).send("two")
     )
+    assertEquals(1, sends)
+
+    val cancellation = CancellationException("controller cancelled")
+    val thrown =
+      assertFailsWith<CancellationException> {
+        AutoMobileNetwork.wrapWebSocket(
+            delegate,
+            "wss://example.com",
+            WebSocketSendController { _, _ -> throw cancellation },
+          )
+          .send("three")
+      }
+
+    assertSame(cancellation, thrown)
     assertEquals(1, sends)
   }
 

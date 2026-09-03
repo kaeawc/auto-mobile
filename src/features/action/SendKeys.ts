@@ -300,6 +300,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       if (!clearResult.success) {
         return { ...clearResult, resolvedMode };
       }
+      signal?.throwIfAborted();
     }
 
     // iOS has one text-delivery mechanism: XCUITest typeText. Preserve the
@@ -511,7 +512,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     }
 
     if (operation === "replace") {
-      await clearTextWithKeyEvents(this.adb, getFocusedTextLength(focusResult.hierarchy), signal);
+      const clearResult = await this.clearEventOnlyForReplace(
+        getFocusedTextLength(focusResult.hierarchy),
+        signal,
+      );
+      if (!clearResult.success) {
+        return clearResult;
+      }
     }
 
     let mutated = operation === "replace";
@@ -523,6 +530,24 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       mutated = true;
     }
     return { success: true };
+  }
+
+  private async clearEventOnlyForReplace(
+    count: number,
+    signal?: AbortSignal,
+  ): Promise<TextActionResult> {
+    let deleted = false;
+    try {
+      await clearTextWithKeyEvents(this.adb, count, signal, () => {
+        deleted = true;
+      });
+      return { success: true };
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn("[SendKeys] Android replacement clearing failed", error);
+      const failure = { success: false, error: errorMessage(error) };
+      return deleted ? markPartialAfterMutation(failure) : failure;
+    }
   }
 
   private async requireFocusedAndroidInput(
@@ -632,11 +657,12 @@ export class SendKeys {
     signal?: AbortSignal,
   ): Promise<SendKeysResult> {
     const focusFailure = await this.focusTarget(selector, signal);
-    const minTimestamp = focusFailure ? undefined : await this.timestampProvider.now();
     signal?.throwIfAborted();
     const execution = focusFailure
       ? { results: [], failure: focusFailure }
       : await this.executeCommands(commands, progress, signal);
+    const minTimestamp = focusFailure ? undefined : await this.timestampProvider.now();
+    signal?.throwIfAborted();
     await progress?.(commands.length, commands.length, "Observing final keyboard input state");
     const observation = await this.observer.execute({
       signal,

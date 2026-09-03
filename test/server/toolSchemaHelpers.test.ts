@@ -137,8 +137,8 @@ describe("canonicalizeDiscriminatedUnionJsonSchema", () => {
         commands: {
           items: {
             anyOf: [
-              { properties: { action: { const: "type" } } },
-              { properties: { action: { const: "key" } } },
+              { properties: { action: { const: "type" } }, required: ["action"] },
+              { properties: { action: { const: "key" } }, required: ["action"] },
             ],
           },
         },
@@ -149,6 +149,24 @@ describe("canonicalizeDiscriminatedUnionJsonSchema", () => {
 
     expect(schema.properties.commands.items).toEqual({
       oneOf: [
+        { properties: { action: { const: "type" } }, required: ["action"] },
+        { properties: { action: { const: "key" } }, required: ["action"] },
+      ],
+    });
+  });
+
+  test("preserves unions with optional literal properties", () => {
+    const schema = {
+      anyOf: [
+        { properties: { action: { const: "type" } } },
+        { properties: { action: { const: "key" } } },
+      ],
+    };
+
+    canonicalizeDiscriminatedUnionJsonSchema(schema);
+
+    expect(schema).toEqual({
+      anyOf: [
         { properties: { action: { const: "type" } } },
         { properties: { action: { const: "key" } } },
       ],

@@ -37,8 +37,14 @@ class FakeGestureEmitter implements GestureEmitter {
 class FakeA11ySource implements A11ySource {
   private listener?: InteractionListener;
 
+  constructor(private readonly supportedCommands: string[] | null = ["request_insert_text"]) {}
+
   async ensureConnected(): Promise<boolean> {
     return true;
+  }
+
+  async getSupportedCommands(): Promise<string[] | null> {
+    return this.supportedCommands;
   }
 
   onInteraction(listener: InteractionListener): () => void {
@@ -236,6 +242,23 @@ describe("DualTrackRecorder", () => {
         params: { text: "updated@example.com" },
       },
     ]);
+  });
+
+  test("inputText from a runner without insert support records a replayable inputText step", async () => {
+    fakeA11y = new FakeA11ySource([]);
+    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer, true);
+    await recorder.start();
+
+    fakeA11y.emit({
+      type: "inputText",
+      timestamp: Date.now(),
+      text: "hello@example.com",
+      element: { "resource-id": "com.example:id/email_field" },
+    });
+
+    const { steps } = await recorder.stop();
+
+    expect(steps).toEqual([{ tool: "inputText", params: { text: "hello@example.com" } }]);
   });
 
   test("consecutive inputText events on same element are coalesced", async () => {

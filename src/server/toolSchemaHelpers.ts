@@ -109,11 +109,21 @@ function hasUniqueDiscriminator(branches: unknown[]): boolean {
 }
 
 function hasUniqueConstValues(branches: Record<string, unknown>[], key: string): boolean {
+  if (!branches.every((branch) => getRequiredProperties(branch).includes(key))) {
+    return false;
+  }
   const values = branches.map((branch) => getPropertyConst(branch, key));
   if (values.some((entry) => !entry.found)) {
     return false;
   }
   return new Set(values.map((entry) => JSON.stringify(entry.value))).size === branches.length;
+}
+
+function getRequiredProperties(branch: Record<string, unknown>): string[] {
+  const required = branch.required;
+  return Array.isArray(required) && required.every((value) => typeof value === "string")
+    ? required
+    : [];
 }
 
 function getPropertyConst(

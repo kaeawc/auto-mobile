@@ -452,10 +452,13 @@ export function finalizeToolResponse<T>(response: T, ctx: FinalizeToolResponseCo
         } else if (
           shouldDiffObservation(baseline, sanitized, classifyObservationAction(ctx.name, ctx.args))
         ) {
-          observationOut = diffObserveResult(baseline, sanitized);
+          const diff = diffObserveResult(baseline, sanitized);
+          const screenChangedWithEmptyDiff =
+            hasScreenChangedEffect(payload) && isEmptyObserveDiff(diff);
+          observationOut = screenChangedWithEmptyDiff ? servedObservation : diff;
           observationDiff = {
-            mode: "diff",
-            reason: "diff_emitted",
+            mode: screenChangedWithEmptyDiff ? "full" : "diff",
+            reason: screenChangedWithEmptyDiff ? "screen_changed" : "diff_emitted",
             fromScreen: observationScreenIdentity(baseline),
             toScreen: observationScreenIdentity(sanitized),
           };
@@ -808,6 +811,24 @@ function isObserveResult(value: unknown): value is ObserveResult {
 
 function hasRenderableHierarchy(observation: ObserveResult): boolean {
   return !!observation.viewHierarchy?.hierarchy;
+}
+
+function hasScreenChangedEffect(payload: Record<string, unknown>): boolean {
+  const effect = payload.effect;
+  return (
+    effect !== null &&
+    typeof effect === "object" &&
+    (effect as Record<string, unknown>).screenChanged === true
+  );
+}
+
+function isEmptyObserveDiff(diff: ReturnType<typeof diffObserveResult>): boolean {
+  return (
+    diff.added.length === 0 &&
+    diff.removed.length === 0 &&
+    diff.changed.length === 0 &&
+    diff.fields === undefined
+  );
 }
 
 function observationScreenIdentity(observation: ObserveResult): ObservationDiffScreenIdentity {

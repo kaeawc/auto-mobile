@@ -294,6 +294,158 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.warning).toBeUndefined();
   });
 
+  test("recaptures before replacing stale same-app activity attribution", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      {
+        ...calendarHierarchy(now),
+        packageName: "com.android.settings",
+        foregroundActivity: "com.android.settings/.homepage.SettingsHomepageActivity",
+        hierarchy: { node: { node: [{ text: "Settings home" }] } },
+      },
+      {
+        ...calendarHierarchy(now + 1),
+        packageName: "com.android.settings",
+        foregroundActivity: "com.android.settings/.SubSettings",
+        hierarchy: { node: { node: [{ text: "Connected devices" }] } },
+      },
+    ] as any);
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        backStack: {
+          execute: async () => ({
+            depth: 1,
+            activities: [],
+            tasks: [],
+            currentActivity: { name: "com.android.settings.SubSettings", taskId: 7 },
+            source: "adb",
+          }),
+        } as any,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(viewHierarchy.getCallCount()).toBe(2);
+    expect(viewHierarchy.getCalls()[1]?.minTimestamp).toBe(now + 1);
+    expect(result.activeWindow?.activityName).toBe("com.android.settings.SubSettings");
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Connected devices");
+    expect(result.wakefulness).toBe("Awake");
+  });
+
+  test("uses the adb task owner for an activity outside its package namespace", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      {
+        ...calendarHierarchy(now),
+        packageName: "com.google.android.contacts",
+        foregroundActivity: "com.google.android.contacts/.ContactsActivity",
+      },
+      {
+        ...calendarHierarchy(now + 1),
+        packageName: "com.google.android.contacts",
+        foregroundActivity: "com.google.android.apps.contacts.activities.OnboardingSignInActivity",
+      },
+    ] as any);
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.google.android.contacts", userId: 0 });
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        backStack: {
+          execute: async () => ({
+            depth: 1,
+            activities: [],
+            tasks: [{ id: 7, packageName: "com.google.android.contacts" }],
+            currentActivity: {
+              name: "com.google.android.apps.contacts.activities.OnboardingSignInActivity",
+              taskId: 7,
+            },
+            source: "adb",
+          }),
+        } as any,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(result.activeWindow?.activityName).toBe(
+      "com.google.android.apps.contacts.activities.OnboardingSignInActivity",
+    );
+  });
+
+  test("keeps the original observation when a forced attribution recapture is unusable", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchySequence([
+      {
+        ...calendarHierarchy(now),
+        packageName: "com.android.settings",
+        foregroundActivity: "com.android.settings/.homepage.SettingsHomepageActivity",
+        hierarchy: { node: { node: [{ text: "Settings home" }] } },
+      },
+      { hierarchy: { error: "CtrlProxy timed out" }, fresh: false },
+    ] as any);
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        backStack: {
+          execute: async () => ({
+            depth: 1,
+            activities: [],
+            tasks: [],
+            currentActivity: { name: "com.android.settings.SubSettings", taskId: 7 },
+            source: "adb",
+          }),
+        } as any,
+        cacheStore: new FakeObserveCacheStore(timer),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true });
+
+    expect(result.activeWindow?.activityName).toBe(
+      "com.android.settings.homepage.SettingsHomepageActivity",
+    );
+    expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Settings home");
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.warning).toContain("disagree about the current activity");
+  });
+
   test("an expanded system-UI shade is not flagged as a wrong-window capture", async () => {
     // When the notification shade / quick settings takes accessibility focus,
     // the observed window is com.android.systemui while the resumed activity
@@ -394,6 +546,58 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.warning).toContain(
       'pressButton { platform: "android", button: "home" }',
     );
+  });
+
+  test("uses the confirmed foreground for a status-bar-only hierarchy after transition", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+      ctrlProxyIncomplete: true,
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+          node: [{ text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } }],
+        },
+      },
+    } as any);
+
+    const foregrounds = [
+      { packageName: "com.android.calendar", userId: 0 },
+      { packageName: "com.android.settings", userId: 0 },
+    ];
+    class TransitioningForegroundAdb extends FakeAdbExecutor {
+      async getForegroundApp(): Promise<{ packageName: string; userId: number } | null> {
+        return foregrounds.shift() ?? { packageName: "com.android.settings", userId: 0 };
+      }
+    }
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(new TransitioningForegroundAdb()),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.warning).toContain("com.android.settings");
   });
 
   test("a transient app transition is not flagged: the confirming read settles onto the observed app", async () => {

@@ -856,6 +856,29 @@ describe("finalizeToolResponse", () => {
       expect(finalized.content[0].text).toBe(stringifyToolResponse(finalized.structuredContent));
     });
 
+    test("returns a full observation when a reported screen change would emit an empty diff", () => {
+      const { store } = makeStore();
+      finalizeToolResponse(createStructuredToolResponse(sameScreenObserve()), {
+        name: "observe",
+        sessionUuid: "s1",
+        baselineStore: store,
+      });
+
+      const finalized = finalizeToolResponse(
+        createStructuredToolResponse({
+          success: true,
+          effect: { screenChanged: true, basis: "viewHierarchy changed" },
+          observation: sameScreenObserve(),
+        }),
+        { name: "tapOn", sessionUuid: "s1", baselineStore: store, args: { project: "full" } },
+      );
+
+      const observation = (finalized.structuredContent as any).observation;
+      expect(observation.isDiff).toBeUndefined();
+      expect(observation.viewHierarchy).toBeDefined();
+      expectObservationDiff(finalized, { mode: "full", reason: "screen_changed" });
+    });
+
     test("hierarchy-less action observations emit full sanitized payloads, not empty diffs", () => {
       const { store, map } = makeStore();
       const baseline = sameScreenObserve();

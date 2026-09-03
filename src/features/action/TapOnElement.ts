@@ -570,14 +570,14 @@ export class TapOnElement extends BaseVisualChange {
     previousObservation: ObserveResult | null,
     currentObservation: ObserveResult,
     signal?: AbortSignal,
-  ): Promise<TapOnElementResult["effect"]> {
+  ): Promise<{ effect: TapOnElementResult["effect"]; observation: ObserveResult }> {
     const immediateEffect = this.deriveTapEffect(previousObservation, currentObservation);
     if (
       this.device.platform !== "android" ||
       !previousObservation ||
       immediateEffect?.screenChanged === true
     ) {
-      return immediateEffect;
+      return { effect: immediateEffect, observation: currentObservation };
     }
 
     // A stable source tree can arrive before Android begins the activity
@@ -593,7 +593,18 @@ export class TapOnElement extends BaseVisualChange {
         signal,
       },
     );
-    return this.deriveTapEffect(previousObservation, effectObservation.observation);
+    const effect = this.deriveTapEffect(previousObservation, effectObservation.observation);
+    if (!effectObservation.matched && effect?.screenChanged !== true) {
+      return { effect, observation: currentObservation };
+    }
+    return {
+      effect,
+      observation: {
+        ...effectObservation.observation,
+        gfxMetrics: effectObservation.observation.gfxMetrics ?? currentObservation.gfxMetrics,
+        perfTiming: effectObservation.observation.perfTiming ?? currentObservation.perfTiming,
+      },
+    };
   }
 
   private isElementTapTargetOffScreen(
@@ -1710,6 +1721,7 @@ export class TapOnElement extends BaseVisualChange {
           progress,
           perf,
           signal,
+          deferPredictionOutcome: true,
           predictionContext: {
             toolName: "tapOn",
             toolArgs: {
@@ -1730,11 +1742,16 @@ export class TapOnElement extends BaseVisualChange {
       );
 
       if (result.success && result.observation && result.element) {
-        result.effect = await this.deriveTapEffectAfterPostTapObservation(
+        const postTap = await this.deriveTapEffectAfterPostTapObservation(
           previousObserveResult,
           result.observation,
           signal,
         );
+        result.effect = postTap.effect;
+        // The observation that established the effect must be returned and become
+        // the caller's diff baseline, rather than the earlier source capture.
+        result.observation = postTap.observation;
+        await this.recordDeferredPredictionOutcome(result, result.observation);
         const selectedElements = await this.selectionStateTracker.finalize({
           action: options.action,
           selectionState: selectionCapture,

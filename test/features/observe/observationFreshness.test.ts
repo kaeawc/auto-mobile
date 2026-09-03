@@ -221,6 +221,18 @@ describe("computeFreshness", () => {
       expect(v.isFresh).toBe(false);
     });
 
+    test("an unresolved same-app activity disagreement is NOT verified or fresh", () => {
+      const v = computeFreshness({
+        actualTimestamp: NOW - 100,
+        now: NOW,
+        verified: true,
+        activityAttributionMismatch: true,
+      });
+      expect(v.verified).toBe(false);
+      expect(v.isFresh).toBe(false);
+      expect(v.warning).toContain("disagree about the current activity");
+    });
+
     test("a hierarchy that could not be retrieved still reports unavailable, not a mismatch", () => {
       // No hierarchy means no window to compare — unavailable dominates.
       const v = computeFreshness({

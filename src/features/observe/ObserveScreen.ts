@@ -93,6 +93,7 @@ const SYSTEM_UI_WINDOW_PACKAGES = new Set<string>(["com.android.systemui"]);
 interface PostCaptureForegroundIdentity {
   sampled: boolean;
   identity: string | undefined;
+  activityAttributionMismatch: boolean;
 }
 
 function isStatusBarOnlyCandidate(
@@ -143,6 +144,43 @@ function isAccessibilityViewClass(foregroundActivity: string): boolean {
     activityName.startsWith("android.widget.") ||
     activityName.startsWith("android.view.") ||
     activityName.endsWith("DecorView")
+  );
+}
+
+function isActivityInPackage(activityName: string, packageName: string): boolean {
+  return activityName === packageName || activityName.startsWith(`${packageName}.`);
+}
+
+function resolveBackStackActivityAttribution(
+  result: ObserveResult,
+): { packageName: string; activityName: string } | undefined {
+  const packageName = result.viewHierarchy?.packageName;
+  const backStack = result.backStack;
+  if (!packageName || backStack?.source !== "adb") {
+    return undefined;
+  }
+  const activityName = backStack.currentActivity?.name;
+  if (!activityName) {
+    return undefined;
+  }
+  if (isActivityInPackage(activityName, packageName)) {
+    return { packageName, activityName };
+  }
+
+  const currentTaskId = backStack.currentActivity?.taskId;
+  const ownedByPackage =
+    backStack.tasks.some(
+      (task) => task.id === currentTaskId && task.packageName === packageName,
+    ) === true;
+  return ownedByPackage ? { packageName, activityName } : undefined;
+}
+
+function hasUsableHierarchy(hierarchy: ObserveResult["viewHierarchy"]): boolean {
+  return (
+    hierarchy?.hierarchy !== undefined &&
+    typeof hierarchy.hierarchy === "object" &&
+    hierarchy.hierarchy !== null &&
+    !("error" in hierarchy.hierarchy)
   );
 }
 
@@ -497,6 +535,7 @@ export class RealObserveScreen implements ObserveScreen {
           postCaptureForeground,
           signal,
         ),
+        activityAttributionMismatch: postCaptureForeground.activityAttributionMismatch,
       });
 
       // Cache the result for future use
@@ -876,17 +915,140 @@ export class RealObserveScreen implements ObserveScreen {
     if (
       observed === undefined ||
       activeWindow === undefined ||
-      activeWindow.appId === observed ||
       SYSTEM_UI_WINDOW_PACKAGES.has(observed)
     ) {
-      return { sampled: false, identity: undefined };
+      return { sampled: false, identity: undefined, activityAttributionMismatch: false };
+    }
+
+    const backStackAttribution = resolveBackStackActivityAttribution(result);
+    if (backStackAttribution && activeWindow.activityName !== backStackAttribution.activityName) {
+      const recaptured = await this.recaptureHierarchyForBackStackAttribution(
+        result,
+        backStackAttribution,
+        signal,
+      );
+      if (!recaptured) {
+        return { sampled: false, identity: undefined, activityAttributionMismatch: true };
+      }
+      // Do not pair an adb activity from a later navigation with an earlier
+      // hierarchy. The forced recapture and repeated back-stack read establish
+      // that both sources still describe the same destination (#5992).
+      const reconciled = {
+        ...activeWindow,
+        appId: backStackAttribution.packageName,
+        activityName: backStackAttribution.activityName,
+      };
+      if (result.notificationPermissionDetected) {
+        reconciled.type = "notification_permission_dialog";
+      } else {
+        delete reconciled.type;
+      }
+      result.activeWindow = reconciled;
+      return { sampled: false, identity: undefined, activityAttributionMismatch: false };
+    }
+
+    if (activeWindow.appId === observed) {
+      return { sampled: false, identity: undefined, activityAttributionMismatch: false };
     }
 
     const confirmed = await this.deviceStateCollector.collectForegroundIdentity(signal);
     if (confirmed === observed) {
       result.activeWindow = { ...activeWindow, appId: observed, activityName: "" };
     }
-    return { sampled: true, identity: confirmed };
+    return { sampled: true, identity: confirmed, activityAttributionMismatch: false };
+  }
+
+  private async recaptureHierarchyForBackStackAttribution(
+    result: ObserveResult,
+    expected: { packageName: string; activityName: string },
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const initialTimestamp = this.resolveObservationTimestampMs(result);
+    const minTimestamp = (initialTimestamp ?? this.timer.now()) + 1;
+    let hierarchy: ObserveResult["viewHierarchy"];
+    try {
+      hierarchy = await this.viewHierarchy.getViewHierarchy(
+        undefined,
+        new NoOpPerformanceTracker(),
+        false,
+        minTimestamp,
+        signal,
+      );
+    } catch (error) {
+      logger.debug(
+        `[OBSERVE] Attribution recapture failed; preserving original hierarchy: ${error}`,
+      );
+      return false;
+    }
+    if (!this.isUsableAttributionRecapture(hierarchy, expected)) {
+      return false;
+    }
+
+    // A failed back-stack query is represented as a partial result rather than
+    // thrown. Keep it isolated from the original capture so a stale first read
+    // cannot be mistaken for confirmation of this fresh hierarchy.
+    const recapturedState: ObserveResult = { ...result, backStack: undefined, errors: undefined };
+    await this.deviceStateCollector.collectBackStack(
+      recapturedState,
+      new NoOpPerformanceTracker(),
+      signal,
+    );
+    const confirmed = resolveBackStackActivityAttribution(recapturedState);
+    if (!this.matchesExpectedBackStackAttribution(confirmed, expected)) {
+      return false;
+    }
+
+    this.applyRecapturedHierarchy(result, hierarchy);
+    result.backStack = recapturedState.backStack;
+    return true;
+  }
+
+  private isUsableAttributionRecapture(
+    hierarchy: ObserveResult["viewHierarchy"],
+    expected: { packageName: string; activityName: string },
+  ): hierarchy is NonNullable<ObserveResult["viewHierarchy"]> {
+    if (!hierarchy) {
+      return false;
+    }
+    return (
+      hasUsableHierarchy(hierarchy) &&
+      hierarchy.fresh === true &&
+      hierarchy.packageName === expected.packageName &&
+      this.platformValidator.validate(this.device.platform, hierarchy).valid
+    );
+  }
+
+  private matchesExpectedBackStackAttribution(
+    actual: { packageName: string; activityName: string } | undefined,
+    expected: { packageName: string; activityName: string },
+  ): boolean {
+    return (
+      actual?.packageName === expected.packageName && actual.activityName === expected.activityName
+    );
+  }
+
+  private applyRecapturedHierarchy(
+    result: ObserveResult,
+    hierarchy: NonNullable<ObserveResult["viewHierarchy"]>,
+  ): void {
+    result.viewHierarchy = hierarchy;
+    result.updatedAt = hierarchy.updatedAt ?? result.updatedAt;
+    if (hierarchy.screenWidth && hierarchy.screenHeight) {
+      result.screenSize = { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
+    }
+    result.rotation = hierarchy.rotation;
+    result.systemInsets = hierarchy.systemInsets ?? { top: 0, right: 0, bottom: 0, left: 0 };
+    result.insets = hierarchy.insets ?? {
+      available: false,
+      source: "unavailable",
+      units: "unknown",
+    };
+    result.wakefulness = hierarchy.wakefulness ?? result.wakefulness;
+    result.intentChooserDetected = hierarchy.intentChooserDetected;
+    result.notificationPermissionDetected = hierarchy.notificationPermissionDetected;
+    result.focusedElement = this.viewHierarchy.findFocusedElement(hierarchy) ?? undefined;
+    result.accessibilityFocusedElement =
+      this.viewHierarchy.findAccessibilityFocusedElement(hierarchy) ?? undefined;
   }
 
   /**
@@ -965,10 +1127,14 @@ export class RealObserveScreen implements ObserveScreen {
       postCaptureForeground,
       signal,
     );
-    if (confirmed !== foreground || !isStatusBarOnlyHierarchy(result)) {
+    if (
+      !confirmed ||
+      SYSTEM_UI_WINDOW_PACKAGES.has(confirmed) ||
+      !isStatusBarOnlyHierarchy(result)
+    ) {
       return undefined;
     }
-    return { foreground };
+    return { foreground: confirmed };
   }
 
   private async resolvePostCaptureForegroundIdentity(

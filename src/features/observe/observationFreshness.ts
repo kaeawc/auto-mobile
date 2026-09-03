@@ -83,6 +83,11 @@ export interface FreshnessInputs {
    * accessibility window.
    */
   statusBarOnlyHierarchy?: { foreground: string };
+  /**
+   * ADB and CtrlProxy disagree about the current activity within the same
+   * application, and a forced recapture could not safely reconcile them.
+   */
+  activityAttributionMismatch?: boolean;
   /** Age budget; defaults to {@link maxObservationAgeMs}. */
   maxAgeMs?: number;
 }
@@ -159,33 +164,43 @@ function resolveAgeMs(
   return ageBasis !== undefined ? Math.max(0, now - ageBasis) : undefined;
 }
 
-function computeWrongWindowFreshness(
+function resolveIdentityMismatch(
   inputs: FreshnessInputs,
   ageMs: number | undefined,
 ): FreshnessVerdict | undefined {
+  const { requestedAfter, actualTimestamp } = inputs;
   if (inputs.windowIdentityMismatch) {
     const { observed, foreground } = inputs.windowIdentityMismatch;
     return {
-      requestedAfter: inputs.requestedAfter,
-      actualTimestamp: inputs.actualTimestamp,
+      requestedAfter,
+      actualTimestamp,
       ageMs,
       verified: false,
       isFresh: false,
       warning: `Observed hierarchy is from ${observed}, but the device's current top resumed activity is ${foreground}. This is a stale wrong-window capture; it was not verified against the foreground app. The runner is serving a stale window; call pressButton { platform: "android", button: "home" } (or relaunch the target app) and observe again.`,
     };
   }
-
   if (inputs.statusBarOnlyHierarchy) {
     return {
-      requestedAfter: inputs.requestedAfter,
-      actualTimestamp: inputs.actualTimestamp,
+      requestedAfter,
+      actualTimestamp,
       ageMs,
       verified: false,
       isFresh: false,
       warning: `Observed hierarchy contains only Android status-bar content while the device's current top resumed activity is ${inputs.statusBarOnlyHierarchy.foreground}. This is a stale wrong-window capture; it was not verified against the foreground app. The runner is serving a stale window; call pressButton { platform: "android", button: "home" } (or relaunch the target app) and observe again.`,
     };
   }
-
+  if (inputs.activityAttributionMismatch) {
+    return {
+      requestedAfter,
+      actualTimestamp,
+      ageMs,
+      verified: false,
+      isFresh: false,
+      warning:
+        "CtrlProxy and adb disagree about the current activity, and a fresh hierarchy could not reconcile them. The observation was not verified against the current activity; call observe again.",
+    };
+  }
   return undefined;
 }
 
@@ -213,11 +228,11 @@ export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
     };
   }
 
-  // A wrong-window capture is unfresh at any age, and `verified` is retracted to false so a
-  // consumer reading that field alone is not green-lit onto a phantom.
-  const wrongWindowFreshness = computeWrongWindowFreshness(inputs, ageMs);
-  if (wrongWindowFreshness) {
-    return wrongWindowFreshness;
+  // An app-, activity-, or content-level identity split dominates every other signal: a
+  // client must not treat the tree as verified while its attribution is known to be inconsistent.
+  const identityMismatch = resolveIdentityMismatch(inputs, ageMs);
+  if (identityMismatch) {
+    return identityMismatch;
   }
 
   // Caller supplied an explicit constraint: answer exactly that question.

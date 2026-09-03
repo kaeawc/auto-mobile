@@ -125,4 +125,35 @@ describe("BaseVisualChange post-action observation", () => {
     expect(fakeObserveScreen.getGetMostRecentCachedObserveResultCallCount()).toBe(1);
     expect(fakeObserveScreen.getExecuteCallCount()).toBe(1);
   });
+
+  test("records a deferred prediction outcome against the final observation once", async () => {
+    const instance = createVisualChange("ios");
+    const initialObservation = makeObserve({ updatedAt: 1 });
+    const finalObservation = makeObserve({ updatedAt: 2 });
+    const recordedObservations: ObserveResult[] = [];
+    fakeObserveScreen.setObserveResult(initialObservation);
+    (instance as any).buildPredictionContext = () => ({
+      appId: "com.example.app",
+      fromScreen: "Home",
+      toolName: "tapOn",
+      toolArgs: { text: "Continue" },
+    });
+    (instance as any).predictionAnalyzer = {
+      recordOutcomeForAction: async (_previous: ObserveResult | null, actual: ObserveResult) => {
+        recordedObservations.push(actual);
+      },
+    };
+
+    const result = await instance.observedInteraction(async () => ({ success: true }), {
+      changeExpected: false,
+      skipPreviousObserve: true,
+      deferPredictionOutcome: true,
+      predictionContext: { toolName: "tapOn", toolArgs: { text: "Continue" } },
+    });
+
+    expect(recordedObservations).toEqual([]);
+    await (instance as any).recordDeferredPredictionOutcome(result, finalObservation);
+    await (instance as any).recordDeferredPredictionOutcome(result, initialObservation);
+    expect(recordedObservations).toEqual([finalObservation]);
+  });
 });

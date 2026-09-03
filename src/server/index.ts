@@ -699,11 +699,17 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       ) {
         ToolRegistry.notifyToolListChanged();
       }
+      const isRecordingIdCleanup =
+        name === "videoRecording" &&
+        parsedParams &&
+        typeof parsedParams === "object" &&
+        parsedParams.action === "stop" &&
+        typeof parsedParams.recordingId === "string";
       const daemonSessionManager = DaemonState.getInstance().isInitialized()
         ? DaemonState.getInstance().getSessionManager()
         : undefined;
       const sessionForBinding =
-        daemonSessionManager && providedSessionUuid
+        daemonSessionManager && providedSessionUuid && !isRecordingIdCleanup
           ? daemonSessionManager.getSessionForNewExecution(providedSessionUuid, {
               executionId: execution.id,
               startTime: execution.startTime,
@@ -714,6 +720,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         name !== SET_TOOL_ENABLED_TOOL_NAME &&
         !result?.isError &&
         providedSessionUuid &&
+        !isRecordingIdCleanup &&
         (daemonSessionManager
           ? sessionForBinding !== null &&
             sessionForBinding !== undefined &&

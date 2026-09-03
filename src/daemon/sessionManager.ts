@@ -6,6 +6,7 @@ import {
   DeviceSessionRepository,
   type DeviceSessionPersistence,
 } from "../db/deviceSessionRepository";
+import type { DeviceSession } from "../db/types";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
 import { ActionableError, toActionableError } from "../models/ActionableError";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
@@ -493,11 +494,14 @@ export class SessionManager {
     sessionId: string,
   ): Promise<SessionReleaseSnapshot | undefined> {
     const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
-    if (
-      !persisted ||
-      !persisted.release_reason ||
-      !isTerminalReleaseReason(persisted.release_reason)
-    ) {
+    return persisted ? this.terminalReleaseFromPersisted(sessionId, persisted) : undefined;
+  }
+
+  private terminalReleaseFromPersisted(
+    sessionId: string,
+    persisted: DeviceSession,
+  ): SessionReleaseSnapshot | undefined {
+    if (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason)) {
       return undefined;
     }
     const releasedAtMs = persisted.released_at_ms ?? persisted.last_used_at_ms;
@@ -686,6 +690,12 @@ export class SessionManager {
     }
 
     const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
+    const persistedTerminalRelease =
+      persisted && this.terminalReleaseFromPersisted(sessionId, persisted);
+    if (persistedTerminalRelease) {
+      this.terminalReleaseSnapshots.set(sessionId, persistedTerminalRelease);
+      throw new TerminalSessionError(sessionId, persistedTerminalRelease);
+    }
     if (
       persisted &&
       (!persisted.release_reason || !isTerminalReleaseReason(persisted.release_reason))

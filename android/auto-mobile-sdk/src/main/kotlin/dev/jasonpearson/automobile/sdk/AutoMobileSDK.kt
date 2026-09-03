@@ -132,110 +132,128 @@ object AutoMobileSDK {
    */
   @RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
   fun initialize(context: Context, configuration: AutoMobileConfiguration) {
-    this.context = context.applicationContext
-    this.configuration = configuration
-    capabilityRegistry.markInitialized()
-    AutoMobileNetwork.setCapturePolicyProvider { capabilityRegistry.currentPolicy() }
-    AutoMobileNetwork.setNetworkControlProvider {
-      capabilityRegistry.isCapabilitySupported("network.control")
-    }
-    val appContext = this.context!!
-
-    // Create disk persistence for events
-    val eventPersistence = FileEventPersistence(File(appContext.cacheDir, "automobile_events"))
-    persistence = eventPersistence
-
-    // Create drop counter for tracking event drops across the pipeline
-    val counter = DefaultDropCounter()
-    dropCounter = counter
-    SdkEventBroadcaster.dropCounter = counter
-
-    // Create shared event buffer with broadcast flush callback and disk persistence
-    val buffer =
-      SdkEventBuffer(
-        maxBufferSize = configuration.bufferSize,
-        flushIntervalMs = configuration.flushIntervalMs,
-        onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
-        persistence = eventPersistence,
-        dropCounter = counter,
-        processors = configuration.eventProcessors,
-        maxPendingEvents = configuration.maxPendingEvents,
-        backPressureStrategy = configuration.backPressureStrategy,
-      )
-    buffer.isEnabled = _isEnabled
-    buffer.start()
-    eventBuffer = buffer
-
-    // Initialize SDK context with app version from PackageManager
-    val ctx = SdkContext()
     try {
-      ctx.appVersion =
-        appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName
-    } catch (_: Exception) {
-      // PackageManager lookup may fail in test environments
-    }
-    sdkContext = ctx
-    // Replay pending batches and clean up old ones on the buffer's executor
-    // to avoid blocking the calling thread with disk I/O.
-    buffer.execute {
-      replayPendingBatches(appContext, eventPersistence)
-      eventPersistence.cleanup()
-    }
-
-    // Thread-safe subsystems — can initialize from any thread
-    NetworkMockRuleStore.initialize(appContext)
-    AutoMobileNetwork.initialize(
-      appContext.packageName,
-      buffer,
-      NetworkMockRuleStore.getInstance().ruleMatcher,
-    )
-    AutoMobileLog.initialize()
-    AutoMobileBroadcastInterceptor.initialize(appContext, buffer)
-    DatabaseInspector.initialize(appContext)
-    SharedPreferencesInspector.initialize(appContext)
-    AutoMobileFailures.initialize(appContext)
-    AutoMobileCrashes.initialize(appContext)
-    val trail = BreadcrumbTrail()
-    breadcrumbTrail = trail
-    AutoMobileCrashes.breadcrumbTrail = trail
-    AutoMobileAnr.initialize(appContext)
-    AutoMobileBiometrics.initialize(appContext)
-
-    val tracker = SessionTracker()
-    sessionTracker = tracker
-
-    // Subsystems that register lifecycle observers or activity callbacks must run on main thread
-    val handler = Handler(Looper.getMainLooper())
-    mainHandler = handler
-    handler.post {
-      // Guard: if shutdown() was called before this posted block runs, no-op.
-      if (this@AutoMobileSDK.context == null) return@post
-      AutoMobileOsEvents.initialize(appContext, buffer) { kind ->
-        notifyRuntimeContextChanged(kind)
+      if (this.context != null) {
+        logger.d(TAG) { "AutoMobileSDK already initialized" }
+        return
       }
 
-      // Register session tracker with process lifecycle
-      val observer =
-        object : DefaultLifecycleObserver {
-          override fun onStart(owner: LifecycleOwner) {
-            tracker.onForeground()
+      this.context = context.applicationContext
+      this.configuration = configuration
+      capabilityRegistry.markInitialized()
+      AutoMobileNetwork.setCapturePolicyProvider { capabilityRegistry.currentPolicy() }
+      AutoMobileNetwork.setNetworkControlProvider {
+        capabilityRegistry.isCapabilitySupported("network.control")
+      }
+      val appContext = this.context!!
+
+      // Create disk persistence for events
+      val eventPersistence = FileEventPersistence(File(appContext.cacheDir, "automobile_events"))
+      persistence = eventPersistence
+
+      // Create drop counter for tracking event drops across the pipeline
+      val counter = DefaultDropCounter()
+      dropCounter = counter
+      SdkEventBroadcaster.dropCounter = counter
+
+      // Create shared event buffer with broadcast flush callback and disk persistence
+      val buffer =
+        SdkEventBuffer(
+          maxBufferSize = configuration.bufferSize,
+          flushIntervalMs = configuration.flushIntervalMs,
+          onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
+          persistence = eventPersistence,
+          dropCounter = counter,
+          processors = configuration.eventProcessors,
+          maxPendingEvents = configuration.maxPendingEvents,
+          backPressureStrategy = configuration.backPressureStrategy,
+        )
+      buffer.isEnabled = _isEnabled
+      buffer.start()
+      eventBuffer = buffer
+
+      // Initialize SDK context with app version from PackageManager
+      val ctx = SdkContext()
+      try {
+        ctx.appVersion =
+          appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName
+      } catch (_: Exception) {
+        // PackageManager lookup may fail in test environments
+      }
+      sdkContext = ctx
+      // Replay pending batches and clean up old ones on the buffer's executor
+      // to avoid blocking the calling thread with disk I/O.
+      buffer.execute {
+        replayPendingBatches(appContext, eventPersistence)
+        eventPersistence.cleanup()
+      }
+
+      // Thread-safe subsystems — can initialize from any thread
+      NetworkMockRuleStore.initialize(appContext)
+      AutoMobileNetwork.initialize(
+        appContext.packageName,
+        buffer,
+        NetworkMockRuleStore.getInstance().ruleMatcher,
+      )
+      AutoMobileLog.initialize()
+      AutoMobileBroadcastInterceptor.initialize(appContext, buffer)
+
+      DatabaseInspector.initialize(appContext)
+      SharedPreferencesInspector.initialize(appContext)
+      AutoMobileFailures.initialize(appContext)
+
+      AutoMobileCrashes.initialize(appContext)
+      val trail = BreadcrumbTrail()
+      breadcrumbTrail = trail
+      AutoMobileCrashes.breadcrumbTrail = trail
+
+      AutoMobileAnr.initialize(appContext)
+      AutoMobileBiometrics.initialize(appContext)
+
+      val tracker = SessionTracker()
+      sessionTracker = tracker
+
+      // Subsystems that register lifecycle observers or activity callbacks must run on main thread
+      val handler = Handler(Looper.getMainLooper())
+      mainHandler = handler
+      handler.post {
+        try {
+          // Guard: if shutdown() was called before this posted block runs, no-op.
+          if (this@AutoMobileSDK.context == null) return@post
+          AutoMobileOsEvents.initialize(appContext, buffer) { kind ->
+            notifyRuntimeContextChanged(kind)
           }
 
-          override fun onStop(owner: LifecycleOwner) {
-            tracker.onBackground()
+          // Register session tracker with process lifecycle
+          val observer =
+            object : DefaultLifecycleObserver {
+              override fun onStart(owner: LifecycleOwner) {
+                tracker.onForeground()
+              }
+
+              override fun onStop(owner: LifecycleOwner) {
+                tracker.onBackground()
+              }
+            }
+          sessionLifecycleObserver = observer
+          ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
+          capabilityRegistry.markLifecycleReady()
+          RecompositionTracker.initialize(appContext)
+          RecompositionTracker.setEnabled(_isEnabled)
+          FrameMetricsCollector.initialize(appContext)
+          FrameMetricsCollector.setEnabled(_isEnabled)
+          AutoMobileNotifications.initialize(appContext)
+          if (appContext is Application) {
+            AutoMobileClickTracker.initialize(appContext, appContext.packageName)
           }
+        } catch (error: Exception) {
+          logger.e(TAG, error) { "AutoMobileSDK main-thread initialization failed; rolling back" }
+          shutdown()
         }
-      sessionLifecycleObserver = observer
-      ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
-      capabilityRegistry.markLifecycleReady()
-      RecompositionTracker.initialize(appContext)
-      RecompositionTracker.setEnabled(_isEnabled)
-      FrameMetricsCollector.initialize(appContext)
-      FrameMetricsCollector.setEnabled(_isEnabled)
-      AutoMobileNotifications.initialize(appContext)
-      if (appContext is Application) {
-        AutoMobileClickTracker.initialize(appContext, appContext.packageName)
       }
+    } catch (error: Exception) {
+      shutdown()
+      throw error
     }
   }
 
@@ -328,7 +346,9 @@ object AutoMobileSDK {
   }
 
   /**
-   * Enables or disables navigation event tracking.
+   * Enables or disables capture and tracking while leaving installed runtime hooks in place.
+   *
+   * Call [shutdown] to detach all hooks and return the SDK to its pre-initialization state.
    *
    * @param enabled Whether navigation tracking should be enabled
    */
@@ -518,7 +538,6 @@ object AutoMobileSDK {
         AutoMobileBroadcastInterceptor.shutdown(ctx)
         AutoMobileClickTracker.shutdown(ctx)
         NetworkMockRuleStore.shutdown(ctx)
-        AutoMobileBiometrics.shutdown()
         sessionLifecycleObserver?.let {
           ProcessLifecycleOwner.get().lifecycle.removeObserver(it)
         }
@@ -534,6 +553,13 @@ object AutoMobileSDK {
     // Clear application-provided DataStore adapters so shutdown does not retain host references
     // (issue #5192).
     DataStoreInspector.reset()
+    DatabaseInspector.reset()
+    SharedPreferencesInspector.reset()
+    AutoMobileCrashes.uninstall()
+    AutoMobileAnr.reset()
+    AutoMobileBiometrics.shutdown()
+    AutoMobileFailures.reset()
+    AutoMobileNotifications.reset()
 
     sessionTracker?.shutdown()
     sessionTracker = null

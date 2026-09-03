@@ -138,6 +138,12 @@ object AutoMobileFailures {
     }
   }
 
+  /** Clears process-wide failure reporting state during SDK shutdown. */
+  internal fun reset() {
+    context = null
+    clearEvents()
+  }
+
   private fun createEvent(
     context: Context,
     throwable: Throwable,

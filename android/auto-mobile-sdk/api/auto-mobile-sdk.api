@@ -65,6 +65,7 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileNotifications {
   public static final java.lang.String EXTRA_NOTIFICATION_ID;
   public static final int $stable;
   public final void initialize(android.content.Context);
+  public final void reset$auto_mobile_sdk();
   public final boolean post(java.lang.String, java.lang.String, dev.jasonpearson.automobile.sdk.NotificationStyle, java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.NotificationAction>, java.lang.String);
   public static boolean post$default(dev.jasonpearson.automobile.sdk.AutoMobileNotifications, java.lang.String, java.lang.String, dev.jasonpearson.automobile.sdk.NotificationStyle, java.lang.String, java.util.List, java.lang.String, int, java.lang.Object);
   public final boolean postWithContext$auto_mobile_sdk(android.content.Context, java.lang.String, java.lang.String, dev.jasonpearson.automobile.sdk.NotificationStyle, java.lang.String, java.util.List<dev.jasonpearson.automobile.sdk.NotificationAction>, java.lang.String);
@@ -74,7 +75,7 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$WhenMappings {
   public static final int[] $EnumSwitchMapping$0;
 }
 Compiled from "AutoMobileSDK.kt"
-public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$initialize$5$observer$1 implements androidx.lifecycle.DefaultLifecycleObserver {
+public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK$initialize$6$observer$1 implements androidx.lifecycle.DefaultLifecycleObserver {
   public void onStart(androidx.lifecycle.LifecycleOwner);
   public void onStop(androidx.lifecycle.LifecycleOwner);
   public void onCreate(androidx.lifecycle.LifecycleOwner);
@@ -414,6 +415,7 @@ public final class dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr {
   public static final int $stable;
   public final void initialize(android.content.Context);
   public final boolean isAvailable();
+  public final void reset$auto_mobile_sdk();
 }
 Compiled from "AutoMobileBiometrics.kt"
 final class dev.jasonpearson.automobile.sdk.biometrics.AutoMobileBiometrics$PendingOverride {
@@ -1024,6 +1026,7 @@ public final class dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures {
   public final java.util.List<dev.jasonpearson.automobile.sdk.failures.HandledExceptionEvent> getRecentEvents();
   public final void clearEvents();
   public final int getEventCount();
+  public final void reset$auto_mobile_sdk();
 }
 Compiled from "HandledExceptionEvent.kt"
 public final class dev.jasonpearson.automobile.sdk.failures.DeviceInfo {
@@ -1575,6 +1578,12 @@ public interface dev.jasonpearson.automobile.sdk.session.SessionTracking {
   public abstract void onForeground();
   public abstract void onBackground();
   public abstract void shutdown();
+}
+Compiled from "SharedPreferencesDriverImpl.kt"
+final class dev.jasonpearson.automobile.sdk.storage.BoundedPreferenceChangeQueue {
+  public dev.jasonpearson.automobile.sdk.storage.BoundedPreferenceChangeQueue(int);
+  public final synchronized void add(dev.jasonpearson.automobile.sdk.storage.PreferenceChange);
+  public final synchronized java.util.List<dev.jasonpearson.automobile.sdk.storage.PreferenceChange> drainAfter(long);
 }
 Compiled from "DataStoreAdapter.kt"
 public interface dev.jasonpearson.automobile.sdk.storage.DataStoreAdapter {

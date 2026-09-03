@@ -65,7 +65,10 @@ internal object AutoMobileOsEvents {
     unregisterScreenReceiver(context)
     unregisterLifecycleObserver()
     buffer = null
+    applicationId = null
     onLifecycleEvent = {}
+    lastBatteryPct = null
+    lastBatteryCharging = null
   }
 
   private fun postEvent(kind: String, details: Map<String, String>? = null) {

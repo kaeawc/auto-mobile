@@ -2451,6 +2451,7 @@ describe("DaemonMcpProxy", () => {
         daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
         timer,
+        heartbeatIntervalMs: DAEMON_BOUND_SESSION_REPLAY_TTL_MS * 2,
       });
 
       try {
@@ -2495,6 +2496,7 @@ describe("DaemonMcpProxy", () => {
         daemonManager: matchingDaemonManager(),
         autoStartDaemon: false,
         timer,
+        heartbeatIntervalMs: DAEMON_BOUND_SESSION_REPLAY_TTL_MS * 2,
       });
 
       try {
@@ -2509,6 +2511,33 @@ describe("DaemonMcpProxy", () => {
         expect(client.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
           { toolName: "tapOn", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("does not remember a UUID passed to a tool that does not accept sessions", async () => {
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        await proxy.callTool("listDevices", { sessionUuid: "unissued-session" });
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "listDevices", params: { sessionUuid: "unissued-session" } },
           { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
         ]);
       } finally {

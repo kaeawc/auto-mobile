@@ -5,6 +5,7 @@ SCRIPT="scripts/ios/navigation-graph-sdk-event-integration.sh"
 setup() {
   MOCK_BIN="$(mktemp -d)"
   ORIG_PATH="$PATH"
+  export REAL_JQ="$(command -v jq)"
   export GRAPH_ATTEMPTS_FILE="${MOCK_BIN}/graph-attempts"
   export CURL_URL_FILE="${MOCK_BIN}/curl-urls"
   export SESSION_OBSERVE_FILE="${MOCK_BIN}/session-observe"
@@ -37,7 +38,7 @@ SCRIPT
   make_mock curl 'exit 0'
   make_mock jq '
 if [ "$1" = "-er" ] && [[ "$2" == *"sessionUuid"* ]]; then
-  exit 1
+  exec "$REAL_JQ" "$@"
 fi
 printf "8765\n"
 '
@@ -86,8 +87,7 @@ if [ "$1" = "-cn" ]; then
 fi
 if [ "$1" = "-er" ]; then
   if [[ "$2" == *"sessionUuid"* ]]; then
-    printf "44600000-0000-4000-8000-000000000000\\n"
-    exit 0
+    exec "$REAL_JQ" "$@"
   fi
   if [ -f "$POST_BIND_DOCTOR_FAILURE_FILE" ]; then
     exit 1

@@ -344,6 +344,31 @@ describe("ToolExecutionContext", () => {
     await release;
   });
 
+  test("rechecks admission after setup releases its session", async () => {
+    const session = await sessionManager.createSession("session-releasing", "device-1", "android");
+    const trackSetup = spyOn(sessionManager, "trackSessionSetup").mockImplementation(
+      async (trackedSession, setup) => {
+        await setup();
+        await sessionManager.releaseSession(trackedSession.sessionId, "explicit-release");
+      },
+    );
+
+    try {
+      await expect(
+        createToolExecutionContext(
+          "session-releasing",
+          sessionManager,
+          devicePool,
+          sessionOptions,
+          undefined,
+          session,
+        ),
+      ).rejects.toThrow("released during setup");
+    } finally {
+      trackSetup.mockRestore();
+    }
+  });
+
   test("does not apply keep-awake after a session is released during setup", async () => {
     let allowActivityWrite!: () => void;
     const activityWrite = new Promise<void>((resolve) => {

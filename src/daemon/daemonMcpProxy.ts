@@ -2189,10 +2189,18 @@ export class DaemonMcpProxy {
       return;
     }
     const rememberedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
-    if (rememberedSessionUuid) {
+    if (rememberedSessionUuid && this.toolAcceptsSessionUuid(name)) {
       this.updateBoundSessionUuid(rememberedSessionUuid);
       this.startBoundSessionHeartbeat();
     }
+  }
+
+  private toolAcceptsSessionUuid(name: string): boolean {
+    const tool =
+      this.cachedTools?.find((definition) => definition.name === name) ??
+      this.staticToolDefinitionsProvider().find((definition) => definition.name === name);
+    const properties = tool?.inputSchema.properties;
+    return typeof properties === "object" && properties !== null && "sessionUuid" in properties;
   }
 
   // Bind `sessionUuid`, refreshing the replay lease. A change to a different UUID

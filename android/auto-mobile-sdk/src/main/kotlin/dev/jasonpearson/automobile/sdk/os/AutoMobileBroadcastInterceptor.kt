@@ -110,5 +110,6 @@ internal object AutoMobileBroadcastInterceptor {
     }
     receiver = null
     buffer = null
+    applicationId = null
   }
 }

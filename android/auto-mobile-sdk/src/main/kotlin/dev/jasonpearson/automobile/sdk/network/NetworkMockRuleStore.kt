@@ -41,7 +41,10 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
     }
 
     fun shutdown(context: Context) {
-      getInstance().unregisterReceiver(context)
+      getInstance().apply {
+        unregisterReceiver(context)
+        clear()
+      }
     }
   }
 

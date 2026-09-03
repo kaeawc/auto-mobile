@@ -75,6 +75,11 @@ object AutoMobileNotifications {
     this.context = context.applicationContext
   }
 
+  /** Clears the application context retained by SDK-managed notification helpers. */
+  internal fun reset() {
+    context = null
+  }
+
   /**
    * Post a notification to the system notification tray.
    *

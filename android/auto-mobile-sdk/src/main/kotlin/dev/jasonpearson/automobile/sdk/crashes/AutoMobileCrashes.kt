@@ -84,10 +84,10 @@ object AutoMobileCrashes {
 
     this.context = context.applicationContext
 
-    // Save the original handler
-    originalHandler = Thread.getDefaultUncaughtExceptionHandler()
-
-    // Install our handler
+    // Capture the predecessor in the installed handler. It must remain available after uninstall
+    // because a later crash reporter may retain this handler as its delegate.
+    val originalHandler = Thread.getDefaultUncaughtExceptionHandler()
+    this.originalHandler = originalHandler
     Thread.setDefaultUncaughtExceptionHandler(AutoMobileExceptionHandler())
 
     AutoMobileSDK.logger.d(TAG) { "AutoMobileCrashes initialized - crash detection enabled" }
@@ -113,12 +113,16 @@ object AutoMobileCrashes {
   }
 
   private class AutoMobileExceptionHandler : Thread.UncaughtExceptionHandler {
+    private val originalHandler = AutoMobileCrashes.originalHandler
+
     override fun uncaughtException(thread: Thread, throwable: Throwable) {
-      try {
-        // Broadcast the crash before the app terminates
-        broadcastCrash(thread, throwable)
-      } catch (e: Exception) {
-        AutoMobileSDK.logger.e(TAG, e) { "Failed to broadcast crash" }
+      if (AutoMobileSDK.isTrackingEnabled) {
+        try {
+          // Broadcast the crash before the app terminates
+          broadcastCrash(thread, throwable)
+        } catch (e: Exception) {
+          AutoMobileSDK.logger.e(TAG, e) { "Failed to broadcast crash" }
+        }
       }
 
       // Call the original handler to preserve default crash behavior

@@ -73,6 +73,11 @@ object AutoMobileAnr {
   /** Check if ANR detection is available on this device. */
   fun isAvailable(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
 
+  /** Clears the retained application context during SDK shutdown or a failed initialization. */
+  internal fun reset() {
+    context = null
+  }
+
   @RequiresApi(Build.VERSION_CODES.R)
   private fun checkForPreviousAnrs() {
     val ctx = context ?: return

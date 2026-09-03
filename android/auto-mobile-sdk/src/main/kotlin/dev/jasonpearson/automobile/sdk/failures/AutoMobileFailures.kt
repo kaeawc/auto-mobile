@@ -95,6 +95,8 @@ object AutoMobileFailures {
     message: String? = null,
     currentScreen: String? = null,
   ) {
+    if (!AutoMobileSDK.isTrackingEnabled) return
+
     val ctx = context
     if (ctx == null) {
       AutoMobileSDK.logger.w(TAG) {
@@ -136,6 +138,12 @@ object AutoMobileFailures {
     synchronized(eventsLock) {
       return recentEvents.size
     }
+  }
+
+  /** Clears process-wide failure reporting state during SDK shutdown. */
+  internal fun reset() {
+    context = null
+    clearEvents()
   }
 
   private fun createEvent(

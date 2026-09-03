@@ -1,6 +1,8 @@
 package dev.jasonpearson.automobile.sdk.crashes
 
+import java.util.concurrent.atomic.AtomicInteger
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
@@ -103,5 +105,24 @@ class AutoMobileCrashesTest {
       foreign,
       Thread.getDefaultUncaughtExceptionHandler(),
     )
+  }
+
+  @Test
+  fun `uninstalled handler retained by a later reporter forwards to its original handler`() {
+    val originalCalls = AtomicInteger()
+    val original = Thread.UncaughtExceptionHandler { _, _ -> originalCalls.incrementAndGet() }
+    Thread.setDefaultUncaughtExceptionHandler(original)
+    AutoMobileCrashes.initialize(context)
+    val autoMobileHandler = Thread.getDefaultUncaughtExceptionHandler()
+    val foreign = Thread.UncaughtExceptionHandler { thread, throwable ->
+      autoMobileHandler?.uncaughtException(thread, throwable)
+    }
+    Thread.setDefaultUncaughtExceptionHandler(foreign)
+
+    AutoMobileCrashes.uninstall()
+    foreign.uncaughtException(Thread.currentThread(), RuntimeException("test crash"))
+
+    assertSame(foreign, Thread.getDefaultUncaughtExceptionHandler())
+    assertEquals("a retained handler must forward to its predecessor", 1, originalCalls.get())
   }
 }

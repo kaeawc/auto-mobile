@@ -235,6 +235,10 @@ AutoMobileSDK.updateCapturePolicy(
 )
 ```
 
+`setEnabled(false)` stops SDK capture and tracking but retains installed runtime hooks. Call
+`AutoMobileSDK.shutdown()` to detach all SDK instrumentation and restore its pre-initialization
+state.
+
 Capability snapshots are versioned and distinguish `NOT_INITIALIZED`, `DISABLED`, `UNSUPPORTED`,
 `PERMISSION_DENIED`, `SUPPORTED`, and `UNKNOWN`. Removing an optional capability restores its unsupported
 descriptor and revokes any policy field that depends on it. Older clients should ignore unknown

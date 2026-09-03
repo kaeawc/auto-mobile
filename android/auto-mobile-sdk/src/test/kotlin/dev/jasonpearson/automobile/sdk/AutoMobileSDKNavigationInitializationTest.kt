@@ -32,18 +32,20 @@ import org.robolectric.shadows.ShadowLooper
 @RunWith(RobolectricTestRunner::class)
 class AutoMobileSDKNavigationInitializationTest {
   private val context = RuntimeEnvironment.getApplication()
-  private lateinit var originalHandler: Thread.UncaughtExceptionHandler
+  private var preTestHandler: Thread.UncaughtExceptionHandler? = null
+  private lateinit var assertionHandler: Thread.UncaughtExceptionHandler
 
   @Before
   fun setUp() {
+    preTestHandler = Thread.getDefaultUncaughtExceptionHandler()
     AutoMobileSDK.shutdown()
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
     AutoMobileCrashes.uninstall()
     DatabaseInspector.reset()
     DataStoreInspector.reset()
     SharedPreferencesInspector.reset()
-    originalHandler = Thread.UncaughtExceptionHandler { _, _ -> }
-    Thread.setDefaultUncaughtExceptionHandler(originalHandler)
+    assertionHandler = Thread.UncaughtExceptionHandler { _, _ -> }
+    Thread.setDefaultUncaughtExceptionHandler(assertionHandler)
   }
 
   @After
@@ -51,7 +53,7 @@ class AutoMobileSDKNavigationInitializationTest {
     AutoMobileSDK.shutdown()
     ShadowLooper.runUiThreadTasksIncludingDelayedTasks()
     DataStoreInspector.reset()
-    Thread.setDefaultUncaughtExceptionHandler(originalHandler)
+    Thread.setDefaultUncaughtExceptionHandler(preTestHandler)
   }
 
   @Test
@@ -59,7 +61,7 @@ class AutoMobileSDKNavigationInitializationTest {
     AutoMobileSDK.initialize(NavigationConfiguration(context))
 
     assertNotNull(AutoMobileSDK.getEventBuffer())
-    assertSame(originalHandler, Thread.getDefaultUncaughtExceptionHandler())
+    assertSame(assertionHandler, Thread.getDefaultUncaughtExceptionHandler())
     assertFalse(AutoMobileCrashes.isInitialized())
     val capabilities = AutoMobileSDK.capabilities.capabilities.associateBy { it.id }
     assertEquals(SdkCapabilityState.SUPPORTED, capabilities.getValue("events.navigation").state)
@@ -91,7 +93,7 @@ class AutoMobileSDKNavigationInitializationTest {
     AutoMobileSDK.shutdown()
 
     assertNull(AutoMobileSDK.getEventBuffer())
-    assertSame(originalHandler, Thread.getDefaultUncaughtExceptionHandler())
+    assertSame(assertionHandler, Thread.getDefaultUncaughtExceptionHandler())
   }
 
   @Test
@@ -183,7 +185,7 @@ class AutoMobileSDKNavigationInitializationTest {
     AutoMobileSDK.initialize(NavigationConfiguration(ThrowingApplicationContext(context)))
 
     assertNull(AutoMobileSDK.getEventBuffer())
-    assertSame(originalHandler, Thread.getDefaultUncaughtExceptionHandler())
+    assertSame(assertionHandler, Thread.getDefaultUncaughtExceptionHandler())
   }
 
   @Test

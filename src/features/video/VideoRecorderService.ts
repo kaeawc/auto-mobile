@@ -435,7 +435,9 @@ export class VideoRecorderService {
   private async handleStartFailure(error: unknown, active: ActiveRecordingState): Promise<never> {
     if (this.retainStartCleanupHandle(error, active)) {
       try {
-        await this.forceStopOrDiscardRecording(active.recordingId, true);
+        if (!active.forceStopRequested) {
+          await this.forceStopOrDiscardRecording(active.recordingId, true);
+        }
       } catch (cleanupError) {
         this.log.warn(
           `[VideoRecorderService] Failed to retry cleanup for ${active.recordingId}: ${String(cleanupError)}`,

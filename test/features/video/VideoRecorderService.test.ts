@@ -274,6 +274,43 @@ describe("VideoRecorderService", () => {
     expect(await pathExists(outputPath)).toBe(true);
   });
 
+  test("retains partial artifacts when force stop races a cleanup-handle startup failure", async () => {
+    let failStart: (() => void) | undefined;
+    let startedConfig: Parameters<typeof backend.start>[0] | undefined;
+    let markBackendStarted: (() => void) | undefined;
+    const backendStarted = new Promise<void>((resolve) => {
+      markBackendStarted = resolve;
+    });
+    const allowStartupFailure = new Promise<void>((resolve) => {
+      failStart = resolve;
+    });
+    backend.start = async (config) => {
+      startedConfig = config;
+      await fsPromises.writeFile(config.outputPath, "partial capture");
+      markBackendStarted?.();
+      await allowStartupFailure;
+      throw new VideoCaptureStartCleanupError("startup cleanup timed out", {
+        recordingId: config.recordingId,
+        outputPath: config.outputPath,
+        startedAt: config.startedAt,
+      });
+    };
+
+    const starting = service.startRecording();
+    await backendStarted;
+    const outputPath = startedConfig!.outputPath;
+
+    const forcing = service.forceStopRecording("rec-1");
+    expect(startedConfig?.abortSignal?.aborted).toBe(true);
+    failStart?.();
+
+    await expect(starting).rejects.toThrow("startup cleanup timed out");
+    await forcing;
+
+    expect(await pathExists(path.dirname(outputPath))).toBe(true);
+    expect(await pathExists(outputPath)).toBe(true);
+  });
+
   test("allows a later graceful stop after a force-stop failure", async () => {
     const recording = await service.startRecording();
     backend.forceStop = async (handle) => {

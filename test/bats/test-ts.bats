@@ -142,6 +142,25 @@ run_lane() {
   [ "$(grep -c '^bun test' <<< "$output")" -eq 3 ]
 }
 
+@test "equals-form options are not classified as positional test targets" {
+  run_lane unit --test-name-pattern=integration.test.ts
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--test-name-pattern=integration.test.ts"* ]]
+}
+
+@test "rejects an unclassified positional Bun pattern" {
+  run_lane unit oxlintConfigScoping
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"No test files found for target"* ]]
+}
+
+@test "canonicalizes absolute test paths before assigning their lane" {
+  run_lane all "$BATS_TEST_DIRNAME/../stress/memory-leak.stress.test.ts"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"test/stress/memory-leak.stress.test.ts"* ]]
+  [ "$(grep -c '^bun test' <<< "$output")" -eq 1 ]
+}
+
 @test "targeting a stale test path fails before invoking Bun" {
   run_lane unit test/scripts/removed-test.test.ts
   [ "$status" -eq 2 ]

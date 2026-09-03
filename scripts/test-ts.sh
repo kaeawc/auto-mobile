@@ -107,30 +107,48 @@ add_test_path_to_lane() {
 }
 
 add_test_target() {
-  local target="${1#./}"
+  local requested_target="$1"
+  local absolute_target
+  local target
   local test_path
   local found=0
 
-  if [[ -f "$target" ]]; then
+  if [[ -f "$requested_target" ]]; then
+    absolute_target="$(cd "$(dirname "$requested_target")" && pwd -P)/$(basename "$requested_target")"
+  elif [[ -d "$requested_target" ]]; then
+    absolute_target="$(cd "$requested_target" && pwd -P)"
+  else
+    echo "No test files found for target: $requested_target" >&2
+    exit 2
+  fi
+
+  if [[ "$absolute_target" == "$ROOT/test" ]]; then
+    target="test"
+  elif [[ "$absolute_target" == "$ROOT/test/"* ]]; then
+    target="${absolute_target#"$ROOT"/}"
+  else
+    echo "Test target must be inside test/: $requested_target" >&2
+    exit 2
+  fi
+
+  if [[ -f "$requested_target" ]]; then
     if [[ "$target" != *.test.ts ]]; then
-      echo "Test target is not a Bun test file: $1" >&2
+      echo "Test target is not a Bun test file: $requested_target" >&2
       exit 2
     fi
     add_test_path_to_lane "$target"
     return
   fi
 
-  if [[ -d "$target" ]]; then
-    while IFS= read -r test_path; do
-      found=1
-      add_test_path_to_lane "$test_path"
-    done < <(find "$target" -type f -name '*.test.ts' -print | sort)
-    if [[ "$found" -eq 1 ]]; then
-      return
-    fi
+  while IFS= read -r test_path; do
+    found=1
+    add_test_path_to_lane "$test_path"
+  done < <(find "$target" -type f -name '*.test.ts' -print | sort)
+  if [[ "$found" -eq 1 ]]; then
+    return
   fi
 
-  echo "No test files found for target: $1" >&2
+  echo "No test files found for target: $requested_target" >&2
   exit 2
 }
 
@@ -147,11 +165,11 @@ for arg in "$@"; do
   elif [[ "$arg" == --timeout || "$arg" == --rerun-each || "$arg" == --retry || "$arg" == --seed || "$arg" == --coverage-reporter || "$arg" == --coverage-dir || "$arg" == --test-name-pattern || "$arg" == "-t" || "$arg" == --reporter || "$arg" == --reporter-outfile || "$arg" == --max-concurrency || "$arg" == --path-ignore-patterns || "$arg" == --changed || "$arg" == --parallel || "$arg" == --parallel-delay || "$arg" == --shard ]]; then
     passthrough_args+=("$arg")
     expect_option_value=1
-  elif [[ "${arg#./}" == "test" || "${arg#./}" == test/* || "$arg" == *.test.ts ]]; then
+  elif [[ "$arg" == -* ]]; then
+    passthrough_args+=("$arg")
+  else
     has_test_targets=1
     add_test_target "$arg"
-  else
-    passthrough_args+=("$arg")
   fi
 done
 

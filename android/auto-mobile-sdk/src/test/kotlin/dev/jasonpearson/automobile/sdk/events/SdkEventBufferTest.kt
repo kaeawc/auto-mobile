@@ -270,6 +270,52 @@ class SdkEventBufferTest {
   }
 
   @Test
+  fun `queued batches participate in pending event cap`() {
+    val executor = Executors.newSingleThreadScheduledExecutor()
+    val deliveryStarted = CountDownLatch(1)
+    val releaseDelivery = CountDownLatch(1)
+    val deliveries = CopyOnWriteArrayList<List<SdkEvent>>()
+    val counter = DefaultDropCounter()
+    val buffer =
+      SdkEventBuffer(
+        maxBufferSize = 1,
+        flushIntervalMs = 60_000,
+        onFlush = { events ->
+          deliveries.add(ArrayList(events))
+          if (events.first().timestamp == 1L) {
+            deliveryStarted.countDown()
+            releaseDelivery.await()
+          }
+        },
+        executor = executor,
+        dropCounter = counter,
+        maxPendingEvents = 3,
+      )
+
+    try {
+      buffer.add(makeEvent(1))
+      assertTrue(deliveryStarted.await(1, TimeUnit.SECONDS), "First delivery should block")
+
+      buffer.add(makeEvent(2))
+      buffer.add(makeEvent(3))
+      buffer.add(makeEvent(4))
+      buffer.add(makeEvent(5))
+      releaseDelivery.countDown()
+      buffer.shutdown()
+
+      assertTrue(
+        executor.awaitTermination(1, TimeUnit.SECONDS),
+        "Shutdown should drain queued batches",
+      )
+      assertEquals(listOf(1L, 3L, 4L, 5L), deliveries.flatten().map { it.timestamp })
+      assertEquals(1L, counter.snapshot()[DropReason.BUFFER_OVERFLOW])
+    } finally {
+      releaseDelivery.countDown()
+      executor.shutdownNow()
+    }
+  }
+
+  @Test
   fun `add after shutdown is ignored`() {
     val flushed = mutableListOf<List<SdkEvent>>()
     val buffer =

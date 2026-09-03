@@ -40,7 +40,9 @@ internal class SdkEventBuffer(
 ) {
   private val lock = ReentrantLock()
   private val buffer = mutableListOf<SdkEvent>()
+  private val pendingBatches = ArrayDeque<MutableList<SdkEvent>>()
   private var flushTask: ScheduledFuture<*>? = null
+  private var isDeliveryScheduled = false
   @Volatile private var isShutdown = false
   @Volatile var isEnabled: Boolean = true
 
@@ -94,10 +96,10 @@ internal class SdkEventBuffer(
         return
       }
 
-      if (buffer.size >= maxPendingEvents) {
+      while (pendingEventCount() >= maxPendingEvents) {
         when (backPressureStrategy) {
           BackPressureStrategy.DROP_OLDEST -> {
-            buffer.removeFirst()
+            dropOldestPendingEvent()
             dropCounter?.increment(DropReason.BUFFER_OVERFLOW)
           }
           BackPressureStrategy.IGNORE_NEWEST -> {
@@ -111,7 +113,7 @@ internal class SdkEventBuffer(
       if (buffer.size >= maxBufferSize) {
         val snapshot = ArrayList(buffer)
         buffer.clear()
-        submitDelivery(snapshot)
+        enqueueDelivery(snapshot)
       }
     }
   }
@@ -147,7 +149,7 @@ internal class SdkEventBuffer(
       if (buffer.isNotEmpty()) {
         val snapshot = ArrayList(buffer)
         buffer.clear()
-        submitDelivery(snapshot)
+        enqueueDelivery(snapshot)
       }
     }
     executor.shutdown()
@@ -159,13 +161,47 @@ internal class SdkEventBuffer(
       if (isShutdown || buffer.isEmpty()) return
       val snapshot = ArrayList(buffer)
       buffer.clear()
-      submitDelivery(snapshot)
+      enqueueDelivery(snapshot)
     }
   }
 
-  /** Queue delivery while holding [lock] to preserve snapshot submission order. */
-  private fun submitDelivery(events: List<SdkEvent>) {
-    executor.execute { deliverBatch(events) }
+  /** Queue delivery while holding [lock] to preserve snapshot submission order and backpressure. */
+  private fun enqueueDelivery(events: MutableList<SdkEvent>) {
+    pendingBatches.addLast(events)
+    if (!isDeliveryScheduled) {
+      isDeliveryScheduled = true
+      executor.execute { drainDeliveries() }
+    }
+  }
+
+  private fun drainDeliveries() {
+    while (true) {
+      val events = lock.withLock {
+        if (pendingBatches.isEmpty()) {
+          isDeliveryScheduled = false
+          return
+        }
+        pendingBatches.removeFirst()
+      }
+      deliverBatch(events)
+    }
+  }
+
+  /** Must be called while holding [lock]. Delivery in progress is no longer pending. */
+  private fun pendingEventCount(): Int = buffer.size + pendingBatches.sumOf { it.size }
+
+  /** Must be called while holding [lock]. */
+  private fun dropOldestPendingEvent() {
+    val oldestBatch = pendingBatches.firstOrNull()
+    if (oldestBatch == null) {
+      buffer.removeFirst()
+      return
+    }
+
+    oldestBatch.removeFirst()
+    if (oldestBatch.isEmpty()) {
+      pendingBatches.removeFirst()
+    }
   }
 
   private fun deliverBatch(events: List<SdkEvent>) {

@@ -684,6 +684,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
       if (
         !isDeviceSessionAcquisitionTool(name) &&
         name !== SET_TOOL_ENABLED_TOOL_NAME &&
+        !result?.isError &&
         sessionToolBinding.bind(sessionId, providedSessionUuid)
       ) {
         ToolRegistry.notifyToolListChanged();

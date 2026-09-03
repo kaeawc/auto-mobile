@@ -2484,7 +2484,8 @@ describe("DaemonMcpProxy", () => {
           [
             "tapOn",
             new ActionableError(
-              "Session session-b is not an active daemon session (not found). " +
+              "Unknown device session UUID session-b cannot access device device-b, " +
+                "which is owned by session session-a. " +
                 "Acquire a device with getAndroid or getApple before using its sessionUuid.",
             ),
           ],
@@ -2501,9 +2502,47 @@ describe("DaemonMcpProxy", () => {
         await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
         await expect(
           proxy.callTool("tapOn", { sessionUuid: "session-b", deviceId: "device-b" }),
-        ).rejects.toThrow("is not an active daemon session");
+        ).rejects.toThrow("Unknown device session UUID");
         await proxy.callTool("observe", { deviceId: "device-a" });
 
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "tapOn", params: { sessionUuid: "session-b", deviceId: "device-b" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
+    test("keeps the prior binding when an unissued session UUID returns an error result", async () => {
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const callTool = client.callTool.bind(client);
+      client.callTool = async (toolName, params) => {
+        await callTool(toolName, params);
+        return toolName === "tapOn"
+          ? { content: [{ type: "text", text: "session rejected" }], isError: true }
+          : { content: [{ type: "text", text: "ok" }] };
+      };
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        const rejected = await proxy.callTool("tapOn", {
+          sessionUuid: "session-b",
+          deviceId: "device-b",
+        });
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(rejected.isError).toBe(true);
         expect(client.callToolCalls).toEqual([
           { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
           { toolName: "tapOn", params: { sessionUuid: "session-b", deviceId: "device-b" } },

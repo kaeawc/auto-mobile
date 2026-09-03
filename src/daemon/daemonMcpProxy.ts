@@ -1433,7 +1433,7 @@ export class DaemonMcpProxy {
   }
 
   private isUnadmittedDaemonSessionError(error: unknown): boolean {
-    return errorMessage(error).includes("is not an active daemon session");
+    return errorMessage(error).includes("Unknown device session UUID");
   }
 
   private isUnknownToolError(error: unknown): boolean {
@@ -1670,6 +1670,9 @@ export class DaemonMcpProxy {
         // the result-minted session establishes a fresh binding.
         isSessionAcquisition,
       );
+      if (result?.isError) {
+        return result;
+      }
       this.rememberToolSelectionProfile(name, args, result);
       if (isSessionAcquisition) {
         await this.bindResultMintedDeviceSession(name, result);

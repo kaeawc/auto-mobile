@@ -49,4 +49,36 @@ describe("session tool binding after failed calls", () => {
       tools: expect.arrayContaining([expect.objectContaining({ name: "bindingProbe" })]),
     });
   });
+
+  test("keeps the prior binding when an explicit session UUID call returns an error result", async () => {
+    const schema = z.object({ sessionUuid: z.string().optional() });
+    ToolRegistry.register("bindingProbe", "bindingProbe", schema, async () => ({ success: true }));
+    ToolRegistry.register("rejectSession", "rejectSession", schema, async () => ({
+      content: [{ type: "text" as const, text: "session rejected" }],
+      isError: true,
+    }));
+
+    fixture = new McpTestFixture({
+      sessionContext: { sessionId: "transport-a" },
+      sessionToolSelectionService: {
+        isEnabled: async (sessionUuid, toolName, declaredDefault) =>
+          toolName === "bindingProbe" && sessionUuid === "session-b" ? false : declaredDefault,
+      },
+    });
+    await fixture.setup();
+
+    await fixture.client.callTool({
+      name: "bindingProbe",
+      arguments: { sessionUuid: "session-a" },
+    });
+    const rejected = await fixture.client.callTool({
+      name: "rejectSession",
+      arguments: { sessionUuid: "session-b" },
+    });
+
+    expect(rejected.isError).toBe(true);
+    await expect(fixture.client.listTools()).resolves.toMatchObject({
+      tools: expect.arrayContaining([expect.objectContaining({ name: "bindingProbe" })]),
+    });
+  });
 });

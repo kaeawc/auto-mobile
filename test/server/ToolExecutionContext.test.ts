@@ -165,23 +165,6 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(0);
   });
 
-  test("does not recreate an admitted session released before setup", async () => {
-    const admittedSession = await sessionManager.createSession("session-1", "device-1", "android");
-    await sessionManager.releaseSession("session-1", "explicit-release");
-
-    await expect(
-      createToolExecutionContext(
-        "session-1",
-        sessionManager,
-        devicePool,
-        sessionOptions,
-        undefined,
-        admittedSession,
-      ),
-    ).rejects.toThrow("Session session-1 was released during setup");
-    expect(sessionManager.getSession("session-1")).toBeNull();
-  });
-
   test("quarantines preserved reset-cohort session routing until recovery settles", async () => {
     const first: BootedDevice = {
       name: "Pixel_8_API_35",

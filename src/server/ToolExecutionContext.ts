@@ -78,28 +78,21 @@ export async function createToolExecutionContext(
   devicePool: DevicePool,
   sessionOptions: SessionOptions = {},
   execution?: SessionExecutionMetadata,
-  admittedSession?: Session,
 ): Promise<ToolExecutionContext> {
   if (!sessionUuid) {
     return {};
   }
 
-  if (admittedSession && !sessionManager.isCurrentSession(admittedSession)) {
-    throw new ActionableError(`Session ${sessionUuid} was released during setup`);
-  }
   devicePool.assertSessionReadyForAutomation(sessionUuid);
-  const existingSession =
-    admittedSession ?? sessionManager.getSessionForNewExecution(sessionUuid, execution);
+  const existingSession = sessionManager.getSessionForNewExecution(sessionUuid, execution);
 
   // Get or create session
-  const session =
-    admittedSession ??
-    (await sessionManager.getOrCreateSession(
-      sessionUuid,
-      devicePool,
-      sessionOptions.platform,
-      execution,
-    ));
+  const session = await sessionManager.getOrCreateSession(
+    sessionUuid,
+    devicePool,
+    sessionOptions.platform,
+    execution,
+  );
 
   if (!sessionManager.isCurrentSession(session)) {
     throw new ActionableError(`Session ${sessionUuid} was released during setup`);

@@ -478,16 +478,18 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
       logger.info(`[ToolRegistry] Entering session-based device assignment for ${sessionUuid}`);
       const sessionManager = DaemonState.getInstance().getSessionManager();
-      // A missing assigner makes getOrCreateSession an admission-only lookup:
-      // terminal IDs retain their durable TerminalSessionError, while never-issued
-      // IDs cannot allocate a device.
-      const admittedSession = await sessionManager.getOrCreateSession(
-        sessionUuid,
-        undefined,
-        undefined,
-        execution,
-      );
       const devicePool = DaemonState.getInstance().getDevicePool();
+      const existingSession = sessionManager.getSessionForNewExecution(sessionUuid, execution);
+      const owningSessionUuid = providedDeviceId
+        ? sessionManager.getSessionForDevice(providedDeviceId)
+        : undefined;
+      if (!existingSession && owningSessionUuid && owningSessionUuid !== sessionUuid) {
+        throw new ActionableError(
+          `Unknown device session UUID ${sessionUuid} cannot access device ${providedDeviceId}, ` +
+            `which is owned by session ${owningSessionUuid}. ` +
+            "Acquire a device with getAndroid or getApple before using its sessionUuid.",
+        );
+      }
       const context = await createToolExecutionContext(
         sessionUuid,
         sessionManager,
@@ -497,7 +499,6 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
           platform: platform === "android" || platform === "ios" ? platform : undefined,
         },
         execution,
-        admittedSession,
       );
       if (context.deviceId && !providedDeviceId) {
         providedDeviceId = context.deviceId;

@@ -7,7 +7,7 @@ import {
   type DeviceSessionPersistence,
 } from "../db/deviceSessionRepository";
 import { type DbWriteBarrier, getDbWriteBarrier } from "../db/dbWriteBarrier";
-import { ActionableError, toActionableError } from "../models/ActionableError";
+import { toActionableError } from "../models/ActionableError";
 import type { ViewHierarchyResult } from "../models/ViewHierarchyResult";
 import type { ObserveResult } from "../models/ObserveResult";
 import { DeviceState, type BiometricEnrollment } from "../features/utility/DeviceState";
@@ -684,9 +684,8 @@ export class SessionManager {
 
     // Need to create new session - assign device from pool
     if (!devicePool) {
-      throw new ActionableError(
-        `Session ${sessionId} is not an active daemon session (not found). ` +
-          "Acquire a device with getAndroid or getApple before using its sessionUuid.",
+      throw new Error(
+        `Session ${sessionId} not found and no device pool provided for auto-assignment.`,
       );
     }
 

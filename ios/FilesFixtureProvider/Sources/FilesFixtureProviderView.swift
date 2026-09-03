@@ -128,7 +128,7 @@ private final class FilesPickerHostViewController: UIViewController, UIDocumentP
         let identityURL = applicationSupport
             .appendingPathComponent("AutoMobile/staging-identities", isDirectory: true)
             .appendingPathComponent(namespace, isDirectory: true)
-            .appendingPathComponent(destinationPath + ".json")
+            .appendingPathComponent(stagingIdentityFileName(destinationPath))
         guard let identityData = try? Data(contentsOf: identityURL),
               let identity = try? JSONDecoder().decode(StagingIdentity.self, from: identityData)
         else { return }
@@ -164,6 +164,11 @@ private final class FilesPickerHostViewController: UIViewController, UIDocumentP
             to: markerDirectory.appendingPathComponent("picker-visibility.json"),
             options: .atomic
         )
+    }
+
+    private func stagingIdentityFileName(_ destinationPath: String) -> String {
+        let digest = SHA256.hash(data: Data(destinationPath.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined() + ".json"
     }
 }
 

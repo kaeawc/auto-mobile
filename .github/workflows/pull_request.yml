@@ -1999,9 +1999,14 @@ jobs:
 
       - name: "Run iOS Files picker putAppFile smoke"
         timeout-minutes: 15
-        run: >
-          ./scripts/ios/put-app-file-picker-smoke.sh
-          "${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}"
+        env:
+          SIMULATOR_UDID: ${{ steps.ctrlproxy-simulator.outputs.simulator_udid }}
+        run: |
+          if [[ ! "${SIMULATOR_UDID}" =~ ^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$ ]]; then
+            echo "::error::Invalid simulator UDID" >&2
+            exit 1
+          fi
+          ./scripts/ios/put-app-file-picker-smoke.sh "${SIMULATOR_UDID}"
 
       - name: "Run selected CtrlProxy iOS tests (Xcode 26.5)"
         timeout-minutes: 5

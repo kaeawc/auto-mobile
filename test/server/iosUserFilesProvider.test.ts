@@ -183,6 +183,47 @@ describe("iOS user_files provider (#5807)", () => {
     expect(removed).toEqual(["/tmp/fixture-provider-build"]);
   });
 
+  test("shares an in-flight installation while availability is still resolving", async () => {
+    const container = new InstallableFixtureContainer();
+    let releaseAvailability: () => void = () => {};
+    container.availabilityGate = new Promise<void>((resolve) => {
+      releaseAvailability = resolve;
+    });
+    const xcodebuildArgs: string[][] = [];
+    const installer = new XcodebuildIosFilesFixtureInstaller(
+      container,
+      () => ({
+        executeCommandArgs: async () => {
+          container.available = true;
+          return result();
+        },
+      }),
+      {
+        isAvailable: async () => true,
+        executeCommand: async (args) => {
+          xcodebuildArgs.push(args);
+          return result();
+        },
+        startStreaming: async () => {
+          throw new Error("not used");
+        },
+      },
+      "ios/FilesFixtureProvider/FilesFixtureProvider.xcodeproj",
+      {
+        exists: () => true,
+        mkdtemp: async () => "/tmp/fixture-provider-build",
+        rm: async () => {},
+      },
+    );
+
+    const first = installer.ensureInstalled(simulator);
+    const second = installer.ensureInstalled(simulator);
+    releaseAvailability();
+    await Promise.all([first, second]);
+
+    expect(xcodebuildArgs).toHaveLength(1);
+  });
+
   test("contains writes and reset below Documents/automobile without following symlink parents", async () => {
     const fileSystem = new MemoryFixtureFileSystem();
     const container = resolvedContainer(fileSystem);
@@ -455,8 +496,10 @@ class RecordingFixtureContainer implements IosFilesFixtureContainer {
 
 class InstallableFixtureContainer extends RecordingFixtureContainer {
   available = false;
+  availabilityGate: Promise<void> | undefined;
 
   override async isAvailable(): Promise<boolean> {
+    await this.availabilityGate;
     return this.available;
   }
 }

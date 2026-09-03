@@ -84,7 +84,8 @@
         "android/video-server/src/main/kotlin/**",
         "ios/auto-mobile-sdk/Sources/**",
         "ios/control-proxy/Sources/**",
-        "ios/control-proxy/Tests/**"
+        "ios/control-proxy/Tests/**",
+        "ios/FilesFixtureProvider/**"
       ],
       "outputs": [],
       "outputLogs": "new-only",
@@ -130,7 +131,8 @@
         "android/video-server/src/main/kotlin/**",
         "ios/auto-mobile-sdk/Sources/**",
         "ios/control-proxy/Sources/**",
-        "ios/control-proxy/Tests/**"
+        "ios/control-proxy/Tests/**",
+        "ios/FilesFixtureProvider/**"
       ],
       "outputs": [],
       "outputLogs": "new-only",

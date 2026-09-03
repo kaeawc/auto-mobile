@@ -130,7 +130,9 @@ const nodeIosFilesFixtureInstallerFileSystem: IosFilesFixtureInstallerFileSystem
   },
 };
 
-function defaultFixtureProjectPath(fileSystem: Pick<IosFilesFixtureInstallerFileSystem, "exists">): string {
+function defaultFixtureProjectPath(
+  fileSystem: Pick<IosFilesFixtureInstallerFileSystem, "exists">,
+): string {
   const moduleDirectory = dirname(fileURLToPath(import.meta.url));
   const candidates = [
     resolve(moduleDirectory, "../../ios/FilesFixtureProvider/FilesFixtureProvider.xcodeproj"),
@@ -159,18 +161,25 @@ export class XcodebuildIosFilesFixtureInstaller implements IosFilesFixtureInstal
 
   async ensureInstalled(device: BootedDevice, signal?: AbortSignal): Promise<void> {
     assertSimulator(device);
-    if (await this.container.isAvailable(device, signal)) {
-      return;
-    }
     const existing = this.installations.get(device.deviceId);
     if (existing) {
       return existing;
     }
-    const installation = this.buildAndInstall(device, signal).finally(() => {
-      this.installations.delete(device.deviceId);
+    let installation: Promise<void>;
+    installation = this.installIfMissing(device, signal).finally(() => {
+      if (this.installations.get(device.deviceId) === installation) {
+        this.installations.delete(device.deviceId);
+      }
     });
     this.installations.set(device.deviceId, installation);
     return installation;
+  }
+
+  private async installIfMissing(device: BootedDevice, signal?: AbortSignal): Promise<void> {
+    if (await this.container.isAvailable(device, signal)) {
+      return;
+    }
+    await this.buildAndInstall(device, signal);
   }
 
   private async buildAndInstall(device: BootedDevice, signal?: AbortSignal): Promise<void> {
@@ -353,10 +362,7 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
       sourceHash,
     );
     const generation = existingGeneration ?? this.idGenerator.next();
-    const stagingRoot = posix.join(
-      resolution.dataRoot,
-      STAGING_TEMPORARY_RELATIVE_PATH,
-    );
+    const stagingRoot = posix.join(resolution.dataRoot, STAGING_TEMPORARY_RELATIVE_PATH);
     await this.assertDirectoryChain(resolution.dataRoot, stagingRoot);
     await this.fileSystem.mkdir(stagingRoot);
     await this.assertDirectoryChain(resolution.dataRoot, stagingRoot);
@@ -413,7 +419,9 @@ export class SimctlIosFilesFixtureContainer implements IosFilesFixtureContainer 
     await this.assertDirectoryChain(dataRoot, parent);
     await this.fileSystem.mkdir(parent);
     await this.assertDirectoryChain(dataRoot, parent);
-    const temporaryDirectory = await this.fileSystem.mkdtemp(posix.join(parent, ".automobile-identity-"));
+    const temporaryDirectory = await this.fileSystem.mkdtemp(
+      posix.join(parent, ".automobile-identity-"),
+    );
     try {
       const temporaryPath = posix.join(temporaryDirectory, "identity.json");
       await this.fileSystem.writeFileBuffer(temporaryPath, Buffer.from(JSON.stringify(identity)));
@@ -603,10 +611,7 @@ function assertSimulator(device: BootedDevice): void {
 function containedPath(root: string, safeRelativePath: string): string {
   const candidate = posix.join(root, safeRelativePath);
   const relativeCandidate = posix.relative(root, candidate);
-  if (
-    relativeCandidate.length === 0 ||
-    isOutsideRoot(relativeCandidate)
-  ) {
+  if (relativeCandidate.length === 0 || isOutsideRoot(relativeCandidate)) {
     throw new ActionableError("Refusing to stage an iOS Files fixture outside its managed root.");
   }
   return candidate;

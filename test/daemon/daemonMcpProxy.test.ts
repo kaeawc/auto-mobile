@@ -2477,6 +2477,44 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("keeps the prior binding when an unissued session UUID is rejected", async () => {
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+        toolErrorByName: new Map([
+          [
+            "tapOn",
+            new ActionableError(
+              "Session session-b is not an active daemon session (not found). " +
+                "Acquire a device with getAndroid or getApple before using its sessionUuid.",
+            ),
+          ],
+        ]),
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        await expect(
+          proxy.callTool("tapOn", { sessionUuid: "session-b", deviceId: "device-b" }),
+        ).rejects.toThrow("is not an active daemon session");
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "tapOn", params: { sessionUuid: "session-b", deviceId: "device-b" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("successful heartbeats keep the replay lease alive across a failed tool transport", async () => {
       // The failed tool request did not refresh the daemon session, but the
       // independent heartbeat keeper did. The binding therefore remains live

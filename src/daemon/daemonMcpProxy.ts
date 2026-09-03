@@ -1432,6 +1432,10 @@ export class DaemonMcpProxy {
     return message.includes("Session not found");
   }
 
+  private isUnadmittedDaemonSessionError(error: unknown): boolean {
+    return errorMessage(error).includes("is not an active daemon session");
+  }
+
   private isUnknownToolError(error: unknown): boolean {
     const message = errorMessage(error);
     return message.includes("Unknown tool:");
@@ -2223,6 +2227,7 @@ export class DaemonMcpProxy {
       name === "executePlan" ||
       name === SET_TOOL_ENABLED_TOOL_NAME ||
       this.isRecoverableDaemonSessionError(error) ||
+      this.isUnadmittedDaemonSessionError(error) ||
       this.shouldSkipLeaseRefreshForDeviceControlTransportError(error)
     ) {
       return;

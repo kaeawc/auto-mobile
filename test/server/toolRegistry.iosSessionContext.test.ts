@@ -3,6 +3,10 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { BootedDevice } from "../../src/models";
 import { z } from "zod/v4";
+import {
+  clearDirectSessionDevices,
+  registerDirectSessionDevice,
+} from "../../src/server/directSessionDeviceRegistry";
 
 describe("ToolRegistry iOS session context", () => {
   const iosDeviceA: BootedDevice = {
@@ -21,6 +25,7 @@ describe("ToolRegistry iOS session context", () => {
 
   beforeEach(() => {
     ToolRegistry.clearTools();
+    clearDirectSessionDevices();
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
@@ -29,6 +34,7 @@ describe("ToolRegistry iOS session context", () => {
   afterEach(() => {
     (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
     ToolRegistry.clearTools();
+    clearDirectSessionDevices();
   });
 
   test("requires sessionUuid when multiple iOS simulators are booted", async () => {
@@ -55,6 +61,7 @@ describe("ToolRegistry iOS session context", () => {
 
   test("allows sessionUuid when multiple iOS simulators are booted", async () => {
     fakeDeviceSessionManager.setConnectedDevices([iosDeviceA, iosDeviceB]);
+    registerDirectSessionDevice("session-123", iosDeviceA);
 
     ToolRegistry.registerDeviceAware(
       "iosSessionAllowedTool",

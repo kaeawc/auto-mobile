@@ -9,6 +9,10 @@ import type { BootedDevice } from "../../src/models";
 import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { FakeLogger } from "../fakes/FakeLogger";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
+import {
+  clearDirectSessionDevices,
+  registerDirectSessionDevice,
+} from "../../src/server/directSessionDeviceRegistry";
 import type {
   ObservationArtifactPayload,
   ObservationArtifactWriter,
@@ -180,6 +184,7 @@ describe("ToolRegistry device-aware pipeline", () => {
         throw new Error("bind unavailable");
       },
     });
+    registerDirectSessionDevice("session-1", device);
     try {
       registry.registerDeviceAware(
         "bindFailureProbe",
@@ -201,6 +206,7 @@ describe("ToolRegistry device-aware pipeline", () => {
       );
     } finally {
       (AndroidCtrlProxyClient as any).getInstance = originalGetInstance;
+      clearDirectSessionDevices();
     }
   });
 

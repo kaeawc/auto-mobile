@@ -1,9 +1,9 @@
-import { SessionManager } from "../daemon/sessionManager";
+import { SessionManager, TerminalSessionError } from "../daemon/sessionManager";
 import type { Session, SessionExecutionMetadata } from "../daemon/sessionManager";
 import { DevicePool } from "../daemon/devicePool";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
-import { ActionableError, BootedDevice, Platform } from "../models";
+import { ActionableError, BootedDevice, Platform, toActionableError } from "../models";
 import { logger } from "../utils/logger";
 import { KeepScreenAwakeManager, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
@@ -70,7 +70,7 @@ export interface SessionOptions {
 /**
  * Create tool execution context from session UUID
  *
- * Ensures session exists and device is assigned if session UUID provided.
+ * Resolves an issued session UUID to its assigned device.
  */
 export async function createToolExecutionContext(
   sessionUuid: string | undefined,
@@ -86,13 +86,22 @@ export async function createToolExecutionContext(
   devicePool.assertSessionReadyForAutomation(sessionUuid);
   const existingSession = sessionManager.getSessionForNewExecution(sessionUuid, execution);
 
-  // Get or create session
-  const session = await sessionManager.getOrCreateSession(
-    sessionUuid,
-    devicePool,
-    sessionOptions.platform,
-    execution,
-  );
+  // Tool calls must use an issued session UUID; device acquisition owns
+  // session creation.
+  let session: Session;
+  try {
+    session = await sessionManager.getOrCreateSession(
+      sessionUuid,
+      undefined,
+      sessionOptions.platform,
+      execution,
+    );
+  } catch (error) {
+    if (error instanceof TerminalSessionError) {
+      throw error;
+    }
+    throw toActionableError(error, `Failed to resolve session ${sessionUuid}`);
+  }
 
   if (!sessionManager.isCurrentSession(session)) {
     throw new ActionableError(`Session ${sessionUuid} was released during setup`);

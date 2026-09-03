@@ -105,15 +105,15 @@ describe("ToolRegistry direct-mode sessionUuid resolution (#5893)", () => {
     expect(fakeDeviceSessionManager.getLastEnsureDeviceReadyPlatform()).toBe("either");
   });
 
-  test("falls through unchanged when the sessionUuid has no direct-session device", async () => {
+  test("rejects an unknown sessionUuid before resolving a device", async () => {
     fakeDeviceSessionManager.setConnectedDevices([android]);
     const tool = registerTool();
 
-    const response = await tool.handler({ sessionUuid: "session-unknown" });
-    expect(response).toEqual({ success: true });
+    await expect(tool.handler({ sessionUuid: "session-unknown" })).rejects.toThrow(
+      "Unknown session UUID",
+    );
 
-    // No direct session registered: platform stays "either", no deviceId injected.
-    expect(fakeDeviceSessionManager.getLastEnsureDeviceReadyPlatform()).toBe("either");
+    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
     expect(fakeDeviceSessionManager.getLastEnsureDeviceReadyDeviceId()).toBeUndefined();
   });
 });

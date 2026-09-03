@@ -9,6 +9,7 @@ import { DevicePool } from "../../src/daemon/devicePool";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
+import { clearDirectSessionDevices } from "../../src/server/directSessionDeviceRegistry";
 
 const AUTOLOCK_ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
@@ -55,6 +56,7 @@ describe("ToolRegistry autolock session enforcement", () => {
 
   beforeEach(() => {
     ToolRegistry.clearTools();
+    clearDirectSessionDevices();
     fakeDeviceSessionManager = new FakeDeviceSessionManager();
     originalDeviceSessionManager = (ToolRegistry as any).deviceSessionManager;
     (ToolRegistry as any).deviceSessionManager = fakeDeviceSessionManager;
@@ -63,6 +65,7 @@ describe("ToolRegistry autolock session enforcement", () => {
   afterEach(() => {
     (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
     ToolRegistry.clearTools();
+    clearDirectSessionDevices();
     DaemonState.getInstance().reset();
     daemonSessionManager?.stopCleanupTimer();
     setAutolock(false);
@@ -78,17 +81,6 @@ describe("ToolRegistry autolock session enforcement", () => {
       "Device pool autolock is enabled and multiple devices are available.",
     );
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
-  });
-
-  test("allows the call when a sessionUuid is provided", async () => {
-    setAutolock(true);
-    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
-
-    const tool = registerTool("autolockWithSession");
-
-    const response = await tool.handler({ platform: "android", sessionUuid: "session-123" });
-    expect(response).toEqual({ success: true });
-    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
   });
 
   test("allows the call when an explicit deviceId is provided", async () => {
@@ -122,6 +114,95 @@ describe("ToolRegistry autolock session enforcement", () => {
     const response = await tool.handler({ platform: "android" });
     expect(response).toEqual({ success: true });
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+  });
+
+  test("rejects an unknown sessionUuid before it can target another session's device", async () => {
+    setAutolock(false);
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    await pool.initializeWithDevices([androidA, androidB]);
+    await pool.bindOrReuseDeviceSession("owner-session", androidA.deviceId, "android");
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    let handlerCalls = 0;
+    ToolRegistry.registerDeviceAware(
+      "unknownSessionTarget",
+      "unknownSessionTarget",
+      schema,
+      async () => {
+        handlerCalls += 1;
+        return { success: true };
+      },
+    );
+    const tool = ToolRegistry.getTool("unknownSessionTarget")!;
+
+    await expect(
+      tool.handler({
+        platform: "android",
+        deviceId: androidA.deviceId,
+        sessionUuid: "banana",
+        keepScreenAwake: false,
+      }),
+    ).rejects.toThrow(/not found/i);
+
+    expect(handlerCalls).toBe(0);
+    expect(daemonSessionManager.getSession("banana")).toBeNull();
+    expect(pool.getDevice(androidA.deviceId)?.sessionId).toBe("owner-session");
+    expect(pool.getDevice(androidB.deviceId)?.sessionId).toBeNull();
+  });
+
+  test("rejects a deviceId that differs from an issued session's assignment", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer, new FakeDeviceSessionPersistence());
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
+    const pool = new DevicePool(
+      daemonSessionManager,
+      "daemon-session",
+      timer,
+      undefined,
+      fakeDeviceUtils,
+    );
+    await pool.initializeWithDevices([androidA, androidB]);
+    await pool.bindOrReuseDeviceSession("session-a", androidA.deviceId, "android");
+    await pool.bindOrReuseDeviceSession("session-b", androidB.deviceId, "android");
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    let handlerCalls = 0;
+    ToolRegistry.registerDeviceAware(
+      "mismatchedSessionTarget",
+      "mismatchedSessionTarget",
+      schema,
+      async () => {
+        handlerCalls += 1;
+        return { success: true };
+      },
+    );
+    const tool = ToolRegistry.getTool("mismatchedSessionTarget")!;
+
+    await expect(
+      tool.handler({
+        platform: "android",
+        deviceId: androidA.deviceId,
+        sessionUuid: "session-b",
+        keepScreenAwake: false,
+      }),
+    ).rejects.toThrow(
+      `Session session-b is bound to ${androidB.deviceId}, not ${androidA.deviceId}.`,
+    );
+
+    expect(handlerCalls).toBe(0);
+    expect(pool.getDevice(androidA.deviceId)?.sessionId).toBe("session-a");
+    expect(pool.getDevice(androidB.deviceId)?.sessionId).toBe("session-b");
   });
 
   test("requires sessionUuid for platform 'either' when multiple devices exist", async () => {

@@ -489,7 +489,12 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
         },
         execution,
       );
-      if (context.deviceId && !providedDeviceId) {
+      if (context.deviceId && providedDeviceId && context.deviceId !== providedDeviceId) {
+        throw new ActionableError(
+          `Session ${sessionUuid} is bound to ${context.deviceId}, not ${providedDeviceId}.`,
+        );
+      }
+      if (context.deviceId) {
         providedDeviceId = context.deviceId;
         logger.info(`[ToolRegistry] Resolved device from session: ${providedDeviceId}`);
       }
@@ -505,7 +510,9 @@ class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // ensureDeviceReady("either", undefined) and hits an ambiguity error.
       const directSession = resolveDirectSessionDevice(sessionUuid);
       if (!directSession) {
-        logger.warn(`[ToolRegistry] SessionUuid provided but DaemonState not initialized!`);
+        throw new ActionableError(
+          `Unknown session UUID ${sessionUuid}. Call getAndroid or getApple first to acquire a device.`,
+        );
       } else if (!providedDeviceId) {
         providedDeviceId = directSession.device.deviceId;
         logger.info(

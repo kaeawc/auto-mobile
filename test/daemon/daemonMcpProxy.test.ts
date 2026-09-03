@@ -2548,6 +2548,38 @@ describe("DaemonMcpProxy", () => {
       }
     });
 
+    test("renews a bound session from an unscoped call", async () => {
+      const timer = new FakeTimer();
+      const client = new ScriptedDaemonClient({
+        toolResult: { content: [{ type: "text", text: "ok" }] },
+      });
+      const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+      const proxy = new DaemonMcpProxy({
+        clientFactory: () => client,
+        daemonManager: matchingDaemonManager(),
+        autoStartDaemon: false,
+        timer,
+        heartbeatIntervalMs: DAEMON_BOUND_SESSION_REPLAY_TTL_MS * 2,
+      });
+
+      try {
+        await proxy.callTool("observe", { sessionUuid: "session-a", deviceId: "device-a" });
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("listDevices", {});
+        timer.advanceTime(DAEMON_BOUND_SESSION_REPLAY_TTL_MS - 1);
+        await proxy.callTool("observe", { deviceId: "device-a" });
+
+        expect(client.callToolCalls).toEqual([
+          { toolName: "observe", params: { sessionUuid: "session-a", deviceId: "device-a" } },
+          { toolName: "listDevices", params: { sessionUuid: "session-a" } },
+          { toolName: "observe", params: { deviceId: "device-a", sessionUuid: "session-a" } },
+        ]);
+      } finally {
+        isAvailableSpy.mockRestore();
+        await proxy.close();
+      }
+    });
+
     test("keeps the prior binding when an unissued session UUID is rejected", async () => {
       const client = new ScriptedDaemonClient({
         toolResult: { content: [{ type: "text", text: "ok" }] },

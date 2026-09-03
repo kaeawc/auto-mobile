@@ -2189,7 +2189,10 @@ export class DaemonMcpProxy {
       return;
     }
     const rememberedSessionUuid = this.sessionUuidFromArgs(forwardedArgs);
-    if (rememberedSessionUuid && this.toolAcceptsSessionUuid(name)) {
+    if (
+      rememberedSessionUuid &&
+      (rememberedSessionUuid === this.boundSessionUuid || this.toolAcceptsSessionUuid(name))
+    ) {
       this.updateBoundSessionUuid(rememberedSessionUuid);
       this.startBoundSessionHeartbeat();
     }

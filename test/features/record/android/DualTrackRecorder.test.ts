@@ -83,7 +83,7 @@ describe("DualTrackRecorder", () => {
     fakeA11y = new FakeA11ySource();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
-    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer);
+    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer, true);
   });
 
   test("tap gesture + matching A11y element → tapOn step", async () => {
@@ -208,6 +208,34 @@ describe("DualTrackRecorder", () => {
         ],
       },
     });
+  });
+
+  test("inputText from A11y remains replayable before the sendKeys runner release", async () => {
+    recorder = new DualTrackRecorder(fakeDevice, fakeGestures, fakeA11y, fakeTimer, false);
+    await recorder.start();
+
+    fakeA11y.emit({
+      type: "inputText",
+      timestamp: Date.now(),
+      text: "hello@example.com",
+      element: { "resource-id": "com.example:id/email_field" },
+    });
+
+    fakeA11y.emit({
+      type: "inputText",
+      timestamp: Date.now(),
+      text: "updated@example.com",
+      element: { "resource-id": "com.example:id/email_field" },
+    });
+
+    const { steps } = await recorder.stop();
+
+    expect(steps).toEqual([
+      {
+        tool: "inputText",
+        params: { text: "updated@example.com" },
+      },
+    ]);
   });
 
   test("consecutive inputText events on same element are coalesced", async () => {

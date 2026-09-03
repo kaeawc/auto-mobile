@@ -982,6 +982,11 @@ public class GesturePerformer: GesturePerforming {
                 throw GestureError.noApplication
             }
 
+            try requireKeyboardFocus(
+                app: app,
+                context: "ensure a text field is focused before performing an IME action"
+            )
+
             switch action.lowercased() {
             case "done", "go", "search", "send", "next":
                 try runOnMainThread {
@@ -1057,7 +1062,7 @@ public class GesturePerformer: GesturePerforming {
                 throw GestureError.notSupported("Keyboard key: \(key)")
             }
 
-            var modifierFlags: XCUIKeyModifierFlags = []
+            var modifierFlags: XCUIElement.KeyModifierFlags = []
             for modifier in Set(modifiers.map { $0.lowercased() }) {
                 switch modifier {
                 case "shift":

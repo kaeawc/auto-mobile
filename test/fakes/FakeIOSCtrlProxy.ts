@@ -31,10 +31,7 @@ import { ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 import { defaultTimer } from "../../src/utils/SystemTimer";
-import type {
-  InputKeyModifier,
-  InputKeyName,
-} from "../../src/features/action/InputKey";
+import type { InputKeyModifier, InputKeyName } from "../../src/features/action/InputKey";
 
 /**
  * Fake implementation of IOSCtrlProxy for testing

@@ -48,12 +48,7 @@ export function hasFocusedTextInput(
       }
 
       const nodeProperties = parser.extractNodeProperties(node);
-      const nodeClass = nodeProperties.class ?? nodeProperties.className;
-      if (
-        (nodeProperties.focused === "true" || nodeProperties.focused === true) &&
-        typeof nodeClass === "string" &&
-        ANDROID_INPUT_CLASSES.some((inputClass) => nodeClass.includes(inputClass))
-      ) {
+      if (isFocusedTextInputProperties(nodeProperties)) {
         found = true;
       }
     });
@@ -64,6 +59,20 @@ export function hasFocusedTextInput(
   }
 
   return false;
+}
+
+function isFocusedTextInputProperties(nodeProperties: Record<string, unknown>): boolean {
+  if (nodeProperties.focused !== "true" && nodeProperties.focused !== true) {
+    return false;
+  }
+  const nodeClass = nodeProperties.class ?? nodeProperties.className;
+  const hasKnownInputClass =
+    typeof nodeClass === "string" &&
+    ANDROID_INPUT_CLASSES.some((inputClass) => nodeClass.includes(inputClass));
+  const actions = nodeProperties.actions;
+  const exposesTextAction = Array.isArray(actions) && actions.includes("set_text");
+  const explicitlyEditable = nodeProperties.editable === "true" || nodeProperties.editable === true;
+  return hasKnownInputClass || exposesTextAction || explicitlyEditable;
 }
 
 export async function clearTextWithKeyEvents(

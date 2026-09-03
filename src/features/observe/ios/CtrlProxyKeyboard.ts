@@ -4,11 +4,7 @@
 
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { InputKeyModifier, InputKeyName } from "../../action/InputKey";
-import type {
-  DelegateContext,
-  CtrlProxyKeyboardResult,
-  CtrlProxyPressKeyResult,
-} from "./types";
+import type { DelegateContext, CtrlProxyKeyboardResult, CtrlProxyPressKeyResult } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
 export class CtrlProxyKeyboard {

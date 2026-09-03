@@ -81,6 +81,60 @@ export function withCanonicalDiscriminatedUnionJsonSchema<T extends z.ZodTypeAny
   });
 }
 
+export function canonicalizeDiscriminatedUnionJsonSchema(value: unknown): void {
+  if (Array.isArray(value)) {
+    value.forEach(canonicalizeDiscriminatedUnionJsonSchema);
+    return;
+  }
+  if (!isJsonObject(value)) {
+    return;
+  }
+
+  if (Array.isArray(value.anyOf) && hasUniqueDiscriminator(value.anyOf)) {
+    value.oneOf = value.anyOf;
+    delete value.anyOf;
+  }
+  Object.values(value).forEach(canonicalizeDiscriminatedUnionJsonSchema);
+}
+
+function hasUniqueDiscriminator(branches: unknown[]): boolean {
+  if (branches.length < 2 || !branches.every(isJsonObject)) {
+    return false;
+  }
+  const firstProperties = getJsonObject(branches[0].properties);
+  if (!firstProperties) {
+    return false;
+  }
+  return Object.keys(firstProperties).some((key) => hasUniqueConstValues(branches, key));
+}
+
+function hasUniqueConstValues(branches: Record<string, unknown>[], key: string): boolean {
+  const values = branches.map((branch) => getPropertyConst(branch, key));
+  if (values.some((entry) => !entry.found)) {
+    return false;
+  }
+  return new Set(values.map((entry) => JSON.stringify(entry.value))).size === branches.length;
+}
+
+function getPropertyConst(
+  branch: Record<string, unknown>,
+  key: string,
+): { found: boolean; value?: unknown } {
+  const properties = getJsonObject(branch.properties);
+  const property = properties && getJsonObject(properties[key]);
+  return property && Object.hasOwn(property, "const")
+    ? { found: true, value: property.const }
+    : { found: false };
+}
+
+function getJsonObject(value: unknown): Record<string, unknown> | undefined {
+  return isJsonObject(value) ? value : undefined;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 export function applyJsonSchemaOverride(
   zodSchema: object,
   jsonSchema: Record<string, unknown>,

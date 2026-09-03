@@ -39,7 +39,11 @@ import {
   getStructuredPayload,
   StructuredToolResponse,
 } from "../utils/toolUtils";
-import { applyJsonSchemaOverride, isInjectedDeviceIdSchema } from "./toolSchemaHelpers";
+import {
+  applyJsonSchemaOverride,
+  canonicalizeDiscriminatedUnionJsonSchema,
+  isInjectedDeviceIdSchema,
+} from "./toolSchemaHelpers";
 import {
   InternalToolName,
   InternalToolPayloads,
@@ -90,20 +94,20 @@ function dropDefaultedKeysFromRequired(jsonSchema: Record<string, unknown>): voi
 }
 
 function toAdvertisedJsonSchema(schema: any): Record<string, unknown> {
-  return flattenTopLevelUnion(
-    toJSONSchema(schema, {
-      override: ({ zodSchema, jsonSchema }) => {
-        applyJsonSchemaOverride(zodSchema, jsonSchema);
-        dropDefaultedKeysFromRequired(jsonSchema);
-        if (isInjectedDeviceIdSchema(zodSchema)) {
-          const properties = jsonSchema.properties as Record<string, unknown> | undefined;
-          if (properties) {
-            delete properties.deviceId;
-          }
+  const jsonSchema = toJSONSchema(schema, {
+    override: ({ zodSchema, jsonSchema }) => {
+      applyJsonSchemaOverride(zodSchema, jsonSchema);
+      dropDefaultedKeysFromRequired(jsonSchema);
+      if (isInjectedDeviceIdSchema(zodSchema)) {
+        const properties = jsonSchema.properties as Record<string, unknown> | undefined;
+        if (properties) {
+          delete properties.deviceId;
         }
-      },
-    }),
-  );
+      }
+    },
+  });
+  canonicalizeDiscriminatedUnionJsonSchema(jsonSchema);
+  return flattenTopLevelUnion(jsonSchema);
 }
 
 // Progress notification interface

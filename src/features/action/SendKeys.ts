@@ -5,6 +5,16 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
+import { defaultTimer } from "../../utils/SystemTimer";
+import {
+  isPinnedVersionKnown,
+  LATEST_RELEASE_VERSION,
+  RELEASE_CHECKSUM_REGISTRY,
+  resolveAssetVersion,
+  resolvePinnedVersion,
+  type ReleaseChecksumEntry,
+} from "../../constants/release";
+import { compareStrictNumericVersions } from "../../utils/deviceMatcher";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
@@ -27,10 +37,26 @@ export const SEND_KEYS_TYPING_MODES = [
   "eventOnly",
 ] as const;
 export type SendKeysTypingMode = (typeof SEND_KEYS_TYPING_MODES)[number];
-export type ResolvedSendKeysTypingMode = Exclude<SendKeysTypingMode, "auto">;
+export type ResolvedSendKeysTypingMode = Exclude<SendKeysTypingMode, "auto"> | "xcuiTypeText";
+type AndroidSendKeysTypingMode = Exclude<ResolvedSendKeysTypingMode, "xcuiTypeText">;
 
 export const SEND_KEYS_OPERATIONS = ["insert", "replace"] as const;
 export type SendKeysOperation = (typeof SEND_KEYS_OPERATIONS)[number];
+
+export const SEND_KEYS_MIN_RELEASE = "0.0.68";
+
+export function isSendKeysReleased(
+  env: NodeJS.ProcessEnv = process.env,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY,
+): boolean {
+  const pinned = resolvePinnedVersion(env);
+  if (pinned !== LATEST_RELEASE_VERSION && !isPinnedVersionKnown(env, registry)) {
+    return false;
+  }
+  return (
+    compareStrictNumericVersions(resolveAssetVersion(pinned, registry), SEND_KEYS_MIN_RELEASE) >= 0
+  );
+}
 
 export const SEND_KEYS_SEMANTIC_KEYS = [
   "next",
@@ -79,6 +105,7 @@ export interface SendKeysCommandResult {
   resolvedMode?: ResolvedSendKeysTypingMode;
   key?: SendKeysKey;
   modifiers?: InputKeyModifier[];
+  partialApplication?: boolean;
   error?: string;
 }
 
@@ -110,16 +137,29 @@ export interface SendKeysTargetFocuser {
 }
 
 export interface SendKeysObserver {
-  execute(options?: { signal?: AbortSignal; skipWaitForFresh?: boolean }): Promise<ObserveResult>;
+  execute(options?: {
+    signal?: AbortSignal;
+    skipWaitForFresh?: boolean;
+    minTimestamp?: number;
+  }): Promise<ObserveResult>;
+}
+
+export interface SendKeysTimestampProvider {
+  now(): Promise<number>;
 }
 
 export interface SendKeysDependencies {
   executor?: SendKeysCommandExecutor;
   focuser?: SendKeysTargetFocuser;
   observer?: SendKeysObserver;
+  timestampProvider?: SendKeysTimestampProvider;
 }
 
-export type TextActionResult = { success: boolean; error?: string };
+export type TextActionResult = {
+  success: boolean;
+  error?: string;
+  partialApplication?: boolean;
+};
 
 export interface SendKeysTextClient {
   replace(text: string): Promise<TextActionResult>;
@@ -178,12 +218,13 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     try {
       const result: TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode } =
         this.device.platform === "ios"
-          ? await this.executeIosType(command.text, operation, resolvedMode, signal)
+          ? await this.executeIosType(command.text, operation, signal)
           : await this.executeAndroidType(command.text, operation, resolvedMode, signal);
       return {
         ...baseResult,
         success: result.success,
         ...(result.error ? { error: result.error } : {}),
+        ...(result.partialApplication ? { partialApplication: true } : {}),
         ...(result.resolvedMode ? { resolvedMode: result.resolvedMode } : {}),
       };
     } catch (error) {
@@ -197,6 +238,19 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
     signal?.throwIfAborted();
     const modifiers = command.modifiers ?? [];
     if (isSemanticKey(command.key)) {
+      if (this.device.platform === "android") {
+        const focusResult = await this.requireFocusedAndroidInput(signal);
+        if (!focusResult.success) {
+          return {
+            index: -1,
+            action: "key",
+            key: command.key,
+            modifiers,
+            success: false,
+            error: focusResult.error,
+          };
+        }
+      }
       const result = await this.textClient.ime(command.key);
       return {
         index: -1,
@@ -227,7 +281,7 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private resolveMode(
     operation: SendKeysOperation,
     requestedMode: SendKeysTypingMode,
-  ): ResolvedSendKeysTypingMode {
+  ): AndroidSendKeysTypingMode {
     if (requestedMode !== "auto") {
       return requestedMode;
     }
@@ -237,31 +291,33 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
   private async executeIosType(
     text: string,
     operation: SendKeysOperation,
-    mode: ResolvedSendKeysTypingMode,
     signal?: AbortSignal,
-  ): Promise<TextActionResult> {
+  ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     signal?.throwIfAborted();
+    const resolvedMode = "xcuiTypeText" as const;
     if (operation === "replace") {
       const clearResult = await this.textClient.clear();
       if (!clearResult.success) {
-        return clearResult;
+        return { ...clearResult, resolvedMode };
       }
     }
 
-    // XCUITest's typeText emits keyboard input and replaces the active selection.
-    // That gives iOS equivalent behavior for every delivery mode even though the
-    // runner does not expose Android's ACTION_SET_TEXT/event split.
+    // iOS has one text-delivery mechanism: XCUITest typeText. Preserve the
+    // requested cross-platform mode in metadata, but report the actual mechanism.
     const result = await this.textClient.insert(text);
     if (!result.success) {
-      return result;
+      return {
+        ...(operation === "replace" ? markPartialAfterMutation(result) : result),
+        resolvedMode,
+      };
     }
-    return { success: true };
+    return { success: true, resolvedMode };
   }
 
   private async executeAndroidType(
     text: string,
     operation: SendKeysOperation,
-    mode: ResolvedSendKeysTypingMode,
+    mode: AndroidSendKeysTypingMode,
     signal?: AbortSignal,
   ): Promise<TextActionResult & { resolvedMode?: ResolvedSendKeysTypingMode }> {
     switch (mode) {
@@ -293,6 +349,11 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return { ...result, resolvedMode: "a11y" };
     }
 
+    const focusResult = await this.requireFocusedAndroidInput(signal);
+    if (!focusResult.success) {
+      return focusResult;
+    }
+
     const prefix = chars.slice(0, split.index).join("");
     const suffix = chars.slice(split.index + 1).join("");
     const initialResult = await this.prepareEventLastPrefix(prefix, operation);
@@ -300,8 +361,16 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return initialResult;
     }
 
-    await this.executeKeyEventPlan(split.plan, signal);
-    return suffix ? this.textClient.insert(suffix) : { success: true };
+    const eventFailure = await this.executeKeyEventPlanSafely(
+      split.plan,
+      operation === "replace" || prefix.length > 0,
+      signal,
+    );
+    if (eventFailure) {
+      return eventFailure;
+    }
+    const suffixResult = suffix ? await this.textClient.insert(suffix) : { success: true };
+    return markPartialAfterMutation(suffixResult);
   }
 
   private async findLastKeyEvent(
@@ -344,22 +413,33 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       return { ...result, resolvedMode: "a11y" };
     }
 
+    const focusResult = await this.requireFocusedAndroidInput(signal);
+    if (!focusResult.success) {
+      return focusResult;
+    }
+
     const clearResult = await this.clearForReplace(operation);
     if (!clearResult.success) {
       return clearResult;
     }
-    return this.executeAndroidEventAllCharacters(chars, signal);
+    return this.executeAndroidEventAllCharacters(chars, operation === "replace", signal);
   }
 
   private async executeAndroidEventAllCharacters(
     chars: string[],
+    previouslyMutated: boolean,
     signal?: AbortSignal,
   ): Promise<TextActionResult> {
+    let mutated = previouslyMutated;
     for (let index = 0; index < chars.length; index++) {
       signal?.throwIfAborted();
       const plan = await this.getKeyEventPlan(chars[index] ?? "");
       if (plan) {
-        await this.executeKeyEventPlan(plan, signal);
+        const eventFailure = await this.executeKeyEventPlanSafely(plan, mutated, signal);
+        if (eventFailure) {
+          return eventFailure;
+        }
+        mutated = true;
         continue;
       }
 
@@ -370,10 +450,27 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       }
       const insertResult = await this.textClient.insert(unsupportedRun);
       if (!insertResult.success) {
-        return insertResult;
+        return markPartialAfterPriorMutation(insertResult, mutated);
       }
+      mutated = true;
     }
     return { success: true };
+  }
+
+  private async executeKeyEventPlanSafely(
+    plan: KeyEventPlan,
+    previouslyMutated: boolean,
+    signal?: AbortSignal,
+  ): Promise<TextActionResult | undefined> {
+    try {
+      await this.executeKeyEventPlan(plan, signal);
+      return undefined;
+    } catch (error) {
+      signal?.throwIfAborted();
+      logger.warn("[SendKeys] Android key event dispatch failed", error);
+      const failure = { success: false, error: errorMessage(error) };
+      return previouslyMutated ? markPartialAfterMutation(failure) : failure;
+    }
   }
 
   private clearForReplace(operation: SendKeysOperation): Promise<TextActionResult> {
@@ -408,27 +505,41 @@ export class DefaultSendKeysCommandExecutor implements SendKeysCommandExecutor {
       plans.push(plan);
     }
 
-    if (operation === "replace") {
-      const clearResult = await this.clearWithKeyEvents(signal);
-      if (!clearResult.success) {
-        return clearResult;
-      }
+    const focusResult = await this.requireFocusedAndroidInput(signal);
+    if (!focusResult.success) {
+      return focusResult;
     }
 
+    if (operation === "replace") {
+      await clearTextWithKeyEvents(this.adb, getFocusedTextLength(focusResult.hierarchy), signal);
+    }
+
+    let mutated = operation === "replace";
     for (const plan of plans) {
-      await this.executeKeyEventPlan(plan, signal);
+      const eventFailure = await this.executeKeyEventPlanSafely(plan, mutated, signal);
+      if (eventFailure) {
+        return eventFailure;
+      }
+      mutated = true;
     }
     return { success: true };
   }
 
-  private async clearWithKeyEvents(signal?: AbortSignal): Promise<TextActionResult> {
+  private async requireFocusedAndroidInput(
+    signal?: AbortSignal,
+  ): Promise<
+    | { success: true; hierarchy: NonNullable<ObserveResult["viewHierarchy"]> }
+    | { success: false; error: string }
+  > {
     const observation = await this.observer.execute({ signal, skipWaitForFresh: false });
     const hierarchy = observation.viewHierarchy;
     if (!hierarchy || !hasFocusedTextInput(hierarchy)) {
-      return { success: false, error: "eventOnly replace requires a focused editable field" };
+      return {
+        success: false,
+        error: "Android event delivery requires a focused editable field",
+      };
     }
-    await clearTextWithKeyEvents(this.adb, getFocusedTextLength(hierarchy), signal);
-    return { success: true };
+    return { success: true, hierarchy };
   }
 
   private async getKeyEventPlan(char: string): Promise<KeyEventPlan | null> {
@@ -484,6 +595,7 @@ export class SendKeys {
   private readonly executor: SendKeysCommandExecutor;
   private readonly focuser: SendKeysTargetFocuser;
   private readonly observer: SendKeysObserver;
+  private readonly timestampProvider: SendKeysTimestampProvider;
 
   constructor(
     device: BootedDevice,
@@ -491,6 +603,11 @@ export class SendKeys {
     dependencies: SendKeysDependencies = {},
   ) {
     this.observer = dependencies.observer ?? new RealObserveScreen(device, adbFactory);
+    this.timestampProvider =
+      dependencies.timestampProvider ??
+      (device.platform === "android"
+        ? { now: async () => adbFactory.create(device).getDeviceTimestampMs() }
+        : { now: async () => defaultTimer.now() });
     this.executor =
       dependencies.executor ??
       new DefaultSendKeysCommandExecutor(device, adbFactory, this.observer);
@@ -515,11 +632,17 @@ export class SendKeys {
     signal?: AbortSignal,
   ): Promise<SendKeysResult> {
     const focusFailure = await this.focusTarget(selector, signal);
+    const minTimestamp = focusFailure ? undefined : await this.timestampProvider.now();
+    signal?.throwIfAborted();
     const execution = focusFailure
       ? { results: [], failure: focusFailure }
       : await this.executeCommands(commands, progress, signal);
     await progress?.(commands.length, commands.length, "Observing final keyboard input state");
-    const observation = await this.observer.execute({ signal });
+    const observation = await this.observer.execute({
+      signal,
+      skipWaitForFresh: false,
+      minTimestamp,
+    });
     return this.buildResult(execution.results, execution.failure, observation);
   }
 
@@ -625,4 +748,17 @@ export class SendKeys {
 
 function isSemanticKey(key: SendKeysKey): key is SendKeysSemanticKey {
   return (SEND_KEYS_SEMANTIC_KEYS as readonly string[]).includes(key);
+}
+
+function markPartialAfterMutation(result: TextActionResult): TextActionResult {
+  return result.success || result.partialApplication
+    ? result
+    : { ...result, partialApplication: true };
+}
+
+function markPartialAfterPriorMutation(
+  result: TextActionResult,
+  previouslyMutated: boolean,
+): TextActionResult {
+  return previouslyMutated ? markPartialAfterMutation(result) : result;
 }

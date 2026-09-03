@@ -447,12 +447,14 @@ export class VideoRecorderService {
     if (this.activeRecordings.get(active.recordingId) === active && !active.forceStopRequested) {
       this.activeRecordings.delete(active.recordingId);
     }
-    try {
-      await this.removeRecordingArtifacts(active.recordingId, active.outputPath);
-    } catch (cleanupError) {
-      this.log.warn(
-        `[VideoRecorderService] Failed to remove aborted recording directory for ${active.recordingId}: ${String(cleanupError)}`,
-      );
+    if (!active.forceStopRequested) {
+      try {
+        await this.removeRecordingArtifacts(active.recordingId, active.outputPath);
+      } catch (cleanupError) {
+        this.log.warn(
+          `[VideoRecorderService] Failed to remove aborted recording directory for ${active.recordingId}: ${String(cleanupError)}`,
+        );
+      }
     }
     throw error;
   }

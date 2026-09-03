@@ -236,6 +236,44 @@ describe("VideoRecorderService", () => {
     expect(service.listActiveRecordingIds()).toEqual([]);
   });
 
+  test("retains partial artifacts when a non-discard force stop races startup", async () => {
+    let resolveStart: ((handle: (typeof backend.startResults)[number]) => void) | undefined;
+    let startedConfig: Parameters<typeof backend.start>[0] | undefined;
+    let markBackendStarted: (() => void) | undefined;
+    const backendStarted = new Promise<void>((resolve) => {
+      markBackendStarted = resolve;
+    });
+    backend.start = async (config) => {
+      startedConfig = config;
+      await fsPromises.writeFile(config.outputPath, "partial capture");
+      markBackendStarted?.();
+      const handle = await new Promise<(typeof backend.startResults)[number]>((resolve) => {
+        resolveStart = resolve;
+      });
+      backend.startResults.push(handle);
+      return handle;
+    };
+
+    const starting = service.startRecording();
+    await backendStarted;
+    const outputPath = startedConfig!.outputPath;
+
+    const forcing = service.forceStopRecording("rec-1");
+    expect(startedConfig?.abortSignal?.aborted).toBe(true);
+    const handle = {
+      recordingId: "rec-1",
+      outputPath,
+      startedAt: startedConfig!.startedAt,
+    };
+    resolveStart?.(handle);
+
+    await expect(starting).rejects.toThrow("force-stopped while it was starting");
+    await forcing;
+
+    expect(await pathExists(path.dirname(outputPath))).toBe(true);
+    expect(await pathExists(outputPath)).toBe(true);
+  });
+
   test("allows a later graceful stop after a force-stop failure", async () => {
     const recording = await service.startRecording();
     backend.forceStop = async (handle) => {

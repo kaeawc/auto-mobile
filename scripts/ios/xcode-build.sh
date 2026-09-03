@@ -8,12 +8,20 @@ set -e
 
 # Options
 DRY_RUN=false
+# Optional positional args restrict which Xcode projects get built, by name
+# (without the .xcodeproj suffix), mirroring xcode-test.sh's filter (#5102) so CI
+# can shard the build one project per runner. With no names, every project under
+# ios/ is built (legacy behavior).
+REQUESTED_PROJECTS=()
 for arg in "$@"; do
     case "$arg" in
         --dry-run)
             DRY_RUN=true
             ;;
+        --*)
+            ;;
         *)
+            REQUESTED_PROJECTS+=("$arg")
             ;;
     esac
 done
@@ -33,7 +41,8 @@ source "${SCRIPT_DIR}/xcodegen_version.sh"
 # shellcheck source=scripts/ios/local-sim-build-args.sh disable=SC1091
 source "${SCRIPT_DIR}/local-sim-build-args.sh"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-IOS_DIR="${PROJECT_ROOT}/ios"
+# IOS_DIR is overridable (tests point it at a fixture dir); defaults to ios/.
+IOS_DIR="${IOS_DIR:-${PROJECT_ROOT}/ios}"
 
 # On a local arm64 host, build only the arch the simulator runs and skip the
 # index store; empty in CI / on Intel so those keep building universal (#5024).
@@ -46,6 +55,40 @@ echo -e "${CYAN}========================================${NC}"
 echo -e "${CYAN}  Xcode Project Build${NC}"
 echo -e "${CYAN}========================================${NC}"
 echo ""
+
+# Discover Xcode projects up front and apply the optional project-name filter, so
+# a dry run (XCODE_BUILD_DRY_RUN=1) can list the selection without Xcode — that is
+# what test/bats/xcode-build-project-filter.bats pins. Mirrors xcode-test.sh's
+# selection logic (#5102); fail closed on a filter that matches nothing so a
+# sharded CI leg can't silently build zero projects.
+SELECTED_XCODEPROJ_DIRS=()
+while IFS= read -r _xcodeproj; do
+    [ -z "${_xcodeproj}" ] && continue
+    _name="$(basename "${_xcodeproj}" .xcodeproj)"
+    _match=0
+    if [ ${#REQUESTED_PROJECTS[@]} -eq 0 ]; then
+        _match=1
+    else
+        for _want in "${REQUESTED_PROJECTS[@]}"; do
+            [ "${_want}" = "${_name}" ] && _match=1
+        done
+    fi
+    [ "${_match}" -eq 1 ] && SELECTED_XCODEPROJ_DIRS+=("${_xcodeproj}")
+done < <(find "${IOS_DIR}" -name "*.xcodeproj" -type d 2>/dev/null | sort || true)
+
+# An explicit filter that matches nothing is a misconfiguration (e.g. a renamed
+# project), not a reason to pass a gating job with zero projects built.
+if [ ${#REQUESTED_PROJECTS[@]} -ne 0 ] && [ ${#SELECTED_XCODEPROJ_DIRS[@]} -eq 0 ]; then
+    echo "Error: no Xcode project under ${IOS_DIR} matched: ${REQUESTED_PROJECTS[*]}" >&2
+    exit 1
+fi
+
+if [ "${XCODE_BUILD_DRY_RUN:-0}" = "1" ]; then
+    for _xcodeproj in "${SELECTED_XCODEPROJ_DIRS[@]}"; do
+        basename "${_xcodeproj}" .xcodeproj
+    done
+    exit 0
+fi
 
 # Track overall status
 OVERALL_STATUS=0
@@ -159,19 +202,13 @@ elif command -v xcodegen &> /dev/null; then
     echo ""
 fi
 
-# Find all xcodeproj directories using glob (faster than find)
-echo -e "${BLUE}Searching for Xcode projects...${NC}"
-shopt -s nullglob
-XCODEPROJ_ARRAY=("${IOS_DIR}"/*/*.xcodeproj "${IOS_DIR}"/*.xcodeproj)
-shopt -u nullglob
-
-if [ ${#XCODEPROJ_ARRAY[@]} -eq 0 ]; then
+# Build the selected projects (discovery + filtering happened up front).
+if [ ${#SELECTED_XCODEPROJ_DIRS[@]} -eq 0 ]; then
     echo -e "${YELLOW}No Xcode projects found in ${IOS_DIR}${NC}"
     exit 0
 fi
 
-# Build each project
-for xcodeproj in "${XCODEPROJ_ARRAY[@]}"; do
+for xcodeproj in "${SELECTED_XCODEPROJ_DIRS[@]}"; do
     PROJECT_NAME=$(basename "${xcodeproj}" .xcodeproj)
 
     echo -e "  Building ${PROJECT_NAME}..."

@@ -1767,7 +1767,7 @@ jobs:
         run: ./scripts/ios/swift-test.sh
 
   ios-xcode-build:
-    name: "Build Xcode Projects (${{ matrix.config.name }})"
+    name: "Build Xcode Projects (${{ matrix.config.name }}, ${{ matrix.project }})"
     runs-on: ${{ matrix.config.runner }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
@@ -1781,6 +1781,16 @@ jobs:
         # PR runs only the primary Xcode toolchain; full sweep runs on nightly.yml.
         config:
           - { name: "Xcode 26.5", runner: "macos-26", xcode: "26.5" }
+        # Shard the two Xcode projects across two runners so they build in
+        # parallel, halving this required leg's wall time. The "iOS Build" gate
+        # reads needs.ios-xcode-build.result, which aggregates the whole matrix
+        # (green only if every shard is green), so the gate needs no change. Costs
+        # one extra concurrent macOS slot per PR — offset by moving the Playground
+        # tests to CircleCI (see .circleci/continue_config.yml). Names must match
+        # the generated <name>.xcodeproj basenames passed to xcode-build.sh.
+        project:
+          - Playground
+          - CtrlProxy
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1802,41 +1812,14 @@ jobs:
         uses: ./.github/actions/ensure-ios-simulator-runtime
 
       - name: "Build Xcode Projects"
-        run: ./scripts/ios/xcode-build.sh
+        run: ./scripts/ios/xcode-build.sh ${{ matrix.project }}
 
-  # Runs the Playground PlaygroundTests target (design-system colour/contrast/
-  # typography/shape tests, #5102) via xcode-test.sh, scoped to "Playground" so
-  # the heavier CtrlProxy tests (covered by ios-xctest-runner-simulator-tests)
-  # are not double-run. Simulator-based, so it feeds the non-required "iOS" gate
-  # (not the deterministic "iOS Build" gate) — matching the repo policy that
-  # simulator tests must not gate merges.
-  ios-playground-tests:
-    name: "iOS Playground Tests (${{ matrix.config.name }})"
-    runs-on: ${{ matrix.config.runner }}
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ios_should_run == 'true'
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        config:
-          - { name: "Xcode 26.5", runner: "macos-26", xcode: "26.5" }
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Select Xcode ${{ matrix.config.xcode }}"
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ matrix.config.xcode }}
-
-      - name: "Ensure iOS Simulator runtime"
-        uses: ./.github/actions/ensure-ios-simulator-runtime
-
-      - name: "Run Playground Tests"
-        run: ./scripts/ios/xcode-test.sh Playground
+  # The Playground design-system tests (colour/contrast/typography/shape, #5102)
+  # ran here on macOS as "iOS Playground Tests". They were moved to CircleCI
+  # (.circleci/continue_config.yml → ios-playground-tests) to free a concurrent
+  # GitHub macOS slot for the sharded build lanes above. They remain advisory —
+  # simulator tests must not gate merges — so the CircleCI check stays off the
+  # required-status list, and this gate no longer references them.
 
   ios-xctest-runner-simulator-tests:
     name: "XCTestRunner Simulator Tests"
@@ -3255,11 +3238,12 @@ jobs:
     timeout-minutes: 10
     name: "iOS"
     if: always() && needs.detect-changes.outputs.auto_chore != 'true'
+    # ios-playground-tests moved to CircleCI (advisory), so it is intentionally
+    # not part of this roll-up any more.
     needs:
       - detect-changes
       - ios-build-gate
       - ios-xctest-runner-simulator-tests
-      - ios-playground-tests
       - ios-spm-root-package-build
     runs-on: ubuntu-latest
     steps:
@@ -3269,7 +3253,6 @@ jobs:
             "${{ needs.detect-changes.result }}" \
             "${{ needs.ios-build-gate.result }}" \
             "${{ needs.ios-xctest-runner-simulator-tests.result }}" \
-            "${{ needs.ios-playground-tests.result }}" \
             "${{ needs.ios-spm-root-package-build.result }}" \
           )
           for r in "${results[@]}"; do

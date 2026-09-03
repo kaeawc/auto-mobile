@@ -6,6 +6,8 @@ import dev.jasonpearson.automobile.protocol.WebSocketFrameDirection
 import dev.jasonpearson.automobile.protocol.WebSocketFrameType
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
@@ -13,20 +15,33 @@ import okhttp3.Request
 import okhttp3.WebSocket
 import okio.ByteString
 import okio.ByteString.Companion.encodeUtf8
+import org.junit.After
 import org.junit.Test
 
 class AutoMobileWebSocketTest {
+  private var bufferExecutor: ScheduledExecutorService? = null
+
+  @After
+  fun tearDown() {
+    bufferExecutor?.shutdownNow()
+  }
 
   private fun collectingBuffer(): Pair<SdkEventBuffer, MutableList<SdkEvent>> {
     val events = mutableListOf<SdkEvent>()
+    val executor = Executors.newSingleThreadScheduledExecutor()
     val buffer =
       SdkEventBuffer(
         maxBufferSize = 1,
         flushIntervalMs = 60_000,
         onFlush = { events.addAll(it) },
-        executor = Executors.newSingleThreadScheduledExecutor(),
+        executor = executor,
       )
+    bufferExecutor = executor
     return buffer to events
+  }
+
+  private fun drainDelivery() {
+    bufferExecutor!!.submit {}.get(1, TimeUnit.SECONDS)
   }
 
   @Test
@@ -45,6 +60,7 @@ class AutoMobileWebSocketTest {
 
     assertTrue(webSocket.send("hé"))
 
+    drainDelivery()
     val event = events.single() as SdkWebSocketFrameEvent
     assertEquals(WebSocketFrameDirection.SENT, event.direction)
     assertEquals(WebSocketFrameType.TEXT, event.frameType)
@@ -72,6 +88,7 @@ class AutoMobileWebSocketTest {
 
     assertFalse(webSocket.send(bytes))
 
+    drainDelivery()
     val event = events.single() as SdkWebSocketFrameEvent
     assertEquals(WebSocketFrameType.BINARY, event.frameType)
     assertEquals(bytes.size.toLong(), event.payloadSize)
@@ -97,6 +114,7 @@ class AutoMobileWebSocketTest {
     assertFalse(webSocket.send("blocked"))
 
     assertTrue(delegate.textSends.isEmpty())
+    drainDelivery()
     val event = events.single() as SdkWebSocketFrameEvent
     assertEquals(WebSocketFrameDirection.SENT, event.direction)
     assertEquals(WebSocketFrameType.TEXT, event.frameType)
@@ -120,6 +138,7 @@ class AutoMobileWebSocketTest {
     assertTrue(webSocket.close(1000, "adiós"))
 
     assertEquals(1000 to "adiós", delegate.closeCalls.single())
+    drainDelivery()
     val event = events.single() as SdkWebSocketFrameEvent
     assertEquals(WebSocketFrameType.CLOSE, event.frameType)
     assertEquals(6L, event.payloadSize)
@@ -151,6 +170,7 @@ class AutoMobileWebSocketTest {
     listener.onMessage(delegate, "received")
     webSocket.send("sent")
 
+    drainDelivery()
     assertEquals(
       listOf(connectionId, connectionId),
       events.map { (it as SdkWebSocketFrameEvent).connectionId },

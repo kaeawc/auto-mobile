@@ -7,9 +7,12 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import org.junit.Test
 
 class SdkEventBufferTest {
@@ -23,6 +26,34 @@ class SdkEventBufferTest {
   /** Wait for any pending tasks on the executor to complete. */
   private fun drainExecutor(executor: ScheduledExecutorService) {
     executor.submit {}.get(1, TimeUnit.SECONDS)
+  }
+
+  private class TimerGatedExecutor : ScheduledThreadPoolExecutor(1) {
+    private val timerStarted = CountDownLatch(1)
+    private val allowTimer = CountDownLatch(1)
+
+    override fun scheduleAtFixedRate(
+      command: Runnable,
+      initialDelay: Long,
+      period: Long,
+      unit: TimeUnit,
+    ) =
+      super.scheduleAtFixedRate(
+        {
+          timerStarted.countDown()
+          allowTimer.await()
+          command.run()
+        },
+        initialDelay,
+        period,
+        unit,
+      )
+
+    fun awaitTimerStart(): Boolean = timerStarted.await(1, TimeUnit.SECONDS)
+
+    fun releaseTimer() {
+      allowTimer.countDown()
+    }
   }
 
   @Test
@@ -45,6 +76,85 @@ class SdkEventBufferTest {
     drainExecutor(executor) // capacity flush is async
     assertEquals(1, flushed.size, "Should flush at capacity")
     assertEquals(3, flushed[0].size)
+  }
+
+  @Test
+  fun `capacity delivery runs on executor without blocking caller`() {
+    val executorThreadName = "SdkEventBuffer-test-executor"
+    val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
+      Thread(runnable, executorThreadName)
+    }
+    val deliveryStarted = CountDownLatch(1)
+    val releaseDelivery = CountDownLatch(1)
+    val addReturned = CountDownLatch(1)
+    val flushThread = AtomicReference<String>()
+    val buffer =
+      SdkEventBuffer(
+        maxBufferSize = 1,
+        flushIntervalMs = 60_000,
+        onFlush = {
+          flushThread.set(Thread.currentThread().name)
+          deliveryStarted.countDown()
+          releaseDelivery.await()
+        },
+        executor = executor,
+      )
+    val caller =
+      Thread(
+        {
+          buffer.add(makeEvent(1))
+          addReturned.countDown()
+        },
+        "SDK host caller",
+      )
+
+    try {
+      caller.start()
+      assertTrue(deliveryStarted.await(1, TimeUnit.SECONDS), "Delivery should begin")
+      assertTrue(
+        addReturned.await(100, TimeUnit.MILLISECONDS),
+        "add() should not wait for delivery",
+      )
+      assertEquals(executorThreadName, flushThread.get())
+    } finally {
+      releaseDelivery.countDown()
+      caller.join(1_000)
+      executor.shutdownNow()
+    }
+  }
+
+  @Test
+  fun `capacity and timer delivery retain event order and ownership`() {
+    val executor = TimerGatedExecutor()
+    val deliveries = CopyOnWriteArrayList<List<SdkEvent>>()
+    val delivered = CountDownLatch(2)
+    val buffer =
+      SdkEventBuffer(
+        maxBufferSize = 2,
+        flushIntervalMs = 1,
+        onFlush = {
+          deliveries.add(ArrayList(it))
+          delivered.countDown()
+        },
+        executor = executor,
+      )
+
+    try {
+      buffer.start()
+      assertTrue(executor.awaitTimerStart(), "Timer task should be pending")
+
+      buffer.add(makeEvent(1))
+      buffer.add(makeEvent(2))
+      buffer.add(makeEvent(3))
+      executor.releaseTimer()
+
+      assertTrue(delivered.await(1, TimeUnit.SECONDS), "Both batches should be delivered")
+      assertEquals(listOf(1L, 2L, 3L), deliveries.flatten().map { it.timestamp })
+    } finally {
+      executor.releaseTimer()
+      buffer.shutdown()
+      executor.shutdownNow()
+    }
   }
 
   @Test
@@ -84,20 +194,79 @@ class SdkEventBufferTest {
   @Test
   fun `shutdown flushes remaining events`() {
     val flushed = mutableListOf<List<SdkEvent>>()
+    val executorThreadName = "SdkEventBuffer-shutdown-executor"
+    val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
+      Thread(runnable, executorThreadName)
+    }
+    val flushThread = AtomicReference<String>()
     val buffer =
       SdkEventBuffer(
         maxBufferSize = 100,
         flushIntervalMs = 60_000,
-        onFlush = { flushed.add(it) },
-        executor = Executors.newSingleThreadScheduledExecutor(),
+        onFlush = {
+          flushThread.set(Thread.currentThread().name)
+          flushed.add(it)
+        },
+        executor = executor,
       )
 
     buffer.add(makeEvent(1))
     buffer.add(makeEvent(2))
     buffer.shutdown()
 
+    assertTrue(
+      executor.awaitTermination(1, TimeUnit.SECONDS),
+      "Shutdown should drain queued delivery",
+    )
     assertEquals(1, flushed.size)
     assertEquals(2, flushed[0].size)
+    assertEquals(executorThreadName, flushThread.get())
+  }
+
+  @Test
+  fun `shutdown drains queued capacity and pending batches on executor`() {
+    val executorThreadName = "SdkEventBuffer-shutdown-drain-executor"
+    val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
+      Thread(runnable, executorThreadName)
+    }
+    val deliveryStarted = CountDownLatch(1)
+    val releaseDelivery = CountDownLatch(1)
+    val deliveries = CopyOnWriteArrayList<List<SdkEvent>>()
+    val deliveryThreads = CopyOnWriteArrayList<String>()
+    val buffer =
+      SdkEventBuffer(
+        maxBufferSize = 2,
+        flushIntervalMs = 60_000,
+        onFlush = { events ->
+          deliveries.add(ArrayList(events))
+          deliveryThreads.add(Thread.currentThread().name)
+          if (events.first().timestamp == 1L) {
+            deliveryStarted.countDown()
+            releaseDelivery.await()
+          }
+        },
+        executor = executor,
+      )
+
+    try {
+      buffer.add(makeEvent(1))
+      buffer.add(makeEvent(2))
+      assertTrue(deliveryStarted.await(1, TimeUnit.SECONDS), "Capacity delivery should be queued")
+
+      buffer.add(makeEvent(3))
+      buffer.shutdown()
+      releaseDelivery.countDown()
+
+      assertTrue(
+        executor.awaitTermination(1, TimeUnit.SECONDS),
+        "Shutdown should drain both batches",
+      )
+      assertEquals(listOf(1L, 2L, 3L), deliveries.flatten().map { it.timestamp })
+      assertEquals(listOf(executorThreadName, executorThreadName), deliveryThreads)
+    } finally {
+      releaseDelivery.countDown()
+      executor.shutdownNow()
+    }
   }
 
   @Test

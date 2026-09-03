@@ -53,7 +53,7 @@ internal class SdkEventBuffer(
             // Backstop: any exception escaping the periodic task cancels all future
             // runs (the scheduleAtFixedRate contract). Per-batch errors are already
             // accounted inside deliverBatch; swallow here so the timer survives (#3605).
-            { runCatching { flush() } },
+            { runCatching { enqueueFlush() } },
             flushIntervalMs,
             flushIntervalMs,
             TimeUnit.MILLISECONDS,
@@ -88,10 +88,12 @@ internal class SdkEventBuffer(
       }
     }
 
-    val shouldFlush: Boolean
-    val snapshot: List<SdkEvent>
-
     lock.withLock {
+      if (isShutdown) {
+        dropCounter?.increment(DropReason.SHUTDOWN)
+        return
+      }
+
       if (buffer.size >= maxPendingEvents) {
         when (backPressureStrategy) {
           BackPressureStrategy.DROP_OLDEST -> {
@@ -107,17 +109,10 @@ internal class SdkEventBuffer(
 
       buffer.add(current)
       if (buffer.size >= maxBufferSize) {
-        snapshot = ArrayList(buffer)
+        val snapshot = ArrayList(buffer)
         buffer.clear()
-        shouldFlush = true
-      } else {
-        snapshot = emptyList()
-        shouldFlush = false
+        submitDelivery(snapshot)
       }
-    }
-
-    if (shouldFlush) {
-      deliverBatch(snapshot)
     }
   }
 
@@ -136,17 +131,41 @@ internal class SdkEventBuffer(
 
   /** Submit a task to run on the buffer's background executor. */
   fun execute(task: Runnable) {
-    if (!isShutdown) {
-      executor.execute(task)
+    lock.withLock {
+      if (!isShutdown) {
+        executor.execute(task)
+      }
     }
   }
 
   /** Shutdown the buffer, flushing remaining events. */
   fun shutdown() {
-    isShutdown = true
-    flushTask?.cancel(false)
-    flush()
+    lock.withLock {
+      if (isShutdown) return
+      isShutdown = true
+      flushTask?.cancel(false)
+      if (buffer.isNotEmpty()) {
+        val snapshot = ArrayList(buffer)
+        buffer.clear()
+        submitDelivery(snapshot)
+      }
+    }
     executor.shutdown()
+  }
+
+  /** Snapshot and queue pending events from the periodic executor. */
+  private fun enqueueFlush() {
+    lock.withLock {
+      if (isShutdown || buffer.isEmpty()) return
+      val snapshot = ArrayList(buffer)
+      buffer.clear()
+      submitDelivery(snapshot)
+    }
+  }
+
+  /** Queue delivery while holding [lock] to preserve snapshot submission order. */
+  private fun submitDelivery(events: List<SdkEvent>) {
+    executor.execute { deliverBatch(events) }
   }
 
   private fun deliverBatch(events: List<SdkEvent>) {

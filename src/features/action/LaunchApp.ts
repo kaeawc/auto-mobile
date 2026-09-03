@@ -1070,6 +1070,10 @@ export class LaunchApp extends BaseVisualChange {
     observation: ObserveResult,
     expectedPackageName: string,
   ): boolean {
+    if (observation.freshness?.isFresh === false || observation.freshness?.verified === false) {
+      return false;
+    }
+
     if (this.isLaunchPermissionDialogObservation(observation)) {
       return true;
     }

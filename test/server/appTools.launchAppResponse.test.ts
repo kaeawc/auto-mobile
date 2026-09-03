@@ -66,6 +66,26 @@ describe("buildLaunchAppResponse", () => {
     expect(payload.success).toBe(true);
   });
 
+  test("omits verification when a matching observation is marked unverified", () => {
+    const result: LaunchAppResult = {
+      success: true,
+      packageName: "com.android.settings",
+      observation: {
+        ...observationForApp("com.android.settings"),
+        freshness: {
+          isFresh: false,
+          verified: false,
+          warning: "Observed hierarchy contains only Android status-bar content",
+        },
+      },
+    };
+
+    const payload = buildLaunchAppResponse("com.android.settings", result);
+
+    expect(payload.verified).toBeUndefined();
+    expect(payload.message).toBe("Launched app com.android.settings");
+  });
+
   // A successful launch that lands on an accepted surface (e.g. a notification
   // permission dialog, whose foreground is the permission controller) must not
   // emit a misleading verified:false — execute already returns success:false for a

@@ -496,6 +496,110 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(result.freshness?.verified).toBe(true);
   });
 
+  test("retracts freshness for a system-UI hierarchy confined to the status bar", async () => {
+    // Regression for #5981: after in-app navigation, CtrlProxy can report the
+    // active status-bar window while Settings remains the resumed activity.
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+      packageName: "com.android.systemui",
+      foregroundActivity: "com.android.settings/.SubSettings",
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+          node: [{ text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } }],
+        },
+      },
+    } as any);
+
+    const fakeAdb = new FakeAdbExecutor();
+    fakeAdb.setForegroundApp({ packageName: "com.android.settings", userId: 0 });
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(fakeAdb),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.warning).toContain("status-bar");
+    expect(result.freshness?.warning).toContain("com.android.settings");
+    expect(result.freshness?.warning).toContain(
+      'pressButton { platform: "android", button: "home" }',
+    );
+  });
+
+  test("uses the confirmed foreground for a status-bar-only hierarchy after transition", async () => {
+    const now = 1_700_000_000_000;
+    const timer = new FakeTimer();
+    timer.setCurrentTime(now);
+
+    const viewHierarchy = new FakeViewHierarchy();
+    viewHierarchy.configureHierarchy({
+      updatedAt: now,
+      receivedAt: now,
+      fresh: true,
+      screenWidth: 1080,
+      screenHeight: 2400,
+      systemInsets: { top: 63, right: 0, bottom: 0, left: 0 },
+      ctrlProxyIncomplete: true,
+      hierarchy: {
+        node: {
+          bounds: { left: 0, top: 0, right: 1080, bottom: 63 },
+          node: [{ text: "12:34", bounds: { left: 21, top: 0, right: 107, bottom: 63 } }],
+        },
+      },
+    } as any);
+
+    const foregrounds = [
+      { packageName: "com.android.calendar", userId: 0 },
+      { packageName: "com.android.settings", userId: 0 },
+    ];
+    class TransitioningForegroundAdb extends FakeAdbExecutor {
+      async getForegroundApp(): Promise<{ packageName: string; userId: number } | null> {
+        return foregrounds.shift() ?? { packageName: "com.android.settings", userId: 0 };
+      }
+    }
+
+    const screen = new RealObserveScreen(
+      androidDevice,
+      new FakeAdbClientFactory(new TransitioningForegroundAdb()),
+      {
+        viewHierarchy,
+        cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+        performanceAuditor: { run: async () => undefined } as any,
+        accessibilityAuditor: { run: async () => undefined } as any,
+        accessibilityStateDetector: { run: async () => undefined } as any,
+      },
+      timer,
+    );
+
+    const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+    expect(result.freshness?.isFresh).toBe(false);
+    expect(result.freshness?.verified).toBe(false);
+    expect(result.freshness?.warning).toContain("com.android.settings");
+  });
+
   test("a transient app transition is not flagged: the confirming read settles onto the observed app", async () => {
     // The parallel foreground sample lags the newer captured hierarchy during an
     // A→B transition: sample1 = the old app, observed hierarchy = the new app.

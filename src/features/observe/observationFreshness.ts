@@ -78,6 +78,12 @@ export interface FreshnessInputs {
    */
   windowIdentityMismatch?: { observed: string; foreground: string };
   /**
+   * The hierarchy contains only status-bar content while a non-system app is resumed. This is a
+   * device-side wrong-window capture even when System UI would normally be a legitimate
+   * accessibility window.
+   */
+  statusBarOnlyHierarchy?: { foreground: string };
+  /**
    * ADB and CtrlProxy disagree about the current activity within the same
    * application, and a forced recapture could not safely reconcile them.
    */
@@ -174,6 +180,16 @@ function resolveIdentityMismatch(
       warning: `Observed hierarchy is from ${observed}, but the device's current top resumed activity is ${foreground}. This is a stale wrong-window capture; it was not verified against the foreground app. The runner is serving a stale window; call pressButton { platform: "android", button: "home" } (or relaunch the target app) and observe again.`,
     };
   }
+  if (inputs.statusBarOnlyHierarchy) {
+    return {
+      requestedAfter,
+      actualTimestamp,
+      ageMs,
+      verified: false,
+      isFresh: false,
+      warning: `Observed hierarchy contains only Android status-bar content while the device's current top resumed activity is ${inputs.statusBarOnlyHierarchy.foreground}. This is a stale wrong-window capture; it was not verified against the foreground app. The runner is serving a stale window; call pressButton { platform: "android", button: "home" } (or relaunch the target app) and observe again.`,
+    };
+  }
   if (inputs.activityAttributionMismatch) {
     return {
       requestedAfter,
@@ -212,9 +228,8 @@ export function computeFreshness(inputs: FreshnessInputs): FreshnessVerdict {
     };
   }
 
-  // An app- or activity-level identity split dominates every other signal: a
-  // client must not treat the tree as verified while its attribution is known
-  // to be inconsistent (issues #5867 and #5992).
+  // An app-, activity-, or content-level identity split dominates every other signal: a
+  // client must not treat the tree as verified while its attribution is known to be inconsistent.
   const identityMismatch = resolveIdentityMismatch(inputs, ageMs);
   if (identityMismatch) {
     return identityMismatch;

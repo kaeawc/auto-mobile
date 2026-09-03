@@ -204,6 +204,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     // Track whether the accessibility service hierarchy is incomplete
     // This happens when active windows have null roots or only system UI is accessible
     var activeWindowHasNullRoot = false
+    var primaryAppWindowHasNullRoot = false
     var hasApplicationWindow = false
 
     // Prefer the focused application window to an active system window. When the IME owns focus,
@@ -215,6 +216,13 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       try {
         val rootNode = window.root
         if (rootNode == null) {
+          if (window.id == primaryAppWindowId) {
+            Log.w(
+              TAG,
+              "[HIERARCHY-DEBUG] Primary application window ${window.id} has null root node - accessibility service incomplete",
+            )
+            primaryAppWindowHasNullRoot = true
+          }
           if (window.isActive) {
             Log.w(
               TAG,
@@ -321,8 +329,15 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       }
     }
 
-    // Fallback to activeWindowRoot if no active window found in window list
-    if (mainHierarchy == null && activeWindowRoot != null) {
+    // Fallback to activeWindowRoot when it can still recover application content. When the
+    // selected app has no root, rootInActiveWindow can be the active system status bar, which is
+    // not a substitute for application content.
+    if (
+      mainHierarchy == null &&
+        activeWindowRoot != null &&
+        (!primaryAppWindowHasNullRoot ||
+          activeWindowRoot.packageName?.toString()?.let { it != "com.android.systemui" } == true)
+    ) {
       val element =
         extractNodeInfo(
           activeWindowRoot,
@@ -426,14 +441,17 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     // Determine if the accessibility service hierarchy is incomplete
     // This happens when:
     // 1. An active window has a null root (app restricts accessibility access)
-    // 2. Only system UI windows were successfully extracted (no app windows accessible)
+    // 2. The selected application window has a null root
+    // 3. Only system UI windows were successfully extracted (no app windows accessible)
     val isSystemUiForeground = mainPackageName == "com.android.systemui"
     val ctrlProxyIncomplete =
-      activeWindowHasNullRoot || (!hasApplicationWindow && !isSystemUiForeground)
+      activeWindowHasNullRoot ||
+        primaryAppWindowHasNullRoot ||
+        (!hasApplicationWindow && !isSystemUiForeground)
     if (ctrlProxyIncomplete) {
       Log.w(
         TAG,
-        "[HIERARCHY-DEBUG] Accessibility service incomplete: activeWindowHasNullRoot=$activeWindowHasNullRoot, hasApplicationWindow=$hasApplicationWindow",
+        "[HIERARCHY-DEBUG] Accessibility service incomplete: activeWindowHasNullRoot=$activeWindowHasNullRoot, primaryAppWindowHasNullRoot=$primaryAppWindowHasNullRoot, hasApplicationWindow=$hasApplicationWindow",
       )
     }
 
@@ -677,9 +695,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
   /**
    * Selects the window id hierarchy extraction should treat as the "primary" user-facing window.
-   * Prefers a focused application window. When the IME owns focus, falls back to the topmost
-   * application window with a root. Returns null when neither condition applies so callers can
-   * retain the active-window fallback for genuine system UI.
+   * Prefers a focused application window even when its root is temporarily unavailable. When the
+   * IME owns focus, falls back to the topmost application window with a root. Returns null when
+   * neither condition applies so callers can retain the active-window fallback for genuine system
+   * UI.
    *
    * Android can mark a system window active while the foreground application is focused, and marks
    * the IME active/focused while the keyboard is showing. In either case, relying on
@@ -718,11 +737,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     var topAppId: Int? = null
     var topAppLayer = Int.MIN_VALUE
     for (w in windows) {
-      if (!w.hasRoot) continue
       when (w.type) {
-        AccessibilityWindowInfo.TYPE_INPUT_METHOD -> hasIme = true
+        AccessibilityWindowInfo.TYPE_INPUT_METHOD -> if (w.hasRoot) hasIme = true
         AccessibilityWindowInfo.TYPE_APPLICATION -> {
-          if (w.layer > topAppLayer) {
+          if (w.hasRoot && w.layer > topAppLayer) {
             topAppLayer = w.layer
             topAppId = w.id
           }

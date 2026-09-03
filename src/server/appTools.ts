@@ -134,6 +134,18 @@ export function resetCrashAppToolDependencies(): void {
   crashAppToolDependencies = null;
 }
 
+function isVerifiedLaunchObservation(
+  appId: string,
+  observedAppId: string | undefined,
+  observation: LaunchAppResult["observation"],
+): boolean {
+  return (
+    observedAppId === appId &&
+    observation?.freshness?.isFresh !== false &&
+    observation?.freshness?.verified !== false
+  );
+}
+
 /**
  * Build the launchApp tool response from a {@link LaunchAppResult}, enforcing the
  * launch postcondition instead of reporting a flat "Launched app X" success
@@ -160,13 +172,13 @@ export function buildLaunchAppResponse(appId: string, result: LaunchAppResult) {
   // the hierarchy (active window absent) still reports the observed app.
   const observedAppId =
     result.observation?.activeWindow?.appId ?? result.observation?.viewHierarchy?.packageName;
-  // Only assert verification on an exact foreground match. `LaunchApp.execute`
-  // returns `success:true` only when the foreground reconciles with the request —
-  // an exact match, an accepted surface (e.g. a notification-permission dialog
-  // whose foreground is the permission controller), or no observation at all — so
-  // a non-matching `observedAppId` here is such an accepted surface, not a failed
-  // launch. Emit `verified` as true-or-undefined; never a misleading `false`.
-  const verified = observedAppId === appId ? true : undefined;
+  // Only assert verification on an exact foreground match with a fresh, verified
+  // observation. `LaunchApp.execute` retries an unverified observation, but this
+  // response-level guard preserves the true-or-undefined contract for any direct
+  // caller that supplies one.
+  const verified = isVerifiedLaunchObservation(appId, observedAppId, result.observation)
+    ? true
+    : undefined;
 
   return {
     message: verified ? `Launched app ${appId} (foreground verified)` : `Launched app ${appId}`,

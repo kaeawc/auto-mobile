@@ -578,6 +578,28 @@ describe("LaunchApp", () => {
     ).toBe(true);
   });
 
+  test("re-observes when a matching launch observation is marked unverified", async () => {
+    fakeTimer.enableAutoAdvance();
+    const unverifiedObservation = {
+      ...createObserveResult(packageName),
+      freshness: {
+        isFresh: false,
+        verified: false,
+        warning: "Observed hierarchy contains only Android status-bar content",
+      },
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", { stdout: "0\n", stderr: "" });
+    fakeObserveScreen.setObserveResult(unverifiedObservation);
+
+    const result = await launchApp.execute(packageName, false, false);
+
+    expect(result.success).toBe(false);
+    expect(result.observation).toBeUndefined();
+    expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+
   test("treats Android notification permission dialogs as valid launch observations", async () => {
     fakeTimer.enableAutoAdvance();
     const permissionControllerPackageName = "com.google.android.permissioncontroller";

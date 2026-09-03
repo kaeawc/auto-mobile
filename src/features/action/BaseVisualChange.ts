@@ -43,6 +43,7 @@ interface ObservedChangeOptions {
   observationTimestampProvider?: () => number | undefined;
   overrideMinTimestamp?: number;
   signal?: AbortSignal;
+  deferPredictionOutcome?: boolean;
   predictionContext?: {
     toolName: string;
     toolArgs: Record<string, any>;
@@ -57,6 +58,10 @@ export class BaseVisualChange {
   observeScreen: ObserveScreen;
   window: Window;
   private predictionAnalyzer: PredictionAnalyzer;
+  private deferredPredictionOutcomes = new WeakMap<
+    object,
+    (observation: ObserveResult) => Promise<void>
+  >();
   protected timer: Timer;
 
   /**
@@ -254,9 +259,18 @@ export class BaseVisualChange {
       gfxMetrics,
       perf,
       actionStartTime: options.overrideMinTimestamp ?? observationStartTime,
-      predictionContext,
+      predictionContext: options.deferPredictionOutcome ? undefined : predictionContext,
       signal: options.signal,
     });
+    if (options.deferPredictionOutcome && predictionContext && typeof observed === "object") {
+      this.deferredPredictionOutcomes.set(observed, async (finalObservation) => {
+        await this.predictionAnalyzer.recordOutcomeForAction(
+          previousObserveResult,
+          finalObservation,
+          predictionContext,
+        );
+      });
+    }
     this.annotateDeviceLock(observed, previousObserveResult);
     return observed;
   }
@@ -281,6 +295,25 @@ export class BaseVisualChange {
     result.deviceLock = lock;
     result.deviceLockWarning = BaseVisualChange.buildDeviceLockWarning(lock);
     logger.warn(`[BaseVisualChange] ${result.deviceLockWarning}`);
+  }
+
+  /**
+   * Record a deferred prediction outcome after a subclass replaces the initial
+   * post-action observation with a later, more representative observation.
+   */
+  protected async recordDeferredPredictionOutcome(
+    result: unknown,
+    finalObservation: ObserveResult,
+  ): Promise<void> {
+    if (!result || typeof result !== "object") {
+      return;
+    }
+    const recordOutcome = this.deferredPredictionOutcomes.get(result);
+    if (!recordOutcome) {
+      return;
+    }
+    this.deferredPredictionOutcomes.delete(result);
+    await recordOutcome(finalObservation);
   }
 
   private static buildDeviceLockWarning(lock: DeviceLockState): string {

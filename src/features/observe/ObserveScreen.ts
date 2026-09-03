@@ -995,7 +995,7 @@ export class RealObserveScreen implements ObserveScreen {
       source: "unavailable",
       units: "unknown",
     };
-    result.wakefulness = hierarchy.wakefulness;
+    result.wakefulness = hierarchy.wakefulness ?? result.wakefulness;
     result.intentChooserDetected = hierarchy.intentChooserDetected;
     result.notificationPermissionDetected = hierarchy.notificationPermissionDetected;
     result.focusedElement = this.viewHierarchy.findFocusedElement(hierarchy) ?? undefined;

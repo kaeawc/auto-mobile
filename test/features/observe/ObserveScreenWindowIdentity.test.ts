@@ -343,6 +343,7 @@ describe("ObserveScreen window-identity freshness (issue #5867)", () => {
     expect(viewHierarchy.getCalls()[1]?.minTimestamp).toBe(now + 1);
     expect(result.activeWindow?.activityName).toBe("com.android.settings.SubSettings");
     expect(result.viewHierarchy?.hierarchy.node.node?.[0]?.text).toBe("Connected devices");
+    expect(result.wakefulness).toBe("Awake");
   });
 
   test("uses the adb task owner for an activity outside its package namespace", async () => {

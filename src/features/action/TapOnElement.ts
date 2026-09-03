@@ -594,7 +594,7 @@ export class TapOnElement extends BaseVisualChange {
       },
     );
     const effect = this.deriveTapEffect(previousObservation, effectObservation.observation);
-    if (!effectObservation.matched) {
+    if (!effectObservation.matched && effect?.screenChanged !== true) {
       return { effect, observation: currentObservation };
     }
     return {
@@ -1721,6 +1721,7 @@ export class TapOnElement extends BaseVisualChange {
           progress,
           perf,
           signal,
+          deferPredictionOutcome: true,
           predictionContext: {
             toolName: "tapOn",
             toolArgs: {
@@ -1750,6 +1751,7 @@ export class TapOnElement extends BaseVisualChange {
         // The observation that established the effect must be returned and become
         // the caller's diff baseline, rather than the earlier source capture.
         result.observation = postTap.observation;
+        await this.recordDeferredPredictionOutcome(result, result.observation);
         const selectedElements = await this.selectionStateTracker.finalize({
           action: options.action,
           selectionState: selectionCapture,

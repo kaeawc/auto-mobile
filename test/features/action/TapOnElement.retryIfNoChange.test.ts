@@ -256,6 +256,42 @@ describe("deriveTapEffect", () => {
     expect(postTap.observation).toEqual(destination);
   });
 
+  test("keeps a changed observation when Android polling ends unmatched", async () => {
+    const stale = makeObservation({
+      activeWindow: {
+        appId: "com.android.settings",
+        activityName: ".SettingsHomepageActivity",
+        layoutSeqSum: 0,
+      },
+    });
+    const destination = makeObservation({
+      activeWindow: {
+        appId: "com.android.settings",
+        activityName: ".SubSettings",
+        layoutSeqSum: 0,
+      },
+    });
+    const waitForCondition: WaitForCondition = {
+      execute: async () => ({
+        matched: false,
+        candidates: [],
+        observation: destination,
+        polls: 2,
+        waitMs: 200,
+        timedOut: false,
+      }),
+    };
+    const { tap } = createTapOnElement("android", waitForCondition);
+
+    const postTap = await (tap as any).deriveTapEffectAfterPostTapObservation(stale, stale);
+
+    expect(postTap.effect).toEqual({
+      screenChanged: true,
+      basis: "activeWindow changed",
+    });
+    expect(postTap.observation).toEqual(destination);
+  });
+
   test("does not wait when the initial Android observation shows a change", async () => {
     const stale = makeObservation({
       activeWindow: {

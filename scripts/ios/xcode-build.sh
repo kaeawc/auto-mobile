@@ -58,29 +58,48 @@ echo ""
 
 # Discover Xcode projects up front and apply the optional project-name filter, so
 # a dry run (XCODE_BUILD_DRY_RUN=1) can list the selection without Xcode — that is
-# what test/bats/xcode-build-project-filter.bats pins. Mirrors xcode-test.sh's
-# selection logic (#5102); fail closed on a filter that matches nothing so a
-# sharded CI leg can't silently build zero projects.
-SELECTED_XCODEPROJ_DIRS=()
+# what test/bats/xcode-build-project-filter.bats pins.
+#
+# -maxdepth 2 preserves the original glob's reach (ios/*.xcodeproj and
+# ios/*/*.xcodeproj) so a recursive descent can't sweep in nested .xcodeproj from
+# SwiftPM checkouts or generated build trees (e.g. */.build/checkouts/.../*.xcodeproj)
+# and try to build vendored/sample schemes.
+ALL_XCODEPROJ_DIRS=()
 while IFS= read -r _xcodeproj; do
     [ -z "${_xcodeproj}" ] && continue
-    _name="$(basename "${_xcodeproj}" .xcodeproj)"
-    _match=0
-    if [ ${#REQUESTED_PROJECTS[@]} -eq 0 ]; then
-        _match=1
-    else
-        for _want in "${REQUESTED_PROJECTS[@]}"; do
-            [ "${_want}" = "${_name}" ] && _match=1
-        done
-    fi
-    [ "${_match}" -eq 1 ] && SELECTED_XCODEPROJ_DIRS+=("${_xcodeproj}")
-done < <(find "${IOS_DIR}" -name "*.xcodeproj" -type d 2>/dev/null | sort || true)
+    ALL_XCODEPROJ_DIRS+=("${_xcodeproj}")
+done < <(find "${IOS_DIR}" -maxdepth 2 -name "*.xcodeproj" -type d 2>/dev/null | sort || true)
 
-# An explicit filter that matches nothing is a misconfiguration (e.g. a renamed
-# project), not a reason to pass a gating job with zero projects built.
-if [ ${#REQUESTED_PROJECTS[@]} -ne 0 ] && [ ${#SELECTED_XCODEPROJ_DIRS[@]} -eq 0 ]; then
-    echo "Error: no Xcode project under ${IOS_DIR} matched: ${REQUESTED_PROJECTS[*]}" >&2
-    exit 1
+SELECTED_XCODEPROJ_DIRS=()
+if [ ${#REQUESTED_PROJECTS[@]} -eq 0 ]; then
+    SELECTED_XCODEPROJ_DIRS=(${ALL_XCODEPROJ_DIRS[@]+"${ALL_XCODEPROJ_DIRS[@]}"})
+else
+    # Fail closed on EVERY requested name that matches no project, not merely when
+    # the whole selection ends up empty: `xcode-build.sh Playground Typo` must not
+    # silently build just Playground and swallow the typo. Track which requests
+    # matched, then reject any that did not.
+    MATCHED_REQUESTS=()
+    for _xcodeproj in ${ALL_XCODEPROJ_DIRS[@]+"${ALL_XCODEPROJ_DIRS[@]}"}; do
+        _name="$(basename "${_xcodeproj}" .xcodeproj)"
+        for _want in "${REQUESTED_PROJECTS[@]}"; do
+            if [ "${_want}" = "${_name}" ]; then
+                SELECTED_XCODEPROJ_DIRS+=("${_xcodeproj}")
+                MATCHED_REQUESTS+=("${_want}")
+            fi
+        done
+    done
+    UNMATCHED_REQUESTS=()
+    for _want in "${REQUESTED_PROJECTS[@]}"; do
+        _seen=0
+        for _matched in ${MATCHED_REQUESTS[@]+"${MATCHED_REQUESTS[@]}"}; do
+            [ "${_matched}" = "${_want}" ] && _seen=1
+        done
+        [ "${_seen}" -eq 0 ] && UNMATCHED_REQUESTS+=("${_want}")
+    done
+    if [ ${#UNMATCHED_REQUESTS[@]} -ne 0 ]; then
+        echo "Error: no Xcode project under ${IOS_DIR} matched: ${UNMATCHED_REQUESTS[*]}" >&2
+        exit 1
+    fi
 fi
 
 if [ "${XCODE_BUILD_DRY_RUN:-0}" = "1" ]; then

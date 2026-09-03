@@ -44,3 +44,20 @@ teardown() {
   [[ "$output" == *"no Xcode project"* ]]
   [[ "$output" == *"Nonexistent"* ]]
 }
+
+@test "a valid + invalid name pair fails closed and names only the unmatched" {
+  run env IOS_DIR="$ios_dir" XCODE_BUILD_DRY_RUN=1 bash "$script" Playground Typo
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Typo"* ]]
+  # The error must list the unmatched request, not the valid one.
+  [[ "$output" != *"matched: Playground"* ]]
+}
+
+@test "nested .xcodeproj below depth 2 (SwiftPM checkouts, build trees) is ignored" {
+  mkdir -p "$ios_dir/XCTestRunner/.build/checkouts/Vendor/Sample.xcodeproj"
+  run env IOS_DIR="$ios_dir" XCODE_BUILD_DRY_RUN=1 bash "$script"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Playground"* ]]
+  [[ "$output" == *"CtrlProxy"* ]]
+  [[ "$output" != *"Sample"* ]]
+}

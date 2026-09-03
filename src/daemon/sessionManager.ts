@@ -934,6 +934,10 @@ export class SessionManager {
     );
   }
 
+  isAdmittedForAutomation(session: Session): boolean {
+    return this.isCurrentSession(session) && !this.releasingSessions.has(session);
+  }
+
   /** Whether this is the newest published, releasing, or finalized incarnation for its UUID. */
   isLatestSessionIdentity(
     session: Session,

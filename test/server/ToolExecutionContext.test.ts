@@ -315,6 +315,35 @@ describe("ToolExecutionContext", () => {
     expect(setupCalls).toBe(1);
   });
 
+  test("rejects an admitted session once its release begins", async () => {
+    const session = await sessionManager.createSession("session-releasing", "device-1", "android");
+    let finishSetup!: () => void;
+    const setup = sessionManager.trackSessionSetup(
+      session,
+      () =>
+        new Promise<void>((resolve) => {
+          finishSetup = resolve;
+        }),
+    );
+    const release = sessionManager.releaseSession("session-releasing");
+    await Promise.resolve();
+
+    await expect(
+      createToolExecutionContext(
+        "session-releasing",
+        sessionManager,
+        devicePool,
+        sessionOptions,
+        undefined,
+        session,
+      ),
+    ).rejects.toThrow("released during setup");
+
+    finishSetup();
+    await setup;
+    await release;
+  });
+
   test("does not apply keep-awake after a session is released during setup", async () => {
     let allowActivityWrite!: () => void;
     const activityWrite = new Promise<void>((resolve) => {

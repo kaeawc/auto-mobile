@@ -84,7 +84,7 @@ export async function createToolExecutionContext(
     return {};
   }
 
-  if (admittedSession && !sessionManager.isCurrentSession(admittedSession)) {
+  if (admittedSession && !sessionManager.isAdmittedForAutomation(admittedSession)) {
     throw new ActionableError(`Session ${sessionUuid} was released during setup`);
   }
   devicePool.assertSessionReadyForAutomation(sessionUuid);
@@ -101,7 +101,7 @@ export async function createToolExecutionContext(
       execution,
     ));
 
-  if (!sessionManager.isCurrentSession(session)) {
+  if (!sessionManager.isAdmittedForAutomation(session)) {
     throw new ActionableError(`Session ${sessionUuid} was released during setup`);
   }
 
@@ -153,7 +153,7 @@ async function setupSession(
 }
 
 function ensureSessionIsCurrent(session: Session, sessionManager: SessionManager): void {
-  if (!sessionManager.isCurrentSession(session)) {
+  if (!sessionManager.isAdmittedForAutomation(session)) {
     throw new ActionableError(`Session ${session.sessionId} was released during setup`);
   }
 }
@@ -273,7 +273,7 @@ async function ensureKeepScreenAwake(
     state = { applied: false, skipReason: "failed" };
   }
 
-  if (!sessionManager.isCurrentSession(session)) {
+  if (!sessionManager.isAdmittedForAutomation(session)) {
     if (state.applied) {
       try {
         await manager.restore(state);

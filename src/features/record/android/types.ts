@@ -87,6 +87,6 @@ export interface GestureEmitter {
  */
 export interface A11ySource {
   ensureConnected(): Promise<boolean>;
-  getSupportedCommands?(): Promise<string[] | null>;
+  getSupportedCommands(): Promise<string[] | null>;
   onInteraction(listener: (event: { type: string; [key: string]: unknown }) => void): () => void;
 }

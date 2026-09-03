@@ -105,11 +105,17 @@ class SetTextAcknowledgementOrderTest {
     val setText = body.indexOf("targetNode.performAction(")
     val acknowledgement = body.indexOf("broadcastInsertTextResult(", startIndex = setText)
     val refresh = body.indexOf("refreshHierarchyAfterTextInput()", startIndex = acknowledgement)
+    val successfulMutationRefresh =
+      body.indexOf("if (setTextSucceeded) refreshHierarchyAfterTextInput()")
 
     assertTrue("performInsertText must call ACTION_SET_TEXT", setText >= 0)
     assertTrue(
       "insert_text_result must acknowledge the text mutation before hierarchy postprocessing",
       acknowledgement > setText && refresh > acknowledgement,
+    )
+    assertTrue(
+      "insert text must refresh changed text when caret restoration is only partially applied",
+      successfulMutationRefresh > acknowledgement,
     )
   }
 

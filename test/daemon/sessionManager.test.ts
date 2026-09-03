@@ -2662,6 +2662,16 @@ describe("SessionManager", () => {
       await expect(
         restarted.getOrCreateSession("restarted-session", devicePool, "android"),
       ).resolves.toMatchObject({ assignedDevice: "emulator-5560" });
+      persisted.status = "released";
+      persisted.release_reason = "daemon-shutdown";
+      const gracefullyRestarted = new SessionManager(fakeTimer, persistence);
+      try {
+        await expect(
+          gracefullyRestarted.admitIssuedSessionForAutomation("restarted-session"),
+        ).resolves.toBeUndefined();
+      } finally {
+        gracefullyRestarted.stopCleanupTimer();
+      }
     } finally {
       restarted.stopCleanupTimer();
     }

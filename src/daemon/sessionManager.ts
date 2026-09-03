@@ -689,7 +689,10 @@ export class SessionManager {
     }
 
     const persisted = await this.deviceSessionRepository.getSession?.(sessionId);
-    if (persisted?.status === "expired" && persisted.release_reason === "daemon-restart") {
+    if (
+      (persisted?.status === "expired" && persisted.release_reason === "daemon-restart") ||
+      (persisted?.status === "released" && persisted.release_reason === "daemon-shutdown")
+    ) {
       return undefined;
     }
     throw unissuedSessionError;

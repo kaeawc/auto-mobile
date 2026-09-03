@@ -11,6 +11,7 @@ import { createDefaultPlanExecutionLock, type PlanExecutionLock } from "./PlanEx
 import { SessionToolBinding } from "./SessionToolBinding";
 import { SessionReleaseBroadcaster } from "./sessionReleaseBroadcast";
 import { TerminalSessionError } from "../daemon/sessionManager";
+import { resolveDirectSessionDevice } from "./directSessionDeviceRegistry";
 import {
   INTERNAL_MCP_REQUEST_TIMEOUT_PARAM,
   DAEMON_NON_FINITE_ENCODED_PARAM,
@@ -685,6 +686,12 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         !isDeviceSessionAcquisitionTool(name) &&
         name !== SET_TOOL_ENABLED_TOOL_NAME &&
         !result?.isError &&
+        providedSessionUuid &&
+        (DaemonState.getInstance().isInitialized()
+          ? DaemonState.getInstance()
+              .getSessionManager()
+              .getSessionForNewExecution(providedSessionUuid) !== null
+          : resolveDirectSessionDevice(providedSessionUuid) !== undefined) &&
         sessionToolBinding.bind(sessionId, providedSessionUuid)
       ) {
         ToolRegistry.notifyToolListChanged();

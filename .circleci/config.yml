@@ -40,13 +40,28 @@ workflows:
     jobs:
       # Runs on a small Linux executor. Computes the changed-file set vs main
       # (merge-base) and sets the `run-ios` pipeline parameter, then continues to
-      # continue_config.yml. On main itself the diff is empty, so run-ios stays
-      # false and no macOS job runs — matching the old "halt on base branch".
+      # continue_config.yml.
+      #
+      # `branches: ignore: main` excludes post-merge main builds entirely. On the
+      # base branch the orb's merge-base equals HEAD, and path-filtering's
+      # `same-base-run` default (true) then falls back to diffing HEAD~1..HEAD —
+      # which would re-run every merged iOS change on macOS after the PR already
+      # validated it. Skipping main restores the old "halt on base branch" and
+      # protects the limited macOS budget.
+      #
+      # The mapping mirrors GitHub's filter-ios paths (ios/**, scripts/ios/**,
+      # .swiftformat, .swiftlint.yml) plus .circleci/** so a config change also
+      # revalidates. Keep it in sync with `filter-ios` in pull_request.yml.
       - path-filtering/filter:
           name: detect-ios-changes
           base-revision: main
           config-path: .circleci/continue_config.yml
+          filters:
+            branches:
+              ignore: main
           mapping: |
             ios/.* run-ios true
             scripts/ios/.* run-ios true
+            \.swiftformat run-ios true
+            \.swiftlint\.yml run-ios true
             \.circleci/.* run-ios true
